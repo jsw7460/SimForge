@@ -11,7 +11,7 @@ from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
-import newton
+
 
 class NewtonContactManager(BaseManager):
     """Manages contact information for Newton environments.
@@ -85,6 +85,8 @@ class NewtonContactManager(BaseManager):
         We extract names from the first env's shapes (indices 0 to num_shapes_per_env-1).
         This ordering is preserved in all subsequent tensor operations.
         """
+        from newton.sensors import MatchKind
+
         for sensor_name, sensor in self.env.scene_manager.sensors.items():
             if isinstance(sensor, SensorContact):
                 self._contact_sensors[sensor_name] = sensor
@@ -99,7 +101,7 @@ class NewtonContactManager(BaseManager):
                 f"Found {len(self._contact_sensors)}: {list(self._contact_sensors.keys())}"
             )
 
-        model: newton.Model = self.env.scene_manager.model
+        model = self.env.scene_manager.model
         sensor: SensorContact = list(self._contact_sensors.values())[0]
 
         # Get include_total from sensor (requires local Newton patch)
@@ -120,10 +122,10 @@ class NewtonContactManager(BaseManager):
 
         # Take first num_shapes_per_env (these are env0's shapes)
         for idx, match_kind, _ in first_env_objs[:num_shapes_per_env]:
-            if match_kind == SensorContact.MatchKind.BODY:
-                name = model.body_label[idx]
-            elif match_kind == SensorContact.MatchKind.SHAPE:
-                name = model.shape_label[idx]
+            if match_kind == MatchKind.BODY:
+                name = model.body_key[idx]
+            elif match_kind == MatchKind.SHAPE:
+                name = model.shape_key[idx]
             else:
                 continue
             self._shape_names.append(name)

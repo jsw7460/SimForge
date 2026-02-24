@@ -124,8 +124,8 @@ def initialize_dof_pos(
 
     # Build mapping from joint name to joint_q index
     joint_q_start = wp.to_torch(model.joint_q_start).cpu().numpy()
-    joints_per_world = len(model.joint_label) // num_worlds
-    all_joint_names = list(model.joint_label)[:joints_per_world]
+    joints_per_world = len(model.joint_key) // num_worlds
+    all_joint_names = list(model.joint_key)[:joints_per_world]
     name_to_q_idx = {name: int(joint_q_start[i]) for i, name in enumerate(all_joint_names)}
 
     # Build mapping from joint name to joint_qd index (DOF index)
@@ -180,8 +180,8 @@ def initialize_dof_pos_with_noise(
     if not hasattr(env, '_dof_init_q_indices'):
         joint_q_start = wp.to_torch(model.joint_q_start).cpu().numpy()
         joint_qd_start = wp.to_torch(model.joint_qd_start).cpu().numpy()
-        joints_per_world = len(model.joint_label) // num_worlds
-        all_joint_names = list(model.joint_label)[:joints_per_world]
+        joints_per_world = len(model.joint_key) // num_worlds
+        all_joint_names = list(model.joint_key)[:joints_per_world]
         name_to_q_idx = {name: int(joint_q_start[i]) for i, name in enumerate(all_joint_names)}
         name_to_qd_idx = {name: int(joint_qd_start[i]) for i, name in enumerate(all_joint_names)}
 

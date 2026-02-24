@@ -18,8 +18,8 @@ class NewtonBodyCache:
         self._contact_cache: dict[tuple[str, ...], tuple[list[int], list[int]]] = {}
 
         model = env.scene_manager.model
-        self.bodies_per_env = len(model.body_label) // env.num_envs
-        self.body_names = model.body_label[:self.bodies_per_env]
+        self.bodies_per_env = len(model.body_key) // env.num_envs
+        self.body_names = model.body_key[:self.bodies_per_env]
 
         # Cache original values for domain randomization
         body_mass = wp.to_torch(model.body_mass).reshape(env.num_envs, self.bodies_per_env)

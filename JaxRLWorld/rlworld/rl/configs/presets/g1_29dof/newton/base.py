@@ -86,8 +86,6 @@ class G1FlatNewtonConfig:
 
     feet_height_target: float = 0.1
 
-    robot_foot_names = None
-
     def __post_init__(self):
         if self.observations is None:
             self.observations = LocomotionObservations(
@@ -131,7 +129,15 @@ class G1FlatNewtonConfig:
 
     def _default_extra_observations(self) -> List[ObservationTermConfig]:
         """G1-specific extra observations."""
+        feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
         return [
+            ObservationTermConfig(
+                proprioception.relative_bodies_pos,
+                scale=1.0,
+                params={
+                    "bodies": ("left_ankle_roll_link", "right_ankle_roll_link"),
+                },
+            ),
             ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
             # ObservationTermConfig(state.base_height, scale=1.0),
             # ObservationTermConfig(state.base_lin_vel, scale=1.0),
@@ -144,23 +150,23 @@ class G1FlatNewtonConfig:
 
     def _default_extra_critic_observations(self) -> List[ObservationTermConfig]:
         """Extra critic observations."""
+        feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
         return [
             ObservationTermConfig(
                 proprioception.relative_bodies_pos,
                 scale=1.0,
                 params={
-                    "base_body": self.robot.prefixed("torso_link"),
-                    "bodies": self.robot.prefixed_foot_names,
+                    "bodies": ("left_ankle_roll_link", "right_ankle_roll_link"),
                 },
             ),
             ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
             ObservationTermConfig(state.base_height, scale=1.0),
             ObservationTermConfig(state.base_lin_vel, scale=1.0),
             ObservationTermConfig(state.base_euler, scale=1.0),
-            ObservationTermConfig(state.feet_air_time, scale=1.0, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
-            ObservationTermConfig(state.feet_contact_force, scale=0.001, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
-            ObservationTermConfig(state.feet_contact_indicator, scale=1.0, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
-            ObservationTermConfig(state.feet_height, scale=1.0, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
+            ObservationTermConfig(state.feet_air_time, scale=1.0, params={"feet_bodies": feet_links}),
+            ObservationTermConfig(state.feet_contact_force, scale=0.001, params={"feet_bodies": feet_links}),
+            ObservationTermConfig(state.feet_contact_indicator, scale=1.0, params={"feet_bodies": feet_links}),
+            ObservationTermConfig(state.feet_height, scale=1.0, params={"feet_bodies": feet_links}),
         ]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -207,22 +213,17 @@ class G1FlatNewtonConfig:
             entities=[
                 NewtonEntityConfig(
                     entity_name="ground",
-                    body_label_prefix="ground",
                     entity_type="ground_plane",
                     shape_cfg=newton.ModelBuilder.ShapeConfig(
                         ke=2.0e3,
                         kd=1.0e2,
                         kf=1.0e3,
                         mu=1.0,
-                        thickness=0.00001,
-                        mu_rolling=0.0005,
-                        mu_torsional=0.25
                     ),
                     floating=False
                 ),
                 NewtonEntityConfig(
                     entity_name="robot",
-                    body_label_prefix=self.robot.name,
                     entity_type="urdf",
                     urdf_path=self.robot.urdf_path,
                     transform=wp.transform(
@@ -241,9 +242,9 @@ class G1FlatNewtonConfig:
                         kf=1.0e3,
                         mu=1.0,
                     ),
-                    joint_target_ke_map=self.robot.prefixed_p_gains,
-                    joint_target_kd_map=self.robot.prefixed_d_gains,
-                    joint_armature_map=self.robot.prefixed_armature,
+                    joint_target_ke_map=self.robot.p_gains,
+                    joint_target_kd_map=self.robot.d_gains,
+                    joint_armature_map=self.robot.armature,
                     sites={"imu_site_base": self.robot.base_link_name},
                     enable_self_collisions=False
                 ),
@@ -277,17 +278,18 @@ class G1FlatNewtonConfig:
 
     def _build_action_config(self) -> NewtonActionConfig:
         return NewtonActionConfig(
-            actuated_dof_names=self.robot.prefixed_actuated_dof_patterns,
-            action_scale=self.robot.prefixed_action_scale,
+            actuated_dof_names=self.robot.actuated_dof_patterns,
+            action_scale=self.action_scale,
             clip_actions=(-100.0, 100.0),
-            offset=self.robot.get_prefixed_action_offset(),
+            offset=self.robot.get_action_offset(),
         )
 
     def _build_reward_config(self) -> RewardConfig:
         reward_terms = self._mjlab_default_extra_rewards()
         return RewardConfig(reward_terms=reward_terms)
 
-    def _mjlab_default_extra_rewards(self) -> List[RewardTermConfig]:
+    @staticmethod
+    def _mjlab_default_extra_rewards() -> List[RewardTermConfig]:
         """G1-specific reward terms."""
         return [
             # Tracking rewards
@@ -306,7 +308,7 @@ class G1FlatNewtonConfig:
             RewardTermConfig(
                 rf_mjlab.flat_orientation_mjlab,
                 weight=1.0,
-                params={"std": 0.447, "body_name": self.robot.prefixed("torso_link")},  # sqrt(0.2)
+                params={"std": 0.447, "body_name": "torso_link"},  # sqrt(0.2)
             ),
 
             # Posture (stateful class)
@@ -356,7 +358,7 @@ class G1FlatNewtonConfig:
             RewardTermConfig(
                 rf_mjlab.body_ang_vel_penalty_mjlab,
                 weight=0.05,
-                params={"body_name": self.robot.prefixed("torso_link")},
+                params={"body_name": "torso_link"},
             ),
             RewardTermConfig(
                 rf_mjlab.angular_momentum_penalty,
@@ -376,7 +378,7 @@ class G1FlatNewtonConfig:
                 rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
-                    "feet_bodies": self.robot.prefixed_foot_names,
+                    "feet_bodies": ["left_ankle_roll_link", "right_ankle_roll_link"],
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
@@ -385,7 +387,7 @@ class G1FlatNewtonConfig:
                 rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
-                    "feet_bodies": self.robot.prefixed_foot_names,
+                    "feet_bodies": ["left_ankle_roll_link", "right_ankle_roll_link"],
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
@@ -394,7 +396,7 @@ class G1FlatNewtonConfig:
                 rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
-                    "feet_bodies": self.robot.prefixed_foot_names,
+                    "feet_bodies": ["left_ankle_roll_link", "right_ankle_roll_link"],
                     "command_threshold": 0.05,
                 },
             ),
@@ -402,7 +404,7 @@ class G1FlatNewtonConfig:
                 rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
-                    "feet_bodies": self.robot.prefixed_foot_names,
+                    "feet_bodies": ["left_ankle_roll_link", "right_ankle_roll_link"],
                     "command_threshold": 0.05,
                 },
             ),

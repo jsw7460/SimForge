@@ -42,9 +42,10 @@ def apply_joint_params_by_pattern(
     ke_map = ke_map or {}
     kd_map = kd_map or {}
     armature_map = armature_map or {}
-    num_joints = len(builder.joint_label)
 
-    for joint_idx, joint_name in enumerate(builder.joint_label):
+    num_joints = len(builder.joint_key)
+
+    for joint_idx, joint_name in enumerate(builder.joint_key):
         if joint_idx < num_joints - 1:
             dof_count = builder.joint_qd_start[joint_idx + 1] - builder.joint_qd_start[joint_idx]
         else:
@@ -183,30 +184,10 @@ class NewtonSceneManager(BaseManager):
         return self.state_0
 
     def find_body_names(self, body_names: list[str]):
-        num_bodies_per_env = len(self.model.body_label) // self.env.num_envs
-        bodies_key = self.model.body_label[:num_bodies_per_env]
+        num_bodies_per_env = len(self.model.body_key) // self.env.num_envs
+        bodies_key = self.model.body_key[:num_bodies_per_env]
 
         _, names = string_utils.resolve_matching_names(body_names, bodies_key)
-        return names
-
-    def _prefix_names(
-        self, entity_name: str, names: str | list[str] | list[int] | None
-    ) -> str | list[str] | list[int] | None:
-        if names is None:
-            return None
-
-        # Get actual prefix from entity's robot config
-        entity_config = self.entities[entity_name]["config"]
-        prefix = getattr(entity_config, "body_label_prefix", None)
-        if prefix is None:
-            return names
-
-        if isinstance(names, list):
-            if all(isinstance(n, int) for n in names):
-                return names
-            return [f"{prefix}/{n}" if "/" not in n else n for n in names]
-        if isinstance(names, str):
-            return f"{prefix}/{names}" if "/" not in names else names
         return names
 
     def register_entities(self) -> None:
@@ -246,7 +227,7 @@ class NewtonSceneManager(BaseManager):
         self.entities[config.entity_name] = {
             "config": config,
             "builder": builder,
-            "shape_count": len(builder.shape_label)
+            "shape_count": len(builder.shape_key)
         }
 
     def _load_urdf_entity(self, builder: newton.ModelBuilder, config: NewtonEntityConfig) -> None:
@@ -327,32 +308,33 @@ class NewtonSceneManager(BaseManager):
         self._create_sites(builder, config)
 
     def _create_sites(self, builder: newton.ModelBuilder, config: NewtonEntityConfig) -> None:
-        prefix = config.body_label_prefix
-
-        def _resolve(name: str) -> str:
-            return f"{prefix}/{name}" if prefix and "/" not in name else name
-
+        """Create sites and contact shapes for entity."""
         if config.sites:
             for site_name, body_name in config.sites.items():
-                body_idx = self._find_body_by_name(builder, _resolve(body_name))
+                body_idx = self._find_body_by_name(builder, body_name)
                 if body_idx is not None:
-                    builder.add_site(body_idx, label=site_name)
+                    builder.add_site(body_idx, key=site_name)
                 else:
                     raise ValueError(f"Body '{body_name}' not found for site '{site_name}'")
 
         if config.contact_shapes:
             for shape_name, (body_name, local_pos) in config.contact_shapes.items():
-                body_idx = self._find_body_by_name(builder, _resolve(body_name))
+                body_idx = self._find_body_by_name(builder, body_name)
                 if body_idx is not None:
                     xform = wp.transform(wp.vec3(*local_pos), wp.quat_identity())
-                    builder.add_shape_sphere(body_idx, xform=xform, radius=0.02, label=shape_name)
+                    builder.add_shape_sphere(
+                        body_idx,
+                        xform=xform,
+                        radius=0.02,
+                        key=shape_name,
+                    )
                 else:
                     raise ValueError(f"Body '{body_name}' not found for contact shape '{shape_name}'")
 
     @staticmethod
     def _find_body_by_name(builder: newton.ModelBuilder, body_name: str) -> int | None:
         """Find body index by name in the builder."""
-        for i, name in enumerate(builder.body_label):
+        for i, name in enumerate(builder.body_key):
             if name == body_name:
                 return i
         return None
@@ -419,8 +401,7 @@ class NewtonSceneManager(BaseManager):
 
         # Create collision pipeline
         self.collision_pipeline = newton.CollisionPipeline(self.model)
-        self.contacts = self.collision_pipeline.contacts()        # Before
-        # self.contacts = self.model.contacts()
+        self.contacts = self.collision_pipeline.contacts()
 
         # Update entity tracking with replicated info
         for entity_name in self.entities:
@@ -506,7 +487,7 @@ class NewtonSceneManager(BaseManager):
 
         if isinstance(config, NewtonIMUSensorConfig):
             all_site_indices = [
-                idx for idx, key in enumerate(self.model.shape_label)
+                idx for idx, key in enumerate(self.model.shape_key)
                 if key in config.site_names
             ]
 
@@ -520,20 +501,25 @@ class NewtonSceneManager(BaseManager):
             self.sensors[config.sensor_name] = sensor
 
         elif isinstance(config, NewtonContactSensorConfig):
-            entity_name = config.entity_name
+            if config.use_regex:
+                match_fn = lambda s, p: re.match(p, s) is not None
+            else:
+                match_fn = None
+
             sensor = SensorContact(
                 self.model,
-                sensing_obj_bodies=self._prefix_names(entity_name, config.sensing_obj_bodies),
-                sensing_obj_shapes=self._prefix_names(entity_name, config.sensing_obj_shapes),
-                counterpart_bodies=self._prefix_names(entity_name, config.counterpart_bodies),
+                sensing_obj_bodies=config.sensing_obj_bodies,
+                sensing_obj_shapes=config.sensing_obj_shapes,
+                counterpart_bodies=config.counterpart_bodies,
                 counterpart_shapes=config.counterpart_shapes,
+                match_fn=match_fn,
                 include_total=config.include_total,
             )
             self.sensors[config.sensor_name] = sensor
 
         elif isinstance(config, NewtonFrameTransformSensorConfig):
             site_indices = [
-                idx for idx, key in enumerate(self.model.shape_label)
+                idx for idx, key in enumerate(self.model.shape_key)
                 if key in config.site_names
             ]
 
@@ -579,6 +565,7 @@ class NewtonSceneManager(BaseManager):
 
     def _update_sensors(self) -> None:
         """Update all sensors after physics step."""
+        # Contact sensors need force data from solver
         has_contact_sensor = any(
             isinstance(s, SensorContact) for s in self.sensors.values()
         )
@@ -586,10 +573,11 @@ class NewtonSceneManager(BaseManager):
             self.solver.update_contacts(self.sensor_contacts, self.state_0)
 
         for sensor_name, sensor in self.sensors.items():
-            if isinstance(sensor, SensorContact):
-                sensor.update(self.sensor_contacts)  # Contact sensor takes Contacts
-            elif hasattr(sensor, 'update'):
-                sensor.update(self.state_0)  # IMU takes State
+            if hasattr(sensor, 'update'):
+                sensor.update(self.state_0)  # IMU
+            elif isinstance(sensor, SensorContact):
+                sensor.eval(self.sensor_contacts)  # Contact sensor
+            # FrameTransformSensor: Dealing with it here
 
     def reset(self, env_ids=None) -> None:
         """Reset environments to initial state."""

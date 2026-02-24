@@ -10,7 +10,6 @@ from rlworld.rl.envs.managers.common.action import (
     ActionManagerBase,
     ActionManagerBaseConfig,
 )
-import newton
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
@@ -186,13 +185,17 @@ class NewtonActionManager(ActionManagerBase):
 
     @staticmethod
     def _get_joint_names(model) -> list[str]:
-        """Extract joint names from Newton model (single world only)."""
-        joint_names = getattr(model, "joint_label", None) or getattr(model, "joint_key", None)
-        if not joint_names:
+        """Extract joint names from Newton model (single world only).
+
+        After replication, model.joint_key contains ALL joint names from
+        ALL worlds. We only need unique joint names from a single world.
+        """
+        if not hasattr(model, "joint_key") or not model.joint_key:
             return []
 
-        all_joint_names = list(joint_names)
+        all_joint_names = list(model.joint_key)
         num_worlds = model.world_count
-        joints_per_world = len(all_joint_names) // num_worlds
+        total_joints = len(all_joint_names)
+        joints_per_world = total_joints // num_worlds
 
-        return all_joint_names[:joints_per_world]  # full name 유지
+        return all_joint_names[:joints_per_world]

@@ -55,7 +55,7 @@ class NewtonLocomotionEnv(NewtonEnv):
         config = GaitManagerConfig(
             num_envs=self.num_envs,
             gait_period=self._gait_period,
-            foot_names=self.scene_cfg.robot_cfg.prefixed_foot_names
+            foot_names=self.scene_cfg.robot_cfg.foot_names
         )
         self.gait_manager = GaitManager(env=self, config=config)
 
