@@ -3,15 +3,15 @@
 # Only JaxRLWorld is tracked
 # ==============================
 
-# --- Exclude all other packages ---
-Genesis/
-Newton/
-Mjlab/
-rsl_rl/
-tdmpc2/
-PhysDyn/
-mjlab_sim2real/
-unitree_rl_mjlab/
+# --- Exclude all other packages (root-level only) ---
+/Genesis/
+/Newton/
+/Mjlab/
+/rsl_rl/
+/tdmpc2/
+/PhysDyn/
+/mjlab_sim2real/
+/unitree_rl_mjlab/
 
 # --- Root-level files not needed ---
 setup.py
