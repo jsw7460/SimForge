@@ -1,0 +1,764 @@
+<?xml version="1.0"?>
+<robot name="n_link_arm_30">
+
+  <!-- Base link (fixed) -->
+  <link name="base_link">
+    <visual>
+      <geometry><cylinder radius="0.05" length="0.02"/></geometry>
+    </visual>
+    <inertial>
+      <mass value="10.0"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+
+  <!-- Link 1 -->
+  <link name="link_1">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.5000"/>
+      <inertia ixx="0.000467" ixy="0" ixz="0" iyy="0.000467" iyz="0" izz="0.000100"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 2 -->
+  <link name="link_2">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.5517"/>
+      <inertia ixx="0.000515" ixy="0" ixz="0" iyy="0.000515" iyz="0" izz="0.000110"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1"/>
+    <child link="link_2"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 3 -->
+  <link name="link_3">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.6034"/>
+      <inertia ixx="0.000563" ixy="0" ixz="0" iyy="0.000563" iyz="0" izz="0.000121"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2"/>
+    <child link="link_3"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 4 -->
+  <link name="link_4">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.6552"/>
+      <inertia ixx="0.000611" ixy="0" ixz="0" iyy="0.000611" iyz="0" izz="0.000131"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_4" type="revolute">
+    <parent link="link_3"/>
+    <child link="link_4"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 5 -->
+  <link name="link_5">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.7069"/>
+      <inertia ixx="0.000660" ixy="0" ixz="0" iyy="0.000660" iyz="0" izz="0.000141"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_5" type="revolute">
+    <parent link="link_4"/>
+    <child link="link_5"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 6 -->
+  <link name="link_6">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.7586"/>
+      <inertia ixx="0.000708" ixy="0" ixz="0" iyy="0.000708" iyz="0" izz="0.000152"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_6" type="revolute">
+    <parent link="link_5"/>
+    <child link="link_6"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 7 -->
+  <link name="link_7">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.8103"/>
+      <inertia ixx="0.000756" ixy="0" ixz="0" iyy="0.000756" iyz="0" izz="0.000162"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_7" type="revolute">
+    <parent link="link_6"/>
+    <child link="link_7"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 8 -->
+  <link name="link_8">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.8621"/>
+      <inertia ixx="0.000805" ixy="0" ixz="0" iyy="0.000805" iyz="0" izz="0.000172"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_8" type="revolute">
+    <parent link="link_7"/>
+    <child link="link_8"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 9 -->
+  <link name="link_9">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.9138"/>
+      <inertia ixx="0.000853" ixy="0" ixz="0" iyy="0.000853" iyz="0" izz="0.000183"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_9" type="revolute">
+    <parent link="link_8"/>
+    <child link="link_9"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 10 -->
+  <link name="link_10">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="0.9655"/>
+      <inertia ixx="0.000901" ixy="0" ixz="0" iyy="0.000901" iyz="0" izz="0.000193"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_10" type="revolute">
+    <parent link="link_9"/>
+    <child link="link_10"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 11 -->
+  <link name="link_11">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.0172"/>
+      <inertia ixx="0.000949" ixy="0" ixz="0" iyy="0.000949" iyz="0" izz="0.000203"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_11" type="revolute">
+    <parent link="link_10"/>
+    <child link="link_11"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 12 -->
+  <link name="link_12">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.0690"/>
+      <inertia ixx="0.000998" ixy="0" ixz="0" iyy="0.000998" iyz="0" izz="0.000214"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_12" type="revolute">
+    <parent link="link_11"/>
+    <child link="link_12"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 13 -->
+  <link name="link_13">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.1207"/>
+      <inertia ixx="0.001046" ixy="0" ixz="0" iyy="0.001046" iyz="0" izz="0.000224"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_13" type="revolute">
+    <parent link="link_12"/>
+    <child link="link_13"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 14 -->
+  <link name="link_14">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.1724"/>
+      <inertia ixx="0.001094" ixy="0" ixz="0" iyy="0.001094" iyz="0" izz="0.000234"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_14" type="revolute">
+    <parent link="link_13"/>
+    <child link="link_14"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 15 -->
+  <link name="link_15">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.2241"/>
+      <inertia ixx="0.001143" ixy="0" ixz="0" iyy="0.001143" iyz="0" izz="0.000245"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_15" type="revolute">
+    <parent link="link_14"/>
+    <child link="link_15"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 16 -->
+  <link name="link_16">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.2759"/>
+      <inertia ixx="0.001191" ixy="0" ixz="0" iyy="0.001191" iyz="0" izz="0.000255"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_16" type="revolute">
+    <parent link="link_15"/>
+    <child link="link_16"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 17 -->
+  <link name="link_17">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.3276"/>
+      <inertia ixx="0.001239" ixy="0" ixz="0" iyy="0.001239" iyz="0" izz="0.000266"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_17" type="revolute">
+    <parent link="link_16"/>
+    <child link="link_17"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 18 -->
+  <link name="link_18">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.3793"/>
+      <inertia ixx="0.001287" ixy="0" ixz="0" iyy="0.001287" iyz="0" izz="0.000276"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_18" type="revolute">
+    <parent link="link_17"/>
+    <child link="link_18"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 19 -->
+  <link name="link_19">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.4310"/>
+      <inertia ixx="0.001336" ixy="0" ixz="0" iyy="0.001336" iyz="0" izz="0.000286"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_19" type="revolute">
+    <parent link="link_18"/>
+    <child link="link_19"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 20 -->
+  <link name="link_20">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.4828"/>
+      <inertia ixx="0.001384" ixy="0" ixz="0" iyy="0.001384" iyz="0" izz="0.000297"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_20" type="revolute">
+    <parent link="link_19"/>
+    <child link="link_20"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 21 -->
+  <link name="link_21">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.5345"/>
+      <inertia ixx="0.001432" ixy="0" ixz="0" iyy="0.001432" iyz="0" izz="0.000307"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_21" type="revolute">
+    <parent link="link_20"/>
+    <child link="link_21"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 22 -->
+  <link name="link_22">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.5862"/>
+      <inertia ixx="0.001480" ixy="0" ixz="0" iyy="0.001480" iyz="0" izz="0.000317"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_22" type="revolute">
+    <parent link="link_21"/>
+    <child link="link_22"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 23 -->
+  <link name="link_23">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.6379"/>
+      <inertia ixx="0.001529" ixy="0" ixz="0" iyy="0.001529" iyz="0" izz="0.000328"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_23" type="revolute">
+    <parent link="link_22"/>
+    <child link="link_23"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 24 -->
+  <link name="link_24">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.6897"/>
+      <inertia ixx="0.001577" ixy="0" ixz="0" iyy="0.001577" iyz="0" izz="0.000338"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_24" type="revolute">
+    <parent link="link_23"/>
+    <child link="link_24"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 25 -->
+  <link name="link_25">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.7414"/>
+      <inertia ixx="0.001625" ixy="0" ixz="0" iyy="0.001625" iyz="0" izz="0.000348"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_25" type="revolute">
+    <parent link="link_24"/>
+    <child link="link_25"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 26 -->
+  <link name="link_26">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.7931"/>
+      <inertia ixx="0.001674" ixy="0" ixz="0" iyy="0.001674" iyz="0" izz="0.000359"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_26" type="revolute">
+    <parent link="link_25"/>
+    <child link="link_26"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 27 -->
+  <link name="link_27">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.8448"/>
+      <inertia ixx="0.001722" ixy="0" ixz="0" iyy="0.001722" iyz="0" izz="0.000369"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_27" type="revolute">
+    <parent link="link_26"/>
+    <child link="link_27"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 28 -->
+  <link name="link_28">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.8966"/>
+      <inertia ixx="0.001770" ixy="0" ixz="0" iyy="0.001770" iyz="0" izz="0.000379"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_28" type="revolute">
+    <parent link="link_27"/>
+    <child link="link_28"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 29 -->
+  <link name="link_29">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="1.9483"/>
+      <inertia ixx="0.001818" ixy="0" ixz="0" iyy="0.001818" iyz="0" izz="0.000390"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_29" type="revolute">
+    <parent link="link_28"/>
+    <child link="link_29"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+
+  <!-- Link 30 -->
+  <link name="link_30">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry><cylinder radius="0.02" length="0.1"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.05"/>
+      <mass value="2.0000"/>
+      <inertia ixx="0.001867" ixy="0" ixz="0" iyy="0.001867" iyz="0" izz="0.000400"/>
+    </inertial>
+  </link>
+
+  <joint name="joint_30" type="revolute">
+    <parent link="link_29"/>
+    <child link="link_30"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+</robot>

@@ -1,0 +1,155 @@
+<?xml version="1.0"?>
+
+<mujoco model="go1" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <xacro:arg name="DEBUG" default="false"/> <!-- Debug mode will hung up the robot, use "true" or "false" to switch it. -->
+    <!-- Isaac Gym uses com frame for links, so we need dummy site links whose link, inertia, collision frames are the same for correct link frame state calc -->
+    <xacro:arg name="MESH_DIR" default="../meshes/simplified_stl"/>
+
+    <xacro:property name="mesh_dir" value="$(arg MESH_DIR)"/>
+
+    <xacro:include filename="$(find go1_model)/xacro/mjcf/const.xacro"/>
+    <xacro:include filename="$(find go1_model)/xacro/mjcf/leg.xacro"/>
+
+    <compiler angle="radian" eulerseq="XYZ" meshdir="${mesh_dir}"/>
+    <size njmax="500" nconmax="100" />
+    <option gravity="0 0 -9.806" iterations="50" solver="Newton" noslip_iterations="50" timestep="0.0005"/>
+
+    <default>
+        <geom solref="0.002 1.0" solimp="0.9 0.95 0.001 0.5 2.0"/>
+        <light castshadow="false" diffuse="1 1 1"/>
+        <camera fovy="60"/>
+        <default class="visual">
+            <geom contype="0" conaffinity="0" group="2" material="silver"/>
+        </default>
+        <default class="collision">
+            <!-- condim=3 means no torsional or rolling fric, so last 2 friction attributes set 0 -->
+            <geom condim="3" contype="1" conaffinity="1" group="3" friction="0.6 0.0 0.0" material="blue"/>
+        </default>
+        <default class="collision_all">
+            <!-- condim=3 means no torsional or rolling fric, so last 2 friction attributes set 0 -->
+            <geom condim="3" contype="15" conaffinity="15" group="0" friction="0.6 0.0 0.0"/>
+        </default>
+    </default>
+
+    <asset>
+        <material name="black" rgba="0.0 0.0 0.0 1.0"/>
+        <material name="blue" rgba="0.0 0.0 0.8 1.0"/>
+        <material name="green" rgba="0.0 0.8 0.0 1.0"/>
+        <material name="silver" rgba="${233/255} ${233/255} ${216/255} 1.0"/>
+        <material name="red" rgba="0.8 0.0 0.0 1.0"/>
+
+        <texture type="skybox" builtin="gradient" rgb1="0.4 0.6 0.8" rgb2="0 0 0" width="512" height="512"/>
+        <texture name="plane" type="2d" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300"/>
+        <material name="plane" texture="plane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+
+        <mesh name="trunk" file="trunk.stl" />
+        <mesh name="hip" file="hip.stl" />
+        <mesh name="thigh" file="thigh.stl" />
+        <mesh name="thigh_mirror" file="thigh_mirror.stl" />
+        <mesh name="calf" file="calf.stl" />
+    </asset>
+
+    <visual>
+        <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0.9 0.9 0.9"/>
+        <rgba haze="0.15 0.25 0.35 1"/>
+    </visual>
+
+    <worldbody>
+        <light directional="true" diffuse=".8 .8 .8" pos="0 0 10" dir="0 0 -10"/>
+        <camera mode="trackcom" name="trackcom_RightHoriz" pos="0 -0.8 0.3" xyaxes="1 0 0 0 0 1"/>
+        <camera mode="trackcom" name="tackcom_RightAbove10deg" pos="0 -0.9 0.5" xyaxes="1 0 0 0 0.174 0.985"/>
+        <geom class="collision_all" name="floor" type="plane" material="plane" pos="0 0 0" size="0 0 1"/>
+
+        <body name="trunk" pos="0 0 0.5">
+            <inertial pos="${trunk_com_x} ${trunk_com_y} ${trunk_com_z}" mass="${trunk_mass}" fullinertia="${trunk_ixx} ${trunk_iyy} ${trunk_izz} ${trunk_ixy} ${trunk_ixz} ${trunk_iyz}"/>
+            <xacro:unless value="$(arg DEBUG)">
+                <freejoint/>
+            </xacro:unless>
+            <geom class="visual" type="mesh" mesh="trunk"/>
+            <geom class="collision" type="box" size="${trunk_collision_length/2} ${trunk_collision_width/2} ${trunk_collision_height/2}"/>
+            <geom class="collision" type="cylinder" size="${head_radius} ${head_length/2.0}" pos="${head_offset_x} ${head_offset_y} ${head_offset_z}" euler="0 ${PI/2.0} 0"/>
+            <site name="trunk_cheat_site" pos="0 0 0" euler="0 0 0"/>
+            <site name="imu" pos="${imu_offset_x} ${imu_offset_y} ${imu_offset_z}"/>
+            <xacro:leg name="FR" mirror="-1" mirror_dae= "False" front_hind="1"  front_hind_dae="True"/>
+            <xacro:leg name="FL" mirror="1"  mirror_dae="True"   front_hind="1"  front_hind_dae="True"/>
+            <xacro:leg name="RR" mirror="-1" mirror_dae="False"  front_hind="-1" front_hind_dae="False"/>
+            <xacro:leg name="RL" mirror="1"  mirror_dae="True"   front_hind="-1" front_hind_dae="False"/>
+        </body>
+    </worldbody>
+
+    <actuator>
+        <motor name="FR_hip"       gear="1" joint="FR_hip_joint"/>
+        <motor name="FR_thigh"     gear="1" joint="FR_thigh_joint"/>
+        <motor name="FR_calf"      gear="1" joint="FR_calf_joint"/>
+        <motor name="FL_hip"       gear="1" joint="FL_hip_joint"/>
+        <motor name="FL_thigh"     gear="1" joint="FL_thigh_joint"/>
+        <motor name="FL_calf"      gear="1" joint="FL_calf_joint"/>
+        <motor name="RR_hip"       gear="1" joint="RR_hip_joint"/>
+        <motor name="RR_thigh"     gear="1" joint="RR_thigh_joint"/>
+        <motor name="RR_calf"      gear="1" joint="RR_calf_joint" />
+        <motor name="RL_hip"       gear="1" joint="RL_hip_joint"/>
+        <motor name="RL_thigh"     gear="1" joint="RL_thigh_joint"/>
+        <motor name="RL_calf"      gear="1" joint="RL_calf_joint"/>
+    </actuator>
+
+    <sensor>
+        <jointpos name="FR_hip_pos"     joint="FR_hip_joint"/>
+        <jointpos name="FR_thigh_pos"   joint="FR_thigh_joint"/>
+        <jointpos name="FR_calf_pos"    joint="FR_calf_joint"/>
+        <jointpos name="FL_hip_pos"     joint="FL_hip_joint"/>
+        <jointpos name="FL_thigh_pos"   joint="FL_thigh_joint"/>
+        <jointpos name="FL_calf_pos"    joint="FL_calf_joint"/>
+        <jointpos name="RR_hip_pos"     joint="RR_hip_joint"/>
+        <jointpos name="RR_thigh_pos"   joint="RR_thigh_joint"/>
+        <jointpos name="RR_calf_pos"    joint="RR_calf_joint" />
+        <jointpos name="RL_hip_pos"     joint="RL_hip_joint"/>
+        <jointpos name="RL_thigh_pos"   joint="RL_thigh_joint"/>
+        <jointpos name="RL_calf_pos"    joint="RL_calf_joint"/>
+
+        <jointvel name="FR_hip_vel"     joint="FR_hip_joint"/>
+        <jointvel name="FR_thigh_vel"   joint="FR_thigh_joint"/>
+        <jointvel name="FR_calf_vel"    joint="FR_calf_joint"/>
+        <jointvel name="FL_hip_vel"     joint="FL_hip_joint"/>
+        <jointvel name="FL_thigh_vel"   joint="FL_thigh_joint"/>
+        <jointvel name="FL_calf_vel"    joint="FL_calf_joint"/>
+        <jointvel name="RR_hip_vel"     joint="RR_hip_joint"/>
+        <jointvel name="RR_thigh_vel"   joint="RR_thigh_joint"/>
+        <jointvel name="RR_calf_vel"    joint="RR_calf_joint" />
+        <jointvel name="RL_hip_vel"     joint="RL_hip_joint"/>
+        <jointvel name="RL_thigh_vel"   joint="RL_thigh_joint"/>
+        <jointvel name="RL_calf_vel"    joint="RL_calf_joint"/>
+
+        <actuatorfrc name="FR_hip_torque" actuator="FR_hip" noise="0.01" />
+        <actuatorfrc name="FR_thigh_torque" actuator="FR_thigh" noise="0.01" />
+        <actuatorfrc name="FR_calf_torque" actuator="FR_calf" noise="0.01" />
+        <actuatorfrc name="FL_hip_torque" actuator="FL_hip" noise="0.01" />
+        <actuatorfrc name="FL_thigh_torque" actuator="FL_thigh" noise="0.01" />
+        <actuatorfrc name="FL_calf_torque" actuator="FL_calf" noise="0.01" />
+        <actuatorfrc name="RR_hip_torque" actuator="RR_hip" noise="0.01" />
+        <actuatorfrc name="RR_thigh_torque" actuator="RR_thigh" noise="0.01" />
+        <actuatorfrc name="RR_calf_torque" actuator="RR_calf" noise="0.01" />
+        <actuatorfrc name="RL_hip_torque" actuator="RL_hip" noise="0.01" />
+        <actuatorfrc name="RL_thigh_torque" actuator="RL_thigh" noise="0.01" />
+        <actuatorfrc name="RL_calf_torque" actuator="RL_calf" noise="0.01" />
+
+        <framequat name="imu_quat" objtype="site" objname="imu"/>
+        <gyro name="imu_gyro" site="imu" noise="0.002"/>
+        <accelerometer name="imu_acc" site="imu" noise="0.04" />
+        <framepos name="cheat_trunk_position_world" objname="trunk" objtype="body"/>
+        <velocimeter name="cheat_trunk_lin_vel_trunk" site="trunk_cheat_site"/>
+
+        <force name= "FR_grf" site = "FR_grf_sensor" />
+        <force name= "FL_grf" site = "FL_grf_sensor" />
+        <force name= "RR_grf" site = "RR_grf_sensor" />
+        <force name= "RL_grf" site = "RL_grf_sensor" />
+        <framequat name="FR_foot_quat" objtype="site" objname="FR_grf_sensor"/>
+        <framequat name="FL_foot_quat" objtype="site" objname="FL_grf_sensor"/>
+        <framequat name="RR_foot_quat" objtype="site" objname="RR_grf_sensor"/>
+        <framequat name="RL_foot_quat" objtype="site" objname="RL_grf_sensor"/>
+    </sensor>
+
+    <keyframe>
+        <key name="home" qpos="0 0 0.4 1 0 0 0 0 0.9 -1.6 0 0.9 -1.6 0 0.9 -1.6 0 0.9 -1.6"/>
+    </keyframe>
+</mujoco>

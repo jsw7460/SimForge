@@ -1,0 +1,71 @@
+# ==============================
+# SimForge .gitignore
+# Only JaxRLWorld is tracked
+# ==============================
+
+# --- Exclude all other packages ---
+Genesis/
+Newton/
+Mjlab/
+rsl_rl/
+tdmpc2/
+PhysDyn/
+mjlab_sim2real/
+unitree_rl_mjlab/
+
+# --- Root-level files not needed ---
+setup.py
+main.py
+g1_policy_scripted.pt
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.eggs/
+.eggs/
+
+# --- Virtual environments ---
+venv/
+env/
+.venv/
+.env/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- macOS Finder duplicate artifacts ---
+* 2.*
+* 2/
+
+# --- Logging / Experiment outputs ---
+wandb/
+logs/
+outputs/
+runs/
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+
+# --- Misc ---
+*.log
+.claude/

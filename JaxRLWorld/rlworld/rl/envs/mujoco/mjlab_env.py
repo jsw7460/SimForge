@@ -1,0 +1,246 @@
+"""MuJoCo/mjlab environment for rlworld.
+
+This module provides MjlabEnv, which wraps mjlab's Scene and Simulation
+while following rlworld's World interface and manager pattern.
+"""
+from __future__ import annotations
+
+import torch
+
+from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
+from rlworld.rl.configs.common_config_classes import VisualizationConfig
+from rlworld.rl.configs.mujoco_config_classes import (
+    MujocoEnvConfig,
+    MujocoSceneConfig,
+    MujocoObservationConfig,
+    MujocoActionConfig,
+)
+from rlworld.rl.envs.managers import (
+    CommandManager, CommandManagerConfig,
+    MjlabRewardManager, RewardManagerConfig,
+    TerminationManager, TerminationConfig,
+    EventManager, EventManagerConfig,
+)
+from rlworld.rl.envs.managers.common.observation import (
+    ObservationManager, ObsManagerConfig,
+)
+from rlworld.rl.envs.managers.mujoco import (
+    MjlabSceneManager, MjlabSceneManagerConfig,
+    MjlabActionManager, MjlabActionManagerConfig,
+    MjlabContactManager,
+)
+from rlworld.rl.envs.world import World
+from rlworld.rl.utils import set_seed
+
+
+class MjlabEnv(World):
+    """MuJoCo/mjlab environment following rlworld's World interface.
+
+    This environment wraps mjlab's Scene and Simulation while providing
+    the standard rlworld manager-based architecture.
+
+    Example:
+        from mjlab.scene import SceneCfg
+        from mjlab.entity import EntityCfg
+
+        scene_cfg = SceneCfg(
+            num_envs=4096,
+            entities={"robot": robot_entity_cfg},
+        )
+
+        mujoco_scene_cfg = MujocoSceneConfig(
+            mjlab_scene_cfg=scene_cfg,
+        )
+
+        env = MjlabEnv(
+            num_envs=4096,
+            env_cfg=env_cfg,
+            scene_cfg=mujoco_scene_cfg,
+            ...
+        )
+    """
+
+    sim_name: str = "Mujoco"
+
+    def __init__(
+        self,
+        num_envs: int,
+        env_cfg: MujocoEnvConfig,
+        scene_cfg: MujocoSceneConfig,
+        visualization_cfg: VisualizationConfig,
+        obs_cfg: MujocoObservationConfig,
+        act_cfg: MujocoActionConfig,
+        reward_cfg: RewardConfig,
+        command_cfg: CommandConfig,
+        event_cfg: EventConfig,
+    ):
+        set_seed(env_cfg.seed)
+        super().__init__()
+
+        self.seed = env_cfg.seed
+        self.num_envs = num_envs
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+        # Store high-level configs
+        self.env_cfg = env_cfg
+        self.scene_cfg = scene_cfg
+        self.visualization_cfg = visualization_cfg
+        self.obs_cfg = obs_cfg
+        self.act_cfg = act_cfg
+        self.reward_cfg = reward_cfg
+        self.command_cfg = command_cfg
+        self.event_cfg = event_cfg
+
+        # Timing (will be updated after scene is built)
+        self.decimation = env_cfg.decimation
+        self.physics_dt = scene_cfg.physics_dt
+        self.control_dt = self.physics_dt * self.decimation
+
+        # Initialize buffers
+        self._init_buffers()
+
+        # Setup environment
+        self._setup_environment()
+
+    @property
+    def robot(self):
+        """Get the main robot entity."""
+        return self.scene_manager.robot
+
+    @property
+    def heading_w(self) -> torch.Tensor:
+        """Get robot heading (yaw) in world frame.
+
+        mjlab Entity provides heading_w directly.
+
+        Returns:
+            Tensor of shape [num_envs] in radians.
+        """
+        return self.scene_manager.robot.data.heading_w
+
+    def _setup_environment(self) -> None:
+        """Setup all managers."""
+
+        # Scene Manager (mjlab Scene + Simulation)
+        self.scene_cfg.mjlab_scene_cfg.num_envs = self.num_envs
+        scene_manager_cfg = MjlabSceneManagerConfig(
+            mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
+            mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
+            device=str(self.device),
+            robot_entity_name=self.scene_cfg.robot_entity_name,
+        )
+        self.scene_manager = MjlabSceneManager(env=self, config=scene_manager_cfg)
+        self.scene_manager.build_scene()
+
+        # Update physics_dt from simulation
+        self.physics_dt = self.scene_manager.physics_dt
+        self.control_dt = self.physics_dt * self.decimation
+
+        # Action Manager
+        act_manager_cfg = MjlabActionManagerConfig(
+            entity_name=self.act_cfg.entity_name,
+            actuated_dof_names=self.act_cfg.actuated_dof_names,
+            scale=self.act_cfg.action_scale,
+            clip=self.act_cfg.clip_actions,
+            offset=self.act_cfg.offset,
+        )
+        self.act_manager = MjlabActionManager(env=self, config=act_manager_cfg)
+
+        # Observation Manager (using common implementation)
+        obs_manager_cfg = ObsManagerConfig(
+            num_envs=self.num_envs,
+            obs_group=self.obs_cfg.obs_group,
+        )
+        self.obs_manager = ObservationManager(env=self, config=obs_manager_cfg)
+
+        # Contact Manager
+        self.contact_manager = MjlabContactManager(env=self)
+        self.contact_manager.register_sensors()
+
+        # Command Manager (shared with other simulators)
+        command_manager_cfg = CommandManagerConfig(
+                command_terms=self.command_cfg.sampler,
+                resampling_time_s=self.command_cfg.resampling_time_s,
+                rel_standing_envs=self.command_cfg.rel_standing_envs,
+                heading_command=self.command_cfg.heading_command,
+                heading_control_stiffness=self.command_cfg.heading_control_stiffness,
+                heading_range=self.command_cfg.heading_range,
+                rel_heading_envs=self.command_cfg.rel_heading_envs,
+            )
+        self.command_manager = CommandManager(env=self, config=command_manager_cfg)
+
+        # Reward Manager (shared with other simulators)
+        reward_manager_cfg = RewardManagerConfig(
+            reward_terms=self.reward_cfg.reward_terms,
+        )
+        self.reward_manager = MjlabRewardManager(env=self, config=reward_manager_cfg)
+
+        # Termination Manager (shared with other simulators)
+        termination_cfg = TerminationConfig(
+            num_envs=self.num_envs,
+            termination_criteria=self.env_cfg.termination_criteria,
+            episode_length_s=self.env_cfg.episode_length_s,
+        )
+        self.termination_manager = TerminationManager(env=self, config=termination_cfg)
+
+        # Event Manager (shared with other simulators)
+        event_manager_cfg = EventManagerConfig(
+            event_terms=self.event_cfg.event_terms,
+        )
+        self.event_manager = EventManager(env=self, config=event_manager_cfg)
+
+        if self.visualization_cfg.show_viewer:
+            from rlworld.rl.envs.managers.mujoco.visualization import (
+                MjlabVisualizationManager,
+                MjlabVisualizationManagerConfig,
+            )
+            viz_config = MjlabVisualizationManagerConfig(
+                show_viewer=True,
+                viewer_type="viser",
+                viser_port=self.visualization_cfg.viser_port,
+            )
+            self.visualization_manager = MjlabVisualizationManager(
+                env=self, config=viz_config
+            )
+            self.visualization_manager.setup()
+        else:
+            self.visualization_manager = None
+
+        # Expand model fields for per-env domain randomization
+        dr_fields = []
+        for term in self.event_cfg.event_terms:
+            if term.mode == "startup" and "field" in term.params:
+                dr_fields.append(term.params["field"])
+        if dr_fields:
+            self.scene_manager.sim.expand_model_fields(dr_fields)
+
+        # Apply startup events
+        if "startup" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="startup")
+
+        # Pretty print environment summary
+        from rlworld.rl.utils.pretty import print_env_summary
+        print_env_summary(self)
+
+    def _step_physics(self) -> None:
+        for _ in range(self.decimation):
+            self.act_manager.apply_actions(self.act_manager.processed_actions)
+            self.scene_manager.write_data_to_sim()
+            self.scene_manager.step()
+            self.scene_manager.update(dt=self.physics_dt)
+
+        # Update visualization
+        if self.visualization_manager is not None:
+            self.visualization_manager.advance()
+
+    def _apply_actions(self, processed_actions: torch.Tensor) -> None:
+        """Apply processed actions to mjlab Entity."""
+        self.act_manager.apply_actions(processed_actions)
+
+    def _reset_idx(self, env_ids: torch.Tensor) -> None:
+        """Reset with mjlab-specific write + forward."""
+        super()._reset_idx(env_ids)
+
+        if len(env_ids) > 0:
+            self.scene_manager.write_data_to_sim()
+            self.scene_manager.forward()
