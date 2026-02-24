@@ -13,15 +13,19 @@ if TYPE_CHECKING:
 # Entity Configuration (simplified from mjlab's SceneEntityCfg)
 # =============================================================================
 
+def _default_slice() -> slice:
+    return slice(None)
+
+
 @dataclass
 class EntityCfg:
     """Configuration specifying which entity and components to operate on."""
     name: str = "robot"
-    joint_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-    body_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-    geom_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-    site_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-    actuator_ids: list[int] | slice = field(default_factory=lambda: slice(None))
+    joint_ids: list[int] | slice = field(default_factory=_default_slice)
+    body_ids: list[int] | slice = field(default_factory=_default_slice)
+    geom_ids: list[int] | slice = field(default_factory=_default_slice)
+    site_ids: list[int] | slice = field(default_factory=_default_slice)
+    actuator_ids: list[int] | slice = field(default_factory=_default_slice)
 
     # Named components (resolved to IDs at runtime)
     joint_names: tuple[str, ...] | None = None
@@ -251,31 +255,37 @@ def push_by_setting_velocity(
 
 
 # =============================================================================
-# Domain randomization events
+# Mjlab env adapter (bridges rlworld's MjlabEnv to mjlab's ManagerBasedRlEnv)
 # =============================================================================
 
-def randomize_field(
-    env: "MjlabEnv",
-    field: str,
-    ranges: tuple[float, float] | dict[int, tuple[float, float]],
-    distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
-    operation: Literal["add", "scale", "abs"] = "abs",
-    entity_cfg: EntityCfg | None = None,
-    axes: list[int] | None = None,
-    shared_random: bool = False,
-    env_ids: torch.Tensor | None = None,
-) -> None:
-    """Randomize MuJoCo model field.
+class _MjlabEnvAdapter:
+    """Adapter that exposes the interface mjlab DR functions expect."""
 
-    Directly calls mjlab's randomize_field function.
-    """
-    from mjlab.envs.mdp.events import randomize_field as mjlab_randomize_field
+    def __init__(self, rlworld_env: "MjlabEnv"):
+        self._env = rlworld_env
+
+    @property
+    def num_envs(self):
+        return self._env.num_envs
+
+    @property
+    def device(self):
+        return self._env.device
+
+    @property
+    def scene(self):
+        return self._env.scene_manager.scene
+
+    @property
+    def sim(self):
+        return self._env.scene_manager.sim
+
+
+def _to_scene_entity_cfg(entity_cfg: EntityCfg):
+    """Convert EntityCfg to mjlab's SceneEntityCfg."""
     from mjlab.managers.scene_entity_config import SceneEntityCfg
 
-    entity_cfg = entity_cfg or EntityCfg()
-
-    # Convert to mjlab's SceneEntityCfg
-    scene_entity_cfg = SceneEntityCfg(
+    return SceneEntityCfg(
         name=entity_cfg.name,
         joint_ids=entity_cfg.joint_ids,
         body_ids=entity_cfg.body_ids,
@@ -287,36 +297,54 @@ def randomize_field(
         site_names=entity_cfg.site_names,
     )
 
-    # Create mjlab-compatible env wrapper
-    class MjlabEnvAdapter:
-        def __init__(self, rlworld_env: "MjlabEnv"):
-            self._env = rlworld_env
 
-        @property
-        def num_envs(self):
-            return self._env.num_envs
+# =============================================================================
+# Domain randomization events
+# =============================================================================
 
-        @property
-        def device(self):
-            return self._env.device
+def randomize_geom_friction(
+    env: "MjlabEnv",
+    ranges: tuple[float, float] | dict[int, tuple[float, float]],
+    operation: Literal["add", "scale", "abs"] = "abs",
+    entity_cfg: EntityCfg | None = None,
+    axes: list[int] | None = None,
+    shared_random: bool = False,
+    env_ids: torch.Tensor | None = None,
+) -> None:
+    """Randomize geom friction via mjlab's dr.geom_friction."""
+    from mjlab.envs.mdp.dr import geom_friction
 
-        @property
-        def scene(self):
-            return self._env.scene_manager.scene
-
-        @property
-        def sim(self):
-            return self._env.scene_manager.sim
-
-    adapter = MjlabEnvAdapter(env)
-    mjlab_randomize_field(
-        env=adapter,
+    entity_cfg = entity_cfg or EntityCfg()
+    geom_friction(
+        env=_MjlabEnvAdapter(env),
         env_ids=env_ids,
-        field=field,
         ranges=ranges,
-        distribution=distribution,
+        asset_cfg=_to_scene_entity_cfg(entity_cfg),
         operation=operation,
-        asset_cfg=scene_entity_cfg,
+        axes=axes,
+        shared_random=shared_random,
+    )
+
+
+def randomize_body_com_offset(
+    env: "MjlabEnv",
+    ranges: tuple[float, float] | dict[int, tuple[float, float]],
+    operation: Literal["add", "scale", "abs"] = "add",
+    entity_cfg: EntityCfg | None = None,
+    axes: list[int] | None = None,
+    shared_random: bool = False,
+    env_ids: torch.Tensor | None = None,
+) -> None:
+    """Randomize body COM offset (body_ipos) via mjlab's dr.body_com_offset."""
+    from mjlab.envs.mdp.dr import body_com_offset
+
+    entity_cfg = entity_cfg or EntityCfg()
+    body_com_offset(
+        env=_MjlabEnvAdapter(env),
+        env_ids=env_ids,
+        ranges=ranges,
+        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        operation=operation,
         axes=axes,
         shared_random=shared_random,
     )
@@ -328,33 +356,16 @@ def randomize_encoder_bias(
     entity_cfg: EntityCfg | None = None,
     env_ids: torch.Tensor | None = None,
 ) -> None:
-    """Randomize joint encoder bias."""
-    if env_ids is None:
-        env_ids = torch.arange(env.num_envs, device=env.device)
+    """Randomize joint encoder bias via mjlab's dr.encoder_bias."""
+    from mjlab.envs.mdp.dr import encoder_bias
 
     entity_cfg = entity_cfg or EntityCfg()
-    entity_cfg = _resolve_entity_cfg(env, entity_cfg)
-    entity = env.scene_manager.get_entity(entity_cfg.name)
-
-    joint_ids = entity_cfg.joint_ids
-    if isinstance(joint_ids, slice):
-        num_joints = entity.num_joints
-        joint_ids_tensor = torch.arange(num_joints, device=env.device)
-    else:
-        joint_ids_tensor = torch.tensor(joint_ids, device=env.device)
-
-    num_joints = len(joint_ids_tensor)
-    bias_samples = _sample_uniform(
-        torch.tensor(bias_range[0], device=env.device),
-        torch.tensor(bias_range[1], device=env.device),
-        (len(env_ids), num_joints),
-        env.device,
+    encoder_bias(
+        env=_MjlabEnvAdapter(env),
+        env_ids=env_ids,
+        bias_range=bias_range,
+        asset_cfg=_to_scene_entity_cfg(entity_cfg),
     )
-
-    if isinstance(joint_ids, slice):
-        entity.data.encoder_bias[env_ids] = bias_samples
-    else:
-        entity.data.encoder_bias[env_ids[:, None], joint_ids_tensor] = bias_samples
 
 
 def randomize_pd_gains(
@@ -366,44 +377,16 @@ def randomize_pd_gains(
     entity_cfg: EntityCfg | None = None,
     env_ids: torch.Tensor | None = None,
 ) -> None:
-    """Randomize PD gains."""
-    from mjlab.envs.mdp.events import randomize_pd_gains as mjlab_randomize_pd_gains
-    from mjlab.managers.scene_entity_config import SceneEntityCfg
+    """Randomize PD gains via mjlab's dr.pd_gains."""
+    from mjlab.envs.mdp.dr import pd_gains
 
     entity_cfg = entity_cfg or EntityCfg()
-
-    scene_entity_cfg = SceneEntityCfg(
-        name=entity_cfg.name,
-        actuator_ids=entity_cfg.actuator_ids,
-    )
-
-    class MjlabEnvAdapter:
-        def __init__(self, rlworld_env: "MjlabEnv"):
-            self._env = rlworld_env
-
-        @property
-        def num_envs(self):
-            return self._env.num_envs
-
-        @property
-        def device(self):
-            return self._env.device
-
-        @property
-        def scene(self):
-            return self._env.scene_manager.scene
-
-        @property
-        def sim(self):
-            return self._env.scene_manager.sim
-
-    adapter = MjlabEnvAdapter(env)
-    mjlab_randomize_pd_gains(
-        env=adapter,
+    pd_gains(
+        env=_MjlabEnvAdapter(env),
         env_ids=env_ids,
         kp_range=kp_range,
         kd_range=kd_range,
-        asset_cfg=scene_entity_cfg,
+        asset_cfg=_to_scene_entity_cfg(entity_cfg),
         distribution=distribution,
         operation=operation,
     )

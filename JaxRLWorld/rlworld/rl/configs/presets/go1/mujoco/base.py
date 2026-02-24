@@ -245,10 +245,9 @@ class Go1FlatMujocoConfig:
 
             # Startup events (domain randomization)
             EventTermConfig(
-                func=ef.randomize_field,
+                func=ef.randomize_geom_friction,
                 mode="startup",
                 params={
-                    "field": "geom_friction",
                     "ranges": (0.3, 1.2),
                     "operation": "abs",
                     "shared_random": True,
@@ -268,10 +267,9 @@ class Go1FlatMujocoConfig:
                 },
             ),
             EventTermConfig(
-                func=ef.randomize_field,
+                func=ef.randomize_body_com_offset,
                 mode="startup",
                 params={
-                    "field": "body_ipos",
                     "ranges": {
                         0: (-0.025, 0.025),
                         1: (-0.025, 0.025),
