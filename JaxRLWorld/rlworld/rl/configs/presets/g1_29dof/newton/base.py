@@ -245,7 +245,8 @@ class G1FlatNewtonConfig:
                     joint_target_kd_map=self.robot.prefixed_d_gains,
                     joint_armature_map=self.robot.prefixed_armature,
                     sites={"imu_site_base": self.robot.base_link_name},
-                    enable_self_collisions=False
+                    enable_self_collisions=False,
+                    collapse_fixed_joints=True
                 ),
             ],
             sensors=[

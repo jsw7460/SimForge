@@ -103,7 +103,8 @@ class NewtonContactManager(BaseManager):
         sensor: SensorContact = list(self._contact_sensors.values())[0]
 
         # Get include_total from sensor (requires local Newton patch)
-        self._include_total = sensor.include_total
+        # self._include_total = sensor.include_total
+        self._include_total = True
 
         # Get shape count per environment from first world's sensing objects
         num_sensing_objs = len(sensor.sensing_objs)
