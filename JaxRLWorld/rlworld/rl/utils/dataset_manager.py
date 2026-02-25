@@ -6,14 +6,10 @@ import torch
 
 from rlworld.rl.utils.dynamics_dataset import DynamicsDataset
 
+from rlworld.rl.utils.console import GREEN, YELLOW, RED, RESET
+
 if TYPE_CHECKING:
     from rlworld.rl.runners import BaseRunner
-
-# Color codes
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-RED = "\033[91m"
-RESET = "\033[0m"
 
 
 class DatasetCheckpointHandler:

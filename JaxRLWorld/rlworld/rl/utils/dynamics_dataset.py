@@ -2,10 +2,7 @@ from typing import Optional, Dict, Any, List
 
 import torch
 
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-RED = "\033[91m"
-RESET = "\033[0m"
+from rlworld.rl.utils.console import GREEN, YELLOW, RED, RESET
 
 
 class DynamicsDataset:

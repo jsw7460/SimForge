@@ -488,4 +488,5 @@ class Go1FlatMujocoConfig:
             "runner_class_name": "MujocoRunner",
             "save_interval": 250,
             "output_dir": "auto",
+            "preset_class_name": self.__class__.__name__,
         }

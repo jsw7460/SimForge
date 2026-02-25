@@ -1,0 +1,70 @@
+"""Gymnasium simulator initializer."""
+
+from typing import Any
+
+import gymnasium as gym
+import torch
+
+from rlworld.rl.evals.sim_initializers import SimInitializer
+from rlworld.rl.utils import compare_dicts
+
+
+class GymnasiumInitializer(SimInitializer):
+
+    def init_device(self) -> torch.device:
+        import genesis as gs
+        return gs.device
+
+    def prepare_configs(
+        self,
+        policy_path: str,
+        eval_env_cfgs: dict | None,
+        extra_overrides: dict | None,
+        metadata: dict,
+        show_viewer: bool,
+        record_video: bool,
+        video_dir: str | None,
+    ) -> Any:
+        from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun, EnvConfig
+
+        train_cfgs = GenesisConfigsForRun.from_dict(metadata['config'])
+
+        if eval_env_cfgs is not None:
+            compare_dicts(eval_env_cfgs, train_cfgs.env.to_dict(), "eval_env_cfgs", "train_cfgs.env")
+            eval_cfgs = train_cfgs
+            eval_cfgs.env = EnvConfig.from_dict(eval_env_cfgs)
+        else:
+            eval_cfgs = train_cfgs
+
+        if extra_overrides is not None:
+            eval_cfgs.apply_overrides(**extra_overrides)
+
+        eval_cfgs.visualization.show_viewer = show_viewer
+        eval_cfgs.visualization.record_video = record_video
+        eval_cfgs.visualization.video_dir = video_dir
+
+        return eval_cfgs
+
+    def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
+        from gymnasium.vector import SyncVectorEnv
+        from rlworld.rl.envs import GymnasiumEnv
+
+        seed = kwargs.get('seed', 42)
+
+        def make_env(env_seed):
+            def _init():
+                return gym.make(eval_cfgs.env.task_name, max_episode_steps=100)
+            return _init
+
+        num_envs = eval_cfgs.env.num_envs
+        env_gym = SyncVectorEnv([make_env(i) for i in range(num_envs)])
+        return GymnasiumEnv(
+            env_gym,
+            env_cfg=eval_cfgs.env,
+            scene_cfg=eval_cfgs.scene,
+            obs_cfg=eval_cfgs.observation,
+            act_cfg=eval_cfgs.action,
+            reward_cfg=eval_cfgs.reward,
+            command_cfg=eval_cfgs.command,
+            seed=seed,
+        )

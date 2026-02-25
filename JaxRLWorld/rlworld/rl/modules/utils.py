@@ -5,6 +5,10 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 
+from rlworld.rl.utils.console import (
+    BOLD, BLUE, GREEN, YELLOW, CYAN, MAGENTA, DIM, RESET,
+)
+
 
 def count_parameters(model: eqx.Module) -> int:
     """Count total parameters in model."""
@@ -21,15 +25,6 @@ def print_model_summary(model: eqx.Module, name: str = "Model", max_depth: int =
         name: Display name for the model
         max_depth: Maximum depth to display (default: 2)
     """
-    BOLD = "\033[1m"
-    BLUE = "\033[94m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    CYAN = "\033[96m"
-    MAGENTA = "\033[95m"
-    RESET = "\033[0m"
-    DIM = "\033[2m"
-
     params = eqx.filter(model, eqx.is_array)
     flat, _ = jax.tree_util.tree_flatten_with_path(params)
 

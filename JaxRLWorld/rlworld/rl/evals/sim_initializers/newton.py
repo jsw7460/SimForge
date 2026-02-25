@@ -1,0 +1,83 @@
+"""Newton simulator initializer."""
+
+from typing import Any
+
+import torch
+
+from rlworld.rl.evals.sim_initializers import SimInitializer
+from rlworld.rl.utils import compare_dicts
+from rlworld.rl.utils.console import print_info, print_success, print_error
+
+
+class NewtonInitializer(SimInitializer):
+
+    @property
+    def video_extension(self) -> str:
+        return ".bin"
+
+    def init_device(self) -> torch.device:
+        import warp as wp
+        from warp.torch import device_to_torch
+        return device_to_torch(wp.get_device())
+
+    def prepare_configs(
+        self,
+        policy_path: str,
+        eval_env_cfgs: dict | None,
+        extra_overrides: dict | None,
+        metadata: dict,
+        show_viewer: bool,
+        record_video: bool,
+        video_dir: str | None,
+    ) -> Any:
+        from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun, NewtonEnvConfig
+
+        train_cfgs = NewtonConfigsForRun.from_dict(metadata['config'])
+
+        if eval_env_cfgs is not None:
+            compare_dicts(eval_env_cfgs, train_cfgs.env.to_dict(), "eval_env_cfgs", "train_cfgs.env")
+            eval_cfgs = train_cfgs
+            eval_cfgs.env = NewtonEnvConfig.from_dict(eval_env_cfgs)
+        else:
+            eval_cfgs = train_cfgs
+
+        if extra_overrides is not None:
+            eval_cfgs.apply_overrides(**extra_overrides)
+
+        eval_cfgs.visualization.show_viewer = show_viewer
+        eval_cfgs.visualization.record_video = record_video
+        eval_cfgs.visualization.video_dir = video_dir
+
+        return eval_cfgs
+
+    def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
+        from rlworld.rl.envs import NewtonLocomotionEnv
+
+        return NewtonLocomotionEnv(
+            num_envs=eval_cfgs.env.num_envs,
+            env_cfg=eval_cfgs.env,
+            scene_cfg=eval_cfgs.scene,
+            visualization_cfg=eval_cfgs.visualization,
+            obs_cfg=eval_cfgs.observation,
+            act_cfg=eval_cfgs.action,
+            reward_cfg=eval_cfgs.reward,
+            command_cfg=eval_cfgs.command,
+            event_cfg=eval_cfgs.event,
+        )
+
+    def start_recording(self, env: Any) -> None:
+        # Newton ViewerFile records automatically
+        print_info("Newton recording active")
+
+    def stop_recording(self, env: Any) -> None:
+        env.vis_manager.stop_recording()
+        print_success("Newton recording saved!")
+
+    def cleanup(self, env: Any) -> None:
+        if hasattr(env, 'vis_manager'):
+            print_info("Closing Newton viewer...")
+            try:
+                env.vis_manager.close()
+                print_success("Newton viewer closed!")
+            except Exception as e:
+                print_error(f"Error closing viewer: {e}")

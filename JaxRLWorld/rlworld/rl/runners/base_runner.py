@@ -20,12 +20,8 @@ from rlworld.rl.envs.utils import NumStepCallsObserver
 from rlworld.rl.utils import setup_log_dir
 from rlworld.rl.utils.dynamics_dataset import DynamicsDataset
 from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
+from rlworld.rl.utils.console import GREEN, YELLOW, RED, RESET
 from rlworld.rl.utils.logger import WandbLogger, ConsoleWriter
-
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-RED = "\033[91m"
-RESET = "\033[0m"
 
 
 # ==================== Base Runner ====================
@@ -421,6 +417,7 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
             "current_learning_iteration": self.current_learning_iteration,
             "jax_key": np.array(self.key),
             "config": self.cfgs.recursive_to_dict(),
+            "preset_class_name": getattr(self.cfgs.runner, 'preset_class_name', None),
             **alg_metadata,
         }
 

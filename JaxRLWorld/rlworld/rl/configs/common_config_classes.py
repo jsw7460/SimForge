@@ -80,6 +80,7 @@ class RunnerConfig(BaseConfig):
     runner_class_name: str = field(default=DEFAULT_RUNNER_CONFIG["runner_class_name"])
     save_interval: int = field(default=DEFAULT_RUNNER_CONFIG["save_interval"])
     output_dir: str = field(default="auto")
+    preset_class_name: Optional[str] = field(default=None)
 
 
 from rlworld.rl.vis.overlays.hud_items.items import HUDItem
