@@ -44,7 +44,6 @@ class LocomotionEnv(GenesisEnv):
     ):
         # Store locomotion-specific config before parent init
         self._gait_period = 0.8
-
         # Call parent constructor
         super().__init__(
             num_envs=num_envs,

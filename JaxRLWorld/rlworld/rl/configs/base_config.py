@@ -101,27 +101,17 @@ class BaseConfig:
         for k, v in self.__dict__.items():
             if k.startswith('_'):
                 continue
-            result[k] = self._to_serializable(v)
+            if isinstance(v, BaseConfig):
+                result[k] = v.recursive_to_dict()
+            elif isinstance(v, dict):
+                result[k] = {dk: dv.recursive_to_dict() if isinstance(dv, BaseConfig) else dv
+                             for dk, dv in v.items()}
+            elif isinstance(v, (list, tuple)):
+                result[k] = [item.recursive_to_dict() if isinstance(item, BaseConfig) else item
+                             for item in v]
+            else:
+                result[k] = v
         return result
-
-    @staticmethod
-    def _to_serializable(v):
-        """Recursively convert a value to a pickle-safe form."""
-        if isinstance(v, BaseConfig):
-            return v.recursive_to_dict()
-        if callable(v) and not isinstance(v, type):
-            return repr(v)
-        if hasattr(v, '__dataclass_fields__'):
-            return {
-                k: BaseConfig._to_serializable(val)
-                for k, val in v.__dict__.items()
-                if not k.startswith('_')
-            }
-        if isinstance(v, dict):
-            return {k: BaseConfig._to_serializable(val) for k, val in v.items()}
-        if isinstance(v, (list, tuple)):
-            return [BaseConfig._to_serializable(item) for item in v]
-        return v
 
     @classmethod
     def from_dict(cls, config_dict: Dict):

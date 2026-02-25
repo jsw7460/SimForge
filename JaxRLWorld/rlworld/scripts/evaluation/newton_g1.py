@@ -5,6 +5,7 @@ from rlworld.rl.envs.mdp.commands import command_terms as cf
 import newton
 from rlworld.rl.configs.scene import NewtonEntityConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
+from rlworld.rl.configs.presets.g1_29dof.mujoco.base import G1FlatMujocoConfig
 import warp as wp
 
 if __name__ == '__main__':
@@ -54,7 +55,7 @@ if __name__ == '__main__':
     ]
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-02-23/22-54-09/checkpoint_latest/",  # Newton
+        policy_path=f"./outputs/models/2026-02-24/19-13-19/checkpoint_latest/",  # Newton
         num_evals=1,
         seed=42,
         show_viewer=True,
@@ -68,9 +69,12 @@ if __name__ == '__main__':
                 "episode_length_s": 10e+9,
                 # "termination_criteria": [],
             },
+            "scene": {
+                "mjlab_scene_cfg": G1FlatMujocoConfig().to_dict()["scene"].mjlab_scene_cfg,
+            },
             "visualization": {
                 # "viser_share": True,
-                "viser_port": 8081,
+                "viser_port": 8080,
                 "viewer_type": "viser",
             },
             # "scene": {

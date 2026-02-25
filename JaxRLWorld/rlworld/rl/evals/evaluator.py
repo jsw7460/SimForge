@@ -468,6 +468,15 @@ class PolicyEvaluator(NumStepCallsObserver):
     def _init_mjlab_env(self):
         """Initialize MjlabEnv environment."""
         from rlworld.rl.envs import MjlabEnv
+        if self.eval_cfgs.scene.mjlab_scene_cfg is None:
+            raise ValueError(
+                "mjlab_scene_cfg is required for MjlabEnv evaluation but was not found "
+                "in the checkpoint. Provide it via extra_overrides, e.g.:\n"
+                "  PolicyEvaluator(\n"
+                "      ...,\n"
+                "      extra_overrides={'scene': {'mjlab_scene_cfg': your_config.scene.mjlab_scene_cfg}},\n"
+                "  )"
+            )
         return MjlabEnv(
             num_envs=self.eval_cfgs.env.num_envs,
             env_cfg=self.eval_cfgs.env,

@@ -49,6 +49,13 @@ class MujocoSceneConfig(BaseConfig):
     # Entity configuration (alternative to mjlab_scene_cfg)
     robot_entity_name: str = "robot"
 
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        # Exclude non-serializable mjlab objects (contain lambdas, etc.)
+        result.pop('mjlab_scene_cfg', None)
+        result.pop('mjlab_sim_cfg', None)
+        return result
+
 
 @dataclass
 class MujocoObservationConfig(BaseConfig):
