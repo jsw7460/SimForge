@@ -198,10 +198,22 @@ def angular_momentum_penalty(
 def self_collision_cost(
     env: "MjlabEnv",
     sensor_name: str,
+    force_threshold: float = 10.0,
 ) -> torch.Tensor:
-    """Penalize self-collisions."""
+    """Penalize self-collisions.
+
+    When the sensor has force_history (history_length > 0), detects collisions
+    across decimation substeps using force magnitude thresholding. Otherwise,
+    falls back to the instantaneous ``found`` flag.
+    """
     sensor = env.scene_manager.get_sensor(sensor_name)
-    return -sensor.data.found.squeeze(-1).float()
+    data = sensor.data
+    if data.force_history is not None:
+        force_mag = torch.norm(data.force_history, dim=-1)  # [B, N, H]
+        hit = (force_mag > force_threshold).any(dim=1)       # [B, H]
+        return -hit.sum(dim=-1).float()                      # [B]
+    assert data.found is not None
+    return -data.found.squeeze(-1).float()
 
 
 def feet_air_time(
@@ -269,7 +281,12 @@ def feet_slip(
     total_command = linear_norm + angular_norm
     active = (total_command > command_threshold).float()
 
-    in_contact = (contact_sensor.data.found > 0).float()
+    data = contact_sensor.data
+    if data.force_history is not None:
+        force_mag = torch.norm(data.force_history, dim=-1)  # [B, N, H]
+        in_contact = (force_mag > 1e-6).any(dim=-1).float()  # [B, N]
+    else:
+        in_contact = (data.found > 0).float()
     foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
 

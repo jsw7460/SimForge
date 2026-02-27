@@ -214,7 +214,7 @@ class G1FlatNewtonConfig:
                         kd=1.0e2,
                         kf=1.0e3,
                         mu=1.0,
-                        thickness=0.00001,
+                        margin=0.00001,
                         mu_rolling=0.0005,
                         mu_torsional=0.25
                     ),

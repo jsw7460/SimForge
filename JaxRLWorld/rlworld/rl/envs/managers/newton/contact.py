@@ -121,9 +121,9 @@ class NewtonContactManager(BaseManager):
 
         # Take first num_shapes_per_env (these are env0's shapes)
         for idx, match_kind, _ in first_env_objs[:num_shapes_per_env]:
-            if match_kind == SensorContact.MatchKind.BODY:
+            if match_kind == SensorContact.ObjectType.BODY:
                 name = model.body_label[idx]
-            elif match_kind == SensorContact.MatchKind.SHAPE:
+            elif match_kind == SensorContact.ObjectType.SHAPE:
                 name = model.shape_label[idx]
             else:
                 continue
@@ -177,7 +177,7 @@ class NewtonContactManager(BaseManager):
 
         for sensor in self._contact_sensors.values():
             # net_force shape: (n_sensing_objs, n_counterparts) of vec3
-            net_force = wp.to_torch(sensor.get_total_force())  # (n_sensing_objs, n_counterparts, 3)
+            net_force = wp.to_torch(sensor.net_force)  # (n_sensing_objs, n_counterparts, 3)
 
             if self._include_total:
                 total_force = net_force[:, 0, :]
@@ -234,7 +234,7 @@ class NewtonContactManager(BaseManager):
             )
 
         sensor = list(self._contact_sensors.values())[0]
-        net_force = wp.to_torch(sensor.get_total_force())
+        net_force = wp.to_torch(sensor.net_force)
 
         if self._include_total:
             total_force = net_force[:, 0, :]

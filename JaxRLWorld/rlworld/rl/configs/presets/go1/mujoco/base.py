@@ -160,9 +160,10 @@ class Go1FlatMujocoConfig:
                 exclude=tuple(geom_names),
             ),
             secondary=ContactMatch(mode="body", pattern="terrain"),
-            fields=("found",),
+            fields=("found", "force"),
             reduce="none",
             num_slots=1,
+            history_length=self.decimation
         )
 
         # mjlab SceneCfg with robot entity and sensors
@@ -352,7 +353,7 @@ class Go1FlatMujocoConfig:
                 func=rf.feet_air_time,
                 weight=0.0,
                 params={
-                    "sensor_name": "feet_ground_contact",  # 추가
+                    "sensor_name": "feet_ground_contact",
                     "threshold_min": 0.05,
                     "threshold_max": 0.5,
                     "command_threshold": 0.5,

@@ -587,7 +587,7 @@ class NewtonSceneManager(BaseManager):
 
         for sensor_name, sensor in self.sensors.items():
             if isinstance(sensor, SensorContact):
-                sensor.update(self.sensor_contacts)  # Contact sensor takes Contacts
+                sensor.update(self.state_0, self.sensor_contacts)  # Contact sensor takes Contacts
             elif hasattr(sensor, 'update'):
                 sensor.update(self.state_0)  # IMU takes State
 

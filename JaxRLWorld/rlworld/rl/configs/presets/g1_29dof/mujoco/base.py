@@ -194,9 +194,10 @@ class G1FlatMujocoConfig:
             name="self_collision",
             primary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
             secondary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
-            fields=("found",),
+            fields=("found", "force"),
             reduce="none",
             num_slots=1,
+            history_length=self.decimation,
         )
 
         # mjlab SceneCfg

@@ -10,17 +10,17 @@ def main():
 
     # Create configs and runner
     cfgs_for_run = NewtonConfigsForRun.from_dict_with_overrides(configs_dict)
-    cfgs_for_run.env.num_envs = 4096 * 2
+    cfgs_for_run.env.num_envs = 1024
     fasttd3_config = FastTD3Config(
-        batch_size=32768 * 2,
-        buffer_size=4096 * 2 * 2000 ,
+        batch_size=32768,
+        buffer_size=1024 * 10000,
         learning_starts=10,
         is_squashed=True,
         use_cdq=True,
         utd_ratio=4,
         v_min=-10.0,
         v_max=10.0,
-        num_atoms=251,
+        num_atoms=101,
         noise_min=0.001,
         noise_max=0.4,
         n_steps=8,
@@ -43,8 +43,9 @@ def main():
         }
     )
 
-    cfgs_for_run.action.clip_actions = "joint_limit"
-    cfgs_for_run.action.action_scale = 1.0
+    cfgs_for_run.action.clip_actions = (-1.0, 1.0)
+    cfgs_for_run.action.action_scale = 0.5
+
 
     runner = BaseRunner.create_with_env(cfgs_for_run)
     # Start training

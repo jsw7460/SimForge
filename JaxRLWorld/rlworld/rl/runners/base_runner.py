@@ -233,11 +233,6 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
         """Process actions for environment (SB3-compatible)."""
         if self.squash_output:
             return actions * self.action_scale + self.action_bias
-            # Concentrate actions toward center, suppress extremes
-            # temperature > 1 → more centered, temperature < 1 → more uniform
-            # temperature = 3.0  # tunable
-            # shaped = jnp.sign(actions) * jnp.abs(actions) ** temperature
-            # return shaped * self.action_scale + self.action_bias
         else:
             return jnp.clip(actions, self.action_low_jax, self.action_high_jax)
 
