@@ -453,6 +453,7 @@ class OffPolicyRunner(BaseRunner):
         return {
             **collection_data,
             **training_data,
+            "reward_stats": self.reward_statistics.get_reward_stats_per_type(),
             "action_distribution": self._get_action_statistics(),
         }
 

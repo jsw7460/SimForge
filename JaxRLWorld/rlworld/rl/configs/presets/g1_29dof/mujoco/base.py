@@ -228,6 +228,8 @@ class G1FlatMujocoConfig:
             robot_entity_name="robot",
             mjlab_scene_cfg=mjlab_scene_cfg,
             mjlab_sim_cfg=mjlab_sim_cfg,
+            preset_class_name=self.__class__.__name__,
+            preset_module_path=type(self).__module__,
         )
 
     def _build_event_config(self) -> EventConfig:
@@ -601,5 +603,4 @@ class G1FlatMujocoConfig:
             "runner_class_name": "MujocoRunner",
             "save_interval": 250,
             "output_dir": "auto",
-            "preset_class_name": self.__class__.__name__,
         }

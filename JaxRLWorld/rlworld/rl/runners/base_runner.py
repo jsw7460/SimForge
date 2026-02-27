@@ -417,7 +417,6 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
             "current_learning_iteration": self.current_learning_iteration,
             "jax_key": np.array(self.key),
             "config": self.cfgs.recursive_to_dict(),
-            "preset_class_name": getattr(self.cfgs.runner, 'preset_class_name', None),
             **alg_metadata,
         }
 

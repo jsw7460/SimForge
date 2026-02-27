@@ -49,6 +49,10 @@ class MujocoSceneConfig(BaseConfig):
     # Entity configuration (alternative to mjlab_scene_cfg)
     robot_entity_name: str = "robot"
 
+    # Preset info for auto-resolving non-serializable mjlab objects at eval time
+    preset_class_name: str | None = None
+    preset_module_path: str | None = None
+
     def recursive_to_dict(self) -> Dict:
         result = super().recursive_to_dict()
         # Exclude non-serializable mjlab objects (contain lambdas, etc.)

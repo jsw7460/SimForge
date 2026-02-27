@@ -421,12 +421,9 @@ class WandbLogger:
             if "raw" in action_dist:
                 raw_actions = action_dist["raw"]  # (num_steps * num_envs, action_dim)
                 for i in range(raw_actions.shape[-1]):
-                    try:
-                        log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(
-                            raw_actions[:, i].flatten()
-                        )
-                    except:
-                        import ipdb; ipdb.set_trace()
+                    log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(
+                        raw_actions[:, i].flatten()
+                    )
 
         # Performance
         if "collection_time" in training_data and "learning_time" in training_data:

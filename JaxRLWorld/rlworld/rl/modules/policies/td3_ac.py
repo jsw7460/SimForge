@@ -112,7 +112,7 @@ class TD3ActorCritic(BaseActorCritic):
         self.actor_obs_dim = num_actor_obs
         self.critic_obs_dim = num_critic_obs
         self.num_actions = num_actions
-        self.is_squashed = True  # TD3 uses tanh to bound actions (Different from SB3. Same with CleanRL)
+        self.is_squashed = True
         self.is_recurrent = False
 
         # Split keys

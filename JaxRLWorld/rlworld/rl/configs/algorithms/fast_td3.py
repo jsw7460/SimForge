@@ -22,8 +22,8 @@ class FastTD3Config(TD3Config):
     v_max: float = 10.0
 
     # Mixed exploration noise
-    noise_min: float = 0.05
-    noise_max: float = 0.4
+    noise_min: float = 0.01
+    noise_max: float = 0.05
 
     # Clipped Double Q-learning
     use_cdq: bool = True

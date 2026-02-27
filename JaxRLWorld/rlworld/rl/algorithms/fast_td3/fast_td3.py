@@ -170,13 +170,14 @@ class FastTD3(OffPolicyAlgorithm):
     def _create_optimizers(self):
         """Create optimizers for actor and critics."""
         self.actor_optimizer = optax.chain(
-            optax.adam(learning_rate=self.actor_lr),
+            optax.clip_by_global_norm(self.max_grad_norm),
+            optax.adamw(learning_rate=self.actor_lr, weight_decay=0.1),
         )
 
         self.critic_optimizer = optax.chain(
-            optax.adam(learning_rate=self.critic_lr),
+            optax.clip_by_global_norm(self.max_grad_norm),
+            optax.adamw(learning_rate=self.critic_lr, weight_decay=0.1),
         )
-
     def _init_train_state(self, key: jax.Array):
         """Initialize training state including noise scales."""
         key, noise_key, subkey = jax.random.split(key, 3)

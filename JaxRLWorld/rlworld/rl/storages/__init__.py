@@ -3,8 +3,6 @@ from .rollout_storage import (
     RolloutBatch,
 )
 
-from .nstep_replay_buffer import NstepReplayBuffer
-
 from .replay_buffer import (
     ReplayBuffer,
     ReplayBatch,

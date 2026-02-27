@@ -21,20 +21,38 @@ MUJOCO_PRESET_REGISTRY: dict[str, tuple[str, str]] = {
 }
 
 
-def auto_resolve_mjlab_configs(metadata: dict):
-    """Try to reconstruct mjlab_scene_cfg and mjlab_sim_cfg from preset_class_name.
+def auto_resolve_mjlab_configs(preset_class_name: str | None, preset_module_path: str | None = None):
+    """Try to reconstruct mjlab_scene_cfg and mjlab_sim_cfg from preset info.
 
     Both are non-serializable mjlab objects that get lost during checkpoint save.
+
+    Resolution order:
+      1. Direct import via preset_module_path (new checkpoints)
+      2. Registry fallback via MUJOCO_PRESET_REGISTRY (old checkpoints)
+
     Returns (mjlab_scene_cfg, mjlab_sim_cfg) or (None, None).
     """
-    preset_name = metadata.get('preset_class_name')
-    if not preset_name or preset_name not in MUJOCO_PRESET_REGISTRY:
+    if not preset_class_name:
         return None, None
-    module_path, class_name = MUJOCO_PRESET_REGISTRY[preset_name]
-    mod = importlib.import_module(module_path)
-    preset = getattr(mod, class_name)()
-    scene_config = preset.to_dict()["scene"]
-    return scene_config.mjlab_scene_cfg, scene_config.mjlab_sim_cfg
+
+    # 1st: direct import via module path (new checkpoints)
+    if preset_module_path:
+        mod = importlib.import_module(preset_module_path)
+        cls = getattr(mod, preset_class_name, None)
+        if cls is not None:
+            preset = cls()
+            scene_config = preset.to_dict()["scene"]
+            return scene_config.mjlab_scene_cfg, scene_config.mjlab_sim_cfg
+
+    # 2nd: registry fallback (old checkpoints)
+    if preset_class_name in MUJOCO_PRESET_REGISTRY:
+        module_path, class_name = MUJOCO_PRESET_REGISTRY[preset_class_name]
+        mod = importlib.import_module(module_path)
+        preset = getattr(mod, class_name)()
+        scene_config = preset.to_dict()["scene"]
+        return scene_config.mjlab_scene_cfg, scene_config.mjlab_sim_cfg
+
+    return None, None
 
 
 class MjlabInitializer(SimInitializer):
@@ -72,20 +90,29 @@ class MjlabInitializer(SimInitializer):
 
         # Auto-resolve non-serializable mjlab objects if not provided
         if eval_cfgs.scene.mjlab_scene_cfg is None:
-            scene_cfg, sim_cfg = auto_resolve_mjlab_configs(metadata)
+            # New checkpoints: preset info stored in scene config
+            preset_name = getattr(eval_cfgs.scene, 'preset_class_name', None)
+            preset_module = getattr(eval_cfgs.scene, 'preset_module_path', None)
+
+            # Old checkpoints fallback: preset_class_name in metadata top-level
+            if not preset_name:
+                preset_name = metadata.get('preset_class_name')
+
+            scene_cfg, sim_cfg = auto_resolve_mjlab_configs(preset_name, preset_module)
             if scene_cfg is not None:
                 eval_cfgs.scene.mjlab_scene_cfg = scene_cfg
                 if sim_cfg is not None:
                     eval_cfgs.scene.mjlab_sim_cfg = sim_cfg
+                source = "module path" if preset_module else "registry"
                 print_success(
                     f"Auto-resolved mjlab configs from preset: "
-                    f"{metadata.get('preset_class_name')}"
+                    f"{preset_name} (via {source})"
                 )
             else:
                 raise ValueError(
                     "mjlab_scene_cfg is required for MjlabEnv evaluation but was not found "
                     "in the checkpoint and could not be auto-resolved.\n"
-                    "  - For new checkpoints: re-train to embed preset_class_name in metadata.\n"
+                    "  - For new checkpoints: re-train to embed preset info in scene config.\n"
                     "  - For existing checkpoints: provide it via extra_overrides, e.g.:\n"
                     "      PolicyEvaluator(\n"
                     "          ...,\n"
