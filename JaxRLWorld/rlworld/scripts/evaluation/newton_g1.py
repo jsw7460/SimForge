@@ -55,9 +55,9 @@ if __name__ == '__main__':
     ]
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-02-24/19-13-19/checkpoint_latest/",  # Newton
-        num_evals=1,
+        policy_path=f"./outputs/models/2026-02-24/22-29-38/checkpoint_latest/",  # Newton
         seed=42,
+        num_evals=100000000,
         show_viewer=True,
         record_video=True,
         record_steps=None,
@@ -69,12 +69,9 @@ if __name__ == '__main__':
                 "episode_length_s": 10e+9,
                 # "termination_criteria": [],
             },
-            "scene": {
-                "mjlab_scene_cfg": G1FlatMujocoConfig().to_dict()["scene"].mjlab_scene_cfg,
-            },
             "visualization": {
                 # "viser_share": True,
-                "viser_port": 8080,
+                "viser_port": 2020,
                 "viewer_type": "viser",
             },
             # "scene": {

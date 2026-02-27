@@ -79,7 +79,7 @@ class G1FlatNewtonConfig:
     # Algorithm settings
     algorithm_name: str = "PPO"
     max_iterations: int = 15000
-    actor_hidden_dims: List[int] = field(default_factory=lambda: [512, 256, 128])
+    actor_hidden_dims: List[int] = field(default_factory=lambda: [1024, 512, 256])
 
     actor_class_name: str = "MLPActor"
     run_name: str = "G1_29dof_Newton"
@@ -498,13 +498,13 @@ class G1FlatNewtonConfig:
                     "activation": "tanh",
                     "ortho_init": True,
                     # "output_gain": 0.1,
-                    "hidden_dims": self.actor_hidden_dims,
+                    "hidden_dims": [512, 256, 128],
                 },
                 "critic_kwargs": {
                     "activation": "tanh",
                     "ortho_init": True,
                     # "output_gain": 0.1,
-                    "hidden_dims": self.actor_hidden_dims,
+                    "hidden_dims": [1024, 512, 256],
                 },
                 "init_noise_std": 1.0,
                 "distribution_type": "gaussian",

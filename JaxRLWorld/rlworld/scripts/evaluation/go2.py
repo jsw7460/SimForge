@@ -13,7 +13,7 @@ from rlworld.rl.envs.mdp.commands import command_terms as cf
 if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-02-19/14-35-05/checkpoint_latest/",
+        policy_path=f"./outputs/models/2026-02-26/12-58-51/checkpoint_latest/",
         num_evals=1,
         seed=42,
         show_viewer=False,
