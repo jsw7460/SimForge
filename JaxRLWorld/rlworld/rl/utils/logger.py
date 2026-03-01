@@ -491,6 +491,16 @@ class WandbLogger:
                 log_dict[metric_name] = mean_value
         return log_dict
 
+    def upload_checkpoint_artifact(self, checkpoint_dir: str, iteration: int, metadata: dict | None = None) -> None:
+        """Upload a checkpoint directory as a wandb Artifact."""
+        artifact = wandb.Artifact(
+            name=f"checkpoint-iter{iteration}",
+            type="checkpoint",
+            metadata=metadata,
+        )
+        artifact.add_dir(checkpoint_dir)
+        self.run.log_artifact(artifact)
+
     def close(self):
         """Finish the WandB run."""
         wandb.finish()

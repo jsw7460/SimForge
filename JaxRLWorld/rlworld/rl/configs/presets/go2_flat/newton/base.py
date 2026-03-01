@@ -149,7 +149,13 @@ class Go2FlatNewtonConfig:
                     sites={"imu_site_base": r.base_link_name},
                     joint_target_ke_map=r.prefixed_p_gains,
                     joint_target_kd_map=r.prefixed_d_gains,
-                    collapse_fixed_joints=False
+                    collapse_fixed_joints=True,
+                    joints_to_keep=[
+                        "go2_description/FL_foot_joint",
+                        "go2_description/FR_foot_joint",
+                        "go2_description/RL_foot_joint",
+                        "go2_description/RR_foot_joint",
+                    ]
                 ),
             ],
             sensors=[

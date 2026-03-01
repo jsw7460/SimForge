@@ -20,7 +20,8 @@ def main():
 
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
-
+    cfgs_for_run.runner.upload_checkpoint = True
+    cfgs_for_run.runner.save_interval = 10
     cfgs_for_run.algorithm.obs_normalization = True
     runner = BaseRunner.create_with_env(cfgs_for_run)
 

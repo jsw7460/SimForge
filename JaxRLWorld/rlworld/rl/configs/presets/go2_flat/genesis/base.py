@@ -454,5 +454,6 @@ class Go2FlatGenesisConfig:
             "wandb_project": "RLArchitecture",
             "runner_class_name": "Go1FlatGenesis",
             "save_interval": 250,
+            "upload_checkpoint": True,
             "output_dir": "auto",
         }

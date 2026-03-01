@@ -264,9 +264,10 @@ class NewtonSceneManager(BaseManager):
                 xform=config.transform,
                 floating=config.floating,
                 enable_self_collisions=config.enable_self_collisions,
-                collapse_fixed_joints=config.collapse_fixed_joints,
+                collapse_fixed_joints=False,
                 ignore_inertial_definitions=config.ignore_inertial_definitions
             )
+            builder.collapse_fixed_joints(joints_to_keep=config.joints_to_keep)
 
             # Apply joint params
             if config.joint_target_ke_map or config.joint_target_kd_map:

@@ -341,5 +341,7 @@ DEFAULT_RUNNER_CONFIG: Dict = {
     "wandb_project": "RLArchitecture",
     "runner_class_name": "runner_class_name",
     "save_interval": 1000,
-    "save_path": "auto"
+    "save_path": "auto",
+    "upload_checkpoint": False,
+    "delete_local_after_upload": False,
 }

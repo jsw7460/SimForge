@@ -395,7 +395,24 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
         checkpoint_dir = os.path.join(self.model_log_dir, f"checkpoint_{iteration}")
         self._save_checkpoint_to(checkpoint_dir, iteration)
         print(f"Saved checkpoint to {checkpoint_dir}")
+        if self.runner_cfg.upload_checkpoint and self.wandb_logger is not None:
+            self._upload_checkpoint(checkpoint_dir, iteration)
         return checkpoint_dir
+
+    def _upload_checkpoint(self, checkpoint_dir: str, iteration: int) -> None:
+        """Upload checkpoint to wandb as an artifact. Never interrupts training on failure."""
+        try:
+            self.wandb_logger.upload_checkpoint_artifact(
+                checkpoint_dir=checkpoint_dir,
+                iteration=iteration,
+                metadata={"iteration": iteration, "total_timesteps": self.total_timesteps},
+            )
+            print(f"Uploaded checkpoint to wandb (iteration {iteration})")
+            if self.runner_cfg.delete_local_after_upload:
+                shutil.rmtree(checkpoint_dir)
+                print(f"Deleted local checkpoint: {checkpoint_dir}")
+        except Exception as e:
+            print(f"WARNING: Failed to upload checkpoint to wandb: {e}")
 
     def _save_checkpoint_to(self, checkpoint_dir: str, iteration: int) -> None:
         """Save checkpoint to specified directory."""
@@ -412,6 +429,7 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
             "current_learning_iteration": self.current_learning_iteration,
             "jax_key": np.array(self.key),
             "config": self.cfgs.recursive_to_dict(),
+            "wandb_run_path": self.wandb_logger.run.path if self.wandb_logger else None,
             **alg_metadata,
         }
 

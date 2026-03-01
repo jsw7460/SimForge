@@ -37,7 +37,9 @@ class PolicyEvaluator(NumStepCallsObserver):
     def __init__(
         self,
         eval_env_cfgs: dict | None,
-        policy_path: str,
+        policy_path: str | None = None,
+        wandb_run_path: str | None = None,
+        wandb_checkpoint_iter: int | None = None,
         num_evals: int = 5,
         seed: int = 42,
         use_logging: bool = True,
@@ -50,6 +52,20 @@ class PolicyEvaluator(NumStepCallsObserver):
         use_rich_display: bool = True
     ):
         super().__init__()
+
+        # Resolve policy_path from wandb if needed
+        if wandb_run_path is not None:
+            from rlworld.rl.utils.wandb_checkpoint import get_wandb_checkpoint
+            policy_path, was_cached = get_wandb_checkpoint(
+                wandb_run_path=wandb_run_path,
+                iteration=wandb_checkpoint_iter,
+            )
+            status = "cached" if was_cached else "downloaded"
+            print_info(f"Using {status} wandb checkpoint: {policy_path}")
+
+        if policy_path is None:
+            raise ValueError("Either policy_path or wandb_run_path must be provided.")
+
         self.policy_path = policy_path
         self.num_evals = num_evals
         self.seed = seed
