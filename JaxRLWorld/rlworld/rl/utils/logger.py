@@ -111,6 +111,12 @@ class ConsoleWriter:
                 f"{Fore.BLUE}{wandb_url}{Style.RESET_ALL}"
             )
 
+        if "wandb_run_path" in data:
+            lines.append(
+                f"  {Fore.WHITE}Run Path{Style.RESET_ALL}".ljust(self.pad + 9) +
+                f"{Fore.GREEN}{data['wandb_run_path']}{Style.RESET_ALL}"
+            )
+
         # Simulator and task
         simulator = data.get("simulator", "N/A")
         task_name = data.get("task_name", "N/A")

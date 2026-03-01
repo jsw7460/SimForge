@@ -267,6 +267,8 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
 
         if self.wandb_url:
             training_data["wandb_url"] = self.wandb_url
+        if self.wandb_logger:
+            training_data["wandb_run_path"] = self.wandb_logger.run.path
 
         # Print to console
         self.console_writer.write_metrics(
