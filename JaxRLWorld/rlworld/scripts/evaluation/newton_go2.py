@@ -7,7 +7,7 @@ if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
         # policy_path=f"./outputs/models/2026-01-16/11-07-56/checkpoint_500/",  # ABAGNN
-        policy_path=f"./outputs/models/2026-02-23/22-08-19/checkpoint_latest/",  # ABAGNN
+        policy_path=f"./outputs/models/2026-02-27/11-18-22/checkpoint_latest/",  # ABAGNN
         # policy_path=f"./outputs/models/2026-01-10/23-36-14/checkpoint_6000/",       # MLP
         num_evals=1,
         seed=42,
@@ -27,7 +27,7 @@ if __name__ == '__main__':
             },
             "visualization": {
                 "viewer_type": "viser",
-                "viser_port": 8080,
+                "viser_port": 2020,
             },
             # "command": {
             #     "sampler": [

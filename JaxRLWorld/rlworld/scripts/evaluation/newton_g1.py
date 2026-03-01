@@ -55,7 +55,7 @@ if __name__ == '__main__':
     ]
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-02-24/22-29-38/checkpoint_latest/",  # Newton
+        policy_path=f"./outputs/models/2026-02-27/11-51-04/checkpoint_latest/",
         seed=42,
         num_evals=100000000,
         show_viewer=True,
@@ -71,7 +71,7 @@ if __name__ == '__main__':
             },
             "visualization": {
                 # "viser_share": True,
-                "viser_port": 2020,
+                "viser_port": 8083,
                 "viewer_type": "viser",
             },
             # "scene": {

@@ -214,9 +214,10 @@ class G1FlatNewtonConfig:
                         kd=1.0e2,
                         kf=1.0e3,
                         mu=1.0,
-                        margin=0.00001,
                         mu_rolling=0.0005,
-                        mu_torsional=0.25
+                        mu_torsional=0.25,
+                        # margin=0.00001,
+                        # gap=0.0
                     ),
                     floating=False
                 ),
@@ -240,6 +241,7 @@ class G1FlatNewtonConfig:
                         kd=1.0e2,
                         kf=1.0e3,
                         mu=1.0,
+                        # gap=0.0
                     ),
                     joint_target_ke_map=self.robot.prefixed_p_gains,
                     joint_target_kd_map=self.robot.prefixed_d_gains,

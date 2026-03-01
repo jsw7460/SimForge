@@ -31,6 +31,7 @@ class NewtonVisualizationManager(BaseManager):
 
     def __init__(self, env: "NewtonEnv", config: NewtonVisualizationManagerConfig):
         super().__init__(env=env)
+        config.viser_share = False
         self.config = config
         self.viewer = None
         self.sim_time = 0.0
@@ -90,31 +91,6 @@ class NewtonVisualizationManager(BaseManager):
             else:
                 raise NotImplementedError(f"Unknown viewer type: {self.config.viewer_type}")
             self.viewer.set_model(model, max_worlds=1)
-
-    # def advance(self) -> None:
-    #     if self.viewer is None:
-    #         return
-    #
-    #     if not isinstance(self.viewer, newton.viewer.ViewerUSD):
-    #         if hasattr(self.viewer, 'is_running') and not self.viewer.is_running():
-    #             return
-    #
-    #     state = self.env.scene_manager.state_0
-    #
-    #     # Set camera to look at robot (only for ViewerGL)
-    #     if isinstance(self.viewer, newton.viewer.ViewerGL) and hasattr(self.viewer, 'set_camera'):
-    #         base_pos = state.joint_q.numpy()[:3]
-    #         self.viewer.set_camera(
-    #             pos=wp.vec3(base_pos[0] + 3.0, base_pos[1] + 3.0, base_pos[2] + 1.0),
-    #             pitch=-20.0,
-    #             yaw=-135.0,
-    #         )
-    #
-    #     self.sim_time += self.env.control_dt
-    #
-    #     self.viewer.begin_frame(self.sim_time)
-    #     self.viewer.log_state(state)
-    #     self.viewer.end_frame()
 
     def advance(self) -> None:
         if self.viewer is None:

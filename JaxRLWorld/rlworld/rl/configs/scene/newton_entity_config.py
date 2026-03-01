@@ -56,6 +56,7 @@ class NewtonEntityConfig:
     floating: bool = False
     enable_self_collisions: bool = False
     collapse_fixed_joints: bool = False
+    joints_to_keep: list[str] = field(default_factory=list)
 
     # Joint config
     # If joint_target_ke(kd)_map is given, pd-gain of joint_cfg will be ignored
