@@ -11,10 +11,6 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
-from .default_config import (
-    DEFAULT_ENV_CONFIG,
-)
-
 if TYPE_CHECKING:
     from rlworld.rl.configs.scene import NewtonEntityConfig
     from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
@@ -28,7 +24,7 @@ class NewtonEnvConfig(BaseConfig):
     """Newton environment configuration."""
     num_envs: int = 4096
     env_name: str = "NewtonEnv"
-    task_name: str = field(default=DEFAULT_ENV_CONFIG["task_name"])
+    task_name: str = "Unknown"
     seed: int = 42
     episode_length_s: float = 20.0
     decimation: int = 1
@@ -53,8 +49,6 @@ class NewtonSceneConfig(BaseConfig):
 class NewtonObservationConfig(BaseConfig):
     """Newton observation configuration."""
     obs_group: dict[str, list["ObservationTermConfig"]] = field(default_factory=dict)
-    short_history_len: int = 1
-    max_history_len: int = 1
 
 
 @dataclass

@@ -2,12 +2,6 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Union, TYPE_CHECKING, Literal
 
 from .base_config import BaseConfig
-from .default_config import (
-    DEFAULT_COMMAND_CONFIG,
-    DEFAULT_REWARD_CONFIG,
-    DEFAULT_NN_CONFIG,
-    DEFAULT_RUNNER_CONFIG,
-)
 from .rewards import RewardTermConfig
 
 if TYPE_CHECKING:
@@ -23,12 +17,8 @@ class RewardConfig(BaseConfig):
 @dataclass
 class CommandConfig(BaseConfig):
     """Command configuration (shared)."""
-    sampler: list["CommandTermConfig"] = field(
-        default_factory=lambda: DEFAULT_COMMAND_CONFIG["sampler"]
-    )
-    resampling_time_s: tuple[float, float] = field(
-        default_factory=lambda: DEFAULT_COMMAND_CONFIG["resampling_time_s"]
-    )
+    sampler: list["CommandTermConfig"] = field(default_factory=tuple)
+    resampling_time_s: tuple[float, float] = (8.0, 12.0)
 
     # Standing environment fraction: this fraction of envs will have
     # all commands zeroed out on each resample.
@@ -54,34 +44,45 @@ class EventConfig(BaseConfig):
 @dataclass
 class NNConfig(BaseConfig):
     """Neural network configuration (shared)."""
-    policy: Dict[str, Any] = field(default_factory=lambda: DEFAULT_NN_CONFIG["policy"].copy())
-    state_estimator: Dict[str, Any] = field(default_factory=lambda: DEFAULT_NN_CONFIG["state_estimator"].copy())
+    policy: Dict[str, Any] = field(default_factory=lambda: {
+        "actor_class": None,
+        "activation": "tanh",
+        "actor_hidden_dims": [128, 64],
+        "critic_hidden_dims": [256, 128, 64],
+        "init_noise_std": 1.0,
+        "distribution_type": "gaussian",
+        "std_type": "fixed",
+    })
+    state_estimator: Dict[str, Any] = field(default_factory=lambda: {
+        "activation": "relu",
+        "hidden_dims": [256, 128, 64],
+    })
 
 
 @dataclass
 class RunnerConfig(BaseConfig):
     """Runner configuration (shared)."""
-    checkpoint: int = field(default=DEFAULT_RUNNER_CONFIG["checkpoint"])
-    experiment_name: str = field(default=DEFAULT_RUNNER_CONFIG["experiment_name"])
-    load_run: str = field(default=DEFAULT_RUNNER_CONFIG["load_run"])
-    log_interval: int = field(default=DEFAULT_RUNNER_CONFIG["log_interval"])
-    max_iterations: int = field(default=DEFAULT_RUNNER_CONFIG["max_iterations"])
-    init_at_random_ep_len: bool = field(default=DEFAULT_RUNNER_CONFIG["init_at_random_ep_len"])
-    policy_class_name: str = field(default=DEFAULT_RUNNER_CONFIG["policy_class_name"])
-    state_estimator_class_name: str = field(default=DEFAULT_RUNNER_CONFIG["state_estimator_class_name"])
-    low_level_path: str = field(default=DEFAULT_RUNNER_CONFIG["low_level_path"])
-    high_level_update_freq: int = field(default=DEFAULT_RUNNER_CONFIG["high_level_update_freq"])
-    record_interval: int = field(default=DEFAULT_RUNNER_CONFIG["record_interval"])
-    resume: bool = field(default=DEFAULT_RUNNER_CONFIG["resume"])
-    resume_path: Optional[str] = field(default=DEFAULT_RUNNER_CONFIG["resume_path"])
-    run_name: str = field(default=DEFAULT_RUNNER_CONFIG["run_name"])
-    logger: str = field(default=DEFAULT_RUNNER_CONFIG["logger"])
-    wandb_project: str = field(default=DEFAULT_RUNNER_CONFIG["wandb_project"])
-    runner_class_name: str = field(default=DEFAULT_RUNNER_CONFIG["runner_class_name"])
-    save_interval: int = field(default=DEFAULT_RUNNER_CONFIG["save_interval"])
-    output_dir: str = field(default="auto")
-    upload_checkpoint: bool = field(default=True)
-    delete_local_after_upload: bool = field(default=False)
+    checkpoint: int = -1
+    experiment_name: str = "GoAnywhere"
+    load_run: str = None
+    log_interval: int = 1
+    max_iterations: int = 99999
+    init_at_random_ep_len: bool = False
+    policy_class_name: str = "PPOActorCritic"
+    state_estimator_class_name: str = "StateEstimator"
+    low_level_path: str = None
+    high_level_update_freq: int = 1
+    record_interval: int = -1
+    resume: bool = False
+    resume_path: Optional[str] = None
+    run_name: str = ""
+    logger: str = "wandb"
+    wandb_project: str = "RLArchitecture"
+    runner_class_name: str = "runner_class_name"
+    save_interval: int = 1000
+    output_dir: str = "auto"
+    upload_checkpoint: bool = True
+    delete_local_after_upload: bool = False
 
 
 from rlworld.rl.vis.overlays.hud_items.items import HUDItem

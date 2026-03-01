@@ -11,10 +11,6 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
-from .default_config import (
-    DEFAULT_ENV_CONFIG,
-)
-
 if TYPE_CHECKING:
     from rlworld.rl.envs.mdp.configs import TerminationTermConfig
     from rlworld.rl.configs.observations import ObservationTermConfig
@@ -25,7 +21,7 @@ class MujocoEnvConfig(BaseConfig):
     """MuJoCo/mjlab environment configuration."""
     num_envs: int = 4096
     env_name: str = "MujocoEnv"
-    task_name: str = field(default=DEFAULT_ENV_CONFIG["task_name"])
+    task_name: str = "Unknown"
     seed: int = 42
     episode_length_s: float = 20.0
     decimation: int = 10
