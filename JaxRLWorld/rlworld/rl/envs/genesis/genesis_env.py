@@ -98,7 +98,6 @@ class GenesisEnv(World):
                 sensors=self.scene_cfg.sensors,
                 env_spacing=self.scene_cfg.env_spacing,
                 show_viewer=self.visualization_cfg.show_viewer,
-                use_height_map=self.obs_cfg.use_height_map,
             )
         )
 
@@ -144,12 +143,7 @@ class GenesisEnv(World):
             env=self,
             config=ObsManagerConfig(
                 num_envs=self.num_envs,
-                obs_group=self.obs_cfg.obs_group,
-                use_vision=self.obs_cfg.use_vision,
-                use_height_map=self.obs_cfg.use_height_map,
-                map_size=self.obs_cfg.map_size,
-                map_resolution=self.obs_cfg.map_resolution,
-                cam_fov=self.obs_cfg.cam_fov,
+                obs_group=self.obs_cfg.obs_group
             )
         )
 

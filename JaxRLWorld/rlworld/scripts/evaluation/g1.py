@@ -21,7 +21,8 @@ if __name__ == '__main__':
 
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"outputs/models/2026-02-27/11-30-59/checkpoint_latest/",  # MLP
+        wandb_run_path="jsw7460/RLArchitecture/p79hdfkt",
+        # policy_path=f"outputs/models/2026-02-27/11-30-59/checkpoint_latest/",  # MLP
         # policy_path=f"/home/sangwoo/workspace/model_zoo/dynann/g1_29dof/mlp/checkpoint_latest/",  # MLP
         num_evals=1,
         seed=42,

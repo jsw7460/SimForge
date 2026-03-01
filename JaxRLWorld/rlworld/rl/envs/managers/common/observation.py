@@ -24,13 +24,6 @@ class ObsManagerConfig:
     num_envs: int
     obs_group: dict[str, list[ObservationTermConfig]]
 
-    # Optional vision settings (not all simulators support this)
-    use_vision: bool = False
-    use_height_map: bool = False
-    map_size: int = 10
-    map_resolution: float = 0.1
-    cam_fov: float = 90.0
-
 
 class ObservationManager(BaseManager):
     """Manages observation generation and processing for RL environments.
@@ -78,8 +71,8 @@ class ObservationManager(BaseManager):
         self._is_term_indices_built = False
 
         # Initialize vision system if enabled
-        if self.config.use_vision:
-            raise NotImplementedError("Vision observations not yet implemented in common manager")
+        # if self.config.use_vision:
+        #     raise NotImplementedError("Vision observations not yet implemented in common manager")
 
     # ========== Initialization ==========
 

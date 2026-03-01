@@ -116,6 +116,7 @@ class Go2FlatGenesisConfig:
     def _build_env_config(self) -> Dict[str, Any]:
         return {
             "env_name": "LocomotionEnv",
+            "task_name": "Go2_Locomotion",
             "num_envs": self.num_envs,
             "seed": self.seed,
             "decimation": self.decimation,

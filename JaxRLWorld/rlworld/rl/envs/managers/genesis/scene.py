@@ -30,7 +30,6 @@ class SceneManagerConfig:
     sensors: list[SensorConfig] | None
     env_spacing: tuple
     show_viewer: bool
-    use_height_map: bool
 
 
 class SceneManager(BaseManager):
