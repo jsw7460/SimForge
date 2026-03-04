@@ -282,8 +282,8 @@ class G1FlatGenesisConfig:
                 weight=1.0,
             ),
             RewardTermConfig(
-                rf_mjlab.action_rate_l2_mjlab,
-                weight=0.01,
+                rf_mjlab.raw_action_rate_l2_mjlab,
+                weight=0.1,
             ),
 
             # Feet rewards

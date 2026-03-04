@@ -10,16 +10,16 @@ def main():
 
     # Create configs and runner
     cfgs_for_run = NewtonConfigsForRun.from_dict_with_overrides(configs_dict)
-    cfgs_for_run.env.num_envs = 1024
+    cfgs_for_run.env.num_envs = 1024 * 2
     fasttd3_config = FastTD3Config(
-        batch_size=32768,
-        buffer_size=1024 * 1024 * 10,
+        batch_size=32768 * 2,
+        buffer_size=1024 * 2 * 1024 * 10,
         learning_starts=10,
         obs_normalization=True,
         is_squashed=True,
         use_cdq=True,
         gamma=0.97,
-        utd_ratio=4,
+        utd_ratio=6,
         v_min=-10.0,
         v_max=10.0,
         num_atoms=101,

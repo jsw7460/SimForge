@@ -132,7 +132,7 @@ class G1FlatNewtonConfig:
     def _default_extra_observations(self) -> List[ObservationTermConfig]:
         """G1-specific extra observations."""
         return [
-            ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
+            # ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
             # ObservationTermConfig(state.base_height, scale=1.0),
             # ObservationTermConfig(state.base_lin_vel, scale=1.0),
             # ObservationTermConfig(state.base_euler, scale=1.0),
@@ -145,15 +145,15 @@ class G1FlatNewtonConfig:
     def _default_extra_critic_observations(self) -> List[ObservationTermConfig]:
         """Extra critic observations."""
         return [
-            ObservationTermConfig(
-                proprioception.relative_bodies_pos,
-                scale=1.0,
-                params={
-                    "base_body": self.robot.prefixed("torso_link"),
-                    "bodies": self.robot.prefixed_foot_names,
-                },
-            ),
-            ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
+            # ObservationTermConfig(
+            #     proprioception.relative_bodies_pos,
+            #     scale=1.0,
+            #     params={
+            #         "base_body": self.robot.prefixed("torso_link"),
+            #         "bodies": self.robot.prefixed_foot_names,
+            #     },
+            # ),
+            # ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
             ObservationTermConfig(state.base_height, scale=1.0),
             ObservationTermConfig(state.base_lin_vel, scale=1.0),
             ObservationTermConfig(state.base_euler, scale=1.0),
@@ -370,7 +370,7 @@ class G1FlatNewtonConfig:
                 weight=1.0,
             ),
             RewardTermConfig(
-                rf_mjlab.action_rate_l2_mjlab,
+                rf_mjlab.raw_action_rate_l2_mjlab,
                 weight=0.1,
             ),
 

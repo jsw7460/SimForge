@@ -18,8 +18,6 @@ class OnlineStats:
         n: int,
         batch_mean: float,
         batch_var: float,
-        # batch_min: float,
-        # batch_max: float,
     ):
         """
         Update statistics from pre-computed batch statistics.
@@ -28,8 +26,6 @@ class OnlineStats:
             n: Number of samples in batch
             batch_mean: Pre-computed mean
             batch_var: Pre-computed variance (unbiased=False)
-            batch_min: Pre-computed min
-            batch_max: Pre-computed max
         """
         if n == 0:
             return

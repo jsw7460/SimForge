@@ -453,18 +453,6 @@ class G1FlatMujocoConfig:
                 weight=0.1,
             ),
 
-            # Feet air time (disabled by default like mjlab G1)
-            RewardTermConfig(
-                func=rf.feet_air_time,
-                weight=0.0,
-                params={
-                    "sensor_name": "feet_ground_contact",
-                    "threshold_min": 0.05,
-                    "threshold_max": 0.5,
-                    "command_threshold": 0.5,
-                },
-            ),
-
             # Feet clearance
             RewardTermConfig(
                 func=rf.feet_clearance,
