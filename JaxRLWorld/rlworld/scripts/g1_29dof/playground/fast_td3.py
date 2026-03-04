@@ -157,11 +157,13 @@ def main():
         key=model_key,
         actor_kwargs={
             "hidden_dims": ACTOR_HIDDEN,
+            "ortho_init": True,
             "activation": "relu",
             "output_gain": INIT_SCALE,
         },
         critic_kwargs={
             "hidden_dims": CRITIC_HIDDEN,
+            "ortho_init": True,
             "activation": "relu",
             "output_gain": INIT_SCALE,
         },
@@ -222,6 +224,11 @@ def main():
 
     # ===================== Training Loop =====================
     obs = train_env.reset()  # torch tensor
+    if asymmetric:
+        # First step: get critic_obs from a dummy step or use obs as placeholder.
+        # RSLRLBraxWrapper returns critic_obs in infos on step(), not on reset().
+        # We'll initialize critic_obs after the first step; for step 0, use zeros.
+        critic_obs = torch.zeros(NUM_ENVS, n_critic_obs, device=device)
     start_time = time.time()
     measure_start = None
     measure_step = 0
@@ -230,8 +237,10 @@ def main():
         # Always use policy (matching original — no random warmup)
         obs_jax = torch_to_jax(obs)
         if asymmetric:
-            raise NotImplementedError("Asymmetric obs not yet handled in this script")
-        act_input = ActInput(actor_obs=obs_jax, critic_obs=obs_jax)
+            critic_obs_jax = torch_to_jax(critic_obs)
+        else:
+            critic_obs_jax = obs_jax
+        act_input = ActInput(actor_obs=obs_jax, critic_obs=critic_obs_jax)
         actions = alg.act(act_input, deterministic=False)
 
         # Step env
@@ -239,15 +248,28 @@ def main():
         next_obs, rewards, dones, infos = train_env.step(actions_torch.float())
         truncations = infos["time_outs"]
 
+        if asymmetric:
+            next_critic_obs = infos["observations"]["critic"]
+
         # Pre-reset obs for ALL done environments (matching original exactly)
         true_next_obs = torch.where(
             dones[:, None] > 0,
             infos["observations"]["raw"]["obs"],
             next_obs,
         )
+        if asymmetric:
+            true_next_critic_obs = torch.where(
+                dones[:, None] > 0,
+                infos["observations"]["raw"]["critic_obs"],
+                next_critic_obs,
+            )
 
         # Convert
         next_obs_jax = torch_to_jax(true_next_obs)
+        if asymmetric:
+            next_critic_obs_jax = torch_to_jax(true_next_critic_obs)
+        else:
+            next_critic_obs_jax = next_obs_jax
         rewards_jax = torch_to_jax(rewards)
         terminated_jax = jnp.asarray((dones & ~truncations).cpu().numpy().astype(np.float32))
         truncated_jax = jnp.asarray(truncations.cpu().numpy().astype(np.float32))
@@ -255,11 +277,11 @@ def main():
         # Store transition
         alg.store_transition(
             actor_obs=obs_jax,
-            critic_obs=obs_jax,
+            critic_obs=critic_obs_jax,
             action=actions,
             reward=rewards_jax,
             next_actor_obs=next_obs_jax,
-            next_critic_obs=next_obs_jax,
+            next_critic_obs=next_critic_obs_jax,
             terminated=terminated_jax,
             truncated=truncated_jax,
         )
@@ -269,6 +291,8 @@ def main():
 
         # Use auto-reset obs for next step (NOT true_next_obs)
         obs = next_obs
+        if asymmetric:
+            critic_obs = next_critic_obs
 
         # Training
         if global_step >= LEARNING_STARTS:
