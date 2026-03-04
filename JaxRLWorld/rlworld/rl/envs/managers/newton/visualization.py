@@ -31,7 +31,6 @@ class NewtonVisualizationManager(BaseManager):
 
     def __init__(self, env: "NewtonEnv", config: NewtonVisualizationManagerConfig):
         super().__init__(env=env)
-        config.viser_share = False
         self.config = config
         self.viewer = None
         self.sim_time = 0.0

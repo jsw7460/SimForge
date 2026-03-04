@@ -81,7 +81,7 @@ class RunnerConfig(BaseConfig):
     runner_class_name: str = "runner_class_name"
     save_interval: int = 1000
     output_dir: str = "auto"
-    upload_checkpoint: bool = True
+    upload_checkpoint: bool = False
     delete_local_after_upload: bool = False
 
 

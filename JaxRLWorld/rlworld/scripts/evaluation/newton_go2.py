@@ -6,9 +6,7 @@ from rlworld.rl.configs.robots.go2 import Go2Config
 if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        # policy_path=f"./outputs/models/2026-01-16/11-07-56/checkpoint_500/",  # ABAGNN
-        policy_path=f"./outputs/models/2026-02-27/11-18-22/checkpoint_latest/",  # ABAGNN
-        # policy_path=f"./outputs/models/2026-01-10/23-36-14/checkpoint_6000/",       # MLP
+        wandb_run_path="jsw7460/RLArchitecture/b80sk0ys",
         num_evals=1,
         seed=42,
         show_viewer=True,

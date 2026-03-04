@@ -13,17 +13,20 @@ def main():
     cfgs_for_run.env.num_envs = 1024
     fasttd3_config = FastTD3Config(
         batch_size=32768,
-        buffer_size=1024 * 1000 * 50,
+        buffer_size=1024 * 1024 * 10,
         learning_starts=10,
+        obs_normalization=True,
         is_squashed=True,
         use_cdq=True,
+        gamma=0.97,
         utd_ratio=4,
         v_min=-10.0,
         v_max=10.0,
         num_atoms=101,
+        target_policy_noise=0.001,
         noise_min=0.001,
         noise_max=0.4,
-        n_steps=8,
+        n_steps=1,
         tau=0.1,
     )
     cfgs_for_run.algorithm = fasttd3_config
