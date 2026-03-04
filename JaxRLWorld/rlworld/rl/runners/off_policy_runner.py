@@ -260,6 +260,7 @@ class OffPolicyRunner(BaseRunner):
             target_policy_noise=alg_cfg.get("target_policy_noise", 0.2),
             target_noise_clip=alg_cfg.get("target_noise_clip", 0.5),
             use_cdq=alg_cfg.get("use_cdq", True),
+            use_target_actor=alg_cfg.get("use_target_actor", False),
             max_grad_norm=alg_cfg.get("max_grad_norm", 10.0),
             key=key,
         )

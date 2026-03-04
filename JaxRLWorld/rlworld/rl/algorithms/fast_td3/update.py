@@ -103,6 +103,7 @@ def update_critics(
     target_policy_noise: float,
     target_noise_clip: float,
     use_cdq: bool,
+    use_target_actor: bool,
     key: jax.Array,
 ) -> tuple[Any, optax.OptState, Dict[str, jax.Array]]:
     """
@@ -137,6 +138,7 @@ def update_critics(
             target_policy_noise,
             target_noise_clip,
             use_cdq,
+            use_target_actor,
             key,
         )
         return loss, info
@@ -212,13 +214,18 @@ def update_targets(
     target_critic1_params: Any,
     target_critic2_params: Any,
     tau: float,
+    use_target_actor: bool = False,
 ) -> tuple[Any, Any, Any]:
     """JIT-compiled target network update with Polyak averaging."""
-    actor_params, _ = eqx.partition(model.actor, eqx.is_inexact_array)
     critic1_params, _ = eqx.partition(model.critic1, eqx.is_inexact_array)
     critic2_params, _ = eqx.partition(model.critic2, eqx.is_inexact_array)
 
-    new_target_actor = polyak_update(actor_params, target_actor_params, tau)
+    if use_target_actor:
+        actor_params, _ = eqx.partition(model.actor, eqx.is_inexact_array)
+        new_target_actor = polyak_update(actor_params, target_actor_params, tau)
+    else:
+        new_target_actor = target_actor_params
+
     new_target_critic1 = polyak_update(critic1_params, target_critic1_params, tau)
     new_target_critic2 = polyak_update(critic2_params, target_critic2_params, tau)
 

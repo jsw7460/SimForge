@@ -213,9 +213,10 @@ def project_distribution(
     l = jnp.floor(b).astype(jnp.int32)
     u = jnp.ceil(b).astype(jnp.int32)
 
-    # Handle edge case where l == u
-    l = jnp.where((l == u) & (l > 0), l - 1, l)
-    u = jnp.where((l == u) & (u < num_atoms - 1), u + 1, u)
+    # Handle l == u edge case: ensure l != u so probability mass is not lost
+    is_int = (l == u)
+    l = jnp.where(is_int & (l > 0), l - 1, l)
+    u = jnp.where(is_int & (u < num_atoms - 1), u + 1, u)
 
     # Clamp indices
     l = jnp.clip(l, 0, num_atoms - 1)
@@ -274,6 +275,13 @@ def project_distribution_batched(
     b = (target_z - v_min) / delta_z
     l = jnp.floor(b).astype(jnp.int32)
     u = jnp.ceil(b).astype(jnp.int32)
+
+    # Handle l == u edge case: ensure l != u so probability mass is not lost
+    # When l == u and l > 0: shift l down
+    # When l == u and l == 0: shift u up
+    is_int = (l == u)
+    l = jnp.where(is_int & (l > 0), l - 1, l)
+    u = jnp.where(is_int & (u < num_atoms - 1), u + 1, u)
 
     # Clamp indices
     l = jnp.clip(l, 0, num_atoms - 1)

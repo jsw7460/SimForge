@@ -101,6 +101,7 @@ class FastTD3(OffPolicyAlgorithm):
         target_policy_noise: float = 0.2,
         target_noise_clip: float = 0.5,
         use_cdq: bool = True,
+        use_target_actor: bool = False,
         max_grad_norm: float = 10.0,
         key: jax.Array = None,
         **kwargs,
@@ -146,6 +147,7 @@ class FastTD3(OffPolicyAlgorithm):
         self.target_policy_noise = target_policy_noise
         self.target_noise_clip = target_noise_clip
         self.use_cdq = use_cdq
+        self.use_target_actor = use_target_actor
         self.max_grad_norm = max_grad_norm
 
         # Check if model has normalizers enabled
@@ -237,6 +239,7 @@ class FastTD3(OffPolicyAlgorithm):
         print(f"  Target policy noise: {self.target_policy_noise}")
         print(f"  Target noise clip: {self.target_noise_clip}")
         print(f"  Use CDQ: {self.use_cdq}")
+        print(f"  Use target actor: {self.use_target_actor}")
         print(f"  Obs normalization: {self.obs_normalization}")
 
         print(f"\n📊 Distributional RL (C51):")
@@ -383,6 +386,24 @@ class FastTD3(OffPolicyAlgorithm):
         """
         self.total_it += 1
 
+        # Update normalizer stats from batch data (matches original FastTD3 behavior
+        # where normalize_obs() updates running stats during both collection AND training)
+        if self.obs_normalization:
+            new_actor_norm = self.train_state.model.actor_obs_normalizer.update(
+                batch.actor_observations
+            )
+            new_critic_norm = self.train_state.model.critic_obs_normalizer.update(
+                batch.critic_observations
+            )
+            new_actor_norm = new_actor_norm.update(batch.next_actor_observations)
+            new_critic_norm = new_critic_norm.update(batch.next_critic_observations)
+            new_model = eqx.tree_at(
+                lambda m: (m.actor_obs_normalizer, m.critic_obs_normalizer),
+                self.train_state.model,
+                (new_actor_norm, new_critic_norm),
+            )
+            self.train_state = self.train_state._replace(model=new_model)
+
         key = self.train_state.key
         key, critic_key, actor_key = jax.random.split(key, 3)
 
@@ -403,6 +424,7 @@ class FastTD3(OffPolicyAlgorithm):
             self.target_policy_noise,
             self.target_noise_clip,
             self.use_cdq,
+            self.use_target_actor,
             critic_key,
         )
 
@@ -496,6 +518,7 @@ class FastTD3(OffPolicyAlgorithm):
             self.train_state.target_critic1_params,
             self.train_state.target_critic2_params,
             self.tau,
+            self.use_target_actor,
         )
 
         self.train_state = self.train_state._replace(

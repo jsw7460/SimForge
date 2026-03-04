@@ -24,6 +24,7 @@ def compute_critic_loss(
     target_policy_noise: float,
     target_noise_clip: float,
     use_cdq: bool,
+    use_target_actor: bool,
     key: jax.Array,
 ) -> tuple[jax.Array, Dict[str, jax.Array]]:
     """
@@ -54,8 +55,13 @@ def compute_critic_loss(
     """
     key, noise_key = jax.random.split(key)
 
-    # Reconstruct target actor
-    target_actor = eqx.combine(target_actor_params, target_actor_static)
+    # Select actor for computing next actions:
+    # Original FastTD3: uses current actor (no target actor)
+    # Standard TD3: uses Polyak-averaged target actor
+    if use_target_actor:
+        target_actor = eqx.combine(target_actor_params, target_actor_static)
+    else:
+        target_actor = model.actor
 
     # Normalize next actor observations and get next actions
     next_actor_obs = model._normalize_actor_obs(batch.next_actor_observations)

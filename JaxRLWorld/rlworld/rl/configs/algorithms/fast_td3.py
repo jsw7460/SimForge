@@ -27,3 +27,7 @@ class FastTD3Config(TD3Config):
 
     # Clipped Double Q-learning
     use_cdq: bool = True
+
+    # Target actor: False = use current actor for critic target (original FastTD3),
+    #               True = use Polyak-averaged target actor (standard TD3)
+    use_target_actor: bool = False
