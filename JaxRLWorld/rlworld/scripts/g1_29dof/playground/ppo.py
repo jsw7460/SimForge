@@ -1,11 +1,9 @@
 """
-Diagnostic: FastTD3 on MuJoCo Playground G1JoystickFlatTerrain.
+Diagnostic: PPO on MuJoCo Playground G1JoystickFlatTerrain.
 
-Uses our FastTD3 algorithm directly with the Playground environment,
-bypassing OffPolicyRunner. This isolates whether the issue is in the
+Uses our PPO algorithm directly with the Playground environment,
+bypassing OnPolicyRunner. This isolates whether the issue is in the
 algorithm or in the reward/obs of Newton/Genesis/MuJoCo environments.
-
-Hyperparameters match the original author's G1JoystickFlatTerrain config exactly.
 """
 
 import os
@@ -27,36 +25,43 @@ from mujoco_playground import registry
 from mujoco_playground import wrapper_torch
 
 from rlworld.rl.algorithms.base import ActInput
-from rlworld.rl.algorithms.fast_td3.fast_td3 import FastTD3
-from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
+from rlworld.rl.algorithms.ppo.ppo import PPO
+from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 
 
-# ===================== Config (matches original G1JoystickFlatTerrain exactly) =====================
+# ===================== Config =====================
 
 ENV_NAME = "G1JoystickFlatTerrain"
-NUM_ENVS = 1024
+NUM_ENVS = 4096
 NUM_EVAL_ENVS = 1024
 SEED = 1
 DEVICE_RANK = 0
-TOTAL_TIMESTEPS = 100_000
-LEARNING_STARTS = 10
-NUM_UPDATES = 2           # Original: num_updates=2
-BATCH_SIZE = 32768
-GAMMA = 0.97
-TAU = 0.1
-TARGET_POLICY_NOISE = 0.001
-NOISE_CLIP = 0.5
-NOISE_MIN = 0.001
-NOISE_MAX = 0.4
-BUFFER_SIZE_PER_ENV = 1024 * 10   # Original: 10240
-N_STEPS = 1
-NUM_ATOMS = 101
-V_MIN = -10.0
-V_MAX = 10.0
-ACTOR_HIDDEN = [512, 256, 128]    # Original: actor_hidden_dim=512 -> [512, 256, 128]
-CRITIC_HIDDEN = [1024, 512, 256]  # Original: critic_hidden_dim=1024 -> [1024, 512, 256]
-INIT_SCALE = 0.01
-EVAL_INTERVAL = 5000
+
+# PPO hyperparameters
+NUM_STEPS_PER_ENV = 24
+MAX_ITERATIONS = 3000
+GAMMA = 0.99
+LAM = 0.95
+CLIP_PARAM = 0.2
+ACTOR_LR = 1e-3
+CRITIC_LR = 1e-3
+NUM_LEARNING_EPOCHS = 8
+NUM_MINI_BATCHES = 4
+ENTROPY_COEF = 0.001
+VALUE_LOSS_COEF = 1.0
+MAX_GRAD_NORM = 1.0
+SCHEDULE = "fixed"
+DESIRED_KL = None
+USE_CLIPPED_VALUE_LOSS = False
+USE_REWARD_SCALING = False
+OBS_NORMALIZATION = True
+
+# Network
+ACTOR_HIDDEN = [512, 256, 128]
+CRITIC_HIDDEN = [512, 256, 128]
+INIT_NOISE_STD = 1.0
+
+EVAL_INTERVAL = 100
 USE_WANDB = True
 
 
@@ -77,24 +82,22 @@ def main():
         import wandb
 
         wandb.init(
-            project="FastTD3-Playground-Diagnostic",
+            project="PPO-Playground-Diagnostic",
             name=f"{ENV_NAME}__ours__seed{SEED}",
             config={
                 "env_name": ENV_NAME,
                 "num_envs": NUM_ENVS,
-                "batch_size": BATCH_SIZE,
+                "num_steps_per_env": NUM_STEPS_PER_ENV,
                 "gamma": GAMMA,
-                "tau": TAU,
-                "target_policy_noise": TARGET_POLICY_NOISE,
-                "noise_min": NOISE_MIN,
-                "noise_max": NOISE_MAX,
-                "buffer_size_per_env": BUFFER_SIZE_PER_ENV,
-                "n_steps": N_STEPS,
-                "num_updates": NUM_UPDATES,
-                "num_atoms": NUM_ATOMS,
-                "v_min": V_MIN,
-                "v_max": V_MAX,
-                "use_target_actor": False,
+                "lam": LAM,
+                "clip_param": CLIP_PARAM,
+                "actor_lr": ACTOR_LR,
+                "num_learning_epochs": NUM_LEARNING_EPOCHS,
+                "num_mini_batches": NUM_MINI_BATCHES,
+                "entropy_coef": ENTROPY_COEF,
+                "schedule": SCHEDULE,
+                "desired_kl": DESIRED_KL,
+                "obs_normalization": OBS_NORMALIZATION,
             },
         )
 
@@ -159,53 +162,54 @@ def main():
     key = jax.random.PRNGKey(SEED)
     key, model_key = jax.random.split(key)
 
-    actor_critic = FastTD3ActorCritic(
+    actor_critic = PPOActorCritic(
         num_actor_obs=n_obs,
         num_critic_obs=n_critic_obs,
         num_actions=n_act,
-        num_atoms=NUM_ATOMS,
-        v_min=V_MIN,
-        v_max=V_MAX,
-        is_squashed=True,
-        obs_normalization=True,
+        actor_class_name="MLPActor",
+        init_noise_std=INIT_NOISE_STD,
+        std_type="state_independent",
+        distribution_type="gaussian",
+        obs_normalization=OBS_NORMALIZATION,
         key=model_key,
         actor_kwargs={
             "hidden_dims": ACTOR_HIDDEN,
+            "activation": "tanh",
             "ortho_init": True,
-            "activation": "relu",
-            "output_gain": INIT_SCALE,
         },
         critic_kwargs={
             "hidden_dims": CRITIC_HIDDEN,
+            "activation": "tanh",
             "ortho_init": True,
-            "activation": "relu",
-            "output_gain": INIT_SCALE,
         },
     )
 
-    alg = FastTD3(
+    alg = PPO(
         actor_critic=actor_critic,
-        num_envs=NUM_ENVS,
+        num_learning_epochs=NUM_LEARNING_EPOCHS,
+        num_mini_batches=NUM_MINI_BATCHES,
+        clip_param=CLIP_PARAM,
         gamma=GAMMA,
-        tau=TAU,
-        batch_size=BATCH_SIZE,
-        policy_delay=2,
-        target_policy_noise=TARGET_POLICY_NOISE,
-        target_noise_clip=NOISE_CLIP,
-        noise_min=NOISE_MIN,
-        noise_max=NOISE_MAX,
-        use_cdq=True,
-        use_target_actor=False,
+        lam=LAM,
+        value_loss_coef=VALUE_LOSS_COEF,
+        entropy_coef=ENTROPY_COEF,
+        actor_lr=ACTOR_LR,
+        critic_lr=CRITIC_LR,
+        max_grad_norm=MAX_GRAD_NORM,
+        use_clipped_value_loss=USE_CLIPPED_VALUE_LOSS,
+        schedule=SCHEDULE,
+        desired_kl=DESIRED_KL,
+        use_reward_scaling=USE_REWARD_SCALING,
+        use_early_stop=False,
         key=key,
     )
 
     alg.init_storage({
         "num_envs": NUM_ENVS,
+        "num_transitions_per_env": NUM_STEPS_PER_ENV,
         "actor_obs_shape": [n_obs],
         "critic_obs_shape": [n_critic_obs],
         "actions_shape": [n_act],
-        "size_per_env": BUFFER_SIZE_PER_ENV,
-        "n_steps": N_STEPS,
     })
 
     # ===================== Evaluate =====================
@@ -224,7 +228,7 @@ def main():
                 critic_obs_jax = actor_obs_jax
             act_input = ActInput(actor_obs=actor_obs_jax, critic_obs=critic_obs_jax)
             actions = alg.act(act_input, deterministic=True)
-            actions_jax = wrapper_torch._torch_to_jax(jax_to_torch(actions, device))
+            actions_jax = jnp.asarray(actions)
             state = eval_jit_step(state, actions_jax)
 
             rewards = state.reward
@@ -245,14 +249,14 @@ def main():
 
         for i in range(max_episode_steps):
             if asymmetric:
-                actor_obs = jnp.asarray(state.obs["state"])[None]  # [1, obs_dim]
+                actor_obs = jnp.asarray(state.obs["state"])[None]
                 critic_obs_r = jnp.asarray(state.obs["privileged_state"])[None]
             else:
                 actor_obs = jnp.asarray(state.obs)[None]
                 critic_obs_r = actor_obs
             act_in = ActInput(actor_obs=actor_obs, critic_obs=critic_obs_r)
             actions = alg.act(act_in, deterministic=True)
-            actions_jax = jnp.asarray(actions)[0]  # [act_dim]
+            actions_jax = jnp.asarray(actions)[0]
             state = render_jit_step(state, actions_jax)
             state.info["command"] = jnp.array([1.0, 0.0, 0.0])
             if i % 2 == 0:
@@ -273,124 +277,117 @@ def main():
     # ===================== Training Loop =====================
     obs = train_env.reset()  # torch tensor
     if asymmetric:
-        # First step: get critic_obs from a dummy step or use obs as placeholder.
-        # RSLRLBraxWrapper returns critic_obs in infos on step(), not on reset().
-        # We'll initialize critic_obs after the first step; for step 0, use zeros.
         critic_obs = torch.zeros(NUM_ENVS, n_critic_obs, device=device)
-    start_time = time.time()
-    measure_start = None
-    measure_step = 0
 
-    for global_step in range(TOTAL_TIMESTEPS):
-        # Always use policy (matching original — no random warmup)
+    total_timesteps = 0
+    start_time = time.time()
+
+    for iteration in range(MAX_ITERATIONS):
+        # ---- Rollout phase ----
+        for step in range(NUM_STEPS_PER_ENV):
+            obs_jax = torch_to_jax(obs)
+            if asymmetric:
+                critic_obs_jax = torch_to_jax(critic_obs)
+            else:
+                critic_obs_jax = obs_jax
+            act_input = ActInput(actor_obs=obs_jax, critic_obs=critic_obs_jax)
+            actions = alg.act(act_input, deterministic=False)
+
+            # Step env
+            actions_torch = jax_to_torch(actions, device)
+            next_obs, rewards, dones, infos = train_env.step(actions_torch.float())
+            truncations = infos["time_outs"]
+
+            if asymmetric:
+                next_critic_obs = infos["observations"]["critic"]
+
+            # Build final_observation for timeout bootstrapping
+            dones_bool = dones.bool()
+            trunc_bool = truncations.bool()
+            terminated_jax = jnp.asarray((dones_bool & ~trunc_bool).cpu().numpy())
+            truncated_jax = jnp.asarray(trunc_bool.cpu().numpy())
+
+            # For timeout bootstrapping, PPO needs final_observation
+            ppo_infos = {}
+            if trunc_bool.any():
+                raw_obs = infos["observations"]["raw"]["obs"]
+                if asymmetric:
+                    raw_critic = infos["observations"]["raw"]["critic_obs"]
+                else:
+                    raw_critic = raw_obs
+                ppo_infos["final_observation"] = {
+                    "actor": torch_to_jax(raw_obs),
+                    "critic": torch_to_jax(raw_critic),
+                }
+
+            rewards_jax = torch_to_jax(rewards)
+            next_obs_jax = torch_to_jax(next_obs)
+            if asymmetric:
+                next_critic_obs_jax = torch_to_jax(next_critic_obs)
+            else:
+                next_critic_obs_jax = next_obs_jax
+
+            alg.process_env_step(
+                rewards=rewards_jax,
+                terminated=terminated_jax,
+                truncated=truncated_jax,
+                infos=ppo_infos,
+                next_actor_obs=next_obs_jax,
+                next_critic_obs=next_critic_obs_jax,
+            )
+
+            obs = next_obs
+            if asymmetric:
+                critic_obs = next_critic_obs
+            total_timesteps += NUM_ENVS
+
+        # ---- Update phase ----
         obs_jax = torch_to_jax(obs)
         if asymmetric:
             critic_obs_jax = torch_to_jax(critic_obs)
         else:
             critic_obs_jax = obs_jax
-        act_input = ActInput(actor_obs=obs_jax, critic_obs=critic_obs_jax)
-        actions = alg.act(act_input, deterministic=False)
+        alg.compute_returns(last_critic_obs=critic_obs_jax)
+        metrics = alg.update()
 
-        # Step env
-        actions_torch = jax_to_torch(actions, device)
-        next_obs, rewards, dones, infos = train_env.step(actions_torch.float())
-        truncations = infos["time_outs"]
-
-        if asymmetric:
-            next_critic_obs = infos["observations"]["critic"]
-
-        # Pre-reset obs for ALL done environments (matching original exactly)
-        true_next_obs = torch.where(
-            dones[:, None] > 0,
-            infos["observations"]["raw"]["obs"],
-            next_obs,
+        # ---- Logging ----
+        elapsed = time.time() - start_time
+        fps = total_timesteps / elapsed if elapsed > 0 else 0
+        m = metrics.to_wandb_dict()
+        print(
+            f"[iter {iteration:>5d}/{MAX_ITERATIONS}] "
+            f"steps={total_timesteps:>9d} | "
+            f"fps={fps:.0f} | "
+            f"policy_loss={metrics.actor.policy_loss:.4f} | "
+            f"value_loss={metrics.critic.value_loss:.4f} | "
+            f"entropy={metrics.actor.entropy:.4f} | "
+            f"kl={metrics.kl.approx_kl:.5f} | "
+            f"lr={metrics.learning_rate:.1e}"
         )
-        if asymmetric:
-            true_next_critic_obs = torch.where(
-                dones[:, None] > 0,
-                infos["observations"]["raw"]["critic_obs"],
-                next_critic_obs,
-            )
+        if USE_WANDB:
+            log_data = {
+                "speed": fps,
+                "total_timesteps": total_timesteps,
+                **m,
+            }
+            wandb.log(log_data, step=iteration)
 
-        # Convert
-        next_obs_jax = torch_to_jax(true_next_obs)
-        if asymmetric:
-            next_critic_obs_jax = torch_to_jax(true_next_critic_obs)
-        else:
-            next_critic_obs_jax = next_obs_jax
-        rewards_jax = torch_to_jax(rewards)
-        dones_bool = dones.bool()
-        trunc_bool = truncations.bool()
-        terminated_jax = jnp.asarray((dones_bool & ~trunc_bool).cpu().numpy())
-        truncated_jax = jnp.asarray(trunc_bool.cpu().numpy())
-
-        # Store transition
-        alg.store_transition(
-            actor_obs=obs_jax,
-            critic_obs=critic_obs_jax,
-            action=actions,
-            reward=rewards_jax,
-            next_actor_obs=next_obs_jax,
-            next_critic_obs=next_critic_obs_jax,
-            terminated=terminated_jax,
-            truncated=truncated_jax,
-        )
-
-        # Process env step (normalizer update + noise resample)
-        alg.process_env_step(rewards_jax, terminated_jax, truncated_jax, {})
-
-        # Use auto-reset obs for next step (NOT true_next_obs)
-        obs = next_obs
-        if asymmetric:
-            critic_obs = next_critic_obs
-
-        # Training
-        if global_step >= LEARNING_STARTS:
-            if measure_start is None:
-                measure_start = time.time()
-                measure_step = global_step
-
-            for _ in range(NUM_UPDATES):
-                key, subkey = jax.random.split(key)
-                batch = alg.sample_batch(BATCH_SIZE, subkey)
-                metrics = alg.update(batch)
-
-            # Logging
-            if global_step % 100 == 0:
-                elapsed = time.time() - measure_start if measure_start else 1
-                speed = (global_step - measure_step) / elapsed if elapsed > 0 else 0
-                m = metrics.to_wandb_dict()
-                log_data = {
-                    "speed": speed,
-                    "env_reward_mean": float(rewards.mean()),
-                    **m,
-                }
-                print(
-                    f"[{global_step:>6d}/{TOTAL_TIMESTEPS}] "
-                    f"speed={speed:.0f} sps | "
-                    f"env_rew={float(rewards.mean()):.3f} | "
-                    f"critic_loss={m.get('critic/loss', 0):.4f} | "
-                    f"q1={m.get('critic/q1_mean', 0):.2f}"
-                )
-                if USE_WANDB:
-                    wandb.log(log_data, step=global_step)
-
-            # Evaluation + render
-            if EVAL_INTERVAL > 0 and global_step % EVAL_INTERVAL == 0:
-                eval_return, eval_length = evaluate()
-                print(f"  >>> EVAL: return={eval_return:.2f}, length={eval_length:.1f}")
-                if USE_WANDB:
-                    eval_log = {"eval/return": eval_return, "eval/length": eval_length}
-                    try:
-                        frames = render_with_rollout()
-                        video = wandb.Video(
-                            np.array(frames).transpose(0, 3, 1, 2),
-                            fps=30, format="gif",
-                        )
-                        eval_log["eval/video"] = video
-                    except Exception as e:
-                        print(f"  Render failed: {e}")
-                    wandb.log(eval_log, step=global_step)
+        # ---- Evaluation + render ----
+        if EVAL_INTERVAL > 0 and iteration % EVAL_INTERVAL == 0:
+            eval_return, eval_length = evaluate()
+            print(f"  >>> EVAL: return={eval_return:.2f}, length={eval_length:.1f}")
+            if USE_WANDB:
+                eval_log = {"eval/return": eval_return, "eval/length": eval_length}
+                try:
+                    frames = render_with_rollout()
+                    video = wandb.Video(
+                        np.array(frames).transpose(0, 3, 1, 2),
+                        fps=30, format="gif",
+                    )
+                    eval_log["eval/video"] = video
+                except Exception as e:
+                    print(f"  Render failed: {e}")
+                wandb.log(eval_log, step=iteration)
 
     # Final eval
     eval_return, eval_length = evaluate()
@@ -398,7 +395,7 @@ def main():
     if USE_WANDB:
         wandb.log(
             {"eval/return": eval_return, "eval/length": eval_length},
-            step=TOTAL_TIMESTEPS,
+            step=MAX_ITERATIONS,
         )
         wandb.finish()
 

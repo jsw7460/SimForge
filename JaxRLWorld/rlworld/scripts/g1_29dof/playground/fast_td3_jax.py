@@ -1,11 +1,10 @@
 """
-Diagnostic: FastTD3 on MuJoCo Playground G1JoystickFlatTerrain.
+Diagnostic: FastTD3 on MuJoCo Playground G1JoystickFlatTerrain (Fully JAX).
 
-Uses our FastTD3 algorithm directly with the Playground environment,
-bypassing OffPolicyRunner. This isolates whether the issue is in the
-algorithm or in the reward/obs of Newton/Genesis/MuJoCo environments.
+Same as fast_td3.py but bypasses RSLRLBraxWrapper entirely.
+Uses raw JAX Brax environment directly — zero torch↔jax conversions.
 
-Hyperparameters match the original author's G1JoystickFlatTerrain config exactly.
+This should be significantly faster than the torch-wrapper version.
 """
 
 import os
@@ -21,10 +20,9 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
-import torch
 
 from mujoco_playground import registry
-from mujoco_playground import wrapper_torch
+from mujoco_playground._src.wrapper import wrap_for_brax_training
 
 from rlworld.rl.algorithms.base import ActInput
 from rlworld.rl.algorithms.fast_td3.fast_td3 import FastTD3
@@ -40,7 +38,7 @@ SEED = 1
 DEVICE_RANK = 0
 TOTAL_TIMESTEPS = 100_000
 LEARNING_STARTS = 10
-NUM_UPDATES = 2           # Original: num_updates=2
+NUM_UPDATES = 2
 BATCH_SIZE = 32768
 GAMMA = 0.97
 TAU = 0.1
@@ -48,29 +46,34 @@ TARGET_POLICY_NOISE = 0.001
 NOISE_CLIP = 0.5
 NOISE_MIN = 0.001
 NOISE_MAX = 0.4
-BUFFER_SIZE_PER_ENV = 1024 * 10   # Original: 10240
+BUFFER_SIZE_PER_ENV = 1024 * 10
 N_STEPS = 1
 NUM_ATOMS = 101
 V_MIN = -10.0
 V_MAX = 10.0
-ACTOR_HIDDEN = [512, 256, 128]    # Original: actor_hidden_dim=512 -> [512, 256, 128]
-CRITIC_HIDDEN = [1024, 512, 256]  # Original: critic_hidden_dim=1024 -> [1024, 512, 256]
+ACTOR_HIDDEN = [512, 256, 128]
+CRITIC_HIDDEN = [1024, 512, 256]
 INIT_SCALE = 0.01
 EVAL_INTERVAL = 5000
 USE_WANDB = True
 
 
-def torch_to_jax(t: torch.Tensor) -> jax.Array:
-    return jnp.asarray(t.detach().cpu().numpy())
-
-
-def jax_to_torch(a: jax.Array, device: torch.device) -> torch.Tensor:
-    return torch.as_tensor(np.asarray(a), device=device)
+def _extract_obs(state_obs, asymmetric: bool):
+    """Extract actor_obs and critic_obs from Brax state.obs."""
+    if asymmetric:
+        return state_obs["state"], state_obs["privileged_state"]
+    else:
+        obs = state_obs
+        return obs, obs
 
 
 def main():
-    device = torch.device(f"cuda:{DEVICE_RANK}" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    gpu_devices = jax.devices("gpu")
+    if gpu_devices:
+        jax_device = gpu_devices[DEVICE_RANK]
+    else:
+        jax_device = jax.devices("cpu")[0]
+    print(f"JAX device: {jax_device}")
 
     # ===================== Wandb =====================
     if USE_WANDB:
@@ -78,7 +81,7 @@ def main():
 
         wandb.init(
             project="FastTD3-Playground-Diagnostic",
-            name=f"{ENV_NAME}__ours__seed{SEED}",
+            name=f"{ENV_NAME}__jax__seed{SEED}",
             config={
                 "env_name": ENV_NAME,
                 "num_envs": NUM_ENVS,
@@ -95,37 +98,41 @@ def main():
                 "v_min": V_MIN,
                 "v_max": V_MAX,
                 "use_target_actor": False,
+                "backend": "fully_jax",
             },
         )
 
-    # ===================== Training Environment =====================
+    # ===================== Training Environment (raw JAX) =====================
     train_env_cfg = registry.get_default_config(ENV_NAME)
     train_env_cfg.push_config.enable = False
     train_env_cfg.push_config.magnitude_range = [0.0, 0.0]
     raw_train_env = registry.load(ENV_NAME, config=train_env_cfg)
-    train_env = wrapper_torch.RSLRLBraxWrapper(
-        raw_train_env,
-        NUM_ENVS,
-        SEED,
-        train_env_cfg.episode_length,
-        train_env_cfg.action_repeat,
-        device_rank=DEVICE_RANK,
-    )
     max_episode_steps = train_env_cfg.episode_length
 
-    n_obs = train_env.num_obs if isinstance(train_env.num_obs, int) else train_env.num_obs[0]
-    n_act = train_env.num_actions
-    asymmetric = train_env.asymmetric_obs
-    if asymmetric:
-        n_critic_obs = (
-            train_env.num_privileged_obs
-            if isinstance(train_env.num_privileged_obs, int)
-            else train_env.num_privileged_obs[0]
-        )
-    else:
-        n_critic_obs = n_obs
+    # Wrap with VmapWrapper + EpisodeWrapper + BraxAutoResetWrapper (provides raw_obs)
+    train_env = wrap_for_brax_training(
+        raw_train_env,
+        episode_length=train_env_cfg.episode_length,
+        action_repeat=train_env_cfg.action_repeat,
+    )
+    train_jit_reset = jax.jit(train_env.reset)
+    train_jit_step = jax.jit(train_env.step)
 
-    print(f"Env: {ENV_NAME}")
+    # Determine obs dims from a test reset
+    test_key = jax.random.PRNGKey(0)
+    test_key = jax.device_put(test_key, jax_device)
+    test_state = train_jit_reset(test_key)
+
+    asymmetric = isinstance(test_state.obs, dict)
+    if asymmetric:
+        n_obs = test_state.obs["state"].shape[-1]
+        n_critic_obs = test_state.obs["privileged_state"].shape[-1]
+    else:
+        n_obs = test_state.obs.shape[-1]
+        n_critic_obs = n_obs
+    n_act = raw_train_env.action_size
+
+    print(f"Env: {ENV_NAME} (fully JAX)")
     print(f"  obs_dim={n_obs}, critic_obs_dim={n_critic_obs}, act_dim={n_act}")
     print(f"  asymmetric_obs={asymmetric}")
     print(f"  episode_length={max_episode_steps}")
@@ -139,10 +146,10 @@ def main():
     eval_jit_reset = jax.jit(jax.vmap(raw_eval_env.reset))
     eval_jit_step = jax.jit(jax.vmap(raw_eval_env.step))
     eval_key = jax.random.PRNGKey(SEED + 100)
-    gpu_devices = jax.devices("gpu")
     if gpu_devices:
-        eval_key = jax.device_put(eval_key, gpu_devices[DEVICE_RANK])
+        eval_key = jax.device_put(eval_key, jax_device)
     eval_key_reset = jax.random.split(eval_key, NUM_EVAL_ENVS)
+    # Note: eval uses raw vmap (no auto-reset wrapper) since we track done manually
 
     # ===================== Render Environment (1 env) =====================
     render_env_cfg = registry.get_default_config(ENV_NAME)
@@ -153,7 +160,7 @@ def main():
     render_jit_step = jax.jit(raw_render_env.step)
     render_key = jax.random.PRNGKey(SEED + 200)
     if gpu_devices:
-        render_key = jax.device_put(render_key, gpu_devices[DEVICE_RANK])
+        render_key = jax.device_put(render_key, jax_device)
 
     # ===================== Algorithm =====================
     key = jax.random.PRNGKey(SEED)
@@ -216,22 +223,14 @@ def main():
         done_masks = jnp.zeros(NUM_EVAL_ENVS, dtype=bool)
 
         for _ in range(max_episode_steps):
-            if asymmetric:
-                actor_obs_jax = jnp.asarray(state.obs["state"])
-                critic_obs_jax = jnp.asarray(state.obs["privileged_state"])
-            else:
-                actor_obs_jax = jnp.asarray(state.obs)
-                critic_obs_jax = actor_obs_jax
-            act_input = ActInput(actor_obs=actor_obs_jax, critic_obs=critic_obs_jax)
+            actor_obs, critic_obs_eval = _extract_obs(state.obs, asymmetric)
+            act_input = ActInput(actor_obs=actor_obs, critic_obs=critic_obs_eval)
             actions = alg.act(act_input, deterministic=True)
-            actions_jax = wrapper_torch._torch_to_jax(jax_to_torch(actions, device))
-            state = eval_jit_step(state, actions_jax)
+            state = eval_jit_step(state, actions)
 
-            rewards = state.reward
-            dones = state.done
-            episode_returns = jnp.where(~done_masks, episode_returns + rewards, episode_returns)
+            episode_returns = jnp.where(~done_masks, episode_returns + state.reward, episode_returns)
             episode_lengths = jnp.where(~done_masks, episode_lengths + 1, episode_lengths)
-            done_masks = done_masks | (dones > 0)
+            done_masks = done_masks | (state.done > 0)
             if done_masks.all():
                 break
 
@@ -244,16 +243,12 @@ def main():
         trajectory = [state]
 
         for i in range(max_episode_steps):
-            if asymmetric:
-                actor_obs = jnp.asarray(state.obs["state"])[None]  # [1, obs_dim]
-                critic_obs_r = jnp.asarray(state.obs["privileged_state"])[None]
-            else:
-                actor_obs = jnp.asarray(state.obs)[None]
-                critic_obs_r = actor_obs
+            actor_obs, critic_obs_r = _extract_obs(state.obs, asymmetric)
+            actor_obs = actor_obs[None]  # [1, obs_dim]
+            critic_obs_r = critic_obs_r[None]
             act_in = ActInput(actor_obs=actor_obs, critic_obs=critic_obs_r)
             actions = alg.act(act_in, deterministic=True)
-            actions_jax = jnp.asarray(actions)[0]  # [act_dim]
-            state = render_jit_step(state, actions_jax)
+            state = render_jit_step(state, actions[0])
             state.info["command"] = jnp.array([1.0, 0.0, 0.0])
             if i % 2 == 0:
                 trajectory.append(state)
@@ -270,79 +265,52 @@ def main():
         )
         return frames
 
-    # ===================== Training Loop =====================
-    obs = train_env.reset()  # torch tensor
-    if asymmetric:
-        # First step: get critic_obs from a dummy step or use obs as placeholder.
-        # RSLRLBraxWrapper returns critic_obs in infos on step(), not on reset().
-        # We'll initialize critic_obs after the first step; for step 0, use zeros.
-        critic_obs = torch.zeros(NUM_ENVS, n_critic_obs, device=device)
-    start_time = time.time()
+    # ===================== Training Loop (fully JAX) =====================
+    train_key = jax.random.PRNGKey(SEED)
+    if gpu_devices:
+        train_key = jax.device_put(train_key, jax_device)
+    state = train_jit_reset(train_key)
+
     measure_start = None
     measure_step = 0
 
     for global_step in range(TOTAL_TIMESTEPS):
-        # Always use policy (matching original — no random warmup)
-        obs_jax = torch_to_jax(obs)
-        if asymmetric:
-            critic_obs_jax = torch_to_jax(critic_obs)
-        else:
-            critic_obs_jax = obs_jax
-        act_input = ActInput(actor_obs=obs_jax, critic_obs=critic_obs_jax)
+        # Extract obs (all JAX, no conversion)
+        actor_obs, critic_obs = _extract_obs(state.obs, asymmetric)
+        act_input = ActInput(actor_obs=actor_obs, critic_obs=critic_obs)
         actions = alg.act(act_input, deterministic=False)
 
-        # Step env
-        actions_torch = jax_to_torch(actions, device)
-        next_obs, rewards, dones, infos = train_env.step(actions_torch.float())
-        truncations = infos["time_outs"]
+        # Step env (all JAX)
+        state = train_jit_step(state, actions)
 
-        if asymmetric:
-            next_critic_obs = infos["observations"]["critic"]
+        # Extract raw_obs (pre-reset observation for replay buffer)
+        raw_actor_obs, raw_critic_obs = _extract_obs(state.info["raw_obs"], asymmetric)
 
-        # Pre-reset obs for ALL done environments (matching original exactly)
-        true_next_obs = torch.where(
-            dones[:, None] > 0,
-            infos["observations"]["raw"]["obs"],
-            next_obs,
-        )
-        if asymmetric:
-            true_next_critic_obs = torch.where(
-                dones[:, None] > 0,
-                infos["observations"]["raw"]["critic_obs"],
-                next_critic_obs,
-            )
+        # Build true_next_obs: use raw_obs for done envs, post-reset obs for others
+        next_actor_obs, next_critic_obs = _extract_obs(state.obs, asymmetric)
+        dones = state.done
+        truncations = state.info["truncation"]
 
-        # Convert
-        next_obs_jax = torch_to_jax(true_next_obs)
-        if asymmetric:
-            next_critic_obs_jax = torch_to_jax(true_next_critic_obs)
-        else:
-            next_critic_obs_jax = next_obs_jax
-        rewards_jax = torch_to_jax(rewards)
-        dones_bool = dones.bool()
-        trunc_bool = truncations.bool()
-        terminated_jax = jnp.asarray((dones_bool & ~trunc_bool).cpu().numpy())
-        truncated_jax = jnp.asarray(trunc_bool.cpu().numpy())
+        true_next_actor = jnp.where(dones[:, None] > 0, raw_actor_obs, next_actor_obs)
+        true_next_critic = jnp.where(dones[:, None] > 0, raw_critic_obs, next_critic_obs)
 
-        # Store transition
+        terminated = (dones > 0) & ~(truncations > 0)
+        truncated = truncations > 0
+
+        # Store transition (all JAX arrays, zero copies)
         alg.store_transition(
-            actor_obs=obs_jax,
-            critic_obs=critic_obs_jax,
+            actor_obs=actor_obs,
+            critic_obs=critic_obs,
             action=actions,
-            reward=rewards_jax,
-            next_actor_obs=next_obs_jax,
-            next_critic_obs=next_critic_obs_jax,
-            terminated=terminated_jax,
-            truncated=truncated_jax,
+            reward=state.reward,
+            next_actor_obs=true_next_actor,
+            next_critic_obs=true_next_critic,
+            terminated=terminated,
+            truncated=truncated,
         )
 
-        # Process env step (normalizer update + noise resample)
-        alg.process_env_step(rewards_jax, terminated_jax, truncated_jax, {})
-
-        # Use auto-reset obs for next step (NOT true_next_obs)
-        obs = next_obs
-        if asymmetric:
-            critic_obs = next_critic_obs
+        # Process env step
+        alg.process_env_step(state.reward, terminated, truncated, {})
 
         # Training
         if global_step >= LEARNING_STARTS:
@@ -362,13 +330,13 @@ def main():
                 m = metrics.to_wandb_dict()
                 log_data = {
                     "speed": speed,
-                    "env_reward_mean": float(rewards.mean()),
+                    "env_reward_mean": float(state.reward.mean()),
                     **m,
                 }
                 print(
                     f"[{global_step:>6d}/{TOTAL_TIMESTEPS}] "
                     f"speed={speed:.0f} sps | "
-                    f"env_rew={float(rewards.mean()):.3f} | "
+                    f"env_rew={float(state.reward.mean()):.3f} | "
                     f"critic_loss={m.get('critic/loss', 0):.4f} | "
                     f"q1={m.get('critic/q1_mean', 0):.2f}"
                 )
