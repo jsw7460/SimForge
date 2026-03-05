@@ -97,7 +97,7 @@ class JaxActionManagerBase(BaseManager):
             indices, _, values = string_utils.resolve_matching_names_values(
                 self.config.scale, self._actuated_joint_names
             )
-            scale = scale.at[indices].set(jnp.array(values))
+            scale = scale.at[jnp.array(indices)].set(jnp.array(values))
 
         return scale
 
@@ -140,8 +140,8 @@ class JaxActionManagerBase(BaseManager):
                 clip_dict_high, self._actuated_joint_names
             )
 
-            clip_low = clip_low.at[indices].set(jnp.array(low_values))
-            clip_high = clip_high.at[indices].set(jnp.array(high_values))
+            clip_low = clip_low.at[jnp.array(indices)].set(jnp.array(low_values))
+            clip_high = clip_high.at[jnp.array(indices)].set(jnp.array(high_values))
 
         return clip_low, clip_high
 
@@ -154,7 +154,7 @@ class JaxActionManagerBase(BaseManager):
                     self.config.offset, self._actuated_joint_names
                 )
             )
-            offset = offset.at[:, offset_indices].set(
+            offset = offset.at[:, jnp.array(offset_indices)].set(
                 jnp.array(offset_values)
             )
 
