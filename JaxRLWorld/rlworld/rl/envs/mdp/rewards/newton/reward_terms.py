@@ -1,5 +1,5 @@
-import torch
-import warp as wp
+import jax
+import jax.numpy as jnp
 
 from genesis import quat_to_xyz
 from rlworld.rl.envs import NewtonEnv, NewtonLocomotionEnv
@@ -11,71 +11,53 @@ from rlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_pos, g
 from rlworld.rl.envs.mdp.observations.newton.proprioception import projected_gravity
 from rlworld.rl.envs.mdp.observations.newton.state import base_ang_vel, _quat_rotate_inverse
 from rlworld.rl.envs.utils.newton.body_cache import get_cache
+from rlworld.rl.envs.utils.warp_jax_utils import wp_to_jax
 from rlworld.rl.utils import string as string_utils
 
 
-def tracking_lin_vel(env: "NewtonEnv", sigma: float = 0.25) -> torch.Tensor:
-    """Reward for tracking commanded linear velocity in xy plane.
-
-    Returns exponential of negative squared error between commanded and actual velocity.
-    """
-    target_lin_vel = torch.stack(
-        [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y], dim=1
+def tracking_lin_vel(env: "NewtonEnv", sigma: float = 0.25) -> jax.Array:
+    """Reward for tracking commanded linear velocity in xy plane."""
+    target_lin_vel = jnp.stack(
+        [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y], axis=1
     )
     lin_vel = state.base_lin_vel(env)
-    lin_vel_error = torch.sum(
-        torch.square(target_lin_vel - lin_vel[:, :2]), dim=1
+    lin_vel_error = jnp.sum(
+        jnp.square(target_lin_vel - lin_vel[:, :2]), axis=1
     )
+    return jnp.exp(-lin_vel_error / sigma)
 
-    return torch.exp(-lin_vel_error / sigma)
 
-
-def tracking_ang_vel(env: "NewtonEnv", sigma: float = 0.25) -> torch.Tensor:
-    """Reward for tracking commanded angular velocity (yaw).
-
-    Returns exponential of negative squared error between commanded and actual yaw rate.
-    """
+def tracking_ang_vel(env: "NewtonEnv", sigma: float = 0.25) -> jax.Array:
+    """Reward for tracking commanded angular velocity (yaw)."""
     ang_vel = state.base_ang_vel(env)
-    ang_vel_error = torch.square(env.command_manager.ang_vel - ang_vel[:, 2])
-    return torch.exp(-ang_vel_error / sigma)
+    ang_vel_error = jnp.square(env.command_manager.ang_vel - ang_vel[:, 2])
+    return jnp.exp(-ang_vel_error / sigma)
 
 
-def lin_vel_z(env: "NewtonEnv") -> torch.Tensor:
-    """Penalty for vertical movement.
-
-    Returns negative squared vertical velocity to discourage unwanted up/down motion.
-    """
+def lin_vel_z(env: "NewtonEnv") -> jax.Array:
+    """Penalty for vertical movement."""
     lin_vel = state.base_lin_vel(env)
-    return -torch.square(lin_vel[:, 2])
+    return -jnp.square(lin_vel[:, 2])
 
 
-def base_height_penalty(env: "NewtonEnv") -> torch.Tensor:
-    """Penalty for deviating from target base height.
-
-    Returns negative squared error from desired base height.
-    """
+def base_height_penalty(env: "NewtonEnv") -> jax.Array:
+    """Penalty for deviating from target base height."""
     height = state.base_height(env)
-    return -torch.square(height[:, 0] - env.command_manager.base_height)
+    return -jnp.square(height[:, 0] - env.command_manager.base_height)
 
 
-def action_rate(env: "NewtonEnv") -> torch.Tensor:
-    """Penalty for sudden joint action changes.
-
-    Returns negative squared difference between consecutive joint actions.
-    """
-    return -torch.sum(
-        torch.square(env.act_manager.prev_processed_actions - env.act_manager.processed_actions),
-        dim=1
+def action_rate(env: "NewtonEnv") -> jax.Array:
+    """Penalty for sudden joint action changes."""
+    return -jnp.sum(
+        jnp.square(env.act_manager.prev_processed_actions - env.act_manager.processed_actions),
+        axis=1
     )
 
 
-def similar_to_default(env: "NewtonEnv") -> torch.Tensor:
-    """Penalty for deviating from default joint positions.
-
-    Returns negative absolute difference from default pose.
-    """
+def similar_to_default(env: "NewtonEnv") -> jax.Array:
+    """Penalty for deviating from default joint positions."""
     pos = proprioception.dof_pos(env)
-    return -torch.sum(torch.abs(pos - env.act_manager.offset), dim=1)
+    return -jnp.sum(jnp.abs(pos - env.act_manager.offset), axis=1)
 
 
 def reward_feet_air_time(
@@ -83,33 +65,20 @@ def reward_feet_air_time(
     feet_bodies: str | list[str],
     threshold: float = 0.1,
     command_threshold: float = 0.1,
-) -> torch.Tensor:
-    """Reward for taking long steps.
-
-    Encourages the robot to lift its feet off the ground for at least
-    `threshold` seconds before landing. Only active when moving.
-
-    Args:
-        env: Newton environment with contact_manager.
-        feet_bodies: Body name pattern(s) for feet (e.g., ".*_foot").
-        threshold: Minimum air time (seconds) to receive reward.
-        command_threshold: Minimum command velocity magnitude to activate reward.
-
-    Returns:
-        Reward tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Reward for taking long steps."""
     result = get_bodies_height_with_contact(env, feet_bodies)
 
     first_contact = env.contact_manager.compute_first_contact()[:, result.contact_indices]
     last_air_time = env.contact_manager.last_air_time[:, result.contact_indices]
 
-    reward = torch.sum((last_air_time - threshold) * first_contact, dim=-1)
+    reward = jnp.sum((last_air_time - threshold) * first_contact, axis=-1)
 
-    command_vel = torch.stack([
+    command_vel = jnp.stack([
         env.command_manager.lin_vel_x,
         env.command_manager.lin_vel_y,
-    ], dim=-1)
-    is_moving = torch.norm(command_vel, dim=-1) > command_threshold
+    ], axis=-1)
+    is_moving = jnp.linalg.norm(command_vel, axis=-1) > command_threshold
 
     return reward * is_moving * (env.termination_manager.episode_length_buf > 5)
 
@@ -119,18 +88,8 @@ def penalize_feet_swing_height(
     max_height: float = 0.08,
     profile: str = "sine",
     foot_offset: float = 0.0,
-) -> torch.Tensor:
-    """Penalize feet height error during actual swing (not in contact).
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-        foot_offset: Distance from link origin to foot bottom (meters).
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize feet height error during actual swing (not in contact)."""
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_height_with_contact(env, feet_bodies)
 
@@ -140,9 +99,9 @@ def penalize_feet_swing_height(
     is_contact = env.contact_manager.is_contact[:, result.contact_indices]
     is_swing = ~is_contact
 
-    height_error = torch.square(feet_height - target_height) * is_swing.float()
+    height_error = jnp.square(feet_height - target_height) * is_swing.astype(jnp.float32)
 
-    return -torch.sum(height_error, dim=-1)
+    return -jnp.sum(height_error, axis=-1)
 
 
 def penalize_feet_swing_height_gait(
@@ -151,19 +110,8 @@ def penalize_feet_swing_height_gait(
     profile: str = "sine",
     foot_offset: float = 0.0,
     penalty_offset: float = 0.0
-) -> torch.Tensor:
-    """Penalize feet height error during commanded swing phase.
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-        foot_offset: Distance from link origin to foot bottom (meters).
-        penalty_offset: Will be added to the final penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize feet height error during commanded swing phase."""
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_height_with_contact(env, feet_bodies)
 
@@ -171,9 +119,9 @@ def penalize_feet_swing_height_gait(
     target_height = env.gait_manager.get_target_foot_height(max_height, profile)
     swing_mask = env.gait_manager.get_swing_mask()
 
-    height_error = torch.square(feet_height - target_height) * swing_mask.float()
+    height_error = jnp.square(feet_height - target_height) * swing_mask.astype(jnp.float32)
 
-    return -torch.sum(height_error, dim=-1) + penalty_offset
+    return -jnp.sum(height_error, axis=-1) + penalty_offset
 
 
 def reward_feet_swing_height_gait_exp(
@@ -182,19 +130,8 @@ def reward_feet_swing_height_gait_exp(
     profile: str = "sine",
     foot_offset: float = 0.0,
     sigma: float = 0.01,
-) -> torch.Tensor:
-    """Reward feet height tracking during commanded swing phase (Gaussian kernel).
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-        foot_offset: Distance from link origin to foot bottom (meters).
-        sigma: Gaussian kernel width (smaller = stricter).
-
-    Returns:
-        Reward tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Reward feet height tracking during commanded swing phase (Gaussian kernel)."""
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_height_with_contact(env, feet_bodies)
 
@@ -202,13 +139,12 @@ def reward_feet_swing_height_gait_exp(
     target_height = env.gait_manager.get_target_foot_height(max_height, profile)
     swing_mask = env.gait_manager.get_swing_mask()
 
-    height_error_sq = torch.square(feet_height - target_height)
+    height_error_sq = jnp.square(feet_height - target_height)
 
-    # Per-foot Gaussian reward, averaged over swing feet
-    per_foot_reward = torch.exp(-height_error_sq / sigma) * swing_mask.float()
-    swing_count = swing_mask.float().sum(dim=-1).clamp(min=1)
+    per_foot_reward = jnp.exp(-height_error_sq / sigma) * swing_mask.astype(jnp.float32)
+    swing_count = jnp.clip(swing_mask.astype(jnp.float32).sum(axis=-1), a_min=1)
 
-    return per_foot_reward.sum(dim=-1) / swing_count
+    return per_foot_reward.sum(axis=-1) / swing_count
 
 
 def reward_feet_height_exp(
@@ -216,171 +152,126 @@ def reward_feet_height_exp(
     feet_bodies: str | list[str],
     target_height: float = 0.08,
     sigma: float = 0.01,
-) -> torch.Tensor:
-    """Reward feet reaching target height during swing (exponential kernel).
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Body name pattern(s) for feet (e.g., ".*_foot").
-        target_height: Target foot height during swing (meters).
-        sigma: Exponential kernel width (smaller = stricter).
-
-    Returns:
-        Reward tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Reward feet reaching target height during swing (exponential kernel)."""
     result = get_bodies_height_with_contact(env, feet_bodies)
 
-    feet_height = result.data  # (num_envs, num_feet)
+    feet_height = result.data
     is_contact = env.contact_manager.is_contact[:, result.contact_indices]
     is_swing = ~is_contact
 
-    height_error = torch.square(feet_height - target_height)
-    height_reward = torch.exp(-height_error / sigma)
+    height_error = jnp.square(feet_height - target_height)
+    height_reward = jnp.exp(-height_error / sigma)
 
-    return torch.sum(height_reward * is_swing.float(), dim=-1)
+    return jnp.sum(height_reward * is_swing.astype(jnp.float32), axis=-1)
 
 
 def penalize_invalid_contact(
     env: "NewtonEnv",
     allowed_bodies: str | list[str],
     force_threshold: float = 1.0,
-) -> torch.Tensor:
-    """Penalize contacts on non-allowed bodies.
-
-    Args:
-        env: Newton environment.
-        allowed_bodies: Body name pattern(s) for allowed contacts (e.g., ".*_foot").
-        force_threshold: Minimum force (N) to count as invalid contact.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize contacts on non-allowed bodies."""
     model = env.scene_manager.model
 
     contacts = env.scene_manager.contacts
 
-    contact_count = wp.to_torch(contacts.rigid_contact_count).item()
+    contact_count = int(wp_to_jax(contacts.rigid_contact_count).item())
     if contact_count == 0:
-        return torch.zeros(env.num_envs, device=env.device)
+        return jnp.zeros(env.num_envs)
 
-    shape0 = wp.to_torch(contacts.rigid_contact_shape0)[:contact_count]
-    shape1 = wp.to_torch(contacts.rigid_contact_shape1)[:contact_count]
-    force = wp.to_torch(contacts.rigid_contact_force)[:contact_count]
-    force_magnitude = torch.norm(force, dim=-1)
+    shape0 = wp_to_jax(contacts.rigid_contact_shape0)[:contact_count]
+    shape1 = wp_to_jax(contacts.rigid_contact_shape1)[:contact_count]
+    force = wp_to_jax(contacts.rigid_contact_force)[:contact_count]
+    force_magnitude = jnp.linalg.norm(force, axis=-1)
 
-    shape_body = wp.to_torch(model.shape_body)
+    shape_body = wp_to_jax(model.shape_body)
 
     cache = get_cache(env)
     allowed_body_indices = cache.get_body_indices(allowed_bodies)
-    allowed_tensor = torch.tensor(allowed_body_indices, device=env.device, dtype=torch.long)
+    allowed_arr = jnp.array(allowed_body_indices, dtype=jnp.int32)
 
     body0 = shape_body[shape0]
     body1 = shape_body[shape1]
 
-    # Ground plane has body_idx = -1, filter it out
     is_robot_body0 = (body0 != -1)
     is_robot_body1 = (body1 != -1)
 
-    # Normalize to first env's body indices (only valid for robot bodies)
-    body0_local = torch.where(is_robot_body0, body0 % cache.bodies_per_env, -1)
-    body1_local = torch.where(is_robot_body1, body1 % cache.bodies_per_env, -1)
+    body0_local = jnp.where(is_robot_body0, body0 % cache.bodies_per_env, -1)
+    body1_local = jnp.where(is_robot_body1, body1 % cache.bodies_per_env, -1)
 
-    # Check if robot body is in allowed list
-    is_allowed_body0 = torch.isin(body0_local, allowed_tensor)
-    is_allowed_body1 = torch.isin(body1_local, allowed_tensor)
+    is_allowed_body0 = jnp.isin(body0_local, allowed_arr)
+    is_allowed_body1 = jnp.isin(body1_local, allowed_arr)
 
-    # Invalid: robot body AND not in allowed list
     invalid_body0 = is_robot_body0 & ~is_allowed_body0
     invalid_body1 = is_robot_body1 & ~is_allowed_body1
 
-    # Contact is invalid if either body is invalid AND force > threshold
     is_invalid = (invalid_body0 | invalid_body1) & (force_magnitude > force_threshold)
 
-    # env_idx from robot body (use body1 if body0 is ground)
-    robot_body = torch.where(body0 != -1, body0, body1)
+    robot_body = jnp.where(body0 != -1, body0, body1)
     env_idx = robot_body // cache.bodies_per_env
 
-    # Scatter invalid contacts to each env
-    penalty = torch.zeros(env.num_envs, device=env.device)
-    penalty.scatter_add_(0, env_idx.long(), is_invalid.float())
+    penalty = jnp.zeros(env.num_envs)
+    penalty = penalty.at[env_idx].add(is_invalid.astype(jnp.float32))
     return -penalty
 
 
 def penalize_impact_force(
     env: "NewtonEnv",
     feet_bodies: str | list[str],
-) -> torch.Tensor:
-    """Penalize contact force at the moment of landing.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Body name pattern(s) for feet (e.g., ".*_foot").
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize contact force at the moment of landing."""
     from rlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_height_with_contact
 
     result = get_bodies_height_with_contact(env, feet_bodies)
 
-    # Get contact force magnitude for each foot
-    contact_force = env.contact_manager.contact_force[:, result.contact_indices]  # (num_envs, num_feet, 3)
-    force_magnitude = torch.norm(contact_force, dim=-1)  # (num_envs, num_feet)
+    contact_force = env.contact_manager.contact_force[:, result.contact_indices]
+    force_magnitude = jnp.linalg.norm(contact_force, axis=-1)
 
-    # First contact mask
     first_contact = env.contact_manager.compute_first_contact()[:, result.contact_indices]
-    return -torch.sum(force_magnitude * first_contact.float(), dim=-1)
+    return -jnp.sum(force_magnitude * first_contact.astype(jnp.float32), axis=-1)
 
 
-def penalize_torques(env: "NewtonEnv") -> torch.Tensor:
+def penalize_torques(env: "NewtonEnv") -> jax.Array:
     """Penalize joint torques."""
     mjw_data = env.scene_manager.solver.mjw_data
 
-    # exclude base DOF
-    qfrc_actuator = wp.to_torch(mjw_data.qfrc_actuator)[:, 6:]
+    qfrc_actuator = wp_to_jax(mjw_data.qfrc_actuator)[:, 6:]
 
-    return -torch.sum(torch.square(qfrc_actuator), dim=-1)
+    return -jnp.sum(jnp.square(qfrc_actuator), axis=-1)
 
 
-def penalize_ang_vel_xy(env: "NewtonEnv") -> torch.Tensor:
+def penalize_ang_vel_xy(env: "NewtonEnv") -> jax.Array:
     """Penalize roll and pitch angular velocities in body frame."""
-
-    body_ang_vel = base_ang_vel(env)  # (num_envs, 3)
-    roll_pitch_vel_squared = torch.sum(torch.square(body_ang_vel[:, :2]), dim=-1)
-
+    body_ang_vel = base_ang_vel(env)
+    roll_pitch_vel_squared = jnp.sum(jnp.square(body_ang_vel[:, :2]), axis=-1)
     return -roll_pitch_vel_squared
 
 
-def penalize_nonflat_by_gravity(env: "NewtonEnv") -> torch.Tensor:
+def penalize_nonflat_by_gravity(env: "NewtonEnv") -> jax.Array:
     """Penalize non-flat orientation using projected gravity."""
-
-    proj_gravity = projected_gravity(env)  # (num_envs, 3)
-
-    return -torch.sum(torch.square(proj_gravity[:, :2]), dim=-1)
+    proj_gravity = projected_gravity(env)
+    return -jnp.sum(jnp.square(proj_gravity[:, :2]), axis=-1)
 
 
-def reward_flat_by_gravity_exp(env: "NewtonEnv", sigma: float = 0.1) -> torch.Tensor:
+def reward_flat_by_gravity_exp(env: "NewtonEnv", sigma: float = 0.1) -> jax.Array:
     """Reward flat orientation using projected gravity (Gaussian kernel)."""
-    proj_gravity = projected_gravity(env)  # (num_envs, 3)
+    proj_gravity = projected_gravity(env)
+    error_sq = jnp.sum(jnp.square(proj_gravity[:, :2]), axis=-1)
+    return jnp.exp(-error_sq / sigma)
 
-    error_sq = torch.sum(torch.square(proj_gravity[:, :2]), dim=-1)
-    return torch.exp(-error_sq / sigma)
 
-
-def penalize_nonflat_by_gravity_exp(env: "NewtonEnv") -> torch.Tensor:
+def penalize_nonflat_by_gravity_exp(env: "NewtonEnv") -> jax.Array:
     """Penalize non-flat orientation using projected gravity."""
-
-    proj_gravity = projected_gravity(env)  # (num_envs, 3)
-
-    return torch.exp(-torch.sum(torch.square(proj_gravity[:, :2]), dim=-1))
+    proj_gravity = projected_gravity(env)
+    return jnp.exp(-jnp.sum(jnp.square(proj_gravity[:, :2]), axis=-1))
 
 
 def penalize_hip_deviation(
     env: "NewtonEnv",
     hip_joints: str | tuple[str, ...],
-) -> torch.Tensor:
+) -> jax.Array:
     """Penalize hip joint angles deviating from nominal pose."""
-
     indices, _ = string_utils.resolve_matching_names(
         hip_joints,
         env.act_manager._actuated_joint_names
@@ -389,23 +280,15 @@ def penalize_hip_deviation(
     dof = proprioception.dof_pos(env)[:, indices]
     nominal = env.act_manager.offset[:, indices]
 
-    return -torch.sum(torch.square(dof - nominal), dim=-1)
+    return -jnp.sum(jnp.square(dof - nominal), axis=-1)
+
 
 def penalize_joint_deviation_l1(
     env: "NewtonEnv",
     joints: str | tuple[str, ...],
     penalty_offset: float = 0.0
 ):
-    """Penalize joint positions that deviate from the default one (L1 norm).
-
-        Args:
-            env: Genesis environment.
-            joints: Joint name(s) or regex pattern(s).
-            penalty_offset: Penalty offset.
-
-        Returns:
-            Penalty tensor of shape (num_envs,).
-    """
+    """Penalize joint positions that deviate from the default one (L1 norm)."""
     actuated_joint_names = env.act_manager._actuated_joint_names
 
     indices_in_actuated, _ = string_utils.resolve_matching_names(
@@ -416,50 +299,37 @@ def penalize_joint_deviation_l1(
     default_pos = env.act_manager.offset
 
     deviation = dof_pos[:, indices_in_actuated] - default_pos[:, indices_in_actuated]
-    return -torch.sum(torch.abs(deviation), dim=-1) + penalty_offset
+    return -jnp.sum(jnp.abs(deviation), axis=-1) + penalty_offset
 
 
-def penalize_dof_vel(env: "NewtonEnv") -> torch.Tensor:
+def penalize_dof_vel(env: "NewtonEnv") -> jax.Array:
     """Penalize joint velocities."""
     vel = proprioception.dof_vel(env)
-    return -torch.sum(torch.square(vel), dim=-1)
+    return -jnp.sum(jnp.square(vel), axis=-1)
 
 
-def penalize_dof_pos_limits(env: "NewtonEnv", soft_joint_pos_limit_factor: float = 1.0) -> torch.Tensor:
+def penalize_dof_pos_limits(env: "NewtonEnv", soft_joint_pos_limit_factor: float = 1.0) -> jax.Array:
     """Penalize joint positions exceeding limits."""
     model = env.scene_manager.model
     num_worlds = model.num_worlds
     dofs_per_world = model.joint_dof_count // num_worlds
 
-    dof_pos = proprioception.dof_pos(env)  # (num_envs, num_actuated)
+    dof_pos = proprioception.dof_pos(env)
 
-    # Limits are indexed by qd (velocity DOF)
-    lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
-    upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
+    lower_all = wp_to_jax(model.joint_limit_lower)[:dofs_per_world]
+    upper_all = wp_to_jax(model.joint_limit_upper)[:dofs_per_world]
 
     lower = lower_all[env.act_manager.actuated_qd_indices] * soft_joint_pos_limit_factor
     upper = upper_all[env.act_manager.actuated_qd_indices] * soft_joint_pos_limit_factor
 
-    # Violation amounts
-    out_of_limits = -(dof_pos - lower).clamp(max=0.0)  # below lower
-    out_of_limits += (dof_pos - upper).clamp(min=0.0)  # above upper
+    out_of_limits = -jnp.clip(dof_pos - lower, a_max=0.0)
+    out_of_limits = out_of_limits + jnp.clip(dof_pos - upper, a_min=0.0)
 
-    return -torch.sum(out_of_limits, dim=-1)
+    return -jnp.sum(out_of_limits, axis=-1)
 
 
-def reward_gait_pattern(env: "NewtonLocomotionEnv") -> torch.Tensor:
-    """Reward for matching desired gait pattern.
-
-    Encourages feet to follow the gait phase:
-    - Swing phase: foot should NOT be in contact
-    - Stance phase: foot SHOULD be in contact
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-
-    Returns:
-        Reward tensor [num_envs], range [0, 1].
-    """
+def reward_gait_pattern(env: "NewtonLocomotionEnv") -> jax.Array:
+    """Reward for matching desired gait pattern."""
     feet_bodies = env.gait_manager.foot_names
 
     result = get_bodies_height_with_contact(env, feet_bodies)
@@ -470,34 +340,22 @@ def reward_gait_pattern(env: "NewtonLocomotionEnv") -> torch.Tensor:
     correct_swing = ~is_contact & swing_mask
     correct_stance = is_contact & ~swing_mask
 
-    num_correct = torch.sum(correct_swing.float() + correct_stance.float(), dim=-1)
+    num_correct = jnp.sum(correct_swing.astype(jnp.float32) + correct_stance.astype(jnp.float32), axis=-1)
     num_feet = swing_mask.shape[-1]
 
     return num_correct / num_feet
 
 
-def reward_alive(env: "NewtonEnv") -> torch.Tensor:
-    return torch.ones((env.num_envs,))
+def reward_alive(env: "NewtonEnv") -> jax.Array:
+    return jnp.ones((env.num_envs,))
 
 
 def penalize_base_acc(
     env: "NewtonEnv",
     base_body: str = "base",
     penalize_offset: float = 0.0
-) -> torch.Tensor:
-    """Penalize base body acceleration.
-
-    NOTE: Requires body_qdd to be requested via model.request_state_attributes("body_qdd").
-          This is automatically done when IMU sensor is configured.
-
-    Args:
-        env: Newton environment.
-        base_body: Name of the base body.
-        penalize_offset: Will be added to the final penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize base body acceleration."""
     state = env.scene_manager.state
 
     if state.body_qdd is None:
@@ -509,57 +367,42 @@ def penalize_base_acc(
     cache = get_cache(env)
     body_indices = cache.get_body_indices(base_body)
 
-    body_qdd = wp.to_torch(state.body_qdd).reshape(env.num_envs, cache.bodies_per_env, 6)
-    base_acc = body_qdd[:, body_indices[0], :3]  # (num_envs, 3) [Linear acc]
+    body_qdd = wp_to_jax(state.body_qdd).reshape(env.num_envs, cache.bodies_per_env, 6)
+    base_acc = body_qdd[:, body_indices[0], :3]
 
-    return -torch.sum(torch.square(base_acc), dim=-1) + penalize_offset
+    return -jnp.sum(jnp.square(base_acc), axis=-1) + penalize_offset
 
 
 def penalize_feet_slip(
     env: "NewtonEnv",
     feet_bodies: str | list[str],
     penalty_offset: float = 0.0
-) -> torch.Tensor:
-    """Penalize foot velocities when feet are in contact with ground.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Body name pattern(s) for feet.
-        penalty_offset: Will be added to the final penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize foot velocities when feet are in contact with ground."""
     cache = get_cache(env)
     state = env.scene_manager.state
 
     result = get_bodies_height_with_contact(env, feet_bodies)
     body_indices = result.body_indices
 
-    # Get body velocities: (num_envs, bodies_per_env, 6)
-    body_qd = wp.to_torch(state.body_qd).reshape(env.num_envs, cache.bodies_per_env, 6)
+    body_qd = wp_to_jax(state.body_qd).reshape(env.num_envs, cache.bodies_per_env, 6)
 
-    # Extract feet linear velocities (xy only)
-    feet_vel_xy = body_qd[:, body_indices, :2]  # (num_envs, num_feet, 2)
+    feet_vel_xy = body_qd[:, body_indices, :2]
 
-    # Squared velocity magnitude (xy only)
-    vel_magnitude_sq = torch.sum(torch.square(feet_vel_xy), dim=-1)  # (num_envs, num_feet)
+    vel_magnitude_sq = jnp.sum(jnp.square(feet_vel_xy), axis=-1)
 
-    # Get contact states
-    is_contact = env.contact_manager.is_contact[:, result.contact_indices]  # (num_envs, num_feet)
+    is_contact = env.contact_manager.is_contact[:, result.contact_indices]
 
-    # Apply contact mask
-    penalty = torch.sum(vel_magnitude_sq * is_contact.float(), dim=-1)  # (num_envs,)
+    penalty = jnp.sum(vel_magnitude_sq * is_contact.astype(jnp.float32), axis=-1)
 
-    # Skip first episode step
-    penalty = penalty * (env.termination_manager.episode_length_buf > 1).float()
+    penalty = penalty * (env.termination_manager.episode_length_buf > 1).astype(jnp.float32)
     return -penalty + penalty_offset
 
 
 def penalize_feet_stance_height(
     env: "NewtonLocomotionEnv",
     threshold: float = 0.02,
-) -> torch.Tensor:
+) -> jax.Array:
     """Penalize feet height during commanded stance phase."""
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_height_with_contact(env, feet_bodies)
@@ -567,146 +410,96 @@ def penalize_feet_stance_height(
     feet_height = result.data
     stance_mask = ~env.gait_manager.get_swing_mask()
 
-    height_violation = (feet_height - threshold).clamp(min=0.0)
-    penalty = torch.square(height_violation) * stance_mask.float()
+    height_violation = jnp.clip(feet_height - threshold, a_min=0.0)
+    penalty = jnp.square(height_violation) * stance_mask.astype(jnp.float32)
 
-    return -torch.sum(penalty, dim=-1)
+    return -jnp.sum(penalty, axis=-1)
 
 
 def penalize_feet_yaw_mean_deviation(
     env: "NewtonEnv",
     feet_bodies: str | list[str],
-) -> torch.Tensor:
-    """Penalize deviation between base yaw and mean feet yaw.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Body name pattern(s) for feet.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-
+) -> jax.Array:
+    """Penalize deviation between base yaw and mean feet yaw."""
     result = get_bodies_quat(env, feet_bodies)
 
-    feet_quat_xyzw = result.data  # (num_envs, num_feet, 4)
-    feet_quat_wxyz = feet_quat_xyzw[..., [3, 0, 1, 2]]
-    feet_yaw = quat_to_xyz(feet_quat_wxyz, rpy=True, degrees=False)[..., 2]  # (num_envs, num_feet)
+    feet_quat_xyzw = result.data
+    feet_quat_wxyz = feet_quat_xyzw[..., jnp.array([3, 0, 1, 2])]
+    feet_yaw = quat_to_xyz(feet_quat_wxyz, rpy=True, degrees=False)[..., 2]
 
-    mean = feet_yaw.mean(-1) + torch.pi * (torch.abs(feet_yaw[:, 1] - feet_yaw[:, 0]) > torch.pi).float()
+    mean = feet_yaw.mean(-1) + jnp.pi * (jnp.abs(feet_yaw[:, 1] - feet_yaw[:, 0]) > jnp.pi).astype(jnp.float32)
 
     base_quat_xyzw = state.base_quat(env)
-    base_quat_wxyz = base_quat_xyzw[..., [3, 0, 1, 2]]
+    base_quat_wxyz = base_quat_xyzw[..., jnp.array([3, 0, 1, 2])]
     base_yaw = quat_to_xyz(base_quat_wxyz, rpy=True, degrees=False)[:, 2]
 
-    error = (base_yaw - mean + torch.pi) % (2 * torch.pi) - torch.pi
-    return -torch.square(error)
+    error = (base_yaw - mean + jnp.pi) % (2 * jnp.pi) - jnp.pi
+    return -jnp.square(error)
 
 
 def penalize_feet_yaw_difference(
     env: "NewtonEnv",
     feet_bodies: tuple[str, str],
-) -> torch.Tensor:
-    """Penalize yaw difference between two feet.
-
-    For bipedal robots - encourages feet to point in the same direction.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Exactly 2 foot body names.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-
+) -> jax.Array:
+    """Penalize yaw difference between two feet."""
     if len(feet_bodies) != 2:
         raise ValueError("feet_bodies must have exactly 2 elements")
 
     result = get_bodies_quat(env, list(feet_bodies))
-    feet_quat_xyzw = result.data  # (num_envs, 2, 4)
-    feet_quat_wxyz = feet_quat_xyzw[..., [3, 0, 1, 2]]
+    feet_quat_xyzw = result.data
+    feet_quat_wxyz = feet_quat_xyzw[..., jnp.array([3, 0, 1, 2])]
 
-    feet_yaw = quat_to_xyz(feet_quat_wxyz, rpy=True, degrees=False)[..., 2]  # (num_envs, 2)
+    feet_yaw = quat_to_xyz(feet_quat_wxyz, rpy=True, degrees=False)[..., 2]
 
     yaw0 = feet_yaw[:, 0]
     yaw1 = feet_yaw[:, 1]
 
-    # Wrapped difference
-    yaw_diff = (yaw0 - yaw1 + torch.pi) % (2 * torch.pi) - torch.pi
+    yaw_diff = (yaw0 - yaw1 + jnp.pi) % (2 * jnp.pi) - jnp.pi
 
-    return -torch.square(yaw_diff)
+    return -jnp.square(yaw_diff)
 
 
 def penalize_feet_distance(
     env: "NewtonEnv",
     feet_bodies: tuple[str, str] | list[str],
     feet_distance_ref: float,
-) -> torch.Tensor:
-    """Penalize feet lateral distance deviating from target.
-
-    Measures left-right distance between feet relative to robot's heading,
-    ignoring forward-backward separation.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Exactly 2 foot body names.
-        feet_distance_ref: Target lateral distance (meters).
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize feet lateral distance deviating from target."""
     result = get_bodies_pos(env, list(feet_bodies))
-    feet_pos_world = result.data  # (num_envs, 2, 3)
+    feet_pos_world = result.data
 
-    base_quat = state.base_quat(env)  # (num_envs, 4)
+    base_quat_val = state.base_quat(env)
 
-    # Transform to body frame
     feet_pos_body = _quat_rotate_inverse(
-        base_quat.unsqueeze(1),  # (num_envs, 1, 4)
-        feet_pos_world  # (num_envs, 2, 3)
-    )  # (num_envs, 2, 3)
+        jnp.expand_dims(base_quat_val, 1),
+        feet_pos_world
+    )
 
-    # Lateral distance = y-component difference in body frame
-    lateral_distance = torch.abs(feet_pos_body[:, 1, 1] - feet_pos_body[:, 0, 1])
+    lateral_distance = jnp.abs(feet_pos_body[:, 1, 1] - feet_pos_body[:, 0, 1])
 
-    return -torch.clamp(feet_distance_ref - lateral_distance, min=0.0, max=0.1)
+    return -jnp.clip(feet_distance_ref - lateral_distance, a_min=0.0, a_max=0.1)
 
 
 def penalize_swing_height_by_velocity(
     env: "NewtonLocomotionEnv",
     max_height: float = 0.1,
     profile: str = "sine",
-) -> torch.Tensor:
-    """Penalize feet height error weighted by horizontal velocity during swing.
-
-    Feet moving fast horizontally should maintain target height.
-    Feet moving slow (stance-like) receive less penalty.
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
+) -> jax.Array:
+    """Penalize feet height error weighted by horizontal velocity during swing."""
     cache = get_cache(env)
     state = env.scene_manager.state
 
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_height_with_contact(env, feet_bodies)
 
-    # Feet height and target
-    feet_height = result.data  # (num_envs, num_feet)
+    feet_height = result.data
     target_height = env.gait_manager.get_target_foot_height(max_height, profile)
 
-    # Feet xy velocity magnitude
-    body_qd = wp.to_torch(state.body_qd).reshape(env.num_envs, cache.bodies_per_env, 6)
-    feet_vel_xy = body_qd[:, result.body_indices, :2]  # (num_envs, num_feet, 2)
-    vel_norm = torch.sqrt(torch.sum(torch.square(feet_vel_xy), dim=-1))  # (num_envs, num_feet)
+    body_qd = wp_to_jax(state.body_qd).reshape(env.num_envs, cache.bodies_per_env, 6)
+    feet_vel_xy = body_qd[:, result.body_indices, :2]
+    vel_norm = jnp.sqrt(jnp.sum(jnp.square(feet_vel_xy), axis=-1))
 
-    # Height error weighted by velocity
-    height_error = torch.abs(feet_height - target_height)
+    height_error = jnp.abs(feet_height - target_height)
     penalty = height_error * vel_norm
 
-    return -torch.sum(penalty, dim=-1)
+    return -jnp.sum(penalty, axis=-1)

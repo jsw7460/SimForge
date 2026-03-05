@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import torch
-import warp as wp
+import jax
+import jax.numpy as jnp
 
 from rlworld.rl.envs.utils.newton.body_cache import get_cache
 from rlworld.rl.envs.utils import EnvStepCache
+from rlworld.rl.envs.utils.warp_jax_utils import wp_to_jax
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 @dataclass
 class BodiesResult:
     """Result of body query."""
-    data: torch.Tensor
+    data: jax.Array
     body_names: list[str]
     body_indices: list[int]
 
@@ -28,7 +29,7 @@ class BodiesResult:
 @dataclass
 class BodiesWithContactResult:
     """Result of body query with contact information."""
-    data: torch.Tensor
+    data: jax.Array
     body_names: list[str]
     body_indices: list[int]
     contact_indices: list[int]
@@ -39,11 +40,11 @@ class BodiesWithContactResult:
 # ============================================================
 
 @EnvStepCache()
-def get_body_q(env: "NewtonEnv") -> torch.Tensor:
-    """Get all body transforms as (num_envs, bodies_per_env, 7) tensor."""
+def get_body_q(env: "NewtonEnv") -> jax.Array:
+    """Get all body transforms as (num_envs, bodies_per_env, 7) array."""
     cache = get_cache(env)
     state = env.scene_manager.state
-    return wp.to_torch(state.body_q).view(env.num_envs, cache.bodies_per_env, 7)
+    return wp_to_jax(state.body_q).reshape(env.num_envs, cache.bodies_per_env, 7)
 
 
 def get_bodies_pos(
@@ -51,10 +52,6 @@ def get_bodies_pos(
     body_patterns: str | list[str],
 ) -> BodiesResult:
     """Get world positions for bodies matching pattern.
-
-    Args:
-        env: Newton environment.
-        body_patterns: Body name pattern(s), supports regex.
 
     Returns:
         BodiesResult with data shape (num_envs, num_bodies, 3).

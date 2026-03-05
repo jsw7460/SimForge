@@ -3,14 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import torch
+import jax
+import jax.numpy as jnp
+import numpy as np
 import warp as wp
 
-from rlworld.rl.envs.managers.common.action import (
-    ActionManagerBase,
+from rlworld.rl.envs.managers.common.action_jax import (
+    JaxActionManagerBase,
     ActionManagerBaseConfig,
 )
 import newton
+from rlworld.rl.envs.utils.warp_jax_utils import wp_to_jax, wp_from_jax
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
@@ -19,44 +22,29 @@ if TYPE_CHECKING:
 
 @dataclass
 class NewtonActionManagerConfig(ActionManagerBaseConfig):
-    """Newton-specific action manager configuration.
-
-    Attributes:
-        num_actions: Legacy support — use num_actions directly instead of
-            actuated_dof_names. Deprecated; prefer actuated_dof_names.
-        default_joint_pos: Legacy support — list-based default positions.
-            Deprecated; prefer offset dict.
-    """
-
+    """Newton-specific action manager configuration."""
     num_actions: int | None = None
     default_joint_pos: list[float] | None = None
 
 
-class NewtonActionManager(ActionManagerBase):
-    """Newton action manager.
+class NewtonActionManager(JaxActionManagerBase):
+    """Newton action manager (JAX-native).
 
     Extends ActionManagerBase with Newton/Warp-specific joint resolution,
     joint-limit queries via model.joint_limit_lower/upper, and Warp-based
-    position control.
-
-    Additional properties beyond base class:
-        - actuated_q_indices: joint_q array indices for actuated joints
-        - actuated_qd_indices: joint_qd array indices for actuated joints
+    position control. All tensor operations use JAX arrays.
     """
 
     def __init__(self, env: "World", config: NewtonActionManagerConfig):
         self._newton_config = config
         self._model = env.scene_manager.model
 
-        # Extract joint names before super().__init__
         self._all_joint_names = self._get_joint_names(self._model)
 
-        # Resolve joints early to compute qd/q indices before super().__init__,
-        # since _initialize_clip may call _get_joint_limits which needs them.
         resolved_indices, resolved_names = self._resolve_joints()
 
         # Validate: check matched joints have DOFs
-        joint_q_start = wp.to_torch(self._model.joint_q_start).cpu().numpy()
+        joint_q_start = np.array(wp_to_jax(self._model.joint_q_start))
         invalid_joints = []
         for idx, name in zip(resolved_indices, resolved_names):
             dof_count = joint_q_start[idx + 1] - joint_q_start[idx]
@@ -69,27 +57,23 @@ class NewtonActionManager(ActionManagerBase):
                 f"Only joints with DOF > 0 can be actuated."
             )
 
-        # Compute qd and q indices (needed by _get_joint_limits during init)
-        joint_qd_start = wp.to_torch(self._model.joint_qd_start).cpu().numpy()
-        self._actuated_qd_indices = torch.tensor(
+        joint_qd_start = np.array(wp_to_jax(self._model.joint_qd_start))
+        self._actuated_qd_indices = jnp.array(
             [int(joint_qd_start[j]) for j in resolved_indices],
-            device=env.device,
         )
 
-        self._actuated_q_indices = torch.tensor(
+        self._actuated_q_indices = jnp.array(
             [int(joint_q_start[j]) for j in resolved_indices],
-            device=env.device,
         )
 
         super().__init__(env, config)
 
-        # Handle legacy default_joint_pos (overrides offset if provided)
+        # Handle legacy default_joint_pos
         if config.default_joint_pos is not None and config.offset is None:
-            default_pos = torch.tensor(
-                config.default_joint_pos, device=self.device
+            default_pos = jnp.array(config.default_joint_pos)
+            self._offset = jnp.broadcast_to(
+                jnp.expand_dims(default_pos, 0), self._offset.shape
             )
-            self._offset[:] = default_pos.unsqueeze(0)
-            # Recompute clip bounds since offset changed
             self._clip_low, self._clip_high = self._initialize_clip()
 
     # ------------------------------------------------------------------
@@ -101,7 +85,6 @@ class NewtonActionManager(ActionManagerBase):
         config = self._newton_config
 
         if config.actuated_dof_names:
-            # Filter out floating_base (not actuatable)
             actuatable = [
                 (i, name)
                 for i, name in enumerate(self._all_joint_names)
@@ -113,15 +96,12 @@ class NewtonActionManager(ActionManagerBase):
             matched_indices, matched_names = string_utils.resolve_matching_names(
                 config.actuated_dof_names, actuatable_names, preserve_order=True
             )
-            # Map back to original indices
             original_indices = [actuatable_indices[i] for i in matched_indices]
             return original_indices, matched_names
 
         elif config.num_actions is not None:
-            # Legacy mode
             num = config.num_actions
             indices = list(range(num))
-            # Skip floating_base
             names = self._all_joint_names[1 : 1 + num]
             return indices, names
 
@@ -129,19 +109,19 @@ class NewtonActionManager(ActionManagerBase):
             "Must provide either 'actuated_dof_names' or 'num_actions' in config"
         )
 
-    def _get_joint_limits(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def _get_joint_limits(self) -> tuple[jax.Array, jax.Array]:
         """Get joint limits from Newton model."""
         dofs_per_world = (
             self._model.joint_dof_count // self._model.world_count
         )
-        lower_all = wp.to_torch(self._model.joint_limit_lower)[:dofs_per_world]
-        upper_all = wp.to_torch(self._model.joint_limit_upper)[:dofs_per_world]
+        lower_all = wp_to_jax(self._model.joint_limit_lower)[:dofs_per_world]
+        upper_all = wp_to_jax(self._model.joint_limit_upper)[:dofs_per_world]
 
         lower = lower_all[self._actuated_qd_indices]
         upper = upper_all[self._actuated_qd_indices]
         return lower, upper
 
-    def apply_actions(self, processed_actions: torch.Tensor) -> None:
+    def apply_actions(self, processed_actions: jax.Array) -> None:
         """Apply processed actions via Newton/Warp position control."""
         scene_manager = self.env.scene_manager
         control = scene_manager.control
@@ -150,20 +130,17 @@ class NewtonActionManager(ActionManagerBase):
         num_worlds = model.world_count
         dof_per_world = model.joint_dof_count // num_worlds
 
-        # Initialize full target array with zeros
-        full_targets = torch.zeros(
+        full_targets = jnp.zeros(
             (num_worlds, dof_per_world),
-            device=self.device,
-            dtype=torch.float32,
+            dtype=jnp.float32,
         )
 
-        # Map processed actions to correct DOF indices
-        full_targets[:, self._actuated_qd_indices] = processed_actions
+        full_targets = full_targets.at[:, self._actuated_qd_indices].set(processed_actions)
 
         targets_flat = full_targets.flatten()
         wp.copy(
             control.joint_target_pos,
-            wp.from_torch(targets_flat, dtype=wp.float32, requires_grad=False),
+            wp_from_jax(targets_flat, dtype=wp.float32),
         )
 
     # ------------------------------------------------------------------
@@ -171,12 +148,12 @@ class NewtonActionManager(ActionManagerBase):
     # ------------------------------------------------------------------
 
     @property
-    def actuated_q_indices(self) -> torch.Tensor:
+    def actuated_q_indices(self) -> jax.Array:
         """joint_q array indices for actuated joints."""
         return self._actuated_q_indices
 
     @property
-    def actuated_qd_indices(self) -> torch.Tensor:
+    def actuated_qd_indices(self) -> jax.Array:
         """joint_qd array indices for actuated joints."""
         return self._actuated_qd_indices
 
@@ -195,4 +172,4 @@ class NewtonActionManager(ActionManagerBase):
         num_worlds = model.world_count
         joints_per_world = len(all_joint_names) // num_worlds
 
-        return all_joint_names[:joints_per_world]  # full name 유지
+        return all_joint_names[:joints_per_world]

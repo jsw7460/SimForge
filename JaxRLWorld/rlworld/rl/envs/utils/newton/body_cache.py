@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-import warp as wp
+import jax.numpy as jnp
+
+from rlworld.rl.envs.utils.warp_jax_utils import wp_to_jax
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -22,8 +24,8 @@ class NewtonBodyCache:
         self.body_names = model.body_label[:self.bodies_per_env]
 
         # Cache original values for domain randomization
-        body_mass = wp.to_torch(model.body_mass).reshape(env.num_envs, self.bodies_per_env)
-        self.original_body_mass = body_mass[0].clone()  # (bodies_per_env,)
+        body_mass = wp_to_jax(model.body_mass).reshape(env.num_envs, self.bodies_per_env)
+        self.original_body_mass = jnp.array(body_mass[0])  # (bodies_per_env,)
 
     def get_body_indices(self, body_patterns: str | list[str]) -> list[int]:
         """Get body_q indices for patterns (no contact requirement)."""

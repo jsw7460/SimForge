@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import torch
+import jax
+import jax.numpy as jnp
+import numpy as np
 import warp as wp
+
+from rlworld.rl.envs.utils.warp_jax_utils import wp_to_jax, wp_from_jax
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -11,17 +15,10 @@ if TYPE_CHECKING:
 
 def push_robot(
     env: "NewtonEnv",
-    env_ids: torch.Tensor,
+    env_ids,
     velocity_range: dict[str, tuple[float, float]],
 ) -> None:
-    """Push robot by adding velocity perturbation.
-
-    Args:
-        env: Newton environment instance.
-        env_ids: Environment indices to apply push.
-        velocity_range: Dict with keys 'x', 'y', 'z', 'roll', 'pitch', 'yaw'
-                       and tuple (min, max) values.
-    """
+    """Push robot by adding velocity perturbation."""
     if len(env_ids) == 0:
         return
 
@@ -32,25 +29,21 @@ def push_robot(
     num_worlds = model.world_count
     dofs_per_world = model.joint_dof_count // num_worlds
 
-    joint_qd = wp.to_torch(state.joint_qd).reshape(num_worlds, dofs_per_world)
+    joint_qd = wp_to_jax(state.joint_qd).reshape(num_worlds, dofs_per_world)
 
     n_envs = len(env_ids)
-    device = env.device
+    key = jax.random.PRNGKey(np.random.randint(0, 2**31))
 
     # Linear velocity perturbation (indices 0, 1, 2)
-    if "x" in velocity_range:
-        joint_qd[env_ids, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["x"])
-    if "y" in velocity_range:
-        joint_qd[env_ids, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["y"])
-    if "z" in velocity_range:
-        joint_qd[env_ids, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["z"])
+    axis_map = {"x": 0, "y": 1, "z": 2, "roll": 3, "pitch": 4, "yaw": 5}
+    for axis_name, axis_idx in axis_map.items():
+        if axis_name in velocity_range:
+            key, subkey = jax.random.split(key)
+            perturbation = jax.random.uniform(
+                subkey, shape=(n_envs,),
+                minval=velocity_range[axis_name][0],
+                maxval=velocity_range[axis_name][1],
+            )
+            joint_qd = joint_qd.at[env_ids, axis_idx].add(perturbation)
 
-    # Angular velocity perturbation (indices 3, 4, 5)
-    if "roll" in velocity_range:
-        joint_qd[env_ids, 3] += torch.empty(n_envs, device=device).uniform_(*velocity_range["roll"])
-    if "pitch" in velocity_range:
-        joint_qd[env_ids, 4] += torch.empty(n_envs, device=device).uniform_(*velocity_range["pitch"])
-    if "yaw" in velocity_range:
-        joint_qd[env_ids, 5] += torch.empty(n_envs, device=device).uniform_(*velocity_range["yaw"])
-
-    wp.copy(state.joint_qd, wp.from_torch(joint_qd.flatten(), dtype=wp.float32))
+    wp.copy(state.joint_qd, wp_from_jax(joint_qd.flatten(), dtype=wp.float32))
