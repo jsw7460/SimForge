@@ -52,6 +52,7 @@ class OffPolicyRunner(BaseRunner):
 
     def _init_training_modules(self) -> None:
         """Initialize actor-critic model based on algorithm type."""
+        self._is_jax_native = getattr(self.env, 'is_jax_native', False)
         obs_dim = self.env.obs_manager.calculate_obs_dim()
         self.actor_obs_dim = obs_dim["actor"]
         self.critic_obs_dim = obs_dim["critic"]
@@ -283,8 +284,12 @@ class OffPolicyRunner(BaseRunner):
     def _get_initial_obs(self) -> ActInput:
         """Get initial observation as JAX arrays."""
         obs = self.env.obs_manager.get_observation()
-        actor_obs = torch_to_jax(obs["actor"])
-        critic_obs = torch_to_jax(obs["critic"])
+        if self._is_jax_native:
+            actor_obs = obs["actor"]
+            critic_obs = obs["critic"]
+        else:
+            actor_obs = torch_to_jax(obs["actor"])
+            critic_obs = torch_to_jax(obs["critic"])
         return ActInput(actor_obs, critic_obs)
 
     def _collect_experience(
@@ -320,35 +325,58 @@ class OffPolicyRunner(BaseRunner):
 
             # Process action for environment
             actions_for_env = self._process_action_for_env(actions)
-            actions_torch = jax_to_torch(actions_for_env, self.device)
 
-            # Environment step
-            obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
+            if self._is_jax_native:
+                # JAX-native: pass JAX actions directly, get JAX outputs
+                obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_for_env)
 
-            # Convert to JAX
-            next_actor_obs = torch_to_jax(obs_dict["actor"])
-            next_critic_obs = torch_to_jax(obs_dict["critic"])
+                next_actor_obs = obs_dict["actor"]
+                next_critic_obs = obs_dict["critic"]
 
-            # Handle truncated episodes: use final_observation for bootstrap
-            final_obs = infos.get("final_observation")
-            if final_obs is not None:
-                final_actor = torch_to_jax(final_obs["actor"])
-                final_critic = torch_to_jax(final_obs["critic"])
+                final_obs = infos.get("final_observation")
+                if final_obs is not None:
+                    final_actor = final_obs["actor"]
+                    final_critic = final_obs["critic"]
 
-                # Replace next_obs for truncated (not terminated) envs
-                truncated_mask = truncated.cpu().numpy()
-                terminated_mask = terminated.cpu().numpy()
+                    truncated_mask = np.array(truncated)
+                    terminated_mask = np.array(terminated)
 
-                for i in range(self.env.num_envs):
-                    if truncated_mask[i] and not terminated_mask[i]:
-                        next_actor_obs = next_actor_obs.at[i].set(final_actor[i])
-                        next_critic_obs = next_critic_obs.at[i].set(final_critic[i])
+                    for i in range(self.env.num_envs):
+                        if truncated_mask[i] and not terminated_mask[i]:
+                            next_actor_obs = next_actor_obs.at[i].set(final_actor[i])
+                            next_critic_obs = next_critic_obs.at[i].set(final_critic[i])
 
-            rewards_jax = torch_to_jax(rewards)
-            # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
-            terminated_jax = jnp.asarray(terminated.cpu().numpy())
-            truncated_jax = jnp.asarray(truncated.cpu().numpy())
-            dones_jax = terminated_jax | truncated_jax
+                rewards_jax = rewards
+                terminated_jax = terminated
+                truncated_jax = truncated
+                dones_jax = terminated_jax | truncated_jax
+            else:
+                # Torch environment: convert between frameworks
+                actions_torch = jax_to_torch(actions_for_env, self.device)
+
+                obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
+
+                next_actor_obs = torch_to_jax(obs_dict["actor"])
+                next_critic_obs = torch_to_jax(obs_dict["critic"])
+
+                final_obs = infos.get("final_observation")
+                if final_obs is not None:
+                    final_actor = torch_to_jax(final_obs["actor"])
+                    final_critic = torch_to_jax(final_obs["critic"])
+
+                    truncated_mask = truncated.cpu().numpy()
+                    terminated_mask = terminated.cpu().numpy()
+
+                    for i in range(self.env.num_envs):
+                        if truncated_mask[i] and not terminated_mask[i]:
+                            next_actor_obs = next_actor_obs.at[i].set(final_actor[i])
+                            next_critic_obs = next_critic_obs.at[i].set(final_critic[i])
+
+                rewards_jax = torch_to_jax(rewards)
+                # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
+                terminated_jax = jnp.asarray(terminated.cpu().numpy())
+                truncated_jax = jnp.asarray(truncated.cpu().numpy())
+                dones_jax = terminated_jax | truncated_jax
 
             # Store transition in replay buffer
             self.alg.store_transition(
@@ -363,7 +391,10 @@ class OffPolicyRunner(BaseRunner):
             )
 
             # Process env step (for timeout handling)
-            infos_jax = convert_infos_to_jax(infos, self.device)
+            if self._is_jax_native:
+                infos_jax = infos  # already JAX
+            else:
+                infos_jax = convert_infos_to_jax(infos, self.device)
             self.alg.process_env_step(rewards_jax, terminated_jax, truncated_jax, infos_jax)
 
             # Update reward statistics

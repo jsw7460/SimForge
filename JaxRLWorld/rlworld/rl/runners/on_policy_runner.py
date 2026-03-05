@@ -49,6 +49,7 @@ class OnPolicyRunner(BaseRunner):
 
     def _init_training_modules(self) -> None:
         """Initialize actor-critic model based on algorithm type."""
+        self._is_jax_native = getattr(self.env, 'is_jax_native', False)
         obs_dim = self.env.calculate_obs_dim()
         self.actor_obs_dim = obs_dim["actor"]
         self.critic_obs_dim = obs_dim["critic"]
@@ -225,8 +226,12 @@ class OnPolicyRunner(BaseRunner):
     def _get_initial_obs(self) -> PPO.ActInput:
         """Get initial observation as JAX arrays."""
         obs = self.env.get_observation()
-        actor_obs = torch_to_jax(obs["actor"])
-        critic_obs = torch_to_jax(obs["critic"])
+        if self._is_jax_native:
+            actor_obs = obs["actor"]
+            critic_obs = obs["critic"]
+        else:
+            actor_obs = torch_to_jax(obs["actor"])
+            critic_obs = torch_to_jax(obs["critic"])
         return PPO.ActInput(actor_obs, critic_obs)
 
     def _collect_experience(
@@ -246,27 +251,47 @@ class OnPolicyRunner(BaseRunner):
             # Get action
             actions = self.alg.act(PPO.ActInput(actor_obs, critic_obs))
             actions_for_env = self._process_action_for_env(actions)
-            actions_torch = jax_to_torch(actions_for_env, self.device)
 
-            # Environment step
-            obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
-            dones = terminated | truncated
+            if self._is_jax_native:
+                # JAX-native: pass JAX actions directly, get JAX outputs
+                obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_for_env)
+                dones = terminated | truncated
 
-            # Convert to JAX
-            actor_obs = torch_to_jax(obs_dict["actor"])
-            critic_obs = torch_to_jax(obs_dict["critic"])
-            rewards_jax = torch_to_jax(rewards)
-            # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
-            terminated_jax = jnp.asarray(terminated.cpu().numpy())
-            truncated_jax = jnp.asarray(truncated.cpu().numpy())
+                actor_obs = obs_dict["actor"]
+                critic_obs = obs_dict["critic"]
+                rewards_jax = rewards
+                terminated_jax = terminated
+                truncated_jax = truncated
 
-            # Process step
-            infos_jax = {}
-            if infos.get("final_observation") is not None:
-                infos_jax["final_observation"] = {
-                    "actor": torch_to_jax(infos["final_observation"]["actor"]),
-                    "critic": torch_to_jax(infos["final_observation"]["critic"]),
-                }
+                # Process step
+                infos_jax = {}
+                if infos.get("final_observation") is not None:
+                    infos_jax["final_observation"] = {
+                        "actor": infos["final_observation"]["actor"],
+                        "critic": infos["final_observation"]["critic"],
+                    }
+            else:
+                # Torch environment: convert between frameworks
+                actions_torch = jax_to_torch(actions_for_env, self.device)
+
+                obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
+                dones = terminated | truncated
+
+                actor_obs = torch_to_jax(obs_dict["actor"])
+                critic_obs = torch_to_jax(obs_dict["critic"])
+                rewards_jax = torch_to_jax(rewards)
+                # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
+                terminated_jax = jnp.asarray(terminated.cpu().numpy())
+                truncated_jax = jnp.asarray(truncated.cpu().numpy())
+
+                # Process step
+                infos_jax = {}
+                if infos.get("final_observation") is not None:
+                    infos_jax["final_observation"] = {
+                        "actor": torch_to_jax(infos["final_observation"]["actor"]),
+                        "critic": torch_to_jax(infos["final_observation"]["critic"]),
+                    }
+
             self.alg.process_env_step(
                 rewards_jax,
                 terminated_jax,
@@ -359,9 +384,18 @@ class OnPolicyRunner(BaseRunner):
         """Main training loop."""
         # Initialize random episode length
         if init_at_random_ep_len:
-            self.env.termination_manager.episode_length_buf = torch.randint_like(
-                self.env.episode_length_buf, high=int(self.env.max_episode_length)
-            )
+            if self._is_jax_native:
+                key = jax.random.PRNGKey(0)
+                self.env.termination_manager.episode_length_buf = jax.random.randint(
+                    key,
+                    shape=self.env.episode_length_buf.shape,
+                    minval=0,
+                    maxval=int(self.env.max_episode_length),
+                )
+            else:
+                self.env.termination_manager.episode_length_buf = torch.randint_like(
+                    self.env.episode_length_buf, high=int(self.env.max_episode_length)
+                )
 
         # Training state
         obs = self._get_initial_obs()
