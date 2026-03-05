@@ -30,16 +30,9 @@ from rlworld.rl.envs.managers.newton import (
     NewtonContactManager
 )
 from rlworld.rl.envs.mdp.observations.newton.proprioception import base_quat
+from rlworld.rl.envs.utils.quat_jax import quat_to_xyz
 from rlworld.rl.envs.world_jax import JaxWorld
 from rlworld.rl.utils import set_seed
-
-
-def _quat_to_yaw_jax(quat_wxyz: jax.Array) -> jax.Array:
-    """Extract yaw (heading) from wxyz quaternion. Returns shape [num_envs]."""
-    w, x, y, z = quat_wxyz[:, 0], quat_wxyz[:, 1], quat_wxyz[:, 2], quat_wxyz[:, 3]
-    siny_cosp = 2.0 * (w * z + x * y)
-    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    return jnp.arctan2(siny_cosp, cosy_cosp)
 
 
 class NewtonEnv(JaxWorld):
@@ -104,8 +97,8 @@ class NewtonEnv(JaxWorld):
             JAX array of shape [num_envs] in radians.
         """
         quat_xyzw = base_quat(self)  # [num_envs, 4] xyzw
-        quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
-        return _quat_to_yaw_jax(quat_wxyz)
+        quat_wxyz = quat_xyzw[:, jnp.array([3, 0, 1, 2])]
+        return quat_to_xyz(quat_wxyz, rpy=True, degrees=False)[:, 2]
 
     def _setup_environment(self) -> None:
         """Setup all managers by converting high-level configs to manager configs."""

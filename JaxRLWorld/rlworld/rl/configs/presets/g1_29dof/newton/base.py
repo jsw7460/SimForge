@@ -370,7 +370,7 @@ class G1FlatNewtonConfig:
                 weight=1.0,
             ),
             RewardTermConfig(
-                rf_mjlab.raw_action_rate_l2_mjlab,
+                rf_mjlab.processed_action_rate_l2_mjlab,
                 weight=0.1,
             ),
 

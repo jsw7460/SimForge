@@ -1,7 +1,7 @@
 from rlworld.rl.envs.mdp.configs.terminations import TerminationResult
 from rlworld.rl.envs.mdp.observations.newton.state import base_euler
 
-import torch
+import jax.numpy as jnp
 
 from typing import TYPE_CHECKING
 
@@ -19,6 +19,6 @@ def roll_pitch_violation(
     roll = euler[:, 0]
     pitch = euler[:, 1]
 
-    roll_violated = torch.abs(roll) > roll_threshold_degree
-    pitch_violated = torch.abs(pitch) > pitch_threshold_degree
+    roll_violated = jnp.abs(roll) > roll_threshold_degree
+    pitch_violated = jnp.abs(pitch) > pitch_threshold_degree
     return TerminationResult(roll_violated | pitch_violated)

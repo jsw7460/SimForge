@@ -1,7 +1,8 @@
 from rlworld.rl.configs import NewtonConfigsForRun
 from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
 from rlworld.rl.runners import BaseRunner
-
+# import jax
+# jax.config.update("jax_debug_nans", True)
 
 def main():
     # Get complete config from preset

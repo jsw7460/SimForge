@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 import jax
 import jax.numpy as jnp
 
-from genesis.utils.geom import quat_to_xyz
+from rlworld.rl.envs.utils.quat_jax import quat_to_xyz
 from rlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_height_with_contact
 from rlworld.rl.envs.utils.utils import EnvStepCache
 from rlworld.rl.envs.utils.warp_jax_utils import wp_to_jax

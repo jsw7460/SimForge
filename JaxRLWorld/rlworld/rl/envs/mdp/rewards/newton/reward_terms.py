@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from genesis import quat_to_xyz
+from rlworld.rl.envs.utils.quat_jax import quat_to_xyz
 from rlworld.rl.envs import NewtonEnv, NewtonLocomotionEnv
 from rlworld.rl.envs.mdp.observations.newton import state, proprioception
 from rlworld.rl.envs.mdp.observations.newton.body_utils import (

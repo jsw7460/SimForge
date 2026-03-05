@@ -1,12 +1,13 @@
 from dataclasses import dataclass, field
 import torch
+import jax
 from typing import Callable
 
 
 @dataclass
 class TerminationResult:
     """Result from a termination check."""
-    reset: torch.Tensor  # Which envs to reset
+    reset: torch.Tensor | jax.Array  # Which envs to reset
     is_timeout: bool = False  # Whether this is a timeout termination
     extras: dict = None  # Additional logging info
 
