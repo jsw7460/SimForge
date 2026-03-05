@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rlworld.rl.envs import NewtonEnv
-from rlworld.rl.envs.managers import GaitManagerConfig, GaitManager
+from rlworld.rl.envs.managers.common.gait_jax import JaxGaitManager, GaitManagerConfig
 from rlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
     NewtonSceneConfig,
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class NewtonLocomotionEnv(NewtonEnv):
     """Specialized Newton environment for legged locomotion tasks."""
 
-    gait_manager: GaitManager
+    gait_manager: JaxGaitManager
 
     def __init__(
         self,
@@ -57,7 +57,7 @@ class NewtonLocomotionEnv(NewtonEnv):
             gait_period=self._gait_period,
             foot_names=self.scene_cfg.robot_cfg.prefixed_foot_names
         )
-        self.gait_manager = GaitManager(env=self, config=config)
+        self.gait_manager = JaxGaitManager(env=self, config=config)
 
     def _pre_termination_hook(self):
         self.gait_manager.advance()

@@ -79,8 +79,7 @@ class JaxObservationManager(BaseManager):
 
     def reset(self, env_ids=None) -> None:
         if env_ids is None:
-            import torch
-            env_ids = torch.arange(self.config.num_envs, device=self.env.device)
+            env_ids = jnp.arange(self.config.num_envs)
         for group_name, history_buffers in self._group_obs_term_history_buffer.items():
             for term_name, buffer in history_buffers.items():
                 buffer.reset(batch_ids=env_ids)

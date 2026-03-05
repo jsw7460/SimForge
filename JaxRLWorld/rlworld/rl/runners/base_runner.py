@@ -222,10 +222,14 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
 
     def _init_action_scaling(self) -> None:
         """Initialize action scaling parameters."""
-        action_low = self.env.action_low.cpu().numpy()
-        action_high = self.env.action_high.cpu().numpy()
-        self.action_low_jax = jnp.array(action_low)
-        self.action_high_jax = jnp.array(action_high)
+        action_low = self.env.action_low
+        action_high = self.env.action_high
+        if isinstance(action_low, jax.Array):
+            self.action_low_jax = action_low
+            self.action_high_jax = action_high
+        else:
+            self.action_low_jax = jnp.array(action_low.cpu().numpy())
+            self.action_high_jax = jnp.array(action_high.cpu().numpy())
         self.action_scale = (self.action_high_jax - self.action_low_jax) / 2.0
         self.action_bias = (self.action_high_jax + self.action_low_jax) / 2.0
 

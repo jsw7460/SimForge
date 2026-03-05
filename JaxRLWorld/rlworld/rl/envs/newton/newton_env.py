@@ -1,8 +1,7 @@
-import torch
+import jax
+import jax.numpy as jnp
 import warp as wp
-from warp.torch import device_to_torch
 
-from genesis.utils.geom import quat_to_xyz
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
@@ -11,11 +10,17 @@ from rlworld.rl.configs.newton_config_classes import (
     NewtonActionConfig,
     VisualizationConfig
 )
-from rlworld.rl.envs.managers import (
-    CommandManager, CommandManagerConfig,
-    RewardManager, RewardManagerConfig,
-    TerminationManager, TerminationConfig,
-    EventManager, EventManagerConfig,
+from rlworld.rl.envs.managers.common.command_jax import (
+    JaxCommandManager, CommandManagerConfig,
+)
+from rlworld.rl.envs.managers.common.reward_jax import (
+    JaxRewardManager, RewardManagerConfig,
+)
+from rlworld.rl.envs.managers.common.termination_jax import (
+    JaxTerminationManager, TerminationConfig,
+)
+from rlworld.rl.envs.managers.common.event_jax import (
+    JaxEventManager, EventManagerConfig,
 )
 from rlworld.rl.envs.managers.newton import (
     NewtonSceneManager, NewtonSceneManagerConfig,
@@ -25,11 +30,19 @@ from rlworld.rl.envs.managers.newton import (
     NewtonContactManager
 )
 from rlworld.rl.envs.mdp.observations.newton.proprioception import base_quat
-from rlworld.rl.envs.world import World
+from rlworld.rl.envs.world_jax import JaxWorld
 from rlworld.rl.utils import set_seed
 
 
-class NewtonEnv(World):
+def _quat_to_yaw_jax(quat_wxyz: jax.Array) -> jax.Array:
+    """Extract yaw (heading) from wxyz quaternion. Returns shape [num_envs]."""
+    w, x, y, z = quat_wxyz[:, 0], quat_wxyz[:, 1], quat_wxyz[:, 2], quat_wxyz[:, 3]
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    return jnp.arctan2(siny_cosp, cosy_cosp)
+
+
+class NewtonEnv(JaxWorld):
     sim_name: str = "Newton"
 
     def __init__(
@@ -49,7 +62,12 @@ class NewtonEnv(World):
 
         self.seed = env_cfg.seed
         self.num_envs = num_envs
-        self.device = device_to_torch(wp.get_device())
+        # Store device as torch-compatible string for stats collector compatibility
+        wp_device = wp.get_device()
+        if wp_device.is_cuda:
+            self.device = f"cuda:{wp_device.ordinal}"
+        else:
+            self.device = "cpu"
 
         # Store high-level configs
         self.env_cfg = env_cfg
@@ -76,19 +94,18 @@ class NewtonEnv(World):
         return self.scene_manager.model
 
     @property
-    def heading_w(self) -> torch.Tensor:
+    def heading_w(self) -> jax.Array:
         """Get robot heading (yaw) in world frame.
 
-        Newton joint_q[:, 3:7] is xyzw convention,
-        quat_to_xyz expects wxyz.
+        Newton joint_q[:, 3:7] is xyzw convention.
+        Convert to wxyz for yaw extraction.
 
         Returns:
-            Tensor of shape [num_envs] in radians.
+            JAX array of shape [num_envs] in radians.
         """
         quat_xyzw = base_quat(self)  # [num_envs, 4] xyzw
         quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
-        euler = quat_to_xyz(quat_wxyz)  # [num_envs, 3]
-        return euler[:, 2]
+        return _quat_to_yaw_jax(quat_wxyz)
 
     def _setup_environment(self) -> None:
         """Setup all managers by converting high-level configs to manager configs."""
@@ -123,7 +140,7 @@ class NewtonEnv(World):
         self.vis_manager = NewtonVisualizationManager(env=self, config=vis_manager_cfg)
         self.vis_manager.setup()
 
-        # Action Manager
+        # Action Manager (already JAX-native from Phase 4)
         act_manager_cfg = NewtonActionManagerConfig(
             actuated_dof_names=self.act_cfg.actuated_dof_names,
             scale=self.act_cfg.action_scale,
@@ -132,18 +149,18 @@ class NewtonEnv(World):
         )
         self.act_manager = NewtonActionManager(env=self, config=act_manager_cfg)
 
-        # Observation Manager
+        # Observation Manager (JAX-native via Newton alias)
         obs_manager_cfg = NewtonObsManagerConfig(
             num_envs=self.num_envs,
             obs_group=self.obs_cfg.obs_group,
         )
         self.obs_manager = NewtonObservationManager(env=self, config=obs_manager_cfg)
 
-        # Contact Manager
+        # Contact Manager (already JAX-native from Phase 4)
         self.contact_manager = NewtonContactManager(env=self)
         self.contact_manager.register_sensors()
 
-        # Command Manager (shared with Genesis)
+        # Command Manager (JAX-native)
         command_manager_cfg = CommandManagerConfig(
                 command_terms=self.command_cfg.sampler,
                 resampling_time_s=self.command_cfg.resampling_time_s,
@@ -153,27 +170,27 @@ class NewtonEnv(World):
                 heading_range=self.command_cfg.heading_range,
                 rel_heading_envs=self.command_cfg.rel_heading_envs,
             )
-        self.command_manager = CommandManager(env=self, config=command_manager_cfg)
+        self.command_manager = JaxCommandManager(env=self, config=command_manager_cfg)
 
-        # Reward Manager (shared with Genesis)
+        # Reward Manager (JAX-native)
         reward_manager_cfg = RewardManagerConfig(
             reward_terms=self.reward_cfg.reward_terms,
         )
-        self.reward_manager = RewardManager(env=self, config=reward_manager_cfg)
+        self.reward_manager = JaxRewardManager(env=self, config=reward_manager_cfg)
 
-        # Termination Manager (shared with Genesis)
+        # Termination Manager (JAX-native)
         termination_cfg = TerminationConfig(
             num_envs=self.num_envs,
             termination_criteria=self.env_cfg.termination_criteria,
             episode_length_s=self.env_cfg.episode_length_s,
         )
-        self.termination_manager = TerminationManager(env=self, config=termination_cfg)
+        self.termination_manager = JaxTerminationManager(env=self, config=termination_cfg)
 
-        # Event Manager (shared with Genesis)
+        # Event Manager (JAX-native)
         event_manager_cfg = EventManagerConfig(
             event_terms=self.event_cfg.event_terms,
         )
-        self.event_manager = EventManager(env=self, config=event_manager_cfg)
+        self.event_manager = JaxEventManager(env=self, config=event_manager_cfg)
 
         # Capture graph for performance
         self.scene_manager.capture()
@@ -194,6 +211,6 @@ class NewtonEnv(World):
         if self.vis_manager is not None:
             self.vis_manager.advance()
 
-    def _apply_actions(self, processed_actions: torch.Tensor) -> None:
+    def _apply_actions(self, processed_actions: jax.Array) -> None:
         """Apply actions to Newton control."""
         self.act_manager.apply_actions(processed_actions)

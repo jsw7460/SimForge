@@ -301,10 +301,18 @@ class OnPolicyRunner(BaseRunner):
                 next_critic_obs=critic_obs
             )
 
-            # Update statistics
+            # Update statistics (stats collector is torch-based)
+            if self._is_jax_native:
+                reward_info_torch = {
+                    k: torch.from_dlpack(v) for k, v in infos["rewards_per_type"].items()
+                }
+                dones_torch = torch.tensor(np.array(dones), dtype=torch.bool)
+            else:
+                reward_info_torch = infos["rewards_per_type"]
+                dones_torch = dones
             self.reward_statistics.update(
-                reward_info=infos["rewards_per_type"],
-                dones=dones,
+                reward_info=reward_info_torch,
+                dones=dones_torch,
                 success=infos.get("success", None),
             )
 

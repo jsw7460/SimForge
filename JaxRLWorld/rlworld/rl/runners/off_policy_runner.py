@@ -397,11 +397,19 @@ class OffPolicyRunner(BaseRunner):
                 infos_jax = convert_infos_to_jax(infos, self.device)
             self.alg.process_env_step(rewards_jax, terminated_jax, truncated_jax, infos_jax)
 
-            # Update reward statistics
+            # Update reward statistics (stats collector is torch-based)
             dones = terminated | truncated
+            if self._is_jax_native:
+                reward_info_torch = {
+                    k: torch.from_dlpack(v) for k, v in infos["rewards_per_type"].items()
+                }
+                dones_torch = torch.tensor(np.array(dones), dtype=torch.bool)
+            else:
+                reward_info_torch = infos["rewards_per_type"]
+                dones_torch = dones
             self.reward_statistics.update(
-                reward_info=infos["rewards_per_type"],
-                dones=dones,
+                reward_info=reward_info_torch,
+                dones=dones_torch,
                 success=infos.get("success", None),
             )
 

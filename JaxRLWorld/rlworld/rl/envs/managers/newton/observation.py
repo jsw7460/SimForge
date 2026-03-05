@@ -38,17 +38,17 @@ Usage:
         },
     )
 """
-from rlworld.rl.envs.managers.common.observation import (
-    ObservationManager,
+from rlworld.rl.envs.managers.common.observation_jax import (
+    JaxObservationManager,
     ObsManagerConfig,
 )
 
 # Aliases for Newton-specific naming convention
-NewtonObservationManager = ObservationManager
+NewtonObservationManager = JaxObservationManager
 NewtonObsManagerConfig = ObsManagerConfig
 
 __all__ = [
-    "ObservationManager",
+    "JaxObservationManager",
     "ObsManagerConfig",
     "NewtonObservationManager",
     "NewtonObsManagerConfig",
