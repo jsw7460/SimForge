@@ -112,6 +112,7 @@ class PPO(OnPolicyAlgorithm):
         desired_kl: float = 0.01,
         use_reward_scaling: bool = True,
         use_early_stop: bool = False,
+        optimizer_class=None,
         key: jax.Array = None,
         **kwargs,
     ):
@@ -162,6 +163,7 @@ class PPO(OnPolicyAlgorithm):
         self.desired_kl = desired_kl
         self.use_reward_scaling = use_reward_scaling
         self.use_early_stop = use_early_stop
+        self.optimizer_class = optimizer_class or optax.adamw
 
         # Check if model has normalizers enabled
         self.obs_normalization = actor_critic.actor_obs_normalizer is not None
@@ -229,6 +231,7 @@ class PPO(OnPolicyAlgorithm):
             label_fn=label_fn,
             lr_config=lr_config,
             max_grad_norm=self.max_grad_norm,
+            optimizer_class=self.optimizer_class,
         )
 
         return optimizer

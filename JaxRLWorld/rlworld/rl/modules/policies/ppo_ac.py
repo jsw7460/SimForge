@@ -88,12 +88,18 @@ class ConstantStd(eqx.Module):
 class LearnableLogStd(eqx.Module):
     """Learnable state-independent log standard deviation."""
     log_std: jax.Array
+    log_std_min: float = eqx.field(static=True)
+    log_std_max: float = eqx.field(static=True)
 
-    def __init__(self, num_actions: int, init_std: float):
+    def __init__(self, num_actions: int, init_std: float,
+                 log_std_min: float = -5.0, log_std_max: float = 2.0):
         self.log_std = jnp.full(num_actions, jnp.log(init_std))
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        std = jnp.exp(self.log_std)
+        log_std = jnp.clip(self.log_std, self.log_std_min, self.log_std_max)
+        std = jnp.exp(log_std)
         batch_shape = x.shape[:-1]
         return jnp.broadcast_to(std, batch_shape + std.shape)
 
@@ -241,7 +247,10 @@ class PPOActorCritic(BaseActorCritic):
         if self.std_type == "state_dependent":
             return self.std_module(observations)
         elif self.std_type == "state_independent":
-            std = jnp.exp(self.std_module.log_std)
+            log_std = jnp.clip(self.std_module.log_std,
+                               self.std_module.log_std_min,
+                               self.std_module.log_std_max)
+            std = jnp.exp(log_std)
             if observations is not None:
                 return jnp.broadcast_to(std, (observations.shape[0],) + std.shape)
             return std

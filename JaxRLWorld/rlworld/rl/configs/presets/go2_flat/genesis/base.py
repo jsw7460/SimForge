@@ -350,7 +350,7 @@ class Go2FlatGenesisConfig:
 
             # Action rate
             RewardTermConfig(
-                func=rf_mjlab.action_rate_l2_mjlab,
+                func=rf_mjlab.raw_action_rate_l2_mjlab,
                 weight=0.1,
             ),
         ]
