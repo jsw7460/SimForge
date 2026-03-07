@@ -10,4 +10,4 @@ class Go1MLPConfig(G1FlatNewtonConfig):
 
 
 def get_config():
-    return Go1MLPConfig().to_dict()
+    return Go1MLPConfig().build()

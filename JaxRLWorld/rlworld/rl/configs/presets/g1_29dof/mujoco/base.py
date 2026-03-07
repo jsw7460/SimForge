@@ -5,10 +5,20 @@ adapted for rlworld's MjlabEnv interface.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Any, List
+
 import math
 
+from mjlab.asset_zoo.robots import get_g1_robot_cfg, G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.scene import SceneCfg
+from mjlab.sensor import ContactSensorCfg, ContactMatch
+from mjlab.sim import SimulationCfg, MujocoCfg
+from mjlab.terrains import TerrainImporterCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
+from rlworld.rl.configs.algorithms.ppo import PPOConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.mujoco import LocomotionObservations
+from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,
     MujocoSceneConfig,
@@ -16,8 +26,8 @@ from rlworld.rl.configs.mujoco_config_classes import (
     MujocoActionConfig,
     VisualizationConfig,
 )
-from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.observations import ObservationTermConfig
+from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -28,13 +38,6 @@ from rlworld.rl.envs.mdp.configs import (
 from rlworld.rl.envs.mdp.observations.mujoco import proprioception
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
-
-from mjlab.scene import SceneCfg
-from mjlab.sim import SimulationCfg, MujocoCfg
-from mjlab.asset_zoo.robots import get_g1_robot_cfg, G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
-from mjlab.sensor import ContactSensorCfg, ContactMatch
-from mjlab.terrains import TerrainImporterCfg
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 
 @dataclass
@@ -132,21 +135,25 @@ class G1FlatMujocoConfig:
             ObservationTermConfig(proprioception.foot_contact_forces, scale=0.01)
         ]
 
+    def build(self) -> "MujocoConfigsForRun":
+        """Build the complete configuration as a typed MujocoConfigsForRun."""
+        return MujocoConfigsForRun(
+            env=self._build_env_config(),
+            scene=self._build_scene_config(),
+            visualization=VisualizationConfig(show_viewer=False, record_video=False),
+            observation=self._build_observation_config(),
+            action=self._build_action_config(),
+            reward=self._build_reward_config(),
+            command=self._build_command_config(),
+            event=self._build_event_config(),
+            algorithm=self._build_algorithm_config(),
+            nn=self._build_nn_config(),
+            runner=self._build_runner_config(),
+        )
+
     def to_dict(self) -> Dict[str, Any]:
-        """Generate the complete configuration dictionary."""
-        return {
-            "env": self._build_env_config(),
-            "scene": self._build_scene_config(),
-            "visualization": VisualizationConfig(show_viewer=False, record_video=False),
-            "observation": self._build_observation_config(),
-            "action": self._build_action_config(),
-            "reward": self._build_reward_config(),
-            "command": self._build_command_config(),
-            "event": self._build_event_config(),
-            "algorithm": self._build_algorithm_config(),
-            "nn": self._build_nn_config(),
-            "runner": self._build_runner_config(),
-        }
+        """Backward-compatible dict output."""
+        return self.build().recursive_to_dict()
 
     def _build_env_config(self) -> MujocoEnvConfig:
         return MujocoEnvConfig(
@@ -221,7 +228,6 @@ class G1FlatMujocoConfig:
             ),
             contact_sensor_maxmatch=64,
         )
-
         return MujocoSceneConfig(
             physics_dt=self.physics_dt,
             num_envs=self.num_envs,
@@ -524,72 +530,65 @@ class G1FlatMujocoConfig:
             rel_heading_envs=0.3,
         )
 
-    def _build_algorithm_config(self) -> Dict[str, Any]:
-        return {
-            "algorithm_name": self.algorithm_name,
-            "clip_param": 0.2,
-            "obs_normalization": True,
-            "use_early_stop": False,
-            "desired_kl": 0.01,
-            "entropy_coef": 0.01,
-            "gamma": 0.99,
-            "lam": 0.95,
-            "actor_lr": 1e-3,
-            "critic_lr": 1e-3,
-            "estimator_learning_rate": 5e-4,
-            "max_grad_norm": 1.0,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-            "schedule": "adaptive",
-            "use_clipped_value_loss": True,
-            "value_loss_coef": 1.0,
-            "use_reward_scaling": False,
-        }
+    def _build_algorithm_config(self) -> PPOConfig:
+        return PPOConfig(
+            algorithm_name=self.algorithm_name,
+            clip_param=0.2,
+            obs_normalization=True,
+            use_early_stop=False,
+            desired_kl=0.01,
+            entropy_coef=0.01,
+            gamma=0.99,
+            lam=0.95,
+            actor_lr=1e-3,
+            critic_lr=1e-3,
+            estimator_learning_rate=5e-4,
+            max_grad_norm=1.0,
+            num_learning_epochs=5,
+            num_mini_batches=4,
+            schedule="adaptive",
+            use_clipped_value_loss=True,
+            value_loss_coef=1.0,
+            use_reward_scaling=False,
+        )
 
-    def _build_nn_config(self) -> Dict[str, Any]:
-        return {
-            "policy": {
+    def _build_nn_config(self) -> NNConfig:
+        return NNConfig(
+            policy={
                 "actor_class_name": self.actor_class_name,
                 "actor_kwargs": {
-                    "activation": "tanh",
+                    "activation": "elu",
                     "ortho_init": True,
-                    # "output_gain": 0.1,
+                    "output_gain": 0.01,
                     "hidden_dims": self.actor_hidden_dims,
                 },
                 "critic_kwargs": {
-                    "activation": "tanh",
+                    "activation": "elu",
                     "ortho_init": True,
-                    # "output_gain": 0.1,
+                    "output_gain": 0.01,
                     "hidden_dims": self.actor_hidden_dims,
                 },
                 "init_noise_std": 1.0,
                 "distribution_type": "gaussian",
-                "std_type": "state_independent",
+                "std_type": "scalar",
             },
-            "state_estimator": {
+            state_estimator={
                 "activation": "relu",
                 "hidden_dims": [256, 128, 64],
             },
-        }
+        )
 
-    def _build_runner_config(self) -> Dict[str, Any]:
-        return {
-            "checkpoint": -1,
-            "experiment_name": "GoAnywhere",
-            "load_run": None,
-            "log_interval": 1,
-            "max_iterations": self.max_iterations,
-            "init_at_random_ep_len": True,
-            "state_estimator_class_name": "StateEstimator",
-            "low_level_path": None,
-            "high_level_update_freq": 1,
-            "record_interval": -1,
-            "resume": False,
-            "resume_path": None,
-            "run_name": self.run_name,
-            "logger": "wandb",
-            "wandb_project": "RLArchitecture",
-            "runner_class_name": "MujocoRunner",
-            "save_interval": 250,
-            "output_dir": "auto",
-        }
+    def _build_runner_config(self) -> RunnerConfig:
+        return RunnerConfig(
+            checkpoint=-1,
+            log_interval=1,
+            max_iterations=self.max_iterations,
+            init_at_random_ep_len=True,
+            resume=False,
+            resume_path=None,
+            run_name=self.run_name,
+            logger="wandb",
+            wandb_project="RLArchitecture",
+            save_interval=250,
+            output_dir="auto",
+        )

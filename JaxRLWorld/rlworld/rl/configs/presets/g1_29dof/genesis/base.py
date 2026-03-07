@@ -3,10 +3,16 @@ from typing import Dict, Any, List
 
 import genesis as gs
 from rlworld.rl.configs import EventConfig
-from rlworld.rl.configs.common_config_classes import CommandConfig
+from rlworld.rl.configs.algorithms.ppo import PPOConfig
+from rlworld.rl.configs.common_config_classes import (
+    RewardConfig, CommandConfig, NNConfig, RunnerConfig, VisualizationConfig,
+)
 from rlworld.rl.configs.components.observations.genesis import LocomotionObservations
 from rlworld.rl.configs.components.rewards.genesis import TrackingRewards, RegularizationRewards
 from rlworld.rl.configs.events import EventTermConfig
+from rlworld.rl.configs.genesis_config_classes import (
+    EnvConfig, SceneConfig, ObservationConfig, ActionConfig, CurriculumConfig,
+)
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
@@ -66,7 +72,7 @@ class G1FlatGenesisConfig:
         # Observations - match original config
         if self.observations is None:
             self.observations = LocomotionObservations(
-                base_name=self.robot.base_link_name,
+                base_name="pelvis",
                 # IMU angular velocity
                 ang_vel_scale=2.0,
                 ang_vel_history=4,
@@ -218,7 +224,7 @@ class G1FlatGenesisConfig:
             RewardTermConfig(
                 rf_mjlab.track_ang_vel_mjlab,
                 weight=2.0,
-                params={"std": 0.707, "base_name": self.robot.base_link_name},
+                params={"std": 0.707, "base_name": "pelvis"},
             ),
 
             # Orientation
@@ -323,50 +329,56 @@ class G1FlatGenesisConfig:
             ),
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Generate complete configuration dictionary."""
-        return {
-            "env": self._build_env_config(),
-            "visualization": {"show_viewer": False},
-            "event": self._build_event_config(),
-            "action": self._build_action_config(),
-            "scene": self._build_scene_config(),
-            "observation": self._build_observation_config(),
-            "reward": self._build_reward_config(),
-            "command": self._build_command_config(),
-            "curriculum": self._build_curriculum_config(),
-            "algorithm": self._build_algorithm_config(),
-            "nn": self._build_nn_config(),
-            "runner": self._build_runner_config(),
-        }
+    def build(self) -> "GenesisConfigsForRun":
+        """Build the complete configuration as a typed GenesisConfigsForRun."""
+        from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
 
-    def _build_env_config(self) -> Dict[str, Any]:
-        return {
-            "env_name": "LocomotionEnv",
-            "task_name": "G1_Velocity_Tracking",
-            "num_envs": self.num_envs,
-            "seed": self.seed,
-            "decimation": self.decimation,
-            "episode_length_s": self.episode_length_s,
-            "termination_criteria": [
+        return GenesisConfigsForRun(
+            env=self._build_env_config(),
+            scene=self._build_scene_config(),
+            visualization=VisualizationConfig(show_viewer=False),
+            observation=self._build_observation_config(),
+            action=self._build_action_config(),
+            reward=self._build_reward_config(),
+            command=self._build_command_config(),
+            event=self._build_event_config(),
+            curriculum=self._build_curriculum_config(),
+            algorithm=self._build_algorithm_config(),
+            nn=self._build_nn_config(),
+            runner=self._build_runner_config(),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Backward-compatible dict output."""
+        return self.build().recursive_to_dict()
+
+    def _build_env_config(self) -> EnvConfig:
+        return EnvConfig(
+            env_name="LocomotionEnv",
+            task_name="G1_Velocity_Tracking",
+            num_envs=self.num_envs,
+            seed=self.seed,
+            decimation=self.decimation,
+            episode_length_s=self.episode_length_s,
+            termination_criteria=[
                 TerminationTermConfig(
                     tf.roll_pitch_violation,
                     {"roll_threshold_degree": 20.0, "pitch_threshold_degree": 20.0},
                 ),
                 TerminationTermConfig(max_episode_exceed),
             ],
-        }
+        )
 
-    def _build_action_config(self) -> Dict[str, Any]:
-        return {
-            "actuated_dof_names": self.robot.actuated_dof_patterns,
-            "action_scale": G1_ACTION_SCALE,
-            "clip_actions": (-100.0, 100.0),
-            "offset": self.robot.default_joint_angles,
-        }
+    def _build_action_config(self) -> ActionConfig:
+        return ActionConfig(
+            actuated_dof_names=self.robot.actuated_dof_patterns,
+            action_scale=G1_ACTION_SCALE,
+            clip_actions=(-100.0, 100.0),
+            offset=self.robot.default_joint_angles,
+        )
 
     def _build_event_config(self) -> EventConfig:
-        return EventConfig([
+        return EventConfig(event_terms=[
             EventTermConfig(func=initf.initialize_dof_pos, mode="reset"),
             EventTermConfig(
                 func=initf.initialize_pos_quat,
@@ -378,9 +390,9 @@ class G1FlatGenesisConfig:
             ),
         ])
 
-    def _build_scene_config(self) -> Dict[str, Any]:
-        return {
-            "entities": [
+    def _build_scene_config(self) -> SceneConfig:
+        return SceneConfig(
+            entities=[
                 EntityConfig(
                     entity_name="base_entity",
                     morph=gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True),
@@ -389,19 +401,19 @@ class G1FlatGenesisConfig:
                     entity_name="robot",
                     morph=gs.morphs.URDF(
                         file=self.robot.urdf_path,
-                        links_to_keep=[self.robot.base_link_name],
+                        # links_to_keep=[self.robot.base_link_name],
                         convexify=True,
                     ),
-                    visualize_contact=True,
+                    visualize_contact=False,
                     p_gain=self.robot.p_gains,
                     d_gain=self.robot.d_gains,
                     armature=self.robot.armature,
                 ),
             ],
-            "sensors": [
+            sensors=[
                 SensorConfig(
                     entity_name="robot",
-                    link_name=self.robot.base_link_name,
+                    link_name="pelvis",
                     sensor_class=gs.sensors.IMU,
                 ),
                 SensorConfig(
@@ -425,32 +437,30 @@ class G1FlatGenesisConfig:
                     sensor_class=gs.sensors.ContactForce,
                 )
             ],
-            "sim_options": gs.options.SimOptions(dt=0.005, substeps=1),
-            "rigid_options": gs.options.RigidOptions(
+            sim_options=gs.options.SimOptions(dt=0.005, substeps=1),
+            rigid_options=gs.options.RigidOptions(
                 dt=0.005,
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
                 enable_self_collision=False,
                 enable_joint_limit=True,
             ),
-            "robot_cfg": self.robot
-        }
+            robot_cfg=self.robot,
+        )
 
-    def _build_observation_config(self) -> Dict[str, Any]:
-        actor_obs = self.observations.to_terms() + self.extra_actor_observations
+    def _build_observation_config(self) -> ObservationConfig:
+        actor_obs = self.observations.to_terms()
         critic_obs = self.observations.to_critic_terms() + self.extra_critic_observations
-        return {
-            "obs_group": {
+        return ObservationConfig(
+            obs_group={
                 "actor": actor_obs,
                 "critic": critic_obs,
             },
-        }
+        )
 
-    def _build_reward_config(self) -> Dict[str, Any]:
+    def _build_reward_config(self) -> RewardConfig:
         reward_terms = self._mjlab_rewards()
-        return {
-            "reward_terms": reward_terms,
-        }
+        return RewardConfig(reward_terms=reward_terms)
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(
@@ -467,43 +477,43 @@ class G1FlatGenesisConfig:
             rel_heading_envs=0.3,
         )
 
-    def _build_curriculum_config(self) -> Dict[str, Any]:
-        return {
-            "enable": False,
-            "initial_level": 0,
-            "max_level": 3,
-            "success_threshold": 0.8,
-            "min_steps_per_level": 50000,
-            "eval_window_size": 2,
-            "curriculum_components": {},
-            "criterion": {"tracking_lin_vel_xy": -100, "mean_return": -100},
-        }
+    def _build_curriculum_config(self) -> CurriculumConfig:
+        return CurriculumConfig(
+            enable=False,
+            initial_level=0,
+            max_level=3,
+            success_threshold=0.8,
+            min_steps_per_level=50000,
+            eval_window_size=2,
+            curriculum_components={},
+            criterion={"tracking_lin_vel_xy": -100, "mean_return": -100},
+        )
 
-    def _build_algorithm_config(self) -> Dict[str, Any]:
-        return {
-            "algorithm_name": self.algorithm_name,
-            "clip_param": 0.2,
-            "obs_normalization": True,
-            "use_early_stop": False,
-            "desired_kl": 0.01,
-            "entropy_coef": 0.01,
-            "gamma": 0.99,
-            "lam": 0.95,
-            "actor_lr": 1e-3,
-            "critic_lr": 1e-3,
-            "estimator_learning_rate": 5e-4,
-            "max_grad_norm": 1.0,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-            "schedule": "adaptive",
-            "use_clipped_value_loss": True,
-            "value_loss_coef": 1.0,
-            "use_reward_scaling": False,
-        }
+    def _build_algorithm_config(self) -> PPOConfig:
+        return PPOConfig(
+            algorithm_name=self.algorithm_name,
+            clip_param=0.2,
+            obs_normalization=True,
+            use_early_stop=False,
+            desired_kl=0.01,
+            entropy_coef=0.01,
+            gamma=0.99,
+            lam=0.95,
+            actor_lr=1e-3,
+            critic_lr=1e-3,
+            estimator_learning_rate=5e-4,
+            max_grad_norm=1.0,
+            num_learning_epochs=5,
+            num_mini_batches=4,
+            schedule="adaptive",
+            use_clipped_value_loss=True,
+            value_loss_coef=1.0,
+            use_reward_scaling=False,
+        )
 
-    def _build_nn_config(self) -> Dict[str, Any]:
-        return {
-            "policy": {
+    def _build_nn_config(self) -> NNConfig:
+        return NNConfig(
+            policy={
                 "actor_class_name": self.actor_class_name,
                 "actor_kwargs": {
                     "activation": "tanh",
@@ -519,28 +529,22 @@ class G1FlatGenesisConfig:
                 "distribution_type": "gaussian",
                 "std_type": "state_independent",
             },
-            "state_estimator": {
+            state_estimator={
                 "activation": "relu",
                 "hidden_dims": [256, 128, 64],
             },
-        }
+        )
 
-    def _build_runner_config(self) -> Dict[str, Any]:
-        return {
-            "checkpoint": -1,
-            "experiment_name": "GoAnywhere",
-            "load_run": None,
-            "log_interval": 1,
-            "max_iterations": self.max_iterations,
-            "init_at_random_ep_len": False,
-            "state_estimator_class_name": "StateEstimator",
-            "record_interval": -1,
-            "resume": False,
-            "resume_path": None,
-            "run_name": self.run_name,
-            "logger": "wandb",
-            "wandb_project": "RLArchitecture",
-            "runner_class_name": "runner_class_name",
-            "save_interval": 1000,
-            "save_path": "auto",
-        }
+    def _build_runner_config(self) -> RunnerConfig:
+        return RunnerConfig(
+            checkpoint=-1,
+            log_interval=1,
+            max_iterations=self.max_iterations,
+            init_at_random_ep_len=False,
+            resume=False,
+            resume_path=None,
+            run_name=self.run_name,
+            logger="wandb",
+            wandb_project="RLArchitecture",
+            save_interval=1000,
+        )

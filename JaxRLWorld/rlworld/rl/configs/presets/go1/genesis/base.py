@@ -4,8 +4,15 @@ from typing import Dict, Any, List
 import math
 
 import genesis as gs
+from rlworld.rl.configs.algorithms.ppo import PPOConfig
+from rlworld.rl.configs.common_config_classes import (
+    RewardConfig, CommandConfig, EventConfig, NNConfig, RunnerConfig, VisualizationConfig,
+)
 from rlworld.rl.configs.components.observations.genesis import LocomotionObservations
 from rlworld.rl.configs.events import EventTermConfig
+from rlworld.rl.configs.genesis_config_classes import (
+    EnvConfig, SceneConfig, ObservationConfig, ActionConfig, CurriculumConfig,
+)
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.go1 import Go1MjlabConfig
@@ -80,59 +87,58 @@ class Go1FlatGenesisConfig:
                 prev_actions_scale=1.0,
             )
 
+    def build(self) -> "GenesisConfigsForRun":
+        """Build the complete configuration as a typed GenesisConfigsForRun."""
+        from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
+
+        return GenesisConfigsForRun(
+            env=self._build_env_config(),
+            scene=self._build_scene_config(),
+            visualization=VisualizationConfig(show_viewer=False),
+            observation=self._build_observation_config(),
+            action=self._build_action_config(),
+            reward=self._build_reward_config(),
+            command=self._build_command_config(),
+            event=self._build_event_config(),
+            curriculum=self._build_curriculum_config(),
+            algorithm=self._build_algorithm_config(),
+            nn=self._build_nn_config(),
+            runner=self._build_runner_config(),
+        )
+
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Generate the complete configuration dictionary.
+        """Backward-compatible dict output."""
+        return self.build().recursive_to_dict()
 
-        Returns:
-            Complete configuration dictionary compatible with ConfigsForRun
-        """
-        return {
-            "env": self._build_env_config(),
-            "action": self._build_action_config(),
-            "scene": self._build_scene_config(),
-            "observation": self._build_observation_config(),
-            "reward": self._build_reward_config(),
-            "command": self._build_command_config(),
-            "visualization": {},
-            "event": self._build_event_config(),
-            "curriculum": self._build_curriculum_config(),
-            "algorithm": self._build_algorithm_config(),
-            "nn": self._build_nn_config(),
-            "runner": self._build_runner_config(),
-        }
-
-    def _build_env_config(self) -> Dict[str, Any]:
-        return {
-            "env_name": "LocomotionEnv",
-            "num_envs": self.num_envs,
-            "seed": self.seed,
-            "decimation": self.decimation,
-            "episode_length_s": self.episode_length_s,
-            "viewer_camera_lookat": [0.0, 0.0, 2.5],
-            "viewer_camera_pos": [3.0, 3.0, 5.0],
-            "termination_criteria": [
+    def _build_env_config(self) -> EnvConfig:
+        return EnvConfig(
+            env_name="LocomotionEnv",
+            num_envs=self.num_envs,
+            seed=self.seed,
+            decimation=self.decimation,
+            episode_length_s=self.episode_length_s,
+            termination_criteria=[
                 TerminationTermConfig(
                     tf.roll_pitch_violation,
                     {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
                 ),
                 TerminationTermConfig(max_episode_exceed),
             ],
-        }
+        )
 
-    def _build_action_config(self) -> Dict[str, Any]:
-        return {
-            "actuated_dof_names": self.robot.actuated_dof_patterns,
-            "action_scale": 0.4,
-            "simulate_action_latency": False,
-            "clip_actions": (-100.0, 100.0),
-            "offset": self.robot.get_action_offset(),
-        }
+    def _build_action_config(self) -> ActionConfig:
+        return ActionConfig(
+            actuated_dof_names=self.robot.actuated_dof_patterns,
+            action_scale=0.4,
+            simulate_action_latency=False,
+            clip_actions=(-100.0, 100.0),
+            offset=self.robot.get_action_offset(),
+        )
 
-    def _build_scene_config(self) -> Dict[str, Any]:
-        return {
-            "env_spacing": (20.0, 20.0),
-            "entities": [
+    def _build_scene_config(self) -> SceneConfig:
+        return SceneConfig(
+            env_spacing=(20.0, 20.0),
+            entities=[
                 EntityConfig(
                     entity_name="base_entity",
                     morph=gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
@@ -149,7 +155,7 @@ class Go1FlatGenesisConfig:
                     d_gain=self.robot.d_gains,
                 ),
             ],
-            "sensors": [
+            sensors=[
                 SensorConfig(entity_name="robot", link_name="base", sensor_class=gs.sensors.IMU),
                 SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.Contact),
                 SensorConfig(entity_name="robot", link_name="FL_foot", sensor_class=gs.sensors.Contact),
@@ -160,26 +166,26 @@ class Go1FlatGenesisConfig:
                 SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.ContactForce),
                 SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.ContactForce),
             ],
-            "sim_options": gs.options.SimOptions(dt=self.sim_dt, substeps=1),
-            "rigid_options": gs.options.RigidOptions(
+            sim_options=gs.options.SimOptions(dt=self.sim_dt, substeps=1),
+            rigid_options=gs.options.RigidOptions(
                 dt=self.sim_dt,
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
                 enable_self_collision=True,
                 enable_joint_limit=True,
             ),
-            "robot_cfg": self.robot
-        }
+            robot_cfg=self.robot,
+        )
 
-    def _build_observation_config(self) -> Dict[str, Any]:
-        return {
-            "obs_group": {
+    def _build_observation_config(self) -> ObservationConfig:
+        return ObservationConfig(
+            obs_group={
                 "actor": self.observations.to_terms(),
                 "critic": self.observations.to_critic_terms(),
             },
-        }
+        )
 
-    def _build_reward_config(self) -> Dict[str, Any]:
+    def _build_reward_config(self) -> RewardConfig:
         reward_terms = [
             # Tracking rewards
             RewardTermConfig(
@@ -297,100 +303,98 @@ class Go1FlatGenesisConfig:
             ),
         ]
 
-        return {"reward_terms": reward_terms}
+        return RewardConfig(reward_terms=reward_terms)
 
-    def _build_command_config(self) -> Dict[str, Any]:
-        return {
-            "resampling_time_s": (4.0, 8.0),
-            "sampler": [
+    def _build_command_config(self) -> CommandConfig:
+        return CommandConfig(
+            resampling_time_s=(4.0, 8.0),
+            sampler=[
                 CommandTermConfig(cf.lin_vel_x, params={"range": self.lin_vel_x_range}),
                 CommandTermConfig(cf.lin_vel_y, params={"range": self.lin_vel_y_range}),
                 CommandTermConfig(cf.ang_vel, params={"range": self.ang_vel_range}),
                 # CommandTermConfig(cf.base_height, params={"range": self.base_height_range}),
             ],
-        }
+        )
 
-    def _build_curriculum_config(self) -> Dict[str, Any]:
-        return {
-            "enable": False,
-            "initial_level": 0,
-            "max_level": 3,
-            "success_threshold": 0.8,
-            "min_steps_per_level": 50000,
-            "eval_window_size": 2,
-            "curriculum_components": {},
-            "criterion": {
+    def _build_curriculum_config(self) -> CurriculumConfig:
+        return CurriculumConfig(
+            enable=False,
+            initial_level=0,
+            max_level=3,
+            success_threshold=0.8,
+            min_steps_per_level=50000,
+            eval_window_size=2,
+            curriculum_components={},
+            criterion={
                 "tracking_lin_vel_xy": -100,
                 "mean_return": -100,
             },
-        }
+        )
 
-    def _build_event_config(self) -> Dict[str, Any]:
-        return {
-            "event_terms": [
-                EventTermConfig(
-                    func=initf.initialize_dof_pos_with_noise,
-                    mode="reset",
-                    params={"position_noise_range": (math.pi / 360, math.pi / 120)},
-                ),
-                EventTermConfig(
-                    func=initf.initialize_pos_quat,
-                    mode="reset",
-                    params={
-                        "base_init_pos": [1.5, 1.5, self.robot.base_init_height],
-                        "base_init_quat": [1.0, 0.0, 0.0, 0.0],
-                    },
-                ),
-                EventTermConfig(
-                    func=initf.randomize_base_mass,
-                    mode="reset",
-                    params={"mass_ratio_range": (0.85, 1.15)},
-                ),
-                EventTermConfig(
-                    func=initf.randomize_friction,
-                    mode="reset",
-                ),
-                # Interval terms (기존)
-                EventTermConfig(
-                    func=ef.apply_external_force_torque,
-                    mode="interval",
-                    interval_range_s=(2.0, 20.0),
-                    params={"force_range": {"x": (-50.0, 50.0), "y": (-50.0, 50.0), "z": (-20.0, 20.0)}},
-                ),
-            ]
-        }
+    def _build_event_config(self) -> EventConfig:
+        return EventConfig(event_terms=[
+            EventTermConfig(
+                func=initf.initialize_dof_pos_with_noise,
+                mode="reset",
+                params={"position_noise_range": (math.pi / 360, math.pi / 120)},
+            ),
+            EventTermConfig(
+                func=initf.initialize_pos_quat,
+                mode="reset",
+                params={
+                    "base_init_pos": [1.5, 1.5, self.robot.base_init_height],
+                    "base_init_quat": [1.0, 0.0, 0.0, 0.0],
+                },
+            ),
+            EventTermConfig(
+                func=initf.randomize_base_mass,
+                mode="reset",
+                params={"mass_ratio_range": (0.85, 1.15)},
+            ),
+            EventTermConfig(
+                func=initf.randomize_friction,
+                mode="reset",
+            ),
+            # Interval terms (기존)
+            EventTermConfig(
+                func=ef.apply_external_force_torque,
+                mode="interval",
+                interval_range_s=(2.0, 20.0),
+                params={"force_range": {"x": (-50.0, 50.0), "y": (-50.0, 50.0), "z": (-20.0, 20.0)}},
+            ),
+        ])
 
-    def _build_algorithm_config(self) -> Dict[str, Any]:
-        return {
-            "algorithm_name": self.algorithm_name,
-            "clip_param": 0.2,
-            "obs_normalization": True,
-            "use_early_stop": False,
-            "desired_kl": 0.01,
-            "entropy_coef": 0.01,
-            "gamma": 0.99,
-            "lam": 0.95,
-            "actor_lr": 1e-3,
-            "critic_lr": 1e-3,
-            "estimator_learning_rate": 5e-4,
-            "use_reward_scaling": False,
-            "max_grad_norm": 0.5,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-            "schedule": "adaptive",
-            "use_clipped_value_loss": True,
-            "value_loss_coef": 1.0,
-            "use_truth_value_for_actor": False,
-            "use_truth_value_for_critic": True,
-            "use_barrier_style": False,
-            "use_sde": True,
-            "sde_sample_freq": 100,
-            "learning_starts": 10_000
-        }
+    def _build_algorithm_config(self) -> PPOConfig:
+        return PPOConfig(
+            algorithm_name=self.algorithm_name,
+            clip_param=0.2,
+            obs_normalization=True,
+            use_early_stop=False,
+            desired_kl=0.01,
+            entropy_coef=0.01,
+            gamma=0.99,
+            lam=0.95,
+            actor_lr=1e-3,
+            critic_lr=1e-3,
+            estimator_learning_rate=5e-4,
+            use_reward_scaling=False,
+            max_grad_norm=0.5,
+            num_learning_epochs=5,
+            num_mini_batches=4,
+            schedule="adaptive",
+            use_clipped_value_loss=True,
+            value_loss_coef=1.0,
+            use_truth_value_for_actor=False,
+            use_truth_value_for_critic=True,
+            use_barrier_style=False,
+            use_sde=True,
+            sde_sample_freq=100,
+            learning_starts=10_000,
+        )
 
-    def _build_nn_config(self) -> Dict[str, Any]:
-        return {
-            "policy": {
+    def _build_nn_config(self) -> NNConfig:
+        return NNConfig(
+            policy={
                 "actor_class_name": self.actor_class_name,
                 "actor_kwargs": {
                     "activation": "elu",
@@ -406,31 +410,31 @@ class Go1FlatGenesisConfig:
                 "distribution_type": "gaussian",
                 "std_type": "state_independent",
             },
-            "state_estimator": {
+            state_estimator={
                 "activation": "relu",
                 "hidden_dims": [256, 128, 64],
             },
-        }
+        )
 
-    def _build_runner_config(self) -> Dict[str, Any]:
-        return {
-            "algorithm_class_name": self.algorithm_name,
-            "checkpoint": -1,
-            "experiment_name": "GoAnywhere",
-            "load_run": None,
-            "log_interval": 1,
-            "max_iterations": self.max_iterations,
-            "init_at_random_ep_len": False,
-            "state_estimator_class_name": "StateEstimator",
-            "low_level_path": None,
-            "high_level_update_freq": 1,
-            "record_interval": -1,
-            "resume": False,
-            "resume_path": None,
-            "run_name": self.run_name,
-            "logger": "wandb",
-            "wandb_project": "RLArchitecture",
-            "runner_class_name": "Go1FlatGenesis",
-            "save_interval": 250,
-            "output_dir": "auto",
-        }
+    def _build_runner_config(self) -> RunnerConfig:
+        return RunnerConfig(
+            algorithm_class_name=self.algorithm_name,
+            checkpoint=-1,
+            experiment_name="GoAnywhere",
+            load_run=None,
+            log_interval=1,
+            max_iterations=self.max_iterations,
+            init_at_random_ep_len=False,
+            state_estimator_class_name="StateEstimator",
+            low_level_path=None,
+            high_level_update_freq=1,
+            record_interval=-1,
+            resume=False,
+            resume_path=None,
+            run_name=self.run_name,
+            logger="wandb",
+            wandb_project="RLArchitecture",
+            runner_class_name="Go1FlatGenesis",
+            save_interval=250,
+            output_dir="auto",
+        )

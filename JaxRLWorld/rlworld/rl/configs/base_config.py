@@ -132,18 +132,18 @@ class BaseConfig:
         return self._pretty_repr(self.recursive_to_dict())
 
     @classmethod
-    def from_dict_with_overrides(cls, config_dict: Dict) -> "GenesisConfigsForRun":
-        """admit command line overrides"""
-        # Base config
+    def from_dict_with_overrides(cls, config_dict: Dict) -> "BaseConfig":
+        """Create from dict, then apply CLI overrides."""
         config = cls.from_dict(config_dict)
+        return config.with_cli_overrides()
 
-        # Parsing and applying overrides
+    def with_cli_overrides(self):
+        """Apply command-line overrides to this config instance."""
         overrides = parse_override_args()
         if overrides:
-            _print_override_changes(overrides, config)
-            config.apply_overrides(**overrides)
-
-        return config
+            _print_override_changes(overrides, self)
+            self.apply_overrides(**overrides)
+        return self
 
     def _pretty_repr(self, obj: Any, indent: int = 4, use_colors: bool = True) -> str:
         """

@@ -6,6 +6,8 @@ import warp as wp
 
 import newton
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
+from rlworld.rl.configs.algorithms.ppo import PPOConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.newton import LocomotionObservations
 from rlworld.rl.configs.components.rewards.newton import (
     TrackingRewards,
@@ -143,23 +145,28 @@ class G1FlatNewtonConfig:
             ObservationTermConfig(state.base_euler, scale=1.0),
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Generate the complete configuration dictionary."""
+    def build(self) -> "NewtonConfigsForRun":
+        """Build the complete configuration as a typed NewtonConfigsForRun."""
+        from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun
         quat = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), wp.pi * 0.5)
 
-        return {
-            "env": self._build_env_config(quat),
-            "scene": self._build_scene_config(quat),
-            "visualization": VisualizationConfig(show_viewer=False, record_video=False),
-            "observation": self._build_observation_config(),
-            "action": self._build_action_config(),
-            "reward": self._build_reward_config(),
-            "command": self._build_command_config(),
-            "event": EventConfig(event_terms=[]),
-            "algorithm": self._build_algorithm_config(),
-            "nn": self._build_nn_config(),
-            "runner": self._build_runner_config(),
-        }
+        return NewtonConfigsForRun(
+            env=self._build_env_config(quat),
+            scene=self._build_scene_config(quat),
+            visualization=VisualizationConfig(show_viewer=False, record_video=False),
+            observation=self._build_observation_config(),
+            action=self._build_action_config(),
+            reward=self._build_reward_config(),
+            command=self._build_command_config(),
+            event=EventConfig(event_terms=[]),
+            algorithm=self._build_algorithm_config(),
+            nn=self._build_nn_config(),
+            runner=self._build_runner_config(),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Backward-compatible dict output."""
+        return self.build().recursive_to_dict()
 
     def _build_env_config(self, quat) -> NewtonEnvConfig:
         return NewtonEnvConfig(
@@ -330,31 +337,31 @@ class G1FlatNewtonConfig:
             ],
         )
 
-    def _build_algorithm_config(self) -> Dict[str, Any]:
-        return {
-            "algorithm_name": self.algorithm_name,
-            "clip_param": 0.2,
-            "use_early_stop": False,
-            "desired_kl": 0.01,
-            "entropy_coef": 0.01,
-            "gamma": 0.97,
-            "lam": 0.9,
-            "actor_lr": 3e-4,
-            "critic_lr": 3e-4,
-            "estimator_learning_rate": 5e-4,
-            "max_grad_norm": 1.0,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-            "schedule": "fixed",
-            "use_clipped_value_loss": False,
-            "value_loss_coef": 1.0,
-            "use_reward_scaling": False,
-            "obs_normalization": True
-        }
+    def _build_algorithm_config(self) -> PPOConfig:
+        return PPOConfig(
+            algorithm_name=self.algorithm_name,
+            clip_param=0.2,
+            use_early_stop=False,
+            desired_kl=0.01,
+            entropy_coef=0.01,
+            gamma=0.97,
+            lam=0.9,
+            actor_lr=3e-4,
+            critic_lr=3e-4,
+            estimator_learning_rate=5e-4,
+            max_grad_norm=1.0,
+            num_learning_epochs=5,
+            num_mini_batches=4,
+            schedule="fixed",
+            use_clipped_value_loss=False,
+            value_loss_coef=1.0,
+            use_reward_scaling=False,
+            obs_normalization=True,
+        )
 
-    def _build_nn_config(self) -> Dict[str, Any]:
-        return {
-            "policy": {
+    def _build_nn_config(self) -> NNConfig:
+        return NNConfig(
+            policy={
                 "actor_class_name": self.actor_class_name,
                 "actor_kwargs": {
                     "activation": "tanh",
@@ -368,30 +375,30 @@ class G1FlatNewtonConfig:
                 "distribution_type": "gaussian",
                 "std_type": "state_independent",
             },
-            "state_estimator": {
+            state_estimator={
                 "activation": "relu",
                 "hidden_dims": [256, 128, 64],
             },
-        }
+        )
 
-    def _build_runner_config(self) -> Dict[str, Any]:
-        return {
-            "checkpoint": -1,
-            "experiment_name": "GoAnywhere",
-            "load_run": None,
-            "log_interval": 1,
-            "max_iterations": self.max_iterations,
-            "init_at_random_ep_len": False,
-            "state_estimator_class_name": "StateEstimator",
-            "low_level_path": None,
-            "high_level_update_freq": 1,
-            "record_interval": -1,
-            "resume": False,
-            "resume_path": None,
-            "run_name": self.run_name,
-            "logger": "wandb",
-            "wandb_project": "RLArchitecture",
-            "runner_class_name": "runner_class_name",
-            "save_interval": 250,
-            "output_dir": "auto",
-        }
+    def _build_runner_config(self) -> RunnerConfig:
+        return RunnerConfig(
+            checkpoint=-1,
+            experiment_name="GoAnywhere",
+            load_run=None,
+            log_interval=1,
+            max_iterations=self.max_iterations,
+            init_at_random_ep_len=False,
+            state_estimator_class_name="StateEstimator",
+            low_level_path=None,
+            high_level_update_freq=1,
+            record_interval=-1,
+            resume=False,
+            resume_path=None,
+            run_name=self.run_name,
+            logger="wandb",
+            wandb_project="RLArchitecture",
+            runner_class_name="runner_class_name",
+            save_interval=250,
+            output_dir="auto",
+        )

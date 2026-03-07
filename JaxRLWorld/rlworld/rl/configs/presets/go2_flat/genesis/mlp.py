@@ -10,4 +10,4 @@ class Go2MLPConfig(Go2FlatGenesisConfig):
 
 
 def get_config():
-    return Go2MLPConfig().to_dict()
+    return Go2MLPConfig().build()

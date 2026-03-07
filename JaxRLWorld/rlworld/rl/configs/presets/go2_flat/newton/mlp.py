@@ -9,4 +9,4 @@ class Go2FlatNewtonMLPConfig(Go2FlatNewtonConfig):
 
 def get_config():
     """Complete configuration for Go2 flat terrain with MLP actor on Newton."""
-    return Go2FlatNewtonMLPConfig().to_dict()
+    return Go2FlatNewtonMLPConfig().build()

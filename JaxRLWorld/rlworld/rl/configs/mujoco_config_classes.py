@@ -61,8 +61,7 @@ class MujocoSceneConfig(BaseConfig):
 class MujocoObservationConfig(BaseConfig):
     """MuJoCo/mjlab observation configuration."""
     obs_group: dict[str, list["ObservationTermConfig"]] = field(default_factory=dict)
-    short_history_len: int = 1
-    max_history_len: int = 1
+    enable_noise: bool = True
 
 
 @dataclass

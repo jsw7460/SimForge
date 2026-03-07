@@ -49,6 +49,7 @@ class NewtonSceneConfig(BaseConfig):
 class NewtonObservationConfig(BaseConfig):
     """Newton observation configuration."""
     obs_group: dict[str, list["ObservationTermConfig"]] = field(default_factory=dict)
+    enable_noise: bool = True
 
 
 @dataclass

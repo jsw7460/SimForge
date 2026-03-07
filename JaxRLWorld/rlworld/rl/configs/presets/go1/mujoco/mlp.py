@@ -10,4 +10,4 @@ class Go1MLPConfig(Go1FlatMujocoConfig):
 
 
 def get_config():
-    return Go1MLPConfig().to_dict()
+    return Go1MLPConfig().build()

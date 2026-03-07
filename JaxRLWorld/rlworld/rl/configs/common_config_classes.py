@@ -63,22 +63,14 @@ class NNConfig(BaseConfig):
 class RunnerConfig(BaseConfig):
     """Runner configuration (shared)."""
     checkpoint: int = -1
-    experiment_name: str = "GoAnywhere"
-    load_run: str = None
     log_interval: int = 1
     max_iterations: int = 99999
     init_at_random_ep_len: bool = False
-    policy_class_name: str = "PPOActorCritic"
-    state_estimator_class_name: str = "StateEstimator"
-    low_level_path: str = None
-    high_level_update_freq: int = 1
-    record_interval: int = -1
     resume: bool = False
     resume_path: Optional[str] = None
     run_name: str = ""
     logger: str = "wandb"
     wandb_project: str = "RLArchitecture"
-    runner_class_name: str = "runner_class_name"
     save_interval: int = 1000
     output_dir: str = "auto"
     upload_checkpoint: bool = False

@@ -51,6 +51,7 @@ class SceneConfig(BaseConfig):
 class ObservationConfig(BaseConfig):
     """Genesis observation configuration."""
     obs_group: dict[str, list[ObservationTermConfig]] = None
+    enable_noise: bool = True
 
 
 @dataclass
