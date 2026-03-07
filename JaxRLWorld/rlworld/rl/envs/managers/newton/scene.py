@@ -420,7 +420,7 @@ class NewtonSceneManager(BaseManager):
 
         # Create collision pipeline
         self.collision_pipeline = newton.CollisionPipeline(self.model)
-        self.contacts = self.collision_pipeline.contacts()        # Before
+        self.contacts = self.collision_pipeline.contacts()
         # self.contacts = self.model.contacts()
 
         # Update entity tracking with replicated info
@@ -569,9 +569,13 @@ class NewtonSceneManager(BaseManager):
         self._update_sensors()
 
     def _step(self):
-        self.contacts = self.model.collide(self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline)
 
         for _ in range(self.config.substeps):
+            self.contacts = self.model.collide(
+                self.state_0,
+                contacts=self.contacts,
+                collision_pipeline=self.collision_pipeline
+            )
             self.state_0.clear_forces()
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self._sim_dt)
 

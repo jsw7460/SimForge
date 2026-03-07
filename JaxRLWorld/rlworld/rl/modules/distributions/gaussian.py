@@ -79,10 +79,10 @@ class SquashedGaussianDistribution(eqx.Module):
     """
     mean: jax.Array
     std: jax.Array
-    _eps: float = eqx.field(static=True, default=1e-6)
+    _eps: float = eqx.field(static=True, default=1e-4)
     is_squashed: bool = eqx.field(static=True, default=True)
 
-    def __init__(self, mean: jax.Array, std: jax.Array, eps: float = 1e-6):
+    def __init__(self, mean: jax.Array, std: jax.Array, eps: float = 1e-4):
         self.mean = mean
         self.std = std
         self._eps = eps
@@ -91,11 +91,14 @@ class SquashedGaussianDistribution(eqx.Module):
     def stddev(self) -> jax.Array:
         return self.std
 
+    def sample_raw(self, key: jax.Array) -> jax.Array:
+        """Sample pre-tanh (raw) action. Use for storage in PPO."""
+        noise = jax.random.normal(key, shape=self.mean.shape)
+        return self.mean + self.std * noise
+
     def sample(self, key: jax.Array) -> jax.Array:
         """Sample and squash through tanh."""
-        noise = jax.random.normal(key, shape=self.mean.shape)
-        pre_tanh = self.mean + self.std * noise
-        return jnp.tanh(pre_tanh)
+        return jnp.tanh(self.sample_raw(key))
 
     def rsample_with_log_prob(self, key: jax.Array) -> Tuple[jax.Array, jax.Array]:
         """
@@ -112,12 +115,20 @@ class SquashedGaussianDistribution(eqx.Module):
 
         return action, log_prob
 
+    def log_prob_raw(self, raw_actions: jax.Array) -> jax.Array:
+        """Compute log prob from pre-tanh (raw) actions. No arctanh needed.
+
+        This is the numerically stable path used during PPO updates,
+        matching Brax's approach of always operating on pre-tanh actions.
+        """
+        return self._log_prob_from_pre_tanh(raw_actions)
+
     def log_prob(self, actions: jax.Array) -> jax.Array:
         """
         Compute log probability of squashed actions.
 
-        Note: This requires inverting tanh, which can be numerically unstable
-        for actions near ±1. Use rsample_with_log_prob when possible.
+        WARNING: This uses arctanh inversion which is numerically unstable
+        near ±1. Prefer log_prob_raw() with pre-tanh actions when possible.
         """
         # Inverse tanh (atanh)
         actions_clipped = jnp.clip(actions, -1 + self._eps, 1 - self._eps)

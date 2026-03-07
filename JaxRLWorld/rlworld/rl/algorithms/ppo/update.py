@@ -52,17 +52,32 @@ def forward_policy_and_value(
     actor_obs: jax.Array,
     critic_obs: jax.Array,
     key: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict]:
-    """Combined forward pass for actor and critic (stochastic)."""
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict]:
+    """Combined forward pass for actor and critic (stochastic).
+
+    Returns:
+        env_actions: Actions to send to environment (squashed if applicable)
+        raw_actions: Actions to store for PPO update (pre-tanh if squashed)
+        mean, std, log_prob, values, aux
+    """
     key, subkey = jax.random.split(key)
     dist, actor_aux = model.get_distribution(actor_obs, key=subkey)
-    actions = dist.sample(key)
-    log_prob = dist.log_prob(actions)
+
+    if dist.is_squashed:
+        # Brax-style: store raw (pre-tanh) actions, use for log_prob
+        raw_actions = dist.sample_raw(key)
+        env_actions = jnp.tanh(raw_actions)
+        log_prob = dist.log_prob_raw(raw_actions)
+    else:
+        raw_actions = dist.sample(key)
+        env_actions = raw_actions
+        log_prob = dist.log_prob(raw_actions)
+
     values, critic_aux = model.evaluate_value(critic_obs)
     values = values.squeeze(-1)
 
     aux = {**actor_aux, **critic_aux}
-    return actions, dist.mean, dist.std, log_prob, values, aux
+    return env_actions, raw_actions, dist.mean, dist.std, log_prob, values, aux
 
 
 @eqx.filter_jit
@@ -71,16 +86,24 @@ def forward_policy_and_value_deterministic(
     actor_obs: jax.Array,
     critic_obs: jax.Array,
     key: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict]:
     """Combined forward pass for actor and critic (deterministic)."""
     dist, actor_aux = model.get_distribution(actor_obs, key=key)
-    actions = dist.mean
-    log_prob = dist.log_prob(actions)
+
+    if dist.is_squashed:
+        raw_actions = dist.mean  # pre-tanh mean
+        env_actions = jnp.tanh(raw_actions)
+        log_prob = dist.log_prob_raw(raw_actions)
+    else:
+        raw_actions = dist.mean
+        env_actions = raw_actions
+        log_prob = dist.log_prob(raw_actions)
+
     values, critic_aux = model.evaluate_value(critic_obs)
     values = values.squeeze(-1)
 
     aux = {**actor_aux, **critic_aux}
-    return actions, dist.mean, dist.std, log_prob, values, aux
+    return env_actions, raw_actions, dist.mean, dist.std, log_prob, values, aux
 
 
 @eqx.filter_jit

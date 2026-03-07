@@ -37,6 +37,7 @@ class StdNetwork(eqx.Module):
     """Neural network for learning state-dependent action standard deviations."""
     linear: eqx.nn.Linear
     min_std: float = eqx.field(static=True)
+    max_std: float = eqx.field(static=True)
 
     def __init__(
         self,
@@ -44,10 +45,12 @@ class StdNetwork(eqx.Module):
         num_outputs: int,
         init_std: float = 1.0,
         min_std: float = 0.05,
+        max_std: float = 2.0,
         *,
         key: jax.Array,
     ):
         self.min_std = min_std
+        self.max_std = max_std
         self.linear = eqx.nn.Linear(num_inputs, num_outputs, key=key)
 
         target_bias = jnp.log(jnp.exp(init_std - min_std) - 1)
@@ -64,7 +67,7 @@ class StdNetwork(eqx.Module):
         )
 
     def _forward_single(self, x: jax.Array) -> jax.Array:
-        return jax.nn.softplus(self.linear(x)) + self.min_std
+        return jnp.clip(jax.nn.softplus(self.linear(x)) + self.min_std, max=self.max_std)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         if x.ndim == 1:
@@ -315,9 +318,16 @@ class PPOActorCritic(BaseActorCritic):
         *,
         key: jax.Array | None = None,
     ) -> tuple[jax.Array, jax.Array, dict]:
-        """Evaluate log probability and entropy for given actions."""
+        """Evaluate log probability and entropy for given actions.
+
+        For squashed distributions, actions should be raw (pre-tanh) values.
+        This avoids numerically unstable arctanh inversion (matches Brax).
+        """
         dist, aux = self.get_distribution(actor_obs, key=key)
-        log_prob = dist.log_prob(actions)
+        if dist.is_squashed:
+            log_prob = dist.log_prob_raw(actions)
+        else:
+            log_prob = dist.log_prob(actions)
         entropy = dist.entropy()
         return log_prob, entropy, aux
 

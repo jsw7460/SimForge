@@ -163,7 +163,7 @@ class PPO(OnPolicyAlgorithm):
         self.desired_kl = desired_kl
         self.use_reward_scaling = use_reward_scaling
         self.use_early_stop = use_early_stop
-        self.optimizer_class = optimizer_class or optax.adamw
+        self.optimizer_class = optimizer_class or optax.adam
 
         # Check if model has normalizers enabled
         self.obs_normalization = actor_critic.actor_obs_normalizer is not None
@@ -254,7 +254,11 @@ class PPO(OnPolicyAlgorithm):
             )
 
     def act(self, obs: ActInput, deterministic: bool = False) -> jax.Array:
-        """Select action given observation."""
+        """Select action given observation.
+
+        Returns env_actions (squashed if applicable) for environment stepping.
+        Stores raw_actions (pre-tanh if squashed) in transition for PPO update.
+        """
         model = self.train_state.model
 
         key = self.train_state.key
@@ -262,22 +266,24 @@ class PPO(OnPolicyAlgorithm):
         self.train_state = self.train_state._replace(key=key)
 
         if deterministic:
-            actions, mean, std, log_prob, values, _ = forward_policy_and_value_deterministic(
+            env_actions, raw_actions, mean, std, log_prob, values, _ = forward_policy_and_value_deterministic(
                 model, obs.actor_obs, obs.critic_obs, subkey
             )
         else:
-            actions, mean, std, log_prob, values, _ = forward_policy_and_value(
+            env_actions, raw_actions, mean, std, log_prob, values, _ = forward_policy_and_value(
                 model, obs.actor_obs, obs.critic_obs, subkey
             )
 
-        self.transition.actions = actions
+        # Store raw (pre-tanh) actions for numerically stable PPO update
+        self.transition.actions = raw_actions
         self.transition.values = values
         self.transition.actions_log_prob = log_prob
         self.transition.action_mean = mean
         self.transition.action_sigma = std
         self.transition.actor_observations = obs.actor_obs
         self.transition.critic_observations = obs.critic_obs
-        return actions
+        # Return squashed actions for environment
+        return env_actions
 
     def process_env_step(
         self,
@@ -288,26 +294,14 @@ class PPO(OnPolicyAlgorithm):
         next_actor_obs: jax.Array = None,
         next_critic_obs: jax.Array = None,
     ) -> None:
-        """Process environment step and store transition."""
-        dones = terminated | truncated
+        """Process environment step and store transition.
 
-        # Update observation normalizers
-        if self.obs_normalization:
-            if next_actor_obs is not None and next_critic_obs is not None:
-                new_model = _update_normalizers(
-                    self.train_state.model,
-                    next_actor_obs,
-                    next_critic_obs,
-                )
-            elif self.transition.actor_observations is not None:
-                new_model = _update_normalizers(
-                    self.train_state.model,
-                    self.transition.actor_observations,
-                    self.transition.critic_observations,
-                )
-            else:
-                new_model = self.train_state.model
-            self.train_state = self.train_state._replace(model=new_model)
+        NOTE: Observation normalizer is NOT updated here. It is updated
+        once per iteration in update() after the gradient step, to ensure
+        consistency between collection-time and update-time normalization
+        (matching Brax PPO behavior).
+        """
+        dones = terminated | truncated
 
         # Reward scaling
         if self._reward_scaler is not None:
@@ -437,6 +431,20 @@ class PPO(OnPolicyAlgorithm):
         # Adaptive learning rate based on KL divergence
         if self.schedule == "adaptive" and self.desired_kl is not None:
             self._adaptive_learning_rate(metrics.kl.approx_kl)
+
+        # Update observation normalizers with all collected observations.
+        # Done AFTER gradient update so that rollout, returns, and loss
+        # computation all used the same (frozen) normalizer.
+        if self.obs_normalization and self.storage._storage is not None:
+            all_actor_obs = self.storage._storage["actor_obs"]
+            all_critic_obs = self.storage._storage["critic_obs"]
+            # Reshape [num_steps, num_envs, dim] → [num_steps * num_envs, dim]
+            flat_actor = all_actor_obs.reshape(-1, all_actor_obs.shape[-1])
+            flat_critic = all_critic_obs.reshape(-1, all_critic_obs.shape[-1])
+            new_model = _update_normalizers(
+                self.train_state.model, flat_actor, flat_critic,
+            )
+            self.train_state = self.train_state._replace(model=new_model)
 
         self.storage.clear()
 
