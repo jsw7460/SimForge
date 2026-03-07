@@ -1,15 +1,10 @@
-from rlworld.rl.configs import MujocoConfigsForRun
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.g1_29dof.mujoco.mlp import get_config
 from rlworld.rl.configs.algorithms import FastTD3Config
 
 
 def main():
-    # Get complete config from preset
-    configs_dict = get_config()
-
-    # Create configs and runner
-    cfgs_for_run = MujocoConfigsForRun.from_dict_with_overrides(configs_dict)
+    cfgs_for_run = get_config().with_cli_overrides()
     cfgs_for_run.env.num_envs = 1024 * 2
     fasttd3_config = FastTD3Config(
         batch_size=32768 * 2,

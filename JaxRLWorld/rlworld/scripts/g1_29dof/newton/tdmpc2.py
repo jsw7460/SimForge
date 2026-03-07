@@ -1,15 +1,10 @@
-from rlworld.rl.configs import NewtonConfigsForRun
 from rlworld.rl.configs.algorithms import TDMPC2Config
 from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 
 
 def main():
-    # Get complete config from preset
-    configs_dict = get_config()
-
-    # Create configs and runner
-    cfgs_for_run = NewtonConfigsForRun.from_dict_with_overrides(configs_dict)
+    cfgs_for_run = get_config().with_cli_overrides()
     tdmpc2_config = TDMPC2Config(
         vmin=-5.0,
         vmax=5.0,

@@ -9,7 +9,6 @@ import genesis.utils.terrain
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.configs import NewtonConfigsForRun
 from rlworld.rl.configs.algorithms import TDMPC2Config
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.go2_flat.newton.mlp import get_config
@@ -17,7 +16,7 @@ from rlworld.rl.configs.presets.go2_flat.newton.mlp import get_config
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    cfgs_for_run = get_config().with_cli_overrides()
 
     tdmpc2_config = TDMPC2Config(
         vmin=-5.0,
@@ -32,9 +31,6 @@ def main():
         batch_size=10000,
         learning_starts=5000
     )
-
-    # Create configs and runner
-    cfgs_for_run = NewtonConfigsForRun.from_dict(configs_dict)
     cfgs_for_run.env.num_envs = 1024
     cfgs_for_run.runner.max_iterations = 100000
     cfgs_for_run.action.clip_actions = "joint_limit"

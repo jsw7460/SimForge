@@ -10,15 +10,12 @@ genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs.algorithms import FastTD3Config
-from rlworld.rl.configs import NewtonConfigsForRun
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.go1.newton.mlp import get_config
 
 
 def main():
-    configs_dict = get_config()
-
-    cfgs_for_run = NewtonConfigsForRun.from_dict_with_overrides(configs_dict)
+    cfgs_for_run = get_config().with_cli_overrides()
 
     scale_param = 1.0
     cfgs_for_run.action.action_scale = cfgs_for_run.action.action_scale  / scale_param

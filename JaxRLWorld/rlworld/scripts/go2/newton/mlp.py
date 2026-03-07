@@ -9,17 +9,12 @@ import genesis.utils.terrain
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.configs import NewtonConfigsForRun
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.go2_flat.newton.mlp import get_config
 
 
 def main():
-    # Get complete config from preset
-    configs_dict = get_config()
-
-    # Create configs and runner
-    cfgs_for_run = NewtonConfigsForRun.from_dict(configs_dict)
+    cfgs_for_run = get_config()
     runner = BaseRunner.create_with_env(cfgs_for_run)
 
     # Start training

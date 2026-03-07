@@ -9,7 +9,6 @@ import genesis.utils.terrain
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.configs import NewtonConfigsForRun
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.g1_12dof.newton.mlp import get_config
 
@@ -17,11 +16,7 @@ large = [512, 256, 256]
 
 
 def main():
-    # Get complete config from preset
-    configs_dict = get_config()
-
-    # Create configs and runner
-    cfgs_for_run = NewtonConfigsForRun.from_dict_with_overrides(configs_dict)
+    cfgs_for_run = get_config().with_cli_overrides()
     cfgs_for_run.nn.policy["actor_kwargs"].update({
         "hidden_dims": large
     })

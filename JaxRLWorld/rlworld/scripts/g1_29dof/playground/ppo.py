@@ -19,6 +19,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
+import optax
 import torch
 
 from mujoco_playground import registry
@@ -32,34 +33,34 @@ from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 # ===================== Config =====================
 
 ENV_NAME = "G1JoystickFlatTerrain"
-NUM_ENVS = 4096
+NUM_ENVS = 8192
 NUM_EVAL_ENVS = 1024
 SEED = 1
 DEVICE_RANK = 0
 
 # PPO hyperparameters
-NUM_STEPS_PER_ENV = 24
-MAX_ITERATIONS = 3000
-GAMMA = 0.99
+NUM_STEPS_PER_ENV = 20
+MAX_ITERATIONS = 15000
+GAMMA = 0.97
 LAM = 0.95
 CLIP_PARAM = 0.2
-ACTOR_LR = 1e-3
-CRITIC_LR = 1e-3
-NUM_LEARNING_EPOCHS = 8
-NUM_MINI_BATCHES = 4
-ENTROPY_COEF = 0.001
+ACTOR_LR = 3e-4
+CRITIC_LR = 3e-4
+NUM_LEARNING_EPOCHS = 4
+NUM_MINI_BATCHES = 32
+ENTROPY_COEF = 0.005
 VALUE_LOSS_COEF = 1.0
 MAX_GRAD_NORM = 1.0
 SCHEDULE = "fixed"
-DESIRED_KL = None
-USE_CLIPPED_VALUE_LOSS = False
+DESIRED_KL = 0.01
+USE_CLIPPED_VALUE_LOSS = True
 USE_REWARD_SCALING = False
 OBS_NORMALIZATION = True
 
 # Network
 ACTOR_HIDDEN = [512, 256, 128]
 CRITIC_HIDDEN = [512, 256, 128]
-INIT_NOISE_STD = 1.0
+INIT_NOISE_STD = 0.5
 
 EVAL_INTERVAL = 100
 USE_WANDB = True
@@ -168,18 +169,19 @@ def main():
         num_actions=n_act,
         actor_class_name="MLPActor",
         init_noise_std=INIT_NOISE_STD,
-        std_type="state_independent",
-        distribution_type="gaussian",
+        std_type="state_dependent",
+        distribution_type="squashed_gaussian",
         obs_normalization=OBS_NORMALIZATION,
         key=model_key,
         actor_kwargs={
             "hidden_dims": ACTOR_HIDDEN,
-            "activation": "tanh",
+            "activation": "elu",
             "ortho_init": True,
+            "output_gain": 0.01,
         },
         critic_kwargs={
             "hidden_dims": CRITIC_HIDDEN,
-            "activation": "tanh",
+            "activation": "elu",
             "ortho_init": True,
         },
     )
@@ -201,6 +203,7 @@ def main():
         desired_kl=DESIRED_KL,
         use_reward_scaling=USE_REWARD_SCALING,
         use_early_stop=False,
+        optimizer_class=optax.adam,
         key=key,
     )
 
@@ -275,9 +278,10 @@ def main():
         return frames
 
     # ===================== Training Loop =====================
-    obs = train_env.reset()  # torch tensor
+    obs_td = train_env.reset()  # TensorDict
+    obs = obs_td["state"]
     if asymmetric:
-        critic_obs = torch.zeros(NUM_ENVS, n_critic_obs, device=device)
+        critic_obs = obs_td["privileged_state"]
 
     total_timesteps = 0
     start_time = time.time()
@@ -295,30 +299,18 @@ def main():
 
             # Step env
             actions_torch = jax_to_torch(actions, device)
-            next_obs, rewards, dones, infos = train_env.step(actions_torch.float())
-            truncations = infos["time_outs"]
+            next_obs_td, rewards, dones, _infos = train_env.step(actions_torch.float())
 
+            next_obs = next_obs_td["state"]
             if asymmetric:
-                next_critic_obs = infos["observations"]["critic"]
+                next_critic_obs = next_obs_td["privileged_state"]
 
-            # Build final_observation for timeout bootstrapping
+            # Official wrapper doesn't provide terminal obs on truncation,
+            # so disable truncation bootstrapping (treat all dones as termination).
+            # This matches Brax PPO behavior which zeros out advantage at truncation.
             dones_bool = dones.bool()
-            trunc_bool = truncations.bool()
-            terminated_jax = jnp.asarray((dones_bool & ~trunc_bool).cpu().numpy())
-            truncated_jax = jnp.asarray(trunc_bool.cpu().numpy())
-
-            # For timeout bootstrapping, PPO needs final_observation
-            ppo_infos = {}
-            if trunc_bool.any():
-                raw_obs = infos["observations"]["raw"]["obs"]
-                if asymmetric:
-                    raw_critic = infos["observations"]["raw"]["critic_obs"]
-                else:
-                    raw_critic = raw_obs
-                ppo_infos["final_observation"] = {
-                    "actor": torch_to_jax(raw_obs),
-                    "critic": torch_to_jax(raw_critic),
-                }
+            terminated_jax = jnp.asarray(dones_bool.cpu().numpy())
+            truncated_jax = jnp.zeros_like(terminated_jax)
 
             rewards_jax = torch_to_jax(rewards)
             next_obs_jax = torch_to_jax(next_obs)
@@ -331,14 +323,14 @@ def main():
                 rewards=rewards_jax,
                 terminated=terminated_jax,
                 truncated=truncated_jax,
-                infos=ppo_infos,
+                infos={},
                 next_actor_obs=next_obs_jax,
                 next_critic_obs=next_critic_obs_jax,
             )
 
-            obs = next_obs
+            obs = next_obs  # plain tensor (state)
             if asymmetric:
-                critic_obs = next_critic_obs
+                critic_obs = next_critic_obs  # plain tensor (privileged_state)
             total_timesteps += NUM_ENVS
 
         # ---- Update phase ----
