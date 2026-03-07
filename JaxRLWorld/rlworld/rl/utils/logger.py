@@ -40,6 +40,7 @@ class ConsoleWriter:
         mode: str,
         width: int = 100,
         print_reward_stats: bool = True,
+        last_eval_stats: Optional[Dict] = None,
     ):
         """Write formatted metrics to console."""
         log_string = []
@@ -75,6 +76,10 @@ class ConsoleWriter:
         # Reward statistics
         if print_reward_stats and "reward_stats" in data:
             log_string.extend(self._format_reward_stats(data))
+
+        # Persistent eval stats section
+        if last_eval_stats is not None:
+            log_string.extend(self._format_eval_stats(last_eval_stats))
 
         # Summary (training only)
         if mode == "train":
@@ -244,6 +249,56 @@ class ConsoleWriter:
                 segments.append(segment)
 
             lines.append("  " + "   ".join(segments))
+
+        return lines
+
+    def _format_eval_stats(self, eval_stats: Dict) -> List[str]:
+        """Format persistent eval stats section."""
+        eval_iter = eval_stats.get("eval/iteration", "?")
+        lines = [
+            "",
+            f"{Fore.MAGENTA}🎯 Eval (iter {eval_iter}):{Style.RESET_ALL}",
+        ]
+
+        mean_ret = eval_stats.get("eval/mean_return", 0.0)
+        std_ret = eval_stats.get("eval/std_return", 0.0)
+        min_ret = eval_stats.get("eval/min_return", 0.0)
+        max_ret = eval_stats.get("eval/max_return", 0.0)
+        mean_len = eval_stats.get("eval/mean_episode_length", 0.0)
+        n_eps = eval_stats.get("eval/num_episodes", 0)
+
+        color = Fore.GREEN if mean_ret >= 0 else Fore.RED
+        lines.append(
+            f"  {Fore.WHITE}Return{Style.RESET_ALL}".ljust(self.pad + 9) +
+            f"{color}{mean_ret:.2f}{Style.RESET_ALL} ± {std_ret:.2f}  "
+            f"[{min_ret:.2f}, {max_ret:.2f}]"
+        )
+        lines.append(
+            f"  {Fore.WHITE}Episode Length{Style.RESET_ALL}".ljust(self.pad + 9) +
+            f"{Fore.CYAN}{mean_len:.1f}{Style.RESET_ALL}  "
+            f"({n_eps} episodes)"
+        )
+
+        # Per-reward-type breakdown
+        reward_keys = sorted(
+            k for k in eval_stats if k.startswith("eval/reward/")
+        )
+        if reward_keys:
+            lines.append(f"  {Fore.WHITE}Reward Breakdown:{Style.RESET_ALL}")
+            # Multi-column layout matching training reward stats
+            items = [(k.split("eval/reward/")[1], eval_stats[k]) for k in reward_keys]
+            num_columns = 3
+            name_width = 25
+            value_width = 10
+            for i in range(0, len(items), num_columns):
+                row_items = items[i:i + num_columns]
+                segments = []
+                for name, mean in row_items:
+                    display_name = name[:name_width - 2] + ".." if len(name) > name_width else name
+                    color = Fore.GREEN if mean >= 0 else Fore.RED
+                    segment = f"{Fore.WHITE}{display_name:<{name_width}}{Style.RESET_ALL} {color}{mean:>{value_width}.4f}{Style.RESET_ALL}"
+                    segments.append(segment)
+                lines.append("    " + "   ".join(segments))
 
         return lines
 
@@ -496,6 +551,32 @@ class WandbLogger:
                 metric_name = f"{prefix}/{key}" if "/" not in key else key
                 log_dict[metric_name] = mean_value
         return log_dict
+
+    def log_eval_data(self, eval_stats: Dict[str, Any], step: int) -> None:
+        """Log evaluation metrics to WandB with structured keys."""
+        log_dict = {}
+
+        # Core eval metrics
+        key_mapping = {
+            "eval/mean_return": "Eval/mean_return",
+            "eval/std_return": "Eval/std_return",
+            "eval/min_return": "Eval/min_return",
+            "eval/max_return": "Eval/max_return",
+            "eval/mean_episode_length": "Eval/mean_episode_length",
+            "eval/num_episodes": "Eval/num_episodes",
+            "eval/time": "Eval/time",
+        }
+        for src, dst in key_mapping.items():
+            if src in eval_stats:
+                log_dict[dst] = eval_stats[src]
+
+        # Per-reward-type breakdown
+        for key, val in eval_stats.items():
+            if key.startswith("eval/reward/"):
+                reward_name = key.split("eval/reward/")[1]
+                log_dict[f"Eval/Rewards/{reward_name}"] = val
+
+        wandb.log(log_dict, step=step)
 
     def upload_checkpoint_artifact(self, checkpoint_dir: str, iteration: int, metadata: dict | None = None) -> None:
         """Upload a checkpoint directory as a wandb Artifact."""

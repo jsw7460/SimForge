@@ -70,11 +70,19 @@ class RunnerConfig(BaseConfig):
     resume_path: Optional[str] = None
     run_name: str = ""
     logger: str = "wandb"
-    wandb_project: str = "RLArchitecture"
+    wandb_project: str = "SimForge"
     save_interval: int = 1000
     output_dir: str = "auto"
     upload_checkpoint: bool = False
     delete_local_after_upload: bool = False
+
+    # In-training evaluation
+    eval_interval: int = 50  # 0 = disabled
+    eval_num_envs: int = 32
+    eval_num_episodes: int = 10
+    eval_deterministic: bool = True
+    eval_disable_noise: bool = True
+    eval_disable_interval_events: bool = True
 
 
 from rlworld.rl.vis.overlays.hud_items.items import HUDItem

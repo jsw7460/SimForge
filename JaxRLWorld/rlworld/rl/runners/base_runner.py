@@ -2,7 +2,9 @@ import os
 import pickle
 import shutil
 import statistics
+import time
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from typing import Dict, Any, Optional, List, Tuple
 
 import jax
@@ -10,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 
-from rlworld.rl.algorithms.base import RLAlgorithm
+from rlworld.rl.algorithms.base import RLAlgorithm, ActInput
 from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.envs import World, EpisodeStatsCollector
@@ -212,6 +214,9 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
         self.current_learning_iteration = 0
         self.num_steps_per_env = self.cfgs.algorithm.num_steps_per_env
 
+        # Last eval stats (persisted across iterations for console display)
+        self._last_eval_stats: Optional[Dict[str, Any]] = None
+
         # Initialize environment
         self.reward_statistics = EpisodeStatsCollector(
             num_envs=self.env.num_envs,
@@ -276,6 +281,7 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
             metrics=training_data.get("metrics"),
             mode="train",
             print_reward_stats=True,
+            last_eval_stats=self._last_eval_stats,
         )
 
         # Optionally log to WandB
@@ -335,6 +341,163 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
         """Set all components to training mode (no-op for JAX)."""
         if hasattr(self.alg, 'train_mode'):
             self.alg.train_mode()
+
+    # ==================== In-Training Evaluation ====================
+
+    def _create_eval_configs(self) -> ConfigsForRun:
+        """Create evaluation config by modifying a copy of training config."""
+        eval_cfgs = deepcopy(self.cfgs)
+
+        # Use fewer envs for evaluation
+        eval_cfgs.env.num_envs = self.runner_cfg.eval_num_envs
+
+        # Disable observation noise
+        if self.runner_cfg.eval_disable_noise:
+            eval_cfgs.observation.enable_noise = False
+
+        # Remove interval events (external forces, disturbances)
+        if self.runner_cfg.eval_disable_interval_events and hasattr(eval_cfgs, 'event'):
+            eval_cfgs.event.event_terms = [
+                t for t in eval_cfgs.event.event_terms
+                if t.mode != "interval"
+            ]
+
+        # Disable viewer
+        eval_cfgs.visualization.show_viewer = False
+        eval_cfgs.visualization.record_video = False
+
+        return eval_cfgs
+
+    def _get_or_create_eval_env(self) -> World:
+        """Lazily create eval environment on first use."""
+        if not hasattr(self, '_eval_env') or self._eval_env is None:
+            eval_cfgs = self._create_eval_configs()
+            self._eval_env = self._create_env_from_config(eval_cfgs)
+        return self._eval_env
+
+    def _run_evaluation(self) -> Dict[str, Any]:
+        """Run deterministic evaluation episodes and return statistics."""
+        # Save the shared step counter (eval env's step() will overwrite the
+        # class-level singleton NumStepCallsObserver with its own low counter).
+        saved_step_counter = self.env._env_step_counter
+
+        eval_env = self._get_or_create_eval_env()
+        eval_start = time.time()
+
+        num_envs = eval_env.num_envs
+        target_episodes = self.runner_cfg.eval_num_episodes
+        deterministic = self.runner_cfg.eval_deterministic
+
+        # Reset eval env
+        eval_env.reset()
+        obs_dict = eval_env.obs_manager.get_observation()
+
+        # Per-env tracking
+        episode_returns = torch.zeros(num_envs, device=self.device)
+        episode_lengths = torch.zeros(num_envs, device=self.device, dtype=torch.long)
+
+        completed_returns: list[float] = []
+        completed_lengths: list[float] = []
+
+        # Per-reward-type tracking
+        reward_type_sums: dict[str, torch.Tensor] = {}
+        completed_reward_breakdowns: dict[str, list[float]] = {}
+
+        max_steps = int(eval_env.max_episode_length) * 2  # Safety limit
+        step = 0
+
+        while len(completed_returns) < target_episodes and step < max_steps:
+            # Policy inference
+            actor_obs = torch_to_jax(obs_dict["actor"])
+            critic_obs = torch_to_jax(obs_dict["critic"])
+            actions = self.alg.act(
+                ActInput(actor_obs, critic_obs),
+                deterministic=deterministic,
+            )
+
+            # Process actions
+            actions_for_env = self._process_action_for_env(actions)
+            actions_torch = jax_to_torch(actions_for_env, self.device)
+
+            # Step
+            obs_dict, rewards, terminated, truncated, infos = eval_env.step(actions_torch)
+            dones = terminated | truncated
+
+            # Accumulate returns
+            episode_returns += rewards
+            episode_lengths += 1
+
+            # Per-reward-type accumulation
+            rewards_per_type = infos.get("rewards_per_type", {})
+            for rname, rval in rewards_per_type.items():
+                if rname not in reward_type_sums:
+                    reward_type_sums[rname] = torch.zeros(num_envs, device=self.device)
+                    completed_reward_breakdowns[rname] = []
+                reward_type_sums[rname] += rval
+
+            # Collect completed episodes
+            for i in range(num_envs):
+                if dones[i] and len(completed_returns) < target_episodes:
+                    completed_returns.append(episode_returns[i].item())
+                    completed_lengths.append(episode_lengths[i].item())
+                    for rname in reward_type_sums:
+                        completed_reward_breakdowns[rname].append(
+                            reward_type_sums[rname][i].item()
+                        )
+
+            # Reset tracking for done envs
+            episode_returns[dones] = 0
+            episode_lengths[dones] = 0
+            for rname in reward_type_sums:
+                reward_type_sums[rname][dones] = 0
+
+            step += 1
+
+        eval_time = time.time() - eval_start
+
+        # Restore the shared step counter so training env's counter is intact
+        NumStepCallsObserver.on_env_step_counter_update(saved_step_counter)
+
+        # Build results
+        eval_stats = {
+            "eval/mean_return": np.mean(completed_returns) if completed_returns else 0.0,
+            "eval/std_return": np.std(completed_returns) if completed_returns else 0.0,
+            "eval/min_return": np.min(completed_returns) if completed_returns else 0.0,
+            "eval/max_return": np.max(completed_returns) if completed_returns else 0.0,
+            "eval/mean_episode_length": np.mean(completed_lengths) if completed_lengths else 0.0,
+            "eval/num_episodes": len(completed_returns),
+            "eval/time": eval_time,
+        }
+
+        # Per-reward-type eval stats
+        for rname, vals in completed_reward_breakdowns.items():
+            if vals:
+                eval_stats[f"eval/reward/{rname}"] = np.mean(vals)
+
+        return eval_stats
+
+    def _log_eval_stats(self, eval_stats: Dict[str, Any], it: int) -> None:
+        """Store eval stats for persistent console display and log to wandb."""
+        eval_stats["eval/iteration"] = it
+        self._last_eval_stats = eval_stats
+
+        # Immediate console summary
+        mean_ret = eval_stats["eval/mean_return"]
+        std_ret = eval_stats["eval/std_return"]
+        mean_len = eval_stats["eval/mean_episode_length"]
+        n_eps = eval_stats["eval/num_episodes"]
+        eval_time = eval_stats["eval/time"]
+
+        print(f"\n  {GREEN}[Eval @ iter {it}]{RESET} "
+              f"return={mean_ret:.2f} ± {std_ret:.2f}  "
+              f"length={mean_len:.1f}  "
+              f"episodes={n_eps}  "
+              f"time={eval_time:.1f}s")
+
+        if self.wandb_logger:
+            self.wandb_logger.log_eval_data(eval_stats, step=self.env_step_calls)
+
+    # ==================== End Evaluation ====================
 
     def _get_action_statistics(self) -> Dict[str, Any]:
         """Extract action statistics from storage. Override in subclasses."""
@@ -460,6 +623,13 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
                 training_data,
                 total_iter=total_iter,
             )
+
+        # In-training evaluation
+        eval_interval = self.runner_cfg.eval_interval
+        if eval_interval > 0 and it > 0 and it % eval_interval == 0:
+            eval_stats = self._run_evaluation()
+            self._log_eval_stats(eval_stats, it=it)
+
         if it % self.runner_cfg.save_interval == 0:
             self.checkpoint(it)
 
