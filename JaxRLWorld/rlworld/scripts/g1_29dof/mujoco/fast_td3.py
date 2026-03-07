@@ -5,29 +5,32 @@ from rlworld.rl.configs.algorithms import FastTD3Config
 
 def main():
     cfgs_for_run = get_config().with_cli_overrides()
-    cfgs_for_run.env.num_envs = 1024 * 2
+    cfgs_for_run.env.num_envs = 1024
     fasttd3_config = FastTD3Config(
-        batch_size=32768 * 2,
-        buffer_size=1024 * 2 * 1024 * 10,
+        batch_size=32768,
+        buffer_size=1024 * 1024 * 10,
         learning_starts=10,
         obs_normalization=True,
         is_squashed=True,
         use_cdq=True,
         gamma=0.97,
-        utd_ratio=6,
+        utd_ratio=2,
         v_min=-10.0,
         v_max=10.0,
         num_atoms=101,
         target_policy_noise=0.001,
         noise_min=0.001,
         noise_max=0.4,
+        target_noise_clip=0.5,
         n_steps=1,
         tau=0.1,
+        use_target_actor=False,
     )
     cfgs_for_run.algorithm = fasttd3_config
     cfgs_for_run.nn.policy["actor_kwargs"].update(
         {
             "activation": "relu",
+            "ortho_init": True,
             "output_gain": 0.01,
             "hidden_dims": [512, 256, 128]
         },
@@ -36,6 +39,7 @@ def main():
     cfgs_for_run.nn.policy["critic_kwargs"].update(
         {
             "activation": "relu",
+            "ortho_init": True,
             "output_gain": 0.01,
             "hidden_dims": [1024, 512, 256]
         }

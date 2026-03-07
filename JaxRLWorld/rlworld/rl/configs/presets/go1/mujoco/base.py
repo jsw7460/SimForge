@@ -5,12 +5,21 @@ adapted for rlworld's MjlabEnv interface.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Any, List
+
 import math
 
+from mjlab.asset_zoo.robots import get_go1_robot_cfg, GO1_ACTION_SCALE
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+# mjlab imports for scene configuration
+from mjlab.scene import SceneCfg
+from mjlab.sensor import ContactSensorCfg, ContactMatch
+from mjlab.sim import SimulationCfg, MujocoCfg
+from mjlab.terrains import TerrainImporterCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import NNConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.mujoco import LocomotionObservations
+from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,
     MujocoSceneConfig,
@@ -19,8 +28,8 @@ from rlworld.rl.configs.mujoco_config_classes import (
     VisualizationConfig,
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
-from rlworld.rl.configs.robots.go1 import Go1MjlabConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.robots.go1 import Go1MjlabConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
@@ -28,14 +37,6 @@ from rlworld.rl.envs.mdp.configs import (
 )
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
-
-# mjlab imports for scene configuration
-from mjlab.scene import SceneCfg
-from mjlab.sim import SimulationCfg, MujocoCfg
-from mjlab.asset_zoo.robots import get_go1_robot_cfg, GO1_ACTION_SCALE
-from mjlab.sensor import ContactSensorCfg, ContactMatch
-from mjlab.terrains import TerrainImporterCfg
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 
 @dataclass
@@ -104,7 +105,6 @@ class Go1FlatMujocoConfig:
 
     def build(self) -> "MujocoConfigsForRun":
         """Build the complete configuration as a typed MujocoConfigsForRun."""
-        from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
         return MujocoConfigsForRun(
             env=self._build_env_config(),
             scene=self._build_scene_config(),
@@ -413,7 +413,6 @@ class Go1FlatMujocoConfig:
         ]
 
         return RewardConfig(reward_terms=reward_terms)
-
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(
