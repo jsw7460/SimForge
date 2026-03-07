@@ -6,8 +6,8 @@ from rlworld.rl.evals import PolicyEvaluator
 if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        wandb_run_path="jsw7460/RLArchitecture/2jzsqo16",
-        # policy_path=f"./outputs/models/2026-02-27/11-51-04/checkpoint_latest/",
+        # wandb_run_path="jsw7460/RLArchitecture/2jzsqo16",
+        policy_path=f"./outputs/models/2026-03-06/15-38-09/checkpoint_latest/",
         seed=42,
         num_evals=100000000,
         show_viewer=True,
@@ -23,21 +23,16 @@ if __name__ == '__main__':
             },
             "visualization": {
                 # "viser_share": True,
-                "viser_port": 5000,
+                "viser_port": 2026,
                 "viewer_type": "viser",
             },
             # "scene": {
             #     "entities": entities,
             #     "robot_cfg": g1_29dof
             # },
-            # "command": {
-            #     "sampler": [
-            #         CommandTermConfig(cf.lin_vel_x, params={"range": (0.7, 0.7)}),
-            #         CommandTermConfig(cf.lin_vel_y, params={"range": (0.0, 0.0)}),
-            #         CommandTermConfig(cf.ang_vel, params={"range": (-0.0, 0.0)}),
-            #     ]
-            #     # ]
-            # }
+            "command": {
+                "rel_standing_envs": 0.5,
+            }
         },
     )
     evaluator.evaluate()

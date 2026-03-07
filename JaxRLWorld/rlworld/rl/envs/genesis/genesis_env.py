@@ -143,7 +143,8 @@ class GenesisEnv(World):
             env=self,
             config=ObsManagerConfig(
                 num_envs=self.num_envs,
-                obs_group=self.obs_cfg.obs_group
+                obs_group=self.obs_cfg.obs_group,
+                enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
             )
         )
 

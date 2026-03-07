@@ -123,6 +123,7 @@ class MjlabEnv(World):
 
         # Scene Manager (mjlab Scene + Simulation)
         self.scene_cfg.mjlab_scene_cfg.num_envs = self.num_envs
+
         scene_manager_cfg = MjlabSceneManagerConfig(
             mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
             mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
@@ -150,6 +151,7 @@ class MjlabEnv(World):
         obs_manager_cfg = ObsManagerConfig(
             num_envs=self.num_envs,
             obs_group=self.obs_cfg.obs_group,
+            enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
         )
         self.obs_manager = ObservationManager(env=self, config=obs_manager_cfg)
 

@@ -103,6 +103,9 @@ class PolicyEvaluator(NumStepCallsObserver):
             video_dir=self.video_dir,
         )
 
+        # Apply eval-mode defaults: disable obs noise, remove interval events
+        self._apply_eval_defaults()
+
         # Initialize environment
         self.env = self._init.init_environment(
             self.eval_cfgs,
@@ -138,6 +141,25 @@ class PolicyEvaluator(NumStepCallsObserver):
         self.eval_results_dir = None
         self.episode_data = []
         self._setup_evaluation_tools()
+
+    def _apply_eval_defaults(self) -> None:
+        """Apply evaluation-mode defaults to configs.
+
+        - Disables observation noise (enable_noise = False)
+        - Removes interval events (e.g. push_by_setting_velocity)
+        """
+        # Disable observation noise
+        if hasattr(self.eval_cfgs, 'observation'):
+            self.eval_cfgs.observation.enable_noise = False
+
+        # Remove interval events (external forces, etc.)
+        if hasattr(self.eval_cfgs, 'event'):
+            event_cfg = self.eval_cfgs.event
+            if hasattr(event_cfg, 'event_terms'):
+                event_cfg.event_terms = [
+                    t for t in event_cfg.event_terms
+                    if t.mode != "interval"
+                ]
 
     def _resize_mppi_state(self) -> None:
         """Resize MPPI prev_mean to match eval num_envs (may differ from training)."""

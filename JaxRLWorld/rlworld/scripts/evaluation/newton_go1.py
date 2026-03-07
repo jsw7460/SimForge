@@ -1,12 +1,13 @@
-from rlworld.rl.evals import PolicyEvaluator
-from rlworld.rl.envs.mdp.configs.commands.command_term_config import CommandTermConfig
-from rlworld.rl.envs.mdp.commands import command_terms as cf
-
-import newton
-from rlworld.rl.configs.scene import NewtonEntityConfig
 import warp as wp
 
+# mjlab imports for scene configuration
+from mjlab.terrains import TerrainImporterCfg
+from mjlab.terrains import TerrainImporterCfg
+from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.robots.go1 import Go1Config
+from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
+from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
+from rlworld.rl.evals import PolicyEvaluator
 
 robot = Go1Config()
 
@@ -48,42 +49,91 @@ if __name__ == '__main__':
 
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-01-30/19-52-51/checkpoint_latest/",  # Newton
-        num_evals=1,
+        policy_path=f"./outputs/models/2026-03-06/15-38-52/checkpoint_latest/",  # Newton
         seed=42,
-        show_viewer=False,
+        num_evals=100000000,
+        show_viewer=True,
         record_video=True,
         record_steps=None,
         video_dir=None,
         extra_overrides={
             "env": {
                 "num_envs": 1,
-                # "episode_length_s": 10.0,
+                "episode_length_s": 10e+9,
                 # "termination_criteria": [],
             },
             "visualization": {
                 # "viser_share": True,
-                # "viser_port": 8081,
+                "viser_port": 2026,
                 "viewer_type": "viser",
             },
-            "scene": {
-                "robot_cfg": robot
-            },
-            # "command": {
-                # "sampler": [
-                #     CommandTermConfig(cf.lin_vel_x, params={"range": (0.5, 0.5)}),
-                #     CommandTermConfig(cf.lin_vel_y, params={"range": (0.0, 0.0)}),
-                #     CommandTermConfig(cf.ang_vel, params={"range": (-0.0, 0.0)}),
-                #     CommandTermConfig(cf.base_height, params={"range": (0.34, 0.34)})
-                # ]
-                # "resampling_time_s": (5.0, 5.0),
-                # "sampler": [
-                #     CommandTermConfig(cf.lin_vel_x, params={"range": (-1.0, 1.0)}),
-                #     CommandTermConfig(cf.lin_vel_y, params={"range": (-1.0, 1.0)}),
-                #     CommandTermConfig(cf.ang_vel, params={"range": (-0.0, 0.0)}),
-                #     CommandTermConfig(cf.base_height, params={"range": (0.34, 0.34)})
-                # ]
-            # }
+            # "event": {
+            #     "event_terms": [
+            #         # Reset events
+            #         EventTermConfig(
+            #             func=ef.reset_root_state_uniform,
+            #             mode="reset",
+            #             params={
+            #                 "pose_range": {
+            #                     "x": (-0.5, 0.5),
+            #                     "y": (-0.5, 0.5),
+            #                     "z": (0.01, 0.05),
+            #                     "yaw": (-3.14, 3.14),
+            #                 },
+            #                 "velocity_range": {},
+            #             },
+            #         ),
+            #         EventTermConfig(
+            #             func=ef.reset_joints_by_offset,
+            #             mode="reset",
+            #             params={
+            #                 "position_range": (0.0, 0.0),
+            #                 "velocity_range": (0.0, 0.0),
+            #                 "entity_cfg": EntityCfg(name="robot", joint_names=(".*",)),
+            #             },
+            #         ),
+            #
+            #         # Startup events (domain randomization)
+            #         EventTermConfig(
+            #             func=ef.randomize_geom_friction,
+            #             mode="startup",
+            #             params={
+            #                 "ranges": (0.3, 1.2),
+            #                 "operation": "abs",
+            #                 "shared_random": True,
+            #                 "entity_cfg": EntityCfg(
+            #                     name="robot",
+            #                     geom_names=("FR_foot_collision", "FL_foot_collision",
+            #                                 "RR_foot_collision", "RL_foot_collision"),
+            #                 ),
+            #             },
+            #         ),
+            #         EventTermConfig(
+            #             func=ef.randomize_encoder_bias,
+            #             mode="startup",
+            #             params={
+            #                 "bias_range": (-0.015, 0.015),
+            #                 "entity_cfg": EntityCfg(name="robot"),
+            #             },
+            #         ),
+            #         EventTermConfig(
+            #             func=ef.randomize_body_com_offset,
+            #             mode="startup",
+            #             params={
+            #                 "ranges": {
+            #                     0: (-0.025, 0.025),
+            #                     1: (-0.025, 0.025),
+            #                     2: (-0.03, 0.03),
+            #                 },
+            #                 "operation": "add",
+            #                 "entity_cfg": EntityCfg(name="robot", body_names=("trunk",)),
+            #             },
+            #         ),
+            #     ]
+            # },
+            "command": {
+                "rel_standing_envs": 1.0
+            }
         },
     )
     evaluator.evaluate()

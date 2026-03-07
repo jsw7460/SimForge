@@ -23,6 +23,7 @@ class ObsManagerConfig:
     """
     num_envs: int
     obs_group: dict[str, list[ObservationTermConfig]]
+    enable_noise: bool = True
 
 
 class ObservationManager(BaseManager):
@@ -278,7 +279,7 @@ class ObservationManager(BaseManager):
                 # Call observation function and apply scaling
                 obs_value = func(self.env, **obs_term.params)
 
-                if obs_term.noise is not None:
+                if self.config.enable_noise and obs_term.noise is not None:
                     obs_value = apply_noise(obs_value, obs_term.noise)
 
                 if obs_term.clip is not None:
@@ -365,7 +366,10 @@ class ObservationManager(BaseManager):
                 # Format noise
                 noise_str = "-"
                 if obs_term.noise is not None:
-                    noise_str = type(obs_term.noise).__name__
+                    if self.config.enable_noise:
+                        noise_str = type(obs_term.noise).__name__
+                    else:
+                        noise_str = f"{type(obs_term.noise).__name__} (off)"
 
                 rows.append([idx, func_name, format_shape(base_dim), scale_str, history_str, noise_str])
 

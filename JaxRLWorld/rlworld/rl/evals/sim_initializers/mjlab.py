@@ -41,16 +41,16 @@ def auto_resolve_mjlab_configs(preset_class_name: str | None, preset_module_path
         cls = getattr(mod, preset_class_name, None)
         if cls is not None:
             preset = cls()
-            scene_config = preset.to_dict()["scene"]
-            return scene_config.mjlab_scene_cfg, scene_config.mjlab_sim_cfg
+            cfgs = preset.build()
+            return cfgs.scene.mjlab_scene_cfg, cfgs.scene.mjlab_sim_cfg
 
     # 2nd: registry fallback (old checkpoints)
     if preset_class_name in MUJOCO_PRESET_REGISTRY:
         module_path, class_name = MUJOCO_PRESET_REGISTRY[preset_class_name]
         mod = importlib.import_module(module_path)
         preset = getattr(mod, class_name)()
-        scene_config = preset.to_dict()["scene"]
-        return scene_config.mjlab_scene_cfg, scene_config.mjlab_sim_cfg
+        cfgs = preset.build()
+        return cfgs.scene.mjlab_scene_cfg, cfgs.scene.mjlab_sim_cfg
 
     return None, None
 

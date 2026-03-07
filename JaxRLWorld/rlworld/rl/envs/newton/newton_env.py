@@ -136,6 +136,7 @@ class NewtonEnv(World):
         obs_manager_cfg = NewtonObsManagerConfig(
             num_envs=self.num_envs,
             obs_group=self.obs_cfg.obs_group,
+            enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
         )
         self.obs_manager = NewtonObservationManager(env=self, config=obs_manager_cfg)
 
