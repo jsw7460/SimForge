@@ -312,24 +312,13 @@ class FastTD3(OffPolicyAlgorithm):
         truncated: jax.Array,
         infos: Dict[str, Any],
     ) -> None:
-        """Process environment step and update noise scales for done envs."""
-        dones = terminated | truncated
+        """Process environment step and update noise scales for done envs.
 
-        # Update observation normalizers inside model
-        if self.obs_normalization and self.transition.actor_observations is not None:
-            new_actor_normalizer = self.train_state.model.actor_obs_normalizer.update(
-                self.transition.actor_observations
-            )
-            new_critic_normalizer = self.train_state.model.critic_obs_normalizer.update(
-                self.transition.critic_observations
-            )
-            # Update normalizers in model using eqx.tree_at
-            new_model = eqx.tree_at(
-                lambda m: (m.actor_obs_normalizer, m.critic_obs_normalizer),
-                self.train_state.model,
-                (new_actor_normalizer, new_critic_normalizer),
-            )
-            self.train_state = self.train_state._replace(model=new_model)
+        NOTE: Observation normalizer is NOT updated here. It is updated
+        in update() from batch data, avoiding per-step model/train_state
+        recreation (matching PPO's approach).
+        """
+        dones = terminated | truncated
 
         # Resample noise for done environments
         new_noise_scales, new_key = resample_noise_on_done(

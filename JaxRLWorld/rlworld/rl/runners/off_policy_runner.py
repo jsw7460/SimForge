@@ -20,7 +20,7 @@ from rlworld.rl.modules.policies.td3_ac import TD3ActorCritic
 from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
 from rlworld.rl.modules.utils import print_model_summary, count_parameters
 from rlworld.rl.runners.base_runner import BaseRunner
-from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch, convert_infos_to_jax
+from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
 
 
 class OffPolicyRunner(BaseRunner):
@@ -336,13 +336,11 @@ class OffPolicyRunner(BaseRunner):
                 final_critic = torch_to_jax(final_obs["critic"])
 
                 # Replace next_obs for truncated (not terminated) envs
-                truncated_mask = truncated.cpu().numpy()
-                terminated_mask = terminated.cpu().numpy()
-
-                for i in range(self.env.num_envs):
-                    if truncated_mask[i] and not terminated_mask[i]:
-                        next_actor_obs = next_actor_obs.at[i].set(final_actor[i])
-                        next_critic_obs = next_critic_obs.at[i].set(final_critic[i])
+                truncated_jax_mask = jnp.asarray(truncated.cpu().numpy())
+                terminated_jax_mask = jnp.asarray(terminated.cpu().numpy())
+                truncated_only = (truncated_jax_mask & ~terminated_jax_mask)[:, None]
+                next_actor_obs = jnp.where(truncated_only, final_actor, next_actor_obs)
+                next_critic_obs = jnp.where(truncated_only, final_critic, next_critic_obs)
 
             rewards_jax = torch_to_jax(rewards)
             # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
@@ -362,9 +360,8 @@ class OffPolicyRunner(BaseRunner):
                 truncated=truncated_jax,
             )
 
-            # Process env step (for timeout handling)
-            infos_jax = convert_infos_to_jax(infos, self.device)
-            self.alg.process_env_step(rewards_jax, terminated_jax, truncated_jax, infos_jax)
+            # Process env step (noise resampling, etc.)
+            self.alg.process_env_step(rewards_jax, terminated_jax, truncated_jax, {})
 
             # Update reward statistics
             dones = terminated | truncated
@@ -431,8 +428,10 @@ class OffPolicyRunner(BaseRunner):
 
                 # Update networks
                 metrics = self.alg.update(batch)
-                update_data = metrics.to_full_dict()
-                update_data["metrics"] = metrics
+                del batch  # Release JAX array references to allow GC
+
+            update_data = metrics.to_full_dict()
+            update_data["metrics"] = metrics
 
             learning_time = time.time() - training_start_time
             fps = (self.num_steps_per_env * self.env.num_envs) / (
@@ -451,12 +450,17 @@ class OffPolicyRunner(BaseRunner):
             LearningIterationObserver.on_iteration_update(iteration)
 
         # Combine data
-        return {
+        result = {
             **collection_data,
             **training_data,
             "reward_stats": self.reward_statistics.get_reward_stats_per_type(),
-            "action_distribution": self._get_action_statistics(),
         }
+
+        # Only compute action statistics on log intervals to avoid unnecessary allocations
+        if iteration % self.runner_cfg.log_interval == 0:
+            result["action_distribution"] = self._get_action_statistics()
+
+        return result
 
     def learn(
         self,
