@@ -142,34 +142,24 @@ def invalidate_cache(func: Callable) -> Callable:
 
 
 class LearningIterationObserver:
-    """Implemented with singleton design pattern to share
-     the number of gradient descent (i.e., learning iteration) across all classes."""
-    _shared_iteration = 0
-
-    def __init__(self):
-        pass
+    """Deprecated: kept as empty mixin for backward compatibility.
+    Learning iteration is now tracked directly by the runner."""
 
     @property
     def learning_iteration(self):
-        return LearningIterationObserver._shared_iteration
-
-    @staticmethod
-    def on_iteration_update(iteration: int):
-        LearningIterationObserver._shared_iteration = iteration
+        raise AttributeError(
+            "LearningIterationObserver singleton removed. "
+            "Use runner.current_learning_iteration instead."
+        )
 
 
 class NumStepCallsObserver:
-    """Implemented with singleton design pattern to share
-     the number of gradient descent (i.e., learning iteration) across all classes."""
-    _shared_env_step_counter = 0
-
-    def __init__(self):
-        pass
+    """Deprecated: kept as empty mixin for backward compatibility.
+    Env step count is now accessed via env._env_step_counter."""
 
     @property
     def env_step_calls(self):
-        return NumStepCallsObserver._shared_env_step_counter
-
-    @staticmethod
-    def on_env_step_counter_update(env_step_counter: int):
-        NumStepCallsObserver._shared_env_step_counter = env_step_counter
+        raise AttributeError(
+            "NumStepCallsObserver singleton removed. "
+            "Use env._env_step_counter instead."
+        )

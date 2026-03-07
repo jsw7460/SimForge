@@ -14,7 +14,6 @@ from rlworld.rl.algorithms import SAC, TD3, FastTD3
 from rlworld.rl.configs.algorithms import TD3Config, FastTD3Config, SACConfig
 from rlworld.rl.configs import ConfigsForRun, configs_from_dict
 from rlworld.rl.envs import World
-from rlworld.rl.envs.utils import LearningIterationObserver
 from rlworld.rl.modules.policies.sac_ac import SACActorCritic
 from rlworld.rl.modules.policies.td3_ac import TD3ActorCritic
 from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
@@ -445,9 +444,6 @@ class OffPolicyRunner(BaseRunner):
                 "buffer_size": self.alg.replay_buffer.size,
                 **update_data,
             })
-
-            # Update learning iteration for curriculum
-            LearningIterationObserver.on_iteration_update(iteration)
 
         # Combine data
         result = {

@@ -17,8 +17,6 @@ from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.envs import World, EpisodeStatsCollector
 # from rlworld.rl.envs.curriculum import Go2Curriculum
-from rlworld.rl.envs.utils import LearningIterationObserver
-from rlworld.rl.envs.utils import NumStepCallsObserver
 from rlworld.rl.utils import setup_log_dir
 from rlworld.rl.utils.dynamics_dataset import DynamicsDataset
 from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
@@ -28,7 +26,7 @@ from rlworld.rl.utils.logger import WandbLogger, ConsoleWriter
 
 # ==================== Base Runner ====================
 
-class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
+class BaseRunner(ABC):
     is_distributed_runner: bool = False
     algorithm_name: str
 
@@ -288,7 +286,7 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
         if self.wandb_logger:
             self.wandb_logger.log_training_data(
                 training_data=training_data,
-                step=self.env_step_calls
+                step=self.total_timesteps
             )
 
     def close(self):
@@ -377,10 +375,6 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
 
     def _run_evaluation(self) -> Dict[str, Any]:
         """Run deterministic evaluation episodes and return statistics."""
-        # Save the shared step counter (eval env's step() will overwrite the
-        # class-level singleton NumStepCallsObserver with its own low counter).
-        saved_step_counter = self.env._env_step_counter
-
         eval_env = self._get_or_create_eval_env()
         eval_start = time.time()
 
@@ -455,9 +449,6 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
 
         eval_time = time.time() - eval_start
 
-        # Restore the shared step counter so training env's counter is intact
-        NumStepCallsObserver.on_env_step_counter_update(saved_step_counter)
-
         # Build results
         eval_stats = {
             "eval/mean_return": np.mean(completed_returns) if completed_returns else 0.0,
@@ -495,7 +486,7 @@ class BaseRunner(NumStepCallsObserver, LearningIterationObserver, ABC):
               f"time={eval_time:.1f}s")
 
         if self.wandb_logger:
-            self.wandb_logger.log_eval_data(eval_stats, step=self.env_step_calls)
+            self.wandb_logger.log_eval_data(eval_stats, step=self.total_timesteps)
 
     # ==================== End Evaluation ====================
 

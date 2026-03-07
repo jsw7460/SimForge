@@ -425,7 +425,6 @@ import torch
 from rlworld.rl.algorithms.tdmpc2 import TDMPC2
 from rlworld.rl.configs import ConfigsForRun, configs_from_dict
 from rlworld.rl.envs import World
-from rlworld.rl.envs.utils import LearningIterationObserver
 from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
 from rlworld.rl.modules.utils import print_model_summary, count_parameters
 from rlworld.rl.runners.base_runner import BaseRunner
@@ -741,8 +740,6 @@ class ModelBasedRunner(BaseRunner):
                 "reward_stats": reward_stats,
                 **update_data,
             })
-
-            LearningIterationObserver.on_iteration_update(iteration)
 
         return {
             **collection_data,

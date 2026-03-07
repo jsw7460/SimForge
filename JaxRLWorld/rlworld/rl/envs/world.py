@@ -9,10 +9,7 @@ import numpy as np
 import torch
 from gymnasium import spaces
 
-from rlworld.rl.envs.utils import NumStepCallsObserver
-
-
-class World(ABC, NumStepCallsObserver):
+class World(ABC):
     """Abstract base class for all RL environments."""
 
     sim_name: str = "World"
@@ -36,7 +33,6 @@ class World(ABC, NumStepCallsObserver):
     command_manager: Any
     event_manager: Any
     contact_manager: Any
-    # state_init_manager: Any
 
     def __init__(self):
         super().__init__()
@@ -60,7 +56,11 @@ class World(ABC, NumStepCallsObserver):
 
     def _update_num_step_calls(self) -> None:
         self._env_step_counter += 1
-        NumStepCallsObserver.on_env_step_counter_update(self._env_step_counter)
+
+    @property
+    def env_step_counter(self) -> int:
+        """Number of step() calls on this environment instance."""
+        return self._env_step_counter
 
     # ========== Properties ==========
 

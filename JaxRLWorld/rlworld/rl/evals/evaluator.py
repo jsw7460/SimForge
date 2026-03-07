@@ -10,7 +10,6 @@ import numpy as np
 import torch
 
 from rlworld.rl.envs import EpisodeStatsCollector
-from rlworld.rl.envs.utils import NumStepCallsObserver
 from rlworld.rl.evals.policy_wrappers import PolicyWrapper
 from rlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer
 from rlworld.rl.utils.checkpoint import load_runner, load_checkpoint_metadata
@@ -28,7 +27,7 @@ from rlworld.rl.utils.console import (
 )
 
 
-class PolicyEvaluator(NumStepCallsObserver):
+class PolicyEvaluator:
     """
     Evaluates trained policies by loading checkpoints and running episodes.
     Supports Genesis, Newton, MjlabEnv, ManiSkill, and Gymnasium environments.
@@ -304,7 +303,7 @@ class PolicyEvaluator(NumStepCallsObserver):
             # Handle mid-episode recording stop for Genesis
             if (self.record_steps is not None
                 and self.sim_type == 'Genesis'
-                and self.env_step_calls >= self.record_steps - 1):
+                and self.env.env_step_counter >= self.record_steps - 1):
                 self._init.stop_recording(self.env)
                 self.record_steps = None
 

@@ -14,7 +14,6 @@ from rlworld.rl.algorithms.ppo_dr3 import PPODR3
 from rlworld.rl.configs import ConfigsForRun, configs_from_dict
 from rlworld.rl.configs.algorithms import PPOConfig, PPODR3Config
 from rlworld.rl.envs import World
-from rlworld.rl.envs.utils import LearningIterationObserver
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.modules.policies.ppo_dr3_ac import PPODR3ActorCritic
 from rlworld.rl.modules.utils import print_model_summary, count_parameters
@@ -378,8 +377,6 @@ class OnPolicyRunner(BaseRunner):
                 iteration=it,
                 ep_infos=ep_infos,
             )
-            LearningIterationObserver.on_iteration_update(self.it)
-
             # Update obs
             obs = PPO.ActInput(
                 actor_obs=training_data["last_obs"]["actor_obs"],
