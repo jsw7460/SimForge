@@ -45,7 +45,7 @@ class BaseRunner(ABC):
         Returns:
             Created environment
         """
-        from gymnasium.vector import SyncVectorEnv
+        from gymnasium.vector import SyncVectorEnv, AutoresetMode
         import gymnasium as gym
         from rlworld.rl import envs
         from rlworld.rl.envs import GymnasiumEnv
@@ -100,7 +100,10 @@ class BaseRunner(ABC):
 
                 return _init
 
-            env_gym = SyncVectorEnv([make_env(i) for i in range(cfgs.env.num_envs)])
+            env_gym = SyncVectorEnv(
+                [make_env(i) for i in range(cfgs.env.num_envs)],
+                autoreset_mode=AutoresetMode.SAME_STEP
+            )
             env = GymnasiumEnv(
                 env_gym,
                 env_cfg=cfgs.env,

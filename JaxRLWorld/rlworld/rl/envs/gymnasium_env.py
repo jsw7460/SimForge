@@ -3,6 +3,8 @@ from typing import Optional, Any
 import mujoco
 import torch
 
+import numpy as np
+
 import genesis as gs
 from rlworld.rl.configs import EnvConfig, SceneConfig, ObservationConfig, ActionConfig, RewardConfig, CommandConfig
 from rlworld.rl.envs import World
@@ -447,38 +449,8 @@ class GymnasiumEnv(World):
     def robot(self) -> Any:
         pass
 
-    # def _create_scene_manager_with_kinematic_tree(self, gym_env):
-    #     """Extract kinematic tree from MuJoCo model"""
-    #
-    #     class DummySceneManager:
-    #         def __init__(self, kinematic_tree):
-    #             self.trees = {"robot": kinematic_tree}
-    #
-    #     if hasattr(gym_env, 'envs'):
-    #         # SyncVectorEnv
-    #         first_env = gym_env.envs[0]
-    #     else:
-    #         # Single env
-    #         first_env = gym_env
-    #     import ipdb; ipdb.set_trace()
-    #     # Unwrap to get MuJoCo env
-    #     base_env = first_env
-    #     while hasattr(base_env, 'env'):
-    #         base_env = base_env.env
-    #
-    #     # Extract MuJoCo model
-    #     if not hasattr(base_env, 'model'):
-    #         raise ValueError(
-    #             "Cannot extract MuJoCo model. "
-    #             "Use gym.make_vec(..., vectorization_mode='sync') instead of 'async'"
-    #         )
-    #
-    #     mj_model = base_env.model
-    #     kinematic_tree = KinematicTree(mjcf_path=base_env.fullpath)
-    #     print(f"✓ Extracted kinematic tree: {kinematic_tree}")
-    #
-    #     self.mj_model = mj_model
-    #     return DummySceneManager(kinematic_tree)
+    def heading_w(self) -> torch.Tensor:
+        pass
 
     def _create_scene_manager_with_kinematic_tree(self, gym_env):
         """Extract kinematic tree from MuJoCo model"""
@@ -577,16 +549,17 @@ class GymnasiumEnv(World):
 
         final_observation = None
         if dones_tensor.any():
+            final_obs_arr = info["final_obs"]  # object array, None for non-done envs
 
-            final_obs_list = info["final_obs"]
-
-            # Use current step's obs as base (not stale _current_obs)
+            # Start from reset obs (current obs_tensor)
             final_obs_tensor = obs_tensor.clone()
 
-            # Overwrite only done envs with their final observation
-            for i, (done, final_obs) in enumerate(zip(dones_tensor, final_obs_list)):
-                if done and final_obs is not None:
-                    final_obs_tensor[i] = torch.from_numpy(final_obs).float().to(self.device)
+            # Only overwrite done envs
+            done_indices = dones_tensor.nonzero(as_tuple=True)[0].cpu().numpy()
+            for i in done_indices:
+                final_obs_tensor[i] = torch.from_numpy(
+                    final_obs_arr[i].astype(np.float32)
+                ).to(self.device)
 
             final_observation = {
                 "actor": final_obs_tensor,
