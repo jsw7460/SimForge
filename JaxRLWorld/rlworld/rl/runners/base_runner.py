@@ -463,10 +463,11 @@ class BaseRunner(ABC):
             "eval/time": eval_time,
         }
 
-        # Per-reward-type eval stats
+        # Per-reward-type eval stats (per-step average, matching training display)
         for rname, vals in completed_reward_breakdowns.items():
             if vals:
-                eval_stats[f"eval/reward/{rname}"] = np.mean(vals)
+                per_step = [v / l for v, l in zip(vals, completed_lengths)]
+                eval_stats[f"eval/reward/{rname}"] = np.mean(per_step)
 
         return eval_stats
 
