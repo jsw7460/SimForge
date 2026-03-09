@@ -59,6 +59,9 @@ class TDMPC2Config(BaseConfig):
     log_std_max: float = 2.0
     squash_action: bool = True
 
+    # ---- Observation normalization ----
+    obs_normalization: bool = True
+
     # ---- Training ----
     batch_size: int = 4096
     buffer_size: int = 1_000_000

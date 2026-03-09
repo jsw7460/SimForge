@@ -87,6 +87,7 @@ class ModelBasedRunner(BaseRunner):
             squash_action=squash_action,
             action_low=tuple(action_low.tolist()),
             action_high=tuple(action_high.tolist()),
+            obs_normalization=alg_cfg.obs_normalization,
             key=subkey,
         )
 
@@ -383,6 +384,116 @@ class ModelBasedRunner(BaseRunner):
             return {}
         actions = self.alg.replay_buffer.get_recent_actions(n_recent)
         return self._compute_action_distribution_stats(np.array(actions))
+
+    # ==================== Evaluation ====================
+
+    def _run_evaluation(self) -> Dict[str, Any]:
+        """Run evaluation with MPPI planning instead of direct policy output."""
+        eval_env = self._get_or_create_eval_env()
+        eval_start = time.time()
+
+        num_envs = eval_env.num_envs
+
+        # Reset eval env
+        eval_env.reset()
+        obs_dict = eval_env.obs_manager.get_observation()
+
+        # Per-env tracking
+        episode_returns = torch.zeros(num_envs, device=self.device)
+        episode_lengths = torch.zeros(num_envs, device=self.device, dtype=torch.long)
+
+        completed_returns: list[float] = []
+        completed_lengths: list[float] = []
+
+        # Per-reward-type tracking
+        reward_type_sums: dict[str, torch.Tensor] = {}
+        completed_reward_breakdowns: dict[str, list[float]] = {}
+
+        target_episodes = self.runner_cfg.eval_num_episodes
+        max_steps = int(eval_env.max_episode_length) * 2
+        step = 0
+
+        # Resize MPPI prev_mean for eval num_envs (may differ from training)
+        _, horizon, action_dim = self.alg._prev_mean.shape
+        orig_prev_mean = self.alg._prev_mean
+        self.alg._prev_mean = np.zeros(
+            (num_envs, horizon, action_dim), dtype=np.float32,
+        )
+
+        # MPPI warm-start: all envs start fresh
+        t0_mask = np.ones(num_envs, dtype=bool)
+
+        while len(completed_returns) < target_episodes and step < max_steps:
+            actor_obs = torch_to_jax(obs_dict["actor"])
+
+            # Use MPPI planning for action selection
+            actions = self.alg.act_with_t0(
+                actor_obs,
+                t0_mask=t0_mask,
+                eval_mode=True,
+            )
+
+            # Process actions
+            actions_for_env = self._process_action_for_env(actions)
+            actions_torch = jax_to_torch(actions_for_env, self.device)
+
+            # Step
+            obs_dict, rewards, terminated, truncated, infos = eval_env.step(actions_torch)
+            dones = terminated | truncated
+
+            # Reset MPPI warm-start for done envs
+            t0_mask = dones.cpu().numpy()
+
+            # Accumulate returns
+            episode_returns += rewards
+            episode_lengths += 1
+
+            # Per-reward-type accumulation
+            rewards_per_type = infos.get("rewards_per_type", {})
+            for rname, rval in rewards_per_type.items():
+                if rname not in reward_type_sums:
+                    reward_type_sums[rname] = torch.zeros(num_envs, device=self.device)
+                    completed_reward_breakdowns[rname] = []
+                reward_type_sums[rname] += rval
+
+            # Collect completed episodes
+            for i in range(num_envs):
+                if dones[i] and len(completed_returns) < target_episodes:
+                    completed_returns.append(episode_returns[i].item())
+                    completed_lengths.append(episode_lengths[i].item())
+                    for rname in reward_type_sums:
+                        completed_reward_breakdowns[rname].append(
+                            reward_type_sums[rname][i].item()
+                        )
+
+            # Reset tracking for done envs
+            episode_returns[dones] = 0
+            episode_lengths[dones] = 0
+            for rname in reward_type_sums:
+                reward_type_sums[rname][dones] = 0
+
+            step += 1
+
+        eval_time = time.time() - eval_start
+
+        eval_stats = {
+            "eval/mean_return": np.mean(completed_returns) if completed_returns else 0.0,
+            "eval/std_return": np.std(completed_returns) if completed_returns else 0.0,
+            "eval/min_return": np.min(completed_returns) if completed_returns else 0.0,
+            "eval/max_return": np.max(completed_returns) if completed_returns else 0.0,
+            "eval/mean_episode_length": np.mean(completed_lengths) if completed_lengths else 0.0,
+            "eval/num_episodes": len(completed_returns),
+            "eval/time": eval_time,
+        }
+
+        for rname, vals in completed_reward_breakdowns.items():
+            if vals:
+                eval_stats[f"eval/reward/{rname}"] = np.mean(vals)
+
+        # Restore prev_mean to training size
+        self.alg._prev_mean = orig_prev_mean
+
+        return eval_stats
 
     # ==================== Checkpoint ====================
 
