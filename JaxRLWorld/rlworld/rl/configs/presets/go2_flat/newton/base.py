@@ -41,19 +41,28 @@ class Go2FlatNewtonConfig:
     robot: Go2Config = field(default_factory=Go2Config)
 
     observations: LocomotionObservations = field(default_factory=lambda: LocomotionObservations(
-        include_base_lin_vel=False,
-        ang_vel_scale=0.25,
-        ang_vel_noise=Unoise(-0.2, 0.2),
-        gravity_scale=1.0,
-        gravity_noise=Unoise(-0.05, 0.05),
-        command_scale=1.0,
-        dof_pos_scale=1.0,
-        dof_pos_noise=Unoise(-0.01, 0.01),
-        include_dof_pos=True,
-        include_nominal_difference=True,
-        dof_vel_scale=0.05,
-        dof_vel_noise=Unoise(-1.5, 1.5),
-        prev_actions_scale=1.0,
+                # Base linear velocity
+                include_base_lin_vel=False,
+                # base_lin_vel_scale=2.0,
+                # base_lin_vel_noise=Unoise(-0.2, 0.2),
+                # IMU angular velocity
+                ang_vel_scale=0.25,
+                ang_vel_noise=Unoise(-0.2, 0.2),
+                # Projected gravity
+                gravity_scale=1.0,
+                gravity_noise=Unoise(-0.05, 0.05),
+                # Command
+                command_scale=1.0,
+                # DOF position
+                dof_pos_scale=1.0,
+                dof_pos_noise=Unoise(-0.01, 0.01),
+                include_dof_pos=True,
+                include_nominal_difference=False,
+                # DOF velocity
+                dof_vel_scale=0.05,
+                dof_vel_noise=Unoise(-1.5, 1.5),
+                # Previous actions
+                prev_actions_scale=1.0,
     ))
 
     tracking_rewards: TrackingRewards = field(default_factory=TrackingRewards)
@@ -72,7 +81,7 @@ class Go2FlatNewtonConfig:
 
     algorithm_name: str = "PPO"
     max_iterations: int = 6000
-    actor_hidden_dims: List[int] = field(default_factory=lambda: [512, 512, 256])
+    actor_hidden_dims: List[int] = field(default_factory=lambda: [256, 128, 64])
 
     actor_class_name: str = "MLPActor"
     run_name: str = "Go2_Newton"
@@ -109,7 +118,7 @@ class Go2FlatNewtonConfig:
             termination_criteria=[
                 TerminationTermConfig(
                     tf.roll_pitch_violation,
-                    {"roll_threshold_degree": 15.0, "pitch_threshold_degree": 15.0}
+                    {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
                 ),
                 TerminationTermConfig(max_episode_exceed),
             ],
@@ -126,12 +135,6 @@ class Go2FlatNewtonConfig:
                 NewtonEntityConfig(
                     entity_name="ground",
                     entity_type="ground_plane",
-                    shape_cfg=newton.ModelBuilder.ShapeConfig(
-                        ke=5.0e4,
-                        kd=5.0e2,
-                        kf=1.0e3,
-                        mu=1.0,
-                    ),
                     floating=False
                 ),
                 NewtonEntityConfig(
@@ -147,12 +150,6 @@ class Go2FlatNewtonConfig:
                         armature=0.1,
                         target_ke=20.0,
                         target_kd=0.5
-                    ),
-                    shape_cfg=newton.ModelBuilder.ShapeConfig(
-                        ke=5.0e4,
-                        kd=5.0e2,
-                        kf=1.0e3,
-                        mu=1.0,
                     ),
                     sites={"imu_site_base": r.base_link_name},
                     joint_target_ke_map=r.prefixed_p_gains,
@@ -277,27 +274,12 @@ class Go2FlatNewtonConfig:
                 },
             ),
             RewardTermConfig(
-                func=rf_mjlab.body_ang_vel_penalty_mjlab,
-                weight=0.0,
-                params={"body_name": base},
-            ),
-            RewardTermConfig(
-                func=rf_mjlab.feet_air_time_mjlab,
-                weight=0.0,
-                params={
-                    "feet_bodies": feet,
-                    "threshold_min": 0.05,
-                    "threshold_max": 0.5,
-                    "command_threshold": 0.5,
-                },
-            ),
-            RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
                 params={"soft_limit_factor": 1.0},
             ),
             RewardTermConfig(
-                func=rf_mjlab.action_rate_l2_mjlab,
+                func=rf_mjlab.processed_action_rate_l2_mjlab,
                 weight=0.1,
             ),
         ]
@@ -306,16 +288,22 @@ class Go2FlatNewtonConfig:
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(
-            resampling_time_s=(8.0, 12.0),
+            resampling_time_s=(3.0, 8.0),
             sampler=[
                 CommandTermConfig(cf.lin_vel_x, params={"range": self.lin_vel_x_range}),
                 CommandTermConfig(cf.lin_vel_y, params={"range": self.lin_vel_y_range}),
                 CommandTermConfig(cf.ang_vel, params={"range": self.ang_vel_range}),
             ],
+            rel_standing_envs=0.1,
+            heading_command=True,
+            heading_control_stiffness=0.5,
+            heading_range=(-3.14, 3.14),
+            rel_heading_envs=0.3,
         )
 
     def _build_event_config(self, quat) -> EventConfig:
         r = self.robot
+        from rlworld.rl.envs.mdp.events.newton_event_terms import push_robot
         return EventConfig([
             EventTermConfig(
                 func=initf.initialize_base_pose,
@@ -334,6 +322,21 @@ class Go2FlatNewtonConfig:
                 func=initf.randomize_body_mass,
                 params={"mass_ratio_range": (0.8, 1.2), "body_patterns": r.prefixed("base")},
                 mode="reset",
+            ),
+            EventTermConfig(
+                func=push_robot,
+                mode="interval",
+                interval_range_s=(2.0, 20.0),
+                params={
+                    "velocity_range": {
+                        "x": (-0.5, 0.5),
+                        "y": (-0.5, 0.5),
+                        "z": (-0.4, 0.4),
+                        "roll": (-0.52, 0.52),
+                        "pitch": (-0.52, 0.52),
+                        "yaw": (-0.78, 0.78),
+                    },
+                },
             )
         ])
 
@@ -346,7 +349,7 @@ class Go2FlatNewtonConfig:
             desired_kl=0.01,
             entropy_coef=0.01,
             gamma=0.99,
-            lam=0.9,
+            lam=0.95,
             actor_lr=1e-3,
             critic_lr=1e-3,
             estimator_learning_rate=5e-4,
@@ -354,8 +357,8 @@ class Go2FlatNewtonConfig:
             max_grad_norm=0.5,
             num_learning_epochs=5,
             num_mini_batches=4,
-            schedule="fixed",
-            use_clipped_value_loss=False,
+            schedule="adaptive",
+            use_clipped_value_loss=True,
             value_loss_coef=1.0,
             use_truth_value_for_actor=False,
             use_truth_value_for_critic=True,
@@ -382,10 +385,6 @@ class Go2FlatNewtonConfig:
                 "init_noise_std": 1.0,
                 "distribution_type": "gaussian",
                 "std_type": "state_independent",
-            },
-            state_estimator={
-                "activation": "relu",
-                "hidden_dims": [256, 128, 64],
             },
         )
 

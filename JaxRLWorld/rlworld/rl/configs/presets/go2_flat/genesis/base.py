@@ -325,25 +325,6 @@ class Go2FlatGenesisConfig:
                 },
             ),
 
-            # Body angular velocity penalty (disabled)
-            RewardTermConfig(
-                func=rf_mjlab.body_ang_vel_penalty_mjlab,
-                weight=0.0,
-                params={"body_name": "base"},
-            ),
-
-            # Feet air time (disabled)
-            RewardTermConfig(
-                func=rf_mjlab.feet_air_time_mjlab,
-                weight=0.0,
-                params={
-                    "feet_links": ["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
-                    "threshold_min": 0.05,
-                    "threshold_max": 0.5,
-                    "command_threshold": 0.5,
-                },
-            ),
-
             # Joint position limits
             RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
@@ -353,7 +334,7 @@ class Go2FlatGenesisConfig:
 
             # Action rate
             RewardTermConfig(
-                func=rf_mjlab.raw_action_rate_l2_mjlab,
+                func=rf_mjlab.processed_action_rate_l2_mjlab,
                 weight=0.1,
             ),
         ]
@@ -362,12 +343,17 @@ class Go2FlatGenesisConfig:
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(
-            resampling_time_s=(4.0, 8.0),
+            resampling_time_s=(3.0, 8.0),
             sampler=[
                 CommandTermConfig(cf.lin_vel_x, params={"range": self.lin_vel_x_range}),
                 CommandTermConfig(cf.lin_vel_y, params={"range": self.lin_vel_y_range}),
                 CommandTermConfig(cf.ang_vel, params={"range": self.ang_vel_range}),
             ],
+            rel_standing_envs=0.1,
+            heading_command=True,
+            heading_control_stiffness=0.5,
+            heading_range=(-3.14, 3.14),
+            rel_heading_envs=0.3,
         )
 
     def _build_curriculum_config(self) -> CurriculumConfig:
@@ -430,10 +416,6 @@ class Go2FlatGenesisConfig:
                 "init_noise_std": 1.0,
                 "distribution_type": "gaussian",
                 "std_type": "state_independent",
-            },
-            state_estimator={
-                "activation": "relu",
-                "hidden_dims": [256, 128, 64],
             },
         )
 
