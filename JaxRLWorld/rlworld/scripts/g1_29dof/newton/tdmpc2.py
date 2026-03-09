@@ -22,7 +22,7 @@ def main():
     cfgs_for_run.env.num_envs = 1024
     cfgs_for_run.runner.max_iterations = 100000
     cfgs_for_run.action.clip_actions = "joint_limit"
-    cfgs_for_run.action.action_scale = 1.0
+    cfgs_for_run.action.action_scale = 0.6
     # cfgs_for_run.action.clip_actions = (-5.0, 5.0)
     cfgs_for_run.algorithm = tdmpc2_config
     cfgs_for_run.runner.run_name = "G1_NT_TDMPC2"
