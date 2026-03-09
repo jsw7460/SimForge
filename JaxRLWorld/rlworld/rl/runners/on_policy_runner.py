@@ -54,15 +54,13 @@ class OnPolicyRunner(BaseRunner):
         self.num_actions_dim = self.env.num_actions
 
         policy_cfg = self.cfgs.nn.policy
-        actor_kwargs = policy_cfg.get("actor_kwargs", {})
-        critic_kwargs = policy_cfg.get("critic_kwargs", {})
 
         self.key, subkey = jax.random.split(self.key)
 
         if self.algorithm_name == "PPODR3":
-            self._init_ppodr3_actor_critic(policy_cfg, actor_kwargs, critic_kwargs, subkey)
+            self._init_ppodr3_actor_critic(policy_cfg, subkey)
         else:  # PPO
-            self._init_ppo_actor_critic(policy_cfg, actor_kwargs, critic_kwargs, subkey)
+            self._init_ppo_actor_critic(policy_cfg, subkey)
 
         self.training_modules = {"actor_critic": self.actor_critic}
 
@@ -134,13 +132,7 @@ class OnPolicyRunner(BaseRunner):
             key=key,
         )
 
-    def _init_ppo_actor_critic(
-        self,
-        policy_cfg: Dict,
-        actor_kwargs: Dict,
-        critic_kwargs: Dict,
-        key: jax.Array,
-    ) -> None:
+    def _init_ppo_actor_critic(self, policy_cfg, key: jax.Array) -> None:
         """Initialize PPO actor-critic."""
 
         if hasattr(self.env, "scene_manager"):
@@ -152,24 +144,18 @@ class OnPolicyRunner(BaseRunner):
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg["actor_class_name"],
-            init_noise_std=policy_cfg["init_noise_std"],
-            std_type=policy_cfg["std_type"],
-            distribution_type=policy_cfg["distribution_type"],
+            actor_class_name=policy_cfg.actor_class_name,
+            init_noise_std=policy_cfg.init_noise_std,
+            std_type=policy_cfg.std_type,
+            distribution_type=policy_cfg.distribution_type,
             kinematic_tree=kinematic_tree,
             key=key,
-            actor_kwargs=actor_kwargs,
-            critic_kwargs=critic_kwargs,
-            obs_normalization=self.cfgs.algorithm.obs_normalization
+            actor_kwargs=policy_cfg.actor_kwargs,
+            critic_kwargs=policy_cfg.critic_kwargs,
+            obs_normalization=self.cfgs.algorithm.obs_normalization,
         )
 
-    def _init_ppodr3_actor_critic(
-        self,
-        policy_cfg: Dict,
-        actor_kwargs: Dict,
-        critic_kwargs: Dict,
-        key: jax.Array,
-    ) -> None:
+    def _init_ppodr3_actor_critic(self, policy_cfg, key: jax.Array) -> None:
         """Initialize PPO-DR3 actor-critic with DR3Critic."""
 
         if hasattr(self.env, "scene_manager"):
@@ -181,14 +167,14 @@ class OnPolicyRunner(BaseRunner):
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg["actor_class_name"],
-            init_noise_std=policy_cfg["init_noise_std"],
-            std_type=policy_cfg["std_type"],
-            distribution_type=policy_cfg["distribution_type"],
+            actor_class_name=policy_cfg.actor_class_name,
+            init_noise_std=policy_cfg.init_noise_std,
+            std_type=policy_cfg.std_type,
+            distribution_type=policy_cfg.distribution_type,
             kinematic_tree=kinematic_tree,
             key=key,
-            actor_kwargs=actor_kwargs,
-            critic_kwargs=critic_kwargs,
+            actor_kwargs=policy_cfg.actor_kwargs,
+            critic_kwargs=policy_cfg.critic_kwargs,
         )
 
     def _log_model_parameters(self) -> None:

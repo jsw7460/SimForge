@@ -42,21 +42,43 @@ class EventConfig(BaseConfig):
 
 
 @dataclass
+class PolicyConfig(BaseConfig):
+    """Policy network configuration."""
+    # Common fields (all algorithms)
+    actor_class_name: str = "MLPActor"
+    actor_kwargs: Dict[str, Any] = field(default_factory=lambda: {
+        "activation": "elu",
+        "ortho_init": True,
+        "hidden_dims": [256, 128, 64],
+    })
+    critic_kwargs: Dict[str, Any] = field(default_factory=lambda: {
+        "activation": "elu",
+        "ortho_init": True,
+        "hidden_dims": [256, 128, 64],
+    })
+
+    # Stochastic policy settings (PPO, SAC — ignored by TD3/FastTD3)
+    init_noise_std: float = 1.0
+    distribution_type: str = "gaussian"
+    std_type: str = "state_independent"
+
+    # SAC-specific bounds (ignored by other algorithms)
+    log_std_min: float = -20.0
+    log_std_max: float = 2.0
+
+
+@dataclass
 class NNConfig(BaseConfig):
     """Neural network configuration (shared)."""
-    policy: Dict[str, Any] = field(default_factory=lambda: {
-        "actor_class": None,
-        "activation": "tanh",
-        "actor_hidden_dims": [128, 64],
-        "critic_hidden_dims": [256, 128, 64],
-        "init_noise_std": 1.0,
-        "distribution_type": "gaussian",
-        "std_type": "fixed",
-    })
+    policy: PolicyConfig = field(default_factory=PolicyConfig)
     state_estimator: Dict[str, Any] = field(default_factory=lambda: {
         "activation": "relu",
         "hidden_dims": [256, 128, 64],
     })
+
+    def __post_init__(self):
+        if isinstance(self.policy, dict):
+            self.policy = PolicyConfig.from_dict(self.policy)
 
 
 @dataclass

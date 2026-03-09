@@ -22,7 +22,7 @@ def main():
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
     # # num_params: 1.5m
-    # cfgs_for_run.nn.policy["actor_kwargs"].update({
+    # cfgs_for_run.nn.policy.actor_kwargs.update({
     #     "tokenizer_hidden_dim": 80,
     #     "embed_dim": 80,
     #     "num_heads": 4,
@@ -31,7 +31,7 @@ def main():
     # })
 
     # 아래: vA0
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "tokenizer_hidden_dim": 48,
         "embed_dim": 48,
         "num_heads": 4,
@@ -40,7 +40,7 @@ def main():
     })
 
     # 아래: vB0
-    # cfgs_for_run.nn.policy["actor_kwargs"].update({
+    # cfgs_for_run.nn.policy.actor_kwargs.update({
     #     "tokenizer_hidden_dim": 64,
     #     "embed_dim": 64,
     #     "num_heads": 4,
@@ -49,7 +49,7 @@ def main():
     # })
 
     # # 아래: vC0
-    # cfgs_for_run.nn.policy["actor_kwargs"].update({
+    # cfgs_for_run.nn.policy.actor_kwargs.update({
     #     "tokenizer_hidden_dim": 80,
     #     "embed_dim": 80,
     #     "num_heads": 4,

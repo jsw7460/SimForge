@@ -16,7 +16,7 @@ from rlworld.rl.configs.presets.g1_12dof.genesis.mlp import get_config
 def main():
     cfgs_for_run = get_config().with_cli_overrides()
 
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "activation": "elu",
         "output_gain": 0.01
     })

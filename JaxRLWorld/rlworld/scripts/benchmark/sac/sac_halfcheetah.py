@@ -61,7 +61,7 @@ def main():
         learning_starts=2500,
     )
     cfgs_for_run.algorithm = sac_config
-    cfgs_for_run.nn.policy["distribution_type"] = "squashed_gaussian"
+    cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
     cfgs_for_run.runner.log_interval = 500
     cfgs_for_run.runner.max_iterations = 1000000
     cfgs_for_run.runner.save_interval = 100000

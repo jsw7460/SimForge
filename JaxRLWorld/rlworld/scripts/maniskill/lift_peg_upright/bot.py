@@ -22,7 +22,7 @@ def main():
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
     # num_params: 1.5m
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "tokenizer_hidden_dim": 40,
         "embed_dim": 40,
         "num_heads": 2,

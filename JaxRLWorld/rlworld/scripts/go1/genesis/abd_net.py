@@ -25,8 +25,8 @@ large = [512, 256, 128]
 def main():
     cfgs_for_run = get_config().with_cli_overrides()
 
-    cfgs_for_run.nn.policy["actor_kwargs"].update(**medium)
-    cfgs_for_run.nn.policy["critic_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update(**medium)
+    cfgs_for_run.nn.policy.critic_kwargs.update({
         "hidden_dims": large,
     })
     runner = BaseRunner.create_with_env(cfgs_for_run)

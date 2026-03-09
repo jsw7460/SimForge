@@ -28,7 +28,7 @@ def main():
         use_target_actor=False,
     )
     cfgs_for_run.algorithm = fasttd3_config
-    cfgs_for_run.nn.policy["actor_kwargs"].update(
+    cfgs_for_run.nn.policy.actor_kwargs.update(
         {
             "activation": "relu",
             "ortho_init": True,
@@ -37,7 +37,7 @@ def main():
         },
     )
 
-    cfgs_for_run.nn.policy["critic_kwargs"].update(
+    cfgs_for_run.nn.policy.critic_kwargs.update(
         {
             "activation": "relu",
             "ortho_init": True,

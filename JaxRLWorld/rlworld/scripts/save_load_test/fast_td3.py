@@ -394,11 +394,11 @@ def main():
     cfgs_for_run.action.action_scale = cfgs_for_run.action.action_scale / (scale_param / 2)
     cfgs_for_run.action.clip_actions = (-scale_param, scale_param)
 
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": [512, 256, 128],
         "activation": "relu",
     })
-    cfgs_for_run.nn.policy["critic_kwargs"].update({
+    cfgs_for_run.nn.policy.critic_kwargs.update({
         "hidden_dims": [1024, 512, 256],
         "activation": "relu",
     })

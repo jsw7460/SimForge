@@ -16,7 +16,7 @@ from mjlab.sim import SimulationCfg, MujocoCfg
 from mjlab.terrains import TerrainImporterCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, RunnerConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, PolicyConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.mujoco import LocomotionObservations
 from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from rlworld.rl.configs.mujoco_config_classes import (
@@ -544,24 +544,24 @@ class G1FlatMujocoConfig:
 
     def _build_nn_config(self) -> NNConfig:
         return NNConfig(
-            policy={
-                "actor_class_name": self.actor_class_name,
-                "actor_kwargs": {
+            policy=PolicyConfig(
+                actor_class_name=self.actor_class_name,
+                actor_kwargs={
                     "activation": "elu",
                     "ortho_init": True,
                     "output_gain": 0.01,
                     "hidden_dims": [512, 256, 128],
                 },
-                "critic_kwargs": {
+                critic_kwargs={
                     "activation": "elu",
                     "ortho_init": True,
                     "output_gain": 0.01,
                     "hidden_dims": [1024, 512, 256],
                 },
-                "init_noise_std": 1.0,
-                "distribution_type": "gaussian",
-                "std_type": "scalar",
-            },
+                init_noise_std=1.0,
+                distribution_type="gaussian",
+                std_type="scalar",
+            ),
         )
 
     def _build_runner_config(self) -> RunnerConfig:

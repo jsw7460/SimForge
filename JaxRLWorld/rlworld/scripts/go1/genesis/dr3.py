@@ -28,12 +28,12 @@ def main():
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
     cfgs_for_run.algorithm = algorithm
 
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": large,
         # "ortho_init": True,
         # "output_gain": 0.1
     })
-    cfgs_for_run.nn.policy["critic_kwargs"].update({
+    cfgs_for_run.nn.policy.critic_kwargs.update({
         "hidden_dims": large,
     })
     runner = BaseRunner.create_with_env(cfgs_for_run)

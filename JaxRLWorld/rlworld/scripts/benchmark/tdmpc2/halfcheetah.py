@@ -46,11 +46,9 @@ def main():
     # Get complete config from preset
     configs_dict = get_config()
 
-    configs_dict["runner"]["run_name"] = "HalfCheetah_TDMPC2"
-
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
-
+    cfgs_for_run.runner.run_name = "HalfCheetah_TDMPC2"
     cfgs_for_run.env.num_envs = 1
     cfgs_for_run.env.env_name = "GymnasiumEnv"
     cfgs_for_run.env.seed=42

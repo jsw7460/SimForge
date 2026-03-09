@@ -42,14 +42,14 @@ def main():
     cfgs_for_run.runner.save_interval = 100000
     cfgs_for_run.runner.run_name = "SACBenchmarkInvertedDoublePendulum"
 
-    cfgs_for_run.nn.policy["std_type"] = "state_dependent"
-    # cfgs_for_run.nn.policy["distribution_type"] = "squashed_gaussian"
-    cfgs_for_run.nn.policy["distribution_type"] = "gaussian"
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.std_type = "state_dependent"
+    # cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
+    cfgs_for_run.nn.policy.distribution_type = "gaussian"
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": [128, 128],
         "activation": "tanh"
     })
-    cfgs_for_run.nn.policy["critic_kwargs"].update({
+    cfgs_for_run.nn.policy.critic_kwargs.update({
         "hidden_dims": [256, 128],
         "activation": "tanh"
     })

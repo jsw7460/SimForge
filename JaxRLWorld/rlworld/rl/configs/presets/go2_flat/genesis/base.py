@@ -6,7 +6,7 @@ import math
 import genesis as gs
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
-    RewardConfig, CommandConfig, EventConfig, NNConfig, RunnerConfig, VisualizationConfig,
+    RewardConfig, CommandConfig, EventConfig, NNConfig, PolicyConfig, RunnerConfig, VisualizationConfig,
 )
 from rlworld.rl.configs.components.observations.genesis import LocomotionObservations
 from rlworld.rl.configs.events import EventTermConfig
@@ -401,22 +401,22 @@ class Go2FlatGenesisConfig:
 
     def _build_nn_config(self) -> NNConfig:
         return NNConfig(
-            policy={
-                "actor_class_name": self.actor_class_name,
-                "actor_kwargs": {
+            policy=PolicyConfig(
+                actor_class_name=self.actor_class_name,
+                actor_kwargs={
                     "activation": "elu",
                     "ortho_init": True,
                     "hidden_dims": self.actor_hidden_dims,
                 },
-                "critic_kwargs": {
+                critic_kwargs={
                     "activation": "elu",
                     "ortho_init": True,
                     "hidden_dims": self.actor_hidden_dims,
                 },
-                "init_noise_std": 1.0,
-                "distribution_type": "gaussian",
-                "std_type": "state_independent",
-            },
+                init_noise_std=1.0,
+                distribution_type="gaussian",
+                std_type="state_independent",
+            ),
         )
 
     def _build_runner_config(self) -> RunnerConfig:

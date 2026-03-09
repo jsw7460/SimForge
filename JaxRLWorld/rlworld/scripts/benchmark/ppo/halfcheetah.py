@@ -27,19 +27,19 @@ def main():
     cfgs_for_run.env.num_envs = 1024
     cfgs_for_run.env.env_name = "GymnasiumEnv"
     cfgs_for_run.env.task_name = "HalfCheetah-v4"
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": [256, 128, 64],
         "activation": "relu",
         "ortho_init": False,
         "output_gain": 0.1
     })
-    cfgs_for_run.nn.policy["critic_kwargs"].update({
+    cfgs_for_run.nn.policy.critic_kwargs.update({
         "hidden_dims": [256, 128, 64],
         "activation": "relu",
         "ortho_init": False,
         "output_gain": 0.1
     })
-    cfgs_for_run.nn.policy["distribution_type"] = "gaussian"
+    cfgs_for_run.nn.policy.distribution_type = "gaussian"
 
     ppo_config = PPOConfig(
         actor_lr=3e-4,

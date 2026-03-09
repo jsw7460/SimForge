@@ -27,7 +27,7 @@ def main():
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
     cfgs_for_run.algorithm = algorithm
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": medium
     })
     runner = OnPolicyRunner.create_with_env(cfgs_for_run)

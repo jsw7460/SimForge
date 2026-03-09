@@ -25,7 +25,7 @@ def main():
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
     cfgs_for_run.algorithm = SACConfig()
-    cfgs_for_run.algorithm.obs_normalization = False
+    cfgs_for_run.algorithm.obs_normalization = True
     cfgs_for_run.algorithm.actor_lr = 1e-4
     cfgs_for_run.algorithm.buffer_size = 1_000_000
     cfgs_for_run.algorithm.batch_size = 256
@@ -35,11 +35,11 @@ def main():
     cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
     cfgs_for_run.nn.policy.init_noise_std = 0.05
     cfgs_for_run.nn.policy.actor_kwargs.update({
-        "hidden_dims": [256, 256],
+        "hidden_dims": [64, 64, 64],
         "activation": "relu"
     })
     cfgs_for_run.nn.policy.critic_kwargs.update({
-        "hidden_dims": [256, 256],
+        "hidden_dims": [128, 128, 64],
         "activation": "relu"
     })
     cfgs_for_run.runner.log_interval = 100

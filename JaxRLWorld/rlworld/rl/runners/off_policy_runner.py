@@ -57,17 +57,15 @@ class OffPolicyRunner(BaseRunner):
         self.num_actions_dim = self.env.num_actions
 
         policy_cfg = self.cfgs.nn.policy
-        actor_kwargs = policy_cfg.get("actor_kwargs", {})
-        critic_kwargs = policy_cfg.get("critic_kwargs", {})
 
         self.key, subkey = jax.random.split(self.key)
 
         if self.algorithm_name == "SAC":
-            self._init_sac_actor_critic(policy_cfg, actor_kwargs, critic_kwargs, subkey)
+            self._init_sac_actor_critic(policy_cfg, subkey)
         elif self.algorithm_name == "TD3":
-            self._init_td3_actor_critic(policy_cfg, actor_kwargs, critic_kwargs, subkey)
+            self._init_td3_actor_critic(policy_cfg, subkey)
         elif self.algorithm_name == "FastTD3":
-            self._init_fast_td3_actor_critic(policy_cfg, actor_kwargs, critic_kwargs, subkey)
+            self._init_fast_td3_actor_critic(policy_cfg, subkey)
         else:
             raise NotImplementedError(f"Unknown algorithm: {self.algorithm_name}")
 
@@ -83,13 +81,7 @@ class OffPolicyRunner(BaseRunner):
         if self.use_wandb:
             self._log_model_parameters()
 
-    def _init_fast_td3_actor_critic(
-        self,
-        policy_cfg: Dict,
-        actor_kwargs: Dict,
-        critic_kwargs: Dict,
-        key: jax.Array,
-    ) -> None:
+    def _init_fast_td3_actor_critic(self, policy_cfg, key: jax.Array) -> None:
         """Initialize FastTD3 actor-critic with distributional critics."""
         alg_cfg = self.cfgs.algorithm
 
@@ -100,57 +92,45 @@ class OffPolicyRunner(BaseRunner):
             num_atoms=alg_cfg.num_atoms,
             v_min=alg_cfg.v_min,
             v_max=alg_cfg.v_max,
-            actor_class_name=policy_cfg.get("actor_class_name", "MLPActor"),
+            actor_class_name=policy_cfg.actor_class_name,
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
             key=key,
-            is_squashed=self.cfgs.algorithm.is_squashed,
-            actor_kwargs=actor_kwargs,
-            critic_kwargs=critic_kwargs,
-            obs_normalization=self.cfgs.algorithm.obs_normalization
+            is_squashed=alg_cfg.is_squashed,
+            actor_kwargs=policy_cfg.actor_kwargs,
+            critic_kwargs=policy_cfg.critic_kwargs,
+            obs_normalization=alg_cfg.obs_normalization,
         )
 
-    def _init_sac_actor_critic(
-        self,
-        policy_cfg: Dict,
-        actor_kwargs: Dict,
-        critic_kwargs: Dict,
-        key: jax.Array,
-    ) -> None:
+    def _init_sac_actor_critic(self, policy_cfg, key: jax.Array) -> None:
         """Initialize SAC actor-critic."""
         self.actor_critic = SACActorCritic(
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg.get("actor_class_name", "MLPActor"),
-            distribution_type=policy_cfg.get("distribution_type", "squashed_gaussian"),
-            init_noise_std=policy_cfg["init_noise_std"],
-            log_std_min=policy_cfg.get("log_std_min", -20.0),
-            log_std_max=policy_cfg.get("log_std_max", 2.0),
+            actor_class_name=policy_cfg.actor_class_name,
+            distribution_type=policy_cfg.distribution_type,
+            init_noise_std=policy_cfg.init_noise_std,
+            log_std_min=policy_cfg.log_std_min,
+            log_std_max=policy_cfg.log_std_max,
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
             obs_normalization=self.cfgs.algorithm.obs_normalization,
             key=key,
-            actor_kwargs=actor_kwargs,
-            critic_kwargs=critic_kwargs,
+            actor_kwargs=policy_cfg.actor_kwargs,
+            critic_kwargs=policy_cfg.critic_kwargs,
         )
 
-    def _init_td3_actor_critic(
-        self,
-        policy_cfg: Dict,
-        actor_kwargs: Dict,
-        critic_kwargs: Dict,
-        key: jax.Array,
-    ) -> None:
+    def _init_td3_actor_critic(self, policy_cfg, key: jax.Array) -> None:
         """Initialize TD3 actor-critic."""
         self.actor_critic = TD3ActorCritic(
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg.get("actor_class_name", "MLPActor"),
+            actor_class_name=policy_cfg.actor_class_name,
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
             obs_normalization=self.cfgs.algorithm.obs_normalization,
             key=key,
-            actor_kwargs=actor_kwargs,
-            critic_kwargs=critic_kwargs,
+            actor_kwargs=policy_cfg.actor_kwargs,
+            critic_kwargs=policy_cfg.critic_kwargs,
         )
 
     def _log_model_parameters(self) -> None:

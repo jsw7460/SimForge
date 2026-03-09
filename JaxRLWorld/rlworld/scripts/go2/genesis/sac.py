@@ -26,7 +26,7 @@ def main():
         num_gradient_steps=16,
     )
     cfgs_for_run.algorithm = sac_config
-    cfgs_for_run.nn.policy["distribution_type"] = "squashed_gaussian"
+    cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
 
     cfgs_for_run.action.clip_actions = "joint_limit"
     cfgs_for_run.action.action_scale = 1.0

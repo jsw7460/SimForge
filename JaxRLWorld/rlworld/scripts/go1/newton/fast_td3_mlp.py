@@ -22,11 +22,11 @@ def main():
     cfgs_for_run.action.clip_actions = (-scale_param, scale_param)
 
     # FastTD3 architecture: Actor [512, 256, 128], Critic [1024, 512, 256]
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": [512, 256, 128],
         "activation": "relu",
     })
-    cfgs_for_run.nn.policy["critic_kwargs"].update({
+    cfgs_for_run.nn.policy.critic_kwargs.update({
         "hidden_dims": [1024, 512, 256],
         "activation": "relu",
     })

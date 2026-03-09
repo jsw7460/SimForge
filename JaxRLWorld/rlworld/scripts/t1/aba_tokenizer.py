@@ -74,7 +74,7 @@ def main():
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
     # num params: 1.5m
-    cfgs_for_run.nn.policy["actor_kwargs"].update(**medium2)
+    cfgs_for_run.nn.policy.actor_kwargs.update(**medium2)
 
     runner = OnPolicyRunner.create_with_env(cfgs_for_run)
 

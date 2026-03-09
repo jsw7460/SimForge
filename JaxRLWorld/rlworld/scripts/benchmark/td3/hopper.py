@@ -12,7 +12,7 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 from rlworld.rl.configs import GenesisConfigsForRun
 from rlworld.rl.runners import OffPolicyRunner
 from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
-from rlworld.rl.configs.algorithms import SACConfig
+from rlworld.rl.configs.algorithms import TD3Config
 
 import gymnasium as gym
 
@@ -24,16 +24,13 @@ def main():
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
-    cfgs_for_run.algorithm = SACConfig()
+    cfgs_for_run.algorithm = TD3Config()
     cfgs_for_run.algorithm.obs_normalization = False
     cfgs_for_run.algorithm.actor_lr = 1e-4
     cfgs_for_run.algorithm.buffer_size = 1_000_000
     cfgs_for_run.algorithm.batch_size = 256
     cfgs_for_run.algorithm.tau = 0.005
     cfgs_for_run.algorithm.num_steps_per_env = 1
-    cfgs_for_run.nn.policy.std_type = "state_dependent"
-    cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
-    cfgs_for_run.nn.policy.init_noise_std = 0.05
     cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": [256, 256],
         "activation": "relu"
@@ -45,7 +42,7 @@ def main():
     cfgs_for_run.runner.log_interval = 100
     cfgs_for_run.runner.max_iterations = 1000000
     cfgs_for_run.runner.save_interval = 100000
-    cfgs_for_run.runner.run_name = "SACBenchmarkHopper_Hop"
+    cfgs_for_run.runner.run_name = "TD3Benchmark_HopperHop"
     cfgs_for_run.runner.eval_interval = 0       # Do not change this
 
     from rlworld.rl.envs import GymnasiumEnv

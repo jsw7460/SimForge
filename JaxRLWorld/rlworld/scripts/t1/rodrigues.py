@@ -20,7 +20,7 @@ def main():
 
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "actor_hidden_dims": [32, 32],
         "joint_channels": 4,
         "link_channels": 6,

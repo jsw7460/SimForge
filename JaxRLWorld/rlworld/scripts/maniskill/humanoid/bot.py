@@ -21,7 +21,7 @@ def main():
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
-    # cfgs_for_run.nn.policy["actor_kwargs"].update({
+    # cfgs_for_run.nn.policy.actor_kwargs.update({
     #     "tokenizer_hidden_dim": 80,
     #     "embed_dim": 80,
     #     "num_heads": 4,
@@ -29,7 +29,7 @@ def main():
     #     "dim_feedforward": 380,
     # })
 
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
+    cfgs_for_run.nn.policy.actor_kwargs.update({
         "tokenizer_hidden_dim": 40,
         "embed_dim": 40,
         "num_heads": 4,

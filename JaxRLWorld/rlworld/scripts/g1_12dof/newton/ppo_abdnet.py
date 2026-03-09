@@ -28,7 +28,7 @@ medium = {
 
 def main():
     cfgs_for_run = get_config().with_cli_overrides()
-    cfgs_for_run.nn.policy["actor_kwargs"].update(**medium)
+    cfgs_for_run.nn.policy.actor_kwargs.update(**medium)
 
     cfgs_for_run.algorithm.obs_normalization = True
     runner = BaseRunner.create_with_env(cfgs_for_run)

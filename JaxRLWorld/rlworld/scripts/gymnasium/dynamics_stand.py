@@ -27,7 +27,7 @@ def main():
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
     cfgs_for_run.env.num_envs = 1024
-    cfgs_for_run.nn.policy["actor_kwargs"].update(
+    cfgs_for_run.nn.policy.actor_kwargs.update(
         {
             # "encoder_type": "GatedDeepPhysicsEncoder",
             # "encoder_type": "GatedPhysicsEncoder",
@@ -44,7 +44,7 @@ def main():
             "use_auxiliary_loss": True,
         }
     )
-    cfgs_for_run.nn.policy["critic_kwargs"].update({
+    cfgs_for_run.nn.policy.critic_kwargs.update({
         "hidden_dims": medium
     })
 

@@ -2,6 +2,7 @@ from .common_config_classes import (
     RewardConfig,
     CommandConfig,
     EventConfig,
+    PolicyConfig,
     NNConfig,
     RunnerConfig,
     VisualizationConfig,

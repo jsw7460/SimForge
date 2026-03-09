@@ -4,7 +4,7 @@ from typing import Dict, Any, List
 import genesis as gs
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
-    RewardConfig, CommandConfig, EventConfig, NNConfig, RunnerConfig, VisualizationConfig,
+    RewardConfig, CommandConfig, EventConfig, NNConfig, PolicyConfig, RunnerConfig, VisualizationConfig,
 )
 from rlworld.rl.configs.components.observations.genesis import LocomotionObservations
 from rlworld.rl.configs.components.rewards.genesis import TrackingRewards, RegularizationRewards
@@ -352,20 +352,20 @@ class G1FlatGenesisConfig:
 
     def _build_nn_config(self) -> NNConfig:
         return NNConfig(
-            policy={
-                "actor_class_name": self.actor_class_name,
-                "actor_kwargs": {
+            policy=PolicyConfig(
+                actor_class_name=self.actor_class_name,
+                actor_kwargs={
                     "activation": "tanh",
                     "hidden_dims": self.actor_hidden_dims,
                 },
-                "critic_kwargs": {
+                critic_kwargs={
                     "activation": "tanh",
                     "hidden_dims": self.actor_hidden_dims,
                 },
-                "init_noise_std": 0.8,
-                "distribution_type": "gaussian",
-                "std_type": "state_independent",
-            },
+                init_noise_std=0.8,
+                distribution_type="gaussian",
+                std_type="state_independent",
+            ),
             state_estimator={
                 "activation": "relu",
                 "hidden_dims": [256, 128, 64],
