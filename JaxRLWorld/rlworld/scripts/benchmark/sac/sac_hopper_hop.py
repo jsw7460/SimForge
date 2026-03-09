@@ -26,18 +26,19 @@ def main():
 
     cfgs_for_run.algorithm = SACConfig()
     cfgs_for_run.algorithm.obs_normalization = False
-    cfgs_for_run.algorithm.actor_lr = 1e-4
+    cfgs_for_run.algorithm.actor_lr = 3e-4
     cfgs_for_run.algorithm.buffer_size = 1_000_000
     cfgs_for_run.algorithm.batch_size = 256
     cfgs_for_run.algorithm.tau = 0.005
     cfgs_for_run.algorithm.num_steps_per_env = 1
+    cfgs_for_run.algorithm.num_gradient_steps = 1
     cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(SACPolicyConfig)
     cfgs_for_run.nn.policy.actor_kwargs.update({
-        "hidden_dims": [64, 64, 32],
+        "hidden_dims": [256, 256],
         "activation": "relu"
     })
     cfgs_for_run.nn.policy.critic_kwargs.update({
-        "hidden_dims": [128, 128, 128],
+        "hidden_dims": [64, 64, 64],
         "activation": "relu"
     })
     cfgs_for_run.runner.log_interval = 100

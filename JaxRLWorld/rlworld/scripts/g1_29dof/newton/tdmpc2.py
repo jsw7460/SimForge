@@ -17,10 +17,10 @@ def main():
         vmax=10.0,
         num_bins=101,
         num_samples=512,
-        num_pi_trajs=24,
+        num_pi_trajs=128,
         num_elites=64,
         num_iterations=6,
-        buffer_size=4096 * 5000,
+        buffer_size=1024 * 1024 * 10,
         num_gradient_steps=8,
         batch_size=10000,
         learning_starts=5000

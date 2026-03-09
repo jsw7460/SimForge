@@ -1,15 +1,20 @@
-import os
-
-os.environ['__NV_PRIME_RENDER_OFFLOAD'] = '1'
-os.environ['__GLX_VENDOR_LIBRARY_NAME'] = 'nvidia'
-
 import genesis as gs
 from rlworld.rl.evals import PolicyEvaluator
+from rlworld.rl.envs.mdp.commands import command_terms as cf
+from rlworld.rl.envs.mdp.configs import CommandTermConfig
+from rlworld.rl.vis.overlays.hud_items import LinkPositionItem, LinkPositionItemConfig
+
+from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
 
 if __name__ == '__main__':
+    g1_29dof = G1MjlabConfig()
+    link_pos_item = LinkPositionItem(
+        LinkPositionItemConfig(link_patterns=("left_ankle_roll_link", "right_ankle_roll_link")),
+    )
+
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-03-08/17-44-14/checkpoint_2250/",
+        policy_path=f"outputs/models/2026-03-09/16-13-41/checkpoint_latest/",
         num_evals=1,
         seed=42,
         show_viewer=False,
@@ -34,8 +39,16 @@ if __name__ == '__main__':
                     ],
                 ),
             },
+            "visualization": {
+                "extra_hud_items": [link_pos_item, ]
+            },
             "command": {
-                "rel_standing_envs": 0.5
+                "sampler": [
+                    CommandTermConfig(cf.lin_vel_x, params={"range": (-1.0, 1.5)}),
+                    CommandTermConfig(cf.lin_vel_y, params={"range": (-0.5, 0.5)}),
+                    CommandTermConfig(cf.ang_vel, params={"range": (-0.5, 0.5)})
+                ],
+                "rel_standing_envs": 0.3,
             }
         },
     )

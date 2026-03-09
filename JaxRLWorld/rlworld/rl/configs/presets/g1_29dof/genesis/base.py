@@ -366,8 +366,9 @@ class G1FlatGenesisConfig:
                 dt=0.005,
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
-                enable_self_collision=True,
+                enable_self_collision=False,
                 enable_joint_limit=True,
+                max_collision_pairs=30,
             ),
             robot_cfg=self.robot,
         )
