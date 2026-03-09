@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from .base_ac import BaseActorCritic
 from rlworld.rl.modules.utils import get_activation
 from rlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
+from rlworld.rl.modules.normalization import EmpiricalNormalization
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.scene_manager import KinematicTree
@@ -191,6 +192,7 @@ class SACActorCritic(BaseActorCritic):
         log_std_min: float = -20.0,
         log_std_max: float = 2.0,
         kinematic_tree: "KinematicTree | None" = None,
+        obs_normalization: bool = False,
         *,
         key: jax.Array,
         **kwargs,
@@ -202,10 +204,11 @@ class SACActorCritic(BaseActorCritic):
             num_actions: Action dimension
             actor_class_name: Name of actor class ("MLPActor", etc.)
             distribution_type: "gaussian" or "squashed_gaussian"
-            log_std_init: Initial value for log_std
+            init_noise_std: Initial noise standard deviation (not log)
             log_std_min: Minimum log_std (clipping)
             log_std_max: Maximum log_std (clipping)
             kinematic_tree: Optional kinematic tree for dynamics-aware actors
+            obs_normalization: Whether to enable observation normalization
             key: JAX random key
             **kwargs: Must contain "actor_kwargs" and "critic_kwargs"
         """
@@ -237,8 +240,17 @@ class SACActorCritic(BaseActorCritic):
         # We use critic1 and critic2 instead
         self.critic = self.critic1
 
+        # Observation normalization
+        if obs_normalization:
+            self.actor_obs_normalizer = EmpiricalNormalization(shape=num_actor_obs)
+            self.critic_obs_normalizer = EmpiricalNormalization(shape=num_critic_obs)
+        else:
+            self.actor_obs_normalizer = None
+            self.critic_obs_normalizer = None
+
         print(f"🎭 SAC Actor-Critic: distribution={distribution_type}")
         print(f"🤖 Actor: {actor_class_name}")
+        print(f"📏 Obs normalization: {obs_normalization}")
 
     def _build_networks(
         self,

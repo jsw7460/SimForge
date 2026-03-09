@@ -140,6 +140,9 @@ class SAC(OffPolicyAlgorithm):
         # Initialize training state
         self._init_train_state(key)
 
+        # Observation normalization
+        self.obs_normalization = actor_critic.actor_obs_normalizer is not None
+
         # Storage (initialized via init_storage)
         self.replay_buffer: Optional[ReplayBuffer] = None
         self.transition: Optional[SACTransitionBuffer] = None
@@ -341,6 +344,23 @@ class SAC(OffPolicyAlgorithm):
     def update(self, batch: ReplayBatch) -> SACMetrics:
         """Update all networks using provided batch."""
         self.total_it += 1
+
+        # Update normalizer stats from batch data
+        if self.obs_normalization:
+            new_actor_norm = self.train_state.model.actor_obs_normalizer.update(
+                batch.actor_observations
+            )
+            new_critic_norm = self.train_state.model.critic_obs_normalizer.update(
+                batch.critic_observations
+            )
+            new_actor_norm = new_actor_norm.update(batch.next_actor_observations)
+            new_critic_norm = new_critic_norm.update(batch.next_critic_observations)
+            new_model = eqx.tree_at(
+                lambda m: (m.actor_obs_normalizer, m.critic_obs_normalizer),
+                self.train_state.model,
+                (new_actor_norm, new_critic_norm),
+            )
+            self.train_state = self.train_state._replace(model=new_model)
 
         key = self.train_state.key
         key, critic_key, actor_key = jax.random.split(key, 3)

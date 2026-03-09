@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import math
 
 from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
+from rlworld.rl.modules.normalization import EmpiricalNormalization
 from .base_ac import BaseActorCritic
 
 if TYPE_CHECKING:
@@ -95,6 +96,7 @@ class TD3ActorCritic(BaseActorCritic):
         num_actions: int,
         actor_class_name: str = "MLPActor",
         kinematic_tree: "KinematicTree | None" = None,
+        obs_normalization: bool = False,
         *,
         key: jax.Array,
         **kwargs,
@@ -106,6 +108,7 @@ class TD3ActorCritic(BaseActorCritic):
             num_actions: Action dimension
             actor_class_name: Name of actor class ("MLPActor", etc.)
             kinematic_tree: Optional kinematic tree for dynamics-aware actors
+            obs_normalization: Whether to enable observation normalization
             key: JAX random key
             **kwargs: Must contain "actor_kwargs" and "critic_kwargs"
         """
@@ -131,8 +134,17 @@ class TD3ActorCritic(BaseActorCritic):
         # Placeholder critic (required by BaseActorCritic)
         self.critic = self.critic1
 
+        # Observation normalization
+        if obs_normalization:
+            self.actor_obs_normalizer = EmpiricalNormalization(shape=num_actor_obs)
+            self.critic_obs_normalizer = EmpiricalNormalization(shape=num_critic_obs)
+        else:
+            self.actor_obs_normalizer = None
+            self.critic_obs_normalizer = None
+
         print(f"🎭 TD3 Actor-Critic: deterministic policy")
         print(f"🤖 Actor: {actor_class_name}")
+        print(f"📏 Obs normalization: {obs_normalization}")
 
     def _build_networks(
         self,

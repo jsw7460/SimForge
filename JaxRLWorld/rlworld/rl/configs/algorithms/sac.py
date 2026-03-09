@@ -18,7 +18,7 @@ class SACConfig(BaseConfig):
     tau: float = 0.005
     ent_coef: Union[str, float] = "auto"
     target_entropy: Union[str, float] = "auto"
-    use_obs_norm: bool = False
+    obs_normalization: bool = False
     optimizer: str = "adam"
     optimizer_betas: tuple = (0.9, 0.999)
     optimizer_eps: float = 1e-8
@@ -26,5 +26,5 @@ class SACConfig(BaseConfig):
     batch_size: int = 512
     buffer_size: int = 1_000_000
     policy_delay: int = 1
-    utd_ratio: float = 1
+    num_gradient_steps: int = 1
     num_steps_per_env: int =  1

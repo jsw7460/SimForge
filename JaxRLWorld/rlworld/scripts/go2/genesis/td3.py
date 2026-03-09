@@ -23,8 +23,8 @@ def main():
         batch_size=4096 * 2,
         buffer_size=4096 * 1100,
         learning_starts=10000,
-        utd_ratio=16,
-        use_obs_norm=True,
+        num_gradient_steps=16,
+        obs_normalization=True,
         target_noise_clip=0.1
     )
     cfgs_for_run.algorithm = td3_config
