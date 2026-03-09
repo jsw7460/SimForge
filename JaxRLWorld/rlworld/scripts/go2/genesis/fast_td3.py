@@ -13,7 +13,7 @@ def main():
         learning_starts=10000,
         is_squashed=True,
         use_cdq=False,
-        utd_ratio=16,
+        num_gradient_steps=16,
     )
     cfgs_for_run.algorithm = fasttd3_config
 

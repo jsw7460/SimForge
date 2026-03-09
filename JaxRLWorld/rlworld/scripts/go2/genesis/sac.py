@@ -23,7 +23,7 @@ def main():
         batch_size=4096 * 2,
         buffer_size=4096 * 1100,
         learning_starts=10000,
-        utd_ratio=16,
+        num_gradient_steps=16,
     )
     cfgs_for_run.algorithm = sac_config
     cfgs_for_run.nn.policy["distribution_type"] = "squashed_gaussian"

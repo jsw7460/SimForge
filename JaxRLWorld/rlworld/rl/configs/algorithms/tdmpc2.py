@@ -68,5 +68,5 @@ class TDMPC2Config(BaseConfig):
     grad_clip_norm: float = 20.0
     max_grad_norm: float = 20.0
     learning_starts: int = 10000
-    utd_ratio: int = 1
+    num_gradient_steps: int = 1
     num_steps_per_env: int = 1

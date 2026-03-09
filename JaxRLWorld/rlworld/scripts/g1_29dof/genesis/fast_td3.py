@@ -15,7 +15,7 @@ def main():
         is_squashed=True,
         use_cdq=True,
         gamma=0.97,
-        utd_ratio=2,
+        num_gradient_steps=2,
         v_min=-10.0,
         v_max=10.0,
         num_atoms=101,

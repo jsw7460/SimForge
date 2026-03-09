@@ -127,6 +127,7 @@ class OffPolicyRunner(BaseRunner):
             log_std_min=policy_cfg.get("log_std_min", -20.0),
             log_std_max=policy_cfg.get("log_std_max", 2.0),
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
+            obs_normalization=self.cfgs.algorithm.obs_normalization,
             key=key,
             actor_kwargs=actor_kwargs,
             critic_kwargs=critic_kwargs,
@@ -146,6 +147,7 @@ class OffPolicyRunner(BaseRunner):
             num_actions=self.num_actions_dim,
             actor_class_name=policy_cfg.get("actor_class_name", "MLPActor"),
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
+            obs_normalization=self.cfgs.algorithm.obs_normalization,
             key=key,
             actor_kwargs=actor_kwargs,
             critic_kwargs=critic_kwargs,
@@ -190,22 +192,20 @@ class OffPolicyRunner(BaseRunner):
         else:
             raise NotImplementedError(f"Unknown algorithm: {self.algorithm_name}")
 
-        # Compute UTD info
-        utd_ratio = alg_cfg.get("utd_ratio", 1.0)
+        # Compute training info
+        num_gradient_steps = alg_cfg.get("num_gradient_steps", 1)
         num_transitions = self.env.num_envs * self.cfgs.algorithm.num_steps_per_env
-        num_updates = max(1, int(utd_ratio * num_transitions))
 
         print(f"\n🔧 JAX {self.algorithm_name} initialized")
         print(f"  Learning rate: actor={alg_cfg.actor_lr}, critic={alg_cfg.critic_lr}")
         print(f"  Tau: {alg_cfg.tau}")
         print(f"  Gamma: {alg_cfg.gamma}")
         print(f"  Batch size: {alg_cfg.batch_size}")
-        print(f"\n  UTD config:")
-        print(f"    - utd_ratio: {utd_ratio}")
+        print(f"\n  Training config:")
         print(f"    - num_envs: {self.env.num_envs}")
         print(f"    - num_steps_per_env: {self.cfgs.algorithm.num_steps_per_env}")
         print(f"    - transitions per iter: {num_transitions}")
-        print(f"    - gradient steps per iter: {num_updates}")
+        print(f"    - gradient steps per iter: {num_gradient_steps}")
 
         return self.alg
 
@@ -416,8 +416,7 @@ class OffPolicyRunner(BaseRunner):
         if self.alg.replay_buffer.size >= self.cfgs.algorithm.learning_starts:
             training_start_time = time.time()
 
-            utd_ratio = self.cfgs.algorithm.get("utd_ratio", 1)
-            num_updates = max(1, utd_ratio)
+            num_updates = max(1, self.cfgs.algorithm.get("num_gradient_steps", 1))
             # Perform updates
             update_data = {}
             for _ in range(num_updates):

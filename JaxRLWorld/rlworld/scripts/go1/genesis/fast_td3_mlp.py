@@ -55,7 +55,7 @@ def main():
         noise_max=0.8,
         is_squashed=True,
         use_cdq=True,
-        utd_ratio=8,
+        num_gradient_steps=8,
         obs_normalization=True
     )
     cfgs_for_run.algorithm = fast_td3_config

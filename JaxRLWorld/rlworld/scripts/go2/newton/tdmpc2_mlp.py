@@ -27,7 +27,7 @@ def main():
         num_elites=64,
         num_iterations=6,
         buffer_size=5_000_000,
-        utd_ratio=8,
+        num_gradient_steps=8,
         batch_size=10000,
         learning_starts=5000
     )

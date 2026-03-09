@@ -59,7 +59,7 @@ def main():
         is_squashed=True,
         obs_normalization=True,
         use_cdq=True,
-        utd_ratio=1,
+        num_gradient_steps=1,
     )
     cfgs_for_run.algorithm = fast_td3_config
 

@@ -311,8 +311,7 @@ class ModelBasedRunner(BaseRunner):
                 print(f'Pretraining agent on seed data ({num_updates} updates)...')
                 self._pretrained = True
             else:
-                utd_ratio = self.cfgs.algorithm.utd_ratio
-                num_updates = max(1, utd_ratio)
+                num_updates = max(1, self.cfgs.algorithm.num_gradient_steps)
 
             update_data = {}
             for i in range(num_updates):

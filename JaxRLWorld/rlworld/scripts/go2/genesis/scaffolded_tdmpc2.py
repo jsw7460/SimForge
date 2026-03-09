@@ -13,7 +13,7 @@ def main():
     cfgs_for_run.algorithm.buffer_size = 5000000
     cfgs_for_run.algorithm.learning_starts = 5000
     cfgs_for_run.algorithm.batch_size = 10000
-    cfgs_for_run.algorithm.utd_ratio = 8
+    cfgs_for_run.algorithm.num_gradient_steps = 8
     cfgs_for_run.algorithm.warmup_std = 0.1
     cfgs_for_run.algorithm.entropy_coef = 1e-3
     cfgs_for_run.algorithm.lr = 1e-4

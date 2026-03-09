@@ -30,7 +30,7 @@ def run_trial(trial: optuna.Trial, num_iterations: int = 5000) -> float:
     v_max = trial.suggest_float("v_max", 50.0, 150.0)
     noise_min = trial.suggest_float("noise_min", 0.01, 0.1)
     noise_max = trial.suggest_float("noise_max", 0.2, 0.5)
-    utd_ratio = trial.suggest_int("utd_ratio", 1, 16)
+    num_gradient_steps = trial.suggest_int("num_gradient_steps", 1, 16)
 
     # Constraint: noise_min < noise_max
     if noise_min >= noise_max:
@@ -65,7 +65,7 @@ def run_trial(trial: optuna.Trial, num_iterations: int = 5000) -> float:
         noise_max=noise_max,
         is_squashed=True,
         use_cdq=True,
-        utd_ratio=utd_ratio,
+        num_gradient_steps=num_gradient_steps,
     )
     cfgs_for_run.algorithm = fast_td3_config
 

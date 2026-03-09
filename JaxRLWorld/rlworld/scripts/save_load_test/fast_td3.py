@@ -422,7 +422,7 @@ def main():
         noise_max=0.4,
         is_squashed=True,
         use_cdq=True,
-        utd_ratio=2,
+        num_gradient_steps=2,
         obs_normalization=True,  # 중요: normalization 활성화
     )
     cfgs_for_run.algorithm = fast_td3_config

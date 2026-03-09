@@ -43,7 +43,7 @@ class Go2ScaffoldedTDMPC2Config(Go2FlatGenesisConfig):
     batch_size: int = 256
     buffer_size: int = 1_000_000
     learning_starts: int = 256
-    utd_ratio: int = 1
+    num_gradient_steps: int = 1
     lr: float = 3e-4
     pi_lr: float = 3e-4
     tau: float = 0.01
@@ -175,7 +175,7 @@ class Go2ScaffoldedTDMPC2Config(Go2FlatGenesisConfig):
             "grad_clip_norm": self.grad_clip_norm,
             "max_grad_norm": self.max_grad_norm,
             "learning_starts": self.learning_starts,
-            "utd_ratio": self.utd_ratio,
+            "num_gradient_steps": self.num_gradient_steps,
             "num_steps_per_env": 1,
         }
 
