@@ -14,6 +14,7 @@ from rlworld.rl.configs.genesis_config_classes import (
     EnvConfig, SceneConfig, ObservationConfig, ActionConfig, CurriculumConfig,
 )
 from rlworld.rl.configs.observations import ObservationTermConfig
+from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import EntityConfig
@@ -23,7 +24,7 @@ from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
     CommandTermConfig,
 )
-from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
+from rlworld.rl.envs.mdp.observations.genesis import state, proprioception
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf
@@ -59,12 +60,10 @@ class G1FlatGenesisConfig:
     lin_vel_x_range: tuple = (-1.0, 1.0)
     lin_vel_y_range: tuple = (-1.0, 1.0)
     ang_vel_range: tuple = (-0.5, 0.5)
-    base_height_range: tuple = (0.68, 0.69)
 
     # Algorithm
     algorithm_name: str = "PPO"
-    max_iterations: int = 15000
-    actor_hidden_dims: List[int] = field(default_factory=lambda: [512, 512, 256])
+    max_iterations: int = 30000
     actor_class_name: str = "MLPActor"
     run_name: str = "mlp_ppo_g1_29dof"
 
@@ -73,25 +72,27 @@ class G1FlatGenesisConfig:
         if self.observations is None:
             self.observations = LocomotionObservations(
                 base_name="pelvis",
+                # Base linear velocity (matching mjlab noise)
+                base_lin_vel_scale=1.0,
+                base_lin_vel_noise=Unoise(-0.5, 0.5),
                 # IMU angular velocity
-                ang_vel_scale=2.0,
-                ang_vel_history=4,
+                ang_vel_scale=1.0,
+                ang_vel_noise=Unoise(-0.2, 0.2),
                 # Projected gravity
                 gravity_scale=1.0,
-                gravity_history=3,
+                gravity_noise=Unoise(-0.05, 0.05),
                 # Command
                 command_scale=1.0,
-                # DOF position nominal difference
+                # DOF position (relative to default)
+                dof_pos_scale=1.0,
+                dof_pos_noise=Unoise(-0.01, 0.01),
                 include_dof_pos=True,
-                include_nominal_difference=True,
-                nominal_difference_scale=1.0,
+                include_nominal_difference=False,
                 # DOF velocity
-                dof_vel_scale=0.05,
-                dof_vel_history=4,
+                dof_vel_scale=1.0,
+                dof_vel_noise=Unoise(-1.5, 1.5),
                 # Previous actions
                 prev_actions_scale=1.0,
-
-                include_base_lin_vel=False,
             )
 
         # Extra observations for G1
@@ -114,100 +115,23 @@ class G1FlatGenesisConfig:
                 action_rate_weight=0.01,
                 similar_to_default_weight=None,
             )
-        if not self.extra_reward_terms:
-            self.extra_reward_terms = self._default_extra_rewards()
 
     def _default_extra_observations(self) -> List[ObservationTermConfig]:
         """G1-specific extra observations."""
-        return [
-            ObservationTermConfig(
-                proprioception.relative_links_pos,
-                scale=1.0,
-                params={
-                    "base_name": self.robot.base_link_name,
-                    "links": ("left_ankle_roll_link", "right_ankle_roll_link"),
-                },
-            ),
-            ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
-        ]
+        return []
 
     def _default_extra_critic_observations(self) -> List[ObservationTermConfig]:
         """Extra critic observations."""
+        feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
         return [
             ObservationTermConfig(state.base_height, scale=1.0),
-            ObservationTermConfig(state.base_lin_vel, scale=1.0),
             ObservationTermConfig(state.base_euler, scale=1.0),
-        ]
+            ObservationTermConfig(state.contact_indicator, scale=1.0, params={"links": feet_links}),
+            ObservationTermConfig(state.contact_force, scale=0.01, params={"links": feet_links}),
+            ObservationTermConfig(state.feet_height, scale=1.0, params={"links": feet_links}),
+            ObservationTermConfig(state.foot_air_time, scale=1.0, params={"links": feet_links}),
 
-    def _default_extra_rewards(self) -> List[RewardTermConfig]:
-        """G1-specific reward terms."""
-        feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
-        hip_joints = (".*hip_roll.*", ".*hip_yaw.*")
-        return [
-
-            RewardTermConfig(rf.reward_feet_air_time, weight=0.75, params={"links": feet_links}),
-
-            RewardTermConfig(
-                rf.penalize_joint_deviation_l1, weight=0.1, params={"joints": hip_joints}
-            ),  # hip
-            RewardTermConfig(
-                rf.penalize_joint_deviation_l1,
-                weight=0.1,
-                params={"joints": [
-                    ".*_shoulder_pitch_joint",
-                    ".*_shoulder_roll_joint",
-                    ".*_shoulder_yaw_joint",
-                    ".*_elbow_joint",
-                ]}
-            ),  # arms
-            RewardTermConfig(
-                rf.penalize_joint_deviation_l1,
-                weight=0.05,
-                params={"joints": [
-                    ".*_wrist_roll_joint",
-                    ".*_wrist_pitch_joint",
-                    ".*_wrist_yaw_joint"
-                ]}
-            ),  # hands
-            RewardTermConfig(
-                rf.penalize_joint_deviation_l1,
-                weight=0.1,
-                params={"joints": ["waist_roll_joint", "waist_pitch_joint", "waist_yaw_joint"]}
-            ),  # torso
-
-            RewardTermConfig(
-                rf.penalize_ang_vel_xy,
-                weight=0.05,
-                params={"base_name": self.robot.base_link_name},
-            ),
-            RewardTermConfig(rf.penalize_nonflat_by_gravity, weight=0.1),
-            RewardTermConfig(rf.penalize_dof_vel, weight=1e-3),
-            RewardTermConfig(
-                g1rf.penalize_feet_swing_height_gait,
-                weight=20.0,
-                params={"max_height": 0.1},
-            ),
-            RewardTermConfig(g1rf.penalize_dof_pos_limits, weight=1.0),
-            RewardTermConfig(rf.reward_gait_pattern, weight=0.18),
-            RewardTermConfig(rf.reward_alive, weight=0.15),
-            RewardTermConfig(rf.penalize_torques, weight=1e-5),
-            RewardTermConfig(
-                rf.penalize_base_acc,
-                weight=1e-4,
-                params={"base_name": self.robot.base_link_name},
-            ),
-            RewardTermConfig(
-                rf.penalize_feet_slip,
-                weight=0.1,
-                params={"feet_links": feet_links},
-            ),
-            RewardTermConfig(rf.penalize_feet_yaw_mean_deviation, params={"feet_links": feet_links}, weight=1.0),
-            RewardTermConfig(rf.penalize_feet_yaw_difference, params={"feet_links": feet_links}, weight=1.0),
-            RewardTermConfig(
-                rf.penalize_feet_distance,
-                params={"feet_links": feet_links, "feet_distance_ref": 0.21},
-                weight=1.0
-            ),
+            # ObservationTermConfig(, scale=1.0),
         ]
 
     def _mjlab_rewards(self) -> List[RewardTermConfig]:
@@ -442,7 +366,7 @@ class G1FlatGenesisConfig:
                 dt=0.005,
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
-                enable_self_collision=False,
+                enable_self_collision=True,
                 enable_joint_limit=True,
             ),
             robot_cfg=self.robot,
@@ -518,20 +442,16 @@ class G1FlatGenesisConfig:
                 "actor_kwargs": {
                     "activation": "tanh",
                     "ortho_init": True,
-                    "hidden_dims": self.actor_hidden_dims,
+                    "hidden_dims": [512, 256, 128],
                 },
                 "critic_kwargs": {
                     "activation": "tanh",
                     "ortho_init": True,
-                    "hidden_dims": self.actor_hidden_dims,
+                    "hidden_dims": [1024, 512, 256],
                 },
                 "init_noise_std": 1.0,
                 "distribution_type": "gaussian",
                 "std_type": "state_independent",
-            },
-            state_estimator={
-                "activation": "relu",
-                "hidden_dims": [256, 128, 64],
             },
         )
 

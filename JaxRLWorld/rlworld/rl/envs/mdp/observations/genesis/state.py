@@ -38,9 +38,29 @@ def base_lin_vel(env: GenesisEnv):
 
 
 @EnvStepCache()
+def feet_height(env: GenesisEnv, links: tuple[str, ...], entity_name: str = "robot"):
+    entity = env.scene_manager[entity_name]
+
+    if isinstance(links, str):
+        links = [links]
+
+    links_idx_local, _ = eu.find_links(entity, list(links), global_ids=False, preserve_order=True)
+    foot_pos = entity.get_links_pos(links_idx_local=links_idx_local)  # (num_envs, num_feet, 3)
+    foot_z = foot_pos[:, :, 2]
+    return foot_z
+
+
+@EnvStepCache()
 def base_euler(env: GenesisEnv, rpy: bool = False, degrees: bool = False):
     return quat_to_xyz(base_quat(env), rpy=rpy, degrees=degrees)
 
+
+@EnvStepCache()
+def foot_air_time(env: GenesisEnv, links: tuple[str, ...], entity_name: str = "robot"):
+    link_indices = env.contact_manager.get_link_indices(links, entity_name)
+
+    current_air_time = env.contact_manager.current_air_time[:, link_indices]
+    return current_air_time
 
 @EnvStepCache()
 def contact_indicator(

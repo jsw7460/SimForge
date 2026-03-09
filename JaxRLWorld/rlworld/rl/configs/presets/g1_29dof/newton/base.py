@@ -20,7 +20,7 @@ from rlworld.rl.configs.newton_config_classes import (
     VisualizationConfig,
 )
 from rlworld.rl.configs.observations import ObservationTermConfig
-from rlworld.rl.configs.observations.noise import UniformNoiseConfig
+from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import NewtonEntityConfig
@@ -80,49 +80,37 @@ class G1FlatNewtonConfig:
 
     # Algorithm settings
     algorithm_name: str = "PPO"
-    max_iterations: int = 15000
-    actor_hidden_dims: List[int] = field(default_factory=lambda: [1024, 512, 256])
+    max_iterations: int = 30000
 
     actor_class_name: str = "MLPActor"
     run_name: str = "G1_29dof_Newton"
-
-    feet_height_target: float = 0.1
 
     robot_foot_names = None
 
     def __post_init__(self):
         if self.observations is None:
             self.observations = LocomotionObservations(
-                # Base angular velocity
+                # Base linear velocity (matching mjlab noise)
+                base_lin_vel_scale=1.0,
+                base_lin_vel_noise=Unoise(-0.5, 0.5),
+                # IMU angular velocity
                 ang_vel_scale=1.0,
-                ang_vel_noise=UniformNoiseConfig(n_min=-0.2, n_max=0.2),
-                # ang_vel_history=4,
-
+                ang_vel_noise=Unoise(-0.2, 0.2),
                 # Projected gravity
                 gravity_scale=1.0,
-                gravity_noise=UniformNoiseConfig(n_min=-0.05, n_max=0.05),
-                # gravity_history=3,
-
-                # DOF position
+                gravity_noise=Unoise(-0.05, 0.05),
+                # Command
+                command_scale=1.0,
+                # DOF position (relative to default)
+                dof_pos_scale=1.0,
+                dof_pos_noise=Unoise(-0.01, 0.01),
                 include_dof_pos=True,
-                dof_pos_noise=UniformNoiseConfig(n_min=-0.01, n_max=0.01),
-
-                # DOF nominal difference (joint_pos_rel)
-                include_nominal_difference=True,
-                nominal_difference_scale=1.0,
-                nominal_difference_noise=UniformNoiseConfig(n_min=-0.01, n_max=0.01),
-
+                include_nominal_difference=False,
                 # DOF velocity
                 dof_vel_scale=1.0,
-                dof_vel_noise=UniformNoiseConfig(n_min=-1.5, n_max=1.5),
-                # dof_vel_history=4,
-
-                # Previous actions (no noise in mjlab)
+                dof_vel_noise=Unoise(-1.5, 1.5),
+                # Previous actions
                 prev_actions_scale=1.0,
-
-                include_base_lin_vel=True,
-                base_lin_vel_scale=1.0,
-                base_lin_vel_noise=UniformNoiseConfig(n_min=-0.5, n_max=0.5),
             )
 
         # Extra observations for G1
@@ -133,34 +121,16 @@ class G1FlatNewtonConfig:
 
     def _default_extra_observations(self) -> List[ObservationTermConfig]:
         """G1-specific extra observations."""
-        return [
-            # ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
-            # ObservationTermConfig(state.base_height, scale=1.0),
-            # ObservationTermConfig(state.base_lin_vel, scale=1.0),
-            # ObservationTermConfig(state.base_euler, scale=1.0),
-            # ObservationTermConfig(state.feet_air_time, scale=1.0, params={"feet_bodies": feet_links}),
-            # ObservationTermConfig(state.feet_contact_force, scale=0.001, params={"feet_bodies": feet_links}),
-            # ObservationTermConfig(state.feet_contact_indicator, scale=1.0, params={"feet_bodies": feet_links}),
-            # ObservationTermConfig(state.feet_height, scale=1.0, params={"feet_bodies": feet_links}),
-        ]
+        return []
 
     def _default_extra_critic_observations(self) -> List[ObservationTermConfig]:
         """Extra critic observations."""
         return [
-            # ObservationTermConfig(
-            #     proprioception.relative_bodies_pos,
-            #     scale=1.0,
-            #     params={
-            #         "base_body": self.robot.prefixed("torso_link"),
-            #         "bodies": self.robot.prefixed_foot_names,
-            #     },
-            # ),
-            # ObservationTermConfig(proprioception.gait_phase_encoding, scale=1.0),
             ObservationTermConfig(state.base_height, scale=1.0),
             ObservationTermConfig(state.base_lin_vel, scale=1.0),
             ObservationTermConfig(state.base_euler, scale=1.0),
             ObservationTermConfig(state.feet_air_time, scale=1.0, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
-            ObservationTermConfig(state.feet_contact_force, scale=0.001, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
+            ObservationTermConfig(state.feet_contact_force, scale=0.01, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
             ObservationTermConfig(state.feet_contact_indicator, scale=1.0, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
             ObservationTermConfig(state.feet_height, scale=1.0, params={"feet_bodies": tuple(self.robot.prefixed_foot_names)}),
         ]
@@ -332,9 +302,11 @@ class G1FlatNewtonConfig:
                         r".*knee.*": 0.35,
                         r".*ankle_pitch.*": 0.25,
                         r".*ankle_roll.*": 0.1,
+                        # Waist.
                         r".*waist_yaw.*": 0.2,
                         r".*waist_roll.*": 0.08,
                         r".*waist_pitch.*": 0.1,
+                        # Arms.
                         r".*shoulder_pitch.*": 0.15,
                         r".*shoulder_roll.*": 0.15,
                         r".*shoulder_yaw.*": 0.1,
@@ -342,15 +314,18 @@ class G1FlatNewtonConfig:
                         r".*wrist.*": 0.3,
                     },
                     "std_running": {
+                        # Lower body.
                         r".*hip_pitch.*": 0.5,
                         r".*hip_roll.*": 0.2,
                         r".*hip_yaw.*": 0.2,
                         r".*knee.*": 0.6,
                         r".*ankle_pitch.*": 0.35,
                         r".*ankle_roll.*": 0.15,
+                        # Waist.
                         r".*waist_yaw.*": 0.3,
                         r".*waist_roll.*": 0.08,
                         r".*waist_pitch.*": 0.2,
+                        # Arms.
                         r".*shoulder_pitch.*": 0.5,
                         r".*shoulder_roll.*": 0.2,
                         r".*shoulder_yaw.*": 0.15,
@@ -516,10 +491,6 @@ class G1FlatNewtonConfig:
                 "init_noise_std": 1.0,
                 "distribution_type": "gaussian",
                 "std_type": "state_independent",
-            },
-            state_estimator={
-                "activation": "relu",
-                "hidden_dims": [256, 128, 64],
             },
         )
 

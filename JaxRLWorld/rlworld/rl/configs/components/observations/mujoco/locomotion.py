@@ -12,7 +12,7 @@ from rlworld.rl.envs.mdp.observations.mujoco import (
     dof_vel,
     dof_pos_nominal_difference,
     prev_processed_actions,
-    last_action
+    raw_actions,
 )
 
 
@@ -128,7 +128,7 @@ class LocomotionObservations:
         ))
 
         terms.append(ObservationTermConfig(
-            func=last_action,
+            func=raw_actions,
             scale=self.prev_actions_scale,
             noise=self.prev_actions_noise,
             clip=self.prev_actions_clip,

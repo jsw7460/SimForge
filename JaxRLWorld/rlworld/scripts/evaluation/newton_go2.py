@@ -6,7 +6,8 @@ from rlworld.rl.configs.robots.go2 import Go2Config
 if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        wandb_run_path="jsw7460/RLArchitecture/b80sk0ys",
+        # wandb_run_path="jsw7460/RLArchitecture/b80sk0ys",
+        policy_path="./outputs/models/2026-03-08/12-10-17/checkpoint_latest/",
         num_evals=1,
         seed=42,
         show_viewer=True,
@@ -20,28 +21,13 @@ if __name__ == '__main__':
                 # "seed": 43,
                 # "termination_criteria": [],
             },
-            "scene": {
-                "robot_cfg": Go2Config()
-            },
             "visualization": {
                 "viewer_type": "viser",
-                "viser_port": 2020,
+                "viser_port": 2028,
             },
-            # "command": {
-            #     "sampler": [
-            #         CommandTermConfig(cf.lin_vel_x, params={"range": (1.0, 1.0)}),
-            #         CommandTermConfig(cf.lin_vel_y, params={"range": (1.0, 1.0)}),
-            #         CommandTermConfig(cf.ang_vel, params={"range": (-0.0, 0.0)}),
-            #         CommandTermConfig(cf.base_height, params={"range": (0.34, 0.34)})
-            #     ]
-            #     # "resampling_time_s": (5.0, 5.0),
-            #     # "sampler": [
-            #     #     CommandTermConfig(cf.lin_vel_x, params={"range": (-1.0, 1.0)}),
-            #     #     CommandTermConfig(cf.lin_vel_y, params={"range": (-1.0, 1.0)}),
-            #     #     CommandTermConfig(cf.ang_vel, params={"range": (-0.0, 0.0)}),
-            #     #     CommandTermConfig(cf.base_height, params={"range": (0.34, 0.34)})
-            #     # ]
-            # }
+            "command": {
+                "rel_standing_envs": 0.3
+            }
         },
     )
     evaluator.evaluate()

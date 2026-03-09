@@ -74,7 +74,6 @@ class G1FlatMujocoConfig:
     # Algorithm settings
     algorithm_name: str = "PPO"
     max_iterations: int = 30000
-    actor_hidden_dims: List[int] = field(default_factory=lambda: [512, 256, 128])
 
     actor_class_name: str = "MLPActor"
     run_name: str = "G1_Mujoco"
@@ -96,8 +95,8 @@ class G1FlatMujocoConfig:
                 # DOF position (relative to default)
                 dof_pos_scale=1.0,
                 dof_pos_noise=Unoise(-0.01, 0.01),
-                include_dof_pos=False,
-                include_nominal_difference=True,
+                include_dof_pos=True,
+                include_nominal_difference=False,
                 # DOF velocity
                 dof_vel_scale=1.0,
                 dof_vel_noise=Unoise(-1.5, 1.5),
@@ -112,16 +111,7 @@ class G1FlatMujocoConfig:
 
     def _default_extra_actor_observations(self) -> List[ObservationTermConfig]:
         """G1-specific extra actor observations."""
-        return [
-            # ObservationTermConfig(
-            #     proprioception.relative_sites_pos,
-            #     scale=1.0,
-            #     params={
-            #         "base_name": self.robot.base_link_name,
-            #         "sites": ("left_foot", "right_foot"),
-            #     },
-            # ),
-        ]
+        return []
 
     def _default_extra_critic_observations(self) -> List[ObservationTermConfig]:
         """G1-specific extra critic observations."""
@@ -560,21 +550,17 @@ class G1FlatMujocoConfig:
                     "activation": "elu",
                     "ortho_init": True,
                     "output_gain": 0.01,
-                    "hidden_dims": self.actor_hidden_dims,
+                    "hidden_dims": [512, 256, 128],
                 },
                 "critic_kwargs": {
                     "activation": "elu",
                     "ortho_init": True,
                     "output_gain": 0.01,
-                    "hidden_dims": self.actor_hidden_dims,
+                    "hidden_dims": [1024, 512, 256],
                 },
                 "init_noise_std": 1.0,
                 "distribution_type": "gaussian",
                 "std_type": "scalar",
-            },
-            state_estimator={
-                "activation": "relu",
-                "hidden_dims": [256, 128, 64],
             },
         )
 

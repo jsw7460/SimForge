@@ -13,7 +13,7 @@ from rlworld.rl.envs.mdp.commands import command_terms as cf
 if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-03-06/18-58-52/checkpoint_latest/",
+        policy_path=f"./outputs/models/2026-03-08/17-44-14/checkpoint_2250/",
         # wandb_run_path="jsw7460/RLArchitecture/m24kgrku",
         num_evals=1,
         seed=42,
@@ -24,7 +24,7 @@ if __name__ == '__main__':
         extra_overrides={
             "env": {
                 "num_envs": 1,
-                # "episode_length_s": 5.0,
+                "episode_length_s": 60.0,
                 "seed": 42,
                 # "env_name": "Maniskill",
                 # "episode_length_s": 1.0,
@@ -67,15 +67,9 @@ if __name__ == '__main__':
                 #     )
                 # ]
             },
-            # "command": {
-            #     "resampling_time_s": (5.0, 5.0),
-            #     "sampler": [
-            #         CommandTermConfig(cf.lin_vel_x, params={"range": (-1.0, 1.0)}),
-            #         CommandTermConfig(cf.lin_vel_y, params={"range": (-1.0, 1.0)}),
-            #         CommandTermConfig(cf.ang_vel, params={"range": (-0.0, 0.0)}),
-            #         CommandTermConfig(cf.base_height, params={"range": (0.34, 0.34)})
-            #     ]
-            # }
+            "command": {
+                "rel_standing_envs": 0.5
+            }
         },
     )
     evaluator.evaluate()

@@ -7,7 +7,7 @@ if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
         # wandb_run_path="jsw7460/RLArchitecture/2jzsqo16",
-        policy_path=f"./outputs/models/2026-03-06/15-38-09/checkpoint_latest/",
+        policy_path=f"./outputs/models/2026-03-07/18-47-17/checkpoint_latest/",
         seed=42,
         num_evals=100000000,
         show_viewer=True,

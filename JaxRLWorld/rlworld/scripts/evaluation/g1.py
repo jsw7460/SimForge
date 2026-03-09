@@ -22,7 +22,7 @@ if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
         # wandb_run_path="jsw7460/RLArchitecture/p79hdfkt",
-        policy_path=f"outputs/models/2026-03-04/06-36-44/checkpoint_latest/",  # MLP
+        policy_path=f"outputs/models/2026-03-07/14-40-49/checkpoint_latest/",  # MLP
         # policy_path=f"/home/sangwoo/workspace/model_zoo/dynann/g1_29dof/mlp/checkpoint_latest/",  # MLP
         num_evals=1,
         seed=42,
@@ -33,7 +33,7 @@ if __name__ == '__main__':
         extra_overrides={
             "env": {
                 "num_envs": 1,
-                # "episode_length_s": 5.0,
+                "episode_length_s": 60.0,
                 "seed": 42,
                 # "env_name": "Maniskill",
                 # "episode_length_s": 1.0,
@@ -80,10 +80,11 @@ if __name__ == '__main__':
             },
             "command": {
                 "sampler": [
-                    CommandTermConfig(cf.lin_vel_x, params={"range": (-1.0, 1.0)}),
-                    CommandTermConfig(cf.lin_vel_y, params={"range": (-0.3, 0.3)}),
-                    CommandTermConfig(cf.ang_vel, params={"range": (-0.0, 0.0)})
-                ]
+                    CommandTermConfig(cf.lin_vel_x, params={"range": (-1.0, 1.5)}),
+                    CommandTermConfig(cf.lin_vel_y, params={"range": (-0.5, 0.5)}),
+                    CommandTermConfig(cf.ang_vel, params={"range": (-0.5, 0.5)})
+                ],
+                "rel_standing_envs": 0.5,
             }
         },
     )
