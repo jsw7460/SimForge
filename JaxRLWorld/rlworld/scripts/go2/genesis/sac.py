@@ -10,6 +10,7 @@ genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.runners import BaseRunner
+from rlworld.rl.configs import SACPolicyConfig
 from rlworld.rl.configs.algorithms import SACConfig
 from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
 
@@ -26,7 +27,7 @@ def main():
         num_gradient_steps=16,
     )
     cfgs_for_run.algorithm = sac_config
-    cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(SACPolicyConfig)
 
     cfgs_for_run.action.clip_actions = "joint_limit"
     cfgs_for_run.action.action_scale = 1.0

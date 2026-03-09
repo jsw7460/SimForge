@@ -16,7 +16,7 @@ from mjlab.sim import SimulationCfg, MujocoCfg
 from mjlab.terrains import TerrainImporterCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, PolicyConfig, RunnerConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.mujoco import LocomotionObservations
 from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from rlworld.rl.configs.mujoco_config_classes import (
@@ -544,7 +544,7 @@ class G1FlatMujocoConfig:
 
     def _build_nn_config(self) -> NNConfig:
         return NNConfig(
-            policy=PolicyConfig(
+            policy=PPOPolicyConfig(
                 actor_class_name=self.actor_class_name,
                 actor_kwargs={
                     "activation": "elu",

@@ -14,6 +14,7 @@ genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs.algorithms import FastTD3Config
+from rlworld.rl.configs import FastTD3PolicyConfig
 from rlworld.rl.configs import GenesisConfigsForRun
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
@@ -62,6 +63,7 @@ def main():
         num_gradient_steps=1,
     )
     cfgs_for_run.algorithm = fast_td3_config
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(FastTD3PolicyConfig)
 
     cfgs_for_run.runner.log_interval = 500
     cfgs_for_run.runner.max_iterations = 1000000

@@ -9,7 +9,7 @@ import genesis.utils.terrain
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.configs import GenesisConfigsForRun
+from rlworld.rl.configs import GenesisConfigsForRun, SACPolicyConfig
 from rlworld.rl.runners import OffPolicyRunner
 from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
 from rlworld.rl.configs.algorithms import SACConfig
@@ -31,15 +31,13 @@ def main():
     cfgs_for_run.algorithm.batch_size = 256
     cfgs_for_run.algorithm.tau = 0.005
     cfgs_for_run.algorithm.num_steps_per_env = 1
-    cfgs_for_run.nn.policy.std_type = "state_dependent"
-    cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
-    cfgs_for_run.nn.policy.init_noise_std = 0.05
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(SACPolicyConfig)
     cfgs_for_run.nn.policy.actor_kwargs.update({
-        "hidden_dims": [256, 256],
+        "hidden_dims": [64, 64, 32],
         "activation": "relu"
     })
     cfgs_for_run.nn.policy.critic_kwargs.update({
-        "hidden_dims": [256, 256],
+        "hidden_dims": [128, 128, 128],
         "activation": "relu"
     })
     cfgs_for_run.runner.log_interval = 100

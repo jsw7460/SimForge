@@ -1,5 +1,6 @@
 from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
 from rlworld.rl.configs.algorithms import FastTD3Config
+from rlworld.rl.configs import FastTD3PolicyConfig
 from rlworld.rl.runners import BaseRunner
 
 
@@ -27,6 +28,7 @@ def main():
         use_target_actor=False,
     )
     cfgs_for_run.algorithm = fasttd3_config
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(FastTD3PolicyConfig)
     cfgs_for_run.nn.policy.actor_kwargs.update(
         {
             "activation": "relu",

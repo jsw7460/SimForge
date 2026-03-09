@@ -43,8 +43,7 @@ class EventConfig(BaseConfig):
 
 @dataclass
 class PolicyConfig(BaseConfig):
-    """Policy network configuration."""
-    # Common fields (all algorithms)
+    """Base policy network configuration — common to all algorithms."""
     actor_class_name: str = "MLPActor"
     actor_kwargs: Dict[str, Any] = field(default_factory=lambda: {
         "activation": "elu",
@@ -57,20 +56,62 @@ class PolicyConfig(BaseConfig):
         "hidden_dims": [256, 128, 64],
     })
 
-    # Stochastic policy settings (PPO, SAC — ignored by TD3/FastTD3)
+    def to(self, target_cls: type) -> "PolicyConfig":
+        """Convert to another PolicyConfig subclass, copying common fields."""
+        import dataclasses as dc
+        base_field_names = {f.name for f in dc.fields(PolicyConfig)}
+        kwargs = {k: getattr(self, k) for k in base_field_names}
+        return target_cls(**kwargs)
+
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        result["_type"] = self.__class__.__name__
+        return result
+
+
+@dataclass
+class PPOPolicyConfig(PolicyConfig):
+    """PPO policy settings."""
     init_noise_std: float = 1.0
     distribution_type: str = "gaussian"
     std_type: str = "state_independent"
 
-    # SAC-specific bounds (ignored by other algorithms)
+
+@dataclass
+class SACPolicyConfig(PolicyConfig):
+    """SAC policy settings."""
+    init_noise_std: float = 0.05
+    distribution_type: str = "squashed_gaussian"
     log_std_min: float = -20.0
     log_std_max: float = 2.0
 
 
 @dataclass
+class TD3PolicyConfig(PolicyConfig):
+    """TD3 policy settings (deterministic — no extra fields)."""
+    pass
+
+
+@dataclass
+class FastTD3PolicyConfig(PolicyConfig):
+    """FastTD3 policy settings (deterministic — no extra fields)."""
+    pass
+
+
+# Registry for deserialization
+_POLICY_CONFIG_CLASSES = {
+    "PolicyConfig": PolicyConfig,
+    "PPOPolicyConfig": PPOPolicyConfig,
+    "SACPolicyConfig": SACPolicyConfig,
+    "TD3PolicyConfig": TD3PolicyConfig,
+    "FastTD3PolicyConfig": FastTD3PolicyConfig,
+}
+
+
+@dataclass
 class NNConfig(BaseConfig):
     """Neural network configuration (shared)."""
-    policy: PolicyConfig = field(default_factory=PolicyConfig)
+    policy: PolicyConfig = field(default_factory=PPOPolicyConfig)
     state_estimator: Dict[str, Any] = field(default_factory=lambda: {
         "activation": "relu",
         "hidden_dims": [256, 128, 64],
@@ -78,7 +119,9 @@ class NNConfig(BaseConfig):
 
     def __post_init__(self):
         if isinstance(self.policy, dict):
-            self.policy = PolicyConfig.from_dict(self.policy)
+            cls_name = self.policy.pop("_type", "PPOPolicyConfig")
+            cls = _POLICY_CONFIG_CLASSES.get(cls_name, PPOPolicyConfig)
+            self.policy = cls.from_dict(self.policy)
 
 
 @dataclass

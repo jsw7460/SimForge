@@ -10,7 +10,7 @@ genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs.algorithms.sac import SACConfig
-from rlworld.rl.configs import GenesisConfigsForRun
+from rlworld.rl.configs import GenesisConfigsForRun, SACPolicyConfig
 from rlworld.rl.runners import OffPolicyRunner
 from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
 
@@ -42,8 +42,7 @@ def main():
     cfgs_for_run.runner.save_interval = 100000
     cfgs_for_run.runner.run_name = "SACBenchmarkInvertedDoublePendulum"
 
-    cfgs_for_run.nn.policy.std_type = "state_dependent"
-    # cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(SACPolicyConfig)
     cfgs_for_run.nn.policy.distribution_type = "gaussian"
     cfgs_for_run.nn.policy.actor_kwargs.update({
         "hidden_dims": [128, 128],

@@ -7,7 +7,7 @@ import warp as wp
 import newton
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, PolicyConfig, RunnerConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.newton import LocomotionObservations
 from rlworld.rl.configs.components.rewards.newton import TrackingRewards, RegularizationRewards
 from rlworld.rl.configs.events import EventTermConfig
@@ -370,7 +370,7 @@ class Go2FlatNewtonConfig:
 
     def _build_nn_config(self) -> NNConfig:
         return NNConfig(
-            policy=PolicyConfig(
+            policy=PPOPolicyConfig(
                 actor_class_name=self.actor_class_name,
                 actor_kwargs={
                     "activation": "elu",

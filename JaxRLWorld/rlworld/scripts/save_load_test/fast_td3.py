@@ -38,7 +38,7 @@ genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs.algorithms import FastTD3Config
-from rlworld.rl.configs import NewtonConfigsForRun
+from rlworld.rl.configs import NewtonConfigsForRun, FastTD3PolicyConfig
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.go1.newton.mlp import get_config
 
@@ -426,6 +426,7 @@ def main():
         obs_normalization=True,  # 중요: normalization 활성화
     )
     cfgs_for_run.algorithm = fast_td3_config
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(FastTD3PolicyConfig)
 
     runner = BaseRunner.create_with_env(cfgs_for_run)
     algorithm = runner.alg

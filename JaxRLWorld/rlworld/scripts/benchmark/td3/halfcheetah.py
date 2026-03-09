@@ -15,7 +15,7 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 import shimmy
 from rlworld.rl.configs.algorithms import TD3Config
-from rlworld.rl.configs import GenesisConfigsForRun
+from rlworld.rl.configs import GenesisConfigsForRun, TD3PolicyConfig
 from rlworld.rl.runners import OffPolicyRunner
 from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
 from gymnasium.wrappers import FlattenObservation
@@ -61,7 +61,7 @@ def main():
         learning_starts=2500,
     )
     cfgs_for_run.algorithm = sac_config
-    cfgs_for_run.nn.policy.distribution_type = "squashed_gaussian"
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(TD3PolicyConfig)
     cfgs_for_run.runner.log_interval = 500
     cfgs_for_run.runner.max_iterations = 1000000
     cfgs_for_run.runner.save_interval = 100000

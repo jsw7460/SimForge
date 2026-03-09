@@ -13,6 +13,7 @@ from rlworld.rl.configs import GenesisConfigsForRun
 from rlworld.rl.runners import OffPolicyRunner
 from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
 from rlworld.rl.configs.algorithms import TD3Config
+from rlworld.rl.configs import TD3PolicyConfig
 
 import gymnasium as gym
 
@@ -25,6 +26,7 @@ def main():
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
     cfgs_for_run.algorithm = TD3Config()
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(TD3PolicyConfig)
     cfgs_for_run.algorithm.obs_normalization = False
     cfgs_for_run.algorithm.actor_lr = 1e-4
     cfgs_for_run.algorithm.buffer_size = 1_000_000
