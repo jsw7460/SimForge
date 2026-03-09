@@ -112,6 +112,13 @@ class RLWorldRasterizerContext(RasterizerContext):
             if hasattr(cmd_manager, "ang_vel"):
                 state["cmd_ang_vel"] = cmd_manager.ang_vel
 
+        # Actual base velocity (body frame) for tracking visualization
+        if robot is not None:
+            from genesis.utils.geom import transform_by_quat, inv_quat
+            world_vel = robot.get_vel()
+            body_vel = transform_by_quat(world_vel, inv_quat(robot.get_quat()))
+            state["actual_lin_vel"] = body_vel
+
         # Feet heights
         feet_height = self._get_feet_height()
         if feet_height is not None:
