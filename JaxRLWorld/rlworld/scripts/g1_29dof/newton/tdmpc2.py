@@ -7,7 +7,7 @@ def main():
     cfgs_for_run = get_config().with_cli_overrides()
     tdmpc2_config = TDMPC2Config(
         vmin=-5.0,
-        vmax=5.0,
+        vmax=10.0,
         num_bins=101,
         num_samples=512,
         num_pi_trajs=24,
@@ -22,7 +22,7 @@ def main():
     cfgs_for_run.env.num_envs = 1024
     cfgs_for_run.runner.max_iterations = 100000
     cfgs_for_run.action.clip_actions = "joint_limit"
-    cfgs_for_run.action.action_scale = 0.6
+    cfgs_for_run.action.action_scale = 0.5
     # cfgs_for_run.action.clip_actions = (-5.0, 5.0)
     cfgs_for_run.algorithm = tdmpc2_config
     cfgs_for_run.runner.run_name = "G1_NT_TDMPC2"
