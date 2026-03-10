@@ -64,3 +64,7 @@ class SimulatorBridge(Protocol):
     def get_tracked_position(self, env_idx: int) -> np.ndarray:
         """Position of the tracked body (for camera). Returns (3,)."""
         ...
+
+    def get_body_velocity(self, env_idx: int) -> np.ndarray | None:
+        """Body-frame linear velocity of the tracked body. Returns (2,) [vx, vy] or None."""
+        ...

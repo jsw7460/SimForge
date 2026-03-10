@@ -125,6 +125,21 @@ class NewtonBridge:
             return positions[self._tracked_body_local]
         return positions[0]
 
+    def get_body_velocity(self, env_idx: int) -> np.ndarray | None:
+        """Body-frame linear velocity of the tracked body. Returns (2,) [vx, vy]."""
+        tracked = self._tracked_body_local
+        if tracked is None:
+            return None
+        state = self._scene_manager.state_0
+        body_idx = env_idx * self._bodies_per_world + tracked
+        body_qd = state.body_qd.numpy()[body_idx]  # (6,) [vx,vy,vz,wx,wy,wz]
+        world_vel = body_qd[:3]
+        body_q = state.body_q.numpy()[body_idx]  # (7,) [x,y,z,qx,qy,qz,qw]
+        qx, qy, qz, qw = body_q[3:7]
+        from scipy.spatial.transform import Rotation
+        body_vel = Rotation.from_quat([qx, qy, qz, qw]).inv().apply(world_vel)
+        return body_vel[:2].astype(np.float32)
+
     def _find_tracked_body(self) -> int | None:
         """Find the robot base body index (first non-ground body)."""
         model = self._model
@@ -141,49 +156,44 @@ class NewtonBridge:
         shape_idx: int,
     ) -> trimesh.Trimesh | None:
         """Convert a Newton mesh to trimesh.Trimesh."""
-        try:
-            vertices = geo_src.vertices  # (N, 3) float32
-            indices = geo_src.indices  # (M,) int32
+        vertices = geo_src.vertices  # (N, 3) float32
+        indices = geo_src.indices  # (M,) int32
 
-            if vertices is None or len(vertices) == 0:
-                return None
-
-            # Apply shape scale.
-            scale = self._model.shape_scale.numpy()[shape_idx]  # (3,)
-            scaled_verts = vertices * scale
-
-            # Apply shape local transform.
-            shape_xform = self._model.shape_transform.numpy()[shape_idx]  # (7,)
-            local_pos = shape_xform[:3]
-            local_quat_xyzw = shape_xform[3:7]
-            # Convert to rotation matrix.
-            qx, qy, qz, qw = local_quat_xyzw
-            from scipy.spatial.transform import Rotation
-            rot = Rotation.from_quat([qx, qy, qz, qw]).as_matrix()
-            transformed_verts = (rot @ scaled_verts.T).T + local_pos
-
-            faces = indices.reshape(-1, 3)
-
-            # Color.
-            color = getattr(geo_src, "color", None)
-            if color is not None:
-                rgba = [int(c * 255) for c in color[:3]] + [255]
-                visual = trimesh.visual.ColorVisuals(
-                    face_colors=np.tile(rgba, (len(faces), 1))
-                )
-            else:
-                visual = trimesh.visual.ColorVisuals(
-                    face_colors=np.tile([180, 180, 180, 255], (len(faces), 1))
-                )
-
-            mesh = trimesh.Trimesh(
-                vertices=transformed_verts,
-                faces=faces,
-                visual=visual,
-                process=False,
-            )
-            return mesh
-
-        except Exception as e:
-            print(f"[NewtonBridge] Failed to convert mesh: {e}")
+        if vertices is None or len(vertices) == 0:
             return None
+
+        # Apply shape scale.
+        scale = self._model.shape_scale.numpy()[shape_idx]  # (3,)
+        scaled_verts = vertices * scale
+
+        # Apply shape local transform.
+        shape_xform = self._model.shape_transform.numpy()[shape_idx]  # (7,)
+        local_pos = shape_xform[:3]
+        local_quat_xyzw = shape_xform[3:7]
+        # Convert to rotation matrix.
+        qx, qy, qz, qw = local_quat_xyzw
+        from scipy.spatial.transform import Rotation
+        rot = Rotation.from_quat([qx, qy, qz, qw]).as_matrix()
+        transformed_verts = (rot @ scaled_verts.T).T + local_pos
+
+        faces = indices.reshape(-1, 3)
+
+        # Color.
+        color = getattr(geo_src, "color", None)
+        if color is not None:
+            rgba = [int(c * 255) for c in color[:3]] + [255]
+            visual = trimesh.visual.ColorVisuals(
+                face_colors=np.tile(rgba, (len(faces), 1))
+            )
+        else:
+            visual = trimesh.visual.ColorVisuals(
+                face_colors=np.tile([180, 180, 180, 255], (len(faces), 1))
+            )
+
+        mesh = trimesh.Trimesh(
+            vertices=transformed_verts,
+            faces=faces,
+            visual=visual,
+            process=False,
+        )
+        return mesh

@@ -165,15 +165,11 @@ class ViserScene:
                 if group.is_fixed:
                     name = f"/fixed_bodies/body_{group.body_id}/mesh_{mesh_idx}"
 
-                try:
-                    handle = self.server.scene.add_mesh_trimesh(
-                        name=name,
-                        mesh=mesh,
-                    )
-                    handles.append(handle)
-                except Exception as e:
-                    print(f"[ViserScene] Failed to add mesh {name}: {e}")
-                    continue
+                handle = self.server.scene.add_mesh_trimesh(
+                    name=name,
+                    mesh=mesh,
+                )
+                handles.append(handle)
 
             if handles:
                 self._body_handles[group.body_id] = handles

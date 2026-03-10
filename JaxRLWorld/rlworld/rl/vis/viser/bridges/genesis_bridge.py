@@ -132,11 +132,8 @@ class GenesisBridge:
         positions = np.zeros((len(self._link_map), 3), dtype=np.float32)
 
         for entity, link, body_id in self._link_map:
-            try:
-                pos = link.get_pos()  # (n_envs, 3) torch tensor
-                positions[body_id] = pos[env_idx].cpu().numpy()
-            except Exception:
-                pass
+            pos = link.get_pos()  # (n_envs, 3) torch tensor
+            positions[body_id] = pos[env_idx].cpu().numpy()
 
         return positions
 
@@ -150,11 +147,8 @@ class GenesisBridge:
         quaternions[:, 0] = 1.0  # Identity quaternion default.
 
         for entity, link, body_id in self._link_map:
-            try:
-                quat = link.get_quat()  # (n_envs, 4) wxyz torch tensor
-                quaternions[body_id] = quat[env_idx].cpu().numpy()
-            except Exception:
-                pass
+            quat = link.get_quat()  # (n_envs, 4) wxyz torch tensor
+            quaternions[body_id] = quat[env_idx].cpu().numpy()
 
         return quaternions
 
@@ -165,28 +159,36 @@ class GenesisBridge:
             return positions[self._tracked_body_id]
         return positions[0]
 
+    def get_body_velocity(self, env_idx: int) -> np.ndarray | None:
+        """Body-frame linear velocity of the robot base. Returns (2,) [vx, vy]."""
+        robot = self._scene_manager.entities.get("robot")
+        if robot is None or not hasattr(robot, "get_vel"):
+            return None
+        world_vel = robot.get_vel()[env_idx].cpu().numpy()  # (3,)
+        quat_wxyz = robot.get_quat()[env_idx].cpu().numpy()  # (4,) wxyz
+        w, x, y, z = quat_wxyz
+        from scipy.spatial.transform import Rotation
+        body_vel = Rotation.from_quat([x, y, z, w]).inv().apply(world_vel)
+        return body_vel[:2].astype(np.float32)
+
     @staticmethod
     def _extract_vgeom_mesh(vgeom) -> trimesh.Trimesh | None:
         """Extract trimesh from a Genesis RigidVisGeom."""
-        try:
-            # Genesis wraps trimesh internally.
-            vmesh = getattr(vgeom, "vmesh", None)
-            if vmesh is not None and hasattr(vmesh, "trimesh"):
-                mesh = vmesh.trimesh
-                if isinstance(mesh, trimesh.Trimesh):
-                    return mesh.copy()
+        # Genesis wraps trimesh internally.
+        vmesh = getattr(vgeom, "vmesh", None)
+        if vmesh is not None and hasattr(vmesh, "trimesh"):
+            mesh = vmesh.trimesh
+            if isinstance(mesh, trimesh.Trimesh):
+                return mesh.copy()
 
-            # Fallback: build from raw vertex/face data.
-            verts = getattr(vgeom, "init_vverts", None)
-            faces = getattr(vgeom, "init_vfaces", None)
-            if verts is not None and faces is not None and len(verts) > 0:
-                return trimesh.Trimesh(
-                    vertices=np.asarray(verts),
-                    faces=np.asarray(faces),
-                    process=False,
-                )
-
-        except Exception as e:
-            print(f"[GenesisBridge] Failed to extract mesh: {e}")
+        # Fallback: build from raw vertex/face data.
+        verts = getattr(vgeom, "init_vverts", None)
+        faces = getattr(vgeom, "init_vfaces", None)
+        if verts is not None and faces is not None and len(verts) > 0:
+            return trimesh.Trimesh(
+                vertices=np.asarray(verts),
+                faces=np.asarray(faces),
+                process=False,
+            )
 
         return None
