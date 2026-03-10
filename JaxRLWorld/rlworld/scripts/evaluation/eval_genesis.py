@@ -24,7 +24,7 @@ if __name__ == '__main__':
         extra_overrides={
             "env": {
                 "num_envs": 1,
-                "episode_length_s": 60.0,
+                "episode_length_s": 10e+9,
             },
             "scene": {
                 "vis_options": gs.options.VisOptions(
@@ -40,6 +40,8 @@ if __name__ == '__main__':
                 ),
             },
             "visualization": {
+                "viewer_type": "viser",
+                "viser_port": 2026,
                 "extra_hud_items": [link_pos_item, ]
             },
             "command": {

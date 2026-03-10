@@ -101,7 +101,7 @@ class GenesisEnv(World):
             )
         )
 
-        # Visualization
+        # Visualization (created before register_entities which references it).
         self.vis_manager = VisualizationManager(
             env=self,
             config=VisualizationManagerConfig(
@@ -124,6 +124,23 @@ class GenesisEnv(World):
 
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
+
+        # Replace with unified Viser viewer after scene is built.
+        if self.visualization_cfg.viewer_type == "viser":
+            from rlworld.rl.vis.viser import ViserVisualizationManager
+            from rlworld.rl.vis.viser.viewer import ViserViewerConfig
+            from rlworld.rl.vis.viser.bridges import GenesisBridge
+
+            bridge = GenesisBridge(self.scene_manager)
+            viser_cfg = ViserViewerConfig(
+                port=self.visualization_cfg.viser_port,
+                share=self.visualization_cfg.viser_share,
+                enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
+                enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
+            )
+            self.vis_manager = ViserVisualizationManager(
+                env=self, bridge=bridge, config=viser_cfg
+            )
 
         # Other managers
         self.command_manager = CommandManager(

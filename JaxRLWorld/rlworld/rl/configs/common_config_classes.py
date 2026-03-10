@@ -178,8 +178,12 @@ class VisualizationConfig(BaseConfig):
     feet_names: tuple[str, ...] = ("FL", "FR", "RL", "RR")
     extra_hud_items: list[HUDItem] = field(default_factory=lambda: [])
 
-    # Viewer type for Newton
+    # Viewer type
     viewer_type: Literal["gl", "viser", "rerun", "usd", "file"] = "gl"
     viser_port: int = 8080
     viser_share: bool = True
     rerun_web_port: int = 9191
+
+    # Unified Viser viewer (SimForge custom)
+    viser_enable_reward_plots: bool = True
+    viser_enable_debug_viz: bool = False

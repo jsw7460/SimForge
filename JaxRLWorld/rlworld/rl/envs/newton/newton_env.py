@@ -110,18 +110,35 @@ class NewtonEnv(World):
         self.scene_manager.build_scene()
 
         # Visualization Manager (after scene build)
-        vis_manager_cfg = NewtonVisualizationManagerConfig(
-            show_viewer=self.visualization_cfg.show_viewer,
-            record_video=self.visualization_cfg.record_video,
-            video_dir=self.visualization_cfg.video_dir,
-            video_fps=self.visualization_cfg.video_fps or 60,
-            viewer_type=self.visualization_cfg.viewer_type,
-            viser_port=self.visualization_cfg.viser_port,
-            viser_share=self.visualization_cfg.viser_share,
-            rerun_web_port=self.visualization_cfg.rerun_web_port,
-        )
-        self.vis_manager = NewtonVisualizationManager(env=self, config=vis_manager_cfg)
-        self.vis_manager.setup()
+        if (self.visualization_cfg.show_viewer
+                and self.visualization_cfg.viewer_type == "viser"):
+            from rlworld.rl.vis.viser import ViserVisualizationManager
+            from rlworld.rl.vis.viser.viewer import ViserViewerConfig
+            from rlworld.rl.vis.viser.bridges import NewtonBridge
+
+            bridge = NewtonBridge(self.scene_manager)
+            viser_cfg = ViserViewerConfig(
+                port=self.visualization_cfg.viser_port,
+                share=self.visualization_cfg.viser_share,
+                enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
+                enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
+            )
+            self.vis_manager = ViserVisualizationManager(
+                env=self, bridge=bridge, config=viser_cfg
+            )
+        else:
+            vis_manager_cfg = NewtonVisualizationManagerConfig(
+                show_viewer=self.visualization_cfg.show_viewer,
+                record_video=self.visualization_cfg.record_video,
+                video_dir=self.visualization_cfg.video_dir,
+                video_fps=self.visualization_cfg.video_fps or 60,
+                viewer_type=self.visualization_cfg.viewer_type,
+                viser_port=self.visualization_cfg.viser_port,
+                viser_share=self.visualization_cfg.viser_share,
+                rerun_web_port=self.visualization_cfg.rerun_web_port,
+            )
+            self.vis_manager = NewtonVisualizationManager(env=self, config=vis_manager_cfg)
+            self.vis_manager.setup()
 
         # Action Manager
         act_manager_cfg = NewtonActionManagerConfig(
