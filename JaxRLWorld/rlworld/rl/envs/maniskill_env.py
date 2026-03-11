@@ -64,6 +64,23 @@ class ManiSkillEnv(World):
         self._initial_seed_set = False
         self._reset_counter = 0
 
+    @property
+    def robot(self):
+        return None
+
+    @property
+    def robot_data(self):
+        return None
+
+    def _build_scene(self):
+        pass
+
+    def _build_sim_managers(self):
+        pass
+
+    def _step_physics(self):
+        pass
+
     def _create_scene_manager_with_kinematic_tree(self, gym_env):
         """Extract kinematic tree from backend simulator"""
 

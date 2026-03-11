@@ -449,6 +449,9 @@ class GymnasiumEnv(World):
     def robot(self) -> Any:
         pass
 
+    def robot_data(self):
+        return None
+
     def heading_w(self) -> torch.Tensor:
         pass
 

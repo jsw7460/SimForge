@@ -2,7 +2,6 @@ import torch
 import warp as wp
 from warp.torch import device_to_torch
 
-from genesis.utils.geom import quat_to_xyz
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
@@ -11,27 +10,17 @@ from rlworld.rl.configs.newton_config_classes import (
     NewtonActionConfig,
     VisualizationConfig
 )
-from rlworld.rl.envs.managers import (
-    CommandManager, CommandManagerConfig,
-    RewardManager, RewardManagerConfig,
-    TerminationManager, TerminationConfig,
-    EventManager, EventManagerConfig,
-)
 from rlworld.rl.envs.managers.newton import (
-    NewtonSceneManager, NewtonSceneManagerConfig,
-    NewtonActionManager, NewtonActionManagerConfig,
-    NewtonObservationManager, NewtonObsManagerConfig,
     NewtonVisualizationManager, NewtonVisualizationManagerConfig,
-    NewtonContactManager
 )
-from rlworld.rl.envs.lifecycle import LifecycleEvent
-from rlworld.rl.envs.mdp.observations.newton.proprioception import base_quat
+from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
 
 
 class NewtonEnv(World):
     sim_name: str = "Newton"
+    sim_type: str = "newton"
 
     def __init__(
         self,
@@ -77,39 +66,30 @@ class NewtonEnv(World):
         return self.scene_manager.model
 
     @property
-    def heading_w(self) -> torch.Tensor:
-        """Get robot heading (yaw) in world frame.
+    def robot_data(self):
+        return self._robot_data
 
-        Newton joint_q[:, 3:7] is xyzw convention,
-        quat_to_xyz expects wxyz.
+    def _build_scene(self) -> None:
+        """Create Newton scene and visualization manager."""
+        SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
+        SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
 
-        Returns:
-            Tensor of shape [num_envs] in radians.
-        """
-        quat_xyzw = base_quat(self)  # [num_envs, 4] xyzw
-        quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
-        euler = quat_to_xyz(quat_wxyz)  # [num_envs, 3]
-        return euler[:, 2]
-
-    def _setup_environment(self) -> None:
-        """Setup all managers by converting high-level configs to manager configs."""
-
-        # Scene Manager
-        scene_manager_cfg = NewtonSceneManagerConfig(
-            num_worlds=self.num_envs,
-            entities=self.scene_cfg.entities,
-            sensors=self.scene_cfg.sensors,
-            add_ground=self.scene_cfg.add_ground,
-            dt=self.scene_cfg.dt,
-            substeps=self.scene_cfg.substeps,
-            gravity=self.scene_cfg.gravity,
-            solver_type=self.scene_cfg.solver_type,
-            env_spacing=self.scene_cfg.env_spacing,
+        self.scene_manager = SceneCls(
+            env=self,
+            config=SceneCfgCls(
+                num_worlds=self.num_envs,
+                entities=self.scene_cfg.entities,
+                sensors=self.scene_cfg.sensors,
+                add_ground=self.scene_cfg.add_ground,
+                dt=self.scene_cfg.dt,
+                substeps=self.scene_cfg.substeps,
+                gravity=self.scene_cfg.gravity,
+                solver_type=self.scene_cfg.solver_type,
+                env_spacing=self.scene_cfg.env_spacing,
+            )
         )
-        self.scene_manager = NewtonSceneManager(env=self, config=scene_manager_cfg)
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
-        self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
 
         # Visualization Manager (after scene build)
         if (self.visualization_cfg.show_viewer
@@ -142,72 +122,41 @@ class NewtonEnv(World):
             self.vis_manager = NewtonVisualizationManager(env=self, config=vis_manager_cfg)
             self.vis_manager.setup()
 
-        # Action Manager
-        act_manager_cfg = NewtonActionManagerConfig(
-            actuated_dof_names=self.act_cfg.actuated_dof_names,
-            scale=self.act_cfg.action_scale,
-            clip=self.act_cfg.clip_actions,
-            offset=self.act_cfg.offset,
+    def _build_sim_managers(self) -> None:
+        """Create Newton-specific managers via ManagerRegistry."""
+        ActCls = ManagerRegistry.get_class(self.sim_type, "action")
+        ActCfgCls = ManagerRegistry.get_config_class(self.sim_type, "action")
+        self.act_manager = ActCls(
+            env=self,
+            config=ActCfgCls(
+                actuated_dof_names=self.act_cfg.actuated_dof_names,
+                scale=self.act_cfg.action_scale,
+                clip=self.act_cfg.clip_actions,
+                offset=self.act_cfg.offset,
+            )
         )
-        self.act_manager = NewtonActionManager(env=self, config=act_manager_cfg)
 
-        # Observation Manager
-        obs_manager_cfg = NewtonObsManagerConfig(
-            num_envs=self.num_envs,
-            obs_group=self.obs_cfg.obs_group,
-            enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
+        ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
+        ObsCfgCls = ManagerRegistry.get_config_class(self.sim_type, "observation")
+        self.obs_manager = ObsCls(
+            env=self,
+            config=ObsCfgCls(
+                num_envs=self.num_envs,
+                obs_group=self.obs_cfg.obs_group,
+                enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
+            )
         )
-        self.obs_manager = NewtonObservationManager(env=self, config=obs_manager_cfg)
 
-        # Contact Manager
-        self.contact_manager = NewtonContactManager(env=self)
+        ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
+        self.contact_manager = ContactCls(env=self)
         self.contact_manager.register_sensors()
 
-        # Command Manager (shared with Genesis)
-        command_manager_cfg = CommandManagerConfig(
-                command_terms=self.command_cfg.sampler,
-                resampling_time_s=self.command_cfg.resampling_time_s,
-                rel_standing_envs=self.command_cfg.rel_standing_envs,
-                heading_command=self.command_cfg.heading_command,
-                heading_control_stiffness=self.command_cfg.heading_control_stiffness,
-                heading_range=self.command_cfg.heading_range,
-                rel_heading_envs=self.command_cfg.rel_heading_envs,
-            )
-        self.command_manager = CommandManager(env=self, config=command_manager_cfg)
+        from rlworld.rl.envs.newton.robot_data import NewtonRobotData
+        self._robot_data = NewtonRobotData(self)
 
-        # Reward Manager (shared with Genesis)
-        reward_manager_cfg = RewardManagerConfig(
-            reward_terms=self.reward_cfg.reward_terms,
-        )
-        self.reward_manager = RewardManager(env=self, config=reward_manager_cfg)
-
-        # Termination Manager (shared with Genesis)
-        termination_cfg = TerminationConfig(
-            num_envs=self.num_envs,
-            termination_criteria=self.env_cfg.termination_criteria,
-            episode_length_s=self.env_cfg.episode_length_s,
-        )
-        self.termination_manager = TerminationManager(env=self, config=termination_cfg)
-
-        # Event Manager (shared with Genesis)
-        event_manager_cfg = EventManagerConfig(
-            event_terms=self.event_cfg.event_terms,
-        )
-        self.event_manager = EventManager(env=self, config=event_manager_cfg)
-        self.lifecycle.dispatch(LifecycleEvent.MANAGERS_READY)
-
-        # Capture graph for performance
+    def _post_setup(self) -> None:
+        """Capture CUDA graph for Newton performance."""
         self.scene_manager.capture()
-
-        # Apply startup events
-        if "startup" in self.event_manager.available_modes:
-            self.event_manager.apply(mode="startup")
-
-        self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
-
-        # Pretty print environment summary
-        from rlworld.rl.utils.pretty import print_env_summary
-        print_env_summary(self)
 
     def _step_physics(self) -> None:
         """Newton physics step (substeps handled internally by scene manager)."""

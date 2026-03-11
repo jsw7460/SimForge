@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from copy import deepcopy
-from typing import Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import numpy as np
 import torch
@@ -11,11 +11,15 @@ from gymnasium import spaces
 
 from rlworld.rl.envs.lifecycle import LifecycleEvent, LifecycleManager
 
+if TYPE_CHECKING:
+    from rlworld.rl.envs.robot_data import RobotData
+
 
 class World(ABC):
     """Abstract base class for all RL environments."""
 
     sim_name: str = "World"
+    sim_type: str = "world"  # lowercase key for ManagerRegistry ("genesis", "newton", "mujoco")
 
     # Required attributes (set in subclass __init__)
     num_envs: int
@@ -104,13 +108,23 @@ class World(ABC):
 
     @property
     @abstractmethod
+    def robot_data(self) -> "RobotData":
+        """Get the unified robot state interface.
+
+        Returns an object satisfying the ``RobotData`` protocol, providing
+        position, orientation, velocity, and joint state in a
+        simulator-agnostic format.
+        """
+        pass
+
+    @property
     def heading_w(self) -> torch.Tensor:
         """Get the heading (yaw angle) of the robot in world frame.
 
         Returns:
             Tensor of shape [num_envs] in radians.
         """
-        pass
+        return self.robot_data.heading_w
 
     def calculate_obs_dim(self) -> dict[str, int]:
         return self.obs_manager.calculate_obs_dim()
@@ -158,12 +172,117 @@ class World(ABC):
 
         return obs_spaces
 
-    # ========== Abstract Methods ==========
+    # ========== Environment Setup (phased lifecycle) ==========
+
+    def _setup_environment(self) -> None:
+        """Initialize all managers in a structured, phased sequence.
+
+        Subclasses implement the abstract hooks (_build_scene,
+        _build_sim_managers) and optionally override _post_setup for
+        customisation.  The ManagerRegistry resolves backend-specific
+        classes (including reward manager) automatically via sim_type.
+        Lifecycle events fire at well-defined points so external code
+        can hook in.
+        """
+        # Register backend-specific managers in the registry
+        from rlworld.rl.envs.managers._registrations import register_all_for
+        register_all_for(self.sim_type)
+
+        # Phase 1 — Build physics scene (simulator-specific)
+        self._build_scene()
+        self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
+
+        # Phase 2 — Create managers
+        self._build_sim_managers()
+        self._build_common_managers()
+        self.lifecycle.dispatch(LifecycleEvent.MANAGERS_READY)
+
+        # Phase 3 — Simulator-specific finalization
+        self._post_setup()
+
+        # Phase 4 — Startup events
+        if hasattr(self, "event_manager") and self.event_manager is not None:
+            if "startup" in self.event_manager.available_modes:
+                self.event_manager.apply(mode="startup")
+
+        self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
+
+        # Pretty print environment summary
+        from rlworld.rl.utils.pretty import print_env_summary
+        print_env_summary(self)
 
     @abstractmethod
-    def _setup_environment(self) -> None:
-        """Initialize all managers. Implement in subclass."""
-        pass
+    def _build_scene(self) -> None:
+        """Create the scene manager and build the physics world.
+
+        This is the first setup phase.  After this method returns the
+        scene manager must be assigned to ``self.scene_manager`` and the
+        scene must be fully built (entities registered, simulation ready).
+        """
+
+    @abstractmethod
+    def _build_sim_managers(self) -> None:
+        """Create simulator-specific managers.
+
+        At minimum this must set ``self.act_manager``,
+        ``self.obs_manager``, and ``self.contact_manager``.
+        Visualization managers are also created here.
+        """
+
+    def _build_common_managers(self) -> None:
+        """Create simulator-agnostic managers (command, reward, termination, event).
+
+        The reward manager class is resolved via ManagerRegistry so that
+        backends like MuJoCo automatically get MjlabRewardManager without
+        needing a subclass hook.
+        """
+        from rlworld.rl.envs.managers import (
+            CommandManager, CommandManagerConfig,
+            RewardManagerConfig,
+            TerminationManager, TerminationConfig,
+            EventManager, EventManagerConfig,
+        )
+        from rlworld.rl.envs.managers.registry import ManagerRegistry
+
+        self.command_manager = CommandManager(
+            env=self,
+            config=CommandManagerConfig(
+                command_terms=self.command_cfg.sampler,
+                resampling_time_s=self.command_cfg.resampling_time_s,
+                rel_standing_envs=self.command_cfg.rel_standing_envs,
+                heading_command=self.command_cfg.heading_command,
+                heading_control_stiffness=self.command_cfg.heading_control_stiffness,
+                heading_range=self.command_cfg.heading_range,
+                rel_heading_envs=self.command_cfg.rel_heading_envs,
+            ),
+        )
+
+        reward_cls = ManagerRegistry.get_class(self.sim_type, "reward")
+        self.reward_manager = reward_cls(
+            env=self,
+            config=RewardManagerConfig(reward_terms=self.reward_cfg.reward_terms),
+        )
+
+        self.termination_manager = TerminationManager(
+            env=self,
+            config=TerminationConfig(
+                num_envs=self.num_envs,
+                termination_criteria=self.env_cfg.termination_criteria,
+                episode_length_s=self.env_cfg.episode_length_s,
+            ),
+        )
+
+        self.event_manager = EventManager(
+            env=self,
+            config=EventManagerConfig(event_terms=self.event_cfg.event_terms),
+        )
+
+    def _post_setup(self) -> None:
+        """Simulator-specific finalization after all managers are created.
+
+        Examples: Newton captures CUDA graphs, MuJoCo expands model fields
+        for domain randomisation.  Called before startup events.
+        """
 
     @abstractmethod
     def _step_physics(self) -> None:

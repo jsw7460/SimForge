@@ -1,29 +1,21 @@
 import torch
 
 import genesis as gs
-from genesis.utils.geom import quat_to_xyz
 from rlworld.rl.configs import (
     EnvConfig, SceneConfig, ObservationConfig, VisualizationConfig,
     ActionConfig, RewardConfig, CommandConfig, EventConfig
 )
 from rlworld.rl.envs.managers import (
-    SceneManagerConfig, SceneManager,
-    CommandManagerConfig, CommandManager,
     VisualizationManagerConfig, VisualizationManager,
-    ObsManagerConfig, ObservationManager,
-    ActionManagerConfig, ActionManager,
-    TerminationConfig, TerminationManager,
-    RewardManagerConfig, RewardManager,
-    EventManagerConfig, EventManager,
-    ContactManager
 )
-from rlworld.rl.envs.lifecycle import LifecycleEvent
+from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
 
 
 class GenesisEnv(World):
     sim_name: str = "Genesis"
+    sim_type: str = "genesis"
 
     def __init__(
         self,
@@ -70,27 +62,21 @@ class GenesisEnv(World):
         return self.scene_manager.robot
 
     @property
-    def heading_w(self) -> torch.Tensor:
-        """Get robot heading (yaw) in world frame.
-
-        Genesis get_quat() returns wxyz convention.
-
-        Returns:
-            Tensor of shape [num_envs] in radians.
-        """
-        quat_wxyz = self.robot.get_quat()  # [num_envs, 4] wxyz
-        euler = quat_to_xyz(quat_wxyz)  # [num_envs, 3] -> (roll, pitch, yaw)
-        return euler[:, 2]
+    def robot_data(self):
+        return self._robot_data
 
     @property
     def scene(self) -> gs.Scene:
         return self.scene_manager.scene
 
-    def _setup_environment(self) -> None:
-        # Scene
-        self.scene_manager = SceneManager(
+    def _build_scene(self) -> None:
+        """Create Genesis scene and visualization manager."""
+        SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
+        SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
+
+        self.scene_manager = SceneCls(
             env=self,
-            config=SceneManagerConfig(
+            config=SceneCfgCls(
                 sim_options=self.scene_cfg.sim_options,
                 viewer_options=self.scene_cfg.viewer_options,
                 vis_options=self.scene_cfg.vis_options,
@@ -125,7 +111,6 @@ class GenesisEnv(World):
 
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
-        self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
 
         # Replace with unified Viser viewer after scene is built.
         if self.visualization_cfg.viewer_type == "viser":
@@ -144,32 +129,24 @@ class GenesisEnv(World):
                 env=self, bridge=bridge, config=viser_cfg
             )
 
-        # Other managers
-        self.command_manager = CommandManager(
+    def _build_sim_managers(self) -> None:
+        """Create Genesis-specific managers via ManagerRegistry."""
+        ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
+        ObsCfgCls = ManagerRegistry.get_config_class(self.sim_type, "observation")
+        self.obs_manager = ObsCls(
             env=self,
-            config=CommandManagerConfig(
-                command_terms=self.command_cfg.sampler,
-                resampling_time_s=self.command_cfg.resampling_time_s,
-                rel_standing_envs=self.command_cfg.rel_standing_envs,
-                heading_command=self.command_cfg.heading_command,
-                heading_control_stiffness=self.command_cfg.heading_control_stiffness,
-                heading_range=self.command_cfg.heading_range,
-                rel_heading_envs=self.command_cfg.rel_heading_envs,
-            )
-        )
-
-        self.obs_manager = ObservationManager(
-            env=self,
-            config=ObsManagerConfig(
+            config=ObsCfgCls(
                 num_envs=self.num_envs,
                 obs_group=self.obs_cfg.obs_group,
                 enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
             )
         )
 
-        self.act_manager = ActionManager(
+        ActCls = ManagerRegistry.get_class(self.sim_type, "action")
+        ActCfgCls = ManagerRegistry.get_config_class(self.sim_type, "action")
+        self.act_manager = ActCls(
             env=self,
-            config=ActionManagerConfig(
+            config=ActCfgCls(
                 actuated_dof_names=self.act_cfg.actuated_dof_names,
                 clip=self.act_cfg.clip_actions,
                 scale=self.act_cfg.action_scale,
@@ -178,36 +155,11 @@ class GenesisEnv(World):
             )
         )
 
-        self.termination_manager = TerminationManager(
-            env=self,
-            config=TerminationConfig(
-                num_envs=self.num_envs,
-                termination_criteria=self.env_cfg.termination_criteria,
-                episode_length_s=self.env_cfg.episode_length_s,
-            )
-        )
+        ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
+        self.contact_manager = ContactCls(env=self)
 
-        self.reward_manager = RewardManager(
-            env=self,
-            config=RewardManagerConfig(reward_terms=self.reward_cfg.reward_terms)
-        )
-
-        self.event_manager = EventManager(
-            env=self,
-            config=EventManagerConfig(event_terms=self.event_cfg.event_terms)
-        )
-
-        self.contact_manager = ContactManager(env=self)
-        self.lifecycle.dispatch(LifecycleEvent.MANAGERS_READY)
-
-        if "startup" in self.event_manager.available_modes:
-            self.event_manager.apply(mode="startup")
-
-        self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
-
-        # Pretty print environment summary
-        from rlworld.rl.utils.pretty import print_env_summary
-        print_env_summary(self)
+        from rlworld.rl.envs.genesis.robot_data import GenesisRobotData
+        self._robot_data = GenesisRobotData(self)
 
     def _step_physics(self) -> None:
         """Genesis physics step with decimation."""

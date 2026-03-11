@@ -15,21 +15,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
     MujocoObservationConfig,
     MujocoActionConfig,
 )
-from rlworld.rl.envs.managers import (
-    CommandManager, CommandManagerConfig,
-    MjlabRewardManager, RewardManagerConfig,
-    TerminationManager, TerminationConfig,
-    EventManager, EventManagerConfig,
-)
-from rlworld.rl.envs.managers.common.observation import (
-    ObservationManager, ObsManagerConfig,
-)
-from rlworld.rl.envs.managers.mujoco import (
-    MjlabSceneManager, MjlabSceneManagerConfig,
-    MjlabActionManager, MjlabActionManagerConfig,
-    MjlabContactManager,
-)
-from rlworld.rl.envs.lifecycle import LifecycleEvent
+from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
 
@@ -62,6 +48,7 @@ class MjlabEnv(World):
     """
 
     sim_name: str = "Mujoco"
+    sim_type: str = "mujoco"
 
     def __init__(
         self,
@@ -109,89 +96,60 @@ class MjlabEnv(World):
         return self.scene_manager.robot
 
     @property
-    def heading_w(self) -> torch.Tensor:
-        """Get robot heading (yaw) in world frame.
+    def robot_data(self):
+        """mjlab's EntityData already satisfies the RobotData protocol."""
+        return self.scene_manager.robot.data
 
-        mjlab Entity provides heading_w directly.
-
-        Returns:
-            Tensor of shape [num_envs] in radians.
-        """
-        return self.scene_manager.robot.data.heading_w
-
-    def _setup_environment(self) -> None:
-        """Setup all managers."""
-
-        # Scene Manager (mjlab Scene + Simulation)
+    def _build_scene(self) -> None:
+        """Create MuJoCo/mjlab scene via ManagerRegistry."""
         self.scene_cfg.mjlab_scene_cfg.num_envs = self.num_envs
 
-        scene_manager_cfg = MjlabSceneManagerConfig(
-            mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
-            mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
-            device=str(self.device),
-            robot_entity_name=self.scene_cfg.robot_entity_name,
+        SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
+        SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
+        self.scene_manager = SceneCls(
+            env=self,
+            config=SceneCfgCls(
+                mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
+                mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
+                device=str(self.device),
+                robot_entity_name=self.scene_cfg.robot_entity_name,
+            )
         )
-        self.scene_manager = MjlabSceneManager(env=self, config=scene_manager_cfg)
         self.scene_manager.build_scene()
-        self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
 
         # Update physics_dt from simulation
         self.physics_dt = self.scene_manager.physics_dt
         self.control_dt = self.physics_dt * self.decimation
 
-        # Action Manager
-        act_manager_cfg = MjlabActionManagerConfig(
-            entity_name=self.act_cfg.entity_name,
-            actuated_dof_names=self.act_cfg.actuated_dof_names,
-            scale=self.act_cfg.action_scale,
-            clip=self.act_cfg.clip_actions,
-            offset=self.act_cfg.offset,
-        )
-        self.act_manager = MjlabActionManager(env=self, config=act_manager_cfg)
-
-        # Observation Manager (using common implementation)
-        obs_manager_cfg = ObsManagerConfig(
-            num_envs=self.num_envs,
-            obs_group=self.obs_cfg.obs_group,
-            enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
-        )
-        self.obs_manager = ObservationManager(env=self, config=obs_manager_cfg)
-
-        # Contact Manager
-        self.contact_manager = MjlabContactManager(env=self)
-        self.contact_manager.register_sensors()
-
-        # Command Manager (shared with other simulators)
-        command_manager_cfg = CommandManagerConfig(
-                command_terms=self.command_cfg.sampler,
-                resampling_time_s=self.command_cfg.resampling_time_s,
-                rel_standing_envs=self.command_cfg.rel_standing_envs,
-                heading_command=self.command_cfg.heading_command,
-                heading_control_stiffness=self.command_cfg.heading_control_stiffness,
-                heading_range=self.command_cfg.heading_range,
-                rel_heading_envs=self.command_cfg.rel_heading_envs,
+    def _build_sim_managers(self) -> None:
+        """Create MuJoCo-specific managers via ManagerRegistry."""
+        ActCls = ManagerRegistry.get_class(self.sim_type, "action")
+        ActCfgCls = ManagerRegistry.get_config_class(self.sim_type, "action")
+        self.act_manager = ActCls(
+            env=self,
+            config=ActCfgCls(
+                entity_name=self.act_cfg.entity_name,
+                actuated_dof_names=self.act_cfg.actuated_dof_names,
+                scale=self.act_cfg.action_scale,
+                clip=self.act_cfg.clip_actions,
+                offset=self.act_cfg.offset,
             )
-        self.command_manager = CommandManager(env=self, config=command_manager_cfg)
-
-        # Reward Manager (shared with other simulators)
-        reward_manager_cfg = RewardManagerConfig(
-            reward_terms=self.reward_cfg.reward_terms,
         )
-        self.reward_manager = MjlabRewardManager(env=self, config=reward_manager_cfg)
 
-        # Termination Manager (shared with other simulators)
-        termination_cfg = TerminationConfig(
-            num_envs=self.num_envs,
-            termination_criteria=self.env_cfg.termination_criteria,
-            episode_length_s=self.env_cfg.episode_length_s,
+        ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
+        ObsCfgCls = ManagerRegistry.get_config_class(self.sim_type, "observation")
+        self.obs_manager = ObsCls(
+            env=self,
+            config=ObsCfgCls(
+                num_envs=self.num_envs,
+                obs_group=self.obs_cfg.obs_group,
+                enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
+            )
         )
-        self.termination_manager = TerminationManager(env=self, config=termination_cfg)
 
-        # Event Manager (shared with other simulators)
-        event_manager_cfg = EventManagerConfig(
-            event_terms=self.event_cfg.event_terms,
-        )
-        self.event_manager = EventManager(env=self, config=event_manager_cfg)
+        ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
+        self.contact_manager = ContactCls(env=self)
+        self.contact_manager.register_sensors()
 
         if self.visualization_cfg.show_viewer:
             from rlworld.rl.envs.managers.mujoco.visualization import (
@@ -210,25 +168,14 @@ class MjlabEnv(World):
         else:
             self.visualization_manager = None
 
-        self.lifecycle.dispatch(LifecycleEvent.MANAGERS_READY)
-
-        # Expand model fields for per-env domain randomization
+    def _post_setup(self) -> None:
+        """Expand model fields for per-env domain randomization."""
         dr_fields = []
         for term in self.event_cfg.event_terms:
             if term.mode == "startup" and "field" in term.params:
                 dr_fields.append(term.params["field"])
         if dr_fields:
             self.scene_manager.sim.expand_model_fields(dr_fields)
-
-        # Apply startup events
-        if "startup" in self.event_manager.available_modes:
-            self.event_manager.apply(mode="startup")
-
-        self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
-
-        # Pretty print environment summary
-        from rlworld.rl.utils.pretty import print_env_summary
-        print_env_summary(self)
 
     def _step_physics(self) -> None:
         for _ in range(self.decimation):
