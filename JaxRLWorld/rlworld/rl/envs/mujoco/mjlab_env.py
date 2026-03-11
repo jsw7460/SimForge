@@ -29,6 +29,7 @@ from rlworld.rl.envs.managers.mujoco import (
     MjlabActionManager, MjlabActionManagerConfig,
     MjlabContactManager,
 )
+from rlworld.rl.envs.lifecycle import LifecycleEvent
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
 
@@ -132,6 +133,7 @@ class MjlabEnv(World):
         )
         self.scene_manager = MjlabSceneManager(env=self, config=scene_manager_cfg)
         self.scene_manager.build_scene()
+        self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
 
         # Update physics_dt from simulation
         self.physics_dt = self.scene_manager.physics_dt
@@ -208,6 +210,8 @@ class MjlabEnv(World):
         else:
             self.visualization_manager = None
 
+        self.lifecycle.dispatch(LifecycleEvent.MANAGERS_READY)
+
         # Expand model fields for per-env domain randomization
         dr_fields = []
         for term in self.event_cfg.event_terms:
@@ -219,6 +223,8 @@ class MjlabEnv(World):
         # Apply startup events
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
+
+        self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
 
         # Pretty print environment summary
         from rlworld.rl.utils.pretty import print_env_summary

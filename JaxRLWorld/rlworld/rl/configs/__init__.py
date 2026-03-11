@@ -36,16 +36,30 @@ from .mujoco_config_classes import (
 
 ConfigsForRun = GenesisConfigsForRun | NewtonConfigsForRun | MujocoConfigsForRun
 
+# Canonical sim_type → ConfigsForRun class mapping
+_CONFIGS_FOR_RUN_MAP: dict[str, type] = {
+    "genesis": GenesisConfigsForRun,
+    "newton": NewtonConfigsForRun,
+    "mujoco": MujocoConfigsForRun,
+}
+
+
 def configs_from_dict(data: dict) -> ConfigsForRun:
-    """Factory function to create appropriate config from dict."""
-    if data.get("simulator") == "newton":
-        return NewtonConfigsForRun.from_dict(data)
+    """Create the appropriate ConfigsForRun from a dict.
 
-    elif data.get("simulator") == "genesis":
-        return GenesisConfigsForRun.from_dict(data)
+    Looks for ``sim_type`` first (new convention), then falls back to
+    the legacy ``simulator`` key for backward compatibility.
+    """
+    sim_type = data.get("sim_type") or data.get("simulator")
+    if sim_type is None:
+        raise ValueError(
+            "Cannot determine simulator: dict must contain 'sim_type' or 'simulator' key."
+        )
 
-    elif data.get("simulator") == "mujoco":
-        return MujocoConfigsForRun.from_dict(data)
-
-    else:
-        raise ValueError(f"Unknown simulator {data['simulator']}")
+    cls = _CONFIGS_FOR_RUN_MAP.get(sim_type)
+    if cls is None:
+        raise ValueError(
+            f"Unknown sim_type={sim_type!r}. "
+            f"Available: {list(_CONFIGS_FOR_RUN_MAP.keys())}"
+        )
+    return cls.from_dict(data)

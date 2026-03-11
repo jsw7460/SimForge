@@ -35,15 +35,11 @@ class BaseRunner(ABC):
         cls,
         cfgs: ConfigsForRun,
     ) -> World:
-        """
-        Create environment from config.
+        """Create environment from config.
 
-        Args:
-            cfgs: Configuration for the run
-            show_viewer: Whether to show visualization
-
-        Returns:
-            Created environment
+        Dispatches on ``cfgs.sim_type`` when available (new path), falling
+        back to ``cfgs.env.env_name`` for backward compatibility and for
+        non-physics environments (Gymnasium, ManiSkill).
         """
         from gymnasium.vector import SyncVectorEnv, AutoresetMode
         import gymnasium as gym
@@ -53,7 +49,11 @@ class BaseRunner(ABC):
         env_class_name = cfgs.env.env_name
         env_class = getattr(envs, env_class_name)
 
-        if env_class.sim_name in ["Genesis", "Newton", "Mujoco"]:
+        sim_type = getattr(cfgs, "sim_type", None)
+
+        if sim_type in ("genesis", "newton", "mujoco") or env_class.sim_name in (
+            "Genesis", "Newton", "Mujoco"
+        ):
             env = env_class(
                 num_envs=cfgs.env.num_envs,
                 env_cfg=cfgs.env,
@@ -583,6 +583,7 @@ class BaseRunner(ABC):
         metadata = {
             "runner_class": self.__class__.__name__,
             "algorithm_name": self.algorithm_name,
+            "sim_type": getattr(self.cfgs, "sim_type", None),
             "iteration": iteration,
             "total_timesteps": self.total_timesteps,
             "total_time": self.total_time,

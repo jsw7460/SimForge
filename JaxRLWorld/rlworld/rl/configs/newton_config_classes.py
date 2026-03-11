@@ -64,6 +64,7 @@ class NewtonActionConfig(BaseConfig):
 @dataclass
 class NewtonConfigsForRun(BaseConfig):
     """Complete configuration for Newton training runs."""
+    sim_type: str = "newton"
     env: NewtonEnvConfig = field(default_factory=NewtonEnvConfig)
     scene: NewtonSceneConfig = field(default_factory=NewtonSceneConfig)
     observation: NewtonObservationConfig = field(default_factory=NewtonObservationConfig)

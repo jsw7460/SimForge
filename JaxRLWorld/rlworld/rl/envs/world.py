@@ -9,6 +9,9 @@ import numpy as np
 import torch
 from gymnasium import spaces
 
+from rlworld.rl.envs.lifecycle import LifecycleEvent, LifecycleManager
+
+
 class World(ABC):
     """Abstract base class for all RL environments."""
 
@@ -38,6 +41,7 @@ class World(ABC):
         super().__init__()
         self._cache_generation = 0
         self._env_step_counter = 0
+        self.lifecycle = LifecycleManager()
 
     def _init_buffers(self) -> None:
         """Initialize common buffers. Call after setting num_envs and device."""

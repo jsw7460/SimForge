@@ -17,6 +17,7 @@ from rlworld.rl.envs.managers import (
     EventManagerConfig, EventManager,
     ContactManager
 )
+from rlworld.rl.envs.lifecycle import LifecycleEvent
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
 
@@ -124,6 +125,7 @@ class GenesisEnv(World):
 
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
+        self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
 
         # Replace with unified Viser viewer after scene is built.
         if self.visualization_cfg.viewer_type == "viser":
@@ -196,9 +198,12 @@ class GenesisEnv(World):
         )
 
         self.contact_manager = ContactManager(env=self)
+        self.lifecycle.dispatch(LifecycleEvent.MANAGERS_READY)
 
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
+
+        self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
 
         # Pretty print environment summary
         from rlworld.rl.utils.pretty import print_env_summary

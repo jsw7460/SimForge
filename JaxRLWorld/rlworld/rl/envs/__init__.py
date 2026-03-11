@@ -1,4 +1,5 @@
 from .world import World
+from .lifecycle import LifecycleEvent, LifecycleManager
 from .stats_collector import EpisodeStatsCollector
 from .genesis.genesis_env import GenesisEnv
 from .newton.newton_env import NewtonEnv
@@ -19,6 +20,8 @@ def __getattr__(name):
 
 __all__ = [
     "World",
+    "LifecycleEvent",
+    "LifecycleManager",
     "EpisodeStatsCollector",
     "GenesisEnv",
     "NewtonEnv",

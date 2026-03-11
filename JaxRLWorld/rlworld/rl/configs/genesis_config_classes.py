@@ -82,6 +82,7 @@ class CurriculumConfig(BaseConfig):
 @dataclass
 class GenesisConfigsForRun(BaseConfig):
     """Complete configuration for Genesis training runs."""
+    sim_type: str = "genesis"
     env: EnvConfig = field(default_factory=EnvConfig)
     scene: SceneConfig = field(default_factory=SceneConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)

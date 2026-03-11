@@ -1,4 +1,5 @@
 from .base import BaseManager
+from .registry import ManagerRegistry
 
 # Common managers (simulator-independent)
 from .common import (
@@ -67,6 +68,7 @@ VisualizationManagerConfig = GenesisVisualizationManagerConfig
 
 __all__ = [
     "BaseManager",
+    "ManagerRegistry",
     # Common
     "CommandManager", "CommandManagerConfig",
     "RewardManager", "RewardManagerConfig",

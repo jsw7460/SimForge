@@ -24,6 +24,7 @@ from rlworld.rl.envs.managers.newton import (
     NewtonVisualizationManager, NewtonVisualizationManagerConfig,
     NewtonContactManager
 )
+from rlworld.rl.envs.lifecycle import LifecycleEvent
 from rlworld.rl.envs.mdp.observations.newton.proprioception import base_quat
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
@@ -108,6 +109,7 @@ class NewtonEnv(World):
         self.scene_manager = NewtonSceneManager(env=self, config=scene_manager_cfg)
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
+        self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
 
         # Visualization Manager (after scene build)
         if (self.visualization_cfg.show_viewer
@@ -192,6 +194,7 @@ class NewtonEnv(World):
             event_terms=self.event_cfg.event_terms,
         )
         self.event_manager = EventManager(env=self, config=event_manager_cfg)
+        self.lifecycle.dispatch(LifecycleEvent.MANAGERS_READY)
 
         # Capture graph for performance
         self.scene_manager.capture()
@@ -199,6 +202,8 @@ class NewtonEnv(World):
         # Apply startup events
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
+
+        self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
 
         # Pretty print environment summary
         from rlworld.rl.utils.pretty import print_env_summary

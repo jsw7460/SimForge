@@ -77,6 +77,7 @@ class MujocoActionConfig(BaseConfig):
 @dataclass
 class MujocoConfigsForRun(BaseConfig):
     """Complete configuration for MuJoCo/mjlab training runs."""
+    sim_type: str = "mujoco"
     env: MujocoEnvConfig = field(default_factory=MujocoEnvConfig)
     scene: MujocoSceneConfig = field(default_factory=MujocoSceneConfig)
     observation: MujocoObservationConfig = field(default_factory=MujocoObservationConfig)
