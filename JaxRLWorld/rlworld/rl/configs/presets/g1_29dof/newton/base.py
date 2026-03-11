@@ -67,7 +67,7 @@ class G1FlatNewtonConfig:
     # Environment settings
     num_envs: int = 4096
     episode_length_s: float = 20.0
-    seed: int = 42
+    seed: int = 0
 
     # Simulation settings
     dt: float = 0.02

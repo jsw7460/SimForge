@@ -57,9 +57,9 @@ class LocomotionEnv(GenesisEnv):
             event_cfg=event_cfg,
         )
 
-    def _setup_environment(self):
-        """Override to add locomotion-specific managers"""
-        super()._setup_environment()
+    def _post_setup(self):
+        """Add locomotion-specific managers after base setup."""
+        super()._post_setup()
         self._initialize_gait_manager()
 
     def _initialize_gait_manager(self):

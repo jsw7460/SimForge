@@ -325,7 +325,6 @@ class OffPolicyRunner(BaseRunner):
             # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
             terminated_jax = jnp.asarray(terminated.cpu().numpy())
             truncated_jax = jnp.asarray(truncated.cpu().numpy())
-            dones_jax = terminated_jax | truncated_jax
 
             # Store transition in replay buffer
             self.alg.store_transition(

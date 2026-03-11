@@ -3,7 +3,7 @@ from rlworld.rl.evals import PolicyEvaluator
 if __name__ == '__main__':
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"./outputs/models/2026-03-10/18-44-32/checkpoint_latest/",  # Newton
+        policy_path=f"./outputs/models/2026-03-11/18-07-08/checkpoint_latest/",  # Newton
         seed=42,
         num_evals=100000000,
         show_viewer=True,
