@@ -267,30 +267,30 @@ class G1FlatNewtonConfig:
         reward_terms = self._mjlab_default_extra_rewards()
         return RewardConfig(reward_terms=reward_terms)
 
-    def _mjlab_default_extra_rewards(self) -> List[RewardTermConfig]:
+    def _mjlab_default_extra_rewards(self) -> dict[str, RewardTermConfig]:
         """G1-specific reward terms."""
-        return [
+        return {
             # Tracking rewards
-            RewardTermConfig(
+            "track_lin_vel_mjlab": RewardTermConfig(
                 rf_mjlab.track_lin_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.5},  # sqrt(0.25)
             ),
-            RewardTermConfig(
+            "track_ang_vel_mjlab": RewardTermConfig(
                 rf_mjlab.track_ang_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.707},  # sqrt(0.5)
             ),
 
             # Orientation
-            RewardTermConfig(
+            "flat_orientation_mjlab": RewardTermConfig(
                 rf_mjlab.flat_orientation_mjlab,
                 weight=1.0,
                 params={"std": 0.447, "body_name": self.robot.prefixed("torso_link")},  # sqrt(0.2)
             ),
 
             # Posture (stateful class)
-            RewardTermConfig(
+            "variable_posture": RewardTermConfig(
                 rf_mjlab.variable_posture,
                 weight=1.0,
                 params={
@@ -338,26 +338,26 @@ class G1FlatNewtonConfig:
             ),
 
             # Penalties
-            RewardTermConfig(
+            "body_ang_vel_penalty_mjlab": RewardTermConfig(
                 rf_mjlab.body_ang_vel_penalty_mjlab,
                 weight=0.05,
                 params={"body_name": self.robot.prefixed("torso_link")},
             ),
-            RewardTermConfig(
+            "angular_momentum_penalty": RewardTermConfig(
                 rf_mjlab.angular_momentum_penalty,
                 weight=0.02,
             ),
-            RewardTermConfig(
+            "joint_pos_limits_mjlab": RewardTermConfig(
                 rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
             ),
-            RewardTermConfig(
+            "raw_action_rate_l2_mjlab": RewardTermConfig(
                 rf_mjlab.raw_action_rate_l2_mjlab,
                 weight=0.1,
             ),
 
             # Feet rewards
-            RewardTermConfig(
+            "feet_clearance_mjlab": RewardTermConfig(
                 rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -366,7 +366,7 @@ class G1FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "feet_swing_height_mjlab": RewardTermConfig(
                 rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -375,7 +375,7 @@ class G1FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "feet_slip_mjlab": RewardTermConfig(
                 rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
@@ -383,7 +383,7 @@ class G1FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "soft_landing_mjlab": RewardTermConfig(
                 rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
@@ -393,7 +393,7 @@ class G1FlatNewtonConfig:
             ),
 
             # Air time (weight=0 in mjlab config, included for completeness)
-            # RewardTermConfig(
+            # "feet_air_time_mjlab": RewardTermConfig(
             #     rf_mjlab.feet_air_time_mjlab,
             #     weight=0.0,
             #     params={
@@ -403,7 +403,7 @@ class G1FlatNewtonConfig:
             #         "command_threshold": 0.5,
             #     },
             # ),
-        ]
+        }
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(

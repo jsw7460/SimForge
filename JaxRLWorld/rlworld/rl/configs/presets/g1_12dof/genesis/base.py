@@ -45,7 +45,7 @@ class G1FlatGenesisConfig:
     # Rewards
     tracking_rewards: TrackingRewards | None = None
     regularization_rewards: RegularizationRewards | None = None
-    extra_reward_terms: List[RewardTermConfig] = field(default_factory=list)
+    extra_reward_terms: dict[str, RewardTermConfig] = field(default_factory=dict)
 
     # Environment
     num_envs: int = 8192
@@ -137,42 +137,31 @@ class G1FlatGenesisConfig:
             ObservationTermConfig(state.base_euler, scale=1.0),
         ]
 
-    def _default_extra_rewards(self) -> List[RewardTermConfig]:
+    def _default_extra_rewards(self) -> dict[str, RewardTermConfig]:
         """G1-specific reward terms."""
         feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
         hip_joints = (".*hip_roll.*", ".*hip_yaw.*")
-        return [
-            RewardTermConfig(
+        return {
+            "penalize_ang_vel_xy": RewardTermConfig(
                 rf.penalize_ang_vel_xy,
                 weight=0.03,
                 params={"base_name": self.robot.base_link_name},
             ),
-            RewardTermConfig(rf.penalize_nonflat_by_gravity, weight=0.1),
-            RewardTermConfig(rf.penalize_dof_vel, weight=1e-3),
-            # RewardTermConfig(
-            #     g1rf.penalize_feet_swing_height_gait,
-            #     weight=50.0,
-            #     params={"max_height": 0.1},
-            # ),
-            RewardTermConfig(g1rf.penalize_dof_pos_limits, weight=5.0),
-            RewardTermConfig(rf.reward_gait_pattern, weight=2.0),
-            RewardTermConfig(rf.reward_alive, weight=0.15),
-            RewardTermConfig(g1rf.penalize_hip_pos, weight=0.1, params={"hip_joints": hip_joints}),
-            RewardTermConfig(rf.penalize_torques, weight=1e-5),
-            # RewardTermConfig(
-            #     rf.penalize_base_acc,
-            #     weight=1e-4,
-            #     params={"base_name": self.robot.base_link_name},
-            # ),
-            RewardTermConfig(
+            "penalize_nonflat_by_gravity": RewardTermConfig(rf.penalize_nonflat_by_gravity, weight=0.1),
+            "penalize_dof_vel": RewardTermConfig(rf.penalize_dof_vel, weight=1e-3),
+            "penalize_dof_pos_limits": RewardTermConfig(g1rf.penalize_dof_pos_limits, weight=5.0),
+            "reward_gait_pattern": RewardTermConfig(rf.reward_gait_pattern, weight=2.0),
+            "reward_alive": RewardTermConfig(rf.reward_alive, weight=0.15),
+            "penalize_hip_pos": RewardTermConfig(g1rf.penalize_hip_pos, weight=0.1, params={"hip_joints": hip_joints}),
+            "penalize_torques": RewardTermConfig(rf.penalize_torques, weight=1e-5),
+            "penalize_feet_slip": RewardTermConfig(
                 rf.penalize_feet_slip,
                 weight=0.2,
                 params={"feet_links": feet_links},
             ),
-            RewardTermConfig(rf.penalize_feet_yaw_mean_deviation, params={"feet_links": feet_links}, weight=1.0),
-            RewardTermConfig(rf.penalize_feet_yaw_difference, params={"feet_links": feet_links}, weight=1.0),
-            # RewardTermConfig(rf.penalize_feet_distance, params={"feet_links": feet_links, "feet_distance_ref": 0.21}, weight=1.0),
-        ]
+            "penalize_feet_yaw_mean_deviation": RewardTermConfig(rf.penalize_feet_yaw_mean_deviation, params={"feet_links": feet_links}, weight=1.0),
+            "penalize_feet_yaw_difference": RewardTermConfig(rf.penalize_feet_yaw_difference, params={"feet_links": feet_links}, weight=1.0),
+        }
 
     def build(self) -> "GenesisConfigsForRun":
         """Build the complete configuration as a typed GenesisConfigsForRun."""
@@ -290,18 +279,17 @@ class G1FlatGenesisConfig:
         )
 
     def _build_reward_config(self) -> RewardConfig:
-        reward_terms = (
-            self.tracking_rewards.to_terms()
-            + self.regularization_rewards.to_terms()
-            + ContactRewards(
+        reward_terms: dict[str, RewardTermConfig] = {}
+        reward_terms.update(self.tracking_rewards.to_terms())
+        reward_terms.update(self.regularization_rewards.to_terms())
+        reward_terms.update(ContactRewards(
             feet_links=self.robot.foot_names,
             contact_allowed_links=self.robot.foot_names,
             feet_air_time_weight=0.1,
             feet_air_time_threshold=0.35,
-            feet_height_weight=None
-        ).to_terms()
-            + self.extra_reward_terms
-        )
+            feet_height_weight=None,
+        ).to_terms())
+        reward_terms.update(self.extra_reward_terms)
         return RewardConfig(
             tracking_sigma=0.25,
             reward_terms=reward_terms,

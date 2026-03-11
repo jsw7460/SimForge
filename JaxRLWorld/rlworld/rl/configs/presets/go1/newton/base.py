@@ -272,28 +272,28 @@ class Go1FlatNewtonConfig:
         )
 
     def _build_reward_config(self) -> RewardConfig:
-        reward_terms = [
+        reward_terms = {
             # Tracking rewards
-            RewardTermConfig(
+            "track_lin_vel_mjlab": RewardTermConfig(
                 func=rf_mjlab.track_lin_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.5},
             ),
-            RewardTermConfig(
+            "track_ang_vel_mjlab": RewardTermConfig(
                 func=rf_mjlab.track_ang_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.707},
             ),
 
             # Orientation reward
-            RewardTermConfig(
+            "flat_orientation_mjlab": RewardTermConfig(
                 func=rf_mjlab.flat_orientation_mjlab,
                 weight=1.0,
                 params={"std": 0.447, "body_name": "base"},
             ),
 
             # Posture reward (stateful class)
-            RewardTermConfig(
+            "variable_posture": RewardTermConfig(
                 func=rf_mjlab.variable_posture,
                 weight=1.0,
                 params={
@@ -315,7 +315,7 @@ class Go1FlatNewtonConfig:
             ),
 
             # Feet swing height (stateful class)
-            RewardTermConfig(
+            "feet_swing_height_mjlab": RewardTermConfig(
                 func=rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -326,7 +326,7 @@ class Go1FlatNewtonConfig:
             ),
 
             # Feet clearance
-            RewardTermConfig(
+            "feet_clearance_mjlab": RewardTermConfig(
                 func=rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -337,7 +337,7 @@ class Go1FlatNewtonConfig:
             ),
 
             # Feet slip
-            RewardTermConfig(
+            "feet_slip_mjlab": RewardTermConfig(
                 func=rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
@@ -347,7 +347,7 @@ class Go1FlatNewtonConfig:
             ),
 
             # Soft landing
-            RewardTermConfig(
+            "soft_landing_mjlab": RewardTermConfig(
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
@@ -357,14 +357,14 @@ class Go1FlatNewtonConfig:
             ),
 
             # Body angular velocity penalty (disabled)
-            RewardTermConfig(
+            "body_ang_vel_penalty_mjlab": RewardTermConfig(
                 func=rf_mjlab.body_ang_vel_penalty_mjlab,
                 weight=0.0,
                 params={"body_name": "base"},
             ),
 
             # Feet air time (disabled)
-            RewardTermConfig(
+            "feet_air_time_mjlab": RewardTermConfig(
                 func=rf_mjlab.feet_air_time_mjlab,
                 weight=0.0,
                 params={
@@ -376,18 +376,18 @@ class Go1FlatNewtonConfig:
             ),
 
             # Joint position limits
-            RewardTermConfig(
+            "joint_pos_limits_mjlab": RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
                 params={"soft_limit_factor": 1.0},
             ),
 
             # Action rate
-            RewardTermConfig(
+            "action_rate_l2_mjlab": RewardTermConfig(
                 func=rf_mjlab.action_rate_l2_mjlab,
                 weight=0.1,
             ),
-        ]
+        }
 
         return RewardConfig(reward_terms)
 

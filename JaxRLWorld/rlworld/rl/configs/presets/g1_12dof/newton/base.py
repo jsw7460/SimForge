@@ -272,59 +272,53 @@ class G1FlatNewtonConfig:
         )
 
     def _build_reward_config(self) -> RewardConfig:
-        reward_terms = (
-            self.tracking_rewards.to_terms()
-            + self.regularization_rewards.to_terms()
-            + ContactRewards(
+        reward_terms: dict[str, RewardTermConfig] = {}
+        reward_terms.update(self.tracking_rewards.to_terms())
+        reward_terms.update(self.regularization_rewards.to_terms())
+        reward_terms.update(ContactRewards(
             feet_links=self.robot.foot_names,
             contact_allowed_links=self.robot.foot_names,
             feet_air_time_weight=0.1,
             feet_air_time_threshold=0.35,
-            feet_height_weight=None
-        ).to_terms()
-            + self._default_extra_rewards()
-        )
+            feet_height_weight=None,
+        ).to_terms())
+        reward_terms.update(self._default_extra_rewards())
         return RewardConfig(reward_terms=reward_terms)
 
-    def _default_extra_rewards(self) -> List[RewardTermConfig]:
+    def _default_extra_rewards(self) -> dict[str, RewardTermConfig]:
         """G1-specific reward terms."""
         feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
         hip_joints = (".*hip_roll.*", ".*hip_yaw.*")
-        return [
-            RewardTermConfig(
+        return {
+            "penalize_ang_vel_xy": RewardTermConfig(
                 rf.penalize_ang_vel_xy,
                 weight=0.03,
             ),
-            RewardTermConfig(rf.penalize_nonflat_by_gravity, weight=0.1),
-            RewardTermConfig(rf.penalize_dof_vel, weight=1e-3),
-            RewardTermConfig(
+            "penalize_nonflat_by_gravity": RewardTermConfig(rf.penalize_nonflat_by_gravity, weight=0.1),
+            "penalize_dof_vel": RewardTermConfig(rf.penalize_dof_vel, weight=1e-3),
+            "penalize_feet_swing_height_gait": RewardTermConfig(
                 rf.penalize_feet_swing_height_gait,
                 weight=50.0,
                 params={"max_height": self.feet_height_target, "foot_offset": 0.035},
             ),
-            RewardTermConfig(rf.penalize_dof_pos_limits, weight=5.0),
-            RewardTermConfig(rf.reward_gait_pattern, weight=2.0),
-            RewardTermConfig(rf.reward_alive, weight=0.15),
-            RewardTermConfig(rf.penalize_hip_deviation, weight=0.1, params={"hip_joints": hip_joints}),
-            RewardTermConfig(rf.penalize_torques, weight=5e-6),
-            RewardTermConfig(
+            "penalize_dof_pos_limits": RewardTermConfig(rf.penalize_dof_pos_limits, weight=5.0),
+            "reward_gait_pattern": RewardTermConfig(rf.reward_gait_pattern, weight=2.0),
+            "reward_alive": RewardTermConfig(rf.reward_alive, weight=0.15),
+            "penalize_hip_deviation": RewardTermConfig(rf.penalize_hip_deviation, weight=0.1, params={"hip_joints": hip_joints}),
+            "penalize_torques": RewardTermConfig(rf.penalize_torques, weight=5e-6),
+            "penalize_base_acc": RewardTermConfig(
                 rf.penalize_base_acc,
                 weight=1e-4,
                 params={"base_body": self.robot.base_link_name},
             ),
-            RewardTermConfig(
+            "penalize_feet_slip": RewardTermConfig(
                 rf.penalize_feet_slip,
                 weight=0.2,
                 params={"feet_bodies": ("right_ankle_roll_link", "left_ankle_roll_link")},
             ),
-            RewardTermConfig(rf.penalize_feet_yaw_mean_deviation, params={"feet_bodies": feet_links}, weight=1.0),
-            RewardTermConfig(rf.penalize_feet_yaw_difference, params={"feet_bodies": feet_links}, weight=1.0),
-            # RewardTermConfig(
-            #     rf.penalize_feet_distance,
-            #     params={"feet_bodies": feet_links, "feet_distance_ref": 0.21},
-            #     weight=1.0
-            # ),
-        ]
+            "penalize_feet_yaw_mean_deviation": RewardTermConfig(rf.penalize_feet_yaw_mean_deviation, params={"feet_bodies": feet_links}, weight=1.0),
+            "penalize_feet_yaw_difference": RewardTermConfig(rf.penalize_feet_yaw_difference, params={"feet_bodies": feet_links}, weight=1.0),
+        }
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(

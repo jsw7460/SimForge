@@ -60,7 +60,7 @@ def print_summary():
     print(f"action.num_active_joint_actions: {new['action']['num_active_joint_actions']}")
     print(f"observation.obs_group.actor count: {len(new['observation']['obs_group']['actor'])}")
     print(f"observation.obs_group.critic count: {len(new['observation']['obs_group']['critic'])}")
-    print(f"reward.reward_terms count: {len(new['reward']['reward_terms'])}")
+    print(f"reward.reward_terms count: {len(new['reward']['reward_terms']) if new['reward']['reward_terms'] else 0}")
     print(f"nn.policy.actor_class_name: {new['nn']['policy']['actor_class_name']}")
     print(f"runner.run_name: {new['runner']['run_name']}")
 

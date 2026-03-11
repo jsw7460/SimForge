@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 @dataclass
 class RewardManagerConfig:
     """Configuration for reward management."""
-    reward_terms: list[RewardTermConfig] = None
+    reward_terms: dict[str, RewardTermConfig] = None
 
 
 class RewardManager(BaseManager):
@@ -27,13 +27,13 @@ class RewardManager(BaseManager):
         self.reward_terms = config.reward_terms
 
         # Initialize stateful reward instances
-        self._instances: dict[int, object] = {}
+        self._instances: dict[str, object] = {}
         if self.reward_terms:
-            for idx, reward_term in enumerate(self.reward_terms):
+            for name, reward_term in self.reward_terms.items():
                 func = reward_term.func
                 # Check if func is a class (not an instance, not a function)
                 if isinstance(func, type):
-                    self._instances[idx] = func(env=self.env, **reward_term.params)
+                    self._instances[name] = func(env=self.env, **reward_term.params)
 
     def set_rewards(
         self,
@@ -42,25 +42,19 @@ class RewardManager(BaseManager):
         reward_buffer_per_type: dict[str, torch.Tensor]
     ) -> None:
 
-        for idx, reward_term in enumerate(self.reward_terms):
-            reward_value = self._compute_weighted_reward(idx, reward_term)
+        for name, reward_term in self.reward_terms.items():
+            reward_value = self._compute_weighted_reward(name, reward_term)
 
-            # Get reward name
-            if idx in self._instances:
-                reward_name = self._instances[idx].__name__
-            else:
-                reward_name = reward_term.func.__name__
-
-            reward_buffer_per_type[reward_name] = reward_value
-            episode_sums[reward_name] += reward_value
+            reward_buffer_per_type[name] = reward_value
+            episode_sums[name] += reward_value
             reward_buffer += reward_value
 
         reward_buffer_per_type["total_reward"] = reward_buffer
 
-    def _compute_weighted_reward(self, idx: int, reward_term: RewardTermConfig) -> torch.Tensor:
+    def _compute_weighted_reward(self, name: str, reward_term: RewardTermConfig) -> torch.Tensor:
         # Use instance if available (stateful class), otherwise call function
-        if idx in self._instances:
-            raw_reward = self._instances[idx](self.env)
+        if name in self._instances:
+            raw_reward = self._instances[name](self.env)
         else:
             raw_reward = reward_term.func(self.env, **reward_term.params)
 
@@ -84,29 +78,23 @@ class RewardManager(BaseManager):
             return ""
 
         rows = []
-        for idx, term in enumerate(self.reward_terms):
-            # Get name from instance or function
-            if idx in self._instances:
-                func_name = self._instances[idx].__name__
-            else:
-                func_name = getattr(term.func, '__name__', f"term_{idx}")
-
+        for name, term in self.reward_terms.items():
             weight_str = format_weight(term.weight)
 
             # Format params if present
             params_str = "-"
-            if term.params and idx not in self._instances:
+            if term.params and name not in self._instances:
                 # Only show params for non-class rewards (class params used in __init__)
                 param_items = [f"{k}={v}" for k, v in list(term.params.items())[:2]]
                 params_str = ", ".join(param_items)
                 if len(term.params) > 2:
                     params_str += ", ..."
 
-            rows.append([idx, func_name, weight_str, params_str])
+            rows.append([name, weight_str, params_str])
 
         table = create_manager_table(
             title="Reward Terms",
-            columns=["Idx", "Name", "Weight", "Params"],
+            columns=["Name", "Weight", "Params"],
             rows=rows,
             footer=f"{len(self.reward_terms)} terms"
         )

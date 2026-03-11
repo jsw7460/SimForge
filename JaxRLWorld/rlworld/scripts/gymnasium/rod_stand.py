@@ -364,14 +364,13 @@ def main():
     DEFAULT_ENV_CONFIG["termination_criteria"] = termination_terms
     DEFAULT_ENV_CONFIG["state_init_terms"] = state_init_terms
 
-    reward_terms = [
-        RewardTermConfig(rf.tracking_lin_vel, weight=1.0),
-        RewardTermConfig(rf.tracking_ang_vel, weight=0.2),
-        RewardTermConfig(rf.lin_vel_z, weight=1.0),
-        # RewardTermConfig(rf.adaptive_base_height, weight=50.0),
-        RewardTermConfig(rf.action_rate, weight=0.005),
-        RewardTermConfig(rf.similar_to_default, weight=0.1)
-    ]
+    reward_terms = {
+        "tracking_lin_vel": RewardTermConfig(rf.tracking_lin_vel, weight=1.0),
+        "tracking_ang_vel": RewardTermConfig(rf.tracking_ang_vel, weight=0.2),
+        "lin_vel_z": RewardTermConfig(rf.lin_vel_z, weight=1.0),
+        "action_rate": RewardTermConfig(rf.action_rate, weight=0.005),
+        "similar_to_default": RewardTermConfig(rf.similar_to_default, weight=0.1),
+    }
 
     DEFAULT_REWARD_CONFIG["reward_terms"] = reward_terms
 

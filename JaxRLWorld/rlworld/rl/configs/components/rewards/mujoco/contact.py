@@ -1,6 +1,5 @@
 """MuJoCo contact reward components."""
 from dataclasses import dataclass
-from typing import List
 
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
@@ -37,12 +36,12 @@ class ContactRewards:
     soft_landing_weight: float | None = -1e-5
     landing_command_threshold: float = 0.05
 
-    def to_terms(self) -> List[RewardTermConfig]:
-        """Convert to list of RewardTermConfig for config dict."""
-        terms = []
+    def to_terms(self) -> dict[str, RewardTermConfig]:
+        """Convert to dict of RewardTermConfig for config dict."""
+        terms = {}
 
         if self.feet_air_time_weight is not None:
-            terms.append(RewardTermConfig(
+            terms["feet_air_time"] = RewardTermConfig(
                 rf.feet_air_time,
                 weight=self.feet_air_time_weight,
                 params={
@@ -50,34 +49,34 @@ class ContactRewards:
                     "threshold_max": self.air_time_threshold_max,
                     "command_threshold": self.air_time_command_threshold,
                 },
-            ))
+            )
 
         if self.feet_clearance_weight is not None:
-            terms.append(RewardTermConfig(
+            terms["feet_clearance"] = RewardTermConfig(
                 rf.feet_clearance,
                 weight=self.feet_clearance_weight,
                 params={
                     "target_height": self.clearance_target_height,
                     "command_threshold": self.clearance_command_threshold,
                 },
-            ))
+            )
 
         if self.feet_slip_weight is not None:
-            terms.append(RewardTermConfig(
+            terms["feet_slip"] = RewardTermConfig(
                 rf.feet_slip,
                 weight=self.feet_slip_weight,
                 params={
                     "command_threshold": self.slip_command_threshold,
                 },
-            ))
+            )
 
         if self.soft_landing_weight is not None:
-            terms.append(RewardTermConfig(
+            terms["soft_landing"] = RewardTermConfig(
                 rf.soft_landing,
                 weight=self.soft_landing_weight,
                 params={
                     "command_threshold": self.landing_command_threshold,
                 },
-            ))
+            )
 
         return terms

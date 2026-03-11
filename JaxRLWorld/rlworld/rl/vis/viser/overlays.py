@@ -35,16 +35,7 @@ def _get_reward_term_names(env: Any) -> list[str]:
     terms = getattr(rm, "reward_terms", None)
     if not terms:
         return []
-    names = []
-    for idx, term in enumerate(terms):
-        func = term.func
-        # Stateful reward classes use their name attribute.
-        if isinstance(func, type):
-            name = getattr(func, "name", None) or func.__name__
-        else:
-            name = getattr(func, "__name__", f"reward_{idx}")
-        names.append(name)
-    return names
+    return list(terms.keys())
 
 
 @dataclass

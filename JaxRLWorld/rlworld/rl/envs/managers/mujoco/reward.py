@@ -15,7 +15,7 @@ class MjlabRewardManager(RewardManager):
 
     def __init__(self, env: "World", config: RewardManagerConfig):
         if config.reward_terms:
-            for term in config.reward_terms:
+            for term in config.reward_terms.values():
                 if term.params:
                     for value in term.params.values():
                         if isinstance(value, SceneEntityCfg):

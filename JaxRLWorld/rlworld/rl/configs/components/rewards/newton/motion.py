@@ -15,16 +15,15 @@ class PostureRewards:
 
     hip_joints: str | list[str] = ".*_hip_joint"
 
-    def to_terms(self) -> list[RewardTermConfig]:
-        terms = [
-            RewardTermConfig(rf.penalize_ang_vel_xy, weight=self.ang_vel_xy_weight),
-            RewardTermConfig(rf.penalize_torques, weight=self.torques_weight),
-            RewardTermConfig(rf.penalize_nonflat_by_gravity, weight=self.nonflat_gravity_weight),
-        ]
+    def to_terms(self) -> dict[str, RewardTermConfig]:
+        terms = {
+            "penalize_ang_vel_xy": RewardTermConfig(rf.penalize_ang_vel_xy, weight=self.ang_vel_xy_weight),
+            "penalize_torques": RewardTermConfig(rf.penalize_torques, weight=self.torques_weight),
+            "penalize_nonflat_by_gravity": RewardTermConfig(rf.penalize_nonflat_by_gravity, weight=self.nonflat_gravity_weight),
+        }
 
         if self.hip_deviation_weight is not None:
-            terms.append(RewardTermConfig(rf.penalize_hip_deviation, weight=self.hip_deviation_weight,
-                             params={"hip_joints": self.hip_joints}))
+            terms["penalize_hip_deviation"] = RewardTermConfig(rf.penalize_hip_deviation, weight=self.hip_deviation_weight,
+                             params={"hip_joints": self.hip_joints})
 
         return terms
-

@@ -29,6 +29,7 @@ def main():
     )
     cfgs_for_run.algorithm = fasttd3_config
     cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(FastTD3PolicyConfig)
+    cfgs_for_run.reward.reward_terms["raw_action_rate_l2_mjlab"].weight = 0.01
     cfgs_for_run.nn.policy.actor_kwargs.update(
         {
             "activation": "relu",

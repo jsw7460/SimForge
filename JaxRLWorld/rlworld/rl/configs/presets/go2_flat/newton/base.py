@@ -203,23 +203,23 @@ class Go2FlatNewtonConfig:
         feet = list(r.prefixed_foot_names)
         base = r.prefixed("base")
 
-        reward_terms = [
-            RewardTermConfig(
+        reward_terms = {
+            "track_lin_vel_mjlab": RewardTermConfig(
                 func=rf_mjlab.track_lin_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.5},
             ),
-            RewardTermConfig(
+            "track_ang_vel_mjlab": RewardTermConfig(
                 func=rf_mjlab.track_ang_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.707},
             ),
-            RewardTermConfig(
+            "flat_orientation_mjlab": RewardTermConfig(
                 func=rf_mjlab.flat_orientation_mjlab,
                 weight=1.0,
                 params={"std": 0.447, "body_name": base},
             ),
-            RewardTermConfig(
+            "variable_posture": RewardTermConfig(
                 func=rf_mjlab.variable_posture,
                 weight=1.0,
                 params={
@@ -239,7 +239,7 @@ class Go2FlatNewtonConfig:
                     "running_threshold": 1.5,
                 },
             ),
-            RewardTermConfig(
+            "feet_swing_height_mjlab": RewardTermConfig(
                 func=rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -248,7 +248,7 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "feet_clearance_mjlab": RewardTermConfig(
                 func=rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -257,7 +257,7 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "feet_slip_mjlab": RewardTermConfig(
                 func=rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
@@ -265,7 +265,7 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "soft_landing_mjlab": RewardTermConfig(
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
@@ -273,16 +273,16 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "joint_pos_limits_mjlab": RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
                 params={"soft_limit_factor": 1.0},
             ),
-            RewardTermConfig(
+            "processed_action_rate_l2_mjlab": RewardTermConfig(
                 func=rf_mjlab.processed_action_rate_l2_mjlab,
                 weight=0.1,
             ),
-        ]
+        }
 
         return RewardConfig(reward_terms)
 

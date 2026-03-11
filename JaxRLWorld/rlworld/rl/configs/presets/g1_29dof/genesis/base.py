@@ -48,7 +48,7 @@ class G1FlatGenesisConfig:
     # Rewards
     tracking_rewards: TrackingRewards | None = None
     regularization_rewards: RegularizationRewards | None = None
-    extra_reward_terms: List[RewardTermConfig] = field(default_factory=list)
+    extra_reward_terms: dict[str, RewardTermConfig] = field(default_factory=dict)
 
     # Environment
     num_envs: int = 4096
@@ -112,7 +112,7 @@ class G1FlatGenesisConfig:
             self.regularization_rewards = RegularizationRewards(
                 lin_vel_z_weight=0.2,
                 base_height_weight=None,
-                action_rate_weight=0.01,
+                action_rate_weight=0.1,
                 similar_to_default_weight=None,
             )
 
@@ -134,32 +134,32 @@ class G1FlatGenesisConfig:
             # ObservationTermConfig(, scale=1.0),
         ]
 
-    def _mjlab_rewards(self) -> List[RewardTermConfig]:
+    def _mjlab_rewards(self) -> dict[str, RewardTermConfig]:
         """G1-specific reward terms (mjlab-compatible)."""
         feet_links = ["left_ankle_roll_link", "right_ankle_roll_link"]
 
-        return [
+        return {
             # Tracking rewards
-            RewardTermConfig(
+            "track_lin_vel_mjlab": RewardTermConfig(
                 rf_mjlab.track_lin_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.5},
             ),
-            RewardTermConfig(
+            "track_ang_vel_mjlab": RewardTermConfig(
                 rf_mjlab.track_ang_vel_mjlab,
                 weight=2.0,
                 params={"std": 0.707, "base_name": "pelvis"},
             ),
 
             # Orientation
-            RewardTermConfig(
+            "flat_orientation_mjlab": RewardTermConfig(
                 rf_mjlab.flat_orientation_mjlab,
                 weight=1.0,
                 params={"std": 0.447, "body_name": self.robot.base_link_name},
             ),
 
             # Posture
-            RewardTermConfig(
+            "variable_posture": RewardTermConfig(
                 rf_mjlab.variable_posture,
                 weight=1.0,
                 params={
@@ -202,22 +202,22 @@ class G1FlatGenesisConfig:
             ),
 
             # Penalties
-            RewardTermConfig(
+            "body_ang_vel_penalty_mjlab": RewardTermConfig(
                 rf_mjlab.body_ang_vel_penalty_mjlab,
                 weight=0.05,
                 params={"body_name": self.robot.base_link_name},
             ),
-            RewardTermConfig(
+            "joint_pos_limits_mjlab": RewardTermConfig(
                 rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
             ),
-            RewardTermConfig(
+            "raw_action_rate_l2_mjlab": RewardTermConfig(
                 rf_mjlab.raw_action_rate_l2_mjlab,
-                weight=0.01,
+                weight=0.1,
             ),
 
             # Feet rewards
-            RewardTermConfig(
+            "feet_clearance_mjlab": RewardTermConfig(
                 rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -226,7 +226,7 @@ class G1FlatGenesisConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "feet_swing_height_mjlab": RewardTermConfig(
                 rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -235,7 +235,7 @@ class G1FlatGenesisConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "feet_slip_mjlab": RewardTermConfig(
                 rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
@@ -243,7 +243,7 @@ class G1FlatGenesisConfig:
                     "command_threshold": 0.05,
                 },
             ),
-            RewardTermConfig(
+            "soft_landing_mjlab": RewardTermConfig(
                 rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
@@ -251,7 +251,7 @@ class G1FlatGenesisConfig:
                     "command_threshold": 0.05,
                 },
             ),
-        ]
+        }
 
     def build(self) -> "GenesisConfigsForRun":
         """Build the complete configuration as a typed GenesisConfigsForRun."""

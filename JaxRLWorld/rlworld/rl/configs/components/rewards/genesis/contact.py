@@ -18,36 +18,32 @@ class ContactRewards:
     feet_links: str | list[str] = ".*_foot"
     contact_allowed_links: str | list[str] = ".*_foot"
 
-    def to_terms(self) -> list[RewardTermConfig]:
-        terms = [
-            RewardTermConfig(
+    def to_terms(self) -> dict[str, RewardTermConfig]:
+        terms = {
+            "penalize_invalid_contact": RewardTermConfig(
                 rf.penalize_invalid_contact,
                 weight=self.invalid_contact_weight,
                 params={"contact_allowed_links": self.contact_allowed_links},
             ),
-            RewardTermConfig(
+            "penalize_impact_force": RewardTermConfig(
                 rf.penalize_impact_force,
                 weight=self.impact_force_weight,
                 params={"links": self.feet_links},
             ),
-        ]
+        }
 
         if self.feet_height_weight is not None:
-            terms.append(
-                RewardTermConfig(
-                    rf.reward_feet_height_exp,
-                    weight=self.feet_height_weight,
-                    params={"feet_links": self.feet_links, "target_height": self.feet_height_target},
-                )
+            terms["reward_feet_height_exp"] = RewardTermConfig(
+                rf.reward_feet_height_exp,
+                weight=self.feet_height_weight,
+                params={"feet_links": self.feet_links, "target_height": self.feet_height_target},
             )
 
         if self.feet_air_time_weight is not None:
-            terms.append(
-                RewardTermConfig(
-                    rf.reward_feet_air_time,
-                    weight=self.feet_air_time_weight,
-                    params={"links": self.feet_links, "threshold": self.feet_air_time_threshold},
-                )
+            terms["reward_feet_air_time"] = RewardTermConfig(
+                rf.reward_feet_air_time,
+                weight=self.feet_air_time_weight,
+                params={"links": self.feet_links, "threshold": self.feet_air_time_threshold},
             )
 
         return terms

@@ -339,21 +339,21 @@ class G1FlatMujocoConfig:
         """Build reward configuration matching mjlab G1 velocity task."""
         site_names = ("left_foot", "right_foot")
 
-        reward_terms = [
+        reward_terms = {
             # Tracking rewards
-            RewardTermConfig(
+            "track_linear_velocity": RewardTermConfig(
                 func=rf.track_linear_velocity,
                 weight=2.0,
                 params={"std": math.sqrt(0.25)},
             ),
-            RewardTermConfig(
+            "track_angular_velocity": RewardTermConfig(
                 func=rf.track_angular_velocity,
                 weight=2.0,
                 params={"std": math.sqrt(0.5)},
             ),
 
             # Orientation reward
-            RewardTermConfig(
+            "flat_orientation": RewardTermConfig(
                 func=rf.flat_orientation,
                 weight=1.0,
                 params={
@@ -365,14 +365,14 @@ class G1FlatMujocoConfig:
                 },
             ),
 
-            RewardTermConfig(
+            "self_collision_cost": RewardTermConfig(
                 func=rf.self_collision_cost,
                 weight=1.0,
                 params={"sensor_name": "self_collision"},
             ),
 
             # Variable posture reward (G1-specific std values)
-            RewardTermConfig(
+            "variable_posture": RewardTermConfig(
                 func=rf.variable_posture,
                 weight=1.0,
                 params={
@@ -419,7 +419,7 @@ class G1FlatMujocoConfig:
             ),
 
             # Body angular velocity penalty
-            RewardTermConfig(
+            "body_angular_velocity_penalty": RewardTermConfig(
                 func=rf.body_angular_velocity_penalty,
                 weight=0.05,
                 params={
@@ -431,26 +431,26 @@ class G1FlatMujocoConfig:
             ),
 
             # Angular momentum penalty
-            RewardTermConfig(
+            "angular_momentum_penalty": RewardTermConfig(
                 func=rf.angular_momentum_penalty,
                 weight=0.02,
                 params={"sensor_name": "robot/root_angmom"},
             ),
 
             # Joint position limits
-            RewardTermConfig(
+            "joint_pos_limits": RewardTermConfig(
                 func=rf.joint_pos_limits,
                 weight=1.0,
             ),
 
             # Action rate
-            RewardTermConfig(
+            "raw_action_rate_l2": RewardTermConfig(
                 func=rf.raw_action_rate_l2,
                 weight=0.1,
             ),
 
             # Feet clearance
-            RewardTermConfig(
+            "feet_clearance": RewardTermConfig(
                 func=rf.feet_clearance,
                 weight=2.0,
                 params={
@@ -464,7 +464,7 @@ class G1FlatMujocoConfig:
             ),
 
             # Feet swing height
-            RewardTermConfig(
+            "feet_swing_height": RewardTermConfig(
                 func=rf.feet_swing_height,
                 weight=0.25,
                 params={
@@ -479,7 +479,7 @@ class G1FlatMujocoConfig:
             ),
 
             # Feet slip
-            RewardTermConfig(
+            "feet_slip": RewardTermConfig(
                 func=rf.feet_slip,
                 weight=0.1,
                 params={
@@ -493,7 +493,7 @@ class G1FlatMujocoConfig:
             ),
 
             # Soft landing
-            RewardTermConfig(
+            "soft_landing": RewardTermConfig(
                 func=rf.soft_landing,
                 weight=1e-5,
                 params={
@@ -501,7 +501,7 @@ class G1FlatMujocoConfig:
                     "command_threshold": 0.05,
                 },
             ),
-        ]
+        }
 
         return RewardConfig(reward_terms=reward_terms)
 

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 @dataclass
 class RewardConfig(BaseConfig):
     """Reward configuration (shared)."""
-    reward_terms: list[RewardTermConfig] = None
+    reward_terms: dict[str, RewardTermConfig] = None
 
 
 @dataclass

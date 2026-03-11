@@ -316,47 +316,47 @@ class Go1FlatMujocoConfig:
 
     def _build_reward_config(self) -> RewardConfig:
         """Build reward configuration matching mjlab velocity task."""
-        reward_terms = [
+        reward_terms = {
             # === Tracking rewards (matching mjlab) ===
-            RewardTermConfig(
+            "track_linear_velocity": RewardTermConfig(
                 func=rf.track_linear_velocity,
                 weight=2.0,
                 params={"std": math.sqrt(0.25)},
             ),
-            RewardTermConfig(
+            "track_angular_velocity": RewardTermConfig(
                 func=rf.track_angular_velocity,
                 weight=2.0,
                 params={"std": math.sqrt(0.5)},
             ),
 
             # === Orientation reward ===
-            RewardTermConfig(
+            "flat_orientation": RewardTermConfig(
                 func=rf.flat_orientation,
                 weight=1.0,
                 params={"std": math.sqrt(0.2)},
             ),
 
             # === Posture reward ===
-            RewardTermConfig(
+            "posture": RewardTermConfig(
                 func=rf.posture,
                 weight=1.0,
                 params={"std": 0.25},
             ),
 
             # === Joint limits penalty ===
-            RewardTermConfig(
+            "joint_pos_limits": RewardTermConfig(
                 func=rf.joint_pos_limits,
                 weight=1.0,
             ),
 
             # === Action rate penalty ===
-            RewardTermConfig(
+            "action_rate_l2": RewardTermConfig(
                 func=rf.action_rate_l2,
                 weight=0.1,
             ),
 
             # === Feet air time ===
-            RewardTermConfig(
+            "feet_air_time": RewardTermConfig(
                 func=rf.feet_air_time,
                 weight=0.0,
                 params={
@@ -368,7 +368,7 @@ class Go1FlatMujocoConfig:
             ),
 
             # === Feet clearance penalty ===
-            RewardTermConfig(
+            "feet_clearance": RewardTermConfig(
                 func=rf.feet_clearance,
                 weight=2.0,
                 params={
@@ -382,7 +382,7 @@ class Go1FlatMujocoConfig:
             ),
 
             # === Feet slip penalty ===
-            RewardTermConfig(
+            "feet_slip": RewardTermConfig(
                 func=rf.feet_slip,
                 weight=0.1,
                 params={
@@ -396,7 +396,7 @@ class Go1FlatMujocoConfig:
             ),
 
             # === Soft landing penalty ===
-            RewardTermConfig(
+            "soft_landing": RewardTermConfig(
                 func=rf.soft_landing,
                 weight=1e-5,
                 params={
@@ -406,11 +406,11 @@ class Go1FlatMujocoConfig:
             ),
 
             # === Body angular velocity penalty ===
-            RewardTermConfig(
+            "body_angular_velocity_penalty": RewardTermConfig(
                 func=rf.body_angular_velocity_penalty,
                 weight=0.0,
             ),
-        ]
+        }
 
         return RewardConfig(reward_terms=reward_terms)
 
