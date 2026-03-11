@@ -452,6 +452,9 @@ class GymnasiumEnv(World):
     def robot_data(self):
         return None
 
+    def get_robot_data(self, entity_name: str = "robot"):
+        return None
+
     def heading_w(self) -> torch.Tensor:
         pass
 

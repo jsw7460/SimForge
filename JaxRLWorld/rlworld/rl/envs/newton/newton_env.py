@@ -67,6 +67,10 @@ class NewtonEnv(World):
 
     @property
     def robot_data(self):
+        return self.get_robot_data("robot")
+
+    def get_robot_data(self, entity_name: str = "robot"):
+        # Newton currently supports single entity only
         return self._robot_data
 
     def _build_scene(self) -> None:

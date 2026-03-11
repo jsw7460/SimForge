@@ -63,7 +63,10 @@ class GenesisEnv(World):
 
     @property
     def robot_data(self):
-        return self._robot_data
+        return self.get_robot_data("robot")
+
+    def get_robot_data(self, entity_name: str = "robot"):
+        return self._robot_data_cache[entity_name]
 
     @property
     def scene(self) -> gs.Scene:
@@ -159,7 +162,14 @@ class GenesisEnv(World):
         self.contact_manager = ContactCls(env=self)
 
         from rlworld.rl.envs.genesis.robot_data import GenesisRobotData
-        self._robot_data = GenesisRobotData(self)
+        self._robot_data_cache = {}
+        for name, entity in self.scene_manager.entities.items():
+            self._robot_data_cache[name] = GenesisRobotData(
+                entity=entity,
+                actuated_dof_ids=self.act_manager.actuated_dof_ids,
+                num_envs=self.num_envs,
+                device=self.device,
+            )
 
     def _step_physics(self) -> None:
         """Genesis physics step with decimation."""

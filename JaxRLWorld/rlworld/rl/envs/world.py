@@ -106,16 +106,22 @@ class World(ABC):
         """Get the main robot entity/model."""
         pass
 
-    @property
     @abstractmethod
-    def robot_data(self) -> "RobotData":
-        """Get the unified robot state interface.
+    def get_robot_data(self, entity_name: str = "robot") -> "RobotData":
+        """Get the RobotData interface for a named entity.
 
-        Returns an object satisfying the ``RobotData`` protocol, providing
-        position, orientation, velocity, and joint state in a
-        simulator-agnostic format.
+        Args:
+            entity_name: Name of the entity in the scene (default: "robot").
+
+        Returns:
+            An object satisfying the ``RobotData`` protocol.
         """
         pass
+
+    @property
+    def robot_data(self) -> "RobotData":
+        """Shortcut for ``get_robot_data("robot")``."""
+        return self.get_robot_data("robot")
 
     @property
     def heading_w(self) -> torch.Tensor:

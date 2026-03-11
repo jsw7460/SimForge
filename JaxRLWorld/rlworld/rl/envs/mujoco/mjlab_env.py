@@ -98,7 +98,10 @@ class MjlabEnv(World):
     @property
     def robot_data(self):
         """mjlab's EntityData already satisfies the RobotData protocol."""
-        return self.scene_manager.robot.data
+        return self.get_robot_data("robot")
+
+    def get_robot_data(self, entity_name: str = "robot"):
+        return self.scene_manager.get_entity(entity_name).data
 
     def _build_scene(self) -> None:
         """Create MuJoCo/mjlab scene via ManagerRegistry."""

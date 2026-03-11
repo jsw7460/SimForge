@@ -1,7 +1,7 @@
 """Unified termination conditions using the RobotData interface.
 
 All functions accept any ``World`` subclass and read state exclusively
-through ``env.robot_data``, making them simulator-agnostic.
+through ``env.get_robot_data(entity_name)``, making them simulator-agnostic.
 """
 from __future__ import annotations
 
@@ -20,21 +20,20 @@ def roll_pitch_violation(
     env: World,
     roll_threshold_degree: float = 15.0,
     pitch_threshold_degree: float = 15.0,
+    entity_name: str = "robot",
 ) -> TerminationResult:
     """Terminate if robot's roll or pitch exceeds safe thresholds.
 
-    Uses the unified ``robot_data`` interface to get the root quaternion
-    (wxyz), converts to Euler angles, and checks thresholds.
-
     Args:
-        env: Any environment with ``robot_data``.
+        env: Any environment with ``get_robot_data``.
         roll_threshold_degree: Maximum allowed roll angle in degrees.
         pitch_threshold_degree: Maximum allowed pitch angle in degrees.
+        entity_name: Name of the entity to check.
 
     Returns:
         TerminationResult indicating which envs should reset.
     """
-    quat_wxyz = env.robot_data.root_link_quat_w
+    quat_wxyz = env.get_robot_data(entity_name).root_link_quat_w
     euler = quat_to_euler_wxyz(quat_wxyz)  # (num_envs, 3) radians
 
     roll_deg = torch.abs(euler[:, 0]) * (180.0 / torch.pi)

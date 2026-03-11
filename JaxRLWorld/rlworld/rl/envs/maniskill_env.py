@@ -72,6 +72,9 @@ class ManiSkillEnv(World):
     def robot_data(self):
         return None
 
+    def get_robot_data(self, entity_name: str = "robot"):
+        return None
+
     def _build_scene(self):
         pass
 
