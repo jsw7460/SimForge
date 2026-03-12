@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
     evaluator = PolicyEvaluator(
         eval_env_cfgs=None,
-        policy_path=f"outputs/models/2026-03-09/16-13-41/checkpoint_latest/",
+        policy_path=f"outputs/models/2026-03-11/18-17-32/checkpoint_latest/",
         num_evals=1,
         seed=42,
         show_viewer=False,
