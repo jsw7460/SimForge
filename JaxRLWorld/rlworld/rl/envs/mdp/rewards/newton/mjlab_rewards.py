@@ -17,11 +17,8 @@ from rlworld.rl.envs.mdp.observations.newton.body_utils import (
 from rlworld.rl.envs.mdp.observations.newton.state import (
     _quat_rotate,
     _quat_rotate_inverse,
-    base_lin_vel,
-    base_ang_vel,
     base_quat,
 )
-from rlworld.rl.envs.mdp.observations.newton import proprioception
 from rlworld.rl.envs.utils.newton.body_cache import get_cache
 from rlworld.rl.utils import string as string_utils
 
@@ -54,7 +51,7 @@ def track_lin_vel_mjlab(
         env.command_manager.lin_vel_y,
     ], dim=1)  # (num_envs, 2)
 
-    actual = base_lin_vel(env)  # (num_envs, 3)
+    actual = env.robot_data.root_link_lin_vel_b  # (num_envs, 3)
 
     xy_error = torch.sum(torch.square(command - actual[:, :2]), dim=1)
     z_error = torch.square(actual[:, 2])
@@ -85,7 +82,7 @@ def track_ang_vel_mjlab(
     """
     command_z = env.command_manager.ang_vel  # (num_envs,)
 
-    actual = base_ang_vel(env)  # (num_envs, 3)
+    actual = env.robot_data.root_link_ang_vel_b  # (num_envs, 3)
 
     z_error = torch.square(command_z - actual[:, 2])
     xy_error = torch.sum(torch.square(actual[:, :2]), dim=1)
@@ -118,7 +115,7 @@ def flat_orientation_mjlab(
         projected_gravity_b = _quat_rotate_inverse(body_quat_xyzw, env._gravity_normalized_cache)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
     else:
-        projected_gravity_b = proprioception.projected_gravity(env)  # (num_envs, 3)
+        projected_gravity_b = env.robot_data.projected_gravity_b  # (num_envs, 3)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
 
     return torch.exp(-xy_squared / (std ** 2))
@@ -376,7 +373,7 @@ def joint_pos_limits_mjlab(
     model = env.scene_manager.model
     dofs_per_world = model.joint_dof_count // model.world_count
 
-    dof_pos = proprioception.dof_pos(env)  # (num_envs, num_actuated)
+    dof_pos = env.robot_data.joint_pos  # (num_envs, num_actuated)
 
     lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
     upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
@@ -509,7 +506,7 @@ class variable_posture:
             + self.std_running * running_mask.unsqueeze(1)
         )
 
-        current_joint_pos = proprioception.dof_pos(env)
+        current_joint_pos = env.robot_data.joint_pos
         error_squared = torch.square(current_joint_pos - self.default_joint_pos)
 
         return torch.exp(-torch.mean(error_squared / (std ** 2), dim=1))

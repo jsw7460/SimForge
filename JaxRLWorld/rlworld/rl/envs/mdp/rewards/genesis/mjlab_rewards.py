@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from genesis.utils.geom import transform_by_quat, inv_quat
-from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
+from rlworld.rl.envs.mdp.observations.genesis import proprioception
 from rlworld.rl.utils import entity_utils as eu
 from rlworld.rl.utils import string as string_utils
 
@@ -47,7 +47,7 @@ def track_lin_vel_mjlab(
     ], dim=1)  # (num_envs, 2)
 
     # Get actual velocity in body frame
-    actual = state.base_lin_vel(env)  # (num_envs, 3)
+    actual = env.robot_data.root_link_lin_vel_b  # (num_envs, 3)
 
     # xy error + z error (z command assumed zero)
     xy_error = torch.sum(torch.square(command - actual[:, :2]), dim=1)
@@ -85,7 +85,7 @@ def track_ang_vel_mjlab(
     command_z = env.command_manager.ang_vel  # (num_envs,)
 
     # Get actual angular velocity in body frame
-    actual = proprioception.imu_ang_vel(env, entity_name, base_name)  # (num_envs, 3)
+    actual = env.get_robot_data(entity_name).root_link_ang_vel_b  # (num_envs, 3)
 
     # z error + xy error (xy command assumed zero)
     z_error = torch.square(command_z - actual[:, 2])
@@ -132,8 +132,8 @@ def flat_orientation_mjlab(
         projected_gravity_b = transform_by_quat(gravity_w, inv_quat(body_quat_w))
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
     else:
-        # Use root link projected gravity
-        projected_gravity_b = proprioception.projected_gravity(env)  # (num_envs, 3)
+        # Use root link projected gravity (unit gravity vector via robot_data)
+        projected_gravity_b = env.get_robot_data(entity_name).projected_gravity_b  # (num_envs, 3)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
 
     return torch.exp(-xy_squared / (std ** 2))
@@ -226,7 +226,7 @@ class variable_posture:
         )
 
         # Compute pose error
-        current_joint_pos = proprioception.dof_pos(env)
+        current_joint_pos = env.robot_data.joint_pos
         error_squared = torch.square(current_joint_pos - self.default_joint_pos)
 
         return torch.exp(-torch.mean(error_squared / (std ** 2), dim=1))
@@ -619,7 +619,7 @@ def joint_pos_limits_mjlab(
     # Get only actuated DOFs
     actuated_ids = env.act_manager.actuated_dof_ids
 
-    dof_pos = entity.get_dofs_position(dofs_idx_local=actuated_ids)
+    dof_pos = env.get_robot_data(entity_name).joint_pos
     dof_lower, dof_upper = entity.get_dofs_limit(dofs_idx_local=actuated_ids)
 
     dof_lower = dof_lower * soft_limit_factor

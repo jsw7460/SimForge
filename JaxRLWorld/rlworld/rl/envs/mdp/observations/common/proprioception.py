@@ -74,3 +74,24 @@ def base_height(env: World, entity_name: str = "robot") -> torch.Tensor:
         Tensor of shape (num_envs, 1).
     """
     return env.get_robot_data(entity_name).root_link_pos_w[:, 2:3]
+
+
+def prev_processed_actions(env: World) -> torch.Tensor:
+    """Current step's processed actions (used as observation input).
+
+    Note: Despite the name, this returns the *current* processed actions,
+    matching the existing Newton/Genesis observation behavior.
+
+    Returns:
+        Tensor of shape (num_envs, num_actions).
+    """
+    return env.act_manager.processed_actions.clone()
+
+
+def raw_actions(env: World) -> torch.Tensor:
+    """Current step's raw (unprocessed) actions.
+
+    Returns:
+        Tensor of shape (num_envs, num_actions).
+    """
+    return env.act_manager.raw_actions

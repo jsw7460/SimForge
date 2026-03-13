@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import NoiseConfig
 from rlworld.rl.envs.mdp.observations.genesis.exteroception import command
-from rlworld.rl.envs.mdp.observations.newton import (
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_lin_vel,
     base_ang_vel,
     projected_gravity,

@@ -29,9 +29,10 @@ from rlworld.rl.envs.mdp.configs import (
     CommandTermConfig,
 )
 from rlworld.rl.envs.mdp.reset import newton_reset_terms as initf
+from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.newton import terminations as tf
+from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 
 
 @dataclass
@@ -117,7 +118,7 @@ class Go2FlatNewtonConfig:
             episode_length_s=self.episode_length_s,
             termination_criteria=[
                 TerminationTermConfig(
-                    tf.roll_pitch_violation,
+                    common_tf.roll_pitch_violation,
                     {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
                 ),
                 TerminationTermConfig(max_episode_exceed),
@@ -204,20 +205,22 @@ class Go2FlatNewtonConfig:
         base = r.prefixed("base")
 
         reward_terms = {
-            "track_lin_vel_mjlab": RewardTermConfig(
-                func=rf_mjlab.track_lin_vel_mjlab,
+            # Tracking rewards (common — uses RobotData interface)
+            "track_lin_vel": RewardTermConfig(
+                func=rf_common.track_lin_vel,
                 weight=2.0,
-                params={"std": 0.5},
+                params={"std": 0.5, "penalize_z": True},
             ),
-            "track_ang_vel_mjlab": RewardTermConfig(
-                func=rf_mjlab.track_ang_vel_mjlab,
+            "track_ang_vel": RewardTermConfig(
+                func=rf_common.track_ang_vel,
                 weight=2.0,
-                params={"std": 0.707},
+                params={"std": 0.707, "penalize_xy": True},
             ),
-            "flat_orientation_mjlab": RewardTermConfig(
-                func=rf_mjlab.flat_orientation_mjlab,
+            # Orientation (common — uses RobotData interface)
+            "flat_orientation": RewardTermConfig(
+                func=rf_common.flat_orientation,
                 weight=1.0,
-                params={"std": 0.447, "body_name": base},
+                params={"std": 0.447},
             ),
             "variable_posture": RewardTermConfig(
                 func=rf_mjlab.variable_posture,

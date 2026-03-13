@@ -2,7 +2,14 @@ from dataclasses import dataclass
 
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import NoiseConfig
-from rlworld.rl.envs.mdp.observations.genesis import proprioception, exteroception, state
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    base_lin_vel,
+    dof_pos,
+    dof_vel,
+    dof_pos_nominal_difference,
+    prev_processed_actions,
+)
+from rlworld.rl.envs.mdp.observations.genesis import proprioception, exteroception
 
 
 @dataclass
@@ -65,7 +72,7 @@ class LocomotionObservations:
 
         if self.include_base_lin_vel:
             terms.append(ObservationTermConfig(
-                state.base_lin_vel,
+                base_lin_vel,
                 scale=self.base_lin_vel_scale,
                 noise=self.base_lin_vel_noise,
                 clip=self.base_lin_vel_clip,
@@ -97,7 +104,7 @@ class LocomotionObservations:
         if self.include_dof_pos:
             terms.append(
                 ObservationTermConfig(
-                    proprioception.dof_pos,
+                    dof_pos,
                     scale=self.dof_pos_scale,
                     noise=self.dof_pos_noise,
                     clip=self.dof_pos_clip,
@@ -108,7 +115,7 @@ class LocomotionObservations:
         if self.include_nominal_difference:
             terms.append(
                 ObservationTermConfig(
-                    proprioception.dof_pos_nominal_difference,
+                    dof_pos_nominal_difference,
                     scale=self.nominal_difference_scale,
                     noise=self.nominal_difference_noise,
                     clip=self.nominal_difference_clip,
@@ -117,7 +124,7 @@ class LocomotionObservations:
             )
 
         terms.append(ObservationTermConfig(
-                proprioception.dof_vel,
+                dof_vel,
                 scale=self.dof_vel_scale,
                 noise=self.dof_vel_noise,
                 clip=self.dof_vel_clip,
@@ -125,7 +132,7 @@ class LocomotionObservations:
             ))
 
         terms.append(ObservationTermConfig(
-                proprioception.prev_processed_actions,
+                prev_processed_actions,
                 scale=self.prev_actions_scale,
                 noise=self.prev_actions_noise,
                 clip=self.prev_actions_clip,
@@ -146,7 +153,7 @@ class LocomotionObservations:
 
         if self.include_base_lin_vel:
             terms.append(ObservationTermConfig(
-                state.base_lin_vel,
+                base_lin_vel,
                 scale=self.base_lin_vel_scale,
                 noise=self.base_lin_vel_noise,
                 clip=self.base_lin_vel_clip,
@@ -154,7 +161,7 @@ class LocomotionObservations:
 
         if self.include_dof_pos:
             terms.append(ObservationTermConfig(
-                proprioception.dof_pos,
+                dof_pos,
                 scale=self.dof_pos_scale,
                 noise=self.dof_pos_noise,
                 clip=self.dof_pos_clip,
@@ -163,7 +170,7 @@ class LocomotionObservations:
 
         if self.include_nominal_difference:
             terms.append(ObservationTermConfig(
-                proprioception.dof_pos_nominal_difference,
+                dof_pos_nominal_difference,
                 scale=self.nominal_difference_scale,
                 noise=self.nominal_difference_noise,
                 clip=self.nominal_difference_clip,
@@ -191,14 +198,14 @@ class LocomotionObservations:
                 scale=self.command_scale,
             ),
             ObservationTermConfig(
-                proprioception.dof_vel,
+                dof_vel,
                 scale=self.dof_vel_scale,
                 noise=self.dof_vel_noise,
                 clip=self.dof_vel_clip,
                 history_length=self.dof_vel_history,
             ),
             ObservationTermConfig(
-                proprioception.prev_processed_actions,
+                prev_processed_actions,
                 scale=self.prev_actions_scale,
                 noise=self.prev_actions_noise,
                 clip=self.prev_actions_clip,

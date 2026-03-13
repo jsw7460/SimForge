@@ -36,6 +36,7 @@ from rlworld.rl.envs.mdp.configs import (
     CommandTermConfig,
 )
 from rlworld.rl.envs.mdp.observations.mujoco import proprioception
+from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
 
@@ -60,7 +61,7 @@ class G1FlatMujocoConfig:
     # Environment settings
     num_envs: int = 4096
     episode_length_s: float = 20.0
-    seed: int = 1
+    seed: int = 42
 
     # Simulation settings (matching mjlab)
     physics_dt: float = 0.005  # 5ms physics timestep (200Hz)
@@ -340,16 +341,16 @@ class G1FlatMujocoConfig:
         site_names = ("left_foot", "right_foot")
 
         reward_terms = {
-            # Tracking rewards
-            "track_linear_velocity": RewardTermConfig(
-                func=rf.track_linear_velocity,
+            # Tracking rewards (common — uses RobotData interface)
+            "track_lin_vel": RewardTermConfig(
+                func=rf_common.track_lin_vel,
                 weight=2.0,
-                params={"std": math.sqrt(0.25)},
+                params={"std": math.sqrt(0.25), "penalize_z": True},
             ),
-            "track_angular_velocity": RewardTermConfig(
-                func=rf.track_angular_velocity,
+            "track_ang_vel": RewardTermConfig(
+                func=rf_common.track_ang_vel,
                 weight=2.0,
-                params={"std": math.sqrt(0.5)},
+                params={"std": math.sqrt(0.5), "penalize_xy": True},
             ),
 
             # Orientation reward

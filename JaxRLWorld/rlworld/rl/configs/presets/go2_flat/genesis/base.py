@@ -25,8 +25,10 @@ from rlworld.rl.envs.mdp.configs import (
 )
 from rlworld.rl.envs.mdp.events import event_terms as ef
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
+from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
+from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 from rlworld.rl.envs.mdp.terminations.genesis import terminations as tf
 
 
@@ -130,7 +132,7 @@ class Go2FlatGenesisConfig:
             episode_length_s=self.episode_length_s,
             termination_criteria=[
                 TerminationTermConfig(
-                    tf.roll_pitch_violation,
+                    common_tf.roll_pitch_violation,
                     {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
                 ),
                 TerminationTermConfig(max_episode_exceed),
@@ -242,23 +244,23 @@ class Go2FlatGenesisConfig:
 
     def _build_reward_config(self) -> RewardConfig:
         reward_terms = {
-            # Tracking rewards
-            "track_lin_vel_mjlab": RewardTermConfig(
-                func=rf_mjlab.track_lin_vel_mjlab,
+            # Tracking rewards (common — uses RobotData interface)
+            "track_lin_vel": RewardTermConfig(
+                func=rf_common.track_lin_vel,
                 weight=2.0,
-                params={"std": 0.5},
+                params={"std": 0.5, "penalize_z": True},
             ),
-            "track_ang_vel_mjlab": RewardTermConfig(
-                func=rf_mjlab.track_ang_vel_mjlab,
+            "track_ang_vel": RewardTermConfig(
+                func=rf_common.track_ang_vel,
                 weight=2.0,
-                params={"std": 0.707},
+                params={"std": 0.707, "penalize_xy": True},
             ),
 
-            # Orientation reward
-            "flat_orientation_mjlab": RewardTermConfig(
-                func=rf_mjlab.flat_orientation_mjlab,
+            # Orientation (common — uses RobotData interface)
+            "flat_orientation": RewardTermConfig(
+                func=rf_common.flat_orientation,
                 weight=1.0,
-                params={"std": 0.447, "body_name": "base"},
+                params={"std": 0.447},
             ),
 
             # Posture reward (stateful class)
