@@ -226,7 +226,6 @@ class NewtonSceneManager(BaseManager):
         newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
 
         if config.entity_type == "ground_plane":
-            builder.current_world = -1
             if config.shape_cfg is not None:
                 builder.add_ground_plane(cfg=config.shape_cfg)
             else:

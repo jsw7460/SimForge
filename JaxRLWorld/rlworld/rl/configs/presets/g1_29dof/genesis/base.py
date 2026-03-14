@@ -24,15 +24,12 @@ from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
     CommandTermConfig,
 )
-from rlworld.rl.envs.mdp.observations.genesis import state, proprioception
+from rlworld.rl.envs.mdp.observations.genesis import state
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf
-from rlworld.rl.envs.mdp.rewards.genesis.tasks import g1 as g1rf
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
-from rlworld.rl.envs.mdp.terminations.genesis import terminations as tf
 
 
 @dataclass

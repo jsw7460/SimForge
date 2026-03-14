@@ -70,10 +70,6 @@ class ActionManager(ActionManagerBase):
         # get_dofs_limit returns (num_envs, num_dofs) — use first env row
         return dof_lower[0], dof_upper[0]
 
-    # def apply_actions(self, processed_actions: torch.Tensor) -> None:
-    #     """Apply processed actions via Genesis DOF position control."""
-    #     self.apply_dofs_position(processed_actions)
-
     def apply_actions(self, processed_actions: torch.Tensor) -> None:
         """Apply processed actions via the configured control mode."""
         if self.config.control_mode == "force":

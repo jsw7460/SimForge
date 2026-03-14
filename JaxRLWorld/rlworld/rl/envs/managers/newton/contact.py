@@ -106,21 +106,16 @@ class NewtonContactManager(BaseManager):
         # self._include_total = sensor.include_total
         self._include_total = True
 
-        # Get shape count per environment from first world's sensing objects
-        num_sensing_objs = len(sensor.sensing_objs)
-        num_shapes_per_env = num_sensing_objs // self.num_envs
+        # sensing_objs is per-world: list[list[tuple[int, ObjectType]]]
+        # Each world has the same shape structure (via replicate), so use world 0
+        world0_objs = sensor.sensing_objs[0]
+        num_shapes_per_env = len(world0_objs)
 
-        # TODO: Newton에 올리던가, 뉴턴에서 고치면 수정하기
-        # Collect first env's shapes by sorting by idx
-        first_env_objs = []
-        for i, (idx, match_kind) in enumerate(sensor.sensing_objs):
-            first_env_objs.append((idx, match_kind, i))
-
-        # Sort by idx to get env-major order
+        # Collect world 0's shapes by sorting by idx
+        first_env_objs = [(idx, match_kind) for idx, match_kind in world0_objs]
         first_env_objs.sort(key=lambda x: x[0])
 
-        # Take first num_shapes_per_env (these are env0's shapes)
-        for idx, match_kind, _ in first_env_objs[:num_shapes_per_env]:
+        for idx, match_kind in first_env_objs:
             if match_kind == SensorContact.ObjectType.BODY:
                 name = model.body_label[idx]
             elif match_kind == SensorContact.ObjectType.SHAPE:

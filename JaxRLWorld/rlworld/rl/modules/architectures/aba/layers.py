@@ -41,7 +41,7 @@ class PerBodyABABottomUpLayer(eqx.Module):
     global_norm: eqx.nn.LayerNorm | None
 
     # Identity matrix for orthogonality loss
-    _identity: jax.Array = eqx.field(static=True)
+    _identity: jax.Array
 
     def __init__(
         self,
@@ -223,7 +223,7 @@ class PerBodyABABottomUpLayer(eqx.Module):
             FW = F[:, :, None] * W
             gram = W.transpose(0, 2, 1) @ FW
 
-            loss = loss + ((gram - self._identity) ** 2).mean()
+            loss = loss + ((gram - jax.lax.stop_gradient(self._identity)) ** 2).mean()
 
         return loss / self.num_bodies
 
