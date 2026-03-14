@@ -88,6 +88,7 @@ class ModelBasedRunner(BaseRunner):
             action_low=tuple(action_low.tolist()),
             action_high=tuple(action_high.tolist()),
             obs_normalization=alg_cfg.obs_normalization,
+            episodic=alg_cfg.episodic,
             key=subkey,
         )
 
@@ -140,6 +141,8 @@ class ModelBasedRunner(BaseRunner):
             batch_size=alg_cfg.batch_size,
             grad_clip_norm=alg_cfg.grad_clip_norm,
             max_grad_norm=alg_cfg.max_grad_norm,
+            episodic=alg_cfg.episodic,
+            termination_coef=alg_cfg.termination_coef,
             key=subkey,
         )
 

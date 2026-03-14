@@ -2,6 +2,7 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
+import optax
 
 from rlworld.rl.algorithms.tdmpc2.math import (
     TwoHotConfig,
@@ -19,6 +20,7 @@ class WorldModelLossInfo(NamedTuple):
     consistency_loss: jax.Array
     reward_loss: jax.Array
     value_loss: jax.Array
+    termination_loss: jax.Array
     total_loss: jax.Array
 
 
@@ -38,6 +40,8 @@ def compute_world_model_loss(
     consistency_coef: float,
     reward_coef: float,
     value_coef: float,
+    episodic: bool = False,
+    termination_coef: float = 5.0,
     *,
     key: jax.Array,
 ) -> tuple[jax.Array, WorldModelLossInfo]:
@@ -108,16 +112,28 @@ def compute_world_model_loss(
     )  # [H]
     value_loss = jnp.sum(value_losses * rho_weights) / horizon
 
+    # Termination loss (episodic mode only)
+    if episodic:
+        term_logits = jax.vmap(model.predict_termination)(zs_post)  # [H, B, 1]
+        term_labels = terminated  # [H, B, 1]
+        termination_loss = optax.sigmoid_binary_cross_entropy(
+            term_logits, term_labels,
+        ).mean()
+    else:
+        termination_loss = jnp.float32(0.0)
+
     total_loss = (
         consistency_coef * consistency_loss
         + reward_coef * reward_loss
         + value_coef * value_loss
+        + termination_coef * termination_loss
     )
 
     return total_loss, WorldModelLossInfo(
         consistency_loss=consistency_loss,
         reward_loss=reward_loss,
         value_loss=value_loss,
+        termination_loss=termination_loss,
         total_loss=total_loss,
     )
 

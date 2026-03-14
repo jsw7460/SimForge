@@ -16,6 +16,7 @@ class TDMPC2WorldModelMetrics:
     consistency_loss: float = 0.0
     reward_loss: float = 0.0
     value_loss: float = 0.0
+    termination_loss: float = 0.0
     total_loss: float = 0.0
     grad_norm: float = 0.0
 
@@ -24,6 +25,7 @@ class TDMPC2WorldModelMetrics:
             f"{prefix}/consistency_loss": self.consistency_loss,
             f"{prefix}/reward_loss": self.reward_loss,
             f"{prefix}/value_loss": self.value_loss,
+            f"{prefix}/termination_loss": self.termination_loss,
             f"{prefix}/total_loss": self.total_loss,
             f"{prefix}/grad_norm": self.grad_norm,
         }
@@ -80,6 +82,7 @@ class TDMPC2Metrics(BaseMetrics):
             ConsoleMetric("Consistency", MetricType.LOSS, self.world_model.consistency_loss),
             ConsoleMetric("Reward", MetricType.LOSS, self.world_model.reward_loss),
             ConsoleMetric("Value", MetricType.LOSS, self.world_model.value_loss),
+            ConsoleMetric("Term", MetricType.LOSS, self.world_model.termination_loss),
             ConsoleMetric("Total", MetricType.LOSS, self.world_model.total_loss),
             ConsoleMetric("Pi Loss", MetricType.LOSS, self.policy.pi_loss),
             ConsoleMetric("Entropy", MetricType.ENTROPY, self.policy.pi_entropy),

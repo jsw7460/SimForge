@@ -338,6 +338,7 @@ class TDMPC2WorldModel(eqx.Module):
     reward_head: TDMPC2MLP
     q_ensemble: QEnsemble
     policy: TDMPC2MLP
+    termination_head: Optional[TDMPC2MLP]
 
     # Configuration (static)
     latent_dim: int = eqx.field(static=True)
@@ -346,6 +347,7 @@ class TDMPC2WorldModel(eqx.Module):
     num_q: int = eqx.field(static=True)
     num_bins: int = eqx.field(static=True)
     simnorm_dim: int = eqx.field(static=True)
+    episodic: bool = eqx.field(static=True)
 
     # Log-std bounds
     log_std_min: float = eqx.field(static=True)
@@ -380,6 +382,7 @@ class TDMPC2WorldModel(eqx.Module):
         action_low: tuple = None,
         action_high: tuple = None,
         obs_normalization: bool = False,
+        episodic: bool = False,
         *,
         key: jax.Array,
     ):
@@ -413,6 +416,7 @@ class TDMPC2WorldModel(eqx.Module):
         self.log_std_min = log_std_min
         self.log_std_dif = log_std_max - log_std_min
         self.squash_action = squash_action
+        self.episodic = episodic
 
         # Action bounds: static tuples for JIT compatibility
         if squash_action:
@@ -436,7 +440,7 @@ class TDMPC2WorldModel(eqx.Module):
         out_bins = max(num_bins, 1)
         sim_norm = SimNorm(dim=simnorm_dim)
 
-        k_enc, k_dyn, k_rew, k_q, k_pi = jax.random.split(key, 5)
+        k_enc, k_dyn, k_rew, k_q, k_pi, k_term = jax.random.split(key, 6)
 
         # Encoder: obs -> latent (with SimNorm output activation)
         enc_hidden = max(num_enc_layers - 1, 1) * [mlp_dim]
@@ -484,6 +488,18 @@ class TDMPC2WorldModel(eqx.Module):
             act=None,
             key=k_pi,
         )
+
+        # Termination head: z -> termination logit (episodic mode only)
+        if episodic:
+            self.termination_head = TDMPC2MLP(
+                in_dim=latent_dim,
+                hidden_dims=[mlp_dim, mlp_dim],
+                out_dim=1,
+                act=None,
+                key=k_term,
+            )
+        else:
+            self.termination_head = None
 
         # Zero out reward head last layer weight
         self.reward_head = eqx.tree_at(
@@ -549,6 +565,18 @@ class TDMPC2WorldModel(eqx.Module):
         """
         za = jnp.concatenate([z, a], axis=-1)
         return self.reward_head(za)
+
+    def predict_termination(self, z: jax.Array) -> jax.Array:
+        """
+        Predict termination logit from latent state.
+
+        Args:
+            z: [latent_dim] or [batch_size, latent_dim]
+
+        Returns:
+            Termination logit [1] or [batch_size, 1]
+        """
+        return self.termination_head(z)
 
     def predict_q(
         self,

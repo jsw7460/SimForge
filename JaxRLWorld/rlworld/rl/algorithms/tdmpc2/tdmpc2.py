@@ -115,6 +115,9 @@ class TDMPC2(OffPolicyAlgorithm):
         batch_size: int = 256,
         grad_clip_norm: float = 20.0,
         max_grad_norm: float = 20.0,
+        # Episodic termination
+        episodic: bool = False,
+        termination_coef: float = 5.0,
         # Key
         key: jax.Array = None,
         **kwargs,
@@ -156,6 +159,10 @@ class TDMPC2(OffPolicyAlgorithm):
         self.value_coef = value_coef
         self.entropy_coef = entropy_coef
         self.rho = rho
+
+        # Episodic termination
+        self.episodic = episodic
+        self.termination_coef = termination_coef
 
         # Discount (heuristic based on episode length)
         self.discount = self._compute_discount(
@@ -281,6 +288,7 @@ class TDMPC2(OffPolicyAlgorithm):
         print(f"  Loss coefs: consistency={self.consistency_coef}, reward={self.reward_coef}, value={self.value_coef}")
         print(f"  Squash action: {self.world_model.squash_action}")
         print(f"  Obs normalization: {self.obs_normalization}")
+        print(f"  Episodic: {self.episodic}" + (f", termination_coef: {self.termination_coef}" if self.episodic else ""))
         if not self.world_model.squash_action:
             print(f"  Action bounds: [{self.world_model.action_low_tuple}, {self.world_model.action_high_tuple}]")
 
@@ -384,6 +392,7 @@ class TDMPC2(OffPolicyAlgorithm):
             t0_mask=jnp.asarray(t0_mask),
             eval_mode=jnp.array(eval_mode),
             keys=keys,
+            episodic=self.episodic,
         )
 
         self._prev_mean = np.array(new_means)
@@ -438,6 +447,8 @@ class TDMPC2(OffPolicyAlgorithm):
             consistency_coef=self.consistency_coef,
             reward_coef=self.reward_coef,
             value_coef=self.value_coef,
+            episodic=self.episodic,
+            termination_coef=self.termination_coef,
             scale_value=jnp.array(self.scale.value),
             scale_tau=self.scale.tau,
             key=update_key,
@@ -461,6 +472,7 @@ class TDMPC2(OffPolicyAlgorithm):
                 consistency_loss=float(info.consistency_loss),
                 reward_loss=float(info.reward_loss),
                 value_loss=float(info.value_loss),
+                termination_loss=float(info.termination_loss),
                 total_loss=float(info.total_loss),
                 grad_norm=float(info.wm_grad_norm),
             ),

@@ -43,6 +43,10 @@ class TDMPC2Config(BaseConfig):
     entropy_coef: float = 1e-4
     rho: float = 0.5
 
+    # ---- Episodic termination ----
+    episodic: bool = True
+    termination_coef: float = 5.0
+
     # ---- Discrete regression ----
     num_bins: int = 101
     vmin: float = -10.0
