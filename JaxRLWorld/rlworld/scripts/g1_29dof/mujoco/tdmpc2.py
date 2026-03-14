@@ -1,11 +1,11 @@
 from rlworld.rl.configs.algorithms import TDMPC2Config
-from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
+from rlworld.rl.configs.presets.g1_29dof.mujoco.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
     CommandTermConfig,
 )
-from rlworld.rl.envs.mdp.terminations.newton import terminations as tf
+from rlworld.rl.envs.mdp.terminations.common import terminations as tf
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 
 
@@ -25,7 +25,7 @@ def main():
         batch_size=40000,
         learning_starts=5000
     )
-    # cfgs_for_run.reward.reward_terms["raw_action_rate_l2_mjlab"].weight = 0.01
+
     cfgs_for_run.env.num_envs = 1024
     cfgs_for_run.env.termination_criteria = [
                 TerminationTermConfig(
@@ -40,6 +40,7 @@ def main():
     # cfgs_for_run.action.clip_actions = (-5.0, 5.0)
     cfgs_for_run.algorithm = tdmpc2_config
     cfgs_for_run.runner.run_name = "G1_NT_TDMPC2"
+
 
     runner = BaseRunner.create_with_env(cfgs_for_run)
 
