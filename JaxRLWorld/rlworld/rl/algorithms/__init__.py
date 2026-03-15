@@ -5,6 +5,7 @@ from .ppo_dr3 import PPODR3
 from .fast_td3 import FastTD3
 from .tdmpc2 import TDMPC2
 from .scaffolded_tdmpc2 import ScaffoldedTDMPC2
+from .sim_mpc import SimMPC
 
 
 from enum import Enum
@@ -46,6 +47,10 @@ ALGORITHM_REGISTRY = {
         "class": "rlworld.rl.algorithms.scaffolded_tdmpc2.ScaffoldedTDMPC2",
         "policy_type": PolicyType.MODEL_BASED,
     },
+    "SimMPC": {
+        "class": "rlworld.rl.algorithms.sim_mpc.SimMPC",
+        "policy_type": PolicyType.MODEL_BASED,
+    },
 }
 
 RUNNER_MAP = {
@@ -57,6 +62,7 @@ RUNNER_MAP = {
 # Algorithm-specific runner overrides (takes priority over RUNNER_MAP)
 ALGORITHM_RUNNER_OVERRIDES = {
     "ScaffoldedTDMPC2": "rlworld.rl.runners.privileged_model_based_runner.PrivilegedModelBasedRunner",
+    "SimMPC": "rlworld.rl.runners.sim_mpc_runner.SimMPCRunner",
 }
 
 

@@ -5,6 +5,7 @@ from .sac import SACConfig
 from .ppodr3 import PPODR3Config
 from .tdmpc2 import TDMPC2Config
 from .scaffolded_tdmpc2 import ScaffoldedTDMPC2Config
+from .sim_mpc import SimMPCConfig
 
 
 
@@ -15,7 +16,8 @@ ALGORITHM_CONFIGS = {
     "FastTD3": FastTD3Config,
     "PPODR3": PPODR3Config,
     "TDMPC2": TDMPC2Config,
-    "ScaffoldedTDMPC2": ScaffoldedTDMPC2Config
+    "ScaffoldedTDMPC2": ScaffoldedTDMPC2Config,
+    "SimMPC": SimMPCConfig,
 }
 
 AlgorithmConfig = (
@@ -25,7 +27,8 @@ AlgorithmConfig = (
     FastTD3Config |
     PPODR3Config |
     TDMPC2Config |
-    ScaffoldedTDMPC2Config
+    ScaffoldedTDMPC2Config |
+    SimMPCConfig
 )
 
 
