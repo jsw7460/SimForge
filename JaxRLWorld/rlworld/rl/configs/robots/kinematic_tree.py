@@ -159,6 +159,20 @@ class KinematicTree:
                 continue
             links[name] = link
 
+        # Filter out low-mass links (mass <= 0.01)
+        filtered_links = {}
+        for name, link_elem in links.items():
+            inertial_elem = link_elem.find('inertial')
+            mass = 0.0
+            if inertial_elem is not None:
+                mass_elem = inertial_elem.find('mass')
+                if mass_elem is not None:
+                    mass = float(mass_elem.get('value', 0))
+            if mass > 0.01:
+                filtered_links[name] = link_elem
+
+        links = filtered_links
+
         link_names = list(links.keys())
         link_to_idx = {name: idx for idx, name in enumerate(link_names)}
 

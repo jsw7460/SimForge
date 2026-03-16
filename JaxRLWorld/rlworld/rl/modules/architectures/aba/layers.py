@@ -230,3 +230,103 @@ class PerBodyABABottomUpLayer(eqx.Module):
     @property
     def output_dim(self) -> tuple[int, int]:
         return (self.num_bodies, self.link_channels * self.spatial_dim)
+
+
+class PerBodyABATopDownLayer(eqx.Module):
+    """
+    ABA Top-Down Pass: propagates global context from root → leaves.
+
+    Takes bottom-up features and refines them by passing parent context
+    down the kinematic tree. Each child receives its parent's top-down
+    feature (projected) added to its own bottom-up feature.
+
+    Output: (num_bodies, link_channels, spatial_dim) — same shape as input.
+    """
+
+    # Per-body linear projections for parent → child message
+    parent_to_child: tuple[eqx.nn.Linear, ...]
+    link_norms: tuple[eqx.nn.LayerNorm, ...]
+    gate_bias: jax.Array  # per-body learnable gate bias
+
+    # Static
+    num_bodies: int = eqx.field(static=True)
+    link_channels: int = eqx.field(static=True)
+    spatial_dim: int = eqx.field(static=True)
+    traversal_order: tuple[int, ...] = eqx.field(static=True)  # root-first
+    parent_map: tuple[int, ...] = eqx.field(static=True)
+
+    def __init__(
+        self,
+        kinematic_tree: "KinematicTree",
+        link_channels: int = 8,
+        spatial_dim: int = 6,
+        *,
+        key: jax.Array,
+    ):
+        self.num_bodies = kinematic_tree.num_bodies
+        self.link_channels = link_channels
+        self.spatial_dim = spatial_dim
+
+        # Top-down order = reverse of bottom-up
+        self.traversal_order = tuple(reversed(kinematic_tree.traverse_bottom_up()))
+        self.parent_map = tuple(kinematic_tree.parent_indices)
+
+        feature_dim = link_channels * spatial_dim
+        keys = jax.random.split(key, self.num_bodies)
+
+        # Per-body projection: parent feature → child message
+        # Small init so top-down starts as mild correction
+        projections = []
+        for i in range(self.num_bodies):
+            lin = eqx.nn.Linear(feature_dim, feature_dim, key=keys[i])
+            # Scale down initial weights for stability
+            lin = eqx.tree_at(
+                lambda l: l.weight, lin, lin.weight * 0.1
+            )
+            lin = eqx.tree_at(
+                lambda l: l.bias, lin, jnp.zeros_like(lin.bias)
+            )
+            projections.append(lin)
+
+        self.parent_to_child = tuple(projections)
+
+        self.link_norms = tuple(
+            eqx.nn.LayerNorm((link_channels, spatial_dim))
+            for _ in range(self.num_bodies)
+        )
+
+        # Learnable gate: sigmoid(bias) controls how much top-down info to mix in
+        # Init at -2.0 → sigmoid ≈ 0.12, so starts as small correction
+        self.gate_bias = jnp.full((self.num_bodies,), -2.0)
+
+    def __call__(self, bottom_up_features: jax.Array) -> jax.Array:
+        """
+        Args:
+            bottom_up_features: (num_bodies, link_channels, spatial_dim)
+
+        Returns:
+            top_down_features: (num_bodies, link_channels, spatial_dim)
+        """
+        C, d = self.link_channels, self.spatial_dim
+        td = {}
+
+        for body_idx in self.traversal_order:
+            parent_idx = self.parent_map[body_idx]
+            bu = bottom_up_features[body_idx]  # (C, d)
+
+            if parent_idx == -1:
+                # Root: no parent context, just pass through
+                td[body_idx] = bu
+            else:
+                # Project parent's top-down feature → message for this child
+                parent_flat = td[parent_idx].reshape(-1)  # (C*d,)
+                message = self.parent_to_child[body_idx](parent_flat)
+                message = message.reshape(C, d)
+
+                # Gated residual: td = bu + gate * message
+                gate = jax.nn.sigmoid(self.gate_bias[body_idx])
+                td[body_idx] = bu + gate * message
+
+            td[body_idx] = self.link_norms[body_idx](td[body_idx])
+
+        return jnp.stack([td[i] for i in range(self.num_bodies)], axis=0)

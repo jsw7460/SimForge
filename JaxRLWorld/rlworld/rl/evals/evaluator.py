@@ -170,7 +170,12 @@ class PolicyEvaluator:
         )
         self.runner.set_eval_mode()
         self._resize_mppi_state()
-        self.policy = PolicyWrapper.from_runner(self.runner, self.device)
+
+        # Build joint permutation for cross-sim eval (multisim checkpoints)
+        joint_perm = self._build_joint_permutation(metadata) if self._cross_sim else None
+        self.policy = PolicyWrapper.from_runner(
+            self.runner, self.device, joint_perm=joint_perm
+        )
 
         # Episode tracker
         self.episode_tracker = EpisodeStatsCollector(
@@ -334,6 +339,62 @@ class PolicyEvaluator:
             f"differ from training. Pass the same obs terms via "
             f"eval_cfgs.observation.obs_group."
         )
+
+    def _build_joint_permutation(self, metadata: dict):
+        """Build a joint permutation for cross-sim evaluation.
+
+        During multisim training, MultiSimWorld permutes obs/actions between
+        each simulator's native joint order and a canonical (first sim) order.
+        The policy learns in canonical order.  When evaluating on a single sim,
+        we need to apply the same permutation.
+
+        Returns _JointPermutation if reordering is needed, else None.
+        """
+        from rlworld.rl.envs.multi_sim_world import (
+            _JointPermutation, MultiSimWorld,
+        )
+
+        eval_names = list(self.env.act_manager.actuated_joint_names)
+
+        # Load canonical joint names from checkpoint metadata.
+        # Saved by base_runner since the joint-permutation fix.
+        canonical_names = metadata.get("canonical_joint_names")
+        if canonical_names is None:
+            print_warning(
+                "Checkpoint has no canonical_joint_names in metadata. "
+                "Joint permutation skipped — retrain to enable cross-sim eval."
+            )
+            return None
+
+        # Compare bare names (strip simulator prefixes like "g1_29dof/").
+        def _bare(name: str) -> str:
+            return name.rsplit("/", 1)[-1]
+
+        canonical_bare = [_bare(n) for n in canonical_names]
+        eval_bare = [_bare(n) for n in eval_names]
+
+        if canonical_bare == eval_bare:
+            print_info("Joint ordering matches canonical — no permutation needed.")
+            return None
+
+        # Build permutation.
+        joint_slices = MultiSimWorld._find_joint_obs_slices(
+            self.env, self.env.num_actions,
+        )
+        obs_dims = self.env.obs_manager.calculate_obs_dim()
+
+        perm = _JointPermutation(
+            canonical_names=canonical_names,
+            sim_names=eval_names,
+            obs_group_joint_slices=joint_slices,
+            obs_group_dims=obs_dims,
+            device=self.device,
+        )
+        print_info(
+            f"Joint permutation built: {len(canonical_names)} joints "
+            f"(canonical → {self.sim_type})"
+        )
+        return perm
 
     def _resize_mppi_state(self) -> None:
         """Resize MPPI prev_mean to match eval num_envs (may differ from training)."""

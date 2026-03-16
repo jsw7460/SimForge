@@ -623,6 +623,21 @@ class BaseRunner(ABC):
             **alg_metadata,
         }
 
+        # Save canonical joint names for cross-sim evaluation permutation.
+        # For MultiSimWorld, use the first (canonical) sub-env's joint names.
+        try:
+            from rlworld.rl.envs.multi_sim_world import MultiSimWorld
+            if isinstance(self.env, MultiSimWorld):
+                metadata["canonical_joint_names"] = list(
+                    self.env.envs[0].act_manager.actuated_joint_names
+                )
+            elif hasattr(self.env, "act_manager"):
+                metadata["canonical_joint_names"] = list(
+                    self.env.act_manager.actuated_joint_names
+                )
+        except Exception:
+            pass
+
         metadata_path = os.path.join(checkpoint_dir, "metadata.pkl")
         with open(metadata_path, "wb") as f:
             pickle.dump(metadata, f)
