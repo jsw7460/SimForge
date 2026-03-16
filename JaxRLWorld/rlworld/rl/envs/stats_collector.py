@@ -279,3 +279,13 @@ class EpisodeStatsCollector:
 
     def get_reward_stats_per_type(self) -> dict[str, dict[str, float]]:
         return self.get_all_reward_stats()
+
+    def snapshot(self) -> "EpisodeStats":
+        """Create a typed EpisodeStats snapshot of current statistics."""
+        from rlworld.rl.runners.iteration_data import EpisodeStats
+        return EpisodeStats(
+            return_buffer=list(self.return_history),
+            length_buffer=list(self.episode_length_history),
+            reward_stats=self.get_all_reward_stats(),
+            success_rate=self.get_success_rate(),
+        )

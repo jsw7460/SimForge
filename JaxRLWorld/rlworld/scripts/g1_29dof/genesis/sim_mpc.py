@@ -12,27 +12,30 @@ def main():
     cfgs_for_run = get_config().with_cli_overrides()
 
     sim_mpc_config = SimMPCConfig(
-        horizon=5,
+        horizon=10,
         num_samples=512,
-        num_pi_trajs=64,
-        num_elites=64,
+        num_pi_trajs=128,
+        num_elites=16,
         num_iterations=6,
         temperature=0.5,
+        squash_policy=True,
         min_std=0.05,
-        max_std=2.0,
+        max_std=1.0,
         gamma=0.99,
-        lr=3e-4,
-        pi_lr=3e-4,
+        lr=1e-4,
+        pi_lr=1e-4,
         tau=0.005,
         num_q=5,
         hidden_dims=(512, 256),
         batch_size=4096,
         buffer_size=1_000_000,
         learning_starts=1000,
-        num_gradient_steps=8,
+        num_gradient_steps=1,
+        mppi_ratio=0.01
     )
 
-    cfgs_for_run.env.num_envs = 1
+    cfgs_for_run.env.num_envs = 1024
+    cfgs_for_run.env.decimation = 1
     cfgs_for_run.reward.reward_terms.pop("raw_action_rate_l2_mjlab")
     cfgs_for_run.env.termination_criteria = [
         TerminationTermConfig(

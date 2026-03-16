@@ -360,6 +360,7 @@ class MuJoCoKinematicTree:
 
 class GymnasiumEnv(World):
     """Wrapper to make vectorized Gymnasium envs compatible with RLEnv interface"""
+
     sim_name = "Gymnasium"
 
     def __init__(
@@ -456,6 +457,12 @@ class GymnasiumEnv(World):
         return None
 
     def heading_w(self) -> torch.Tensor:
+        pass
+
+    def _build_scene(self) -> None:
+        pass
+
+    def _build_sim_managers(self) -> None:
         pass
 
     def _create_scene_manager_with_kinematic_tree(self, gym_env):

@@ -17,6 +17,7 @@ from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.envs import World, EpisodeStatsCollector
 # from rlworld.rl.envs.curriculum import Go2Curriculum
+from rlworld.rl.runners.iteration_data import IterationData, EpisodeStats
 from rlworld.rl.utils import setup_log_dir
 from rlworld.rl.utils.dynamics_dataset import DynamicsDataset
 from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
@@ -226,6 +227,44 @@ class BaseRunner(ABC):
             gamma=self.cfgs.algorithm.gamma
         )
 
+        # Per-sim stats collectors for MultiSimWorld
+        from rlworld.rl.envs.multi_sim_world import MultiSimWorld
+        if isinstance(self.env, MultiSimWorld):
+            self._per_sim_collectors: dict[str, EpisodeStatsCollector] = {}
+            for sub_env in self.env.envs:
+                self._per_sim_collectors[sub_env.sim_name] = EpisodeStatsCollector(
+                    num_envs=sub_env.num_envs,
+                    max_episode_length=sub_env.max_episode_length,
+                    device=self.device,
+                    gamma=self.cfgs.algorithm.gamma,
+                )
+
+    def _update_reward_stats(
+        self,
+        reward_info: dict[str, torch.Tensor],
+        dones: torch.Tensor,
+        success: torch.Tensor | None = None,
+    ) -> None:
+        """Update reward statistics including per-sim collectors."""
+        self.reward_statistics.update(reward_info=reward_info, dones=dones, success=success)
+
+        if hasattr(self, '_per_sim_collectors'):
+            offset = 0
+            for sub_env in self.env.envs:
+                n = sub_env.num_envs
+                collector = self._per_sim_collectors[sub_env.sim_name]
+                sub_reward_info = {
+                    k: v[offset:offset + n] for k, v in reward_info.items()
+                }
+                sub_dones = dones[offset:offset + n]
+                sub_success = success[offset:offset + n] if success is not None else None
+                collector.update(
+                    reward_info=sub_reward_info,
+                    dones=sub_dones,
+                    success=sub_success,
+                )
+                offset += n
+
     def _init_action_scaling(self) -> None:
         """Initialize action scaling parameters."""
         action_low = self.env.action_low.cpu().numpy()
@@ -242,55 +281,45 @@ class BaseRunner(ABC):
         else:
             return jnp.clip(actions, self.action_low_jax, self.action_high_jax)
 
-    def log_training_data(self, training_data: Dict[str, Any], total_iter: int):
+    def log_training_data(self, data: IterationData, total_iter: int):
         """Log training data to console and optionally to WandB."""
+        # Enrich with runner-level context
+        data.total_timesteps = self.total_timesteps
+        data.iteration = self.it - self.initial_learning_iteration
+        data.total_time = self.total_time
 
-        if len(training_data["return_buffer"]) > 0:
-            mean_return = statistics.mean(training_data["return_buffer"])
-            mean_episode_length = statistics.mean(training_data["length_buffer"])
-        else:
-            mean_return = 0.0
-            mean_episode_length = 0.0
-
-        training_data.update({
-            "mean_return": mean_return,
-            "mean_episode_length": mean_episode_length,
-            # "curriculum_info": self.curriculum_manager.get_curriculum_info(),
+        context = {
             "total_iterations": total_iter,
-            "total_time": self.total_time,
-            "wandb_extra": {
-                **training_data.get("wandb_extra", {}),
-                "total_timesteps": self.total_timesteps,
-                "iteration": self.it - self.initial_learning_iteration,
-            },
-            "total_timesteps": self.total_timesteps,
-            "iteration": self.it - self.initial_learning_iteration,
             "log_dir": self.model_log_dir,
             "simulator": self.env.sim_name,
             "task_name": self.env.task_name,
-            "wandb_run_name": self.runner_cfg.run_name
-        })
-
+            "wandb_run_name": self.runner_cfg.run_name,
+        }
         if self.wandb_url:
-            training_data["wandb_url"] = self.wandb_url
+            context["wandb_url"] = self.wandb_url
         if self.wandb_logger:
-            training_data["wandb_run_path"] = self.wandb_logger.run.path
+            context["wandb_run_path"] = self.wandb_logger.run.path
 
         # Print to console
-        self.console_writer.write_metrics(
-            data=training_data,
-            metrics=training_data.get("metrics"),
-            mode="train",
-            print_reward_stats=True,
+        self.console_writer.write_iteration(
+            data=data,
+            context=context,
             last_eval_stats=self._last_eval_stats,
         )
 
         # Optionally log to WandB
         if self.wandb_logger:
-            self.wandb_logger.log_training_data(
-                training_data=training_data,
-                step=self.total_timesteps
-            )
+            self.wandb_logger.log_iteration(data=data, step=self.total_timesteps)
+
+    def _build_episode_stats(self) -> EpisodeStats:
+        """Build EpisodeStats from reward_statistics, including per-sim stats if MultiSim."""
+        stats = self.reward_statistics.snapshot()
+        if hasattr(self, '_per_sim_collectors'):
+            stats.per_sim_stats = {
+                name: collector.snapshot()
+                for name, collector in self._per_sim_collectors.items()
+            }
+        return stats
 
     def close(self):
         """Clean up resources."""
@@ -303,7 +332,7 @@ class BaseRunner(ABC):
         pass
 
     @abstractmethod
-    def _run_training_iteration(self, obs, iteration: int, **kwargs) -> Dict[str, Any]:
+    def _run_training_iteration(self, obs, iteration: int, **kwargs) -> IterationData:
         """Execute a single training iteration."""
         pass
 
@@ -605,20 +634,14 @@ class BaseRunner(ABC):
             shutil.rmtree(latest_dir)
         self._save_checkpoint_to(latest_dir, iteration)
 
-    def post_iteration(self, training_data: Dict[str, Any], total_iter: int, it: int = 0):
+    def post_iteration(self, data: IterationData, total_iter: int, it: int = 0):
         """Post-iteration processing."""
         self.current_learning_iteration += 1
         self.total_timesteps += self.num_steps_per_env * self.env.num_envs
-        self.total_time += (training_data["collection_time"] + training_data["learning_time"])
-
-        # Update curriculum if needed
-        # self.curriculum_manager.update_difficulty(training_data)
+        self.total_time += (data.collection_time + data.learning_time)
 
         if it % self.runner_cfg.log_interval == 0:
-            self.log_training_data(
-                training_data,
-                total_iter=total_iter,
-            )
+            self.log_training_data(data, total_iter=total_iter)
 
         # In-training evaluation
         eval_interval = self.runner_cfg.eval_interval

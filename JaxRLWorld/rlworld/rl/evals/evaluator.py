@@ -11,7 +11,7 @@ import torch
 
 from rlworld.rl.envs import EpisodeStatsCollector
 from rlworld.rl.evals.policy_wrappers import PolicyWrapper
-from rlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer
+from rlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer, resolve_cross_sim_config
 from rlworld.rl.utils.checkpoint import load_runner, load_checkpoint_metadata
 from rlworld.rl.utils.console import (
     Colors,
@@ -31,6 +31,23 @@ class PolicyEvaluator:
     """
     Evaluates trained policies by loading checkpoints and running episodes.
     Supports Genesis, Newton, MjlabEnv, ManiSkill, and Gymnasium environments.
+
+    Cross-simulator evaluation:
+        To evaluate a checkpoint on a different simulator, provide ``eval_cfgs``
+        (a full ConfigsForRun for the target sim). The evaluator will
+        automatically copy algorithm/nn config from the checkpoint so that the
+        model architecture matches, then create the target sim's environment.
+
+        Example::
+
+            from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
+            newton_cfg = get_config()
+            evaluator = PolicyEvaluator(
+                eval_env_cfgs=None,
+                policy_path="outputs/genesis_checkpoint/",
+                eval_cfgs=newton_cfg,        # evaluate on Newton
+                extra_overrides={"env": {"num_envs": 10}},
+            )
     """
 
     def __init__(
@@ -48,7 +65,9 @@ class PolicyEvaluator:
         record_steps: int | None = 1000,
         video_dir: str | None = None,
         extra_overrides: dict = None,
-        use_rich_display: bool = True
+        use_rich_display: bool = True,
+        eval_cfgs: "Any | None" = None,
+        eval_sim_type: str | None = None,
     ):
         super().__init__()
 
@@ -77,12 +96,25 @@ class PolicyEvaluator:
         self.record_steps = record_steps
         self.recording_started = False
 
-        # Load metadata to determine simulator type
+        # Load metadata
         metadata = load_checkpoint_metadata(policy_path)
-        self.sim_type = detect_sim_type(metadata)
-        self._init = get_initializer(self.sim_type)
 
-        # Initialize device based on simulator
+        # Determine simulator type and initializer
+        self._train_sim_type = detect_sim_type(metadata)
+
+        if eval_sim_type is not None and eval_cfgs is None:
+            # Auto-resolve: detect robot from checkpoint, build target sim config
+            eval_cfgs = resolve_cross_sim_config(metadata, eval_sim_type)
+
+        if eval_cfgs is not None:
+            # Cross-sim eval: detect target sim from eval_cfgs
+            self.sim_type = self._detect_sim_type_from_cfgs(eval_cfgs)
+            self._cross_sim = True
+        else:
+            self.sim_type = self._train_sim_type
+            self._cross_sim = False
+
+        self._init = get_initializer(self.sim_type)
         self.device = self._init.init_device()
 
         if record_video:
@@ -92,15 +124,25 @@ class PolicyEvaluator:
             signal.signal(signal.SIGTERM, self._signal_handler)
 
         # Load and prepare configurations
-        self.eval_cfgs = self._init.prepare_configs(
-            policy_path=policy_path,
-            eval_env_cfgs=eval_env_cfgs,
-            extra_overrides=extra_overrides,
-            metadata=metadata,
-            show_viewer=show_viewer,
-            record_video=record_video,
-            video_dir=self.video_dir,
-        )
+        if eval_cfgs is not None:
+            self.eval_cfgs = self._prepare_cross_sim_configs(
+                eval_cfgs=eval_cfgs,
+                metadata=metadata,
+                extra_overrides=extra_overrides,
+                show_viewer=show_viewer,
+                record_video=record_video,
+                video_dir=self.video_dir,
+            )
+        else:
+            self.eval_cfgs = self._init.prepare_configs(
+                policy_path=policy_path,
+                eval_env_cfgs=eval_env_cfgs,
+                extra_overrides=extra_overrides,
+                metadata=metadata,
+                show_viewer=show_viewer,
+                record_video=record_video,
+                video_dir=self.video_dir,
+            )
 
         # Apply eval-mode defaults: disable obs noise, remove interval events
         self._apply_eval_defaults()
@@ -114,6 +156,10 @@ class PolicyEvaluator:
             seed=seed,
         )
         self.env.reset()
+
+        # Validate dims BEFORE loading weights (fail fast on mismatch)
+        if self._cross_sim:
+            self._validate_dims(metadata)
 
         # Load runner and build policy wrapper
         self.runner = load_runner(
@@ -159,6 +205,135 @@ class PolicyEvaluator:
                     t for t in event_cfg.event_terms
                     if t.mode != "interval"
                 ]
+
+    @staticmethod
+    def _detect_sim_type_from_cfgs(cfgs) -> str:
+        """Detect simulator type from a ConfigsForRun object."""
+        sim_type = getattr(cfgs, "sim_type", None)
+        if sim_type == "genesis":
+            return "Genesis"
+        elif sim_type == "newton":
+            return "Newton"
+        elif sim_type == "mujoco":
+            return "MjlabEnv"
+        raise ValueError(
+            f"Cannot detect sim_type from eval_cfgs (sim_type={sim_type!r}). "
+            f"eval_cfgs must be a GenesisConfigsForRun, NewtonConfigsForRun, "
+            f"or MujocoConfigsForRun."
+        )
+
+    def _prepare_cross_sim_configs(
+        self,
+        eval_cfgs,
+        metadata: dict,
+        extra_overrides: dict | None,
+        show_viewer: bool,
+        record_video: bool,
+        video_dir: str | None,
+    ):
+        """Prepare configs for cross-simulator evaluation.
+
+        Uses the target sim's env/scene/reward/etc. config, but copies
+        algorithm, nn, and observation config from the checkpoint so the
+        model architecture and obs dims match the saved weights.
+
+        The observation terms (including function references) survive pickle
+        round-trip because ``recursive_to_dict()`` preserves non-BaseConfig
+        objects like ``ObservationTermConfig`` as-is.
+        """
+        from copy import deepcopy
+
+        cfgs = deepcopy(eval_cfgs)
+        train_config = metadata.get("config", {})
+
+        # Copy algorithm config from checkpoint
+        # (must match: hidden dims, num_q, etc. determine weight shapes)
+        train_algo = train_config.get("algorithm", {})
+        if train_algo:
+            cfgs.algorithm = type(cfgs.algorithm).from_dict(train_algo)
+
+        # Copy nn config from checkpoint
+        train_nn = train_config.get("nn", {})
+        if train_nn:
+            cfgs.nn = type(cfgs.nn).from_dict(train_nn)
+
+        # Copy observation config from checkpoint
+        # ObservationTermConfig objects (with func references) are preserved
+        # in the pickle — obs_group is dict[str, list[ObservationTermConfig]]
+        train_obs = train_config.get("observation", {})
+        if train_obs:
+            train_obs_group = train_obs.get("obs_group")
+            if train_obs_group is not None:
+                cfgs.observation.obs_group = train_obs_group
+                print_info(
+                    "Copied observation terms from checkpoint "
+                    f"(groups: {list(train_obs_group.keys())})"
+                )
+            # Preserve other obs settings (enable_noise will be disabled by _apply_eval_defaults)
+            if "enable_noise" in train_obs:
+                cfgs.observation.enable_noise = train_obs["enable_noise"]
+
+        # Apply user overrides
+        if extra_overrides is not None:
+            cfgs.apply_overrides(**extra_overrides)
+
+        # Visualization settings
+        cfgs.visualization.show_viewer = show_viewer
+        cfgs.visualization.record_video = record_video
+        if hasattr(cfgs.visualization, 'video_dir'):
+            cfgs.visualization.video_dir = video_dir
+
+        print_info(
+            f"Cross-sim eval: checkpoint trained on {self._train_sim_type}, "
+            f"evaluating on {self.sim_type}"
+        )
+
+        return cfgs
+
+    def _validate_dims(self, metadata: dict) -> None:
+        """Validate that eval env obs/action dims match the trained model.
+
+        Reads the checkpoint's nn config to infer expected obs dims and
+        compares against the eval env.  Raises ValueError on mismatch with
+        a clear message explaining what to fix.
+        """
+        env_obs_dim = self.env.calculate_obs_dim()
+        env_actor_obs = env_obs_dim.get("actor", 0)
+        env_critic_obs = env_obs_dim.get("critic", 0)
+        env_action_dim = self.env.num_actions
+
+        train_config = metadata.get("config", {})
+
+        # Try to read training obs dims from nn/policy config
+        nn_cfg = train_config.get("nn", {})
+        policy_cfg = nn_cfg.get("policy", {})
+        actor_kwargs = policy_cfg.get("actor_kwargs", {})
+        critic_kwargs = policy_cfg.get("critic_kwargs", {})
+
+        # For off-policy (SAC/TD3), input_dim is stored directly
+        # For on-policy (PPO), first layer shape = num_actor_obs
+        # We can also check storage config if available
+        train_storage = train_config.get("algorithm", {})
+        train_action_dim = train_config.get("action", {}).get("num_joint_actions")
+
+        # Action dim check
+        if train_action_dim is not None and env_action_dim != train_action_dim:
+            raise ValueError(
+                f"Action dim mismatch!\n"
+                f"  Checkpoint (trained on {self._train_sim_type}): {train_action_dim} actions\n"
+                f"  Eval env ({self.sim_type}): {env_action_dim} actions\n"
+                f"  Both simulators must use the same robot."
+            )
+
+        print_info(
+            f"Eval env dims: actor_obs={env_actor_obs}, "
+            f"critic_obs={env_critic_obs}, actions={env_action_dim}"
+        )
+        print_warning(
+            f"If weight loading fails with shape mismatch, your eval obs terms "
+            f"differ from training. Pass the same obs terms via "
+            f"eval_cfgs.observation.obs_group."
+        )
 
     def _resize_mppi_state(self) -> None:
         """Resize MPPI prev_mean to match eval num_envs (may differ from training)."""
@@ -244,7 +419,11 @@ class PolicyEvaluator:
     def _print_eval_config(self):
         """Print evaluation configuration."""
         print_subheader("Configuration")
-        print_key_value("Simulator", self.sim_type)
+        if self._cross_sim:
+            print_key_value("Trained On", self._train_sim_type)
+            print_key_value("Evaluating On", self.sim_type)
+        else:
+            print_key_value("Simulator", self.sim_type)
         print_key_value("Num Environments", self.env.num_envs)
         print_key_value("Max Steps", self.env.max_episode_length)
         print_key_value("Seed", self.seed)
@@ -489,7 +668,10 @@ class PolicyEvaluator:
             'metadata': {
                 'policy_path': os.path.abspath(self.policy_path),
                 'timestamp': datetime.now().isoformat(),
-                'seed': self.seed
+                'seed': self.seed,
+                'cross_sim': self._cross_sim,
+                'train_sim': getattr(self, '_train_sim_type', None) if self._cross_sim else None,
+                'eval_sim': self.sim_type,
             }
         }
 

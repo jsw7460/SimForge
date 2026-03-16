@@ -10,7 +10,7 @@ def find_joints(
     entity: RigidEntity,
     name_keys: str | Sequence[str],
     joint_subset: list[str] | None = None,
-    preserve_order: bool = False
+    preserve_order: bool = True
 ) -> tuple[list[int], list[str]]:
     """Find joints in the articulation based on the name keys."""
     joint_names = [joint.name for joint in chain.from_iterable(entity._joints)]
@@ -31,7 +31,7 @@ def find_dofs(
     entity: RigidEntity,
     name_keys: str | Sequence[str],
     joint_subset: list[str] | None = None,
-    preserve_order: bool = False,
+    preserve_order: bool = True,
 ) -> tuple[list[int], list[str]]:
     """Find DOFs based on joint name keys."""
     _joint_ids_local, _joint_names = find_joints(entity, name_keys, joint_subset, preserve_order)

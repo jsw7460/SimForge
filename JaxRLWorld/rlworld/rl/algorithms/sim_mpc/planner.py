@@ -208,6 +208,9 @@ class SimulatorMPPI:
         num_noise = S - num_pi
         action_dim = self.action_low.shape[0]
 
+        # Cache training env state once (avoid repeated get_state in CEM loop)
+        self.state_sync.begin_planning(train_env_idx)
+
         # ── Sample policy trajectories ──
         self.state_sync.fork_and_sync(train_env_idx)
         pi_actions = self._sample_policy_trajectories()  # [H, num_pi, action_dim]
@@ -283,4 +286,5 @@ class SimulatorMPPI:
             exploration_noise = torch.randn(action_dim, device=self.device) * std[0]
             action = (action + exploration_noise).clamp(self.action_low, self.action_high)
 
+        self.state_sync.end_planning()
         return action, mean

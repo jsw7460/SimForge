@@ -9,7 +9,6 @@ and trains policy + Q-ensemble from collected experience.
 import os
 import pickle
 import time
-from copy import deepcopy
 from typing import Dict, List, Any
 
 import numpy as np
@@ -19,6 +18,7 @@ from rlworld.rl.algorithms.sim_mpc import SimMPC
 from rlworld.rl.configs import ConfigsForRun, configs_from_dict
 from rlworld.rl.envs import World
 from rlworld.rl.runners.base_runner import BaseRunner
+from rlworld.rl.runners.iteration_data import IterationData
 
 
 class SimMPCRunner(BaseRunner):
@@ -129,9 +129,14 @@ class SimMPCRunner(BaseRunner):
                 action_high = self.env.action_high
                 actions = actions * (action_high - action_low) + action_low
             else:
-                # MPPI planning
+                # MPPI + policy mix
                 t0_mask = self.env.reset_buf
-                actions = self.alg.act(self.env, t0_mask, eval_mode=False)
+                actions = self.alg.act(
+                    self.env, t0_mask,
+                    eval_mode=False,
+                    mppi_ratio=alg_cfg.mppi_ratio,
+                    obs=actor_obs,
+                )
 
             # Step training environment
             obs_dict, rewards, terminated, truncated, infos = self.env.step(actions)
@@ -148,7 +153,7 @@ class SimMPCRunner(BaseRunner):
             )
 
             # Update reward statistics
-            self.reward_statistics.update(
+            self._update_reward_stats(
                 reward_info=infos["rewards_per_type"],
                 dones=dones,
                 success=infos.get("success", None),
@@ -156,20 +161,8 @@ class SimMPCRunner(BaseRunner):
 
             obs = obs_dict
 
-        collection_time = time.time() - start_time
-
-        cur_return = self.reward_statistics.get_current_returns()
-        return_buffer = self.reward_statistics.get_returns_buffer()
-        length_buffer = self.reward_statistics.get_length_buffer()
-        reward_breakdown_stats = self.reward_statistics.get_reward_stats_per_type()
-
         return {
-            "cur_return": cur_return,
-            "return_buffer": deepcopy(return_buffer),
-            "length_buffer": deepcopy(length_buffer),
-            "reward_breakdown_stats": deepcopy(reward_breakdown_stats),
-            "success_rate": self.reward_statistics.get_success_rate(),
-            "collection_time": collection_time,
+            "collection_time": time.time() - start_time,
             "last_obs": obs,
         }
 
@@ -180,12 +173,14 @@ class SimMPCRunner(BaseRunner):
         obs: Dict[str, torch.Tensor],
         iteration: int,
         ep_infos: List[Dict] = None,
-    ) -> Dict[str, Any]:
+    ) -> IterationData:
         """Collect experience + train policy and Q-networks."""
         collection_data = self._collect_experience(obs=obs, iteration=iteration)
 
-        # Train if we have enough data
-        training_data = {"learning_time": 0.0}
+        collection_time = collection_data["collection_time"]
+        learning_time = 0.0
+        fps = 0.0
+        buffer_size = None
         alg_cfg = self.cfgs.algorithm
 
         min_buffer_size = max(alg_cfg.learning_starts, alg_cfg.batch_size)
@@ -194,7 +189,6 @@ class SimMPCRunner(BaseRunner):
                 and self.alg.replay_buffer.size >= min_buffer_size):
             training_start = time.time()
 
-            # Pretrain on seed data (matches TDMPC2 pattern)
             if not getattr(self, '_pretrained', False):
                 num_updates = 1
                 print(f'Pretraining policy on seed data ({num_updates} updates)...')
@@ -202,40 +196,34 @@ class SimMPCRunner(BaseRunner):
             else:
                 num_updates = max(1, alg_cfg.num_gradient_steps)
 
-            # Enable terminal Q-value after sufficient Q-network training
             if not self.alg.planner.use_terminal_q:
                 self.alg.planner.use_terminal_q = True
                 print("Enabled terminal Q-value for MPPI planning.")
 
-            update_data = {}
             for i in range(num_updates):
-                metrics = self.alg.update(batch_size=alg_cfg.batch_size)
-                if i == num_updates - 1:
-                    update_data = metrics
+                self.alg.update(batch_size=alg_cfg.batch_size)
 
             learning_time = time.time() - training_start
             fps = (self.num_steps_per_env * self.env.num_envs) / max(
-                collection_data["collection_time"] + learning_time, 1e-6
+                collection_time + learning_time, 1e-6
             )
-
-            training_data.update({
-                "learning_time": learning_time,
-                "fps": fps,
-                "buffer_size": self.alg.replay_buffer.size,
-                **update_data,
-            })
+            buffer_size = self.alg.replay_buffer.size
         else:
             fps = (self.num_steps_per_env * self.env.num_envs) / max(
-                collection_data["collection_time"], 1e-6
+                collection_time, 1e-6
             )
-            training_data["fps"] = fps
 
-        return {
-            **collection_data,
-            **training_data,
-            "iteration": iteration,
-            "action_distribution": {},
-        }
+        return IterationData(
+            collection_time=collection_time,
+            learning_time=learning_time,
+            fps=fps,
+            episode_stats=self._build_episode_stats(),
+            metrics=None,  # SimMPC doesn't use BaseMetrics
+            last_obs=collection_data["last_obs"],
+            action_distribution={},
+            buffer_size=buffer_size,
+            iteration=iteration,
+        )
 
     def learn(
         self,
@@ -258,12 +246,12 @@ class SimMPCRunner(BaseRunner):
         for it in range(self.initial_learning_iteration, total_iter + 1):
             self.it = it
 
-            training_data = self._run_training_iteration(
+            data = self._run_training_iteration(
                 obs=obs, iteration=it, ep_infos=ep_infos,
             )
 
-            obs = training_data["last_obs"]
-            self.post_iteration(training_data, total_iter, it)
+            obs = data.last_obs
+            self.post_iteration(data, total_iter, it)
 
     def _get_action_statistics(self) -> Dict[str, Any]:
         """No action statistics for now."""

@@ -1,7 +1,6 @@
 import os
 import pickle
 import time
-from copy import deepcopy
 from typing import Dict, List, Any, Union
 
 import jax
@@ -19,6 +18,7 @@ from rlworld.rl.modules.policies.td3_ac import TD3ActorCritic
 from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
 from rlworld.rl.modules.utils import print_model_summary, count_parameters
 from rlworld.rl.runners.base_runner import BaseRunner
+from rlworld.rl.runners.iteration_data import IterationData
 from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
 
 
@@ -343,7 +343,7 @@ class OffPolicyRunner(BaseRunner):
 
             # Update reward statistics
             dones = terminated | truncated
-            self.reward_statistics.update(
+            self._update_reward_stats(
                 reward_info=infos["rewards_per_type"],
                 dones=dones,
                 success=infos.get("success", None),
@@ -353,88 +353,65 @@ class OffPolicyRunner(BaseRunner):
             actor_obs = next_actor_obs
             critic_obs = next_critic_obs
 
-        # Collect statistics
-        cur_return = self.reward_statistics.get_current_returns()
-        return_buffer = self.reward_statistics.get_returns_buffer()
-        length_buffer = self.reward_statistics.get_length_buffer()
-        reward_breakdown_stats = self.reward_statistics.get_reward_stats_per_type()
-
-        collection_data = dict(infos)
-        collection_data.update({
-            "cur_return": cur_return,
-            "return_buffer": deepcopy(return_buffer),
-            "length_buffer": deepcopy(length_buffer),
-            "reward_breakdown_stats": deepcopy(reward_breakdown_stats),
-            "success_rate": self.reward_statistics.get_success_rate(),
-            "contact_force": infos.get("recent_contact_force", None),
+        return {
             "collection_time": time.time() - start_time,
             "last_obs": {
                 "actor_obs": actor_obs,
                 "critic_obs": critic_obs,
             },
-        })
-
-        return collection_data
+        }
 
     def _run_training_iteration(
         self,
         obs: ActInput,
         iteration: int,
         ep_infos: List[Dict] = None,
-    ) -> Dict[str, Any]:
+    ) -> IterationData:
         """Execute a single training iteration."""
         # Collect experience
         collection_data = self._collect_experience(
             obs=obs, ep_infos=ep_infos, iteration=iteration
         )
 
-        # Train if we have enough samples
-        training_data = {"learning_time": 0.0}
+        collection_time = collection_data["collection_time"]
+        metrics = None
+        learning_time = 0.0
+        fps = 0.0
+        buffer_size = None
         batch_size = self.cfgs.algorithm.batch_size
 
         if self.alg.replay_buffer.size >= self.cfgs.algorithm.learning_starts:
             training_start_time = time.time()
 
             num_updates = max(1, self.cfgs.algorithm.get("num_gradient_steps", 1))
-            # Perform updates
-            update_data = {}
             for _ in range(num_updates):
-                # Sample batch
                 self.key, subkey = jax.random.split(self.key)
                 batch = self.alg.sample_batch(batch_size, subkey)
-
-                # Update networks
                 metrics = self.alg.update(batch)
-                del batch  # Release JAX array references to allow GC
-
-            update_data = metrics.to_full_dict()
-            update_data["metrics"] = metrics
+                del batch
 
             learning_time = time.time() - training_start_time
             fps = (self.num_steps_per_env * self.env.num_envs) / (
-                collection_data["collection_time"] + learning_time
+                collection_time + learning_time
             )
+            buffer_size = self.alg.replay_buffer.size
 
-            training_data.update({
-                "iteration": iteration,
-                "learning_time": learning_time,
-                "fps": fps,
-                "buffer_size": self.alg.replay_buffer.size,
-                **update_data,
-            })
-
-        # Combine data
-        result = {
-            **collection_data,
-            **training_data,
-            "reward_stats": self.reward_statistics.get_reward_stats_per_type(),
-        }
-
-        # Only compute action statistics on log intervals to avoid unnecessary allocations
+        # Only compute action statistics on log intervals
+        action_dist = {}
         if iteration % self.runner_cfg.log_interval == 0:
-            result["action_distribution"] = self._get_action_statistics()
+            action_dist = self._get_action_statistics()
 
-        return result
+        return IterationData(
+            collection_time=collection_time,
+            learning_time=learning_time,
+            fps=fps,
+            episode_stats=self._build_episode_stats(),
+            metrics=metrics,
+            last_obs=collection_data["last_obs"],
+            action_distribution=action_dist,
+            buffer_size=buffer_size,
+            iteration=iteration,
+        )
 
     def learn(
         self,
@@ -460,21 +437,18 @@ class OffPolicyRunner(BaseRunner):
         for it in range(self.initial_learning_iteration, total_iter + 1):
             self.it = it
 
-            # Run training iteration
-            training_data = self._run_training_iteration(
+            data = self._run_training_iteration(
                 obs=obs,
                 iteration=it,
                 ep_infos=ep_infos,
             )
 
-            # Update observation
             obs = ActInput(
-                actor_obs=training_data["last_obs"]["actor_obs"],
-                critic_obs=training_data["last_obs"]["critic_obs"],
+                actor_obs=data.last_obs["actor_obs"],
+                critic_obs=data.last_obs["critic_obs"],
             )
 
-            # Post-iteration processing
-            self.post_iteration(training_data, total_iter, it)
+            self.post_iteration(data, total_iter, it)
 
     def _get_action_statistics(self) -> Dict[str, Any]:
         """Extract recent actions from replay buffer."""

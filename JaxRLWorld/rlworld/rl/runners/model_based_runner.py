@@ -12,7 +12,6 @@ Follows the same runner pattern as OnPolicyRunner and OffPolicyRunner.
 import os
 import pickle
 import time
-from copy import deepcopy
 from typing import Dict, List, Any, Union
 
 import jax
@@ -26,6 +25,7 @@ from rlworld.rl.envs import World
 from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
 from rlworld.rl.modules.utils import print_model_summary, count_parameters
 from rlworld.rl.runners.base_runner import BaseRunner
+from rlworld.rl.runners.iteration_data import IterationData
 from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
 
 
@@ -253,7 +253,7 @@ class ModelBasedRunner(BaseRunner):
 
             # Update reward statistics
             dones = terminated | truncated
-            self.reward_statistics.update(
+            self._update_reward_stats(
                 reward_info=infos["rewards_per_type"],
                 dones=dones,
                 success=infos.get("success", None),
@@ -262,25 +262,10 @@ class ModelBasedRunner(BaseRunner):
             # Continue with reset obs for next step
             actor_obs = next_actor_obs
 
-        # Collect statistics
-        cur_return = self.reward_statistics.get_current_returns()
-        return_buffer = self.reward_statistics.get_returns_buffer()
-        length_buffer = self.reward_statistics.get_length_buffer()
-        reward_breakdown_stats = self.reward_statistics.get_reward_stats_per_type()
-
-        collection_data = dict(infos)
-        collection_data.update({
-            "cur_return": cur_return,
-            "return_buffer": deepcopy(return_buffer),
-            "length_buffer": deepcopy(length_buffer),
-            "reward_breakdown_stats": deepcopy(reward_breakdown_stats),
-            "success_rate": self.reward_statistics.get_success_rate(),
-            "contact_force": infos.get("recent_contact_force", None),
+        return {
             "collection_time": time.time() - start_time,
             "last_obs": actor_obs,
-        })
-
-        return collection_data
+        }
 
     # ==================== Training ====================
 
@@ -289,15 +274,17 @@ class ModelBasedRunner(BaseRunner):
         obs: jax.Array,
         iteration: int,
         ep_infos: List[Dict] = None,
-    ) -> Dict[str, Any]:
+    ) -> IterationData:
         """Execute a single training iteration."""
-        # Collect experience
         collection_data = self._collect_experience(
             obs=obs, ep_infos=ep_infos, iteration=iteration,
         )
 
-        # Train if we have enough data
-        training_data = {"learning_time": 0.0}
+        collection_time = collection_data["collection_time"]
+        metrics = None
+        learning_time = 0.0
+        fps = 0.0
+        buffer_size = None
         batch_size = self.cfgs.algorithm.batch_size
 
         min_buffer_size = max(
@@ -308,7 +295,6 @@ class ModelBasedRunner(BaseRunner):
         if self.alg.replay_buffer.size >= min_buffer_size:
             training_start = time.time()
 
-            # Pretrain on seed data (matches author: num_updates = seed_steps)
             if not getattr(self, '_pretrained', False):
                 num_updates = self.cfgs.algorithm.learning_starts // self.env.num_envs
                 print(f'Pretraining agent on seed data ({num_updates} updates)...')
@@ -316,37 +302,29 @@ class ModelBasedRunner(BaseRunner):
             else:
                 num_updates = max(1, self.cfgs.algorithm.num_gradient_steps)
 
-            update_data = {}
             for i in range(num_updates):
                 self.key, subkey = jax.random.split(self.key)
                 batch = self.alg.sample_batch(batch_size, subkey)
                 is_last = (i == num_updates - 1)
                 metrics = self.alg.update(batch, build_metrics=is_last)
 
-            if metrics is not None:
-                update_data = metrics.to_full_dict()
-                update_data["metrics"] = metrics
-
             learning_time = time.time() - training_start
             fps = (self.num_steps_per_env * self.env.num_envs) / (
-                collection_data["collection_time"] + learning_time
+                collection_time + learning_time
             )
-            reward_stats = self.reward_statistics.get_reward_stats_per_type()
+            buffer_size = self.alg.replay_buffer.size
 
-            training_data.update({
-                "iteration": iteration,
-                "learning_time": learning_time,
-                "fps": fps,
-                "buffer_size": self.alg.replay_buffer.size,
-                "reward_stats": reward_stats,
-                **update_data,
-            })
-
-        return {
-            **collection_data,
-            **training_data,
-            "action_distribution": self._get_action_statistics(),
-        }
+        return IterationData(
+            collection_time=collection_time,
+            learning_time=learning_time,
+            fps=fps,
+            episode_stats=self._build_episode_stats(),
+            metrics=metrics,
+            last_obs=collection_data["last_obs"],
+            action_distribution=self._get_action_statistics(),
+            buffer_size=buffer_size,
+            iteration=iteration,
+        )
 
     def learn(
         self,
@@ -369,12 +347,12 @@ class ModelBasedRunner(BaseRunner):
         for it in range(self.initial_learning_iteration, total_iter + 1):
             self.it = it
 
-            training_data = self._run_training_iteration(
+            data = self._run_training_iteration(
                 obs=obs, iteration=it, ep_infos=ep_infos,
             )
 
-            obs = training_data["last_obs"]
-            self.post_iteration(training_data, total_iter, it)
+            obs = data.last_obs
+            self.post_iteration(data, total_iter, it)
 
     def _get_action_statistics(self) -> Dict[str, Any]:
         """Extract recent action statistics from replay buffer."""

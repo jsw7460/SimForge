@@ -91,7 +91,6 @@ class NewtonActionManager(ActionManagerBase):
             self._offset[:] = default_pos.unsqueeze(0)
             # Recompute clip bounds since offset changed
             self._clip_low, self._clip_high = self._initialize_clip()
-
     # ------------------------------------------------------------------
     # Abstract method implementations
     # ------------------------------------------------------------------

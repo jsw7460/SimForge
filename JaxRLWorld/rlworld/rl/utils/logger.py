@@ -1,14 +1,18 @@
+from __future__ import annotations
+
 import os
 import statistics
-from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Dict, List, Union, Any, Optional
+from typing import Dict, List, Union, Any, Optional, TYPE_CHECKING
 
 import torch
 import wandb
 from colorama import Fore, Style, init
 
 from rlworld.rl.algorithms.metrics import MetricType, ConsoleMetric, BaseMetrics
+
+if TYPE_CHECKING:
+    from rlworld.rl.runners.iteration_data import IterationData
 
 init(autoreset=True)
 
@@ -89,6 +93,40 @@ class ConsoleWriter:
         log_string.append(f"{Fore.CYAN}{'═' * width}{Style.RESET_ALL}")
 
         print("\n".join(log_string))
+
+    def write_iteration(
+        self,
+        data: "IterationData",
+        context: Dict[str, Any],
+        width: int = 100,
+        last_eval_stats: Optional[Dict] = None,
+    ):
+        """Write formatted IterationData to console."""
+        # Build a compat dict for the existing section formatters
+        ep = data.episode_stats
+        compat = {
+            "iteration": data.iteration,
+            "total_iterations": context.get("total_iterations", "?"),
+            "fps": data.fps,
+            "collection_time": data.collection_time,
+            "learning_time": data.learning_time,
+            "total_time": data.total_time,
+            "total_timesteps": data.total_timesteps,
+            "mean_return": ep.mean_return,
+            "mean_episode_length": ep.mean_episode_length,
+            "success_rate": ep.success_rate,
+            "reward_stats": ep.reward_stats,
+        }
+        # Merge display context (wandb_url, simulator, etc.)
+        compat.update(context)
+
+        self.write_metrics(
+            data=compat,
+            metrics=data.metrics,
+            mode="train",
+            print_reward_stats=True,
+            last_eval_stats=last_eval_stats,
+        )
 
     def _create_section_header(self, width: int, title: str) -> List[str]:
         """Create a formatted section header."""
@@ -420,6 +458,29 @@ class WandbLogger:
         self.wandb_url = self.run.get_url()
         os.makedirs(log_dir, exist_ok=True)
         self.log_dir = log_dir
+
+    def log_iteration(self, data: "IterationData", step: int):
+        """Log typed IterationData to WandB."""
+        log_dict = data.to_wandb_dict()
+
+        # Action distribution logging
+        if data.action_distribution:
+            action_dist = data.action_distribution
+            for stat_name in ["mean", "std", "min", "max"]:
+                if stat_name in action_dist:
+                    values = action_dist[stat_name]
+                    for i, v in enumerate(values):
+                        val = v.item() if hasattr(v, 'item') else v
+                        log_dict[f"ActionDist/{stat_name}/dim_{i}"] = val
+
+            if "raw" in action_dist:
+                raw_actions = action_dist["raw"]
+                for i in range(raw_actions.shape[-1]):
+                    log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(
+                        raw_actions[:, i].flatten()
+                    )
+
+        wandb.log(log_dict, step=step)
 
     def log_training_data(
         self,

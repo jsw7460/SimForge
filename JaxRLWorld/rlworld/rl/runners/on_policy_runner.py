@@ -1,7 +1,6 @@
 import os
 import pickle
 import time
-from copy import deepcopy
 from typing import Dict, List, Any
 
 import jax
@@ -18,6 +17,7 @@ from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.modules.policies.ppo_dr3_ac import PPODR3ActorCritic
 from rlworld.rl.modules.utils import print_model_summary, count_parameters
 from rlworld.rl.runners.base_runner import BaseRunner
+from rlworld.rl.runners.iteration_data import IterationData
 from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
 
 
@@ -262,41 +262,26 @@ class OnPolicyRunner(BaseRunner):
             )
 
             # Update statistics
-            self.reward_statistics.update(
+            self._update_reward_stats(
                 reward_info=infos["rewards_per_type"],
                 dones=dones,
                 success=infos.get("success", None),
             )
 
-        # Collect statistics
-        cur_return = self.reward_statistics.get_current_returns()
-        return_buffer = self.reward_statistics.get_returns_buffer()
-        length_buffer = self.reward_statistics.get_length_buffer()
-        reward_breakdown_stats = self.reward_statistics.get_reward_stats_per_type()
-
-        collection_data = dict(infos)
-        collection_data.update({
-            "cur_return": cur_return,
-            "return_buffer": deepcopy(return_buffer),
-            "length_buffer": deepcopy(length_buffer),
-            "reward_breakdown_stats": deepcopy(reward_breakdown_stats),
-            "success_rate": self.reward_statistics.get_success_rate(),
-            "contact_force": infos.get("recent_contact_force", None),
+        return {
             "collection_time": time.time() - start_time,
             "last_obs": {
                 "actor_obs": actor_obs,
                 "critic_obs": critic_obs,
             },
-        })
-
-        return collection_data
+        }
 
     def _run_training_iteration(
         self,
         obs: PPO.ActInput,
         iteration: int,
         ep_infos: List[Dict] = None,
-    ) -> Dict[str, Any]:
+    ) -> IterationData:
         """Execute a single training iteration."""
         # Collect experience
         collection_data = self._collect_experience(obs=obs, ep_infos=ep_infos)
@@ -307,34 +292,21 @@ class OnPolicyRunner(BaseRunner):
         action_stats = self._get_action_statistics()
 
         metrics = self.alg.update()
-        training_data = metrics.to_full_dict()
-        training_data["metrics"] = metrics
-
-        training_data.update(collection_data)
         learning_time = time.time() - start_time
 
-        fps = (self.num_steps_per_env * self.env.num_envs) / (
-            collection_data["collection_time"] + learning_time
+        collection_time = collection_data["collection_time"]
+        fps = (self.num_steps_per_env * self.env.num_envs) / (collection_time + learning_time)
+
+        return IterationData(
+            collection_time=collection_time,
+            learning_time=learning_time,
+            fps=fps,
+            episode_stats=self._build_episode_stats(),
+            metrics=metrics,
+            last_obs=collection_data["last_obs"],
+            action_distribution=action_stats,
+            iteration=iteration,
         )
-        reward_stats = self.reward_statistics.get_reward_stats_per_type()
-
-        # Get current std for logging
-        sample_obs = collection_data["last_obs"]["actor_obs"][:1]
-        current_std = float(self.alg.model.std_module(sample_obs).mean())
-
-        training_data.update({
-            "iteration": iteration,
-            "total_timesteps": self.total_timesteps,
-            "learning_time": learning_time,
-            "collection_time": collection_data["collection_time"],
-            "action_std": current_std,
-            "action_mean": None,
-            "fps": fps,
-            "reward_stats": reward_stats,
-            "action_distribution": action_stats,
-        })
-
-        return training_data
 
     def learn(
         self,
@@ -358,17 +330,17 @@ class OnPolicyRunner(BaseRunner):
 
         for it in range(self.initial_learning_iteration, total_iter + 1):
             self.it = it
-            training_data = self._run_training_iteration(
+            data = self._run_training_iteration(
                 obs=obs,
                 iteration=it,
                 ep_infos=ep_infos,
             )
             # Update obs
             obs = PPO.ActInput(
-                actor_obs=training_data["last_obs"]["actor_obs"],
-                critic_obs=training_data["last_obs"]["critic_obs"],
+                actor_obs=data.last_obs["actor_obs"],
+                critic_obs=data.last_obs["critic_obs"],
             )
-            self.post_iteration(training_data, total_iter, it)
+            self.post_iteration(data, total_iter, it)
 
     def _get_action_statistics(self) -> Dict[str, Any]:
         """Extract from rollout storage."""

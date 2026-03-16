@@ -128,21 +128,28 @@ class SimMPC:
         training_env: GenesisEnv,
         t0_mask: torch.Tensor,
         eval_mode: bool = False,
+        mppi_ratio: float = 1.0,
+        obs: torch.Tensor = None,
     ) -> torch.Tensor:
-        """Select actions for all training envs via sequential MPPI.
+        """Select actions: MPPI for some envs, policy for the rest.
 
         Args:
             training_env: The training environment.
             t0_mask: [N] bool tensor — True if episode just started.
             eval_mode: If True, no exploration noise.
+            mppi_ratio: Fraction of envs to use MPPI (0.0 = all policy, 1.0 = all MPPI).
+            obs: [N, obs_dim] actor observations (needed for policy-only envs).
 
         Returns:
             actions: [N, action_dim] — selected actions.
         """
         N = training_env.num_envs
-        actions = []
+        num_mppi = max(1, int(N * mppi_ratio)) if mppi_ratio > 0 else 0
+        action_dim = self.planner.action_low.shape[0]
+        actions = torch.zeros(N, action_dim, device=self.device)
 
-        for i in range(N):
+        # ── MPPI envs (sequential planning) ──
+        for i in range(num_mppi):
             action, new_mean = self.planner.plan(
                 training_env=training_env,
                 train_env_idx=i,
@@ -150,9 +157,21 @@ class SimMPC:
                 eval_mode=eval_mode,
             )
             self.planner._prev_mean[i] = new_mean
-            actions.append(action)
+            actions[i] = action
 
-        return torch.stack(actions)
+        # ── Policy envs (batched forward pass) ──
+        if num_mppi < N:
+            if obs is None:
+                obs_dict = training_env.obs_manager.get_observation()
+                obs = obs_dict["actor"]
+            policy_obs = obs[num_mppi:]  # [N - num_mppi, obs_dim]
+            policy_actions, _ = self.policy(policy_obs, deterministic=eval_mode)
+            policy_actions = policy_actions.clamp(
+                self.planner.action_low, self.planner.action_high
+            )
+            actions[num_mppi:] = policy_actions
+
+        return actions
 
     def store_transition(
         self,

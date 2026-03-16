@@ -39,5 +39,11 @@ class SimMPCConfig(BaseConfig):
     num_gradient_steps: int = 1
     num_steps_per_env: int = 1
 
+    # ---- MPPI/Policy mixing ----
+    # Fraction of envs that use MPPI planning (rest use policy directly).
+    # E.g., 0.1 with 100 envs → 10 envs MPPI, 90 envs policy.
+    # Set to 1.0 to use MPPI for all envs (default, slow but highest quality).
+    mppi_ratio: float = 1.0
+
     # ---- Episode ----
     episode_length: int = 1000

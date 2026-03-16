@@ -1,7 +1,7 @@
 import json
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, TYPE_CHECKING, Union
+from typing import Any, Dict, TYPE_CHECKING, Union, TypeVar
 
 from colorama import Fore, Style
 
@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
     from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun
     from rlworld.rl.configs.mujoco_config_classes import MujocoEnvConfig
+T = TypeVar("T", bound="BaseConfig")
 
 
 def parse_override_args() -> Dict[str, Any]:
@@ -138,9 +139,7 @@ class BaseConfig:
         config = cls.from_dict(config_dict)
         return config.with_cli_overrides()
 
-    def with_cli_overrides(
-        self
-    ) -> Union["BaseConfig", "GenesisConfigsForRun", "NewtonConfigsForRun", "MujocoEnvConfig"]:
+    def with_cli_overrides(self: T) -> T:
         """Apply command-line overrides to this config instance."""
         overrides = parse_override_args()
         if overrides:

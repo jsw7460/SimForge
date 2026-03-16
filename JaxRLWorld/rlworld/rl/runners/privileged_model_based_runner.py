@@ -250,7 +250,7 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
 
             # Update reward statistics
             dones = terminated | truncated
-            self.reward_statistics.update(
+            self._update_reward_stats(
                 reward_info=infos["rewards_per_type"],
                 dones=dones,
                 success=infos.get("success", None),
@@ -259,26 +259,10 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
             # Continue with reset obs
             last_obs = next_obs
 
-        # Build collection data (same structure as parent)
-        from copy import deepcopy
-        cur_return = self.reward_statistics.get_current_returns()
-        return_buffer = self.reward_statistics.get_returns_buffer()
-        length_buffer = self.reward_statistics.get_length_buffer()
-        reward_breakdown_stats = self.reward_statistics.get_reward_stats_per_type()
-
-        collection_data = dict(infos)
-        collection_data.update({
-            "cur_return": cur_return,
-            "return_buffer": deepcopy(return_buffer),
-            "length_buffer": deepcopy(length_buffer),
-            "reward_breakdown_stats": deepcopy(reward_breakdown_stats),
-            "success_rate": self.reward_statistics.get_success_rate(),
-            "contact_force": infos.get("recent_contact_force", None),
+        return {
             "collection_time": time.time() - start_time,
             "last_obs": last_obs,  # dict: {"actor": ..., "privileged": ...}
-        })
-
-        return collection_data
+        }
 
     # ------------------------------------------------------------------
     # Override 5: Initial observation
