@@ -44,6 +44,7 @@ class ActionManager(ActionManagerBase):
         _actuated_dofs, _ = entity_utils.find_dofs(
             entity=self._genesis_env.scene_manager.robot,
             name_keys=config.actuated_dof_names,
+            # preserve_order=True
         )
         self._actuated_dofs = torch.tensor(_actuated_dofs, device=env.device)
 

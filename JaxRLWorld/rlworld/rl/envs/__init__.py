@@ -7,6 +7,7 @@ from .genesis.locomotion_env import LocomotionEnv
 from .newton.locomotion_env import NewtonLocomotionEnv
 from .gymnasium_env import GymnasiumEnv
 from .mujoco.mjlab_env import MjlabEnv
+from .multi_sim_world import MultiSimWorld
 
 # Lazy import
 def __getattr__(name):
@@ -29,4 +30,5 @@ __all__ = [
     "NewtonLocomotionEnv",
     "GymnasiumEnv",
     "MjlabEnv",
+    "MultiSimWorld",
 ]
