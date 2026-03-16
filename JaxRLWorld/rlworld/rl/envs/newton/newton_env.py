@@ -96,8 +96,8 @@ class NewtonEnv(World):
         self.scene_manager.build_scene()
 
         # Visualization Manager (after scene build)
-        if (self.visualization_cfg.show_viewer
-                and self.visualization_cfg.viewer_type == "viser"):
+        # viewer_type="viser" → always use ViserVisualizationManager (matches Genesis pattern)
+        if self.visualization_cfg.viewer_type == "viser":
             from rlworld.rl.vis.viser import ViserVisualizationManager
             from rlworld.rl.vis.viser.viewer import ViserViewerConfig
             from rlworld.rl.vis.viser.bridges import NewtonBridge
@@ -112,7 +112,8 @@ class NewtonEnv(World):
             self.vis_manager = ViserVisualizationManager(
                 env=self, bridge=bridge, config=viser_cfg
             )
-        else:
+        elif self.visualization_cfg.show_viewer or self.visualization_cfg.record_video:
+            # Non-viser viewer (GL, rerun, usd, file) — only when actively viewing or recording
             vis_manager_cfg = NewtonVisualizationManagerConfig(
                 show_viewer=self.visualization_cfg.show_viewer,
                 record_video=self.visualization_cfg.record_video,
@@ -125,6 +126,9 @@ class NewtonEnv(World):
             )
             self.vis_manager = NewtonVisualizationManager(env=self, config=vis_manager_cfg)
             self.vis_manager.setup()
+        else:
+            # Headless — no visualization overhead
+            self.vis_manager = None
 
     def _build_sim_managers(self) -> None:
         """Create Newton-specific managers via ManagerRegistry."""

@@ -15,12 +15,16 @@ if TYPE_CHECKING:
 
 @dataclass
 class NewtonVisualizationManagerConfig:
-    """Internal config for NewtonVisualizationManager."""
+    """Internal config for NewtonVisualizationManager.
+
+    Note: viewer_type="viser" is handled by ViserVisualizationManager in newton_env.py.
+    This manager only handles GL, Rerun, USD, and File viewers.
+    """
     show_viewer: bool = False
     record_video: bool = False
     video_dir: str = ""
     video_fps: int = 60
-    viewer_type: Literal["gl", "viser", "rerun", "usd", "file"] = "gl"
+    viewer_type: Literal["gl", "rerun", "usd", "file"] = "gl"
     viser_port: int = 8080
     viser_share: bool = True
     rerun_web_port: int = 9191
@@ -47,13 +51,7 @@ class NewtonVisualizationManager(BaseManager):
             return f"output{ext}"
 
         if self.config.show_viewer:
-            if self.config.viewer_type == "viser":
-                self.viewer = newton.viewer.ViewerViser(
-                    port=self.config.viser_port,
-                    share=self.config.viser_share,
-                    record_to_viser=get_output_path(".viser") if self.config.record_video else None,
-                )
-            elif self.config.viewer_type == "rerun":
+            if self.config.viewer_type == "rerun":
                 self.viewer = newton.viewer.ViewerRerun(
                     web_port=self.config.rerun_web_port,
                 )
@@ -70,13 +68,7 @@ class NewtonVisualizationManager(BaseManager):
             self.viewer.set_model(model, max_worlds=1)
 
         elif self.config.record_video:
-            if self.config.viewer_type == "viser":
-                self.viewer = newton.viewer.ViewerViser(
-                    port=self.config.viser_port,
-                    share=self.config.viser_share,
-                    record_to_viser=get_output_path(".viser"),
-                )
-            elif self.config.viewer_type == "usd":
+            if self.config.viewer_type == "usd":
                 self.viewer = newton.viewer.ViewerUSD(
                     output_path=get_output_path(".usd"),
                     fps=self.config.video_fps,
@@ -102,21 +94,13 @@ class NewtonVisualizationManager(BaseManager):
         state = self.env.scene_manager.state_0
         base_pos = state.joint_q.numpy()[:3]
 
-        # Camera tracking
+        # Camera tracking (GL only)
         if isinstance(self.viewer, newton.viewer.ViewerGL) and hasattr(self.viewer, 'set_camera'):
             self.viewer.set_camera(
                 pos=wp.vec3(base_pos[0] + 3.0, base_pos[1] + 3.0, base_pos[2] + 1.0),
                 pitch=-20.0,
                 yaw=-135.0,
             )
-        elif isinstance(self.viewer, newton.viewer.ViewerViser):
-            for client in self.viewer._server.get_clients().values():
-                client.camera.position = (
-                    base_pos[0] + 3.0,
-                    base_pos[1] + 3.0,
-                    base_pos[2] + 1.0,
-                )
-                client.camera.look_at = tuple(base_pos)
 
         self.sim_time += self.env.control_dt
 
@@ -134,9 +118,7 @@ class NewtonVisualizationManager(BaseManager):
             return
         print(f"[DEBUG] stop_recording called, viewer type: {type(self.viewer)}")
 
-        if isinstance(self.viewer, newton.viewer.ViewerViser):
-            self.viewer.save_recording()
-        elif isinstance(self.viewer, newton.viewer.ViewerUSD):
+        if isinstance(self.viewer, newton.viewer.ViewerUSD):
             print("[DEBUG] Closing USD viewer")
             self.viewer.close()
             self.viewer = None

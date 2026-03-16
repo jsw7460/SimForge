@@ -75,7 +75,7 @@ class NewtonBridge:
 
         # Build BodyMeshGroups.
         for body_id, meshes in body_meshes.items():
-            is_fixed = body_id == 0  # Body 0 is typically world/ground.
+            is_fixed = self._is_ground_body(body_id)
             mesh_groups.append(BodyMeshGroup(
                 body_id=body_id,
                 body_name=body_names.get(body_id, f"body_{body_id}"),
@@ -139,6 +139,13 @@ class NewtonBridge:
         from scipy.spatial.transform import Rotation
         body_vel = Rotation.from_quat([qx, qy, qz, qw]).inv().apply(world_vel)
         return body_vel[:2].astype(np.float32)
+
+    def _is_ground_body(self, body_id: int) -> bool:
+        """Check if a body is a ground/world plane by its label."""
+        if body_id >= len(self._model.body_label):
+            return False
+        label = self._model.body_label[body_id].lower()
+        return "ground" in label or "world" in label or "plane" in label
 
     def _find_tracked_body(self) -> int | None:
         """Find the robot base body index (first non-ground body)."""

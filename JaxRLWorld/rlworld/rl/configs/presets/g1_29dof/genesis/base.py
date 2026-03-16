@@ -295,6 +295,7 @@ class G1FlatGenesisConfig:
     def _build_action_config(self) -> ActionConfig:
         return ActionConfig(
             actuated_dof_names=self.robot.actuated_dof_patterns,
+            num_joint_actions=29,
             action_scale=G1_ACTION_SCALE,
             clip_actions=(-100.0, 100.0),
             offset=self.robot.default_joint_angles,
