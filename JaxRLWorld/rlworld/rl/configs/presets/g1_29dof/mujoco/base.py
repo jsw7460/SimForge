@@ -13,7 +13,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.scene import SceneCfg
 from mjlab.sensor import ContactSensorCfg, ContactMatch
 from mjlab.sim import SimulationCfg, MujocoCfg
-from mjlab.terrains import TerrainImporterCfg
+from mjlab.terrains import TerrainEntityCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
@@ -202,7 +202,7 @@ class G1FlatMujocoConfig:
         mjlab_scene_cfg = SceneCfg(
             num_envs=self.num_envs,
             env_spacing=2.0,
-            terrain=TerrainImporterCfg(terrain_type="plane"),
+            terrain=TerrainEntityCfg(terrain_type="plane"),
             entities={"robot": get_g1_robot_cfg()},
             sensors=(feet_ground_cfg, self_collision_cfg),
         )
