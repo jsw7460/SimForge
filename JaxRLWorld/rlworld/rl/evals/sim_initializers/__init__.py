@@ -18,7 +18,6 @@ class SimInitializer(ABC):
     def prepare_configs(
         self,
         policy_path: str,
-        eval_env_cfgs: dict | None,
         extra_overrides: dict | None,
         metadata: dict,
         show_viewer: bool,
@@ -145,6 +144,11 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
 
 def detect_sim_type(metadata: dict) -> str:
     """Detect simulator type from checkpoint metadata."""
+    # Multisim checkpoint (new format)
+    train_sims = metadata.get("train_sim_names")
+    if train_sims and len(train_sims) > 1:
+        return "MultiSim(" + "+".join(train_sims) + ")"
+
     env_name = metadata.get('config', {}).get('env', {}).get('env_name', '')
     if "Genesis" in env_name:
         return "Genesis"
@@ -156,8 +160,17 @@ def detect_sim_type(metadata: dict) -> str:
         return "ManiSkill"
     elif env_name == 'Gymnasium':
         return "Gymnasium"
-    else:
+
+    # Fallback: check sim_type field directly
+    sim_type = metadata.get("sim_type", "")
+    if sim_type == "genesis":
         return "Genesis"
+    elif sim_type == "newton":
+        return "Newton"
+    elif sim_type in ("mujoco", "mjlab"):
+        return "MjlabEnv"
+
+    return "Unknown"
 
 
 def get_initializer(sim_type: str) -> SimInitializer:

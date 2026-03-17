@@ -623,14 +623,14 @@ class BaseRunner(ABC):
             **alg_metadata,
         }
 
-        # Save canonical joint names for cross-sim evaluation permutation.
-        # For MultiSimWorld, use the first (canonical) sub-env's joint names.
+        # Save canonical joint names and training sim info for cross-sim eval.
         try:
             from rlworld.rl.envs.multi_sim_world import MultiSimWorld
             if isinstance(self.env, MultiSimWorld):
                 metadata["canonical_joint_names"] = list(
                     self.env.envs[0].act_manager.actuated_joint_names
                 )
+                metadata["train_sim_names"] = [e.sim_name for e in self.env.envs]
             elif hasattr(self.env, "act_manager"):
                 metadata["canonical_joint_names"] = list(
                     self.env.act_manager.actuated_joint_names

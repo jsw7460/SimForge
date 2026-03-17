@@ -32,28 +32,31 @@ class PolicyEvaluator:
     Evaluates trained policies by loading checkpoints and running episodes.
     Supports Genesis, Newton, MjlabEnv, ManiSkill, and Gymnasium environments.
 
-    Cross-simulator evaluation:
-        To evaluate a checkpoint on a different simulator, provide ``eval_cfgs``
-        (a full ConfigsForRun for the target sim). The evaluator will
-        automatically copy algorithm/nn config from the checkpoint so that the
-        model architecture matches, then create the target sim's environment.
+    Args:
+        policy_path: Path to checkpoint directory.
+        eval_target: Controls which simulator to evaluate on.
+            - None  → same simulator as training (default).
+            - str   → cross-sim eval, auto-resolve preset (e.g. "newton").
+            - ConfigsForRun → cross-sim eval with explicit config.
+        extra_overrides: Dict of config overrides (e.g. {"env": {"num_envs": 1}}).
 
-        Example::
+    Examples::
 
-            from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
-            newton_cfg = get_config()
-            evaluator = PolicyEvaluator(
-                eval_env_cfgs=None,
-                policy_path="outputs/genesis_checkpoint/",
-                eval_cfgs=newton_cfg,        # evaluate on Newton
-                extra_overrides={"env": {"num_envs": 10}},
-            )
+        # Same-sim eval
+        PolicyEvaluator(policy_path="outputs/.../checkpoint_latest/")
+
+        # Cross-sim eval (auto-resolve)
+        PolicyEvaluator(policy_path="...", eval_target="newton")
+
+        # Cross-sim eval (explicit config)
+        from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
+        PolicyEvaluator(policy_path="...", eval_target=get_config())
     """
 
     def __init__(
         self,
-        eval_env_cfgs: dict | None,
         policy_path: str | None = None,
+        eval_target: "str | Any | None" = None,
         wandb_run_path: str | None = None,
         wandb_checkpoint_iter: int | None = None,
         num_evals: int = 5,
@@ -66,8 +69,6 @@ class PolicyEvaluator:
         video_dir: str | None = None,
         extra_overrides: dict = None,
         use_rich_display: bool = True,
-        eval_cfgs: "Any | None" = None,
-        eval_sim_type: str | None = None,
     ):
         super().__init__()
 
@@ -102,12 +103,14 @@ class PolicyEvaluator:
         # Determine simulator type and initializer
         self._train_sim_type = detect_sim_type(metadata)
 
-        if eval_sim_type is not None and eval_cfgs is None:
-            # Auto-resolve: detect robot from checkpoint, build target sim config
-            eval_cfgs = resolve_cross_sim_config(metadata, eval_sim_type)
+        # Resolve eval_target → eval_cfgs
+        eval_cfgs = None
+        if isinstance(eval_target, str):
+            eval_cfgs = resolve_cross_sim_config(metadata, eval_target)
+        elif eval_target is not None:
+            eval_cfgs = eval_target
 
         if eval_cfgs is not None:
-            # Cross-sim eval: detect target sim from eval_cfgs
             self.sim_type = self._detect_sim_type_from_cfgs(eval_cfgs)
             self._cross_sim = True
         else:
@@ -136,7 +139,6 @@ class PolicyEvaluator:
         else:
             self.eval_cfgs = self._init.prepare_configs(
                 policy_path=policy_path,
-                eval_env_cfgs=eval_env_cfgs,
                 extra_overrides=extra_overrides,
                 metadata=metadata,
                 show_viewer=show_viewer,

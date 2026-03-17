@@ -6,7 +6,6 @@ import gymnasium as gym
 import torch
 
 from rlworld.rl.evals.sim_initializers import SimInitializer
-from rlworld.rl.utils import compare_dicts
 
 
 class GymnasiumInitializer(SimInitializer):
@@ -18,23 +17,15 @@ class GymnasiumInitializer(SimInitializer):
     def prepare_configs(
         self,
         policy_path: str,
-        eval_env_cfgs: dict | None,
         extra_overrides: dict | None,
         metadata: dict,
         show_viewer: bool,
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
-        from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun, EnvConfig
+        from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
 
-        train_cfgs = GenesisConfigsForRun.from_dict(metadata['config'])
-
-        if eval_env_cfgs is not None:
-            compare_dicts(eval_env_cfgs, train_cfgs.env.to_dict(), "eval_env_cfgs", "train_cfgs.env")
-            eval_cfgs = train_cfgs
-            eval_cfgs.env = EnvConfig.from_dict(eval_env_cfgs)
-        else:
-            eval_cfgs = train_cfgs
+        eval_cfgs = GenesisConfigsForRun.from_dict(metadata['config'])
 
         if extra_overrides is not None:
             eval_cfgs.apply_overrides(**extra_overrides)

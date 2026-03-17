@@ -32,9 +32,8 @@ def main():
     args = parser.parse_args()
 
     evaluator = PolicyEvaluator(
-        eval_env_cfgs=None,
         policy_path=args.policy_path,
-        eval_sim_type=args.eval_sim,
+        eval_target=args.eval_sim,
         num_evals=args.num_evals,
         show_viewer=args.show_viewer,
         record_video=args.record_video,
