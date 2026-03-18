@@ -20,7 +20,7 @@ from rlworld.rl.configs.newton_config_classes import (
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.go2 import Go2Config
+from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE
 from rlworld.rl.configs.scene import NewtonEntityConfig
 from rlworld.rl.configs.sensors import NewtonIMUSensorConfig, NewtonContactSensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -149,12 +149,13 @@ class Go2FlatNewtonConfig:
                     floating=True,
                     joint_cfg=newton.ModelBuilder.JointDofConfig(
                         armature=0.1,
-                        target_ke=20.0,
-                        target_kd=0.5
+                        target_ke=r.p_gains.get(".*_hip_joint", 20.0),
+                        target_kd=r.d_gains.get(".*_hip_joint", 0.5),
                     ),
                     sites={"imu_site_base": r.base_link_name},
                     joint_target_ke_map=r.prefixed_p_gains,
                     joint_target_kd_map=r.prefixed_d_gains,
+                    joint_armature_map=r.prefixed_armature,
                     collapse_fixed_joints=True,
                     joints_to_keep=[
                         "go2_description/FL_foot_joint",
@@ -194,7 +195,7 @@ class Go2FlatNewtonConfig:
         r = self.robot
         return NewtonActionConfig(
             actuated_dof_names=r.prefixed_actuated_dof_patterns,
-            action_scale=0.4,
+            action_scale=GO2_ACTION_SCALE,
             clip_actions=(-100.0, 100.0),
             offset=r.get_prefixed_action_offset(),
         )

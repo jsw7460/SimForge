@@ -59,7 +59,7 @@ class ActionConfig(BaseConfig):
     """Genesis action configuration."""
     actuated_dof_names: list[str] = field(default_factory=list)
     num_joint_actions: int = 12
-    action_scale: float = 0.4
+    action_scale: float | dict[str, float] = 0.4
     simulate_action_latency: bool = False
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-100.0, 100.0)
     offset: dict[str, float] = field(default_factory=dict)

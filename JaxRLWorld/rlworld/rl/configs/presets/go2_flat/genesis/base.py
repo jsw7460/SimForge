@@ -15,7 +15,7 @@ from rlworld.rl.configs.genesis_config_classes import (
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.go2 import Go2Config
+from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE
 from rlworld.rl.configs.scene import EntityConfig
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -143,21 +143,12 @@ class Go2FlatGenesisConfig:
     def _build_action_config(self) -> ActionConfig:
         return ActionConfig(
             actuated_dof_names=self.robot.actuated_dof_patterns,
-            action_scale=0.4,
+            action_scale=GO2_ACTION_SCALE,
             simulate_action_latency=False,
             clip_actions=(-100.0, 100.0),
             offset=self.robot.get_action_offset(),
             control_mode="position",
         )
-
-        # return ActionConfig(
-        #     actuated_dof_names=self.robot.actuated_dof_patterns,
-        #     action_scale=10.0,
-        #     simulate_action_latency=False,
-        #     clip_actions=(-1.0, 1.0),
-        #     offset=None,
-        #     control_mode="force",
-        # )
 
     def _build_scene_config(self) -> SceneConfig:
         return SceneConfig(
