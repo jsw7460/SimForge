@@ -17,6 +17,9 @@ MUJOCO_PRESET_REGISTRY: dict[str, tuple[str, str]] = {
     # Go1
     "Go1FlatMujocoConfig": ("rlworld.rl.configs.presets.go1.mujoco.base", "Go1FlatMujocoConfig"),
     "Go1MLPConfig": ("rlworld.rl.configs.presets.go1.mujoco.mlp", "Go1MLPConfig"),
+    # Go2
+    "Go2FlatMujocoConfig": ("rlworld.rl.configs.presets.go2_flat.mujoco.base", "Go2FlatMujocoConfig"),
+    "Go2MLPConfig": ("rlworld.rl.configs.presets.go2_flat.mujoco.mlp", "Go2MLPConfig"),
 }
 
 

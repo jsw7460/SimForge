@@ -19,6 +19,11 @@ Examples:
 import argparse
 
 from rlworld.rl.evals import PolicyEvaluator
+from rlworld.rl.envs.mdp.configs import (
+    TerminationTermConfig,
+    CommandTermConfig,
+)
+from rlworld.rl.envs.mdp.commands import command_terms as cf
 
 
 def main():
@@ -47,7 +52,12 @@ def main():
                 "viewer_type": "viser",
             },
             "command": {
-                "rel_standing_envs": 0.3
+                "rel_standing_envs": 0.0,
+                "sampler": [
+                    CommandTermConfig(cf.lin_vel_x, params={"range": (1.0, 1.5)}),
+                    CommandTermConfig(cf.lin_vel_y, params={"range": (0.0, 0.3)}),
+                    CommandTermConfig(cf.ang_vel, params={"range": (-0.75, 0.75)}),
+                ]
             }
         },
     )

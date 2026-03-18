@@ -13,7 +13,8 @@ class KinematicTree:
     Extract kinematic tree from URDF or MJCF file.
     """
 
-    def __init__(self, urdf_path: str = None, mjcf_path: str = None):
+    def __init__(self, urdf_path: str = None, mjcf_path: str = None, exclude_links: list[str] | None = None):
+
         """
         Args:
             urdf_path: Path to URDF file
@@ -24,6 +25,8 @@ class KinematicTree:
 
         self.urdf_path = urdf_path
         self.mjcf_path = mjcf_path
+        self.exclude_links = set(exclude_links) if exclude_links else set()
+
         self.name = "robot"
 
         self.parent_indices = []
@@ -158,6 +161,9 @@ class KinematicTree:
             if is_sensor:
                 continue
             links[name] = link
+
+        # Filter out explicitly excluded links
+        links = {name: elem for name, elem in links.items() if name not in self.exclude_links}
 
         # Filter out low-mass links (mass <= 0.01)
         filtered_links = {}

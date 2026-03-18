@@ -59,6 +59,7 @@ _PRESET_REGISTRY: dict[tuple[str, str], str] = {
     # Go2
     ("go2", "genesis"):  "rlworld.rl.configs.presets.go2_flat.genesis.mlp",
     ("go2", "newton"):   "rlworld.rl.configs.presets.go2_flat.newton.mlp",
+    ("go2", "mujoco"):   "rlworld.rl.configs.presets.go2_flat.mujoco.mlp",
     # G1 29-DOF
     ("g1_29dof", "genesis"): "rlworld.rl.configs.presets.g1_29dof.genesis.mlp",
     ("g1_29dof", "newton"):  "rlworld.rl.configs.presets.g1_29dof.newton.mlp",
