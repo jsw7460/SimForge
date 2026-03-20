@@ -62,7 +62,6 @@ class NewtonContactManager(BaseManager):
         # This order defines the canonical shape indexing for ALL tensors
         self._shape_names: list[str] = []
         self.num_shapes: int = 0
-        self._include_total: bool = True
 
         # All timing buffers have shape (num_envs, num_shapes)
         # Axis 1 ordering matches self._shape_names
@@ -102,27 +101,18 @@ class NewtonContactManager(BaseManager):
         model: newton.Model = self.env.scene_manager.model
         sensor: SensorContact = list(self._contact_sensors.values())[0]
 
-        # Get include_total from sensor (requires local Newton patch)
-        # self._include_total = sensor.include_total
-        self._include_total = True
+        # sensing_obj_idx: flat list, sensing_obj_type: "body" | "shape"
+        obj_type = sensor.sensing_obj_type  # "body" or "shape"
+        label_list = model.body_label if obj_type == "body" else model.shape_label
 
-        # sensing_objs is per-world: list[list[tuple[int, ObjectType]]]
-        # Each world has the same shape structure (via replicate), so use world 0
-        world0_objs = sensor.sensing_objs[0]
-        num_shapes_per_env = len(world0_objs)
+        # sensing_obj_idx already preserves per-world order (world 0 = first N entries)
+        world_count = self.env.scene_manager.model.world_count
+        n_per_env = len(sensor.sensing_obj_idx) // world_count
 
-        # Collect world 0's shapes by sorting by idx
-        first_env_objs = [(idx, match_kind) for idx, match_kind in world0_objs]
-        first_env_objs.sort(key=lambda x: x[0])
+        first_env_indices = sensor.sensing_obj_idx[:n_per_env]
 
-        for idx, match_kind in first_env_objs:
-            if match_kind == SensorContact.ObjectType.BODY:
-                name = model.body_label[idx]
-            elif match_kind == SensorContact.ObjectType.SHAPE:
-                name = model.shape_label[idx]
-            else:
-                continue
-            self._shape_names.append(name)
+        for idx in first_env_indices:
+            self._shape_names.append(label_list[idx])
 
         self.num_shapes = len(self._shape_names)
 
@@ -171,16 +161,14 @@ class NewtonContactManager(BaseManager):
         contact_states = []
 
         for sensor in self._contact_sensors.values():
-            # net_force shape: (n_sensing_objs, n_counterparts) of vec3
-            net_force = wp.to_torch(sensor.net_force)  # (n_sensing_objs, n_counterparts, 3)
-
-            if self._include_total:
-                total_force = net_force[:, 0, :]
+            if sensor.total_force is not None:
+                total_force = wp.to_torch(sensor.total_force)  # shape: (n_sensing_objs, 3)
             else:
-                # Sum across counterparts, compute magnitude
-                total_force = net_force.sum(dim=1)
+                # force_matrix: (n_sensing_objs, n_counterparts, 3)
+                force_matrix = wp.to_torch(sensor.force_matrix)
+                total_force = force_matrix.sum(dim=1)
 
-            force_magnitude = torch.norm(total_force, dim=-1)  # (n_sensing_objs,)
+            force_magnitude = torch.norm(total_force, dim=-1)
 
             # Contact if force > small threshold
             is_contact = force_magnitude > 1.0  # (n_sensing_objs,)
@@ -229,12 +217,11 @@ class NewtonContactManager(BaseManager):
             )
 
         sensor = list(self._contact_sensors.values())[0]
-        net_force = wp.to_torch(sensor.net_force)
-
-        if self._include_total:
-            total_force = net_force[:, 0, :]
+        if sensor.total_force is not None:
+            total_force = wp.to_torch(sensor.total_force)  # (n_sensing_objs, 3)
         else:
-            total_force = net_force.sum(dim=1)
+            force_matrix = wp.to_torch(sensor.force_matrix)
+            total_force = force_matrix.sum(dim=1)
 
         return total_force.reshape(self.num_envs, self.num_shapes, 3)
 

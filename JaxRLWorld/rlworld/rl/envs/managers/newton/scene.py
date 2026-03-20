@@ -527,7 +527,7 @@ class NewtonSceneManager(BaseManager):
                 sensing_obj_shapes=self._prefix_names(entity_name, config.sensing_obj_shapes),
                 counterpart_bodies=self._prefix_names(entity_name, config.counterpart_bodies),
                 counterpart_shapes=config.counterpart_shapes,
-                include_total=config.include_total,
+                measure_total=config.include_total,
             )
             self.sensors[config.sensor_name] = sensor
 
