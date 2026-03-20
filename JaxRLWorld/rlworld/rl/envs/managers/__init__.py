@@ -1,4 +1,5 @@
 from .base import BaseManager
+from .common.contact import BaseContactManager
 from .registry import ManagerRegistry
 
 # Common managers (simulator-independent)
@@ -68,6 +69,7 @@ VisualizationManagerConfig = GenesisVisualizationManagerConfig
 
 __all__ = [
     "BaseManager",
+    "BaseContactManager",
     "ManagerRegistry",
     # Common
     "CommandManager", "CommandManagerConfig",

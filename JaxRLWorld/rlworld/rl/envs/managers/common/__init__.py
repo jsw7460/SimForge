@@ -1,3 +1,4 @@
+from .contact import BaseContactManager
 from .command import CommandManager, CommandManagerConfig
 from .reward import RewardManager, RewardManagerConfig
 from .termination import TerminationManager, TerminationConfig
@@ -6,6 +7,7 @@ from .gait import GaitManager, GaitManagerConfig
 from .observation import ObservationManager, ObsManagerConfig
 
 __all__ = [
+    "BaseContactManager",
     "CommandManager",
     "CommandManagerConfig",
     "RewardManager",
