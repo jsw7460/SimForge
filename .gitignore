@@ -6,7 +6,6 @@
 # --- Exclude all other packages (root-level only) ---
 /Genesis/
 /Newton/
-/Mjlab/
 /rsl_rl/
 /tdmpc2/
 /PhysDyn/

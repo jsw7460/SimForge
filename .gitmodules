@@ -1,0 +1,3 @@
+[submodule "Mjlab"]
+	path = Mjlab
+	url = git@github.com:jsw7460/mjlab.git
