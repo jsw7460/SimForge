@@ -62,7 +62,6 @@ class PolicyEvaluator:
         num_evals: int = 5,
         seed: int = 42,
         use_logging: bool = True,
-        show_viewer: bool = False,
         record_video: bool = False,
         save_data: bool = True,
         record_steps: int | None = 1000,
@@ -90,7 +89,6 @@ class PolicyEvaluator:
         self.seed = seed
 
         self.use_logging = use_logging
-        self.show_viewer = show_viewer
         self.record_video = record_video
         self.use_rich_display = use_rich_display
         self.video_dir = None
@@ -132,7 +130,6 @@ class PolicyEvaluator:
                 eval_cfgs=eval_cfgs,
                 metadata=metadata,
                 extra_overrides=extra_overrides,
-                show_viewer=show_viewer,
                 record_video=record_video,
                 video_dir=self.video_dir,
             )
@@ -141,7 +138,6 @@ class PolicyEvaluator:
                 policy_path=policy_path,
                 extra_overrides=extra_overrides,
                 metadata=metadata,
-                show_viewer=show_viewer,
                 record_video=record_video,
                 video_dir=self.video_dir,
             )
@@ -234,7 +230,6 @@ class PolicyEvaluator:
         eval_cfgs,
         metadata: dict,
         extra_overrides: dict | None,
-        show_viewer: bool,
         record_video: bool,
         video_dir: str | None,
     ):
@@ -284,8 +279,8 @@ class PolicyEvaluator:
         if extra_overrides is not None:
             cfgs.apply_overrides(**extra_overrides)
 
-        # Visualization settings
-        cfgs.visualization.show_viewer = show_viewer
+        # Visualization: native GL viewer always off; viser controlled via overrides.
+        cfgs.visualization.show_viewer = False
         cfgs.visualization.record_video = record_video
         if hasattr(cfgs.visualization, 'video_dir'):
             cfgs.visualization.video_dir = video_dir
@@ -443,6 +438,42 @@ class PolicyEvaluator:
         results_dir = base_dir / timestamp
         results_dir.mkdir(parents=True, exist_ok=True)
         self.eval_results_dir = results_dir
+
+    def play(self, port: int = 8080) -> None:
+        """Launch interactive viewer with real-time pacing.
+
+        Opens a Viser web viewer with Play/Pause, Speed, Step, and Reset
+        controls. The simulation runs at real-time speed by default.
+
+        Args:
+            port: Viser server port.
+        """
+        from rlworld.rl.vis.viser.play_viewer import ViserPlayViewer
+
+        play_scene = self._create_play_scene()
+        viewer = ViserPlayViewer(
+            env=self.env, play_scene=play_scene, policy=self.policy, port=port,
+        )
+        viewer.run()
+
+    def _create_play_scene(self):
+        """Create the appropriate PlayScene for this simulator."""
+        from rlworld.rl.vis.viser.play_scene import BridgePlayScene, MjlabPlayScene
+
+        if self.sim_type == "MjlabEnv":
+            return MjlabPlayScene(self.env.scene_manager)
+
+        # Newton / Genesis: use SimulatorBridge + ViserScene.
+        if self.sim_type == "Newton":
+            from rlworld.rl.vis.viser.bridges import NewtonBridge
+            bridge = NewtonBridge(self.env.scene_manager)
+        elif self.sim_type == "Genesis":
+            from rlworld.rl.vis.viser.bridges import GenesisBridge
+            bridge = GenesisBridge(self.env.scene_manager)
+        else:
+            raise ValueError(f"No play scene for simulator type: {self.sim_type}")
+
+        return BridgePlayScene(bridge)
 
     def evaluate(self):
         """Run evaluation."""

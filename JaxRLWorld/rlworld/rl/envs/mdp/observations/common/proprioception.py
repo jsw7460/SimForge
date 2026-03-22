@@ -40,31 +40,51 @@ def projected_gravity(env: World, entity_name: str = "robot") -> torch.Tensor:
     return env.get_robot_data(entity_name).projected_gravity_b
 
 
+def _actuated_joint_ids(env: World) -> torch.Tensor | None:
+    """Return act_manager._joint_ids if it exists (MuJoCo needs reindexing)."""
+    ids = getattr(env.act_manager, "_joint_ids", None)
+    if ids is None:
+        return None
+    # Only return if it's actually a permutation (not identity).
+    n = len(ids)
+    if n > 0 and not torch.equal(ids, torch.arange(n, device=ids.device)):
+        return ids
+    return None
+
+
 def dof_pos(env: World, entity_name: str = "robot") -> torch.Tensor:
-    """Actuated joint positions.
+    """Actuated joint positions in act_manager order.
 
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    return env.get_robot_data(entity_name).joint_pos
+    pos = env.get_robot_data(entity_name).joint_pos
+    joint_ids = _actuated_joint_ids(env)
+    if joint_ids is not None:
+        return pos[:, joint_ids]
+    return pos
 
 
 def dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
-    """Actuated joint velocities.
+    """Actuated joint velocities in act_manager order.
 
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    return env.get_robot_data(entity_name).joint_vel
+    vel = env.get_robot_data(entity_name).joint_vel
+    joint_ids = _actuated_joint_ids(env)
+    if joint_ids is not None:
+        return vel[:, joint_ids]
+    return vel
 
 
 def dof_pos_nominal_difference(env: World, entity_name: str = "robot") -> torch.Tensor:
-    """Joint positions relative to nominal (default) positions.
+    """Joint positions relative to nominal (default) positions, in act_manager order.
 
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    return env.get_robot_data(entity_name).joint_pos - env.act_manager.offset
+    return dof_pos(env, entity_name) - env.act_manager.offset
 
 
 def base_height(env: World, entity_name: str = "robot") -> torch.Tensor:

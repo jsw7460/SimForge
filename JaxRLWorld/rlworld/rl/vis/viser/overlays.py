@@ -75,8 +75,15 @@ class ViserTermOverlays:
             self.reward_plotter.clear_histories()
             self.reward_plotter.update_env_idx(env_idx)
 
-    def update(self) -> None:
-        """Update term plots from the selected environment."""
+    def update(self, paused: bool = False) -> None:
+        """Update term plots from the selected environment.
+
+        Args:
+            paused: If True, skip plot updates to reduce overhead.
+        """
+        if paused:
+            return
+
         # Lazy init if reward names weren't available at setup time.
         if not self._initialized and hasattr(self, "_tabs"):
             names = list(self.env.rew_buf_per_type.keys())

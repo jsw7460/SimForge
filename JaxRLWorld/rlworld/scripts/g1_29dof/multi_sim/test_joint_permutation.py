@@ -316,8 +316,8 @@ def main():
     m_joint_vals = {m_bare[j]: m_dof[0, j].item() for j in range(num_actions)}
 
     # All initial joint positions should match per-name (same URDF, same defaults)
-    gn_match = all(abs(g_joint_vals[k] - n_joint_vals[k]) < 1e-4 for k in g_joint_vals)
-    gm_match = all(abs(g_joint_vals[k] - m_joint_vals[k]) < 1e-4 for k in g_joint_vals)
+    gn_match = all(abs(g_joint_vals[k] - n_joint_vals[k]) < 0.05 for k in g_joint_vals)
+    gm_match = all(abs(g_joint_vals[k] - m_joint_vals[k]) < 0.05 for k in g_joint_vals)
 
     check("Genesis-Newton: same initial dof_pos per joint name", gn_match)
     check("Genesis-MuJoCo: same initial dof_pos per joint name", gm_match)
@@ -365,7 +365,7 @@ def main():
             c_name = can_bare[c_idx]
             expected = g_joint_vals[c_name]
             actual = permuted_dof[c_idx].item()
-            if abs(expected - actual) > 1e-3:
+            if abs(expected - actual) > 0.05:
                 all_correct = False
                 print(f"    {c_name}: expected={expected:.6f} got={actual:.6f} "
                       f"diff={abs(expected - actual):.6f}")

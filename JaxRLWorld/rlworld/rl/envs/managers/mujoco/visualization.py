@@ -34,7 +34,7 @@ class MjlabVisualizationManager(BaseManager):
 
     def setup(self) -> None:
         """Setup viewer after scene is built."""
-        if not self.config.show_viewer:
+        if self.config.viewer_type != "viser":
             return
 
         import viser
@@ -47,6 +47,7 @@ class MjlabVisualizationManager(BaseManager):
             port=self.config.viser_port,
             label="rlworld-mjlab",
         )
+        self._server.request_share_url()
 
         self._scene = ViserMujocoScene.create(
             server=self._server,

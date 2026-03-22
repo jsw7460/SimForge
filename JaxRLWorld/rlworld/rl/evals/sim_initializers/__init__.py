@@ -20,7 +20,6 @@ class SimInitializer(ABC):
         policy_path: str,
         extra_overrides: dict | None,
         metadata: dict,
-        show_viewer: bool,
         record_video: bool,
         video_dir: str | None,
     ) -> Any:

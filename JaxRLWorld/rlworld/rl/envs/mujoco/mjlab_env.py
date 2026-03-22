@@ -154,13 +154,13 @@ class MjlabEnv(World):
         self.contact_manager = ContactCls(env=self)
         self.contact_manager.register_sensors()
 
-        if self.visualization_cfg.show_viewer:
+        viewer_type = getattr(self.visualization_cfg, "viewer_type", None)
+        if viewer_type == "viser":
             from rlworld.rl.envs.managers.mujoco.visualization import (
                 MjlabVisualizationManager,
                 MjlabVisualizationManagerConfig,
             )
             viz_config = MjlabVisualizationManagerConfig(
-                show_viewer=True,
                 viewer_type="viser",
                 viser_port=self.visualization_cfg.viser_port,
             )

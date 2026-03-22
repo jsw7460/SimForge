@@ -67,7 +67,6 @@ class MjlabInitializer(SimInitializer):
         policy_path: str,
         extra_overrides: dict | None,
         metadata: dict,
-        show_viewer: bool,
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
@@ -78,7 +77,7 @@ class MjlabInitializer(SimInitializer):
         if extra_overrides is not None:
             eval_cfgs.apply_overrides(**extra_overrides)
 
-        eval_cfgs.visualization.show_viewer = show_viewer
+        eval_cfgs.visualization.show_viewer = False
         eval_cfgs.visualization.record_video = record_video
         eval_cfgs.visualization.video_dir = video_dir
 

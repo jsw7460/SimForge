@@ -3,13 +3,15 @@ from dataclasses import dataclass
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import NoiseConfig
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    base_ang_vel,
     base_lin_vel,
     dof_pos,
     dof_vel,
     dof_pos_nominal_difference,
     prev_processed_actions,
+    projected_gravity,
 )
-from rlworld.rl.envs.mdp.observations.genesis import proprioception, exteroception
+from rlworld.rl.envs.mdp.observations.genesis import exteroception
 
 
 @dataclass
@@ -79,16 +81,15 @@ class LocomotionObservations:
             ))
 
         terms.append(ObservationTermConfig(
-                proprioception.imu_ang_vel,
+                base_ang_vel,
                 scale=self.ang_vel_scale,
                 noise=self.ang_vel_noise,
                 clip=self.ang_vel_clip,
                 history_length=self.ang_vel_history,
-                params={"base_name": self.base_name},
             ))
 
         terms.append(ObservationTermConfig(
-                proprioception.projected_gravity,
+                projected_gravity,
                 scale=self.gravity_scale,
                 noise=self.gravity_noise,
                 clip=self.gravity_clip,
@@ -179,15 +180,14 @@ class LocomotionObservations:
 
         terms.extend([
             ObservationTermConfig(
-                proprioception.imu_ang_vel,
+                base_ang_vel,
                 scale=self.ang_vel_scale,
                 noise=self.ang_vel_noise,
                 clip=self.ang_vel_clip,
                 history_length=self.ang_vel_history,
-                params={"base_name": self.base_name},
             ),
             ObservationTermConfig(
-                proprioception.projected_gravity,
+                projected_gravity,
                 scale=self.gravity_scale,
                 noise=self.gravity_noise,
                 clip=self.gravity_clip,

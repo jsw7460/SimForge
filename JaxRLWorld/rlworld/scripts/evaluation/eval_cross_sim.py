@@ -4,16 +4,19 @@ The robot is auto-detected from the checkpoint, and observation/algorithm/nn
 configs are automatically restored.  You only need to specify which simulator
 to evaluate on.
 
+By default, launches an interactive real-time viewer (play mode).
+Pass --eval for batch evaluation with statistics.
+
 Examples:
-    # Genesis-trained Go2 checkpoint -> Newton eval
+    # Interactive play (default)
     python -m rlworld.scripts.evaluation.eval_cross_sim \
         --policy_path outputs/models/.../checkpoint_latest/ \
         --eval_sim newton
 
-    # MultiSim (Genesis+Newton) checkpoint -> Genesis-only eval
+    # Batch evaluation with viser viewer
     python -m rlworld.scripts.evaluation.eval_cross_sim \
         --policy_path outputs/models/.../checkpoint_latest/ \
-        --eval_sim genesis --num_envs 5
+        --eval_sim genesis --eval
 """
 
 import argparse
@@ -32,38 +35,47 @@ def main():
     parser.add_argument("--eval_sim", type=str, required=True, choices=["genesis", "newton", "mujoco"])
     parser.add_argument("--num_envs", type=int, default=10)
     parser.add_argument("--num_evals", type=int, default=10)
-    parser.add_argument("--show_viewer", action="store_true")
     parser.add_argument("--record_video", action="store_true")
+    parser.add_argument("--eval", action="store_true", help="Run batch evaluation instead of interactive viewer")
+    parser.add_argument("--port", type=int, default=2026, help="Viser viewer port")
     args = parser.parse_args()
+
+    overrides = {
+        "env": {
+            "num_envs": 1,
+            "episode_length_s": 10e+9,
+        },
+        "command": {
+            "rel_standing_envs": 0.0,
+            "sampler": [
+                CommandTermConfig(cf.lin_vel_x, params={"range": (1.0, 1.5)}),
+                CommandTermConfig(cf.lin_vel_y, params={"range": (0.0, 0.3)}),
+                CommandTermConfig(cf.ang_vel, params={"range": (-0.75, 0.75)}),
+            ]
+        },
+    }
+
+    # Eval mode: env's built-in viser viewer runs during batch eval.
+    # Play mode: no env viewer; PlayViewer creates its own.
+    if args.eval:
+        overrides["visualization"] = {
+            "viser_port": args.port,
+            "viewer_type": "viser",
+        }
 
     evaluator = PolicyEvaluator(
         policy_path=args.policy_path,
         eval_target=args.eval_sim,
         num_evals=args.num_evals,
-        show_viewer=args.show_viewer,
         record_video=args.record_video,
-        extra_overrides={
-            "env": {
-                "num_envs": 1,
-                "episode_length_s": 10e+9,
-            },
-            "visualization": {
-                "viser_port": 2026,
-                "viewer_type": "viser",
-            },
-            "command": {
-                "rel_standing_envs": 0.0,
-                "sampler": [
-                    CommandTermConfig(cf.lin_vel_x, params={"range": (1.0, 1.5)}),
-                    CommandTermConfig(cf.lin_vel_y, params={"range": (0.0, 0.3)}),
-                    CommandTermConfig(cf.ang_vel, params={"range": (-0.75, 0.75)}),
-                ]
-            }
-        },
+        extra_overrides=overrides,
     )
 
-    stats = evaluator.evaluate()
-    print(f"\nMean return: {stats['mean_return']:.2f} +/- {stats['std_return']:.2f}")
+    if args.eval:
+        stats = evaluator.evaluate()
+        print(f"\nMean return: {stats['mean_return']:.2f} +/- {stats['std_return']:.2f}")
+    else:
+        evaluator.play(port=args.port)
 
 
 if __name__ == "__main__":
