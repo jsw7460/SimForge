@@ -1,252 +1,240 @@
 # SimForge
 
-A modular reinforcement learning framework for robot locomotion training with support for multiple physics simulators and robot platforms.
+A modular reinforcement learning framework for robot locomotion, built for training across multiple physics simulators simultaneously.
 
 ## Overview
 
-SimForge (rlworld) provides a flexible and extensible framework for training RL policies using reinforcement learning. It supports multiple physics simulators and robot configurations with a clean, composable configuration system.
+SimForge provides a unified environment interface (`World`) that abstracts over Genesis, Newton, and MuJoCo simulators. A single policy can be trained on rollouts from multiple simulators at once ("simulator randomization"), then evaluated on any of them — including cross-simulator transfer.
+
+Key design choices:
+- **Manager-based environment**: Observations, rewards, actions, commands, events, contacts, and terminations are modular managers that plug into any simulator backend.
+- **Common observation functions**: Simulator-agnostic obs terms via the `RobotData` protocol — the same `dof_pos`, `base_ang_vel`, `projected_gravity` functions work on Genesis, Newton, and MuJoCo.
+- **Multi-sim training**: `MultiSimWorld` wraps multiple simulator environments, handles joint ordering permutations automatically, and presents a single vectorized interface to the algorithm.
+- **Config presets**: Dataclass-based configs per robot/simulator/architecture, composable and overridable from CLI.
 
 ## Installation
 
 ### Prerequisites
-- Python 3.11
+- Python 3.11+
 - CUDA-compatible GPU
 
-### Step-by-step Setup
+### Setup
 
-1. **Create a conda environment**
 ```bash
-   conda create -n rl python=3.11
-   conda activate rl
+conda create -n rl python=3.11
+conda activate rl
+
+# PyTorch
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# JAX with CUDA
+pip install --upgrade "jax[cuda13]"
+
+# Simulators (install the ones you need)
+pip install genesis-world                          # Genesis
+pip install mjlab                                  # MuJoCo (mjlab wrapper)
+# Newton: follow https://github.com/newton-physics/newton
+
+# SimForge
+cd SimForge
+pip install -e .
 ```
 
-2. **Install PyTorch**
-```bash
-   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+## Supported Platforms
+
+### Robots
+
+| Robot | Type | DOFs | Simulators |
+|-------|------|------|------------|
+| Go1 | Quadruped | 12 | Genesis, Newton, MuJoCo |
+| Go2 | Quadruped | 12 | Genesis, Newton, MuJoCo |
+| G1 | Humanoid | 12 / 29 | Genesis, Newton, MuJoCo |
+
+### Simulators
+
+| Simulator | Backend | GPU | Multi-env |
+|-----------|---------|-----|-----------|
+| Genesis | JAX-native | Yes | Yes (thousands) |
+| Newton | MuJoCo-Warp | Yes | Yes (thousands) |
+| MuJoCo | mjlab (MuJoCo-Warp) | Yes | Yes (thousands) |
+
+### Algorithms
+
+| Algorithm | Type | Runner |
+|-----------|------|--------|
+| PPO | On-policy | `OnPolicyRunner` |
+| TD3 | Off-policy | `OffPolicyRunner` |
+| SAC | Off-policy | `OffPolicyRunner` |
+| FastTD3 | Off-policy | `OffPolicyRunner` |
+| TDMPC2 | Model-based | `ModelBasedRunner` |
+| SimMPC | Sim-based MPC | `SimMPCRunner` |
+
+### Neural Network Architectures
+
+MLP, ABA (Articulated Body Algorithm), ABA+GNN, Transformer, Body Transformer, CRBA, Rodrigues, DR3.
+
+## Quick Start
+
+### Training
+
+```python
+from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
+from rlworld.rl.runners import BaseRunner
+
+cfg = get_config()
+runner = BaseRunner.create_with_env(cfg.with_cli_overrides())
+runner.learn(num_learning_iterations=cfg.runner.max_iterations)
 ```
 
-3. **Install Genesis**
 ```bash
-   pip install genesis-world
-```
-   For more details, see [Genesis](https://github.com/Genesis-Embodied-AI/Genesis).
-
-4. **Install Newton**
-
-   Follow **Method 3: Manual Setup Using Pip in a Virtual Environment** from the [Newton documentation](https://github.com/newton-physics/newton).
-
-5. **Install Mjlab**
-```bash
-   pip install mjlab
-```
-   For more details, see [Mjlab](https://github.com/mujocolab/mjlab).
-
-6. **Install JAX with CUDA support**
-```bash
-   pip install --upgrade "jax[cuda13]"
+python -m rlworld.scripts.go2.genesis.mlp
+python -m rlworld.scripts.g1_29dof.genesis.mlp
 ```
 
-7. **Install SimForge**
-```bash
-   cd SimForge
-   pip install -e .
+### Multi-Simulator Training
+
+Train on Genesis + Newton simultaneously:
+
+```python
+from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config as genesis_cfg
+from rlworld.rl.configs.presets.go2_flat.newton.mlp import get_config as newton_cfg
+from rlworld.rl.envs.multi_sim_world import MultiSimWorld
+from rlworld.rl.runners import BaseRunner, OnPolicyRunner
+
+g_env = BaseRunner._create_env_from_config(genesis_cfg())
+n_env = BaseRunner._create_env_from_config(newton_cfg())
+
+multi_env = MultiSimWorld([g_env, n_env])
+runner = OnPolicyRunner(env=multi_env, cfgs=genesis_cfg())
+runner.learn(num_learning_iterations=6000)
 ```
 
-## Supported Robots
+```bash
+python -m rlworld.scripts.go2.multi_sim.ppo_mlp
+```
 
-| Robot | Type | DOFs | Description |
-|-------|------|------|-------------|
-| **Go1** | Quadruped | 12 | Unitree Go1 quadruped robot |
-| **Go2** | Quadruped | 12 | Unitree Go2 quadruped robot |
-| **G1** | Humanoid | 12 | Unitree G1 humanoid robot (lower body) |
+### Evaluation
 
-## Supported Simulators
+#### Interactive viewer (real-time, default)
 
-| Simulator | Backend | Description |
-|-----------|---------|-------------|
-| **Genesis** | Custom | High-performance GPU-accelerated physics simulator |
-| **Newton** | MuJoCo Warp | GPU-accelerated simulator with MuJoCo physics|
+```bash
+python -m rlworld.scripts.evaluation.eval_cross_sim \
+    --policy_path outputs/models/.../checkpoint_latest/ \
+    --eval_sim newton
+```
 
-## Features
+Opens a Viser web viewer with Play/Pause, Speed (1/32x — 8x), Step, and Reset controls. No SSH tunnel needed — uses a share URL.
 
-- **Modular Configuration System**: Dataclass-based configs for robots, observations, rewards, and environments
-- **Multiple RL Algorithms**: PPO, SAC, TD3, TDMPC2
-- **Various Neural Network Architectures**: MLP, GNN, Transformer, ABA, CRBA, Body Transformer
-- **Domain Randomization**: Mass, friction, external force randomization
-- **Curriculum Learning**: Progressive difficulty adjustment
-- **WandB Integration**: Experiment tracking and logging
+#### Batch evaluation
+
+```bash
+python -m rlworld.scripts.evaluation.eval_cross_sim \
+    --policy_path outputs/models/.../checkpoint_latest/ \
+    --eval_sim genesis --eval --record_video
+```
+
+#### Cross-simulator evaluation
+
+A checkpoint trained on Genesis can be evaluated on Newton or MuJoCo:
+
+```python
+from rlworld.rl.evals import PolicyEvaluator
+
+evaluator = PolicyEvaluator(
+    policy_path="outputs/models/.../checkpoint_latest/",
+    eval_target="newton",
+)
+evaluator.play()       # Interactive viewer
+# evaluator.evaluate() # Batch eval with statistics
+```
 
 ## Project Structure
 
 ```
-rlworld/
-├── assets/                     # Robot URDF models and terrain meshes
+JaxRLWorld/rlworld/
+├── assets/                          # Robot URDFs and meshes
 ├── rl/
-│   ├── algorithms/             # RL algorithms (PPO, SAC, TD3)
+│   ├── algorithms/                  # PPO, TD3, SAC, FastTD3, TDMPC2, SimMPC
 │   ├── configs/
-│   │   ├── components/         # Reusable observation/reward components
-│   │   ├── presets/            # Ready-to-use configurations
-│   │   │   ├── go1/            # Go1 robot presets
-│   │   │   ├── go2_flat/       # Go2 flat terrain presets
-│   │   │   └── g1/             # G1 humanoid presets
-│   │   └── robots/             # Robot-specific configurations
-│   ├── envs/                   # Environment implementations
-│   │   ├── mdp/                # MDP components (observations, rewards, terminations)
-│   │   └── managers/           # Simulator-specific managers
-│   ├── modules/                # Neural network architectures
-│   │   └── architectures/      # MLP, GNN, Transformer, ABA, CRBA, etc.
-│   └── runners/                # Training runners
-└── scripts/                    # Training scripts
-    ├── go1/                    # Go1 training examples
-    ├── go2/                    # Go2 training examples
-    └── g1/                     # G1 training examples
+│   │   ├── components/              # Reusable observation/reward components
+│   │   │   └── observations/        # Per-simulator LocomotionObservations
+│   │   ├── presets/                 # Ready-to-use configs
+│   │   │   ├── go1/                 #   genesis/ newton/ mujoco/
+│   │   │   ├── go2_flat/            #   genesis/ newton/ mujoco/
+│   │   │   ├── g1_12dof/            #   genesis/ newton/
+│   │   │   └── g1_29dof/            #   genesis/ newton/ mujoco/
+│   │   └── robots/                  # Go1, Go2, G1 robot configs
+│   ├── envs/
+│   │   ├── world.py                 # World ABC — base for all envs
+│   │   ├── multi_sim_world.py       # MultiSimWorld + joint permutation
+│   │   ├── genesis/                 # Genesis env implementation
+│   │   ├── newton/                  # Newton env implementation
+│   │   ├── mujoco/                  # MuJoCo (mjlab) env implementation
+│   │   ├── managers/                # Modular managers per simulator
+│   │   │   ├── common/              #   observation, action, reward, command, ...
+│   │   │   ├── genesis/             #   scene, contact, visualization
+│   │   │   ├── newton/              #   scene, contact, visualization
+│   │   │   └── mujoco/              #   scene, contact, visualization
+│   │   └── mdp/                     # MDP components
+│   │       ├── observations/        #   common/ genesis/ newton/ mujoco/
+│   │       ├── rewards/             #   common/ genesis/ newton/ mujoco/
+│   │       ├── terminations/
+│   │       └── commands/
+│   ├── evals/                       # PolicyEvaluator + SimInitializers
+│   ├── modules/                     # Neural networks
+│   │   ├── architectures/           #   MLP, ABA, GNN, Transformer, ...
+│   │   ├── policies/                #   PPO, SAC, TD3, TDMPC2 actor-critics
+│   │   └── dynamics/                #   World models
+│   ├── runners/                     # Training loops
+│   │   ├── on_policy_runner.py      #   PPO
+│   │   ├── off_policy_runner.py     #   TD3, SAC, FastTD3
+│   │   └── model_based_runner.py    #   TDMPC2
+│   ├── storages/                    # Rollout buffer, replay buffer
+│   └── vis/                         # Visualization
+│       └── viser/                   #   PlayViewer, ViserScene, bridges, overlays
+└── scripts/                         # Training and evaluation scripts
+    ├── go1/                         #   genesis/ newton/ mujoco/
+    ├── go2/                         #   genesis/ newton/ mujoco/ multi_sim/
+    ├── g1_29dof/                    #   genesis/ newton/ mujoco/ multi_sim/
+    └── evaluation/                  #   eval_cross_sim, eval_genesis, eval_newton
 ```
 
-## Quick Start
+## Configuration
 
-### Training Go1 with MLP Policy (Genesis)
+Configs are Python dataclasses, composable and overridable:
 
 ```python
-from rlworld.rl.configs import GenesisConfigsForRun
-from rlworld.rl.runners import BaseRunner
-from rlworld.rl.configs.presets.go1.genesis.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
 
-def main():
-    # Get preset configuration
-    configs_dict = get_config()
-
-    # Create configs and runner
-    cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
-    runner = BaseRunner.create_with_env(cfgs_for_run)
-
-    # Start training
-    runner.learn(
-        num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
-    )
-
-if __name__ == "__main__":
-    main()
+cfg = get_config()
+cfg.env.num_envs = 2048
+cfg.algorithm.learning_rate = 3e-4
+cfg.runner.max_iterations = 10000
 ```
 
-### Training G1 Humanoid
-
-```python
-from rlworld.rl.configs import GenesisConfigsForRun
-from rlworld.rl.runners import OnPolicyRunner
-from rlworld.rl.configs.presets.g1.genesis.mlp import get_config
-
-def main():
-    configs_dict = get_config()
-    cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
-
-    # Customize network architecture
-    cfgs_for_run.nn.policy["actor_kwargs"].update({
-        "hidden_dims": [700, 512, 512]
-    })
-
-    runner = OnPolicyRunner.create_with_env(cfgs_for_run)
-    runner.learn(
-        num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
-    )
-
-if __name__ == "__main__":
-    main()
-```
-
-## Configuration System
-
-### Robot Configuration
-
-Each robot has a dedicated configuration class:
-
-```python
-@dataclass
-class Go1Config(RobotConfig):
-    name: str = "go1"
-    urdf_path: str = "./rlworld/assets/go1_model_clean/urdf/go1_simplified_stl.urdf"
-    base_init_height: float = 0.41
-    default_joint_angles: Dict[str, float] = ...
-    p_gains: Dict[str, float] = ...
-    d_gains: Dict[str, float] = ...
-```
-
-### Environment Configuration
-
-Configurations compose multiple components:
-
-```python
-@dataclass
-class Go1FlatGenesisConfig:
-    robot: Go1Config = field(default_factory=Go1Config)
-    observations: LocomotionObservations = ...
-    tracking_rewards: TrackingRewards = ...
-    regularization_rewards: RegularizationRewards = ...
-    num_envs: int = 4096
-    episode_length_s: float = 20.0
-    ...
-```
-
-### Reward Components
-
-Rewards are modularly defined and combined:
-
-- **TrackingRewards**: Linear/angular velocity tracking
-- **RegularizationRewards**: Action smoothness, base height, default pose
-- **ContactRewards**: Feet height, air time, impact forces
-- **PostureRewards**: Body orientation, joint limits
-
-## Running Training Scripts
+CLI overrides:
 
 ```bash
-# Go1 quadruped
-python -m rlworld.scripts.go1.genesis.mlp
-
-# Go2 quadruped
-python -m rlworld.scripts.go2.genesis.mlp
-
-# G1 humanoid
-python -m rlworld.scripts.g1.mlp
+python script.py env.num_envs=2048 algorithm.learning_rate=3e-4
 ```
 
-## Available Presets
+### Config Presets
 
-### Go1 (Quadruped)
-- `rlworld.rl.configs.presets.go1.genesis.mlp` - MLP policy with Genesis
-- `rlworld.rl.configs.presets.go1.newton.mlp` - MLP policy with Newton
+Each preset is organized as `presets/{robot}/{simulator}/{architecture}.py` and includes env, scene, observation, reward, action, command, event, nn, algorithm, and runner configs.
 
-### Go2 (Quadruped)
-- `rlworld.rl.configs.presets.go2_flat.genesis.mlp` - Flat terrain MLP
-- `rlworld.rl.configs.presets.go2_flat.newton.mlp` - Flat terrain with Newton
+## Visualization
 
-### G1 (Humanoid)
-- `rlworld.rl.configs.presets.g1.genesis.mlp` - MLP policy for humanoid locomotion
+All viewers use [Viser](https://viser.studio/) — a web-based 3D viewer that works over SSH without port forwarding (share URL).
 
-## Key Configuration Options
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `num_envs` | Number of parallel environments | 4096 |
-| `episode_length_s` | Episode duration in seconds | 20.0 |
-| `decimation` | Action repeat count | 4 |
-| `action_scale` | Action scaling factor | 0.4 |
-| `max_iterations` | Training iterations | 6000 |
-| `actor_hidden_dims` | Actor network architecture | [256, 256, 256] |
+- **PlayViewer** (`evaluator.play()`): Real-time pacing with budget accumulator. Play/Pause, Speed (1/32x — 8x), Single Step, Reset. Command velocity arrows, reward plots.
+- **Passive viewer** (`--eval` mode): Runs during batch evaluation at full speed. Enabled via `viewer_type: "viser"` in visualization config.
 
 ## Logging
 
-Training metrics are logged to WandB by default. Configure in the runner settings:
+Training metrics are logged to [Weights & Biases](https://wandb.ai/):
 
 ```python
-"logger": "wandb",
-"wandb_project": "RLArchitecture",
+runner = OnPolicyRunner(env=env, cfgs=cfg, use_wandb=True)
 ```
 
-## Requirements
-
-- Python 3.10+
-- PyTorch
-- Genesis simulator
-- Newton simulator
-- WandB (optional, for logging)
+Checkpoints are saved to `outputs/models/{date}/{time}/` with full config metadata for reproducibility and cross-sim evaluation.
