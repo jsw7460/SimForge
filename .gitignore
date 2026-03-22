@@ -4,8 +4,15 @@
 # ==============================
 
 # --- Exclude all other packages (root-level only) ---
+/ConSysID/
+/FastTD3/
 /Genesis/
+/IsaacLab/
 /Newton/
+/SPI-Active/
+/brax/
+/mujoco_playground/
+/neural-robot-dynamics/
 /rsl_rl/
 /tdmpc2/
 /PhysDyn/
