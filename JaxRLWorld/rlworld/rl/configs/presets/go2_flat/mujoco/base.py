@@ -154,11 +154,14 @@ class Go2FlatMujocoConfig:
     def _build_scene_config(self) -> MujocoSceneConfig:
         """Build scene config with mjlab SceneCfg."""
         # Foot contact sensor
+        foot_names = ("FR", "FL", "RR", "RL")
+        geom_names = tuple(f"{name}_foot_collision" for name in foot_names)
+
         feet_ground_cfg = ContactSensorCfg(
             name="feet_ground_contact",
             primary=ContactMatch(
-                mode="body",
-                pattern=r"^(FR_foot|FL_foot|RR_foot|RL_foot)$",
+                mode="geom",
+                pattern=geom_names,
                 entity="robot",
             ),
             secondary=ContactMatch(mode="body", pattern="terrain"),
