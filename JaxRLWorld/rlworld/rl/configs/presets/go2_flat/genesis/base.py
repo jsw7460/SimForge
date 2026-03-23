@@ -136,7 +136,6 @@ class Go2FlatGenesisConfig:
                     {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
                 ),
                 TerminationTermConfig(max_episode_exceed),
-                TerminationTermConfig(tf.invalid_contact, params={"contact_allowed_links": self.robot.foot_names})
             ],
         )
 

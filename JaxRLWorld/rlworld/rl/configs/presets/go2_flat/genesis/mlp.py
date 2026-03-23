@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from rlworld.rl.configs import GenesisConfigsForRun
 from .base import Go2FlatGenesisConfig
 
 
@@ -9,5 +10,5 @@ class Go2MLPConfig(Go2FlatGenesisConfig):
     run_name: str = "Go2_MLP"
 
 
-def get_config():
+def get_config() -> GenesisConfigsForRun:
     return Go2MLPConfig().build()
