@@ -80,7 +80,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Multi-Sim PPO for Go2")
     parser.add_argument("--genesis_num_envs", type=int, default=2048)
     parser.add_argument("--newton_num_envs", type=int, default=2048)
-    parser.add_argument("--max_iterations", type=int, default=6000)
+    parser.add_argument("--max_iterations", type=int, default=10000)
     parser.add_argument("--no_wandb", action="store_true")
     args, _ = parser.parse_known_args()
     return args
@@ -132,6 +132,7 @@ def main():
     primary_cfg = genesis_cfg
     primary_cfg.runner.run_name = "Go2_MultiSim_PPO"
     primary_cfg.runner.max_iterations = args.max_iterations
+    primary_cfg.runner.upload_checkpoint = True
 
     # ── Create runner ──
     runner = OnPolicyRunner(

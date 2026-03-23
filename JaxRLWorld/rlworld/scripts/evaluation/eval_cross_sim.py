@@ -32,6 +32,7 @@ from rlworld.rl.envs.mdp.commands import command_terms as cf
 def main():
     parser = argparse.ArgumentParser(description="Cross-simulator evaluation")
     parser.add_argument("--policy_path", type=str, required=True, help="Checkpoint path")
+    parser.add_argument("--wandb_run_path", type=str, default=None, help="W&B run path")
     parser.add_argument("--eval_sim", type=str, required=True, choices=["genesis", "newton", "mujoco"])
     parser.add_argument("--num_envs", type=int, default=10)
     parser.add_argument("--num_evals", type=int, default=10)
@@ -64,8 +65,9 @@ def main():
         }
 
     evaluator = PolicyEvaluator(
-        policy_path=args.policy_path,
+        # policy_path=args.policy_path,
         eval_target=args.eval_sim,
+        wandb_run_path=args.wandb_run_path,
         num_evals=args.num_evals,
         record_video=args.record_video,
         extra_overrides=overrides,
