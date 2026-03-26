@@ -202,7 +202,7 @@ class Go2FlatGenesisConfig:
                 func=initf.initialize_pos_quat,
                 mode="reset",
                 params={
-                    "base_init_pos": [1.5, 1.5, self.robot.base_init_height],
+                    "base_init_pos": [1.5, 1.5, self.robot.base_init_height + 0.025],
                     "base_init_quat": [1.0, 0.0, 0.0, 0.0],
                 },
             ),
