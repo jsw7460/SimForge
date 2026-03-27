@@ -34,11 +34,13 @@ class ActuatorBase(ABC):
         num_envs: int,
         num_joints: int,
         device: str,
+        joint_names: list[str] | None = None,
     ) -> None:
         self.cfg = cfg
         self._num_envs = num_envs
         self._num_joints = num_joints
         self._device = device
+        self._joint_names = joint_names or []
 
         # Effort limit tensor
         if cfg.effort_limit is not None:
@@ -92,3 +94,25 @@ class ActuatorBase(ABC):
     def _clip_effort(self, effort: torch.Tensor) -> torch.Tensor:
         """Clip torques to the configured effort limit."""
         return torch.clip(effort, min=-self.effort_limit, max=self.effort_limit)
+
+    def _resolve_per_joint_param(
+        self, value: float | dict[str, float] | None, default: float = 0.0
+    ) -> torch.Tensor:
+        """Resolve a scalar or per-joint-regex dict into a (num_envs, num_joints) tensor."""
+        from rlworld.rl.utils import string as string_utils
+
+        tensor = torch.full(
+            (self._num_envs, self._num_joints), default, device=self._device
+        )
+        if value is None:
+            return tensor
+        if isinstance(value, (int, float)):
+            tensor[:] = float(value)
+            return tensor
+        if isinstance(value, dict) and self._joint_names:
+            indices, _, values = string_utils.resolve_matching_names_values(
+                value, self._joint_names
+            )
+            tensor[:, indices] = torch.tensor(values, dtype=torch.float32, device=self._device)
+            return tensor
+        return tensor

@@ -33,25 +33,12 @@ class IdealPDActuator(ActuatorBase):
         num_envs: int,
         num_joints: int,
         device: str,
+        joint_names: list[str] | None = None,
     ) -> None:
-        super().__init__(cfg, num_envs, num_joints, device)
+        super().__init__(cfg, num_envs, num_joints, device, joint_names)
 
-        kp = cfg.stiffness if cfg.stiffness is not None else 0.0
-        kd = cfg.damping if cfg.damping is not None else 0.0
-
-        if isinstance(kp, (int, float)):
-            self.stiffness = torch.full(
-                (num_envs, num_joints), float(kp), device=device
-            )
-        else:
-            self.stiffness = torch.zeros(num_envs, num_joints, device=device)
-
-        if isinstance(kd, (int, float)):
-            self.damping = torch.full(
-                (num_envs, num_joints), float(kd), device=device
-            )
-        else:
-            self.damping = torch.zeros(num_envs, num_joints, device=device)
+        self.stiffness = self._resolve_per_joint_param(cfg.stiffness, default=0.0)
+        self.damping = self._resolve_per_joint_param(cfg.damping, default=0.0)
 
     def reset(self, env_ids: Sequence[int]) -> None:
         pass
@@ -86,8 +73,9 @@ class DelayedPDActuator(IdealPDActuator):
         num_envs: int,
         num_joints: int,
         device: str,
+        joint_names: list[str] | None = None,
     ) -> None:
-        super().__init__(cfg, num_envs, num_joints, device)
+        super().__init__(cfg, num_envs, num_joints, device, joint_names)
 
         max_delay = max(cfg.max_delay, 1)
         # Ring buffer: (max_delay, num_envs, num_joints)
@@ -158,8 +146,9 @@ class DCMotor(IdealPDActuator):
         num_envs: int,
         num_joints: int,
         device: str,
+        joint_names: list[str] | None = None,
     ) -> None:
-        super().__init__(cfg, num_envs, num_joints, device)
+        super().__init__(cfg, num_envs, num_joints, device, joint_names)
 
         if cfg.saturation_effort <= 0:
             raise ValueError("saturation_effort must be > 0 for DCMotor")

@@ -31,8 +31,9 @@ class ActuatorNetMLP(ActuatorBase):
         num_envs: int,
         num_joints: int,
         device: str,
+        joint_names: list[str] | None = None,
     ) -> None:
-        super().__init__(cfg, num_envs, num_joints, device)
+        super().__init__(cfg, num_envs, num_joints, device, joint_names)
 
         if not cfg.network_file:
             raise ValueError("network_file must be specified for ActuatorNetMLP")
@@ -119,8 +120,9 @@ class ActuatorNetLSTM(ActuatorBase):
         num_envs: int,
         num_joints: int,
         device: str,
+        joint_names: list[str] | None = None,
     ) -> None:
-        super().__init__(cfg, num_envs, num_joints, device)
+        super().__init__(cfg, num_envs, num_joints, device, joint_names)
 
         if not cfg.network_file:
             raise ValueError("network_file must be specified for ActuatorNetLSTM")

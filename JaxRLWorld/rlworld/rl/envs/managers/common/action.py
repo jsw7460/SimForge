@@ -98,6 +98,7 @@ class ActionManagerBase(BaseManager):
 
         # Build actuator model if configured
         self._actuator = None
+
         if config.actuator_cfg is not None:
             self._actuator = self._build_actuator(config.actuator_cfg)
 
@@ -331,6 +332,7 @@ class ActionManagerBase(BaseManager):
                     num_envs=self.env.num_envs,
                     num_joints=self._total_action_dim,
                     device=self.device,
+                    joint_names=self._actuated_joint_names,
                 )
         raise ValueError(f"Unknown actuator config type: {type(cfg)}")
 
