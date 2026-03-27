@@ -76,8 +76,12 @@ class MjlabActionManager(ActionManagerBase):
         upper = soft_limits[0, self._joint_ids, 1]
         return lower, upper
 
-    def apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions to mjlab Entity as joint position targets."""
+    def _apply_position(self, targets: torch.Tensor) -> None:
+        """Apply position targets to mjlab Entity with encoder bias."""
         encoder_bias = self._entity.data.encoder_bias[:, self._joint_ids]
-        target = processed_actions - encoder_bias
+        target = targets - encoder_bias
         self._entity.set_joint_position_target(target, joint_ids=self._joint_ids)
+
+    def _apply_force(self, torques: torch.Tensor) -> None:
+        """Apply torques directly to mjlab Entity joints."""
+        self._entity.set_joint_effort_target(torques, joint_ids=self._joint_ids)

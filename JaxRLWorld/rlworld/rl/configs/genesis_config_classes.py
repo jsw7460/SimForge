@@ -64,6 +64,7 @@ class ActionConfig(BaseConfig):
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-100.0, 100.0)
     offset: dict[str, float] = field(default_factory=dict)
     control_mode: Literal["position", "force"] = "position"
+    actuator_cfg: "ActuatorBaseCfg | None" = None
 
 
 @dataclass

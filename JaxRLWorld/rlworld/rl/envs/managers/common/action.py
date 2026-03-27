@@ -18,6 +18,7 @@ from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
+    from rlworld.rl.actuators.actuator_cfg import ActuatorBaseCfg
     from rlworld.rl.envs import World
 
 
@@ -52,6 +53,10 @@ class ActionManagerBaseConfig:
     scale: float | dict[str, float] = 1.0
     offset: dict[str, float] | None = None
     control_mode: Literal["position", "force"] = "position"
+    actuator_cfg: "ActuatorBaseCfg | None" = None
+    """Optional actuator model configuration.  When set, the action manager
+    computes torques via the actuator model and applies them as direct
+    forces, regardless of the ``control_mode`` setting."""
 
 
 class ActionManagerBase(BaseManager):
@@ -60,7 +65,8 @@ class ActionManagerBase(BaseManager):
     Subclasses must implement:
         - _resolve_joints() -> tuple[list[int], list[str]]
         - _get_joint_limits() -> tuple[Tensor, Tensor]
-        - apply_actions(processed_actions: Tensor) -> None
+        - _apply_position(targets: Tensor) -> None
+        - _apply_force(torques: Tensor) -> None
 
     Processing pipeline: raw_action -> clip -> scale -> offset -> processed_action
     """
@@ -90,6 +96,11 @@ class ActionManagerBase(BaseManager):
         self._scale = self._initialize_scale()
         self._clip_low, self._clip_high = self._initialize_clip()
 
+        # Build actuator model if configured
+        self._actuator = None
+        if config.actuator_cfg is not None:
+            self._actuator = self._build_actuator(config.actuator_cfg)
+
     # ------------------------------------------------------------------
     # Abstract methods (simulator-specific)
     # ------------------------------------------------------------------
@@ -113,11 +124,20 @@ class ActionManagerBase(BaseManager):
         ...
 
     @abstractmethod
-    def apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions to the simulator.
+    def _apply_position(self, targets: torch.Tensor) -> None:
+        """Apply position targets to the simulator (uses simulator PD).
 
         Args:
-            processed_actions: Tensor of shape (num_envs, num_actuated).
+            targets: Joint position targets, shape (num_envs, num_actuated).
+        """
+        ...
+
+    @abstractmethod
+    def _apply_force(self, torques: torch.Tensor) -> None:
+        """Apply torques directly to simulator joints (bypasses simulator PD).
+
+        Args:
+            torques: Joint torques, shape (num_envs, num_actuated).
         """
         ...
 
@@ -272,8 +292,82 @@ class ActionManagerBase(BaseManager):
         return None
 
     # ------------------------------------------------------------------
+    # Actuator helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def actuator(self):
+        """The actuator model, or None if not configured."""
+        return self._actuator
+
+    def _build_actuator(self, cfg):
+        """Instantiate the actuator model from its configuration."""
+        from rlworld.rl.actuators.actuator_cfg import (
+            ActuatorNetLSTMCfg,
+            ActuatorNetMLPCfg,
+            DCMotorCfg,
+            DelayedPDActuatorCfg,
+            IdealPDActuatorCfg,
+        )
+        from rlworld.rl.actuators.actuator_net import ActuatorNetLSTM, ActuatorNetMLP
+        from rlworld.rl.actuators.actuator_pd import (
+            DCMotor,
+            DelayedPDActuator,
+            IdealPDActuator,
+        )
+
+        # Order matters: check subclasses before parents
+        cls_map = [
+            (ActuatorNetLSTMCfg, ActuatorNetLSTM),
+            (ActuatorNetMLPCfg, ActuatorNetMLP),
+            (DCMotorCfg, DCMotor),
+            (DelayedPDActuatorCfg, DelayedPDActuator),
+            (IdealPDActuatorCfg, IdealPDActuator),
+        ]
+        for cfg_type, actuator_cls in cls_map:
+            if isinstance(cfg, cfg_type):
+                return actuator_cls(
+                    cfg,
+                    num_envs=self.env.num_envs,
+                    num_joints=self._total_action_dim,
+                    device=self.device,
+                )
+        raise ValueError(f"Unknown actuator config type: {type(cfg)}")
+
+    def _get_joint_pos(self) -> torch.Tensor:
+        """Get current joint positions via the RobotData protocol."""
+        return self.env.get_robot_data().joint_pos
+
+    def _get_joint_vel(self) -> torch.Tensor:
+        """Get current joint velocities via the RobotData protocol."""
+        return self.env.get_robot_data().joint_vel
+
+    # ------------------------------------------------------------------
     # Core methods
     # ------------------------------------------------------------------
+
+    def apply_actions(self, processed_actions: torch.Tensor) -> None:
+        """Apply processed actions, routing through actuator if configured.
+
+        When an actuator model is set, the processed actions (position
+        targets) are converted to torques by the actuator and applied as
+        direct forces.  Otherwise, the control_mode determines whether
+        position targets or raw forces are sent to the simulator.
+
+        Args:
+            processed_actions: Tensor of shape (num_envs, num_actuated).
+        """
+        if self._actuator is not None:
+            torques = self._actuator.compute(
+                target_pos=processed_actions,
+                joint_pos=self._get_joint_pos(),
+                joint_vel=self._get_joint_vel(),
+            )
+            self._apply_force(torques)
+        elif self.config.control_mode == "force":
+            self._apply_force(processed_actions)
+        else:
+            self._apply_position(processed_actions)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
         """Process raw actions: clip -> scale -> offset.
@@ -290,13 +384,15 @@ class ActionManagerBase(BaseManager):
         return self._processed_actions
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
-        """Reset action buffers for specified environments."""
+        """Reset action buffers and actuator state for specified environments."""
         if env_ids is None:
             return
         self._raw_actions[env_ids] = 0.0
         self._processed_actions[env_ids] = 0.0
         self._prev_raw_actions[env_ids] = 0.0
         self._prev_processed_actions[env_ids] = 0.0
+        if self._actuator is not None:
+            self._actuator.reset(env_ids)
 
     def advance(self) -> None:
         """Advance action history by one step."""

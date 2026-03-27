@@ -71,36 +71,23 @@ class ActionManager(ActionManagerBase):
         # get_dofs_limit returns (num_envs, num_dofs) — use first env row
         return dof_lower[0], dof_upper[0]
 
-    def apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions via the configured control mode."""
-        if self.config.control_mode == "force":
-            self.apply_dofs_force(processed_actions)
-        else:
-            self.apply_dofs_position(processed_actions)
-
-    def apply_dofs_position(self, dofs_position: torch.Tensor) -> None:
+    def _apply_position(self, targets: torch.Tensor) -> None:
         """Set DOF position targets on the Genesis robot."""
         self._genesis_env.robot.control_dofs_position(
-            dofs_position, self.actuated_dof_ids
+            targets, self.actuated_dof_ids
         )
 
-    def apply_dofs_force(self, dofs_force: torch.Tensor) -> None:
+    def _apply_force(self, torques: torch.Tensor) -> None:
         """Set DOF force (torque) on the Genesis robot."""
         self._genesis_env.robot.control_dofs_force(
-            dofs_force, self.actuated_dof_ids
+            torques, self.actuated_dof_ids
         )
 
     # ------------------------------------------------------------------
-    # Genesis-specific methods and properties
+    # Genesis-specific properties
     # ------------------------------------------------------------------
 
     @property
     def actuated_dof_ids(self) -> torch.Tensor:
         """DOF indices used for Genesis control."""
         return self._actuated_dofs
-
-    def apply_dofs_position(self, dofs_position: torch.Tensor) -> None:
-        """Set DOF position targets on the Genesis robot."""
-        self._genesis_env.robot.control_dofs_position(
-            dofs_position, self.actuated_dof_ids
-        )
