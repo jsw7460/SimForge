@@ -360,15 +360,6 @@ class NewtonSceneManager(BaseManager):
             else:
                 raise ValueError(f"Body '{body_name}' not found for site '{site_name}'")
 
-        if config.contact_shapes:
-            for shape_name, (body_name, local_pos) in config.contact_shapes.items():
-                body_idx = self._find_body_by_name(builder, _resolve(body_name))
-                if body_idx is not None:
-                    xform = wp.transform(wp.vec3(*local_pos), wp.quat_identity())
-                    builder.add_shape_sphere(body_idx, xform=xform, radius=0.02, label=shape_name)
-                else:
-                    raise ValueError(f"Body '{body_name}' not found for contact shape '{shape_name}'")
-
     @staticmethod
     def _find_body_by_name(builder: newton.ModelBuilder, body_name: str) -> int | None:
         """Find body index by name in the builder."""
