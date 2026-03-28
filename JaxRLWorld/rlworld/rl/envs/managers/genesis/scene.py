@@ -8,6 +8,7 @@ from genesis.engine.entities import RigidEntity
 from genesis.engine.sensors.base_sensor import Sensor
 
 from rlworld.rl.configs.scene import EntityConfig
+from rlworld.rl.configs.scene.unified_entity_config import EntityCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import entity_utils
@@ -26,7 +27,7 @@ class SceneManagerConfig:
     viewer_options: gs.options.ViewerOptions
     vis_options: gs.options.VisOptions
     rigid_options: gs.options.RigidOptions
-    entities: list[EntityConfig]
+    entities: list[EntityConfig] | dict[str, EntityCfg | GroundPlaneCfg]
     sensors: list[SensorConfig] | None
     env_spacing: tuple
     show_viewer: bool
@@ -85,17 +86,53 @@ class SceneManager(BaseManager):
         self.env.vis_manager._setup_visualization_cameras()
 
     def _add_entities(self):
+        if isinstance(self.config.entities, dict):
+            self._add_entities_from_unified_cfg()
+        else:
+            self._add_entities_from_legacy_cfg()
+
+    def _add_entities_from_legacy_cfg(self):
+        """Add entities from legacy list[EntityConfig]."""
         for entity_config in self.config.entities:
             entity_name = entity_config.entity_name
-            if entity_config.entity_name in self.entities:
+            if entity_name in self.entities:
                 raise ValueError(f"Entity '{entity_name}' is already registered")
-
             entity = self.scene.add_entity(
                 morph=entity_config.morph,
                 surface=entity_config.surface,
                 visualize_contact=entity_config.visualize_contact
             )
-            self.entities[entity_config.entity_name] = entity
+            self.entities[entity_name] = entity
+
+    def _add_entities_from_unified_cfg(self):
+        """Add entities from unified dict[str, EntityCfg | GroundPlaneCfg]."""
+        for entity_name, cfg in self.config.entities.items():
+            if entity_name in self.entities:
+                raise ValueError(f"Entity '{entity_name}' is already registered")
+
+            if isinstance(cfg, GroundPlaneCfg):
+                morph = gs.morphs.URDF(
+                    file="urdf/plane/plane.urdf",
+                    fixed=True,
+                )
+                surface = cfg.genesis_options.get("surface", None) if hasattr(cfg, "genesis_options") else None
+                entity = self.scene.add_entity(morph=morph, surface=surface)
+            else:
+                # EntityCfg → Genesis morph
+                genesis_opts = cfg.genesis_options
+                morph_kwargs = {"file": cfg.urdf_path, "fixed": not cfg.floating}
+                if "convexify" in genesis_opts:
+                    morph_kwargs["convexify"] = genesis_opts["convexify"]
+                if cfg.links_to_keep:
+                    morph_kwargs["links_to_keep"] = cfg.links_to_keep
+
+                morph = gs.morphs.URDF(**morph_kwargs)
+                surface = genesis_opts.get("surface", None)
+                visualize = genesis_opts.get("visualize_contact", False)
+                entity = self.scene.add_entity(
+                    morph=morph, surface=surface, visualize_contact=visualize,
+                )
+            self.entities[entity_name] = entity
 
     def _add_sensors(self):
         sensor_configs = self.config.sensors
@@ -130,7 +167,14 @@ class SceneManager(BaseManager):
 
     def _set_kinematic_tree(self):
         for entity_name, entity in self.entities.items():
-            urdf_tree = KinematicTree(self.entities["robot"].morph.file)
+            if isinstance(self.config.entities, dict):
+                cfg = self.config.entities.get(entity_name)
+                if cfg is None or isinstance(cfg, GroundPlaneCfg) or cfg.urdf_path is None:
+                    continue
+                urdf_path = cfg.urdf_path
+            else:
+                urdf_path = self.entities["robot"].morph.file
+            urdf_tree = KinematicTree(urdf_path)
             self.trees[entity_name] = urdf_tree
 
     def _create_scene(self) -> None:
@@ -144,50 +188,76 @@ class SceneManager(BaseManager):
         )
 
     def _configure_robot_dynamics(self) -> None:
-        """Configure robot dynamic properties"""
+        """Configure robot dynamic properties from entity configs."""
+        if isinstance(self.config.entities, dict):
+            self._configure_dynamics_from_unified_cfg()
+        else:
+            self._configure_dynamics_from_legacy_cfg()
 
+    def _configure_dynamics_from_legacy_cfg(self) -> None:
+        """Apply gains/armature from legacy list[EntityConfig]."""
         for entity_name, entity in self.entities.items():
-            # Find matching config for this entity
-            entity_config = next((cfg for cfg in self.config.entities if cfg.entity_name == entity_name), None)
-
+            entity_config = next(
+                (cfg for cfg in self.config.entities if cfg.entity_name == entity_name), None
+            )
             if entity_config is None:
                 continue
 
-            # Set P gain
             if entity_config.p_gain is not None:
                 dof_ids, joint_names = entity_utils.find_dofs(
-                    entity=entity,
-                    name_keys=list(entity_config.p_gain.keys())
+                    entity=entity, name_keys=list(entity_config.p_gain.keys())
                 )
                 _, _, p_values = string_utils.resolve_matching_names_values(
-                    entity_config.p_gain,
-                    joint_names
+                    entity_config.p_gain, joint_names
                 )
                 entity.set_dofs_kp(p_values, dof_ids)
 
-            # Set D gain
             if entity_config.d_gain is not None:
                 dof_ids, joint_names = entity_utils.find_dofs(
-                    entity=entity,
-                    name_keys=list(entity_config.d_gain.keys())
+                    entity=entity, name_keys=list(entity_config.d_gain.keys())
                 )
                 _, _, d_values = string_utils.resolve_matching_names_values(
-                    entity_config.d_gain,
-                    joint_names
+                    entity_config.d_gain, joint_names
                 )
                 entity.set_dofs_kv(d_values, dof_ids)
 
-            # Set armature
             if entity_config.armature is not None:
                 dof_ids, joint_names = entity_utils.find_dofs(
-                    entity=entity,
-                    name_keys=list(entity_config.armature.keys())
+                    entity=entity, name_keys=list(entity_config.armature.keys())
                 )
                 _, _, armature_values = string_utils.resolve_matching_names_values(
-                    entity_config.armature,
-                    joint_names
+                    entity_config.armature, joint_names
                 )
                 entity.set_dofs_armature(armature_values, dof_ids)
+
+    def _configure_dynamics_from_unified_cfg(self) -> None:
+        """Apply gains/armature from unified dict[str, EntityCfg]."""
+        for entity_name, entity in self.entities.items():
+            cfg = self.config.entities.get(entity_name)
+            if cfg is None or isinstance(cfg, GroundPlaneCfg):
+                continue
+
+            for act_cfg in cfg.articulation.actuators:
+                name_keys = list(act_cfg.target_names_expr)
+                dof_ids, joint_names = entity_utils.find_dofs(
+                    entity=entity, name_keys=name_keys
+                )
+                if not dof_ids:
+                    continue
+
+                num_dofs = len(dof_ids)
+
+                # Stiffness (Kp)
+                if act_cfg.stiffness > 0:
+                    entity.set_dofs_kp([act_cfg.stiffness] * num_dofs, dof_ids)
+
+                # Damping (Kd)
+                if act_cfg.damping > 0:
+                    entity.set_dofs_kv([act_cfg.damping] * num_dofs, dof_ids)
+
+                # Armature
+                if act_cfg.armature > 0:
+                    entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 
     def step(self):
         self.scene.step()
