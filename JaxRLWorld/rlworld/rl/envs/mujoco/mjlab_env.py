@@ -112,10 +112,23 @@ class MjlabEnv(World):
         self.scene_manager = SceneCls(
             env=self,
             config=SceneCfgCls(
-                mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
-                mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
                 device=str(self.device),
                 robot_entity_name=self.scene_cfg.robot_entity_name,
+                num_envs=self.scene_cfg.num_envs,
+                env_spacing=self.scene_cfg.env_spacing,
+                physics_dt=self.scene_cfg.physics_dt,
+                entities=getattr(self.scene_cfg, "entities", None),
+                sensors=getattr(self.scene_cfg, "sensors", ()),
+                terrain_type=getattr(self.scene_cfg, "terrain_type", "plane"),
+                solver_iterations=getattr(self.scene_cfg, "solver_iterations", 10),
+                solver_ls_iterations=getattr(self.scene_cfg, "solver_ls_iterations", 20),
+                ccd_iterations=getattr(self.scene_cfg, "ccd_iterations", 50),
+                nconmax=getattr(self.scene_cfg, "nconmax", 35),
+                njmax=getattr(self.scene_cfg, "njmax", 1500),
+                contact_sensor_maxmatch=getattr(self.scene_cfg, "contact_sensor_maxmatch", 64),
+                # Legacy fallbacks
+                mjlab_scene_cfg=getattr(self.scene_cfg, "mjlab_scene_cfg", None),
+                mjlab_sim_cfg=getattr(self.scene_cfg, "mjlab_sim_cfg", None),
                 unified_entities=getattr(self.scene_cfg, "unified_entities", None),
             )
         )

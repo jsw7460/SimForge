@@ -11,10 +11,7 @@ import math
 from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
 from mjlab.asset_zoo.robots.unitree_go2.go2_constants import get_spec as go2_get_spec, FULL_COLLISION
 from mjlab.managers.scene_entity_config import SceneEntityCfg
-from mjlab.scene import SceneCfg
 from mjlab.sensor import ContactSensorCfg, ContactMatch
-from mjlab.sim import SimulationCfg, MujocoCfg
-from mjlab.terrains import TerrainEntityCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
@@ -212,35 +209,20 @@ class Go2FlatMujocoConfig:
             collisions=(FULL_COLLISION,),
         )
 
-        # mjlab SceneCfg with terrain and sensors only — entities are
-        # built automatically from unified_entities by the scene manager.
-        mjlab_scene_cfg = SceneCfg(
-            num_envs=self.num_envs,
-            env_spacing=2.0,
-            terrain=TerrainEntityCfg(terrain_type="plane"),
-            entities={},
-            sensors=(feet_ground_cfg,),
-        )
-
-        mjlab_sim_cfg = SimulationCfg(
-            nconmax=35,
-            njmax=1500,
-            mujoco=MujocoCfg(
-                timestep=self.physics_dt,
-                iterations=10,
-                ls_iterations=20,
-                ccd_iterations=50,
-            ),
-            contact_sensor_maxmatch=64,
-        )
         return MujocoSceneConfig(
             physics_dt=self.physics_dt,
             num_envs=self.num_envs,
             env_spacing=2.0,
             robot_entity_name="robot",
-            mjlab_scene_cfg=mjlab_scene_cfg,
-            mjlab_sim_cfg=mjlab_sim_cfg,
-            unified_entities={"robot": robot_entity},
+            entities={"robot": robot_entity},
+            sensors=(feet_ground_cfg,),
+            terrain_type="plane",
+            solver_iterations=10,
+            solver_ls_iterations=20,
+            ccd_iterations=50,
+            nconmax=35,
+            njmax=1500,
+            contact_sensor_maxmatch=64,
             preset_class_name=self.__class__.__name__,
             preset_module_path=type(self).__module__,
         )
