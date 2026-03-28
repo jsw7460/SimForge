@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
+from rlworld.rl.configs.scene.unified_entity_config import EntityCfg, GroundPlaneCfg, ActuatorCfg
 from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
@@ -36,10 +37,12 @@ class MjlabSceneManagerConfig:
             device="cuda:0",
         )
     """
-    mjlab_scene_cfg: Any  # mjlab.SceneCfg
+    mjlab_scene_cfg: Any = None  # mjlab.SceneCfg (optional if unified_entities is set)
     mjlab_sim_cfg: Any = None  # mjlab.SimulationCfg (optional, uses default if None)
     device: str = "cuda:0"
     robot_entity_name: str = "robot"
+    unified_entities: dict[str, EntityCfg | GroundPlaneCfg] | None = None
+    """When set, entities are converted to mjlab EntityCfg at build time."""
 
 
 class MjlabSceneManager(BaseManager):
@@ -132,6 +135,10 @@ class MjlabSceneManager(BaseManager):
         from mjlab.scene import Scene
         from mjlab.sim import Simulation, SimulationCfg
 
+        # Convert unified entities to mjlab SceneCfg if provided
+        if self.config.unified_entities is not None:
+            self._apply_unified_entities()
+
         # Create scene
         self._scene = Scene(self.config.mjlab_scene_cfg, device=self.config.device)
 
@@ -163,6 +170,83 @@ class MjlabSceneManager(BaseManager):
 
         # Build kinematic trees for each entity
         self._set_kinematic_tree()
+
+    def _apply_unified_entities(self) -> None:
+        """Convert unified EntityCfg dict into mjlab SceneCfg.entities."""
+        from mjlab.entity import EntityCfg as MjlabEntityCfg, EntityArticulationInfoCfg
+        from mjlab.actuator.builtin_actuator import (
+            BuiltinPositionActuatorCfg,
+            BuiltinMotorActuatorCfg,
+        )
+        from mjlab.terrains import TerrainEntityCfg
+
+        scene_cfg = self.config.mjlab_scene_cfg
+        mjlab_entities: dict[str, Any] = {}
+
+        for entity_name, cfg in self.config.unified_entities.items():
+            if isinstance(cfg, GroundPlaneCfg):
+                # Terrain handled separately via SceneCfg.terrain
+                continue
+
+            # Convert ActuatorCfg → mjlab actuator configs
+            mjlab_actuators = []
+            for act_cfg in cfg.articulation.actuators:
+                if act_cfg.control_type == "motor":
+                    mjlab_actuators.append(BuiltinMotorActuatorCfg(
+                        target_names_expr=act_cfg.target_names_expr,
+                        effort_limit=act_cfg.effort_limit or 1000.0,
+                        armature=act_cfg.armature,
+                        frictionloss=act_cfg.frictionloss,
+                    ))
+                else:
+                    mjlab_actuators.append(BuiltinPositionActuatorCfg(
+                        target_names_expr=act_cfg.target_names_expr,
+                        stiffness=act_cfg.stiffness,
+                        damping=act_cfg.damping,
+                        effort_limit=act_cfg.effort_limit,
+                        armature=act_cfg.armature,
+                        frictionloss=act_cfg.frictionloss,
+                    ))
+
+            # Get the existing mjlab EntityCfg if available (from mujoco_options),
+            # otherwise we need a spec_fn from mujoco_options
+            mujoco_opts = cfg.mujoco_options
+            if "entity_cfg" in mujoco_opts:
+                # User provided a full mjlab EntityCfg — just swap actuators
+                mjlab_cfg = mujoco_opts["entity_cfg"]
+                if mjlab_actuators:
+                    mjlab_cfg.articulation = EntityArticulationInfoCfg(
+                        actuators=tuple(mjlab_actuators),
+                        soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
+                    )
+            elif "spec_fn" in mujoco_opts:
+                # User provided a spec_fn
+                init_state = MjlabEntityCfg.InitialStateCfg(
+                    pos=cfg.init_state.pos,
+                    rot=cfg.init_state.rot,
+                    joint_pos=cfg.init_state.joint_pos or None,
+                    joint_vel=cfg.init_state.joint_vel,
+                )
+                mjlab_cfg = MjlabEntityCfg(
+                    init_state=init_state,
+                    spec_fn=mujoco_opts["spec_fn"],
+                    articulation=EntityArticulationInfoCfg(
+                        actuators=tuple(mjlab_actuators),
+                        soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
+                    ) if mjlab_actuators else None,
+                    collisions=mujoco_opts.get("collisions", ()),
+                )
+            else:
+                raise ValueError(
+                    f"MuJoCo entity '{entity_name}' requires either "
+                    "'entity_cfg' or 'spec_fn' in mujoco_options"
+                )
+
+            mjlab_entities[entity_name] = mjlab_cfg
+
+        # Update the SceneCfg with converted entities
+        if mjlab_entities:
+            scene_cfg.entities.update(mjlab_entities)
 
     def step(self) -> None:
         """Execute a single physics step."""
