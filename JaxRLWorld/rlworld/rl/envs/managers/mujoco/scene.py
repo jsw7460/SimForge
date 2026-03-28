@@ -236,9 +236,9 @@ class MjlabSceneManager(BaseManager):
                     f"MuJoCo entity '{entity_name}' must be MujocoEntityCfg, "
                     f"got {type(cfg).__name__}"
                 )
-            if cfg.spec_fn is None and cfg.entity_cfg is None:
+            if cfg.spec_fn is None:
                 raise ValueError(
-                    f"MuJoCo entity '{entity_name}' requires 'spec_fn' or 'entity_cfg'"
+                    f"MuJoCo entity '{entity_name}' requires 'spec_fn'"
                 )
 
             # Convert actuator configs → mjlab actuator configs
@@ -269,23 +269,18 @@ class MjlabSceneManager(BaseManager):
             ) if mjlab_actuators else None
 
             # Build mjlab EntityCfg
-            if cfg.entity_cfg is not None:
-                mjlab_cfg = cfg.entity_cfg
-                if articulation_info is not None:
-                    mjlab_cfg.articulation = articulation_info
-            else:
-                init_state = MjlabEntityCfg.InitialStateCfg(
-                    pos=cfg.init_state.pos,
-                    rot=cfg.init_state.rot,
-                    joint_pos=cfg.init_state.joint_pos or None,
-                    joint_vel=cfg.init_state.joint_vel,
-                )
-                mjlab_cfg = MjlabEntityCfg(
-                    init_state=init_state,
-                    spec_fn=cfg.spec_fn,
-                    articulation=articulation_info,
-                    collisions=cfg.collisions,
-                )
+            init_state = MjlabEntityCfg.InitialStateCfg(
+                pos=cfg.init_state.pos,
+                rot=cfg.init_state.rot,
+                joint_pos=cfg.init_state.joint_pos or None,
+                joint_vel=cfg.init_state.joint_vel,
+            )
+            mjlab_cfg = MjlabEntityCfg(
+                init_state=init_state,
+                spec_fn=cfg.spec_fn,
+                articulation=articulation_info,
+                collisions=cfg.collisions,
+            )
 
             self.config.mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
 

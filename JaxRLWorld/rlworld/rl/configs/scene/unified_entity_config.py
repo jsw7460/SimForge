@@ -159,11 +159,6 @@ class MujocoEntityCfg(EntityCfg):
     """Factory callable returning an mujoco.MjSpec.  Required for MuJoCo
     since URDF must be converted to MjSpec."""
 
-    entity_cfg: Any = None
-    """Pre-built mjlab EntityCfg.  When provided, the actuator settings
-    from :attr:`articulation` override its actuators but all other
-    fields are taken from this object."""
-
     collisions: tuple = ()
     """mjlab CollisionCfg objects for contact customization."""
 
