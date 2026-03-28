@@ -154,8 +154,6 @@ class GenesisEnv(World):
                 clip=self.act_cfg.clip_actions,
                 scale=self.act_cfg.action_scale,
                 offset=self.act_cfg.offset,
-                control_mode=self.act_cfg.control_mode,
-                actuator_cfg=self.act_cfg.actuator_cfg,
             )
         )
 

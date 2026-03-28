@@ -136,7 +136,6 @@ class MjlabEnv(World):
                 scale=self.act_cfg.action_scale,
                 clip=self.act_cfg.clip_actions,
                 offset=self.act_cfg.offset,
-                actuator_cfg=self.act_cfg.actuator_cfg,
             )
         )
 
