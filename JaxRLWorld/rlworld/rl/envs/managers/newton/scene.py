@@ -16,6 +16,7 @@ from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
 )
+from rlworld.rl.configs.scene.unified_entity_config import EntityCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors.newton_sensor_config import (
     NewtonSensorConfig,
     NewtonIMUSensorConfig,
@@ -107,7 +108,7 @@ class NewtonSceneManagerConfig:
     num_worlds: int
 
     # Entity and sensor configurations
-    entities: list[NewtonEntityConfig] = field(default_factory=list)
+    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | GroundPlaneCfg] = field(default_factory=list)
     sensors: list[NewtonSensorConfig] | None = None
 
     # Ground plane
@@ -213,9 +214,74 @@ class NewtonSceneManager(BaseManager):
         """Register all entities defined in config.
 
         This creates a ModelBuilder for each entity and prepares for replication.
+        Supports both legacy list[NewtonEntityConfig] and unified dict[str, EntityCfg].
         """
-        for entity_config in self.config.entities:
-            self._register_entity(entity_config)
+        if isinstance(self.config.entities, dict):
+            for entity_name, cfg in self.config.entities.items():
+                newton_cfg = self._convert_unified_to_newton(entity_name, cfg)
+                self._register_entity(newton_cfg)
+        else:
+            for entity_config in self.config.entities:
+                self._register_entity(entity_config)
+
+    def _convert_unified_to_newton(
+        self, entity_name: str, cfg: EntityCfg | GroundPlaneCfg
+    ) -> NewtonEntityConfig:
+        """Convert unified EntityCfg/GroundPlaneCfg to NewtonEntityConfig."""
+        if isinstance(cfg, GroundPlaneCfg):
+            shape_cfg = newton.ModelBuilder.ShapeConfig(
+                ke=cfg.contact_stiffness,
+                kd=cfg.contact_damping,
+                mu=cfg.friction,
+                **cfg.newton_options,
+            )
+            return NewtonEntityConfig(
+                entity_name=entity_name,
+                entity_type="ground_plane",
+                shape_cfg=shape_cfg,
+            )
+
+        newton_opts = cfg.newton_options
+
+        # Build per-joint gain dicts from ActuatorCfg list
+        ke_map: dict[str, float] = {}
+        kd_map: dict[str, float] = {}
+        armature_map: dict[str, float] = {}
+        prefix = newton_opts.get("body_label_prefix", None)
+
+        for act_cfg in cfg.articulation.actuators:
+            for pattern in act_cfg.target_names_expr:
+                # Newton uses prefixed names
+                key = f"{prefix}/{pattern}" if prefix else pattern
+                if act_cfg.stiffness > 0:
+                    ke_map[key] = act_cfg.stiffness
+                if act_cfg.damping > 0:
+                    kd_map[key] = act_cfg.damping
+                if act_cfg.armature > 0:
+                    armature_map[key] = act_cfg.armature
+
+        return NewtonEntityConfig(
+            entity_name=entity_name,
+            body_label_prefix=prefix,
+            entity_type="usd" if cfg.usd_path else "urdf",
+            urdf_path=cfg.urdf_path,
+            usd_path=cfg.usd_path,
+            transform=wp.transform(
+                wp.vec3(*cfg.init_state.pos),
+                wp.quat(*cfg.init_state.rot),
+            ),
+            floating=cfg.floating,
+            enable_self_collisions=cfg.enable_self_collisions,
+            collapse_fixed_joints=cfg.collapse_fixed_joints,
+            joints_to_keep=cfg.links_to_keep,
+            joint_target_ke_map=ke_map or None,
+            joint_target_kd_map=kd_map or None,
+            joint_armature_map=armature_map or None,
+            shape_cfg=newton_opts.get("shape_cfg", None),
+            sites=newton_opts.get("sites", None),
+            contact_shapes=newton_opts.get("contact_shapes", None),
+            mesh_approximation=newton_opts.get("mesh_approximation", "convex_hull"),
+        )
 
     def _register_entity(self, config: NewtonEntityConfig) -> None:
         """Register a single entity from its config."""
