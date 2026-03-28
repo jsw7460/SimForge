@@ -90,9 +90,12 @@ class ActionManagerBase(BaseManager):
         self._scale = self._initialize_scale()
         self._clip_low, self._clip_high = self._initialize_clip()
 
-        # Build actuator model from entity articulation config
-        self._actuator = None
-        self._actuator = self._build_actuator_from_entity()
+        # Build per-group actuator models from entity ArticulationCfg.
+        # Each actuator handles a subset of joints; implicit actuators are skipped.
+        # _actuators: list of (actuator_instance, joint_indices_into_action_dim)
+        self._actuators: list[tuple] = []
+        self._has_explicit_actuators = False
+        self._build_actuators_from_entity()
 
     # ------------------------------------------------------------------
     # Abstract methods (simulator-specific)
@@ -289,42 +292,69 @@ class ActionManagerBase(BaseManager):
     # ------------------------------------------------------------------
 
     @property
-    def actuator(self):
-        """The actuator model, or None if not configured."""
-        return self._actuator
+    def actuators(self):
+        """List of (actuator, joint_indices) tuples for explicit actuators."""
+        return self._actuators
 
-    def _build_actuator_from_entity(self):
-        """Build actuator from the entity's ArticulationCfg.
+    @property
+    def has_explicit_actuators(self) -> bool:
+        """True if any non-implicit actuator is configured."""
+        return self._has_explicit_actuators
 
-        Scans the entity config for explicit (non-implicit) actuator
-        configs that match the actuated joints.  If found, builds the
-        corresponding actuator model.  Returns None if all actuators
-        are implicit (simulator PD).
+    def _build_actuators_from_entity(self) -> None:
+        """Build per-group actuator models from the entity's ArticulationCfg.
+
+        For each actuator config in the entity:
+        - ImplicitActuatorCfg → skipped (simulator PD handles it)
+        - Any other type → build actuator instance, compute joint index
+          mapping from the actuator's target_names_expr to this action
+          manager's actuated joint ordering.
+
+        Each actuator sees only its own joint subset (IsaacLab pattern).
         """
         from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+        from rlworld.rl.utils import string as string_utils
 
-        # Find the entity config from the scene manager
         entity_cfg = self._get_entity_cfg()
         if entity_cfg is None:
-            return None
+            return
 
-        # Collect non-implicit actuator configs that cover our joints
         for act_cfg in entity_cfg.articulation.actuators:
             if isinstance(act_cfg, ImplicitActuatorCfg):
                 continue
-            # Build the actuator model from this config
-            return self._build_actuator(act_cfg)
 
-        return None
+            # Find which of our actuated joints this actuator covers
+            matched_indices, matched_names = string_utils.resolve_matching_names(
+                list(act_cfg.target_names_expr),
+                self._actuated_joint_names,
+                preserve_order=True,
+            )
+            if not matched_indices:
+                continue
+
+            joint_indices = torch.tensor(matched_indices, device=self.device, dtype=torch.long)
+            num_joints_in_group = len(matched_indices)
+
+            # Build actuator for this subset
+            actuator = self._build_actuator(
+                act_cfg,
+                num_joints=num_joints_in_group,
+                joint_names=matched_names,
+            )
+            self._actuators.append((actuator, joint_indices))
+
+        self._has_explicit_actuators = len(self._actuators) > 0
 
     def _get_entity_cfg(self):
         """Get the entity config for the robot from scene manager."""
         scene_mgr = self.env.scene_manager
-        entities = getattr(scene_mgr.config if hasattr(scene_mgr, 'config') else scene_mgr, 'entities', None)
+        entities = getattr(
+            scene_mgr.config if hasattr(scene_mgr, "config") else scene_mgr,
+            "entities", None,
+        )
         if entities is None:
-            entities = getattr(scene_mgr.config, 'entities', None)
+            entities = getattr(scene_mgr.config, "entities", None)
         if isinstance(entities, dict):
-            # Try "robot" first, then first EntityCfg found
             from rlworld.rl.configs.scene.unified_entity_config import EntityCfg
             if "robot" in entities:
                 cfg = entities["robot"]
@@ -335,8 +365,8 @@ class ActionManagerBase(BaseManager):
                     return cfg
         return None
 
-    def _build_actuator(self, cfg):
-        """Instantiate an actuator model from its configuration."""
+    def _build_actuator(self, cfg, num_joints: int, joint_names: list[str]):
+        """Instantiate an actuator model for a joint subset."""
         from rlworld.rl.actuators.actuator_cfg import (
             ActuatorNetLSTMCfg,
             ActuatorNetMLPCfg,
@@ -363,9 +393,9 @@ class ActionManagerBase(BaseManager):
                 return actuator_cls(
                     cfg,
                     num_envs=self.env.num_envs,
-                    num_joints=self._total_action_dim,
+                    num_joints=num_joints,
                     device=self.device,
-                    joint_names=self._actuated_joint_names,
+                    joint_names=joint_names,
                 )
         raise ValueError(f"Unknown actuator config type: {type(cfg)}")
 
@@ -384,23 +414,38 @@ class ActionManagerBase(BaseManager):
     def apply_actions(self, processed_actions: torch.Tensor) -> None:
         """Apply processed actions.
 
-        If an explicit actuator model is active (from the entity's
-        ArticulationCfg), position targets are converted to torques and
-        applied as direct forces.  Otherwise, position targets are sent
-        to the simulator's built-in PD controller.
+        If explicit actuator models are active, each actuator group
+        extracts its joint subset from the processed actions, computes
+        torques, and scatters them into a full-size force tensor.
+        Joints covered by implicit actuators receive position targets.
 
         Args:
             processed_actions: Tensor of shape (num_envs, num_actuated).
         """
-        if self._actuator is not None:
-            torques = self._actuator.compute(
-                target_pos=processed_actions,
-                joint_pos=self._get_joint_pos(),
-                joint_vel=self._get_joint_vel(),
-            )
-            self._apply_force(torques)
-        else:
+        if not self._has_explicit_actuators:
             self._apply_position(processed_actions)
+            return
+
+        # Get current joint state once (shared by all actuator groups)
+        joint_pos = self._get_joint_pos()
+        joint_vel = self._get_joint_vel()
+
+        # Build full-size force tensor; scatter each group's torques
+        full_torques = torch.zeros_like(processed_actions)
+
+        for actuator, joint_idx in self._actuators:
+            # Extract this group's subset
+            target_subset = processed_actions[:, joint_idx]
+            pos_subset = joint_pos[:, joint_idx]
+            vel_subset = joint_vel[:, joint_idx]
+
+            # Compute torques for this group only
+            torques = actuator.compute(target_subset, pos_subset, vel_subset)
+
+            # Scatter back into full array
+            full_torques[:, joint_idx] = torques
+
+        self._apply_force(full_torques)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
         """Process raw actions: clip -> scale -> offset.
@@ -424,8 +469,8 @@ class ActionManagerBase(BaseManager):
         self._processed_actions[env_ids] = 0.0
         self._prev_raw_actions[env_ids] = 0.0
         self._prev_processed_actions[env_ids] = 0.0
-        if self._actuator is not None:
-            self._actuator.reset(env_ids)
+        for actuator, _ in self._actuators:
+            actuator.reset(env_ids)
 
     def advance(self) -> None:
         """Advance action history by one step."""
