@@ -347,24 +347,15 @@ class ActionManagerBase(BaseManager):
         self._has_explicit_actuators = len(self._actuators) > 0
 
     def _get_entity_cfg(self):
-        """Get the entity config for the robot from scene manager."""
-        scene_mgr = self.env.scene_manager
-        entities = getattr(
-            scene_mgr.config if hasattr(scene_mgr, "config") else scene_mgr,
-            "entities", None,
-        )
-        if entities is None:
-            entities = getattr(scene_mgr.config, "entities", None)
-        if isinstance(entities, dict):
-            from rlworld.rl.configs.scene.unified_entity_config import EntityCfg
-            if "robot" in entities:
-                cfg = entities["robot"]
-                if isinstance(cfg, EntityCfg):
-                    return cfg
-            for cfg in entities.values():
-                if isinstance(cfg, EntityCfg):
-                    return cfg
-        return None
+        """Get the unified EntityCfg for the robot from scene manager."""
+        from rlworld.rl.configs.scene.unified_entity_config import EntityCfg
+
+        entities = getattr(self.env.scene_manager.config, "entities", None)
+        if not isinstance(entities, dict):
+            return None
+        robot_name = getattr(self.env.scene_manager.config, "robot_entity_name", "robot")
+        cfg = entities.get(robot_name)
+        return cfg if isinstance(cfg, EntityCfg) else None
 
     def _build_actuator(self, cfg, num_joints: int, joint_names: list[str]):
         """Instantiate an actuator model for a joint subset."""
