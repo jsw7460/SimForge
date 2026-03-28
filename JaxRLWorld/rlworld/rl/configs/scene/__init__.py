@@ -4,3 +4,10 @@ from .newton_entity_config import (
     NewtonGroundPlaneConfig,
     NewtonBoxConfig,
 )
+from .unified_entity_config import (
+    ActuatorCfg,
+    ArticulationCfg,
+    InitialStateCfg,
+    EntityCfg,
+    GroundPlaneCfg,
+)
