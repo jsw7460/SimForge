@@ -140,29 +140,44 @@ class NewtonActionManager(ActionManagerBase):
         upper = upper_all[self._actuated_qd_indices]
         return lower, upper
 
-    def apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions via Newton/Warp position control."""
-        scene_manager = self.env.scene_manager
-        control = scene_manager.control
-        model = scene_manager.model
+    def _apply_position(self, targets: torch.Tensor) -> None:
+        """Apply position targets via Newton/Warp."""
+        control = self.env.scene_manager.control
+        model = self.env.scene_manager.model
 
         num_worlds = model.world_count
         dof_per_world = model.joint_dof_count // num_worlds
 
-        # Initialize full target array with zeros
         full_targets = torch.zeros(
             (num_worlds, dof_per_world),
             device=self.device,
             dtype=torch.float32,
         )
+        full_targets[:, self._actuated_qd_indices] = targets
 
-        # Map processed actions to correct DOF indices
-        full_targets[:, self._actuated_qd_indices] = processed_actions
-
-        targets_flat = full_targets.flatten()
         wp.copy(
             control.joint_target_pos,
-            wp.from_torch(targets_flat, dtype=wp.float32, requires_grad=False),
+            wp.from_torch(full_targets.flatten(), dtype=wp.float32, requires_grad=False),
+        )
+
+    def _apply_force(self, torques: torch.Tensor) -> None:
+        """Apply torques directly via Newton/Warp."""
+        control = self.env.scene_manager.control
+        model = self.env.scene_manager.model
+
+        num_worlds = model.world_count
+        dof_per_world = model.joint_dof_count // num_worlds
+
+        full_forces = torch.zeros(
+            (num_worlds, dof_per_world),
+            device=self.device,
+            dtype=torch.float32,
+        )
+        full_forces[:, self._actuated_qd_indices] = torques
+
+        wp.copy(
+            control.joint_f,
+            wp.from_torch(full_forces.flatten(), dtype=wp.float32, requires_grad=False),
         )
 
     # ------------------------------------------------------------------

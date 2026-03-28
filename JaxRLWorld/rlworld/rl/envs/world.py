@@ -217,6 +217,10 @@ class World(ABC):
         from rlworld.rl.utils.pretty import print_env_summary
         print_env_summary(self)
 
+        # Print joint mapping for debugging cross-simulator consistency
+        if hasattr(self, "act_manager") and hasattr(self.act_manager, "print_joint_mapping"):
+            self.act_manager.print_joint_mapping()
+
     @abstractmethod
     def _build_scene(self) -> None:
         """Create the scene manager and build the physics world.

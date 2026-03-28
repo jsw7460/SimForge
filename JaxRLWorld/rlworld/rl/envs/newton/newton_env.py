@@ -53,7 +53,8 @@ class NewtonEnv(World):
 
         # Timing
         self.physics_dt = scene_cfg.dt
-        self.control_dt = self.physics_dt
+        self.decimation = getattr(env_cfg, "decimation", 1)
+        self.control_dt = self.physics_dt * self.decimation
 
         # Initialize buffers
         self._init_buffers()
@@ -167,8 +168,15 @@ class NewtonEnv(World):
         self.scene_manager.capture()
 
     def _step_physics(self) -> None:
-        """Newton physics step (substeps handled internally by scene manager)."""
-        self.scene_manager.step()
+        """Newton physics step with decimation.
+
+        Each decimation iteration recomputes actuator torques using the
+        latest joint state, then runs scene_manager.step() which
+        executes the internal substep loop (potentially via CUDA graph).
+        """
+        for _ in range(self.decimation):
+            self.act_manager.apply_actions(self.act_manager.processed_actions)
+            self.scene_manager.step()
 
         # Update visualization
         if self.vis_manager is not None:

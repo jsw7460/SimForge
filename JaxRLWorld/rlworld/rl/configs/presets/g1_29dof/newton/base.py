@@ -24,6 +24,8 @@ from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import NewtonEntityConfig
+from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs.scene.unified_entity_config import NewtonEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import NewtonIMUSensorConfig, NewtonContactSensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
@@ -176,59 +178,48 @@ class G1FlatNewtonConfig:
         )
 
     def _build_scene_config(self, quat) -> NewtonSceneConfig:
+        r = self.robot
         return NewtonSceneConfig(
             dt=self.dt,
             substeps=self.substeps,
             gravity=(0.0, 0.0, -9.81),
             solver_type="mujoco",
             robot_cfg=self.robot,
-            entities=[
-                NewtonEntityConfig(
-                    entity_name="ground",
-                    body_label_prefix="ground",
-                    entity_type="ground_plane",
-                    shape_cfg=newton.ModelBuilder.ShapeConfig(
-                        ke=2.0e3,
-                        kd=1.0e2,
-                        kf=1.0e3,
-                        mu=1.0,
-                        mu_rolling=0.0005,
-                        mu_torsional=0.25,
-                        # margin=0.00001,
-                        # gap=0.0
-                    ),
-                    floating=False
+            entities={
+                "ground": GroundPlaneCfg(
+                    contact_stiffness=2.0e3,
+                    contact_damping=1.0e2,
+                    friction=1.0,
+                    ground_kf=1.0e3,
+                    ground_mu_rolling=0.0005,
+                    ground_mu_torsional=0.25,
                 ),
-                NewtonEntityConfig(
-                    entity_name="robot",
-                    body_label_prefix=self.robot.name,
-                    entity_type="urdf",
-                    urdf_path=self.robot.urdf_path,
-                    transform=wp.transform(
-                        wp.vec3(0.0, 0.0, self.robot.base_init_height),
-                        quat
+                "robot": NewtonEntityCfg(
+                    urdf_path=r.urdf_path,
+                    init_state=InitialStateCfg(
+                        pos=(0.0, 0.0, r.base_init_height),
+                        rot=(quat[0], quat[1], quat[2], quat[3]),
+                        joint_pos=r.default_joint_angles,
                     ),
                     floating=True,
-                    joint_cfg=newton.ModelBuilder.JointDofConfig(
-                        armature=0.1,
-                        target_ke=400.0,
-                        target_kd=5.0
+                    collapse_fixed_joints=True,
+                    articulation=ArticulationCfg(
+                        actuators=(
+                            ImplicitActuatorCfg(
+                                target_names_expr=(".*",),
+                                stiffness=r.p_gains,
+                                damping=r.d_gains,
+                                armature=r.armature,
+                            ),
+                        ),
                     ),
+                    body_label_prefix=r.name,
                     shape_cfg=newton.ModelBuilder.ShapeConfig(
-                        ke=2.0e3,
-                        kd=1.0e2,
-                        kf=1.0e3,
-                        mu=1.0,
-                        # gap=0.0
+                        ke=2.0e3, kd=1.0e2, kf=1.0e3, mu=1.0,
                     ),
-                    joint_target_ke_map=self.robot.prefixed_p_gains,
-                    joint_target_kd_map=self.robot.prefixed_d_gains,
-                    joint_armature_map=self.robot.prefixed_armature,
-                    sites={"imu_site_base": self.robot.base_link_name},
-                    enable_self_collisions=False,
-                    collapse_fixed_joints=True
+                    sites={"imu_site_base": r.base_link_name},
                 ),
-            ],
+            },
             sensors=[
                 NewtonIMUSensorConfig(
                     entity_name="robot",

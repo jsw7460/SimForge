@@ -32,28 +32,45 @@ class MujocoEnvConfig(BaseConfig):
 class MujocoSceneConfig(BaseConfig):
     """MuJoCo/mjlab scene configuration.
 
-    This wraps mjlab's SceneCfg for use with rlworld.
+    Config-level fields only — no mjlab imports needed.
+    The scene manager converts these to mjlab objects internally.
     """
-    physics_dt: float = 0.002  # 2ms physics timestep (500Hz)
+    physics_dt: float = 0.002
     num_envs: int = 4096
     env_spacing: float = 2.0
-
-    # mjlab SceneCfg will be passed directly
-    mjlab_scene_cfg: Any = None  # mjlab.SceneCfg
-    mjlab_sim_cfg: Any = None  # mjlab.SimulationCfg
-
-    # Entity configuration (alternative to mjlab_scene_cfg)
     robot_entity_name: str = "robot"
+
+    # Entities — unified EntityCfg dict (scene manager converts to mjlab)
+    entities: Any = None  # dict[str, EntityCfg | GroundPlaneCfg]
+
+    # Sensors — mjlab sensor config objects (passed through to SceneCfg)
+    sensors: tuple = ()
+
+    # Terrain
+    terrain_type: str = "plane"
+
+    # Solver settings
+    solver_iterations: int = 10
+    solver_ls_iterations: int = 20
+    ccd_iterations: int = 50
+    nconmax: int = 35
+    njmax: int = 1500
+    contact_sensor_maxmatch: int = 64
 
     # Preset info for auto-resolving non-serializable mjlab objects at eval time
     preset_class_name: str | None = None
     preset_module_path: str | None = None
 
+    # Legacy — will be removed. Use entities/sensors/solver fields instead.
+    mjlab_scene_cfg: Any = None
+    mjlab_sim_cfg: Any = None
+    unified_entities: Any = None
+
     def recursive_to_dict(self) -> Dict:
         result = super().recursive_to_dict()
-        # Exclude non-serializable mjlab objects (contain lambdas, etc.)
         result.pop('mjlab_scene_cfg', None)
         result.pop('mjlab_sim_cfg', None)
+        result.pop('unified_entities', None)
         return result
 
 

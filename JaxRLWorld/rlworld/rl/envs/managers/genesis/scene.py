@@ -7,11 +7,12 @@ import torch
 from genesis.engine.entities import RigidEntity
 from genesis.engine.sensors.base_sensor import Sensor
 
-from rlworld.rl.configs.scene import EntityConfig
+from rlworld.rl.configs.scene.unified_entity_config import (
+    EntityCfg, GenesisEntityCfg, GroundPlaneCfg,
+)
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import entity_utils
-from rlworld.rl.utils import string as string_utils
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 
@@ -26,7 +27,7 @@ class SceneManagerConfig:
     viewer_options: gs.options.ViewerOptions
     vis_options: gs.options.VisOptions
     rigid_options: gs.options.RigidOptions
-    entities: list[EntityConfig]
+    entities: dict[str, EntityCfg | GroundPlaneCfg]
     sensors: list[SensorConfig] | None
     env_spacing: tuple
     show_viewer: bool
@@ -85,17 +86,33 @@ class SceneManager(BaseManager):
         self.env.vis_manager._setup_visualization_cameras()
 
     def _add_entities(self):
-        for entity_config in self.config.entities:
-            entity_name = entity_config.entity_name
-            if entity_config.entity_name in self.entities:
+        """Add entities from dict[str, EntityCfg/GenesisEntityCfg/GroundPlaneCfg]."""
+        for entity_name, cfg in self.config.entities.items():
+            if entity_name in self.entities:
                 raise ValueError(f"Entity '{entity_name}' is already registered")
 
-            entity = self.scene.add_entity(
-                morph=entity_config.morph,
-                surface=entity_config.surface,
-                visualize_contact=entity_config.visualize_contact
-            )
-            self.entities[entity_config.entity_name] = entity
+            if isinstance(cfg, GroundPlaneCfg):
+                morph = gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
+                entity = self.scene.add_entity(morph=morph)
+            else:
+                morph_kwargs = {"file": cfg.urdf_path, "fixed": not cfg.floating}
+                if cfg.links_to_keep:
+                    morph_kwargs["links_to_keep"] = cfg.links_to_keep
+
+                # GenesisEntityCfg-specific fields
+                if isinstance(cfg, GenesisEntityCfg):
+                    morph_kwargs["convexify"] = cfg.convexify
+                    surface = cfg.surface
+                    visualize = cfg.visualize_contact
+                else:
+                    surface = None
+                    visualize = False
+
+                morph = gs.morphs.URDF(**morph_kwargs)
+                entity = self.scene.add_entity(
+                    morph=morph, surface=surface, visualize_contact=visualize,
+                )
+            self.entities[entity_name] = entity
 
     def _add_sensors(self):
         sensor_configs = self.config.sensors
@@ -129,9 +146,11 @@ class SceneManager(BaseManager):
         self.env.vis_manager.inject_custom_context()
 
     def _set_kinematic_tree(self):
-        for entity_name, entity in self.entities.items():
-            urdf_tree = KinematicTree(self.entities["robot"].morph.file)
-            self.trees[entity_name] = urdf_tree
+        for entity_name in self.entities:
+            cfg = self.config.entities.get(entity_name)
+            if cfg is None or isinstance(cfg, GroundPlaneCfg) or cfg.urdf_path is None:
+                continue
+            self.trees[entity_name] = KinematicTree(cfg.urdf_path)
 
     def _create_scene(self) -> None:
         """Initialize scene with basic settings"""
@@ -144,50 +163,79 @@ class SceneManager(BaseManager):
         )
 
     def _configure_robot_dynamics(self) -> None:
-        """Configure robot dynamic properties"""
+        """Apply gains/armature from ArticulationCfg actuators.
+
+        For **implicit** actuators, we set the simulator's PD gains (Kp/Kd)
+        so the simulator drives the joints internally.
+
+        For **explicit** actuators (IdealPD, DelayedPD, LSTM, etc.), the
+        simulator's PD gains are still set here but are effectively unused:
+        Genesis switches a joint to force mode when ``control_dofs_force()``
+        is called (the last-called control mode wins), so the Kp/Kd values
+        have no effect once force mode is active.
+
+        This differs from Newton, where PD forces are *always* summed with
+        ``joint_f`` regardless of calling order, requiring explicit ke=0/kd=0
+        to disable the internal PD.  (See ``_load_urdf_entity`` in
+        ``newton/scene.py`` for that handling.)
+        """
+        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 
         for entity_name, entity in self.entities.items():
-            # Find matching config for this entity
-            entity_config = next((cfg for cfg in self.config.entities if cfg.entity_name == entity_name), None)
-
-            if entity_config is None:
+            cfg = self.config.entities.get(entity_name)
+            if cfg is None or isinstance(cfg, GroundPlaneCfg):
                 continue
 
-            # Set P gain
-            if entity_config.p_gain is not None:
+            for act_cfg in cfg.articulation.actuators:
+                name_keys = list(act_cfg.target_names_expr)
                 dof_ids, joint_names = entity_utils.find_dofs(
-                    entity=entity,
-                    name_keys=list(entity_config.p_gain.keys())
+                    entity=entity, name_keys=name_keys
                 )
-                _, _, p_values = string_utils.resolve_matching_names_values(
-                    entity_config.p_gain,
-                    joint_names
-                )
-                entity.set_dofs_kp(p_values, dof_ids)
+                if not dof_ids:
+                    continue
 
-            # Set D gain
-            if entity_config.d_gain is not None:
-                dof_ids, joint_names = entity_utils.find_dofs(
-                    entity=entity,
-                    name_keys=list(entity_config.d_gain.keys())
-                )
-                _, _, d_values = string_utils.resolve_matching_names_values(
-                    entity_config.d_gain,
-                    joint_names
-                )
-                entity.set_dofs_kv(d_values, dof_ids)
+                num_dofs = len(dof_ids)
 
-            # Set armature
-            if entity_config.armature is not None:
-                dof_ids, joint_names = entity_utils.find_dofs(
-                    entity=entity,
-                    name_keys=list(entity_config.armature.keys())
-                )
-                _, _, armature_values = string_utils.resolve_matching_names_values(
-                    entity_config.armature,
-                    joint_names
-                )
-                entity.set_dofs_armature(armature_values, dof_ids)
+                # Only set Kp/Kd for implicit actuators (simulator PD)
+                if isinstance(act_cfg, ImplicitActuatorCfg):
+                    # Stiffness — float or dict[regex, float]
+                    if isinstance(act_cfg.stiffness, dict):
+                        sub_ids, sub_names = entity_utils.find_dofs(
+                            entity=entity, name_keys=list(act_cfg.stiffness.keys())
+                        )
+                        if sub_ids:
+                            _, _, vals = string_utils.resolve_matching_names_values(
+                                act_cfg.stiffness, sub_names
+                            )
+                            entity.set_dofs_kp(vals, sub_ids)
+                    elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                        entity.set_dofs_kp([act_cfg.stiffness] * num_dofs, dof_ids)
+
+                    # Damping — float or dict[regex, float]
+                    if isinstance(act_cfg.damping, dict):
+                        sub_ids, sub_names = entity_utils.find_dofs(
+                            entity=entity, name_keys=list(act_cfg.damping.keys())
+                        )
+                        if sub_ids:
+                            _, _, vals = string_utils.resolve_matching_names_values(
+                                act_cfg.damping, sub_names
+                            )
+                            entity.set_dofs_kv(vals, sub_ids)
+                    elif act_cfg.damping is not None and act_cfg.damping > 0:
+                        entity.set_dofs_kv([act_cfg.damping] * num_dofs, dof_ids)
+
+                # Armature — float or dict[regex, float]
+                if isinstance(act_cfg.armature, dict):
+                    sub_ids, sub_names = entity_utils.find_dofs(
+                        entity=entity, name_keys=list(act_cfg.armature.keys())
+                    )
+                    if sub_ids:
+                        _, _, vals = string_utils.resolve_matching_names_values(
+                            act_cfg.armature, sub_names
+                        )
+                        entity.set_dofs_armature(vals, sub_ids)
+                elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
+                    entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 
     def step(self):
         self.scene.step()

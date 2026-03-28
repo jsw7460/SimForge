@@ -42,7 +42,7 @@ class SceneConfig(BaseConfig):
     vis_options: gs.options.VisOptions = field(default_factory=gs.options.VisOptions)
     rigid_options: gs.options.RigidOptions = field(default_factory=gs.options.RigidOptions)
     env_spacing: tuple[float, float] = (20.0, 20.0)
-    entities: list[EntityConfig] = field(default_factory=list)
+    entities: dict = field(default_factory=dict)
     sensors: list[SensorConfig] | None = field(default_factory=list)
     robot_cfg: Union["RobotConfig", None] = None
 
@@ -63,7 +63,6 @@ class ActionConfig(BaseConfig):
     simulate_action_latency: bool = False
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-100.0, 100.0)
     offset: dict[str, float] = field(default_factory=dict)
-    control_mode: Literal["position", "force"] = "position"
 
 
 @dataclass

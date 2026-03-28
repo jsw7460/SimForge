@@ -8,6 +8,10 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
+from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+from rlworld.rl.configs.scene.unified_entity_config import (
+    EntityCfg, MujocoEntityCfg, GroundPlaneCfg,
+)
 from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
@@ -19,27 +23,39 @@ if TYPE_CHECKING:
 
 @dataclass
 class MjlabSceneManagerConfig:
-    """Configuration for MuJoCo/mjlab scene management.
+    """Internal config consumed by MjlabSceneManager.
 
-    This config wraps mjlab's Scene and Simulation configuration.
-
-    Example:
-        from mjlab.scene import SceneCfg
-        from mjlab.sim import SimulationCfg
-
-        config = MjlabSceneManagerConfig(
-            mjlab_scene_cfg=SceneCfg(
-                num_envs=4096,
-                entities={"robot": robot_entity_cfg},
-            ),
-            mjlab_sim_cfg=SimulationCfg(),
-            device="cuda:0",
-        )
+    Populated from MujocoSceneConfig by mjlab_env at build time.
+    Users should not construct this directly — use MujocoSceneConfig
+    in presets instead.
     """
-    mjlab_scene_cfg: Any  # mjlab.SceneCfg
-    mjlab_sim_cfg: Any = None  # mjlab.SimulationCfg (optional, uses default if None)
     device: str = "cuda:0"
     robot_entity_name: str = "robot"
+    num_envs: int = 4096
+    env_spacing: float = 2.0
+    physics_dt: float = 0.002
+
+    # Entities — unified EntityCfg dict (auto-converted to mjlab)
+    entities: dict[str, EntityCfg | GroundPlaneCfg] | None = None
+
+    # Sensors — mjlab sensor configs (passed through)
+    sensors: tuple = ()
+
+    # Terrain
+    terrain_type: str = "plane"
+
+    # Solver
+    solver_iterations: int = 10
+    solver_ls_iterations: int = 20
+    ccd_iterations: int = 50
+    nconmax: int = 35
+    njmax: int = 1500
+    contact_sensor_maxmatch: int = 64
+
+    # Legacy — set by mjlab_env for backward compat
+    mjlab_scene_cfg: Any = None
+    mjlab_sim_cfg: Any = None
+    unified_entities: Any = None
 
 
 class MjlabSceneManager(BaseManager):
@@ -128,22 +144,55 @@ class MjlabSceneManager(BaseManager):
         return self._scene.sensors
 
     def build_scene(self) -> None:
-        """Build the scene and simulation from config."""
-        from mjlab.scene import Scene
-        from mjlab.sim import Simulation, SimulationCfg
+        """Build the scene and simulation from config.
+
+        Constructs mjlab SceneCfg and SimulationCfg internally from the
+        rlworld config fields.  No mjlab imports needed at config level.
+        """
+        from mjlab.scene import Scene, SceneCfg
+        from mjlab.sim import Simulation, SimulationCfg, MujocoCfg
+        from mjlab.terrains import TerrainEntityCfg
+        # Build mjlab SceneCfg
+        if self.config.mjlab_scene_cfg is not None:
+            # Legacy path — user provided mjlab SceneCfg directly
+            scene_cfg = self.config.mjlab_scene_cfg
+        else:
+            scene_cfg = SceneCfg(
+                num_envs=self.config.num_envs,
+                env_spacing=self.config.env_spacing,
+                terrain=TerrainEntityCfg(terrain_type=self.config.terrain_type),
+                entities={},
+                sensors=self.config.sensors,
+            )
+            self.config.mjlab_scene_cfg = scene_cfg
+
+        # Convert unified entities → mjlab entities and merge
+        if self.config.entities is not None:
+            self._build_mjlab_entities()
 
         # Create scene
-        self._scene = Scene(self.config.mjlab_scene_cfg, device=self.config.device)
+        self._scene = Scene(scene_cfg, device=self.config.device)
 
         # Compile to get MjModel
         mj_model = self._scene.compile()
 
-        # Create simulation config if not provided
-        sim_cfg = self.config.mjlab_sim_cfg
-        if sim_cfg is None:
-            sim_cfg = SimulationCfg()
+        # Build SimulationCfg
+        if self.config.mjlab_sim_cfg is not None:
+            sim_cfg = self.config.mjlab_sim_cfg
+        else:
+            sim_cfg = SimulationCfg(
+                nconmax=self.config.nconmax,
+                njmax=self.config.njmax,
+                mujoco=MujocoCfg(
+                    timestep=self.config.physics_dt,
+                    iterations=self.config.solver_iterations,
+                    ls_iterations=self.config.solver_ls_iterations,
+                    ccd_iterations=self.config.ccd_iterations,
+                ),
+                contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
+            )
 
-        # Update physics dt from config
+        # Update physics dt
         self._physics_dt = sim_cfg.mujoco.timestep
 
         # Create simulation
@@ -163,6 +212,98 @@ class MjlabSceneManager(BaseManager):
 
         # Build kinematic trees for each entity
         self._set_kinematic_tree()
+
+    def _build_mjlab_entities(self) -> None:
+        """Convert unified entities to mjlab EntityCfg and merge into SceneCfg.
+
+        Actuator type mapping (automatic):
+          ImplicitActuatorCfg → BuiltinPositionActuatorCfg (simulator PD)
+          Any other type      → BuiltinMotorActuatorCfg (direct torque)
+        """
+        from mjlab.entity import EntityCfg as MjlabEntityCfg, EntityArticulationInfoCfg
+        from mjlab.actuator.builtin_actuator import (
+            BuiltinPositionActuatorCfg,
+            BuiltinMotorActuatorCfg,
+        )
+        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+
+        for entity_name, cfg in self.config.entities.items():
+            if isinstance(cfg, GroundPlaneCfg):
+                continue
+
+            if not isinstance(cfg, MujocoEntityCfg):
+                raise ValueError(
+                    f"MuJoCo entity '{entity_name}' must be MujocoEntityCfg, "
+                    f"got {type(cfg).__name__}"
+                )
+            if cfg.spec_fn is None:
+                raise ValueError(
+                    f"MuJoCo entity '{entity_name}' requires 'spec_fn'"
+                )
+
+            # Convert actuator configs → mjlab actuator configs.
+            # When stiffness/damping/armature are dicts, we expand into one
+            # mjlab actuator per regex key so each gets the correct value.
+            mjlab_actuators = []
+            for act_cfg in cfg.articulation.actuators:
+                if isinstance(act_cfg, ImplicitActuatorCfg):
+                    if isinstance(act_cfg.stiffness, dict):
+                        # Expand: one BuiltinPositionActuator per gain key
+                        stiff_dict = act_cfg.stiffness
+                        damp_dict = act_cfg.damping if isinstance(act_cfg.damping, dict) else {}
+                        arm_dict = act_cfg.armature if isinstance(act_cfg.armature, dict) else {}
+                        for pattern, kp in stiff_dict.items():
+                            kd = damp_dict.get(pattern, 0.0)
+                            arm = arm_dict.get(pattern, 0.0)
+                            mjlab_actuators.append(BuiltinPositionActuatorCfg(
+                                target_names_expr=(pattern,),
+                                stiffness=kp,
+                                damping=kd,
+                                effort_limit=act_cfg.effort_limit,
+                                armature=arm,
+                                frictionloss=act_cfg.frictionloss,
+                            ))
+                    else:
+                        stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
+                        damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
+                        armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
+                        mjlab_actuators.append(BuiltinPositionActuatorCfg(
+                            target_names_expr=act_cfg.target_names_expr,
+                            stiffness=stiffness,
+                            damping=damping,
+                            effort_limit=act_cfg.effort_limit,
+                            armature=armature,
+                            frictionloss=act_cfg.frictionloss,
+                        ))
+                else:
+                    armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
+                    mjlab_actuators.append(BuiltinMotorActuatorCfg(
+                        target_names_expr=act_cfg.target_names_expr,
+                        effort_limit=act_cfg.effort_limit or 1000.0,
+                        armature=armature,
+                        frictionloss=act_cfg.frictionloss,
+                    ))
+
+            articulation_info = EntityArticulationInfoCfg(
+                actuators=tuple(mjlab_actuators),
+                soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
+            ) if mjlab_actuators else None
+
+            # Build mjlab EntityCfg
+            init_state = MjlabEntityCfg.InitialStateCfg(
+                pos=cfg.init_state.pos,
+                rot=cfg.init_state.rot,
+                joint_pos=cfg.init_state.joint_pos or None,
+                joint_vel=cfg.init_state.joint_vel,
+            )
+            mjlab_cfg = MjlabEntityCfg(
+                init_state=init_state,
+                spec_fn=cfg.spec_fn,
+                articulation=articulation_info,
+                collisions=cfg.collisions,
+            )
+
+            self.config.mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
 
     def step(self) -> None:
         """Execute a single physics step."""

@@ -15,8 +15,9 @@ from rlworld.rl.configs.genesis_config_classes import (
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE
-from rlworld.rl.configs.scene import EntityConfig
+from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE, ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE
+from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
@@ -146,29 +147,43 @@ class Go2FlatGenesisConfig:
             simulate_action_latency=False,
             clip_actions=(-100.0, 100.0),
             offset=self.robot.get_action_offset(),
-            control_mode="position",
         )
 
     def _build_scene_config(self) -> SceneConfig:
         return SceneConfig(
             env_spacing=(20.0, 20.0),
-            entities=[
-                EntityConfig(
-                    entity_name="base_entity",
-                    morph=gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
-                ),
-                EntityConfig(
-                    entity_name="robot",
-                    morph=gs.morphs.URDF(
-                        file=self.robot.urdf_path,
-                        convexify=False,
-                        links_to_keep=("FR_foot", "FL_foot", "RR_foot", "RL_foot")
+            entities={
+                "base_entity": GroundPlaneCfg(),
+                "robot": GenesisEntityCfg(
+                    urdf_path=self.robot.urdf_path,
+                    init_state=InitialStateCfg(
+                        pos=(1.5, 1.5, self.robot.base_init_height),
+                        joint_pos=self.robot.default_joint_angles,
                     ),
+                    floating=True,
+                    links_to_keep=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                    articulation=ArticulationCfg(
+                        actuators=(
+                            ImplicitActuatorCfg(
+                                target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
+                                stiffness=STIFFNESS_HIP,
+                                damping=DAMPING_HIP,
+                                effort_limit=EFFORT_HIP,
+                                armature=ARMATURE_HIP,
+                            ),
+                            ImplicitActuatorCfg(
+                                target_names_expr=(".*_calf_joint",),
+                                stiffness=STIFFNESS_KNEE,
+                                damping=DAMPING_KNEE,
+                                effort_limit=EFFORT_KNEE,
+                                armature=ARMATURE_KNEE,
+                            ),
+                        ),
+                    ),
+                    convexify=False,
                     visualize_contact=True,
-                    p_gain=self.robot.p_gains,
-                    d_gain=self.robot.d_gains,
                 ),
-            ],
+            },
             sensors=[
                 SensorConfig(entity_name="robot", link_name="base", sensor_class=gs.sensors.IMU),
                 SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.Contact),

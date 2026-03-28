@@ -18,6 +18,8 @@ from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import EntityConfig
+from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
@@ -295,7 +297,6 @@ class G1FlatGenesisConfig:
     def _build_action_config(self) -> ActionConfig:
         return ActionConfig(
             actuated_dof_names=self.robot.actuated_dof_patterns,
-            num_joint_actions=29,
             action_scale=G1_ACTION_SCALE,
             clip_actions=(-100.0, 100.0),
             offset=self.robot.default_joint_angles,
@@ -316,24 +317,29 @@ class G1FlatGenesisConfig:
 
     def _build_scene_config(self) -> SceneConfig:
         return SceneConfig(
-            entities=[
-                EntityConfig(
-                    entity_name="base_entity",
-                    morph=gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True),
-                ),
-                EntityConfig(
-                    entity_name="robot",
-                    morph=gs.morphs.URDF(
-                        file=self.robot.urdf_path,
-                        # links_to_keep=[self.robot.base_link_name],
-                        convexify=True,
+            entities={
+                "base_entity": GroundPlaneCfg(),
+                "robot": GenesisEntityCfg(
+                    urdf_path=self.robot.urdf_path,
+                    init_state=InitialStateCfg(
+                        pos=(0, 0, self.robot.base_init_height),
+                        joint_pos=self.robot.default_joint_angles,
                     ),
+                    floating=True,
+                    articulation=ArticulationCfg(
+                        actuators=(
+                            ImplicitActuatorCfg(
+                                target_names_expr=(".*",),
+                                stiffness=self.robot.p_gains,
+                                damping=self.robot.d_gains,
+                                armature=self.robot.armature,
+                            ),
+                        ),
+                    ),
+                    convexify=True,
                     visualize_contact=False,
-                    p_gain=self.robot.p_gains,
-                    d_gain=self.robot.d_gains,
-                    armature=self.robot.armature,
                 ),
-            ],
+            },
             sensors=[
                 SensorConfig(
                     entity_name="robot",

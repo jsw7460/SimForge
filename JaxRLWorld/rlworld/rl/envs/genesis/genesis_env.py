@@ -154,7 +154,6 @@ class GenesisEnv(World):
                 clip=self.act_cfg.clip_actions,
                 scale=self.act_cfg.action_scale,
                 offset=self.act_cfg.offset,
-                control_mode=self.act_cfg.control_mode
             )
         )
 
@@ -172,8 +171,15 @@ class GenesisEnv(World):
             )
 
     def _step_physics(self) -> None:
-        """Genesis physics step with decimation."""
+        """Genesis physics step with decimation.
+
+        When an actuator model is active, torques are recomputed every
+        substep using the latest joint state (matching IsaacLab behavior).
+        For position control without an actuator, re-applying the same
+        target each substep is a harmless no-op.
+        """
         for _ in range(self.decimation):
+            self.act_manager.apply_actions(self.act_manager.processed_actions)
             self.scene_manager.step()
         self.vis_manager.advance()
 
