@@ -329,6 +329,7 @@ class ActionManagerBase(BaseManager):
                 self._actuated_joint_names,
                 preserve_order=True,
             )
+
             if not matched_indices:
                 continue
 
@@ -444,7 +445,6 @@ class ActionManagerBase(BaseManager):
 
             # Scatter back into full array
             full_torques[:, joint_idx] = torques
-
         self._apply_force(full_torques)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
@@ -476,6 +476,50 @@ class ActionManagerBase(BaseManager):
         """Advance action history by one step."""
         self._prev_raw_actions = self._raw_actions.clone()
         self._prev_processed_actions = self._processed_actions.clone()
+
+    def print_joint_mapping(self) -> None:
+        """Print joint names, indices, and actuator assignments for debugging.
+
+        Shows which joints are actuated, their index in the action vector,
+        and which actuator group drives them (with Kp/Kd if applicable).
+        Useful for verifying cross-simulator joint ordering consistency.
+        """
+        sim_type = getattr(self.env, "sim_type", "unknown")
+        header = f"Joint Mapping [{sim_type}]"
+        print(f"\n{'=' * 60}")
+        print(f"  {header}")
+        print(f"{'=' * 60}")
+        print(f"  {'Idx':<4} {'Joint Name':<40} {'Actuator':<15} {'Kp':<10} {'Kd':<10}")
+        print(f"  {'-' * 4} {'-' * 40} {'-' * 15} {'-' * 10} {'-' * 10}")
+
+        # Build actuator lookup: action_idx → (actuator, group_local_idx)
+        actuator_lookup: dict[int, tuple] = {}
+        for actuator, joint_idx in self._actuators:
+            for local_i, global_i in enumerate(joint_idx.tolist()):
+                actuator_lookup[global_i] = (actuator, local_i)
+
+        for idx, name in enumerate(self._actuated_joint_names):
+            if idx in actuator_lookup:
+                act, local_i = actuator_lookup[idx]
+                act_type = type(act).__name__
+                kp = act.stiffness[0, local_i].item() if hasattr(act, "stiffness") else "-"
+                kd = act.damping[0, local_i].item() if hasattr(act, "damping") else "-"
+                kp_str = f"{kp:.2f}" if isinstance(kp, float) else kp
+                kd_str = f"{kd:.2f}" if isinstance(kd, float) else kd
+            else:
+                act_type = "Implicit"
+                kp_str = "-"
+                kd_str = "-"
+
+            print(f"  {idx:<4} {name:<40} {act_type:<15} {kp_str:<10} {kd_str:<10}")
+
+        print(f"{'=' * 60}")
+        print(f"  Total actuated joints: {self._total_action_dim}")
+        if self._has_explicit_actuators:
+            print(f"  Explicit actuator groups: {len(self._actuators)}")
+        else:
+            print(f"  Mode: Implicit (simulator PD)")
+        print(f"{'=' * 60}\n")
 
     def __str__(self) -> str:
         """Pretty print action manager configuration."""
