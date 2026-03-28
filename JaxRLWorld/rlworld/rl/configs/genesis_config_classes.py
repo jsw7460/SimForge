@@ -42,7 +42,7 @@ class SceneConfig(BaseConfig):
     vis_options: gs.options.VisOptions = field(default_factory=gs.options.VisOptions)
     rigid_options: gs.options.RigidOptions = field(default_factory=gs.options.RigidOptions)
     env_spacing: tuple[float, float] = (20.0, 20.0)
-    entities: list[EntityConfig] = field(default_factory=list)
+    entities: list[EntityConfig] | dict = field(default_factory=list)
     sensors: list[SensorConfig] | None = field(default_factory=list)
     robot_cfg: Union["RobotConfig", None] = None
 
