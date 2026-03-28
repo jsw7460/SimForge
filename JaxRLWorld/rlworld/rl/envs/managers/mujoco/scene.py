@@ -134,13 +134,18 @@ class MjlabSceneManager(BaseManager):
         return self._scene.sensors
 
     def build_scene(self) -> None:
-        """Build the scene and simulation from config."""
+        """Build the scene and simulation from config.
+
+        If ``unified_entities`` is provided, the mjlab SceneCfg is built
+        internally — there is no need to supply ``mjlab_scene_cfg`` with
+        entities pre-populated.
+        """
         from mjlab.scene import Scene
         from mjlab.sim import Simulation, SimulationCfg
 
-        # Convert unified entities to mjlab SceneCfg if provided
+        # Build mjlab SceneCfg from unified entities if provided
         if self.config.unified_entities is not None:
-            self._apply_unified_entities()
+            self._build_scene_cfg_from_unified()
 
         # Create scene
         self._scene = Scene(self.config.mjlab_scene_cfg, device=self.config.device)
@@ -174,30 +179,43 @@ class MjlabSceneManager(BaseManager):
         # Build kinematic trees for each entity
         self._set_kinematic_tree()
 
-    def _apply_unified_entities(self) -> None:
-        """Convert unified EntityCfg dict into mjlab SceneCfg.entities.
+    def _build_scene_cfg_from_unified(self) -> None:
+        """Build mjlab SceneCfg internally from unified entities.
+
+        Creates the mjlab SceneCfg from scratch using the unified entity
+        configs.  The user never needs to construct a mjlab SceneCfg
+        directly.
 
         Actuator type mapping (automatic):
           ImplicitActuatorCfg → BuiltinPositionActuatorCfg (simulator PD)
           Any other type      → BuiltinMotorActuatorCfg (direct torque)
         """
         from mjlab.entity import EntityCfg as MjlabEntityCfg, EntityArticulationInfoCfg
+        from mjlab.scene import SceneCfg
+        from mjlab.terrains import TerrainEntityCfg
         from mjlab.actuator.builtin_actuator import (
             BuiltinPositionActuatorCfg,
             BuiltinMotorActuatorCfg,
         )
         from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 
-        scene_cfg = self.config.mjlab_scene_cfg
         mjlab_entities: dict[str, Any] = {}
 
         for entity_name, cfg in self.config.unified_entities.items():
             if isinstance(cfg, GroundPlaneCfg):
                 continue
 
-            # Convert actuator configs → mjlab actuator configs.
-            # ImplicitActuatorCfg → BuiltinPositionActuatorCfg (simulator PD)
-            # Any other type → BuiltinMotorActuatorCfg (direct torque)
+            if not isinstance(cfg, MujocoEntityCfg):
+                raise ValueError(
+                    f"MuJoCo entity '{entity_name}' must be a MujocoEntityCfg, "
+                    f"got {type(cfg).__name__}"
+                )
+            if cfg.spec_fn is None and cfg.entity_cfg is None:
+                raise ValueError(
+                    f"MuJoCo entity '{entity_name}' requires 'spec_fn' or 'entity_cfg'"
+                )
+
+            # Convert actuator configs → mjlab actuator configs
             mjlab_actuators = []
             for act_cfg in cfg.articulation.actuators:
                 if isinstance(act_cfg, ImplicitActuatorCfg):
@@ -212,7 +230,6 @@ class MjlabSceneManager(BaseManager):
                         frictionloss=act_cfg.frictionloss,
                     ))
                 else:
-                    # Explicit actuator (IdealPD, LSTM, etc.) → motor mode
                     mjlab_actuators.append(BuiltinMotorActuatorCfg(
                         target_names_expr=act_cfg.target_names_expr,
                         effort_limit=act_cfg.effort_limit or 1000.0,
@@ -225,12 +242,12 @@ class MjlabSceneManager(BaseManager):
                 soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
             ) if mjlab_actuators else None
 
-            # MujocoEntityCfg: use typed fields directly
-            if isinstance(cfg, MujocoEntityCfg) and cfg.entity_cfg is not None:
+            # Build mjlab EntityCfg
+            if cfg.entity_cfg is not None:
                 mjlab_cfg = cfg.entity_cfg
                 if articulation_info is not None:
                     mjlab_cfg.articulation = articulation_info
-            elif isinstance(cfg, MujocoEntityCfg) and cfg.spec_fn is not None:
+            else:
                 init_state = MjlabEntityCfg.InitialStateCfg(
                     pos=cfg.init_state.pos,
                     rot=cfg.init_state.rot,
@@ -243,16 +260,24 @@ class MjlabSceneManager(BaseManager):
                     articulation=articulation_info,
                     collisions=cfg.collisions,
                 )
-            else:
-                raise ValueError(
-                    f"MuJoCo entity '{entity_name}' requires MujocoEntityCfg "
-                    "with either 'entity_cfg' or 'spec_fn' set."
-                )
 
             mjlab_entities[entity_name] = mjlab_cfg
 
-        if mjlab_entities:
-            scene_cfg.entities.update(mjlab_entities)
+        # Build or update the SceneCfg
+        if self.config.mjlab_scene_cfg is not None:
+            # User provided a partial SceneCfg (e.g. with terrain/sensors) — merge entities
+            self.config.mjlab_scene_cfg.entities.update(mjlab_entities)
+        else:
+            # Build SceneCfg from scratch
+            num_envs = getattr(self.env, "num_envs", 1)
+            sensors = getattr(self.config, "_sensors", ())
+            self.config.mjlab_scene_cfg = SceneCfg(
+                num_envs=num_envs,
+                env_spacing=2.0,
+                terrain=TerrainEntityCfg(terrain_type="plane"),
+                entities=mjlab_entities,
+                sensors=sensors,
+            )
 
     def step(self) -> None:
         """Execute a single physics step."""

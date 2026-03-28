@@ -8,7 +8,7 @@ from typing import Dict, Any, List
 
 import math
 
-from mjlab.asset_zoo.robots import get_go2_robot_cfg, GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
+from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
 from mjlab.asset_zoo.robots.unitree_go2.go2_constants import get_spec as go2_get_spec, FULL_COLLISION
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.scene import SceneCfg
@@ -212,17 +212,16 @@ class Go2FlatMujocoConfig:
             collisions=(FULL_COLLISION,),
         )
 
-        # mjlab SceneCfg — entities still uses mjlab EntityCfg for now;
-        # the unified_entities dict triggers automatic actuator conversion.
+        # mjlab SceneCfg with terrain and sensors only — entities are
+        # built automatically from unified_entities by the scene manager.
         mjlab_scene_cfg = SceneCfg(
             num_envs=self.num_envs,
             env_spacing=2.0,
             terrain=TerrainEntityCfg(terrain_type="plane"),
-            entities={"robot": get_go2_robot_cfg()},
+            entities={},
             sensors=(feet_ground_cfg,),
         )
 
-        # mjlab SimulationCfg
         mjlab_sim_cfg = SimulationCfg(
             nconmax=35,
             njmax=1500,
