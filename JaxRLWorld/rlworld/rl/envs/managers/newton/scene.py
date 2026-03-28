@@ -173,7 +173,7 @@ class NewtonSceneManager(BaseManager):
         self.trees: dict[str, Any] = {}
 
         # Internal
-        self._sim_dt = config.dt / config.substeps
+        self.substep_dt = config.dt / config.substeps
 
     @property
     def robot(self) -> Any:
@@ -213,23 +213,18 @@ class NewtonSceneManager(BaseManager):
         return names
 
     def register_entities(self) -> None:
-        """Register all entities defined in config.
+        """Register all entities defined in config."""
+        for entity_name, cfg in self.config.entities.items():
+            self._register_entity(entity_name, cfg)
 
-        This creates a ModelBuilder for each entity and prepares for replication.
-        Supports both legacy list[NewtonEntityConfig] and unified dict[str, EntityCfg].
-        """
-        if isinstance(self.config.entities, dict):
-            for entity_name, cfg in self.config.entities.items():
-                newton_cfg = self._convert_unified_to_newton(entity_name, cfg)
-                self._register_entity(newton_cfg)
-        else:
-            for entity_config in self.config.entities:
-                self._register_entity(entity_config)
+    def _register_entity(self, entity_name: str, cfg: EntityCfg | NewtonEntityCfg | GroundPlaneCfg) -> None:
+        """Register a single entity from its unified config."""
+        if entity_name in self.entities:
+            raise ValueError(f"Entity '{entity_name}' already registered")
 
-    def _convert_unified_to_newton(
-        self, entity_name: str, cfg: EntityCfg | GroundPlaneCfg
-    ) -> NewtonEntityConfig:
-        """Convert unified EntityCfg/GroundPlaneCfg to NewtonEntityConfig."""
+        builder = newton.ModelBuilder()
+        newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
+
         if isinstance(cfg, GroundPlaneCfg):
             shape_cfg = newton.ModelBuilder.ShapeConfig(
                 ke=cfg.contact_stiffness,
@@ -239,181 +234,131 @@ class NewtonSceneManager(BaseManager):
                 mu_rolling=cfg.ground_mu_rolling,
                 mu_torsional=cfg.ground_mu_torsional,
             )
-            return NewtonEntityConfig(
-                entity_name=entity_name,
-                entity_type="ground_plane",
-                shape_cfg=shape_cfg,
-            )
+            builder.add_ground_plane(cfg=shape_cfg)
+        elif cfg.usd_path:
+            self._load_usd_entity(builder, cfg)
+        elif cfg.urdf_path:
+            self._load_urdf_entity(builder, cfg)
+        else:
+            raise ValueError(f"Entity '{entity_name}' has no urdf_path or usd_path")
 
-        # Build per-joint gain dicts from ActuatorCfg list
+        self._entity_builders[entity_name] = builder
+        self.entities[entity_name] = {
+            "config": cfg,
+            "builder": builder,
+            "shape_count": len(builder.shape_label),
+        }
+
+    def _load_urdf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Load URDF entity from unified config."""
+        # Shape config (Newton-specific)
+        shape_cfg = getattr(cfg, "shape_cfg", None)
+        if shape_cfg is not None:
+            builder.default_shape_cfg = shape_cfg
+
+        # Load URDF
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*cfg.init_state.rot))
+        ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
+
+        builder.add_urdf(
+            cfg.urdf_path,
+            xform=xform,
+            floating=cfg.floating,
+            enable_self_collisions=cfg.enable_self_collisions,
+            collapse_fixed_joints=False,
+            ignore_inertial_definitions=ignore_inertial,
+        )
+        builder.collapse_fixed_joints(joints_to_keep=cfg.links_to_keep)
+
+        # Apply gains and armature from articulation actuators
+        prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
-        prefix = cfg.body_label_prefix if isinstance(cfg, NewtonEntityCfg) else None
 
         for act_cfg in cfg.articulation.actuators:
             for pattern in act_cfg.target_names_expr:
                 key = f"{prefix}/{pattern}" if prefix else pattern
-                if act_cfg.stiffness > 0:
+                if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
                     ke_map[key] = act_cfg.stiffness
-                if act_cfg.damping > 0:
+                if act_cfg.damping is not None and act_cfg.damping > 0:
                     kd_map[key] = act_cfg.damping
                 if act_cfg.armature > 0:
                     armature_map[key] = act_cfg.armature
 
-        # Newton-specific fields from NewtonEntityCfg
-        shape_cfg = cfg.shape_cfg if isinstance(cfg, NewtonEntityCfg) else None
-        sites = cfg.sites if isinstance(cfg, NewtonEntityCfg) else None
-        contact_shapes = cfg.contact_shapes if isinstance(cfg, NewtonEntityCfg) else None
-        mesh_approx = cfg.mesh_approximation if isinstance(cfg, NewtonEntityCfg) else "convex_hull"
-        ignore_inertial = cfg.ignore_inertial_definitions if isinstance(cfg, NewtonEntityCfg) else False
+        if ke_map or kd_map or armature_map:
+            apply_joint_params_by_pattern(
+                builder, ke_map=ke_map or None, kd_map=kd_map or None, armature_map=armature_map or None,
+            )
 
-        return NewtonEntityConfig(
-            entity_name=entity_name,
-            body_label_prefix=prefix,
-            entity_type="usd" if cfg.usd_path else "urdf",
-            urdf_path=cfg.urdf_path,
-            usd_path=cfg.usd_path,
-            transform=wp.transform(
-                wp.vec3(*cfg.init_state.pos),
-                wp.quat(*cfg.init_state.rot),
-            ),
-            floating=cfg.floating,
-            enable_self_collisions=cfg.enable_self_collisions,
+        # Mesh approximation
+        mesh_approx = getattr(cfg, "mesh_approximation", "bounding_box")
+        builder.approximate_meshes(mesh_approx)
+
+        # Sites (Newton-specific)
+        sites = getattr(cfg, "sites", None)
+        if sites:
+            self._create_sites_from_dict(builder, sites, prefix)
+
+    def _load_usd_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Load USD entity from unified config."""
+        shape_cfg = getattr(cfg, "shape_cfg", None)
+        if shape_cfg is not None:
+            builder.default_shape_cfg = shape_cfg
+
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*cfg.init_state.rot))
+
+        builder.add_usd(
+            cfg.usd_path,
+            xform=xform,
             collapse_fixed_joints=cfg.collapse_fixed_joints,
-            joints_to_keep=cfg.links_to_keep,
-            joint_target_ke_map=ke_map or None,
-            joint_target_kd_map=kd_map or None,
-            joint_armature_map=armature_map or None,
-            shape_cfg=shape_cfg,
-            sites=sites,
-            contact_shapes=contact_shapes,
-            mesh_approximation=mesh_approx,
-            ignore_inertial_definitions=ignore_inertial,
+            enable_self_collisions=cfg.enable_self_collisions,
         )
 
-    def _register_entity(self, config: NewtonEntityConfig) -> None:
-        """Register a single entity from its config."""
-        if config.entity_name in self.entities:
-            raise ValueError(f"Entity '{config.entity_name}' already registered")
+        # Mesh approximation
+        mesh_approx = getattr(cfg, "mesh_approximation", "convex_hull")
+        if mesh_approx is not None:
+            builder.approximate_meshes(mesh_approx)
 
-        builder = newton.ModelBuilder()
-        newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
+        # Apply gains from articulation actuators
+        prefix = getattr(cfg, "body_label_prefix", None)
+        ke_map: dict[str, float] = {}
+        kd_map: dict[str, float] = {}
+        armature_map: dict[str, float] = {}
 
-        if config.entity_type == "ground_plane":
-            if config.shape_cfg is not None:
-                builder.add_ground_plane(cfg=config.shape_cfg)
-            else:
-                builder.add_ground_plane()
+        for act_cfg in cfg.articulation.actuators:
+            for pattern in act_cfg.target_names_expr:
+                key = f"{prefix}/{pattern}" if prefix else pattern
+                if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                    ke_map[key] = act_cfg.stiffness
+                if act_cfg.damping is not None and act_cfg.damping > 0:
+                    kd_map[key] = act_cfg.damping
+                if act_cfg.armature > 0:
+                    armature_map[key] = act_cfg.armature
 
-        elif config.entity_type == "urdf":
-            self._load_urdf_entity(builder, config)
-
-        elif config.entity_type == "usd":
-            self._load_usd_entity(builder, config)
-
-        else:
-            raise ValueError(f"Unknown entity_type: {config.entity_type}")
-
-        # Store builder for later
-        self._entity_builders[config.entity_name] = builder
-        self.entities[config.entity_name] = {
-            "config": config,
-            "builder": builder,
-            "shape_count": len(builder.shape_label)
-        }
-
-    def _load_urdf_entity(self, builder: newton.ModelBuilder, config: NewtonEntityConfig) -> None:
-        """Load URDF entity."""
-        if config.joint_cfg is not None:
-            builder.default_joint_cfg = config.joint_cfg
-            builder.default_body_armature = config.joint_cfg.armature
-
-        if config.shape_cfg is not None:
-            builder.default_shape_cfg = config.shape_cfg
-
-        if config.urdf_path is not None:
-            builder.add_urdf(
-                config.urdf_path,
-                xform=config.transform,
-                floating=config.floating,
-                enable_self_collisions=config.enable_self_collisions,
-                collapse_fixed_joints=False,
-                ignore_inertial_definitions=config.ignore_inertial_definitions
-            )
-            builder.collapse_fixed_joints(joints_to_keep=config.joints_to_keep)
-
-            # Apply joint params
-            if config.joint_target_ke_map or config.joint_target_kd_map:
-                apply_joint_params_by_pattern(
-                    builder,
-                    ke_map=config.joint_target_ke_map,
-                    kd_map=config.joint_target_kd_map,
-                    armature_map=config.joint_armature_map
-                )
-            elif config.joint_cfg is not None:
-                for i in range(builder.joint_dof_count):
-                    builder.joint_target_ke[i] = config.joint_cfg.target_ke
-                    builder.joint_target_kd[i] = config.joint_cfg.target_kd
-
-            # Todo: 여기 configuration으로 고치기
-            builder.approximate_meshes("bounding_box")
-
-        # Create sites
-        self._create_sites(builder, config)
-
-    def _load_usd_entity(self, builder: newton.ModelBuilder, config: NewtonEntityConfig) -> None:
-        """Load USD entity."""
-        if config.joint_cfg is not None:
-            builder.default_joint_cfg = config.joint_cfg
-            builder.default_body_armature = config.joint_cfg.armature
-
-        if config.shape_cfg is not None:
-            builder.default_shape_cfg = config.shape_cfg
-
-        if config.usd_path is not None:
-            builder.add_usd(
-                config.usd_path,
-                xform=config.transform,
-                collapse_fixed_joints=config.collapse_fixed_joints,
-                enable_self_collisions=config.enable_self_collisions,
-                hide_collision_shapes=config.hide_collision_shapes,
-                skip_mesh_approximation=config.skip_mesh_approximation,
+        if ke_map or kd_map or armature_map:
+            apply_joint_params_by_pattern(
+                builder, ke_map=ke_map or None, kd_map=kd_map or None, armature_map=armature_map or None,
             )
 
-            # Mesh approximation (optional)
-            if config.mesh_approximation is not None:
-                builder.approximate_meshes(config.mesh_approximation)
+        # Sites
+        sites = getattr(cfg, "sites", None)
+        if sites:
+            self._create_sites_from_dict(builder, sites, prefix)
 
-            # Apply joint params
-            if config.joint_target_ke_map or config.joint_target_kd_map:
-                apply_joint_params_by_pattern(
-                    builder,
-                    ke_map=config.joint_target_ke_map,
-                    kd_map=config.joint_target_kd_map,
-                    armature_map=config.joint_armature_map
-                )
-            elif config.joint_cfg is not None:
-                for i in range(builder.joint_dof_count):
-                    builder.joint_target_ke[i] = config.joint_cfg.target_ke
-                    builder.joint_target_kd[i] = config.joint_cfg.target_kd
-
-        # Create sites
-        self._create_sites(builder, config)
-
-    def _create_sites(self, builder: newton.ModelBuilder, config: NewtonEntityConfig) -> None:
-        prefix = config.body_label_prefix
-
+    def _create_sites_from_dict(
+        self, builder: newton.ModelBuilder, sites: dict[str, str], prefix: str | None = None
+    ) -> None:
+        """Create sensor sites from a {site_name: body_name} dict."""
         def _resolve(name: str) -> str:
             return f"{prefix}/{name}" if prefix and "/" not in name else name
 
-        if config.sites:
-            for site_name, body_name in config.sites.items():
-                body_idx = self._find_body_by_name(builder, _resolve(body_name))
-                if body_idx is not None:
-                    builder.add_site(body_idx, label=site_name)
-                else:
-                    raise ValueError(f"Body '{body_name}' not found for site '{site_name}'")
+        for site_name, body_name in sites.items():
+            body_idx = self._find_body_by_name(builder, _resolve(body_name))
+            if body_idx is not None:
+                builder.add_site(body_idx, label=site_name)
+            else:
+                raise ValueError(f"Body '{body_name}' not found for site '{site_name}'")
 
         if config.contact_shapes:
             for shape_name, (body_name, local_pos) in config.contact_shapes.items():
@@ -651,7 +596,7 @@ class NewtonSceneManager(BaseManager):
                 collision_pipeline=self.collision_pipeline
             )
             self.state_0.clear_forces()
-            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self._sim_dt)
+            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
 
             # Swap states
             self.state_0, self.state_1 = self.state_1, self.state_0
