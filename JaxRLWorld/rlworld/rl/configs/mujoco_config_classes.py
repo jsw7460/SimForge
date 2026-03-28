@@ -44,6 +44,7 @@ class MujocoSceneConfig(BaseConfig):
 
     # Entity configuration (alternative to mjlab_scene_cfg)
     robot_entity_name: str = "robot"
+    unified_entities: Any = None  # dict[str, EntityCfg | GroundPlaneCfg] — auto-converts actuators
 
     # Preset info for auto-resolving non-serializable mjlab objects at eval time
     preset_class_name: str | None = None

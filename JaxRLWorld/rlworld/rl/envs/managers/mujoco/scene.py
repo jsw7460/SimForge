@@ -175,12 +175,18 @@ class MjlabSceneManager(BaseManager):
         self._set_kinematic_tree()
 
     def _apply_unified_entities(self) -> None:
-        """Convert unified EntityCfg dict into mjlab SceneCfg.entities."""
+        """Convert unified EntityCfg dict into mjlab SceneCfg.entities.
+
+        Actuator type mapping (automatic):
+          ImplicitActuatorCfg → BuiltinPositionActuatorCfg (simulator PD)
+          Any other type      → BuiltinMotorActuatorCfg (direct torque)
+        """
         from mjlab.entity import EntityCfg as MjlabEntityCfg, EntityArticulationInfoCfg
         from mjlab.actuator.builtin_actuator import (
             BuiltinPositionActuatorCfg,
             BuiltinMotorActuatorCfg,
         )
+        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 
         scene_cfg = self.config.mjlab_scene_cfg
         mjlab_entities: dict[str, Any] = {}

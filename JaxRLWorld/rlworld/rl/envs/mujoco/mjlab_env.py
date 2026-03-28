@@ -116,6 +116,7 @@ class MjlabEnv(World):
                 mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
                 device=str(self.device),
                 robot_entity_name=self.scene_cfg.robot_entity_name,
+                unified_entities=getattr(self.scene_cfg, "unified_entities", None),
             )
         )
         self.scene_manager.build_scene()
