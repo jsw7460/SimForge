@@ -105,7 +105,8 @@ class MjlabEnv(World):
 
     def _build_scene(self) -> None:
         """Create MuJoCo/mjlab scene via ManagerRegistry."""
-        self.scene_cfg.mjlab_scene_cfg.num_envs = self.num_envs
+        # Sync num_envs (eval env may override env_cfg.num_envs)
+        self.scene_cfg.num_envs = self.num_envs
 
         SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
         SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
