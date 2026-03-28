@@ -18,7 +18,6 @@ from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
-    from rlworld.rl.actuators.actuator_cfg import ActuatorBaseCfg
     from rlworld.rl.envs import World
 
 
@@ -52,11 +51,6 @@ class ActionManagerBaseConfig:
     ) = (-1.0, 1.0)
     scale: float | dict[str, float] = 1.0
     offset: dict[str, float] | None = None
-    control_mode: Literal["position", "force"] = "position"
-    actuator_cfg: "ActuatorBaseCfg | None" = None
-    """Optional actuator model configuration.  When set, the action manager
-    computes torques via the actuator model and applies them as direct
-    forces, regardless of the ``control_mode`` setting."""
 
 
 class ActionManagerBase(BaseManager):
@@ -96,11 +90,9 @@ class ActionManagerBase(BaseManager):
         self._scale = self._initialize_scale()
         self._clip_low, self._clip_high = self._initialize_clip()
 
-        # Build actuator model if configured
+        # Build actuator model from entity articulation config
         self._actuator = None
-
-        if config.actuator_cfg is not None:
-            self._actuator = self._build_actuator(config.actuator_cfg)
+        self._actuator = self._build_actuator_from_entity()
 
     # ------------------------------------------------------------------
     # Abstract methods (simulator-specific)
@@ -301,8 +293,50 @@ class ActionManagerBase(BaseManager):
         """The actuator model, or None if not configured."""
         return self._actuator
 
+    def _build_actuator_from_entity(self):
+        """Build actuator from the entity's ArticulationCfg.
+
+        Scans the entity config for explicit (non-implicit) actuator
+        configs that match the actuated joints.  If found, builds the
+        corresponding actuator model.  Returns None if all actuators
+        are implicit (simulator PD).
+        """
+        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+
+        # Find the entity config from the scene manager
+        entity_cfg = self._get_entity_cfg()
+        if entity_cfg is None:
+            return None
+
+        # Collect non-implicit actuator configs that cover our joints
+        for act_cfg in entity_cfg.articulation.actuators:
+            if isinstance(act_cfg, ImplicitActuatorCfg):
+                continue
+            # Build the actuator model from this config
+            return self._build_actuator(act_cfg)
+
+        return None
+
+    def _get_entity_cfg(self):
+        """Get the entity config for the robot from scene manager."""
+        scene_mgr = self.env.scene_manager
+        entities = getattr(scene_mgr.config if hasattr(scene_mgr, 'config') else scene_mgr, 'entities', None)
+        if entities is None:
+            entities = getattr(scene_mgr.config, 'entities', None)
+        if isinstance(entities, dict):
+            # Try "robot" first, then first EntityCfg found
+            from rlworld.rl.configs.scene.unified_entity_config import EntityCfg
+            if "robot" in entities:
+                cfg = entities["robot"]
+                if isinstance(cfg, EntityCfg):
+                    return cfg
+            for cfg in entities.values():
+                if isinstance(cfg, EntityCfg):
+                    return cfg
+        return None
+
     def _build_actuator(self, cfg):
-        """Instantiate the actuator model from its configuration."""
+        """Instantiate an actuator model from its configuration."""
         from rlworld.rl.actuators.actuator_cfg import (
             ActuatorNetLSTMCfg,
             ActuatorNetMLPCfg,
@@ -317,7 +351,6 @@ class ActionManagerBase(BaseManager):
             IdealPDActuator,
         )
 
-        # Order matters: check subclasses before parents
         cls_map = [
             (ActuatorNetLSTMCfg, ActuatorNetLSTM),
             (ActuatorNetMLPCfg, ActuatorNetMLP),
@@ -349,12 +382,12 @@ class ActionManagerBase(BaseManager):
     # ------------------------------------------------------------------
 
     def apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions, routing through actuator if configured.
+        """Apply processed actions.
 
-        When an actuator model is set, the processed actions (position
-        targets) are converted to torques by the actuator and applied as
-        direct forces.  Otherwise, the control_mode determines whether
-        position targets or raw forces are sent to the simulator.
+        If an explicit actuator model is active (from the entity's
+        ArticulationCfg), position targets are converted to torques and
+        applied as direct forces.  Otherwise, position targets are sent
+        to the simulator's built-in PD controller.
 
         Args:
             processed_actions: Tensor of shape (num_envs, num_actuated).
@@ -366,8 +399,6 @@ class ActionManagerBase(BaseManager):
                 joint_vel=self._get_joint_vel(),
             )
             self._apply_force(torques)
-        elif self.config.control_mode == "force":
-            self._apply_force(processed_actions)
         else:
             self._apply_position(processed_actions)
 

@@ -5,7 +5,6 @@ from .newton_entity_config import (
     NewtonBoxConfig,
 )
 from .unified_entity_config import (
-    ActuatorCfg,
     ArticulationCfg,
     InitialStateCfg,
     EntityCfg,

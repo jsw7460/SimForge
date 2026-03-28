@@ -1,4 +1,16 @@
-"""Configuration dataclasses for actuator models."""
+"""Configuration dataclasses for actuator models.
+
+Each actuator config specifies both **which joints** it drives
+(``target_names_expr``) and **how** it drives them (gains, limits,
+network files, etc.).  The actuator type determines the control mode:
+
+- :class:`ImplicitActuatorCfg` — simulator's built-in PD controller.
+- :class:`IdealPDActuatorCfg` — explicit PD torque computation.
+- :class:`DelayedPDActuatorCfg` — explicit PD with command delay.
+- :class:`DCMotorCfg` — explicit PD with velocity-dependent saturation.
+- :class:`ActuatorNetMLPCfg` — pretrained MLP actuator model.
+- :class:`ActuatorNetLSTMCfg` — pretrained LSTM actuator model.
+"""
 
 from __future__ import annotations
 
@@ -11,27 +23,52 @@ class ActuatorBaseCfg:
     """Base configuration shared by all actuator models.
 
     Attributes:
-        effort_limit: Maximum torque the actuator can produce [N*m].
-            If None, no clipping is applied.
+        target_names_expr: Regex patterns matching joint names that
+            this actuator drives.
+        stiffness: P-gain for PD-based actuators [N*m/rad].
+            Can be a single float or a dict mapping joint name regex
+            patterns to per-joint values.
+        damping: D-gain for PD-based actuators [N*m*s/rad].
+            Same format as stiffness.
+        effort_limit: Maximum torque [N*m].  None means no limit.
         velocity_limit: Maximum joint velocity [rad/s].
             Used by velocity-dependent saturation models (e.g. DCMotor).
-        stiffness: P-gain for PD-based actuators.
-            Can be a single float (same for all joints) or a dict mapping
-            joint name regex patterns to per-joint values.
-        damping: D-gain for PD-based actuators.  Same format as stiffness.
+        armature: Reflected rotor inertia added to the joint [kg*m^2].
+        frictionloss: Static friction at the joint [N*m].
     """
 
-    effort_limit: float | None = None
-    velocity_limit: float | None = None
+    target_names_expr: tuple[str, ...] = ()
     stiffness: float | dict[str, float] | None = None
     damping: float | dict[str, float] | None = None
+    effort_limit: float | None = None
+    velocity_limit: float | None = None
+    armature: float = 0.0
+    frictionloss: float = 0.0
+
+
+@dataclass
+class ImplicitActuatorCfg(ActuatorBaseCfg):
+    """Actuator handled by the simulator's built-in PD controller.
+
+    No explicit torque computation is performed.  The simulator uses
+    the configured stiffness and damping to compute PD torques
+    internally at every physics substep.
+
+    This is equivalent to the default behavior when no actuator model
+    is specified.
+    """
+
+    pass
 
 
 @dataclass
 class IdealPDActuatorCfg(ActuatorBaseCfg):
-    """Configuration for an ideal PD actuator.
+    """Explicit ideal PD actuator.
 
-    Computes: tau = Kp * (target - pos) + Kd * (0 - vel)
+    Computes: ``tau = Kp * (target - pos) + Kd * (0 - vel)``
+
+    Torques are computed externally and applied as direct forces,
+    bypassing the simulator's built-in PD.
     """
 
     pass
@@ -39,7 +76,7 @@ class IdealPDActuatorCfg(ActuatorBaseCfg):
 
 @dataclass
 class DelayedPDActuatorCfg(IdealPDActuatorCfg):
-    """Configuration for a PD actuator with command delay.
+    """Explicit PD actuator with random command delay.
 
     At each environment reset, a random delay (in physics steps) is
     sampled uniformly from [min_delay, max_delay] for each environment.
@@ -55,10 +92,7 @@ class DelayedPDActuatorCfg(IdealPDActuatorCfg):
 
 @dataclass
 class DCMotorCfg(IdealPDActuatorCfg):
-    """Configuration for a DC motor with velocity-dependent torque saturation.
-
-    Uses a linear torque-speed curve to compute instantaneous torque
-    limits based on the current joint velocity.
+    """Explicit PD with velocity-dependent torque saturation (DC motor curve).
 
     Attributes:
         saturation_effort: Stall torque of the motor [N*m].
@@ -69,10 +103,7 @@ class DCMotorCfg(IdealPDActuatorCfg):
 
 @dataclass
 class ActuatorNetMLPCfg(ActuatorBaseCfg):
-    """Configuration for an MLP-based learned actuator model.
-
-    The network is loaded from a TorchScript (.pt) file and maps
-    a history of (position_error, velocity) to output torque.
+    """MLP-based learned actuator model loaded from TorchScript.
 
     Attributes:
         network_file: Path to the TorchScript JIT model.
@@ -83,7 +114,6 @@ class ActuatorNetMLPCfg(ActuatorBaseCfg):
             concatenated network input.
         input_idx: Indices into the history buffer to use as network
             input.  Index 0 is the current step; index n is n steps ago.
-            The history buffer length is ``max(input_idx) + 1``.
     """
 
     network_file: str = ""
@@ -96,10 +126,7 @@ class ActuatorNetMLPCfg(ActuatorBaseCfg):
 
 @dataclass
 class ActuatorNetLSTMCfg(ActuatorBaseCfg):
-    """Configuration for an LSTM-based learned actuator model.
-
-    The LSTM implicitly captures temporal dynamics through its hidden
-    state, removing the need for an explicit history buffer.
+    """LSTM-based learned actuator model loaded from TorchScript.
 
     Attributes:
         network_file: Path to the TorchScript JIT model.

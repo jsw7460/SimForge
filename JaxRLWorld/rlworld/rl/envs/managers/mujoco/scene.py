@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
+from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg, MujocoEntityCfg, GroundPlaneCfg,
 )
@@ -188,22 +189,27 @@ class MjlabSceneManager(BaseManager):
             if isinstance(cfg, GroundPlaneCfg):
                 continue
 
-            # Convert ActuatorCfg → mjlab actuator configs
+            # Convert actuator configs → mjlab actuator configs.
+            # ImplicitActuatorCfg → BuiltinPositionActuatorCfg (simulator PD)
+            # Any other type → BuiltinMotorActuatorCfg (direct torque)
             mjlab_actuators = []
             for act_cfg in cfg.articulation.actuators:
-                if act_cfg.control_type == "motor":
-                    mjlab_actuators.append(BuiltinMotorActuatorCfg(
+                if isinstance(act_cfg, ImplicitActuatorCfg):
+                    stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
+                    damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
+                    mjlab_actuators.append(BuiltinPositionActuatorCfg(
                         target_names_expr=act_cfg.target_names_expr,
-                        effort_limit=act_cfg.effort_limit or 1000.0,
+                        stiffness=stiffness,
+                        damping=damping,
+                        effort_limit=act_cfg.effort_limit,
                         armature=act_cfg.armature,
                         frictionloss=act_cfg.frictionloss,
                     ))
                 else:
-                    mjlab_actuators.append(BuiltinPositionActuatorCfg(
+                    # Explicit actuator (IdealPD, LSTM, etc.) → motor mode
+                    mjlab_actuators.append(BuiltinMotorActuatorCfg(
                         target_names_expr=act_cfg.target_names_expr,
-                        stiffness=act_cfg.stiffness,
-                        damping=act_cfg.damping,
-                        effort_limit=act_cfg.effort_limit,
+                        effort_limit=act_cfg.effort_limit or 1000.0,
                         armature=act_cfg.armature,
                         frictionloss=act_cfg.frictionloss,
                     ))

@@ -163,7 +163,12 @@ class SceneManager(BaseManager):
         )
 
     def _configure_robot_dynamics(self) -> None:
-        """Apply gains/armature from ArticulationCfg actuators."""
+        """Apply gains/armature from ArticulationCfg actuators.
+
+        For ``control_type="motor"`` actuators, Kp and Kd are set to 0 so
+        the simulator's built-in PD is disabled — only external torques
+        (from an explicit actuator model) will drive the joints.
+        """
         for entity_name, entity in self.entities.items():
             cfg = self.config.entities.get(entity_name)
             if cfg is None or isinstance(cfg, GroundPlaneCfg):
@@ -179,15 +184,18 @@ class SceneManager(BaseManager):
 
                 num_dofs = len(dof_ids)
 
-                # Stiffness (Kp)
-                if act_cfg.stiffness > 0:
-                    entity.set_dofs_kp([act_cfg.stiffness] * num_dofs, dof_ids)
+                if act_cfg.control_type == "motor":
+                    # Disable simulator PD — actuator model provides torques
+                    entity.set_dofs_kp([0.0] * num_dofs, dof_ids)
+                    entity.set_dofs_kv([0.0] * num_dofs, dof_ids)
+                else:
+                    # Position mode — set simulator PD gains
+                    if act_cfg.stiffness > 0:
+                        entity.set_dofs_kp([act_cfg.stiffness] * num_dofs, dof_ids)
+                    if act_cfg.damping > 0:
+                        entity.set_dofs_kv([act_cfg.damping] * num_dofs, dof_ids)
 
-                # Damping (Kd)
-                if act_cfg.damping > 0:
-                    entity.set_dofs_kv([act_cfg.damping] * num_dofs, dof_ids)
-
-                # Armature
+                # Armature is always applied regardless of control type
                 if act_cfg.armature > 0:
                     entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 

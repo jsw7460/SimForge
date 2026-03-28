@@ -3,43 +3,21 @@
 Provides a base :class:`EntityCfg` with common fields and per-simulator
 subclasses (:class:`GenesisEntityCfg`, :class:`NewtonEntityCfg`,
 :class:`MujocoEntityCfg`) for type-safe simulator-specific settings.
+
+Actuator types are defined in :mod:`rlworld.rl.actuators.actuator_cfg`.
+The actuator class determines the control mode:
+
+- :class:`~rlworld.rl.actuators.ImplicitActuatorCfg` → simulator PD
+- Any other actuator → explicit torque (motor/force mode)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Callable, TYPE_CHECKING
 
-
-# ---------------------------------------------------------------------------
-# Actuator configuration (simulator-independent)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ActuatorCfg:
-    """Actuator definition for a group of joints.
-
-    Attributes:
-        target_names_expr: Regex patterns matching joint names that this
-            actuator drives.
-        control_type: ``"position"`` uses the simulator's built-in PD;
-            ``"motor"`` bypasses it and accepts direct torques (required
-            when using an explicit actuator model from
-            :mod:`rlworld.rl.actuators`).
-        stiffness: P-gain for position-mode actuators [N*m/rad].
-        damping: D-gain for position-mode actuators [N*m*s/rad].
-        effort_limit: Maximum torque [N*m].  None means no limit.
-        armature: Reflected rotor inertia added to the joint [kg*m^2].
-        frictionloss: Static friction at the joint [N*m].
-    """
-
-    target_names_expr: tuple[str, ...] = ()
-    control_type: Literal["position", "motor"] = "position"
-    stiffness: float = 0.0
-    damping: float = 0.0
-    effort_limit: float | None = None
-    armature: float = 0.0
-    frictionloss: float = 0.0
+if TYPE_CHECKING:
+    from rlworld.rl.actuators.actuator_cfg import ActuatorBaseCfg
 
 
 # ---------------------------------------------------------------------------
@@ -51,14 +29,17 @@ class ArticulationCfg:
     """Articulation (joint drive) settings for an entity.
 
     Attributes:
-        actuators: Tuple of :class:`ActuatorCfg` objects, one per
-            actuator group.  Joints not matched by any actuator are
-            passive.
+        actuators: Tuple of actuator config objects (from
+            :mod:`rlworld.rl.actuators`), one per actuator group.
+            The actuator **type** determines the control mode:
+            :class:`~rlworld.rl.actuators.ImplicitActuatorCfg` uses
+            the simulator's built-in PD; all others compute torques
+            explicitly.
         soft_joint_pos_limit_factor: Fraction of the physical joint
             limits used as "soft" limits (for observations / rewards).
     """
 
-    actuators: tuple[ActuatorCfg, ...] = ()
+    actuators: tuple["ActuatorBaseCfg", ...] = ()
     soft_joint_pos_limit_factor: float = 1.0
 
 
@@ -191,7 +172,7 @@ class MujocoEntityCfg(EntityCfg):
 
 
 # ---------------------------------------------------------------------------
-# Ground plane configuration (convenience)
+# Ground plane configuration
 # ---------------------------------------------------------------------------
 
 @dataclass

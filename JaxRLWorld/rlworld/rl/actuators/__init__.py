@@ -10,11 +10,12 @@ saturation, learned dynamics) which is critical for sim-to-real transfer.
 from .actuator_base import ActuatorBase
 from .actuator_cfg import (
     ActuatorBaseCfg,
-    DCMotorCfg,
-    DelayedPDActuatorCfg,
+    ImplicitActuatorCfg,
     IdealPDActuatorCfg,
-    ActuatorNetLSTMCfg,
+    DelayedPDActuatorCfg,
+    DCMotorCfg,
     ActuatorNetMLPCfg,
+    ActuatorNetLSTMCfg,
 )
 from .actuator_pd import DCMotor, DelayedPDActuator, IdealPDActuator
 from .actuator_net import ActuatorNetMLP, ActuatorNetLSTM
@@ -22,6 +23,7 @@ from .actuator_net import ActuatorNetMLP, ActuatorNetLSTM
 __all__ = [
     "ActuatorBase",
     "ActuatorBaseCfg",
+    "ImplicitActuatorCfg",
     "IdealPDActuatorCfg",
     "DelayedPDActuatorCfg",
     "DCMotorCfg",
