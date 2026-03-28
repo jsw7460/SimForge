@@ -276,13 +276,25 @@ class MjlabSceneManager(BaseManager):
                             frictionloss=act_cfg.frictionloss,
                         ))
                 else:
-                    armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
-                    mjlab_actuators.append(BuiltinMotorActuatorCfg(
-                        target_names_expr=act_cfg.target_names_expr,
-                        effort_limit=act_cfg.effort_limit or 1000.0,
-                        armature=armature,
-                        frictionloss=act_cfg.frictionloss,
-                    ))
+                    # Explicit actuator (IdealPD, LSTM, etc.) → motor mode
+                    if isinstance(act_cfg.armature, dict):
+                        # Expand: one BuiltinMotorActuator per armature key
+                        arm_dict = act_cfg.armature
+                        for pattern, arm in arm_dict.items():
+                            mjlab_actuators.append(BuiltinMotorActuatorCfg(
+                                target_names_expr=(pattern,),
+                                effort_limit=act_cfg.effort_limit or 1000.0,
+                                armature=arm,
+                                frictionloss=act_cfg.frictionloss,
+                            ))
+                    else:
+                        armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
+                        mjlab_actuators.append(BuiltinMotorActuatorCfg(
+                            target_names_expr=act_cfg.target_names_expr,
+                            effort_limit=act_cfg.effort_limit or 1000.0,
+                            armature=armature,
+                            frictionloss=act_cfg.frictionloss,
+                        ))
 
             articulation_info = EntityArticulationInfoCfg(
                 actuators=tuple(mjlab_actuators),
