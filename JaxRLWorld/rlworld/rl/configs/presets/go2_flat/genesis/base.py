@@ -16,7 +16,6 @@ from rlworld.rl.configs.genesis_config_classes import (
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE, ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE
-from rlworld.rl.configs.scene import EntityConfig
 from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ActuatorCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf

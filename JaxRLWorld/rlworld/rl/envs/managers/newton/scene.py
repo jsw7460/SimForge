@@ -110,7 +110,7 @@ class NewtonSceneManagerConfig:
     num_worlds: int
 
     # Entity and sensor configurations
-    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | GroundPlaneCfg] = field(default_factory=list)
+    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | GroundPlaneCfg] = field(default_factory=dict)
     sensors: list[NewtonSensorConfig] | None = None
 
     # Ground plane
