@@ -16,7 +16,7 @@ from rlworld.rl.configs.genesis_config_classes import (
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE, ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE
-from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -144,7 +144,6 @@ class Go2FlatGenesisConfig:
         return ActionConfig(
             actuated_dof_names=self.robot.actuated_dof_patterns,
             action_scale=GO2_ACTION_SCALE,
-            simulate_action_latency=False,
             clip_actions=(-100.0, 100.0),
             offset=self.robot.get_action_offset(),
         )
@@ -164,19 +163,23 @@ class Go2FlatGenesisConfig:
                     links_to_keep=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
                     articulation=ArticulationCfg(
                         actuators=(
-                            ImplicitActuatorCfg(
+                            DelayedPDActuatorCfg(
                                 target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
                                 stiffness=STIFFNESS_HIP,
                                 damping=DAMPING_HIP,
                                 effort_limit=EFFORT_HIP,
                                 armature=ARMATURE_HIP,
+                                min_delay=1,
+                                max_delay=3,
                             ),
-                            ImplicitActuatorCfg(
+                            DelayedPDActuatorCfg(
                                 target_names_expr=(".*_calf_joint",),
                                 stiffness=STIFFNESS_KNEE,
                                 damping=DAMPING_KNEE,
                                 effort_limit=EFFORT_KNEE,
                                 armature=ARMATURE_KNEE,
+                                min_delay=1,
+                                max_delay=3,
                             ),
                         ),
                     ),

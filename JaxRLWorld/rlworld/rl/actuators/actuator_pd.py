@@ -118,7 +118,6 @@ class DelayedPDActuator(IdealPDActuator):
         read_idx = (self._head - 1 - self._delay) % self._max_delay  # (num_envs,)
         env_idx = torch.arange(self._num_envs, device=self._device)
         delayed_target = self._buffer[read_idx, env_idx]  # (num_envs, num_joints)
-
         return super().compute(delayed_target, joint_pos, joint_vel)
 
 

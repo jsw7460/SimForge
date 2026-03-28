@@ -20,8 +20,15 @@ from rlworld.rl.configs.newton_config_classes import (
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE
-from rlworld.rl.configs.scene import NewtonEntityConfig
+from rlworld.rl.configs.robots.go2 import (
+    Go2Config, GO2_ACTION_SCALE,
+    STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE,
+    ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE,
+)
+from rlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg, IdealPDActuatorCfg
+from rlworld.rl.configs.scene.unified_entity_config import (
+    NewtonEntityCfg as UnifiedNewtonEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg,
+)
 from rlworld.rl.configs.sensors import NewtonIMUSensorConfig, NewtonContactSensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
@@ -73,8 +80,8 @@ class Go2FlatNewtonConfig:
     episode_length_s: float = 20.0
     seed: int = 42
 
-    dt: float = 0.02
-    substeps: int = 4
+    dt: float = 0.005
+    substeps: int = 2
 
     lin_vel_x_range: tuple = (-1.0, 1.0)
     lin_vel_y_range: tuple = (-1.0, 1.0)
@@ -116,6 +123,7 @@ class Go2FlatNewtonConfig:
             task_name="Go2 Velocity Tracking",
             seed=self.seed,
             episode_length_s=self.episode_length_s,
+            decimation=4,
             termination_criteria=[
                 TerminationTermConfig(
                     common_tf.roll_pitch_violation,
@@ -132,39 +140,48 @@ class Go2FlatNewtonConfig:
             substeps=self.substeps,
             gravity=(0.0, 0.0, -9.81),
             solver_type="mujoco",
-            entities=[
-                NewtonEntityConfig(
-                    entity_name="ground",
-                    entity_type="ground_plane",
-                    floating=False
-                ),
-                NewtonEntityConfig(
-                    entity_name="robot",
-                    body_label_prefix=r.name,
+            entities={
+                "ground": GroundPlaneCfg(),
+                "robot": UnifiedNewtonEntityCfg(
                     urdf_path=r.urdf_path,
-                    transform=wp.transform(
-                        wp.vec3(0.0, 0.0, r.base_init_height),
-                        quat
+                    init_state=InitialStateCfg(
+                        pos=(0.0, 0.0, r.base_init_height),
+                        rot=(quat[0], quat[1], quat[2], quat[3]),
                     ),
                     floating=True,
-                    joint_cfg=newton.ModelBuilder.JointDofConfig(
-                        armature=0.1,
-                        target_ke=r.p_gains.get(".*_hip_joint", 20.0),
-                        target_kd=r.d_gains.get(".*_hip_joint", 0.5),
-                    ),
-                    sites={"imu_site_base": r.base_link_name},
-                    joint_target_ke_map=r.prefixed_p_gains,
-                    joint_target_kd_map=r.prefixed_d_gains,
-                    joint_armature_map=r.prefixed_armature,
                     collapse_fixed_joints=True,
-                    joints_to_keep=[
+                    links_to_keep=[
                         "go2_description/FL_foot_joint",
                         "go2_description/FR_foot_joint",
                         "go2_description/RL_foot_joint",
                         "go2_description/RR_foot_joint",
-                    ]
+                    ],
+                    articulation=ArticulationCfg(
+                        actuators=(
+                            DelayedPDActuatorCfg(
+                                target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
+                                stiffness=STIFFNESS_HIP,
+                                damping=DAMPING_HIP,
+                                effort_limit=EFFORT_HIP,
+                                armature=ARMATURE_HIP,
+                                min_delay=1,
+                                max_delay=3,
+                            ),
+                            DelayedPDActuatorCfg(
+                                target_names_expr=(".*_calf_joint",),
+                                stiffness=STIFFNESS_KNEE,
+                                damping=DAMPING_KNEE,
+                                effort_limit=EFFORT_KNEE,
+                                armature=ARMATURE_KNEE,
+                                min_delay=1,
+                                max_delay=3,
+                            ),
+                        ),
+                    ),
+                    body_label_prefix=r.name,
+                    sites={"imu_site_base": r.base_link_name},
                 ),
-            ],
+            },
             sensors=[
                 NewtonIMUSensorConfig(
                     entity_name="robot",

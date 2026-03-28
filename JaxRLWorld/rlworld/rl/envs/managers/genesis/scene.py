@@ -2,19 +2,19 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import genesis as gs
 import torch
+
+import genesis as gs
 from genesis.engine.entities import RigidEntity
 from genesis.engine.sensors.base_sensor import Sensor
-
+from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg, GenesisEntityCfg, GroundPlaneCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import entity_utils
-
-from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
+from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World

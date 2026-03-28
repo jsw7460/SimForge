@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
@@ -10,7 +10,6 @@ from rlworld.rl.envs.managers.common.action import (
     ActionManagerBase,
     ActionManagerBaseConfig,
 )
-import newton
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
@@ -91,6 +90,7 @@ class NewtonActionManager(ActionManagerBase):
             self._offset[:] = default_pos.unsqueeze(0)
             # Recompute clip bounds since offset changed
             self._clip_low, self._clip_high = self._initialize_clip()
+
     # ------------------------------------------------------------------
     # Abstract method implementations
     # ------------------------------------------------------------------
@@ -114,6 +114,7 @@ class NewtonActionManager(ActionManagerBase):
             )
             # Map back to original indices
             original_indices = [actuatable_indices[i] for i in matched_indices]
+
             return original_indices, matched_names
 
         elif config.num_actions is not None:
@@ -121,7 +122,7 @@ class NewtonActionManager(ActionManagerBase):
             num = config.num_actions
             indices = list(range(num))
             # Skip floating_base
-            names = self._all_joint_names[1 : 1 + num]
+            names = self._all_joint_names[1: 1 + num]
             return indices, names
 
         raise ValueError(

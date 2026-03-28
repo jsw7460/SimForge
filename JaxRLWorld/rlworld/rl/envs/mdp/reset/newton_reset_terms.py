@@ -65,7 +65,6 @@ def initialize_base_pose(
 
     joint_q = wp.to_torch(state.joint_q).reshape(num_worlds, coords_per_world)
     joint_qd = wp.to_torch(state.joint_qd).reshape(num_worlds, dofs_per_world)
-
     base_pos = torch.tensor(base_init_pos, device=env.device)
     base_quat = torch.tensor(base_init_quat, device=env.device)
 

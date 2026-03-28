@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal, Dict, Any, Union, TYPE_CHECKING
 
+from rlworld.rl.configs.scene import GroundPlaneCfg
 from .algorithms import AlgorithmConfig, get_algorithm_config_class
 from .base_config import BaseConfig
 from .common_config_classes import (
@@ -38,7 +39,7 @@ class NewtonSceneConfig(BaseConfig):
     substeps: int = 4
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
     solver_type: Literal["mujoco"] = "mujoco"  # Currently, only support mujoco solver
-    entities: list["NewtonEntityConfig"] = field(default_factory=list)
+    entities: dict[str, Union["NewtonEntityConfig", "GroundPlaneCfg"]] = field(default_factory=list)
     sensors: list["NewtonSensorConfig"] | None = None
     add_ground: bool = True
     env_spacing: tuple[float, float, float] = (2.0, 2.0, 0.0)

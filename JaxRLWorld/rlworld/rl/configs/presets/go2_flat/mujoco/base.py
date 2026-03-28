@@ -32,7 +32,7 @@ from rlworld.rl.configs.robots.go2 import (
     STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE,
     ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE,
 )
-from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg, ArticulationCfg, InitialStateCfg,
 )
@@ -189,19 +189,23 @@ class Go2FlatMujocoConfig:
             floating=True,
             articulation=ArticulationCfg(
                 actuators=(
-                    ImplicitActuatorCfg(
+                    DelayedPDActuatorCfg(
                         target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
                         stiffness=STIFFNESS_HIP,
                         damping=DAMPING_HIP,
                         effort_limit=EFFORT_HIP,
                         armature=ARMATURE_HIP,
+                        min_delay=1,
+                        max_delay=3
                     ),
-                    ImplicitActuatorCfg(
+                    DelayedPDActuatorCfg(
                         target_names_expr=(".*_calf_joint",),
                         stiffness=STIFFNESS_KNEE,
                         damping=DAMPING_KNEE,
                         effort_limit=EFFORT_KNEE,
                         armature=ARMATURE_KNEE,
+                        min_delay=1,
+                        max_delay=3
                     ),
                 ),
             ),
