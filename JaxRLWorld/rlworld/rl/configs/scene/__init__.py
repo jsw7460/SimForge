@@ -9,5 +9,8 @@ from .unified_entity_config import (
     ArticulationCfg,
     InitialStateCfg,
     EntityCfg,
+    GenesisEntityCfg,
+    NewtonEntityCfg,
+    MujocoEntityCfg,
     GroundPlaneCfg,
 )

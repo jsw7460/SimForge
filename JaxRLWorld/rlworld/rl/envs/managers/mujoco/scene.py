@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
-from rlworld.rl.configs.scene.unified_entity_config import EntityCfg, GroundPlaneCfg, ActuatorCfg
+from rlworld.rl.configs.scene.unified_entity_config import (
+    EntityCfg, MujocoEntityCfg, GroundPlaneCfg,
+)
 from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
@@ -178,14 +180,12 @@ class MjlabSceneManager(BaseManager):
             BuiltinPositionActuatorCfg,
             BuiltinMotorActuatorCfg,
         )
-        from mjlab.terrains import TerrainEntityCfg
 
         scene_cfg = self.config.mjlab_scene_cfg
         mjlab_entities: dict[str, Any] = {}
 
         for entity_name, cfg in self.config.unified_entities.items():
             if isinstance(cfg, GroundPlaneCfg):
-                # Terrain handled separately via SceneCfg.terrain
                 continue
 
             # Convert ActuatorCfg → mjlab actuator configs
@@ -208,19 +208,17 @@ class MjlabSceneManager(BaseManager):
                         frictionloss=act_cfg.frictionloss,
                     ))
 
-            # Get the existing mjlab EntityCfg if available (from mujoco_options),
-            # otherwise we need a spec_fn from mujoco_options
-            mujoco_opts = cfg.mujoco_options
-            if "entity_cfg" in mujoco_opts:
-                # User provided a full mjlab EntityCfg — just swap actuators
-                mjlab_cfg = mujoco_opts["entity_cfg"]
-                if mjlab_actuators:
-                    mjlab_cfg.articulation = EntityArticulationInfoCfg(
-                        actuators=tuple(mjlab_actuators),
-                        soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
-                    )
-            elif "spec_fn" in mujoco_opts:
-                # User provided a spec_fn
+            articulation_info = EntityArticulationInfoCfg(
+                actuators=tuple(mjlab_actuators),
+                soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
+            ) if mjlab_actuators else None
+
+            # MujocoEntityCfg: use typed fields directly
+            if isinstance(cfg, MujocoEntityCfg) and cfg.entity_cfg is not None:
+                mjlab_cfg = cfg.entity_cfg
+                if articulation_info is not None:
+                    mjlab_cfg.articulation = articulation_info
+            elif isinstance(cfg, MujocoEntityCfg) and cfg.spec_fn is not None:
                 init_state = MjlabEntityCfg.InitialStateCfg(
                     pos=cfg.init_state.pos,
                     rot=cfg.init_state.rot,
@@ -229,22 +227,18 @@ class MjlabSceneManager(BaseManager):
                 )
                 mjlab_cfg = MjlabEntityCfg(
                     init_state=init_state,
-                    spec_fn=mujoco_opts["spec_fn"],
-                    articulation=EntityArticulationInfoCfg(
-                        actuators=tuple(mjlab_actuators),
-                        soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
-                    ) if mjlab_actuators else None,
-                    collisions=mujoco_opts.get("collisions", ()),
+                    spec_fn=cfg.spec_fn,
+                    articulation=articulation_info,
+                    collisions=cfg.collisions,
                 )
             else:
                 raise ValueError(
-                    f"MuJoCo entity '{entity_name}' requires either "
-                    "'entity_cfg' or 'spec_fn' in mujoco_options"
+                    f"MuJoCo entity '{entity_name}' requires MujocoEntityCfg "
+                    "with either 'entity_cfg' or 'spec_fn' set."
                 )
 
             mjlab_entities[entity_name] = mjlab_cfg
 
-        # Update the SceneCfg with converted entities
         if mjlab_entities:
             scene_cfg.entities.update(mjlab_entities)
 

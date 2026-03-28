@@ -1,14 +1,14 @@
 """Unified entity configuration for all simulators.
 
-Provides a single EntityCfg that Genesis, Newton, and MuJoCo scene
-managers all consume.  Simulator-specific details are handled by each
-scene manager's adapter logic, not by the config itself.
+Provides a base :class:`EntityCfg` with common fields and per-simulator
+subclasses (:class:`GenesisEntityCfg`, :class:`NewtonEntityCfg`,
+:class:`MujocoEntityCfg`) for type-safe simulator-specific settings.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 
 # ---------------------------------------------------------------------------
@@ -90,47 +90,21 @@ class InitialStateCfg:
 
 
 # ---------------------------------------------------------------------------
-# Unified entity configuration
+# Base entity configuration
 # ---------------------------------------------------------------------------
 
 @dataclass
 class EntityCfg:
-    """Simulator-independent entity configuration.
+    """Simulator-independent base entity configuration.
 
-    Each scene manager interprets this config for its own simulator.
-    Simulator-specific options that have no cross-simulator equivalent
-    go into the ``genesis_options`` / ``newton_options`` /
-    ``mujoco_options`` dictionaries.
-
-    Example::
-
-        EntityCfg(
-            urdf_path="assets/go2/go2.urdf",
-            init_state=InitialStateCfg(
-                pos=(0, 0, 0.34),
-                joint_pos={".*thigh": 0.9, ".*calf": -1.8},
-            ),
-            floating=True,
-            articulation=ArticulationCfg(
-                actuators=(
-                    ActuatorCfg(
-                        target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
-                        stiffness=17.6, damping=5.6,
-                        effort_limit=23.7, armature=0.0045,
-                    ),
-                    ActuatorCfg(
-                        target_names_expr=(".*_calf_joint",),
-                        stiffness=65.0, damping=20.7,
-                        effort_limit=45.43, armature=0.016,
-                    ),
-                ),
-            ),
-        )
+    Contains fields common to all simulators.  Use the subclasses
+    :class:`GenesisEntityCfg`, :class:`NewtonEntityCfg`, or
+    :class:`MujocoEntityCfg` for simulator-specific settings.
     """
 
     # -- Source ---------------------------------------------------------------
     urdf_path: str | None = None
-    """Path to URDF file (Genesis and Newton)."""
+    """Path to URDF file."""
 
     usd_path: str | None = None
     """Path to USD file (Newton only)."""
@@ -149,40 +123,71 @@ class EntityCfg:
 
     # -- Filtering ------------------------------------------------------------
     links_to_keep: list[str] = field(default_factory=list)
-    """Regex patterns for links to preserve when simplifying the model.
-    Genesis uses this for foot-link retention; Newton uses joints_to_keep."""
+    """Links/joints to preserve when simplifying the model."""
 
     collapse_fixed_joints: bool = False
-    """Merge bodies connected by fixed joints (Newton/MuJoCo)."""
+    """Merge bodies connected by fixed joints."""
 
-    # -- Simulator-specific overrides -----------------------------------------
-    genesis_options: dict[str, Any] = field(default_factory=dict)
-    """Genesis-specific options passed to the scene manager.
 
-    Commonly used keys:
-        - ``convexify`` (bool): convex-decompose collision meshes.
-        - ``surface`` (gs.surfaces.Surface): surface material.
-        - ``visualize_contact`` (bool): show contact forces.
-    """
+# ---------------------------------------------------------------------------
+# Per-simulator entity configurations
+# ---------------------------------------------------------------------------
 
-    newton_options: dict[str, Any] = field(default_factory=dict)
-    """Newton-specific options passed to the scene manager.
+@dataclass
+class GenesisEntityCfg(EntityCfg):
+    """Genesis-specific entity configuration."""
 
-    Commonly used keys:
-        - ``body_label_prefix`` (str): prefix for body labels.
-        - ``shape_cfg`` (newton.ModelBuilder.ShapeConfig): contact material.
-        - ``sites`` (dict[str, str]): sensor site definitions.
-        - ``contact_shapes`` (dict): contact shape overrides.
-        - ``mesh_approximation`` (str): mesh simplification method.
-    """
+    convexify: bool = False
+    """Convex-decompose collision meshes."""
 
-    mujoco_options: dict[str, Any] = field(default_factory=dict)
-    """MuJoCo-specific options passed to the scene manager.
+    visualize_contact: bool = False
+    """Show contact forces in the viewer."""
 
-    Commonly used keys:
-        - ``collisions`` (tuple): mjlab CollisionCfg objects.
-        - ``cameras`` (tuple): mjlab CameraCfg objects.
-    """
+    surface: Any = None
+    """Genesis surface material (gs.surfaces.Surface)."""
+
+
+@dataclass
+class NewtonEntityCfg(EntityCfg):
+    """Newton-specific entity configuration."""
+
+    body_label_prefix: str | None = None
+    """Prefix for body labels in the Newton model."""
+
+    shape_cfg: Any = None
+    """Newton contact material (newton.ModelBuilder.ShapeConfig)."""
+
+    sites: dict[str, str] | None = None
+    """Sensor site definitions: {site_name: body_name}."""
+
+    contact_shapes: dict[str, Any] | None = None
+    """Contact shape overrides."""
+
+    mesh_approximation: str = "convex_hull"
+    """Mesh simplification method for collision geometry."""
+
+    ignore_inertial_definitions: bool = False
+    """Ignore inertial properties from URDF."""
+
+
+@dataclass
+class MujocoEntityCfg(EntityCfg):
+    """MuJoCo-specific entity configuration."""
+
+    spec_fn: Callable | None = None
+    """Factory callable returning an mujoco.MjSpec.  Required for MuJoCo
+    since URDF must be converted to MjSpec."""
+
+    entity_cfg: Any = None
+    """Pre-built mjlab EntityCfg.  When provided, the actuator settings
+    from :attr:`articulation` override its actuators but all other
+    fields are taken from this object."""
+
+    collisions: tuple = ()
+    """mjlab CollisionCfg objects for contact customization."""
+
+    cameras: tuple = ()
+    """mjlab CameraCfg objects."""
 
 
 # ---------------------------------------------------------------------------
@@ -203,5 +208,12 @@ class GroundPlaneCfg:
     contact_damping: float = 200.0
     friction: float = 1.0
 
-    newton_options: dict[str, Any] = field(default_factory=dict)
-    """Extra Newton ShapeConfig fields (kf, mu_rolling, etc.)."""
+    # Newton-specific ground options
+    ground_kf: float = 100.0
+    """Newton tangential contact stiffness."""
+
+    ground_mu_rolling: float = 0.0
+    """Newton rolling friction coefficient."""
+
+    ground_mu_torsional: float = 0.0
+    """Newton torsional friction coefficient."""

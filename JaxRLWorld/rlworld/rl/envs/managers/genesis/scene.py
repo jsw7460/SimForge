@@ -8,7 +8,9 @@ from genesis.engine.entities import RigidEntity
 from genesis.engine.sensors.base_sensor import Sensor
 
 from rlworld.rl.configs.scene import EntityConfig
-from rlworld.rl.configs.scene.unified_entity_config import EntityCfg, GroundPlaneCfg
+from rlworld.rl.configs.scene.unified_entity_config import (
+    EntityCfg, GenesisEntityCfg, GroundPlaneCfg,
+)
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import entity_utils
@@ -105,30 +107,29 @@ class SceneManager(BaseManager):
             self.entities[entity_name] = entity
 
     def _add_entities_from_unified_cfg(self):
-        """Add entities from unified dict[str, EntityCfg | GroundPlaneCfg]."""
+        """Add entities from unified dict[str, EntityCfg/GenesisEntityCfg/GroundPlaneCfg]."""
         for entity_name, cfg in self.config.entities.items():
             if entity_name in self.entities:
                 raise ValueError(f"Entity '{entity_name}' is already registered")
 
             if isinstance(cfg, GroundPlaneCfg):
-                morph = gs.morphs.URDF(
-                    file="urdf/plane/plane.urdf",
-                    fixed=True,
-                )
-                surface = cfg.genesis_options.get("surface", None) if hasattr(cfg, "genesis_options") else None
-                entity = self.scene.add_entity(morph=morph, surface=surface)
+                morph = gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
+                entity = self.scene.add_entity(morph=morph)
             else:
-                # EntityCfg → Genesis morph
-                genesis_opts = cfg.genesis_options
                 morph_kwargs = {"file": cfg.urdf_path, "fixed": not cfg.floating}
-                if "convexify" in genesis_opts:
-                    morph_kwargs["convexify"] = genesis_opts["convexify"]
                 if cfg.links_to_keep:
                     morph_kwargs["links_to_keep"] = cfg.links_to_keep
 
+                # GenesisEntityCfg-specific fields
+                if isinstance(cfg, GenesisEntityCfg):
+                    morph_kwargs["convexify"] = cfg.convexify
+                    surface = cfg.surface
+                    visualize = cfg.visualize_contact
+                else:
+                    surface = None
+                    visualize = False
+
                 morph = gs.morphs.URDF(**morph_kwargs)
-                surface = genesis_opts.get("surface", None)
-                visualize = genesis_opts.get("visualize_contact", False)
                 entity = self.scene.add_entity(
                     morph=morph, surface=surface, visualize_contact=visualize,
                 )

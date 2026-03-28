@@ -17,7 +17,7 @@ from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE, ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE
 from rlworld.rl.configs.scene import EntityConfig
-from rlworld.rl.configs.scene.unified_entity_config import EntityCfg, ActuatorCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
+from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ActuatorCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
@@ -155,7 +155,7 @@ class Go2FlatGenesisConfig:
             env_spacing=(20.0, 20.0),
             entities={
                 "base_entity": GroundPlaneCfg(),
-                "robot": EntityCfg(
+                "robot": GenesisEntityCfg(
                     urdf_path=self.robot.urdf_path,
                     init_state=InitialStateCfg(
                         pos=(1.5, 1.5, self.robot.base_init_height),
@@ -181,10 +181,8 @@ class Go2FlatGenesisConfig:
                             ),
                         ),
                     ),
-                    genesis_options={
-                        "convexify": False,
-                        "visualize_contact": True,
-                    },
+                    convexify=False,
+                    visualize_contact=True,
                 ),
             },
             sensors=[

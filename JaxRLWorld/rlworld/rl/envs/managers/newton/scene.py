@@ -16,7 +16,9 @@ from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
 )
-from rlworld.rl.configs.scene.unified_entity_config import EntityCfg, GroundPlaneCfg
+from rlworld.rl.configs.scene.unified_entity_config import (
+    EntityCfg, NewtonEntityCfg, GroundPlaneCfg,
+)
 from rlworld.rl.configs.sensors.newton_sensor_config import (
     NewtonSensorConfig,
     NewtonIMUSensorConfig,
@@ -233,7 +235,9 @@ class NewtonSceneManager(BaseManager):
                 ke=cfg.contact_stiffness,
                 kd=cfg.contact_damping,
                 mu=cfg.friction,
-                **cfg.newton_options,
+                kf=cfg.ground_kf,
+                mu_rolling=cfg.ground_mu_rolling,
+                mu_torsional=cfg.ground_mu_torsional,
             )
             return NewtonEntityConfig(
                 entity_name=entity_name,
@@ -241,17 +245,14 @@ class NewtonSceneManager(BaseManager):
                 shape_cfg=shape_cfg,
             )
 
-        newton_opts = cfg.newton_options
-
         # Build per-joint gain dicts from ActuatorCfg list
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
-        prefix = newton_opts.get("body_label_prefix", None)
+        prefix = cfg.body_label_prefix if isinstance(cfg, NewtonEntityCfg) else None
 
         for act_cfg in cfg.articulation.actuators:
             for pattern in act_cfg.target_names_expr:
-                # Newton uses prefixed names
                 key = f"{prefix}/{pattern}" if prefix else pattern
                 if act_cfg.stiffness > 0:
                     ke_map[key] = act_cfg.stiffness
@@ -259,6 +260,13 @@ class NewtonSceneManager(BaseManager):
                     kd_map[key] = act_cfg.damping
                 if act_cfg.armature > 0:
                     armature_map[key] = act_cfg.armature
+
+        # Newton-specific fields from NewtonEntityCfg
+        shape_cfg = cfg.shape_cfg if isinstance(cfg, NewtonEntityCfg) else None
+        sites = cfg.sites if isinstance(cfg, NewtonEntityCfg) else None
+        contact_shapes = cfg.contact_shapes if isinstance(cfg, NewtonEntityCfg) else None
+        mesh_approx = cfg.mesh_approximation if isinstance(cfg, NewtonEntityCfg) else "convex_hull"
+        ignore_inertial = cfg.ignore_inertial_definitions if isinstance(cfg, NewtonEntityCfg) else False
 
         return NewtonEntityConfig(
             entity_name=entity_name,
@@ -277,10 +285,11 @@ class NewtonSceneManager(BaseManager):
             joint_target_ke_map=ke_map or None,
             joint_target_kd_map=kd_map or None,
             joint_armature_map=armature_map or None,
-            shape_cfg=newton_opts.get("shape_cfg", None),
-            sites=newton_opts.get("sites", None),
-            contact_shapes=newton_opts.get("contact_shapes", None),
-            mesh_approximation=newton_opts.get("mesh_approximation", "convex_hull"),
+            shape_cfg=shape_cfg,
+            sites=sites,
+            contact_shapes=contact_shapes,
+            mesh_approximation=mesh_approx,
+            ignore_inertial_definitions=ignore_inertial,
         )
 
     def _register_entity(self, config: NewtonEntityConfig) -> None:
