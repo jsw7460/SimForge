@@ -241,25 +241,46 @@ class MjlabSceneManager(BaseManager):
                     f"MuJoCo entity '{entity_name}' requires 'spec_fn'"
                 )
 
-            # Convert actuator configs → mjlab actuator configs
+            # Convert actuator configs → mjlab actuator configs.
+            # When stiffness/damping/armature are dicts, we expand into one
+            # mjlab actuator per regex key so each gets the correct value.
             mjlab_actuators = []
             for act_cfg in cfg.articulation.actuators:
                 if isinstance(act_cfg, ImplicitActuatorCfg):
-                    stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
-                    damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
-                    mjlab_actuators.append(BuiltinPositionActuatorCfg(
-                        target_names_expr=act_cfg.target_names_expr,
-                        stiffness=stiffness,
-                        damping=damping,
-                        effort_limit=act_cfg.effort_limit,
-                        armature=act_cfg.armature,
-                        frictionloss=act_cfg.frictionloss,
-                    ))
+                    if isinstance(act_cfg.stiffness, dict):
+                        # Expand: one BuiltinPositionActuator per gain key
+                        stiff_dict = act_cfg.stiffness
+                        damp_dict = act_cfg.damping if isinstance(act_cfg.damping, dict) else {}
+                        arm_dict = act_cfg.armature if isinstance(act_cfg.armature, dict) else {}
+                        for pattern, kp in stiff_dict.items():
+                            kd = damp_dict.get(pattern, 0.0)
+                            arm = arm_dict.get(pattern, 0.0)
+                            mjlab_actuators.append(BuiltinPositionActuatorCfg(
+                                target_names_expr=(pattern,),
+                                stiffness=kp,
+                                damping=kd,
+                                effort_limit=act_cfg.effort_limit,
+                                armature=arm,
+                                frictionloss=act_cfg.frictionloss,
+                            ))
+                    else:
+                        stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
+                        damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
+                        armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
+                        mjlab_actuators.append(BuiltinPositionActuatorCfg(
+                            target_names_expr=act_cfg.target_names_expr,
+                            stiffness=stiffness,
+                            damping=damping,
+                            effort_limit=act_cfg.effort_limit,
+                            armature=armature,
+                            frictionloss=act_cfg.frictionloss,
+                        ))
                 else:
+                    armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
                     mjlab_actuators.append(BuiltinMotorActuatorCfg(
                         target_names_expr=act_cfg.target_names_expr,
                         effort_limit=act_cfg.effort_limit or 1000.0,
-                        armature=act_cfg.armature,
+                        armature=armature,
                         frictionloss=act_cfg.frictionloss,
                     ))
 

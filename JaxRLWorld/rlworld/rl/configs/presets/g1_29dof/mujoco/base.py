@@ -8,12 +8,10 @@ from typing import Dict, Any, List
 
 import math
 
-from mjlab.asset_zoo.robots import get_g1_robot_cfg, G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
+from mjlab.asset_zoo.robots import G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
+from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as g1_get_spec, FULL_COLLISION as G1_FULL_COLLISION
 from mjlab.managers.scene_entity_config import SceneEntityCfg
-from mjlab.scene import SceneCfg
 from mjlab.sensor import ContactSensorCfg, ContactMatch
-from mjlab.sim import SimulationCfg, MujocoCfg
-from mjlab.terrains import TerrainEntityCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
@@ -30,6 +28,8 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
+from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs.scene.unified_entity_config import MujocoEntityCfg, ArticulationCfg, InitialStateCfg
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
@@ -198,34 +198,41 @@ class G1FlatMujocoConfig:
             history_length=self.decimation,
         )
 
-        # mjlab SceneCfg
-        mjlab_scene_cfg = SceneCfg(
-            num_envs=self.num_envs,
-            env_spacing=2.0,
-            terrain=TerrainEntityCfg(terrain_type="plane"),
-            entities={"robot": get_g1_robot_cfg()},
-            sensors=(feet_ground_cfg, self_collision_cfg),
+        robot_entity = MujocoEntityCfg(
+            urdf_path=self.robot.urdf_path,
+            init_state=InitialStateCfg(
+                pos=(0, 0, self.robot.base_init_height),
+                joint_pos=self.robot.default_joint_angles,
+            ),
+            floating=True,
+            articulation=ArticulationCfg(
+                actuators=(
+                    ImplicitActuatorCfg(
+                        target_names_expr=(".*",),
+                        stiffness=self.robot.p_gains,
+                        damping=self.robot.d_gains,
+                        armature=self.robot.armature,
+                    ),
+                ),
+            ),
+            spec_fn=g1_get_spec,
+            collisions=(G1_FULL_COLLISION,),
         )
 
-        # mjlab SimulationCfg
-        mjlab_sim_cfg = SimulationCfg(
-            nconmax=35,
-            njmax=1500,
-            mujoco=MujocoCfg(
-                timestep=self.physics_dt,
-                iterations=10,
-                ls_iterations=20,
-                ccd_iterations=50,
-            ),
-            contact_sensor_maxmatch=64,
-        )
         return MujocoSceneConfig(
             physics_dt=self.physics_dt,
             num_envs=self.num_envs,
             env_spacing=2.0,
             robot_entity_name="robot",
-            mjlab_scene_cfg=mjlab_scene_cfg,
-            mjlab_sim_cfg=mjlab_sim_cfg,
+            entities={"robot": robot_entity},
+            sensors=(feet_ground_cfg, self_collision_cfg),
+            terrain_type="plane",
+            solver_iterations=10,
+            solver_ls_iterations=20,
+            ccd_iterations=50,
+            nconmax=35,
+            njmax=1500,
+            contact_sensor_maxmatch=64,
             preset_class_name=self.__class__.__name__,
             preset_module_path=type(self).__module__,
         )

@@ -282,23 +282,41 @@ class NewtonSceneManager(BaseManager):
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
 
+        def _prefixed(d: dict[str, float]) -> dict[str, float]:
+            """Add body_label_prefix to regex keys."""
+            if not prefix:
+                return d
+            return {f"{prefix}/{k}": v for k, v in d.items()}
+
         for act_cfg in cfg.articulation.actuators:
             is_explicit = not isinstance(act_cfg, ImplicitActuatorCfg)
-            for pattern in act_cfg.target_names_expr:
-                key = f"{prefix}/{pattern}" if prefix else pattern
-                if is_explicit:
-                    # Explicit actuator: zero out solver PD gains
+
+            if is_explicit:
+                # Explicit actuator: zero out solver PD gains for all target joints
+                for pattern in act_cfg.target_names_expr:
+                    key = f"{prefix}/{pattern}" if prefix else pattern
                     ke_map[key] = 0.0
                     kd_map[key] = 0.0
-                else:
-                    # Implicit actuator: set solver PD gains
-                    if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
-                        ke_map[key] = act_cfg.stiffness
-                    if act_cfg.damping is not None and act_cfg.damping > 0:
-                        kd_map[key] = act_cfg.damping
-                # Armature is always set (physical property)
-                if act_cfg.armature > 0:
-                    armature_map[key] = act_cfg.armature
+            else:
+                # Implicit actuator: set solver PD gains
+                if isinstance(act_cfg.stiffness, dict):
+                    ke_map.update(_prefixed(act_cfg.stiffness))
+                elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                    for pattern in act_cfg.target_names_expr:
+                        ke_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.stiffness
+
+                if isinstance(act_cfg.damping, dict):
+                    kd_map.update(_prefixed(act_cfg.damping))
+                elif act_cfg.damping is not None and act_cfg.damping > 0:
+                    for pattern in act_cfg.target_names_expr:
+                        kd_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.damping
+
+            # Armature is always set (physical property)
+            if isinstance(act_cfg.armature, dict):
+                armature_map.update(_prefixed(act_cfg.armature))
+            elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
+                for pattern in act_cfg.target_names_expr:
+                    armature_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.armature
 
         if ke_map or kd_map or armature_map:
             apply_joint_params_by_pattern(

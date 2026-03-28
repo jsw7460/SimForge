@@ -42,7 +42,7 @@ class ActuatorBaseCfg:
     damping: float | dict[str, float] | None = None
     effort_limit: float | None = None
     velocity_limit: float | None = None
-    armature: float = 0.0
+    armature: float | dict[str, float] = 0.0
     frictionloss: float = 0.0
 
 

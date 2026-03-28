@@ -198,15 +198,43 @@ class SceneManager(BaseManager):
 
                 # Only set Kp/Kd for implicit actuators (simulator PD)
                 if isinstance(act_cfg, ImplicitActuatorCfg):
-                    stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
-                    damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
-                    if stiffness > 0:
-                        entity.set_dofs_kp([stiffness] * num_dofs, dof_ids)
-                    if damping > 0:
-                        entity.set_dofs_kv([damping] * num_dofs, dof_ids)
+                    # Stiffness — float or dict[regex, float]
+                    if isinstance(act_cfg.stiffness, dict):
+                        sub_ids, sub_names = entity_utils.find_dofs(
+                            entity=entity, name_keys=list(act_cfg.stiffness.keys())
+                        )
+                        if sub_ids:
+                            _, _, vals = string_utils.resolve_matching_names_values(
+                                act_cfg.stiffness, sub_names
+                            )
+                            entity.set_dofs_kp(vals, sub_ids)
+                    elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                        entity.set_dofs_kp([act_cfg.stiffness] * num_dofs, dof_ids)
 
-                # Armature is always applied
-                if act_cfg.armature > 0:
+                    # Damping — float or dict[regex, float]
+                    if isinstance(act_cfg.damping, dict):
+                        sub_ids, sub_names = entity_utils.find_dofs(
+                            entity=entity, name_keys=list(act_cfg.damping.keys())
+                        )
+                        if sub_ids:
+                            _, _, vals = string_utils.resolve_matching_names_values(
+                                act_cfg.damping, sub_names
+                            )
+                            entity.set_dofs_kv(vals, sub_ids)
+                    elif act_cfg.damping is not None and act_cfg.damping > 0:
+                        entity.set_dofs_kv([act_cfg.damping] * num_dofs, dof_ids)
+
+                # Armature — float or dict[regex, float]
+                if isinstance(act_cfg.armature, dict):
+                    sub_ids, sub_names = entity_utils.find_dofs(
+                        entity=entity, name_keys=list(act_cfg.armature.keys())
+                    )
+                    if sub_ids:
+                        _, _, vals = string_utils.resolve_matching_names_values(
+                            act_cfg.armature, sub_names
+                        )
+                        entity.set_dofs_armature(vals, sub_ids)
+                elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
                     entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 
     def step(self):
