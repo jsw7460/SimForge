@@ -377,8 +377,8 @@ class NewtonSceneManager(BaseManager):
         scene_builder = newton.ModelBuilder()
 
         for entity_name, entity_builder in self._entity_builders.items():
-            config = self.entities[entity_name]["config"]
-            if config.entity_type == "ground_plane":
+            cfg = self.entities[entity_name]["config"]
+            if isinstance(cfg, GroundPlaneCfg):
                 # Ground plane: add once (global)
                 scene_builder.add_builder(entity_builder)
             else:
@@ -487,9 +487,10 @@ class NewtonSceneManager(BaseManager):
     def _set_kinematic_trees(self) -> None:
         """Build kinematic trees for entities with URDF."""
         for entity_name, entity_info in self.entities.items():
-            config = entity_info["config"]
-            if config.urdf_path is not None:
-                self.trees[entity_name] = KinematicTree(urdf_path=config.urdf_path)
+            cfg = entity_info["config"]
+            urdf_path = getattr(cfg, "urdf_path", None)
+            if urdf_path is not None:
+                self.trees[entity_name] = KinematicTree(urdf_path=urdf_path)
 
     def _request_sensor_state_attributes(self) -> None:
         """Request extended state attributes needed by sensors."""
