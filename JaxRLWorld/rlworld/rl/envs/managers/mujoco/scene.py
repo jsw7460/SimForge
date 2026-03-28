@@ -23,29 +23,39 @@ if TYPE_CHECKING:
 
 @dataclass
 class MjlabSceneManagerConfig:
-    """Configuration for MuJoCo/mjlab scene management.
+    """Internal config consumed by MjlabSceneManager.
 
-    This config wraps mjlab's Scene and Simulation configuration.
-
-    Example:
-        from mjlab.scene import SceneCfg
-        from mjlab.sim import SimulationCfg
-
-        config = MjlabSceneManagerConfig(
-            mjlab_scene_cfg=SceneCfg(
-                num_envs=4096,
-                entities={"robot": robot_entity_cfg},
-            ),
-            mjlab_sim_cfg=SimulationCfg(),
-            device="cuda:0",
-        )
+    Populated from MujocoSceneConfig by mjlab_env at build time.
+    Users should not construct this directly — use MujocoSceneConfig
+    in presets instead.
     """
-    mjlab_scene_cfg: Any = None  # mjlab.SceneCfg (optional if unified_entities is set)
-    mjlab_sim_cfg: Any = None  # mjlab.SimulationCfg (optional, uses default if None)
     device: str = "cuda:0"
     robot_entity_name: str = "robot"
-    unified_entities: dict[str, EntityCfg | GroundPlaneCfg] | None = None
-    """When set, entities are converted to mjlab EntityCfg at build time."""
+    num_envs: int = 4096
+    env_spacing: float = 2.0
+    physics_dt: float = 0.002
+
+    # Entities — unified EntityCfg dict (auto-converted to mjlab)
+    entities: dict[str, EntityCfg | GroundPlaneCfg] | None = None
+
+    # Sensors — mjlab sensor configs (passed through)
+    sensors: tuple = ()
+
+    # Terrain
+    terrain_type: str = "plane"
+
+    # Solver
+    solver_iterations: int = 10
+    solver_ls_iterations: int = 20
+    ccd_iterations: int = 50
+    nconmax: int = 35
+    njmax: int = 1500
+    contact_sensor_maxmatch: int = 64
+
+    # Legacy — set by mjlab_env for backward compat
+    mjlab_scene_cfg: Any = None
+    mjlab_sim_cfg: Any = None
+    unified_entities: Any = None
 
 
 class MjlabSceneManager(BaseManager):
@@ -142,7 +152,6 @@ class MjlabSceneManager(BaseManager):
         from mjlab.scene import Scene, SceneCfg
         from mjlab.sim import Simulation, SimulationCfg, MujocoCfg
         from mjlab.terrains import TerrainEntityCfg
-
         # Build mjlab SceneCfg
         if self.config.mjlab_scene_cfg is not None:
             # Legacy path — user provided mjlab SceneCfg directly
@@ -158,9 +167,7 @@ class MjlabSceneManager(BaseManager):
             self.config.mjlab_scene_cfg = scene_cfg
 
         # Convert unified entities → mjlab entities and merge
-        entities = self.config.entities or self.config.unified_entities
-        if entities is not None:
-            self.config.unified_entities = entities
+        if self.config.entities is not None:
             self._build_mjlab_entities()
 
         # Create scene
@@ -220,7 +227,7 @@ class MjlabSceneManager(BaseManager):
         )
         from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 
-        for entity_name, cfg in self.config.unified_entities.items():
+        for entity_name, cfg in self.config.entities.items():
             if isinstance(cfg, GroundPlaneCfg):
                 continue
 
