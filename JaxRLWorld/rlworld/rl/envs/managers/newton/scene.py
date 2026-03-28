@@ -490,13 +490,18 @@ class NewtonSceneManager(BaseManager):
         kd = -biasprm[:, 2]  # velocity damping (stored as negative)
         ke_bias = -biasprm[:, 1]  # should equal ke
 
-        assert (ke > 0).all(), f"Zero/negative position gains: {ke}"
-        assert (kd > 0).all(), f"Zero/negative velocity gains: {kd}"
+        # When explicit actuators set ke/kd=0, gains are intentionally zero.
+        # Only validate that gains are non-negative and gain/bias are consistent.
+        assert (ke >= 0).all(), f"Negative position gains: {ke}"
+        assert (kd >= 0).all(), f"Negative velocity gains: {kd}"
         assert np.allclose(ke, ke_bias), f"Position gain/bias mismatch"
 
+        num_zero = (ke == 0).sum()
         print(f"✓ MuJoCo actuators validated: {num_actuators} joints")
         print(f"  ke range: [{ke.min():.2f}, {ke.max():.2f}]")
         print(f"  kd range: [{kd.min():.2f}, {kd.max():.2f}]")
+        if num_zero > 0:
+            print(f"  ({num_zero} joints with ke=0: explicit actuator mode)")
 
     def _set_kinematic_trees(self) -> None:
         """Build kinematic trees for entities with URDF."""
