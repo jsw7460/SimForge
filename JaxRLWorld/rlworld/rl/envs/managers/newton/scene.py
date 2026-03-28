@@ -270,19 +270,33 @@ class NewtonSceneManager(BaseManager):
         )
         builder.collapse_fixed_joints(joints_to_keep=cfg.links_to_keep)
 
-        # Apply gains and armature from articulation actuators
+        # Apply gains and armature from articulation actuators.
+        # Implicit actuators → set ke/kd so Newton's internal PD drives them.
+        # Explicit actuators (IdealPD, Delayed, etc.) → set ke=0, kd=0 so
+        #   Newton's internal PD is disabled; only our external torques apply.
+        #   Armature is still set (it's a physical property, not a control gain).
+        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+
         prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
 
         for act_cfg in cfg.articulation.actuators:
+            is_explicit = not isinstance(act_cfg, ImplicitActuatorCfg)
             for pattern in act_cfg.target_names_expr:
                 key = f"{prefix}/{pattern}" if prefix else pattern
-                if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
-                    ke_map[key] = act_cfg.stiffness
-                if act_cfg.damping is not None and act_cfg.damping > 0:
-                    kd_map[key] = act_cfg.damping
+                if is_explicit:
+                    # Explicit actuator: zero out solver PD gains
+                    ke_map[key] = 0.0
+                    kd_map[key] = 0.0
+                else:
+                    # Implicit actuator: set solver PD gains
+                    if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                        ke_map[key] = act_cfg.stiffness
+                    if act_cfg.damping is not None and act_cfg.damping > 0:
+                        kd_map[key] = act_cfg.damping
+                # Armature is always set (physical property)
                 if act_cfg.armature > 0:
                     armature_map[key] = act_cfg.armature
 
