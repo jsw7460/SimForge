@@ -165,9 +165,19 @@ class SceneManager(BaseManager):
     def _configure_robot_dynamics(self) -> None:
         """Apply gains/armature from ArticulationCfg actuators.
 
-        ImplicitActuatorCfg → set simulator Kp/Kd (simulator PD).
-        Any other type → simulator Kp/Kd are irrelevant since Genesis
-        switches to FORCE mode when control_dofs_force() is called.
+        For **implicit** actuators, we set the simulator's PD gains (Kp/Kd)
+        so the simulator drives the joints internally.
+
+        For **explicit** actuators (IdealPD, DelayedPD, LSTM, etc.), the
+        simulator's PD gains are still set here but are effectively unused:
+        Genesis switches a joint to force mode when ``control_dofs_force()``
+        is called (the last-called control mode wins), so the Kp/Kd values
+        have no effect once force mode is active.
+
+        This differs from Newton, where PD forces are *always* summed with
+        ``joint_f`` regardless of calling order, requiring explicit ke=0/kd=0
+        to disable the internal PD.  (See ``_load_urdf_entity`` in
+        ``newton/scene.py`` for that handling.)
         """
         from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 
