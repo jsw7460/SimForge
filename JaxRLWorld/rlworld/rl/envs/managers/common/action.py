@@ -57,8 +57,6 @@ class ActionManagerBase(BaseManager):
     """Base class for action managers across all simulators.
 
     Subclasses must implement:
-        - _resolve_joints() -> tuple[list[int], list[str]]
-        - _get_joint_limits() -> tuple[Tensor, Tensor]
         - _apply_position(targets: Tensor) -> None
         - _apply_force(torques: Tensor) -> None
 
@@ -69,11 +67,11 @@ class ActionManagerBase(BaseManager):
         super().__init__(env)
         self.config = config
 
-        # Resolve actuated joints (simulator-specific)
-        self._actuated_joint_indices, self._actuated_joint_names = (
-            self._resolve_joints()
-        )
-        self._total_action_dim = len(self._actuated_joint_indices)
+        # Build ArticulationIndexing from scene manager
+        self._indexing = self._build_indexing()
+        self._actuated_joint_names = list(self._indexing.joint_names)
+        self._actuated_joint_indices = self._indexing.sim_indices.tolist()
+        self._total_action_dim = self._indexing.num_joints
 
         # Action buffers
         self._raw_actions = torch.zeros(
@@ -98,26 +96,29 @@ class ActionManagerBase(BaseManager):
         self._build_actuators_from_entity()
 
     # ------------------------------------------------------------------
-    # Abstract methods (simulator-specific)
+    # Indexing
     # ------------------------------------------------------------------
 
-    @abstractmethod
-    def _resolve_joints(self) -> tuple[list[int], list[str]]:
-        """Resolve actuated joint indices and names from config patterns.
+    @property
+    def indexing(self):
+        """The ArticulationIndexing for this action manager."""
+        return self._indexing
 
-        Returns:
-            Tuple of (joint_indices, joint_names).
-        """
-        ...
+    def _build_indexing(self):
+        """Build ArticulationIndexing from scene manager."""
+        from rlworld.rl.envs.indexing import ArticulationIndexing
+        scene_mgr = self.env.scene_manager
+        return scene_mgr.build_articulation_indexing(
+            actuated_dof_names=self.config.actuated_dof_names,
+        )
 
-    @abstractmethod
     def _get_joint_limits(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """Get joint position limits for actuated joints.
+        """Get joint limits from indexing (canonical order)."""
+        return self._indexing.joint_limits_lower, self._indexing.joint_limits_upper
 
-        Returns:
-            Tuple of (lower_limits, upper_limits), each shape (num_actuated,).
-        """
-        ...
+    # ------------------------------------------------------------------
+    # Abstract methods (simulator-specific)
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def _apply_position(self, targets: torch.Tensor) -> None:

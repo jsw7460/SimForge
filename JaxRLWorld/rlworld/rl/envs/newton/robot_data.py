@@ -90,9 +90,9 @@ class NewtonRobotData:
     @property
     def joint_pos(self) -> Tensor:
         joint_q, _ = self._get_state_tensors()
-        return joint_q[:, self._env.act_manager.actuated_q_indices]
+        return joint_q[:, self._env.act_manager.indexing.newton_q_indices]
 
     @property
     def joint_vel(self) -> Tensor:
         _, joint_qd = self._get_state_tensors()
-        return joint_qd[:, self._env.act_manager.actuated_qd_indices]
+        return joint_qd[:, self._env.act_manager.indexing.newton_qd_indices]

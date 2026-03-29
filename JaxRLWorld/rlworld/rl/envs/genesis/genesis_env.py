@@ -162,10 +162,11 @@ class GenesisEnv(World):
 
         from rlworld.rl.envs.genesis.robot_data import GenesisRobotData
         self._robot_data_cache = {}
+        indexing = self.act_manager.indexing
         for name, entity in self.scene_manager.entities.items():
             self._robot_data_cache[name] = GenesisRobotData(
                 entity=entity,
-                actuated_dof_ids=self.act_manager.actuated_dof_ids,
+                actuated_dof_ids=indexing.sim_indices,
                 num_envs=self.num_envs,
                 device=self.device,
             )

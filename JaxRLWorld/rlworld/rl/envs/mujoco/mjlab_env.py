@@ -148,7 +148,6 @@ class MjlabEnv(World):
         self.act_manager = ActCls(
             env=self,
             config=ActCfgCls(
-                entity_name=self.act_cfg.entity_name,
                 actuated_dof_names=self.act_cfg.actuated_dof_names,
                 scale=self.act_cfg.action_scale,
                 clip=self.act_cfg.clip_actions,
@@ -156,15 +155,14 @@ class MjlabEnv(World):
             )
         )
 
-        # Build MujocoRobotData with action-manager joint ordering
+        # Build MujocoRobotData using ArticulationIndexing
         from rlworld.rl.envs.mujoco.robot_data import MujocoRobotData
         self._robot_data_cache = {}
-        entity_name = self.act_cfg.entity_name
-        entity = self.scene_manager.get_entity(entity_name)
-        joint_ids = self.act_manager._joint_ids
-        self._robot_data_cache[entity_name] = MujocoRobotData(
+        entity = self.scene_manager.robot
+        indexing = self.act_manager.indexing
+        self._robot_data_cache["robot"] = MujocoRobotData(
             entity=entity,
-            joint_ids=joint_ids,
+            joint_ids=indexing.sim_indices,
             num_envs=self.num_envs,
             device=self.device,
         )
