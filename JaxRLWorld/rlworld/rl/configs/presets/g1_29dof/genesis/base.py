@@ -18,7 +18,7 @@ from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import EntityConfig
-from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -328,11 +328,13 @@ class G1FlatGenesisConfig:
                     floating=True,
                     articulation=ArticulationCfg(
                         actuators=(
-                            ImplicitActuatorCfg(
+                            IdealPDActuatorCfg(
                                 target_names_expr=(".*",),
                                 stiffness=self.robot.p_gains,
                                 damping=self.robot.d_gains,
                                 armature=self.robot.armature,
+                                # min_delay=0,
+                                # max_delay=2
                             ),
                         ),
                     ),

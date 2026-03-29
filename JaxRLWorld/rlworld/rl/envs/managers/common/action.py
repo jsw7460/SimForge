@@ -380,6 +380,10 @@ class ActionManagerBase(BaseManager):
             (DelayedPDActuatorCfg, DelayedPDActuator),
             (IdealPDActuatorCfg, IdealPDActuator),
         ]
+        # Strip simulator-specific prefixes (e.g. "g1_29dof/left_hip_joint" → "left_hip_joint")
+        # so gain dicts from robot configs match without prefix awareness.
+        bare_names = [name.rsplit("/", 1)[-1] for name in joint_names]
+
         for cfg_type, actuator_cls in cls_map:
             if isinstance(cfg, cfg_type):
                 return actuator_cls(
@@ -387,7 +391,7 @@ class ActionManagerBase(BaseManager):
                     num_envs=self.env.num_envs,
                     num_joints=num_joints,
                     device=self.device,
-                    joint_names=joint_names,
+                    joint_names=bare_names,
                 )
         raise ValueError(f"Unknown actuator config type: {type(cfg)}")
 
@@ -437,6 +441,15 @@ class ActionManagerBase(BaseManager):
             # Scatter back into full array
             full_torques[:, joint_idx] = torques
         self._apply_force(full_torques)
+        # import numpy as np
+        # mj_model = self.env.scene_manager.sim.mj_model
+        # print("gear:", mj_model.actuator_gear[:29, 0])
+        # print("forcerange:", mj_model.actuator_forcerange[:29])
+        #
+        # print("[MUJOCO] torques[0,:5]:", full_torques[0, :5])
+        # print("[MUJOCO] joint_pos[0,:5]:", joint_pos[0, :5])
+        # print("[MUJOCO] joint_vel[0,:5]:", joint_vel[0, :5])
+        # import ipdb; ipdb.set_trace()
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
         """Process raw actions: clip -> scale -> offset.

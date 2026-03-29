@@ -24,7 +24,7 @@ from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import NewtonEntityConfig
-from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import NewtonEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import NewtonIMUSensorConfig, NewtonContactSensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -73,8 +73,9 @@ class G1FlatNewtonConfig:
     seed: int = 42
 
     # Simulation settings
-    dt: float = 0.02
-    substeps: int = 4
+    dt: float = 0.005
+    decimation: int = 4
+    substeps: int = 2
 
     # Command ranges
     lin_vel_x_range: tuple = (-1.0, 1.0)
@@ -168,6 +169,7 @@ class G1FlatNewtonConfig:
             task_name="G1_12Dof_Velocity_Tracking",
             seed=self.seed,
             episode_length_s=self.episode_length_s,
+            decimation=self.decimation,
             termination_criteria=[
                 TerminationTermConfig(
                     common_tf.roll_pitch_violation,
@@ -205,11 +207,13 @@ class G1FlatNewtonConfig:
                     collapse_fixed_joints=True,
                     articulation=ArticulationCfg(
                         actuators=(
-                            ImplicitActuatorCfg(
+                            IdealPDActuatorCfg(
                                 target_names_expr=(".*",),
                                 stiffness=r.p_gains,
                                 damping=r.d_gains,
                                 armature=r.armature,
+                                # min_delay=0,
+                                # max_delay=2
                             ),
                         ),
                     ),
