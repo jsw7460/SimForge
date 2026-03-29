@@ -11,6 +11,7 @@ import warp as wp
 
 import newton
 from newton.sensors import SensorContact
+from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
@@ -25,6 +26,7 @@ from rlworld.rl.configs.sensors.newton_sensor_config import (
     NewtonContactSensorConfig,
     NewtonFrameTransformSensorConfig,
 )
+from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import string as string_utils
 
@@ -275,8 +277,6 @@ class NewtonSceneManager(BaseManager):
         # Explicit actuators (IdealPD, Delayed, etc.) → set ke=0, kd=0 so
         #   Newton's internal PD is disabled; only our external torques apply.
         #   Armature is still set (it's a physical property, not a control gain).
-        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
-
         prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
@@ -382,6 +382,7 @@ class NewtonSceneManager(BaseManager):
         self, builder: newton.ModelBuilder, sites: dict[str, str], prefix: str | None = None
     ) -> None:
         """Create sensor sites from a {site_name: body_name} dict."""
+
         def _resolve(name: str) -> str:
             return f"{prefix}/{name}" if prefix and "/" not in name else name
 
@@ -437,16 +438,6 @@ class NewtonSceneManager(BaseManager):
                 iterations=100,
                 ls_iterations=50,
                 use_mujoco_contacts=True,
-
-                # solver="newton",
-                # integrator="implicitfast",
-                # njmax=300,
-                # nconmax=150,
-                # cone="elliptic",
-                # impratio=100,
-                # iterations=100,
-                # ls_iterations=50,
-                # use_mujoco_contacts=True,
             )
         else:
             raise ValueError(f"Unsupported solver type: {self.config.solver_type}")
@@ -615,8 +606,6 @@ class NewtonSceneManager(BaseManager):
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-        from rlworld.rl.envs.indexing import ArticulationIndexing
-
         # Get all joint names from model (single world)
         joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
         if not joint_names_raw:

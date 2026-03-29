@@ -14,8 +14,24 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 
+from rlworld.rl.actuators.actuator_cfg import (
+    ActuatorNetLSTMCfg,
+    ActuatorNetMLPCfg,
+    DCMotorCfg,
+    DelayedPDActuatorCfg,
+    IdealPDActuatorCfg,
+)
+from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+from rlworld.rl.actuators.actuator_net import ActuatorNetLSTM, ActuatorNetMLP
+from rlworld.rl.actuators.actuator_pd import (
+    DCMotor,
+    DelayedPDActuator,
+    IdealPDActuator,
+)
+from rlworld.rl.configs.scene.unified_entity_config import EntityCfg
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import string as string_utils
+from rlworld.rl.utils.pretty import create_manager_table, table_to_string
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -311,9 +327,6 @@ class ActionManagerBase(BaseManager):
 
         Each actuator sees only its own joint subset (IsaacLab pattern).
         """
-        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
-        from rlworld.rl.utils import string as string_utils
-
         entity_cfg = self._get_entity_cfg()
         if entity_cfg is None:
             return
@@ -347,7 +360,6 @@ class ActionManagerBase(BaseManager):
 
     def _get_entity_cfg(self):
         """Get the unified EntityCfg for the robot from scene manager."""
-        from rlworld.rl.configs.scene.unified_entity_config import EntityCfg
 
         entities = getattr(self.env.scene_manager.config, "entities", None)
         if not isinstance(entities, dict):
@@ -358,20 +370,6 @@ class ActionManagerBase(BaseManager):
 
     def _build_actuator(self, cfg, num_joints: int, joint_names: list[str]):
         """Instantiate an actuator model for a joint subset."""
-        from rlworld.rl.actuators.actuator_cfg import (
-            ActuatorNetLSTMCfg,
-            ActuatorNetMLPCfg,
-            DCMotorCfg,
-            DelayedPDActuatorCfg,
-            IdealPDActuatorCfg,
-        )
-        from rlworld.rl.actuators.actuator_net import ActuatorNetLSTM, ActuatorNetMLP
-        from rlworld.rl.actuators.actuator_pd import (
-            DCMotor,
-            DelayedPDActuator,
-            IdealPDActuator,
-        )
-
         cls_map = [
             (ActuatorNetLSTMCfg, ActuatorNetLSTM),
             (ActuatorNetMLPCfg, ActuatorNetMLP),
@@ -518,8 +516,6 @@ class ActionManagerBase(BaseManager):
 
     def __str__(self) -> str:
         """Pretty print action manager configuration."""
-        from rlworld.rl.utils.pretty import create_manager_table, table_to_string
-
         rows = []
         for idx, joint_name in enumerate(self._actuated_joint_names):
             clip_low = self._clip_low[idx].item()
