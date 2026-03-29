@@ -97,10 +97,12 @@ class MjlabEnv(World):
 
     @property
     def robot_data(self):
-        """mjlab's EntityData already satisfies the RobotData protocol."""
         return self.get_robot_data("robot")
 
     def get_robot_data(self, entity_name: str = "robot"):
+        if hasattr(self, '_robot_data_cache') and entity_name in self._robot_data_cache:
+            return self._robot_data_cache[entity_name]
+        # Fallback before cache is built (e.g. during setup)
         return self.scene_manager.get_entity(entity_name).data
 
     def _build_scene(self) -> None:
@@ -154,6 +156,19 @@ class MjlabEnv(World):
             )
         )
 
+        # Build MujocoRobotData with action-manager joint ordering
+        from rlworld.rl.envs.mujoco.robot_data import MujocoRobotData
+        self._robot_data_cache = {}
+        entity_name = self.act_cfg.entity_name
+        entity = self.scene_manager.get_entity(entity_name)
+        joint_ids = self.act_manager._joint_ids
+        self._robot_data_cache[entity_name] = MujocoRobotData(
+            entity=entity,
+            joint_ids=joint_ids,
+            num_envs=self.num_envs,
+            device=self.device,
+        )
+
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
         ObsCfgCls = ManagerRegistry.get_config_class(self.sim_type, "observation")
         self.obs_manager = ObsCls(
@@ -205,8 +220,10 @@ class MjlabEnv(World):
                 robot = self.scene_manager.robot
                 et = robot.data.joint_effort_target[0, :5]
                 print(f"\n[step {self._debug_step_count}] effort_target: {et}")
+            import ipdb; ipdb.set_trace()
 
             self.scene_manager.write_data_to_sim()
+            print("ctrl[0,:5]:", self.scene_manager.data.ctrl[0, ])
 
             if self._debug_step_count < 3:
                 ctrl = self.scene_manager.data.ctrl[0, :5]
@@ -221,7 +238,9 @@ class MjlabEnv(World):
                 print(f"[step {self._debug_step_count}] pos: {pos}")
                 print(f"[step {self._debug_step_count}] vel: {vel}")
                 self._debug_step_count += 1
-        # import ipdb; ipdb.set_trace()
+
+        if self._debug_step_count >= 3:
+            import ipdb; ipdb.set_trace()
         # Update visualization
         if self.visualization_manager is not None:
             self.visualization_manager.advance()
