@@ -7,11 +7,13 @@ import torch
 import genesis as gs
 from genesis.engine.entities import RigidEntity
 from genesis.engine.sensors.base_sensor import Sensor
+from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg, GenesisEntityCfg, GroundPlaneCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
+from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.utils import entity_utils
 from rlworld.rl.utils import string as string_utils
@@ -179,8 +181,6 @@ class SceneManager(BaseManager):
         to disable the internal PD.  (See ``_load_urdf_entity`` in
         ``newton/scene.py`` for that handling.)
         """
-        from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
-
         for entity_name, entity in self.entities.items():
             cfg = self.config.entities.get(entity_name)
             if cfg is None or isinstance(cfg, GroundPlaneCfg):
@@ -249,7 +249,6 @@ class SceneManager(BaseManager):
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-        from rlworld.rl.envs.indexing import ArticulationIndexing
 
         entity = self.entities[entity_name]
         dof_ids, joint_names = entity_utils.find_dofs(
@@ -257,9 +256,9 @@ class SceneManager(BaseManager):
         )
         sim_indices = torch.tensor(dof_ids, device=self.env.device)
 
-        # sim_to_canonical: inverse permutation
-        sim_to_canonical = torch.zeros_like(sim_indices)
-        sim_to_canonical[sim_indices] = torch.arange(len(dof_ids), device=self.env.device)
+        # sim_to_canonical: for each canonical index i, sim_to_canonical[i] = i
+        # (used by RobotData which already indexes by sim_indices)
+        sim_to_canonical = torch.arange(len(dof_ids), device=self.env.device)
 
         # Joint limits
         dof_lower, dof_upper = entity.get_dofs_limit(
