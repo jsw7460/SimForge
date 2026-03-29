@@ -313,6 +313,7 @@ class MjlabSceneManager(BaseManager):
                 spec_fn=cfg.spec_fn,
                 articulation=articulation_info,
                 collisions=cfg.collisions,
+                sort_actuators=True,
             )
 
             self.config.mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
