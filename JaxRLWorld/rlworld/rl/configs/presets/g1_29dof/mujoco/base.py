@@ -207,13 +207,13 @@ class G1FlatMujocoConfig:
             floating=True,
             articulation=ArticulationCfg(
                 actuators=(
-                    ImplicitActuatorCfg(
+                    DelayedPDActuatorCfg(
                         target_names_expr=(".*",),
                         stiffness=self.robot.p_gains,
                         damping=self.robot.d_gains,
                         armature=self.robot.armature,
-                        # min_delay=0,
-                        # max_delay=2,
+                        min_delay=0,
+                        max_delay=2,
                     ),
                 ),
             ),

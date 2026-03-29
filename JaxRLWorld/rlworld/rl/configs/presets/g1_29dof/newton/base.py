@@ -207,13 +207,13 @@ class G1FlatNewtonConfig:
                     collapse_fixed_joints=True,
                     articulation=ArticulationCfg(
                         actuators=(
-                            IdealPDActuatorCfg(
+                            DelayedPDActuatorCfg(
                                 target_names_expr=(".*",),
                                 stiffness=r.p_gains,
                                 damping=r.d_gains,
                                 armature=r.armature,
-                                # min_delay=0,
-                                # max_delay=2
+                                min_delay=0,
+                                max_delay=2
                             ),
                         ),
                     ),

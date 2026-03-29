@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
-from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg, MujocoEntityCfg, GroundPlaneCfg,
 )

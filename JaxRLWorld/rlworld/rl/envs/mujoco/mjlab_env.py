@@ -215,32 +215,10 @@ class MjlabEnv(World):
     def _step_physics(self) -> None:
         for _ in range(self.decimation):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
-
-            if self._debug_step_count < 3:
-                robot = self.scene_manager.robot
-                et = robot.data.joint_effort_target[0, :5]
-                print(f"\n[step {self._debug_step_count}] effort_target: {et}")
-            import ipdb; ipdb.set_trace()
-
             self.scene_manager.write_data_to_sim()
-            print("ctrl[0,:5]:", self.scene_manager.data.ctrl[0, ])
-
-            if self._debug_step_count < 3:
-                ctrl = self.scene_manager.data.ctrl[0, :5]
-                print(f"[step {self._debug_step_count}] ctrl:          {ctrl}")
-
             self.scene_manager.step()
             self.scene_manager.update(dt=self.physics_dt)
 
-            if self._debug_step_count < 3:
-                pos = robot.data.joint_pos[0, :5]
-                vel = robot.data.joint_vel[0, :5]
-                print(f"[step {self._debug_step_count}] pos: {pos}")
-                print(f"[step {self._debug_step_count}] vel: {vel}")
-                self._debug_step_count += 1
-
-        if self._debug_step_count >= 3:
-            import ipdb; ipdb.set_trace()
         # Update visualization
         if self.visualization_manager is not None:
             self.visualization_manager.advance()
