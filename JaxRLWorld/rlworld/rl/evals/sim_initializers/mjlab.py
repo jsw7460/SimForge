@@ -102,16 +102,20 @@ class MjlabInitializer(SimInitializer):
                     f"{preset_name} (via {source})"
                 )
             else:
-                raise ValueError(
-                    "mjlab_scene_cfg is required for MjlabEnv evaluation but was not found "
-                    "in the checkpoint and could not be auto-resolved.\n"
-                    "  - For new checkpoints: re-train to embed preset info in scene config.\n"
-                    "  - For existing checkpoints: provide it via extra_overrides, e.g.:\n"
-                    "      PolicyEvaluator(\n"
-                    "          ...,\n"
-                    "          extra_overrides={'scene': {'mjlab_scene_cfg': your_config.scene.mjlab_scene_cfg}},\n"
-                    "      )"
-                )
+                # New path: entities field triggers scene manager to build SceneCfg internally
+                if getattr(eval_cfgs.scene, "entities", None) is not None:
+                    pass
+                else:
+                    raise ValueError(
+                        "mjlab_scene_cfg is required for MjlabEnv evaluation but was not found "
+                        "in the checkpoint and could not be auto-resolved.\n"
+                        "  - For new checkpoints: re-train to embed preset info in scene config.\n"
+                        "  - For existing checkpoints: provide it via extra_overrides, e.g.:\n"
+                        "      PolicyEvaluator(\n"
+                        "          ...,\n"
+                        "          extra_overrides={'scene': {'mjlab_scene_cfg': your_config.scene.mjlab_scene_cfg}},\n"
+                        "      )"
+                    )
 
         return eval_cfgs
 
