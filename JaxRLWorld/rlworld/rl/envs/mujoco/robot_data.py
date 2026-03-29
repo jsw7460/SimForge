@@ -39,12 +39,15 @@ class MujocoRobotData:
         self._device = device
 
     def _get_gravity_vec(self) -> Tensor:
-        if self._gravity_vec is None:
+        """Lazily create gravity vector matching current batch size."""
+        # Use quat batch size to handle eval env with different num_envs
+        n = self._entity.data.root_link_quat_w.shape[0]
+        if self._gravity_vec is None or self._gravity_vec.shape[0] != n:
             self._gravity_vec = torch.tensor(
                 [[0.0, 0.0, -1.0]],
                 device=self._device,
                 dtype=torch.float32,
-            ).expand(self._num_envs, -1).contiguous()
+            ).expand(n, -1).contiguous()
         return self._gravity_vec
 
     @property
