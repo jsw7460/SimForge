@@ -237,6 +237,43 @@ class SceneManager(BaseManager):
                 elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
                     entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 
+    def build_articulation_indexing(
+        self, actuated_dof_names: list[str], entity_name: str = "robot",
+    ):
+        """Build ArticulationIndexing for the given entity.
+
+        Args:
+            actuated_dof_names: Regex patterns for actuated joints.
+            entity_name: Which entity to index.
+
+        Returns:
+            ArticulationIndexing with canonical ↔ simulator mappings.
+        """
+        from rlworld.rl.envs.indexing import ArticulationIndexing
+
+        entity = self.entities[entity_name]
+        dof_ids, joint_names = entity_utils.find_dofs(
+            entity=entity, name_keys=actuated_dof_names
+        )
+        sim_indices = torch.tensor(dof_ids, device=self.env.device)
+
+        # sim_to_canonical: inverse permutation
+        sim_to_canonical = torch.zeros_like(sim_indices)
+        sim_to_canonical[sim_indices] = torch.arange(len(dof_ids), device=self.env.device)
+
+        # Joint limits
+        dof_lower, dof_upper = entity.get_dofs_limit(
+            dofs_idx_local=sim_indices
+        )
+
+        return ArticulationIndexing(
+            joint_names=tuple(joint_names),
+            sim_indices=sim_indices,
+            sim_to_canonical=sim_to_canonical,
+            joint_limits_lower=dof_lower[0],
+            joint_limits_upper=dof_upper[0],
+        )
+
     def step(self):
         self.scene.step()
 

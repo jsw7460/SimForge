@@ -317,6 +317,51 @@ class MjlabSceneManager(BaseManager):
 
             self.config.mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
 
+    def build_articulation_indexing(
+        self, actuated_dof_names: list[str], entity_name: str = "robot",
+    ):
+        """Build ArticulationIndexing for the given entity.
+
+        Args:
+            actuated_dof_names: Regex patterns for actuated joints.
+            entity_name: Which entity to index.
+
+        Returns:
+            ArticulationIndexing with canonical ↔ simulator mappings.
+        """
+        from rlworld.rl.envs.indexing import ArticulationIndexing
+
+        entity = self._scene[entity_name]
+
+        if actuated_dof_names:
+            indices, names = entity.find_joints(
+                actuated_dof_names, preserve_order=True
+            )
+        else:
+            names = list(entity.joint_names)
+            indices = list(range(len(names)))
+
+        sim_indices = torch.tensor(indices, device=self.config.device, dtype=torch.long)
+
+        # sim_to_canonical: inverse permutation
+        num_joints = len(indices)
+        sim_to_canonical = torch.zeros(num_joints, device=self.config.device, dtype=torch.long)
+        for canonical_i, sim_i in enumerate(sim_indices):
+            sim_to_canonical[canonical_i] = canonical_i  # Will be used via sim_indices gather
+
+        # Joint limits
+        soft_limits = entity.data.soft_joint_pos_limits
+        lower = soft_limits[0, sim_indices, 0]
+        upper = soft_limits[0, sim_indices, 1]
+
+        return ArticulationIndexing(
+            joint_names=tuple(names),
+            sim_indices=sim_indices,
+            sim_to_canonical=sim_to_canonical,
+            joint_limits_lower=lower,
+            joint_limits_upper=upper,
+        )
+
     def step(self) -> None:
         """Execute a single physics step."""
         self._sim.step()

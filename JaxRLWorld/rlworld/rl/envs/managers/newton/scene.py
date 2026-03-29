@@ -606,6 +606,76 @@ class NewtonSceneManager(BaseManager):
             self._step()
         self.graph = capture.graph
 
+    def build_articulation_indexing(self, actuated_dof_names: list[str]):
+        """Build ArticulationIndexing for the Newton model.
+
+        Args:
+            actuated_dof_names: Regex patterns for actuated joints (may include prefix).
+
+        Returns:
+            ArticulationIndexing with canonical ↔ simulator mappings.
+        """
+        from rlworld.rl.envs.indexing import ArticulationIndexing
+
+        # Get all joint names from model (single world)
+        joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
+        if not joint_names_raw:
+            raise ValueError("Newton model has no joint labels")
+        all_names = list(joint_names_raw)
+        num_worlds = self.model.world_count
+        joints_per_world = len(all_names) // num_worlds
+        all_names = all_names[:joints_per_world]
+
+        # Filter out floating_base
+        actuatable = [(i, name) for i, name in enumerate(all_names) if name != "floating_base"]
+        actuatable_names = [name for _, name in actuatable]
+        actuatable_indices = [i for i, _ in actuatable]
+
+        matched_indices, matched_names = string_utils.resolve_matching_names(
+            actuated_dof_names, actuatable_names, preserve_order=True
+        )
+        original_indices = [actuatable_indices[i] for i in matched_indices]
+
+        # Bare names (strip prefix)
+        bare_names = tuple(name.rsplit("/", 1)[-1] for name in matched_names)
+
+        # Compute q and qd indices
+        joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
+        joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
+
+        q_indices = torch.tensor(
+            [int(joint_q_start[j]) for j in original_indices], device=self.device
+        )
+        qd_indices = torch.tensor(
+            [int(joint_qd_start[j]) for j in original_indices], device=self.device
+        )
+
+        # sim_indices = qd_indices (used for _apply_force / _apply_position)
+        sim_indices = qd_indices
+
+        # sim_to_canonical: maps qd-space positions back to canonical
+        # For Newton, RobotData uses q_indices/qd_indices directly
+        sim_to_canonical = torch.zeros_like(sim_indices)
+        for canonical_i, sim_i in enumerate(sim_indices):
+            sim_to_canonical[canonical_i] = canonical_i  # identity since we index directly
+
+        # Joint limits (in qd space)
+        dofs_per_world = self.model.joint_dof_count // num_worlds
+        lower_all = wp.to_torch(self.model.joint_limit_lower)[:dofs_per_world]
+        upper_all = wp.to_torch(self.model.joint_limit_upper)[:dofs_per_world]
+        lower = lower_all[qd_indices]
+        upper = upper_all[qd_indices]
+
+        return ArticulationIndexing(
+            joint_names=bare_names,
+            sim_indices=sim_indices,
+            sim_to_canonical=sim_to_canonical,
+            joint_limits_lower=lower,
+            joint_limits_upper=upper,
+            newton_q_indices=q_indices,
+            newton_qd_indices=qd_indices,
+        )
+
     def step(self) -> None:
         """Advance physics by one control step (multiple substeps)."""
         if self.graph:
