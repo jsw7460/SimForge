@@ -20,7 +20,6 @@ from rlworld.rl.utils import string as string_utils
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
-
 JOINT_LIMIT_CLIP = "joint_limit"
 
 
@@ -106,7 +105,6 @@ class ActionManagerBase(BaseManager):
 
     def _build_indexing(self):
         """Build ArticulationIndexing from scene manager."""
-        from rlworld.rl.envs.indexing import ArticulationIndexing
         scene_mgr = self.env.scene_manager
         return scene_mgr.build_articulation_indexing(
             actuated_dof_names=self.config.actuated_dof_names,

@@ -636,9 +636,6 @@ class NewtonSceneManager(BaseManager):
         )
         original_indices = [actuatable_indices[i] for i in matched_indices]
 
-        # Bare names (strip prefix)
-        bare_names = tuple(name.rsplit("/", 1)[-1] for name in matched_names)
-
         # Compute q and qd indices
         joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
         joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
@@ -667,7 +664,7 @@ class NewtonSceneManager(BaseManager):
         upper = upper_all[qd_indices]
 
         return ArticulationIndexing(
-            joint_names=bare_names,
+            joint_names=tuple(matched_names),
             sim_indices=sim_indices,
             sim_to_canonical=sim_to_canonical,
             joint_limits_lower=lower,
