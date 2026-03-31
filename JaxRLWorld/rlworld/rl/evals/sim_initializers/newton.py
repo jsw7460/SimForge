@@ -27,9 +27,9 @@ class NewtonInitializer(SimInitializer):
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
-        from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun
+        from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
 
-        eval_cfgs = NewtonConfigsForRun.from_dict(metadata['config'])
+        eval_cfgs = load_config_from_checkpoint(metadata)
 
         if extra_overrides is not None:
             eval_cfgs.apply_overrides(**extra_overrides)

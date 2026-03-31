@@ -592,7 +592,7 @@ class PPO(OnPolicyAlgorithm):
         self.train_state = PPOTrainState(
             model=new_model,
             opt_state=new_opt_state,
-            key=jnp.array(metadata["alg_key"]),
+            key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
         self.actor_lr = metadata.get("actor_lr", self.actor_lr)

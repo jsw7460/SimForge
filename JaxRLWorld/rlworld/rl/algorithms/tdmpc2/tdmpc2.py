@@ -544,7 +544,7 @@ class TDMPC2(OffPolicyAlgorithm):
             target_q_params=new_target_q,
             wm_opt_state=wm_opt_state,
             pi_opt_state=pi_opt_state,
-            key=jnp.array(metadata["alg_key"]),
+            key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
         self.total_it = metadata.get("total_it", 0)

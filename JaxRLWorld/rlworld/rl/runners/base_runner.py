@@ -1,5 +1,4 @@
 import os
-import pickle
 import shutil
 import statistics
 import time
@@ -389,12 +388,13 @@ class BaseRunner(ABC):
         if self.runner_cfg.eval_disable_noise:
             eval_cfgs.observation.enable_noise = False
 
-        # Remove interval events (external forces, disturbances)
+        # Disable interval events (external forces, disturbances) by setting to None
         if self.runner_cfg.eval_disable_interval_events and hasattr(eval_cfgs, 'event'):
-            eval_cfgs.event.event_terms = [
-                t for t in eval_cfgs.event.event_terms
-                if t.mode != "interval"
-            ]
+            from rlworld.rl.configs.base_config import iter_terms
+            from rlworld.rl.configs.events.event_term_config import EventTermConfig
+            for name, term in iter_terms(eval_cfgs.event, EventTermConfig).items():
+                if term.mode == "interval":
+                    setattr(eval_cfgs.event, name, None)
 
         # Disable viewer
         eval_cfgs.visualization.show_viewer = False
@@ -609,10 +609,21 @@ class BaseRunner(ABC):
 
     def _save_checkpoint_to(self, checkpoint_dir: str, iteration: int) -> None:
         """Save checkpoint to specified directory."""
+        from rlworld.rl.utils.yaml_io import dump_yaml
+
         os.makedirs(checkpoint_dir, exist_ok=True)
 
+        # 1. Algorithm saves weights (.eqx / .pt files)
         alg_metadata = self.alg.save_train_state(checkpoint_dir)
-        metadata = {
+
+        # 2. Config → YAML (callables auto-converted to strings)
+        dump_yaml(
+            os.path.join(checkpoint_dir, "config.yaml"),
+            self.cfgs.recursive_to_dict(),
+        )
+
+        # 3. Train state → YAML (scalars + metadata only)
+        train_state = {
             "runner_class": self.__class__.__name__,
             "algorithm_name": self.algorithm_name,
             "sim_type": self.cfgs.sim_type,
@@ -620,30 +631,27 @@ class BaseRunner(ABC):
             "total_timesteps": self.total_timesteps,
             "total_time": self.total_time,
             "current_learning_iteration": self.current_learning_iteration,
-            "jax_key": np.array(self.key),
-            "config": self.cfgs.recursive_to_dict(),
+            "jax_key": np.array(self.key).tolist(),
             "wandb_run_path": self.wandb_logger.run.path if self.wandb_logger else None,
             **alg_metadata,
         }
 
         # Save canonical joint names and training sim info for cross-sim eval.
-        try:
-            from rlworld.rl.envs.multi_sim_world import MultiSimWorld
-            if isinstance(self.env, MultiSimWorld):
-                metadata["canonical_joint_names"] = list(
-                    self.env.envs[0].act_manager.actuated_joint_names
-                )
-                metadata["train_sim_names"] = [e.sim_name for e in self.env.envs]
-            elif hasattr(self.env, "act_manager"):
-                metadata["canonical_joint_names"] = list(
-                    self.env.act_manager.actuated_joint_names
-                )
-        except Exception:
-            pass
+        from rlworld.rl.envs.multi_sim_world import MultiSimWorld
+        if isinstance(self.env, MultiSimWorld):
+            train_state["canonical_joint_names"] = list(
+                self.env.envs[0].act_manager.actuated_joint_names
+            )
+            train_state["train_sim_names"] = [e.sim_name for e in self.env.envs]
+        elif hasattr(self.env, "act_manager"):
+            train_state["canonical_joint_names"] = list(
+                self.env.act_manager.actuated_joint_names
+            )
 
-        metadata_path = os.path.join(checkpoint_dir, "metadata.pkl")
-        with open(metadata_path, "wb") as f:
-            pickle.dump(metadata, f)
+        dump_yaml(
+            os.path.join(checkpoint_dir, "train_state.yaml"),
+            train_state,
+        )
 
     def _save_latest_checkpoint(self, iteration: int) -> None:
         """Save latest checkpoint (overwritten every iteration)."""

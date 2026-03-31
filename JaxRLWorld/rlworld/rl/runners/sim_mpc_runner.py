@@ -7,7 +7,7 @@ and trains policy + Q-ensemble from collected experience.
 """
 
 import os
-import pickle
+
 import time
 from typing import Dict, List, Any
 
@@ -344,12 +344,12 @@ class SimMPCRunner(BaseRunner):
         use_wandb: bool = True,
     ) -> "SimMPCRunner":
         """Load runner from checkpoint."""
-        metadata_path = os.path.join(checkpoint_path, "metadata.pkl")
-        with open(metadata_path, "rb") as f:
-            metadata = pickle.load(f)
+        from rlworld.rl.utils.checkpoint import load_checkpoint_metadata
+        metadata = load_checkpoint_metadata(checkpoint_path)
 
         if cfgs is None:
-            cfgs = configs_from_dict(metadata["config"])
+            from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
+            cfgs = load_config_from_checkpoint(metadata)
         if env is None:
             env = cls._create_env_from_config(cfgs)
 

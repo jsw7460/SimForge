@@ -607,7 +607,7 @@ class FastTD3(OffPolicyAlgorithm):
             actor_opt_state=actor_opt_state,
             critic_opt_state=critic_opt_state,
             noise_scales=noise_scales,
-            key=jnp.array(metadata["alg_key"]),
+            key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
         self.actor_lr = metadata.get("actor_lr", self.actor_lr)

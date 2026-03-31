@@ -574,7 +574,7 @@ class SAC(OffPolicyAlgorithm):
             critic_opt_state=critic_opt_state,
             alpha_opt_state=alpha_opt_state,
             log_ent_coef=log_ent_coef,
-            key=jnp.array(metadata["alg_key"]),
+            key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
         self.actor_lr = metadata.get("actor_lr", self.actor_lr)

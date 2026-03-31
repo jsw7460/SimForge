@@ -10,7 +10,7 @@ Follows the same runner pattern as OnPolicyRunner and OffPolicyRunner.
 """
 
 import os
-import pickle
+
 import time
 from typing import Dict, List, Any, Union
 
@@ -486,12 +486,12 @@ class ModelBasedRunner(BaseRunner):
         use_wandb: bool = True,
     ) -> "ModelBasedRunner":
         """Load runner from checkpoint."""
-        metadata_path = os.path.join(checkpoint_path, "metadata.pkl")
-        with open(metadata_path, "rb") as f:
-            metadata = pickle.load(f)
+        from rlworld.rl.utils.checkpoint import load_checkpoint_metadata
+        metadata = load_checkpoint_metadata(checkpoint_path)
 
         if cfgs is None:
-            cfgs = configs_from_dict(metadata["config"])
+            from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
+            cfgs = load_config_from_checkpoint(metadata)
         if env is None:
             env = cls._create_env_from_config(cfgs)
 
@@ -503,7 +503,7 @@ class ModelBasedRunner(BaseRunner):
         )
         runner.total_timesteps = metadata["total_timesteps"]
         runner.total_time = metadata.get("total_time", 0)
-        runner.key = jnp.array(metadata["jax_key"])
+        runner.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)
 
         print(f"Loaded checkpoint from {checkpoint_path}")
         print(f"  Algorithm: {runner.algorithm_name}")

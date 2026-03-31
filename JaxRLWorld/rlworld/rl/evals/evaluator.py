@@ -200,14 +200,14 @@ class PolicyEvaluator:
         if hasattr(self.eval_cfgs, 'observation'):
             self.eval_cfgs.observation.enable_noise = False
 
-        # Remove interval events (external forces, etc.)
+        # Disable interval events (external forces, etc.) by setting to None
         if hasattr(self.eval_cfgs, 'event'):
+            from rlworld.rl.configs.base_config import iter_terms
+            from rlworld.rl.configs.events.event_term_config import EventTermConfig
             event_cfg = self.eval_cfgs.event
-            if hasattr(event_cfg, 'event_terms'):
-                event_cfg.event_terms = [
-                    t for t in event_cfg.event_terms
-                    if t.mode != "interval"
-                ]
+            for name, term in iter_terms(event_cfg, EventTermConfig).items():
+                if term.mode == "interval":
+                    setattr(event_cfg, name, None)
 
     @staticmethod
     def _detect_sim_type_from_cfgs(cfgs) -> str:
@@ -239,9 +239,8 @@ class PolicyEvaluator:
         algorithm, nn, and observation config from the checkpoint so the
         model architecture and obs dims match the saved weights.
 
-        The observation terms (including function references) survive pickle
-        round-trip because ``recursive_to_dict()`` preserves non-BaseConfig
-        objects like ``ObservationTermConfig`` as-is.
+        The observation terms are serialized to YAML with callable func fields
+        auto-converted to string references, then reconstructed via from_dict().
         """
         from copy import deepcopy
 
@@ -260,12 +259,13 @@ class PolicyEvaluator:
             cfgs.nn = type(cfgs.nn).from_dict(train_nn)
 
         # Copy observation config from checkpoint
-        # ObservationTermConfig objects (with func references) are preserved
-        # in the pickle — obs_group is dict[str, list[ObservationTermConfig]]
+        # obs_group dicts are reconstructed to ObservationTermConfig via from_dict()
         train_obs = train_config.get("observation", {})
         if train_obs:
             train_obs_group = train_obs.get("obs_group")
             if train_obs_group is not None:
+                # In-place update: obs_group values are dicts from YAML,
+                # assigned directly. Managers resolve func strings lazily.
                 cfgs.observation.obs_group = train_obs_group
                 print_info(
                     "Copied observation terms from checkpoint "

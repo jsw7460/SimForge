@@ -1,5 +1,5 @@
 import os
-import pickle
+
 import time
 from typing import Dict, List, Any
 
@@ -367,14 +367,14 @@ class OnPolicyRunner(BaseRunner):
         Returns:
             Loaded OnPolicyRunner instance
         """
-        # Load metadata
-        metadata_path = os.path.join(checkpoint_path, "metadata.pkl")
-        with open(metadata_path, "rb") as f:
-            metadata = pickle.load(f)
+        # Load metadata (YAML)
+        from rlworld.rl.utils.checkpoint import load_checkpoint_metadata
+        metadata = load_checkpoint_metadata(checkpoint_path)
 
         # Use saved config if not provided
         if cfgs is None:
-            cfgs = configs_from_dict(metadata["config"])
+            from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
+            cfgs = load_config_from_checkpoint(metadata)
 
         # Create env if not provided
         if env is None:
@@ -392,7 +392,7 @@ class OnPolicyRunner(BaseRunner):
         )
         runner.total_timesteps = metadata["total_timesteps"]
         runner.total_time = metadata.get("total_time", 0)
-        runner.key = jnp.array(metadata["jax_key"])
+        runner.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)
 
         print(f"Loaded checkpoint from {checkpoint_path}")
         print(f"  Algorithm: {runner.algorithm_name}")

@@ -1,6 +1,7 @@
 import os
-import pickle
 from typing import TYPE_CHECKING, Optional
+
+from rlworld.rl.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -9,24 +10,45 @@ if TYPE_CHECKING:
 
 
 def load_checkpoint_metadata(checkpoint_path: str) -> dict:
+    """Load config and train state from a checkpoint directory.
+
+    Returns a merged dict: ``{**train_state, "config": config_dict}``.
     """
-    Load metadata from a checkpoint directory.
+    config_path = os.path.join(checkpoint_path, "config.yaml")
+    train_state_path = os.path.join(checkpoint_path, "train_state.yaml")
 
-    Args:
-        checkpoint_path: Path to checkpoint directory
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    if not os.path.isfile(train_state_path):
+        raise FileNotFoundError(f"Train state file not found: {train_state_path}")
 
-    Returns:
-        Metadata dictionary
+    config = load_yaml(config_path)
+    train_state = load_yaml(train_state_path)
+
+    return {**train_state, "config": config}
+
+
+def load_config_from_checkpoint(metadata: dict) -> "ConfigsForRun":
+    """Reconstruct config from checkpoint by re-running the preset.
+
+    Uses ``preset_module`` to re-instantiate the full config (with all nested
+    objects properly created).  The config YAML is **not** merged back — it
+    exists only for logging.  This follows the IsaacLab pattern: the preset
+    is the single source of truth for config structure.
     """
-    metadata_path = os.path.join(checkpoint_path, "metadata.pkl")
+    import importlib
 
-    if not os.path.exists(metadata_path):
-        raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+    config_dict = metadata.get("config", {})
+    preset_module_path = config_dict.get("preset_module")
 
-    with open(metadata_path, "rb") as f:
-        metadata = pickle.load(f)
+    if preset_module_path is None:
+        raise ValueError(
+            "Checkpoint missing 'preset_module' in config.yaml. "
+            "This checkpoint was saved before preset_module tracking was added."
+        )
 
-    return metadata
+    preset_mod = importlib.import_module(preset_module_path)
+    return preset_mod.get_config()
 
 
 def load_runner(
@@ -35,33 +57,15 @@ def load_runner(
     cfgs: Optional["ConfigsForRun"] = None,
     use_wandb: bool = False,
 ) -> "BaseRunner":
-    """
-    Load a runner from checkpoint, automatically detecting the runner class.
-
-    Args:
-        env: Environment instance
-        checkpoint_path: Path to checkpoint directory
-        cfgs: Optional config override. If None, uses config from checkpoint.
-        use_wandb: Whether to use WandB logging
-
-    Returns:
-        Loaded runner instance
-
-    Example:
-        >>> from rlworld.rl.utils.checkpoint import load_runner
-        >>> runner = load_runner(env, "outputs/models/checkpoint_100")
-    """
-    # Load metadata to get runner class
+    """Load a runner from checkpoint, automatically detecting the runner class."""
     metadata = load_checkpoint_metadata(checkpoint_path)
 
     runner_class_name = metadata.get("runner_class")
     if runner_class_name is None:
         raise ValueError(
-            f"Checkpoint missing 'runner_class' in metadata. "
-            f"This checkpoint may be from an older version."
+            "Checkpoint missing 'runner_class' in train_state.yaml."
         )
 
-    # Dynamically import runner class
     from rlworld.rl import runners
 
     if not hasattr(runners, runner_class_name):
@@ -72,12 +76,9 @@ def load_runner(
 
     runner_class = getattr(runners, runner_class_name)
 
-    # Use config from checkpoint if not provided
     if cfgs is None:
-        from rlworld.rl.configs.config_classes import ConfigsForRun
-        cfgs = ConfigsForRun.from_dict(metadata["config"])
+        cfgs = load_config_from_checkpoint(metadata)
 
-    # Load using the appropriate runner's load_checkpoint method
     runner = runner_class.load_checkpoint(
         env=env,
         checkpoint_path=checkpoint_path,
@@ -89,18 +90,9 @@ def load_runner(
 
 
 def get_checkpoint_info(checkpoint_path: str) -> dict:
-    """
-    Get summary information about a checkpoint without loading it.
-
-    Args:
-        checkpoint_path: Path to checkpoint directory
-
-    Returns:
-        Dictionary with checkpoint info
-    """
+    """Get summary information about a checkpoint without loading it."""
     metadata = load_checkpoint_metadata(checkpoint_path)
 
-    # List files in checkpoint
     files = os.listdir(checkpoint_path)
     file_sizes = {
         f: os.path.getsize(os.path.join(checkpoint_path, f))
@@ -118,12 +110,7 @@ def get_checkpoint_info(checkpoint_path: str) -> dict:
 
 
 def print_checkpoint_info(checkpoint_path: str) -> None:
-    """
-    Print formatted information about a checkpoint.
-
-    Args:
-        checkpoint_path: Path to checkpoint directory
-    """
+    """Print formatted information about a checkpoint."""
     info = get_checkpoint_info(checkpoint_path)
 
     print(f"\n{'=' * 50}")
