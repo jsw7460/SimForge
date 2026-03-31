@@ -77,6 +77,9 @@ class QuadrupedOffsets:
         self.offset_cmd = offset_cmd
         self.bound_cmd = bound_cmd
 
+        self.foot_names = tuple(foot_names)
+        self.num_feet = len(foot_names)
+
         # Build ordered list of formula functions matching foot_names order.
         self._formulas = []
         for name in foot_names:
@@ -190,6 +193,16 @@ class GaitManager(BaseManager):
         # ── Outputs ──
         self.clock_inputs = torch.zeros(num_envs, self.num_feet, device=self.device)
         self.desired_contact_states = torch.zeros(num_envs, self.num_feet, device=self.device)
+
+        # ── Validate foot_offset_provider foot count ──
+        if config.offset_mode == "command":
+            provider = config.foot_offset_provider
+            if hasattr(provider, "num_feet") and provider.num_feet != self.num_feet:
+                raise ValueError(
+                    f"foot_offset_provider was built with {provider.num_feet} feet, "
+                    f"but GaitManager has {self.num_feet} feet ({self.foot_names}). "
+                    f"Make sure QuadrupedOffsets receives the same foot_names as GaitConfig."
+                )
 
         # ── Fixed-mode precomputation ──
         if config.offset_mode == "fixed":
