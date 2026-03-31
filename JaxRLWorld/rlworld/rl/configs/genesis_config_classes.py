@@ -7,6 +7,7 @@ from .base_config import BaseConfig
 from .common_config_classes import (
     RewardConfig,
     CommandConfig,
+    GaitConfig,
     EventConfig,
     NNConfig,
     RunnerConfig,
@@ -118,6 +119,11 @@ class GenesisConfigsForRun(BaseConfig):
         reward = _get_or_convert("reward", RewardConfig, RewardConfig)
         command = _get_or_convert("command", CommandConfig, CommandConfig)
         event = _get_or_convert("event", EventConfig, EventConfig)
+        gait_val = config_dict.get("gait", None)
+        if isinstance(gait_val, dict):
+            gait = GaitConfig.from_dict(gait_val)
+        else:
+            gait = gait_val
         nn = _get_or_convert("nn", NNConfig, NNConfig)
         runner = _get_or_convert("runner", RunnerConfig, RunnerConfig)
 
@@ -138,6 +144,7 @@ class GenesisConfigsForRun(BaseConfig):
             action=action,
             reward=reward,
             event=event,
+            gait=gait,
             command=command,
             algorithm=algorithm,
             nn=nn,
