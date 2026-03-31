@@ -41,9 +41,12 @@ class NewtonInitializer(SimInitializer):
         return eval_cfgs
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
-        from rlworld.rl.envs import NewtonLocomotionEnv
+        from rlworld.rl import envs
 
-        return NewtonLocomotionEnv(
+        env_class_name = eval_cfgs.env.env_name
+        env_class = getattr(envs, env_class_name)
+
+        kw = dict(
             num_envs=eval_cfgs.env.num_envs,
             env_cfg=eval_cfgs.env,
             scene_cfg=eval_cfgs.scene,
@@ -54,6 +57,10 @@ class NewtonInitializer(SimInitializer):
             command_cfg=eval_cfgs.command,
             event_cfg=eval_cfgs.event,
         )
+        gait_cfg = getattr(eval_cfgs, "gait", None)
+        if gait_cfg is not None:
+            kw["gait_cfg"] = gait_cfg
+        return env_class(**kw)
 
     def start_recording(self, env: Any) -> None:
         # Newton ViewerFile records automatically

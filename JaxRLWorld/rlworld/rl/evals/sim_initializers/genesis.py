@@ -41,7 +41,7 @@ class GenesisInitializer(SimInitializer):
         env_class_name = eval_cfgs.env.env_name
         if hasattr(envs, env_class_name):
             env_class = getattr(envs, env_class_name)
-            return env_class(
+            kwargs = dict(
                 num_envs=eval_cfgs.env.num_envs,
                 env_cfg=eval_cfgs.env,
                 scene_cfg=eval_cfgs.scene,
@@ -52,6 +52,10 @@ class GenesisInitializer(SimInitializer):
                 command_cfg=eval_cfgs.command,
                 event_cfg=eval_cfgs.event,
             )
+            gait_cfg = getattr(eval_cfgs, "gait", None)
+            if gait_cfg is not None:
+                kwargs["gait_cfg"] = gait_cfg
+            return env_class(**kwargs)
         raise NotImplementedError(f"Undefined env class name {env_class_name}")
 
     def start_recording(self, env: Any) -> None:
