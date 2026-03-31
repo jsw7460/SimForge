@@ -19,10 +19,8 @@ from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS
 from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
-    CommandTermConfig,
 )
 from rlworld.rl.envs.mdp.events import event_terms as ef
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
@@ -358,18 +356,21 @@ class Go2FlatGenesisConfig:
         return RewardConfig(reward_terms=reward_terms)
 
     def _build_command_config(self) -> CommandConfig:
+        from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
         return CommandConfig(
-            resampling_time_s=(3.0, 8.0),
-            sampler=[
-                CommandTermConfig(cf.lin_vel_x, params={"range": self.lin_vel_x_range}),
-                CommandTermConfig(cf.lin_vel_y, params={"range": self.lin_vel_y_range}),
-                CommandTermConfig(cf.ang_vel, params={"range": self.ang_vel_range}),
-            ],
-            rel_standing_envs=0.1,
-            heading_command=True,
-            heading_control_stiffness=0.5,
-            heading_range=(-3.14, 3.14),
-            rel_heading_envs=0.3,
+            terms={
+                "velocity": VelocityCommandTermCfg(
+                    resampling_time_range=(3.0, 8.0),
+                    lin_vel_x_range=self.lin_vel_x_range,
+                    lin_vel_y_range=self.lin_vel_y_range,
+                    ang_vel_range=self.ang_vel_range,
+                    rel_standing_envs=0.1,
+                    heading_command=True,
+                    heading_control_stiffness=0.5,
+                    heading_range=(-3.14, 3.14),
+                    rel_heading_envs=0.3,
+                ),
+            }
         )
 
     def _build_curriculum_config(self) -> CurriculumConfig:

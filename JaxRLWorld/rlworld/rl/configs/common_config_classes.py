@@ -16,23 +16,12 @@ class RewardConfig(BaseConfig):
 
 @dataclass
 class CommandConfig(BaseConfig):
-    """Command configuration (shared)."""
-    sampler: list["CommandTermConfig"] = field(default_factory=tuple)
-    resampling_time_s: tuple[float, float] = (8.0, 12.0)
+    """Command configuration (shared).
 
-    # Standing environment fraction: this fraction of envs will have
-    # all commands zeroed out on each resample.
-    rel_standing_envs: float = 0.0
-
-    # Heading command: when enabled, a heading target is sampled and
-    # ang_vel_z is overwritten with P-control toward the heading target.
-    heading_command: bool = False
-    heading_control_stiffness: float = 0.5
-    heading_range: tuple[float, float] = (-3.14, 3.14)
-
-    # Fraction of envs that use heading control (rest use raw ang_vel_z).
-    # Only effective when heading_command=True.
-    rel_heading_envs: float = 1.0
+    Holds a dict of named CommandTermCfg objects. Each term independently
+    manages its own sampling ranges, resampling timer, and post-processing.
+    """
+    terms: dict[str, Any] = field(default_factory=dict)  # str -> CommandTermCfg
 
 
 @dataclass

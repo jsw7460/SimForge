@@ -256,15 +256,7 @@ class World(ABC):
 
         self.command_manager = CommandManager(
             env=self,
-            config=CommandManagerConfig(
-                command_terms=self.command_cfg.sampler,
-                resampling_time_s=self.command_cfg.resampling_time_s,
-                rel_standing_envs=self.command_cfg.rel_standing_envs,
-                heading_command=self.command_cfg.heading_command,
-                heading_control_stiffness=self.command_cfg.heading_control_stiffness,
-                heading_range=self.command_cfg.heading_range,
-                rel_heading_envs=self.command_cfg.rel_heading_envs,
-            ),
+            config=CommandManagerConfig(terms=self.command_cfg.terms),
         )
 
         reward_cls = ManagerRegistry.get_class(self.sim_type, "reward")
@@ -355,8 +347,8 @@ class World(ABC):
                 "episode_reward_sums": deepcopy(self.episode_sums),
             }
 
-        # Update commands
-        self.command_manager.update_commands(self.episode_length_buf)
+        # Advance commands (timer-based resampling + per-step post-processing)
+        self.command_manager.compute(self.control_dt)
 
         # Reset terminated environments
         self._reset_idx(reset_env_ids)
@@ -415,7 +407,7 @@ class World(ABC):
                 self.event_manager.apply(mode="reset", env_ids=env_ids)
 
         self.termination_manager.reset(env_ids)
-        self.command_manager.resample_commands(env_ids)
+        self.command_manager.reset(env_ids)
         self.act_manager.reset(env_ids)
         self.obs_manager.reset(env_ids)
         self.contact_manager.reset(env_ids)
