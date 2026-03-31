@@ -5,6 +5,7 @@ from .genesis.genesis_env import GenesisEnv
 from .newton.newton_env import NewtonEnv
 from .genesis.locomotion_env import GenesisLocomotionEnv
 from .newton.locomotion_env import NewtonLocomotionEnv
+from .mujoco.locomotion_env import MujocoLocomotionEnv
 from .gymnasium_env import GymnasiumEnv
 from .mujoco.mjlab_env import MujocoEnv
 from .multi_sim_world import MultiSimWorld
@@ -28,6 +29,7 @@ __all__ = [
     "NewtonEnv",
     "GenesisLocomotionEnv",
     "NewtonLocomotionEnv",
+    "MujocoLocomotionEnv",
     "GymnasiumEnv",
     "MujocoEnv",
     "MultiSimWorld",

@@ -55,7 +55,7 @@ class BaseRunner(ABC):
         if sim_type in ("genesis", "newton", "mujoco") or env_class.sim_name in (
             "Genesis", "Newton", "Mujoco"
         ):
-            env = env_class(
+            kwargs = dict(
                 num_envs=cfgs.env.num_envs,
                 env_cfg=cfgs.env,
                 scene_cfg=cfgs.scene,
@@ -66,6 +66,10 @@ class BaseRunner(ABC):
                 command_cfg=cfgs.command,
                 event_cfg=cfgs.event,
             )
+            gait_cfg = getattr(cfgs, "gait", None)
+            if gait_cfg is not None:
+                kwargs["gait_cfg"] = gait_cfg
+            env = env_class(**kwargs)
 
         elif env_class.sim_name == "ManiSkill":
             from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv

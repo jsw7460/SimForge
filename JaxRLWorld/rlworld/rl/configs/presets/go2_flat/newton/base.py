@@ -5,7 +5,7 @@ import math
 import warp as wp
 
 import newton
-from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
+from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.newton import LocomotionObservations
@@ -108,6 +108,7 @@ class Go2FlatNewtonConfig:
             reward=self._build_reward_config(),
             command=self._build_command_config(),
             event=self._build_event_config(quat),
+            gait=self._build_gait_config(),
             algorithm=self._build_algorithm_config(),
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
@@ -119,6 +120,7 @@ class Go2FlatNewtonConfig:
 
     def _build_env_config(self, quat) -> NewtonEnvConfig:
         return NewtonEnvConfig(
+            env_name="NewtonLocomotionEnv",
             num_envs=self.num_envs,
             task_name="Go2 Velocity Tracking",
             seed=self.seed,
@@ -320,6 +322,11 @@ class Go2FlatNewtonConfig:
             heading_control_stiffness=0.5,
             heading_range=(-3.14, 3.14),
             rel_heading_envs=0.3,
+        )
+
+    def _build_gait_config(self) -> GaitConfig:
+        return GaitConfig(
+            foot_names=self.robot.foot_names,
         )
 
     def _build_event_config(self, quat) -> EventConfig:

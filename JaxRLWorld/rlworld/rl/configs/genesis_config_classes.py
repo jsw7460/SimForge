@@ -89,6 +89,7 @@ class GenesisConfigsForRun(BaseConfig):
     reward: RewardConfig = field(default_factory=RewardConfig)
     command: CommandConfig = field(default_factory=CommandConfig)
     event: EventConfig = field(default_factory=EventConfig)
+    gait: "GaitConfig | None" = None
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)

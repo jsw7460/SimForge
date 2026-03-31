@@ -12,7 +12,7 @@ from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
 from mjlab.asset_zoo.robots.unitree_go2.go2_constants import get_spec as go2_get_spec, FULL_COLLISION
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensorCfg, ContactMatch
-from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
+from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
 from rlworld.rl.configs.components.observations.mujoco import LocomotionObservations
@@ -131,6 +131,7 @@ class Go2FlatMujocoConfig:
             reward=self._build_reward_config(),
             command=self._build_command_config(),
             event=self._build_event_config(),
+            gait=self._build_gait_config(),
             algorithm=self._build_algorithm_config(),
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
@@ -143,7 +144,7 @@ class Go2FlatMujocoConfig:
     def _build_env_config(self) -> MujocoEnvConfig:
         return MujocoEnvConfig(
             num_envs=self.num_envs,
-            env_name="MujocoEnv",
+            env_name="MujocoLocomotionEnv",
             task_name="Go2 Velocity Tracking",
             seed=self.seed,
             episode_length_s=self.episode_length_s,
@@ -433,6 +434,11 @@ class Go2FlatMujocoConfig:
         }
 
         return RewardConfig(reward_terms=reward_terms)
+
+    def _build_gait_config(self) -> GaitConfig:
+        return GaitConfig(
+            foot_names=self.robot.foot_names,
+        )
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(

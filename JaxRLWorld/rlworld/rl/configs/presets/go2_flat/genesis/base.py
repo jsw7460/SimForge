@@ -6,7 +6,7 @@ import math
 import genesis as gs
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
-    RewardConfig, CommandConfig, EventConfig, NNConfig, PPOPolicyConfig, RunnerConfig, VisualizationConfig,
+    RewardConfig, CommandConfig, GaitConfig, EventConfig, NNConfig, PPOPolicyConfig, RunnerConfig, VisualizationConfig,
 )
 from rlworld.rl.configs.components.observations.genesis import LocomotionObservations
 from rlworld.rl.configs.events import EventTermConfig
@@ -113,6 +113,7 @@ class Go2FlatGenesisConfig:
             reward=self._build_reward_config(),
             command=self._build_command_config(),
             event=self._build_event_config(),
+            gait=self._build_gait_config(),
             curriculum=self._build_curriculum_config(),
             algorithm=self._build_algorithm_config(),
             nn=self._build_nn_config(),
@@ -125,7 +126,7 @@ class Go2FlatGenesisConfig:
 
     def _build_env_config(self) -> EnvConfig:
         return EnvConfig(
-            env_name="GenesisEnv",
+            env_name="GenesisLocomotionEnv",
             task_name="Go2_Locomotion",
             num_envs=self.num_envs,
             seed=self.seed,
@@ -241,6 +242,11 @@ class Go2FlatGenesisConfig:
                 params={"force_range": {"x": (-50.0, 50.0), "y": (-50.0, 50.0), "z": (-20.0, 20.0)}},
             ),
         ])
+
+    def _build_gait_config(self) -> GaitConfig:
+        return GaitConfig(
+            foot_names=self.robot.foot_names,
+        )
 
     def _build_observation_config(self) -> ObservationConfig:
         return ObservationConfig(
