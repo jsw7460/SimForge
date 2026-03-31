@@ -326,7 +326,7 @@ class Go2FlatNewtonConfig:
 
     def _build_gait_config(self) -> GaitConfig:
         return GaitConfig(
-            foot_names=self.robot.foot_names,
+            foot_names=self.robot.prefixed_foot_names,
         )
 
     def _build_event_config(self, quat) -> EventConfig:
