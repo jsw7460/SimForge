@@ -6,8 +6,12 @@ from rlworld.rl.configs import EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
     RewardConfig, CommandConfig, NNConfig, PPOPolicyConfig, RunnerConfig, VisualizationConfig,
+    TerminationsConfig, ObservationGroupConfig,
 )
-from rlworld.rl.configs.components.observations.genesis import LocomotionObservations
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
+)
+from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.configs.components.rewards.genesis import TrackingRewards, RegularizationRewards
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.genesis_config_classes import (
@@ -41,11 +45,6 @@ class G1FlatGenesisConfig:
     # Robot
     robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
-    # Observations
-    observations: LocomotionObservations | None = None
-    extra_actor_observations: List[ObservationTermConfig] = field(default_factory=list)
-    extra_critic_observations: List[ObservationTermConfig] = field(default_factory=list)
-
     # Rewards
     tracking_rewards: TrackingRewards | None = None
     regularization_rewards: RegularizationRewards | None = None
@@ -58,9 +57,9 @@ class G1FlatGenesisConfig:
     decimation: int = 4
 
     # Command ranges
-    lin_vel_x_range: tuple = (-1.0, 1.0)
-    lin_vel_y_range: tuple = (-1.0, 1.0)
-    ang_vel_range: tuple = (-0.5, 0.5)
+    lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
+    lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
+    ang_vel_range: tuple[float, float] = (-0.5, 0.5)
 
     # Algorithm
     algorithm_name: str = "PPO"
@@ -69,39 +68,6 @@ class G1FlatGenesisConfig:
     run_name: str = "mlp_ppo_g1_29dof"
 
     def __post_init__(self):
-        # Observations - match original config
-        if self.observations is None:
-            self.observations = LocomotionObservations(
-                base_name="pelvis",
-                # Base linear velocity (matching mjlab noise)
-                base_lin_vel_scale=1.0,
-                base_lin_vel_noise=Unoise(-0.5, 0.5),
-                # IMU angular velocity
-                ang_vel_scale=1.0,
-                ang_vel_noise=Unoise(-0.2, 0.2),
-                # Projected gravity
-                gravity_scale=1.0,
-                gravity_noise=Unoise(-0.05, 0.05),
-                # Command
-                command_scale=1.0,
-                # DOF position (relative to default)
-                dof_pos_scale=1.0,
-                dof_pos_noise=Unoise(-0.01, 0.01),
-                include_dof_pos=True,
-                include_nominal_difference=False,
-                # DOF velocity
-                dof_vel_scale=1.0,
-                dof_vel_noise=Unoise(-1.5, 1.5),
-                # Previous actions
-                prev_actions_scale=1.0,
-            )
-
-        # Extra observations for G1
-        if not self.extra_actor_observations:
-            self.extra_actor_observations = self._default_extra_observations()
-        if not self.extra_critic_observations:
-            self.extra_critic_observations = self._default_extra_critic_observations()
-
         # Rewards
         if self.tracking_rewards is None:
             self.tracking_rewards = TrackingRewards(
@@ -116,24 +82,6 @@ class G1FlatGenesisConfig:
                 action_rate_weight=0.1,
                 similar_to_default_weight=None,
             )
-
-    def _default_extra_observations(self) -> List[ObservationTermConfig]:
-        """G1-specific extra observations."""
-        return []
-
-    def _default_extra_critic_observations(self) -> List[ObservationTermConfig]:
-        """Extra critic observations."""
-        feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
-        return [
-            ObservationTermConfig(state.base_height, scale=1.0),
-            ObservationTermConfig(state.base_euler, scale=1.0),
-            ObservationTermConfig(state.contact_indicator, scale=1.0, params={"links": feet_links}),
-            ObservationTermConfig(state.contact_force, scale=0.01, params={"links": feet_links}),
-            ObservationTermConfig(state.feet_height, scale=1.0, params={"links": feet_links}),
-            ObservationTermConfig(state.foot_air_time, scale=1.0, params={"links": feet_links}),
-
-            # ObservationTermConfig(, scale=1.0),
-        ]
 
     def _mjlab_rewards(self) -> dict[str, RewardTermConfig]:
         """G1-specific reward terms (mjlab-compatible)."""
@@ -258,7 +206,7 @@ class G1FlatGenesisConfig:
         """Build the complete configuration as a typed GenesisConfigsForRun."""
         from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
 
-        return GenesisConfigsForRun(
+        cfgs = GenesisConfigsForRun(
             env=self._build_env_config(),
             scene=self._build_scene_config(),
             visualization=VisualizationConfig(show_viewer=False),
@@ -272,12 +220,22 @@ class G1FlatGenesisConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""
         return self.build().recursive_to_dict()
 
     def _build_env_config(self) -> EnvConfig:
+        @dataclass
+        class _TerminationsCfg(TerminationsConfig):
+            roll_pitch_violation = TerminationTermConfig(
+                common_tf.roll_pitch_violation,
+                {"roll_threshold_degree": 70.0, "pitch_threshold_degree": 70.0},
+            )
+            time_out = TerminationTermConfig(max_episode_exceed)
+
         return EnvConfig(
             env_name="GenesisEnv",
             task_name="G1_Velocity_Tracking",
@@ -285,13 +243,7 @@ class G1FlatGenesisConfig:
             seed=self.seed,
             decimation=self.decimation,
             episode_length_s=self.episode_length_s,
-            termination_criteria=[
-                TerminationTermConfig(
-                    common_tf.roll_pitch_violation,
-                    {"roll_threshold_degree": 20.0, "pitch_threshold_degree": 20.0},
-                ),
-                TerminationTermConfig(max_episode_exceed),
-            ],
+            terminations=_TerminationsCfg(),
         )
 
     def _build_action_config(self) -> ActionConfig:
@@ -303,17 +255,19 @@ class G1FlatGenesisConfig:
         )
 
     def _build_event_config(self) -> EventConfig:
-        return EventConfig(event_terms=[
-            EventTermConfig(func=initf.initialize_dof_pos, mode="reset"),
-            EventTermConfig(
+        @dataclass
+        class _EventsCfg(EventConfig):
+            reset_dof_pos = EventTermConfig(func=initf.initialize_dof_pos, mode="reset")
+            reset_pos_quat = EventTermConfig(
                 func=initf.initialize_pos_quat,
                 mode="reset",
                 params={
                     "base_init_pos": [0.0, 0.0, self.robot.base_init_height],
-                    "base_init_quat": [1.0, 0.0, 0.0, 0.0]
-                }
-            ),
-        ])
+                    "base_init_quat": [1.0, 0.0, 0.0, 0.0],
+                },
+            )
+
+        return _EventsCfg()
 
     def _build_scene_config(self) -> SceneConfig:
         return SceneConfig(
@@ -382,32 +336,170 @@ class G1FlatGenesisConfig:
         )
 
     def _build_observation_config(self) -> ObservationConfig:
-        actor_obs = self.observations.to_terms()
-        critic_obs = self.observations.to_critic_terms() + self.extra_critic_observations
-        return ObservationConfig(
-            obs_group={
-                "actor": actor_obs,
-                "critic": critic_obs,
-            },
-        )
+        @dataclass
+        class _ActorObsCfg(ObservationGroupConfig):
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+            projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            command = ObservationTermConfig(func=command_obs, scale=1.0)
+            dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+            dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+
+        feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
+
+        @dataclass
+        class _CriticObsCfg(_ActorObsCfg):
+            base_lin_vel_obs = ObservationTermConfig(func=state.base_lin_vel, scale=1.0)
+            base_height = ObservationTermConfig(func=state.base_height, scale=1.0)
+            base_euler = ObservationTermConfig(func=state.base_euler, scale=1.0)
+            contact_indicator = ObservationTermConfig(func=state.contact_indicator, scale=1.0, params={"links": feet_links})
+            contact_force = ObservationTermConfig(func=state.contact_force, scale=0.01, params={"links": feet_links})
+            feet_height = ObservationTermConfig(func=state.feet_height, scale=1.0, params={"links": feet_links})
+            foot_air_time = ObservationTermConfig(func=state.foot_air_time, scale=1.0, params={"links": feet_links})
+
+        @dataclass
+        class _ObsCfg(ObservationConfig):
+            actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
+            critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
+
+        return _ObsCfg()
 
     def _build_reward_config(self) -> RewardConfig:
-        reward_terms = self._mjlab_rewards()
-        return RewardConfig(reward_terms=reward_terms)
+        feet_links = ["left_ankle_roll_link", "right_ankle_roll_link"]
+
+        @dataclass
+        class _RewardsCfg(RewardConfig):
+            # Tracking rewards (common — uses RobotData interface)
+            track_lin_vel = RewardTermConfig(
+                func=rf_common.track_lin_vel,
+                weight=2.0,
+                params={"std": 0.5, "penalize_z": True},
+            )
+            track_ang_vel = RewardTermConfig(
+                func=rf_common.track_ang_vel,
+                weight=2.0,
+                params={"std": 0.707, "penalize_xy": True},
+            )
+
+            # Orientation (common — uses RobotData interface)
+            flat_orientation = RewardTermConfig(
+                func=rf_common.flat_orientation,
+                weight=1.0,
+                params={"std": 0.447},
+            )
+
+            # Posture
+            variable_posture = RewardTermConfig(
+                func=rf_mjlab.variable_posture,
+                weight=1.0,
+                params={
+                    "std_standing": {".*": 0.05},
+                    "std_walking": {
+                        r".*hip_pitch.*": 0.3,
+                        r".*hip_roll.*": 0.15,
+                        r".*hip_yaw.*": 0.15,
+                        r".*knee.*": 0.35,
+                        r".*ankle_pitch.*": 0.25,
+                        r".*ankle_roll.*": 0.1,
+                        r".*waist_yaw.*": 0.2,
+                        r".*waist_roll.*": 0.08,
+                        r".*waist_pitch.*": 0.1,
+                        r".*shoulder_pitch.*": 0.15,
+                        r".*shoulder_roll.*": 0.15,
+                        r".*shoulder_yaw.*": 0.1,
+                        r".*elbow.*": 0.15,
+                        r".*wrist.*": 0.3,
+                    },
+                    "std_running": {
+                        r".*hip_pitch.*": 0.5,
+                        r".*hip_roll.*": 0.2,
+                        r".*hip_yaw.*": 0.2,
+                        r".*knee.*": 0.6,
+                        r".*ankle_pitch.*": 0.35,
+                        r".*ankle_roll.*": 0.15,
+                        r".*waist_yaw.*": 0.3,
+                        r".*waist_roll.*": 0.08,
+                        r".*waist_pitch.*": 0.2,
+                        r".*shoulder_pitch.*": 0.5,
+                        r".*shoulder_roll.*": 0.2,
+                        r".*shoulder_yaw.*": 0.15,
+                        r".*elbow.*": 0.35,
+                        r".*wrist.*": 0.3,
+                    },
+                    "walking_threshold": 0.05,
+                    "running_threshold": 1.5,
+                },
+            )
+
+            # Penalties
+            body_ang_vel_penalty_mjlab = RewardTermConfig(
+                func=rf_mjlab.body_ang_vel_penalty_mjlab,
+                weight=0.05,
+                params={"body_name": "pelvis"},
+            )
+            joint_pos_limits_mjlab = RewardTermConfig(
+                func=rf_mjlab.joint_pos_limits_mjlab,
+                weight=1.0,
+            )
+            raw_action_rate_l2_mjlab = RewardTermConfig(
+                func=rf_mjlab.raw_action_rate_l2_mjlab,
+                weight=0.1,
+            )
+
+            # Feet rewards
+            feet_clearance_mjlab = RewardTermConfig(
+                func=rf_mjlab.feet_clearance_mjlab,
+                weight=2.0,
+                params={
+                    "feet_links": feet_links,
+                    "target_height": 0.1,
+                    "command_threshold": 0.05,
+                },
+            )
+            feet_swing_height_mjlab = RewardTermConfig(
+                func=rf_mjlab.feet_swing_height_mjlab,
+                weight=0.25,
+                params={
+                    "feet_links": feet_links,
+                    "target_height": 0.1,
+                    "command_threshold": 0.05,
+                },
+            )
+            feet_slip_mjlab = RewardTermConfig(
+                func=rf_mjlab.feet_slip_mjlab,
+                weight=0.1,
+                params={
+                    "feet_links": feet_links,
+                    "command_threshold": 0.05,
+                },
+            )
+            soft_landing_mjlab = RewardTermConfig(
+                func=rf_mjlab.soft_landing_mjlab,
+                weight=1e-5,
+                params={
+                    "feet_links": feet_links,
+                    "command_threshold": 0.05,
+                },
+            )
+
+        return _RewardsCfg()
 
     def _build_command_config(self) -> CommandConfig:
+        from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
         return CommandConfig(
-            resampling_time_s=(3.0, 8.0),
-            sampler=[
-                CommandTermConfig(cf.lin_vel_x, params={"range": self.lin_vel_x_range}),
-                CommandTermConfig(cf.lin_vel_y, params={"range": self.lin_vel_y_range}),
-                CommandTermConfig(cf.ang_vel, params={"range": self.ang_vel_range}),
-            ],
-            rel_standing_envs=0.1,
-            heading_command=True,
-            heading_control_stiffness=0.5,
-            heading_range=(-3.14, 3.14),
-            rel_heading_envs=0.3,
+            terms={
+                "velocity": VelocityCommandTermCfg(
+                    resampling_time_range=(3.0, 8.0),
+                    lin_vel_x_range=self.lin_vel_x_range,
+                    lin_vel_y_range=self.lin_vel_y_range,
+                    ang_vel_range=self.ang_vel_range,
+                    rel_standing_envs=0.1,
+                    heading_command=True,
+                    heading_control_stiffness=0.5,
+                    heading_range=(-3.14, 3.14),
+                    rel_heading_envs=0.3,
+                ),
+            }
         )
 
     def _build_curriculum_config(self) -> CurriculumConfig:

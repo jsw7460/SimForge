@@ -105,7 +105,7 @@ class Go1FlatMujocoConfig:
 
     def build(self) -> "MujocoConfigsForRun":
         """Build the complete configuration as a typed MujocoConfigsForRun."""
-        return MujocoConfigsForRun(
+        cfgs = MujocoConfigsForRun(
             env=self._build_env_config(),
             scene=self._build_scene_config(),
             visualization=VisualizationConfig(show_viewer=False, record_video=False),
@@ -118,6 +118,8 @@ class Go1FlatMujocoConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""

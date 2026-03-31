@@ -8,12 +8,17 @@ from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
     RewardConfig, CommandConfig, GaitConfig, EventConfig, NNConfig, PPOPolicyConfig, RunnerConfig, VisualizationConfig,
+    TerminationsConfig, ObservationGroupConfig,
 )
-from rlworld.rl.configs.components.observations.genesis import LocomotionObservations
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions, base_lin_vel, base_height
+)
+from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.genesis_config_classes import (
     EnvConfig, SceneConfig, ObservationConfig, ActionConfig, CurriculumConfig,
 )
+from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, \
@@ -49,7 +54,7 @@ class Go2FlatGenesisConfig:
     robot: Go2Config = field(default_factory=Go2Config)
 
     # Observation component
-    observations: LocomotionObservations | None = None
+    observations = None
 
     # Environment settings
     num_envs: int = 4096
@@ -71,39 +76,11 @@ class Go2FlatGenesisConfig:
     actor_class_name: str = "MLPActor"
     run_name: str = "Go2_Genesis"
 
-    def __post_init__(self):
-        if self.observations is None:
-            self.observations = LocomotionObservations(
-                base_name=self.robot.base_link_name,
-                # Base linear velocity
-                include_base_lin_vel=False,
-                # base_lin_vel_scale=2.0,
-                # base_lin_vel_noise=Unoise(-0.2, 0.2),
-                # IMU angular velocity
-                ang_vel_scale=0.25,
-                ang_vel_noise=Unoise(-0.2, 0.2),
-                # Projected gravity
-                gravity_scale=1.0,
-                gravity_noise=Unoise(-0.05, 0.05),
-                # Command
-                command_scale=1.0,
-                # DOF position
-                dof_pos_scale=1.0,
-                dof_pos_noise=Unoise(-0.01, 0.01),
-                include_dof_pos=True,
-                include_nominal_difference=False,
-                # DOF velocity
-                dof_vel_scale=0.05,
-                dof_vel_noise=Unoise(-1.5, 1.5),
-                # Previous actions
-                prev_actions_scale=1.0,
-            )
-
     def build(self) -> "GenesisConfigsForRun":
         """Build the complete configuration as a typed GenesisConfigsForRun."""
         from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
 
-        return GenesisConfigsForRun(
+        cfgs = GenesisConfigsForRun(
             env=self._build_env_config(),
             scene=self._build_scene_config(),
             visualization=VisualizationConfig(show_viewer=False),
@@ -118,12 +95,23 @@ class Go2FlatGenesisConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        # Auto-detect preset module from the calling subclass
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""
         return self.build().recursive_to_dict()
 
     def _build_env_config(self) -> EnvConfig:
+        @dataclass
+        class _TerminationsCfg(TerminationsConfig):
+            roll_pitch_violation = TerminationTermConfig(
+                common_tf.roll_pitch_violation,
+                {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
+            )
+            time_out = TerminationTermConfig(max_episode_exceed)
+
         return EnvConfig(
             env_name="GenesisLocomotionEnv",
             task_name="Go2_Locomotion",
@@ -131,13 +119,7 @@ class Go2FlatGenesisConfig:
             seed=self.seed,
             decimation=self.decimation,
             episode_length_s=self.episode_length_s,
-            termination_criteria=[
-                TerminationTermConfig(
-                    common_tf.roll_pitch_violation,
-                    {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
-                ),
-                TerminationTermConfig(max_episode_exceed),
-            ],
+            terminations=_TerminationsCfg(),
         )
 
     def _build_action_config(self) -> ActionConfig:
@@ -210,37 +192,39 @@ class Go2FlatGenesisConfig:
         )
 
     def _build_event_config(self) -> EventConfig:
-        return EventConfig(event_terms=[
-            EventTermConfig(
+        @dataclass
+        class _EventsCfg(EventConfig):
+            reset_dof_pos = EventTermConfig(
                 func=initf.initialize_dof_pos_with_noise,
                 mode="reset",
                 params={"position_noise_range": (math.pi / 360, math.pi / 120)},
-            ),
-            EventTermConfig(
+            )
+            reset_pos_quat = EventTermConfig(
                 func=initf.initialize_pos_quat,
                 mode="reset",
                 params={
                     "base_init_pos": [1.5, 1.5, self.robot.base_init_height + 0.025],
                     "base_init_quat": [1.0, 0.0, 0.0, 0.0],
                 },
-            ),
-            EventTermConfig(
+            )
+            randomize_base_mass = EventTermConfig(
                 func=initf.randomize_base_mass,
                 mode="reset",
                 params={"mass_ratio_range": (0.85, 1.15)},
-            ),
-            EventTermConfig(
+            )
+            randomize_friction = EventTermConfig(
                 func=initf.randomize_friction,
                 mode="reset",
-            ),
+            )
             # Interval terms
-            EventTermConfig(
+            apply_external_force_torque = EventTermConfig(
                 func=ef.apply_external_force_torque,
                 mode="interval",
                 interval_range_s=(2.0, 20.0),
                 params={"force_range": {"x": (-50.0, 50.0), "y": (-50.0, 50.0), "z": (-20.0, 20.0)}},
-            ),
-        ])
+            )
+
+        return _EventsCfg()
 
     def _build_gait_config(self) -> GaitConfig:
         return GaitConfig(
@@ -248,36 +232,51 @@ class Go2FlatGenesisConfig:
         )
 
     def _build_observation_config(self) -> ObservationConfig:
-        return ObservationConfig(
-            obs_group={
-                "actor": self.observations.to_terms(),
-                "critic": self.observations.to_critic_terms(),
-            },
-        )
+        @dataclass
+        class _ActorObsCfg(ObservationGroupConfig):
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=0.25, noise=Unoise(-0.2, 0.2))
+            projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            command = ObservationTermConfig(func=command_obs, scale=1.0)
+            dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+            dof_vel = ObservationTermConfig(func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5))
+            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+
+        @dataclass
+        class _CriticObsCfg(_ActorObsCfg):
+            base_lin_vel = ObservationTermConfig(func=base_lin_vel, scale=2.0)
+            base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
+
+        @dataclass
+        class _ObsCfg(ObservationConfig):
+            actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
+            critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
+
+        return _ObsCfg()
 
     def _build_reward_config(self) -> RewardConfig:
-        reward_terms = {
+        @dataclass
+        class _RewardsCfg(RewardConfig):
             # Tracking rewards (common — uses RobotData interface)
-            "track_lin_vel": RewardTermConfig(
+            track_lin_vel = RewardTermConfig(
                 func=rf_common.track_lin_vel,
                 weight=2.0,
                 params={"std": 0.5, "penalize_z": True},
-            ),
-            "track_ang_vel": RewardTermConfig(
+            )
+            track_ang_vel = RewardTermConfig(
                 func=rf_common.track_ang_vel,
                 weight=2.0,
                 params={"std": 0.707, "penalize_xy": True},
-            ),
+            )
 
             # Orientation (common — uses RobotData interface)
-            "flat_orientation": RewardTermConfig(
+            flat_orientation = RewardTermConfig(
                 func=rf_common.flat_orientation,
                 weight=1.0,
                 params={"std": 0.447},
-            ),
+            )
 
             # Posture reward (stateful class)
-            "variable_posture": RewardTermConfig(
+            variable_posture = RewardTermConfig(
                 func=rf_mjlab.variable_posture,
                 weight=1.0,
                 params={
@@ -296,10 +295,10 @@ class Go2FlatGenesisConfig:
                     "walking_threshold": 0.05,
                     "running_threshold": 1.5,
                 },
-            ),
+            )
 
             # Feet swing height (stateful class)
-            "feet_swing_height_mjlab": RewardTermConfig(
+            feet_swing_height_mjlab = RewardTermConfig(
                 func=rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -307,10 +306,10 @@ class Go2FlatGenesisConfig:
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
-            ),
+            )
 
             # Feet clearance
-            "feet_clearance_mjlab": RewardTermConfig(
+            feet_clearance_mjlab = RewardTermConfig(
                 func=rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -318,43 +317,42 @@ class Go2FlatGenesisConfig:
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
-            ),
+            )
 
             # Feet slip
-            "feet_slip_mjlab": RewardTermConfig(
+            feet_slip_mjlab = RewardTermConfig(
                 func=rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
                     "feet_links": ["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
                     "command_threshold": 0.05,
                 },
-            ),
+            )
 
             # Soft landing
-            "soft_landing_mjlab": RewardTermConfig(
+            soft_landing_mjlab = RewardTermConfig(
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
                     "feet_links": ["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
                     "command_threshold": 0.05,
                 },
-            ),
+            )
 
             # Joint position limits
-            "joint_pos_limits_mjlab": RewardTermConfig(
+            joint_pos_limits_mjlab = RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
                 params={"soft_limit_factor": 1.0},
-            ),
+            )
 
             # Action rate
-            "processed_action_rate_l2_mjlab": RewardTermConfig(
+            processed_action_rate_l2_mjlab = RewardTermConfig(
                 func=rf_mjlab.processed_action_rate_l2_mjlab,
                 weight=0.1,
-            ),
-        }
+            )
 
-        return RewardConfig(reward_terms=reward_terms)
+        return _RewardsCfg()
 
     def _build_command_config(self) -> CommandConfig:
         from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg

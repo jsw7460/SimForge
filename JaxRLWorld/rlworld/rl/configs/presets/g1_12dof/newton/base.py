@@ -150,7 +150,7 @@ class G1FlatNewtonConfig:
         from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun
         quat = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), wp.pi * 0.5)
 
-        return NewtonConfigsForRun(
+        cfgs = NewtonConfigsForRun(
             env=self._build_env_config(quat),
             scene=self._build_scene_config(quat),
             visualization=VisualizationConfig(show_viewer=False, record_video=False),
@@ -163,6 +163,8 @@ class G1FlatNewtonConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""

@@ -14,8 +14,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensorCfg, ContactMatch
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
-from rlworld.rl.configs.components.observations.mujoco import LocomotionObservations
+from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, ObservationGroupConfig
 from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,
@@ -35,7 +34,13 @@ from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
     CommandTermConfig,
 )
-from rlworld.rl.envs.mdp.observations.mujoco import proprioception
+from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
+from rlworld.rl.envs.mdp.observations.mujoco.proprioception import (
+    base_ang_vel, projected_gravity, dof_pos, dof_vel,
+    raw_actions, prev_processed_actions,
+    base_lin_vel, base_height, base_quat,
+    foot_height, foot_air_time, foot_contact, foot_contact_forces,
+)
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
@@ -53,11 +58,6 @@ class G1FlatMujocoConfig:
     # Robot configuration
     robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
-    # Observation component
-    observations: LocomotionObservations | None = None
-    extra_actor_observations: List[ObservationTermConfig] = field(default_factory=list)
-    extra_critic_observations: List[ObservationTermConfig] = field(default_factory=list)
-
     # Environment settings
     num_envs: int = 4096
     episode_length_s: float = 20.0
@@ -68,9 +68,9 @@ class G1FlatMujocoConfig:
     decimation: int = 4  # Control at 50Hz
 
     # Command ranges (matching mjlab velocity task)
-    lin_vel_x_range: tuple = (-1.0, 1.0)
-    lin_vel_y_range: tuple = (-1.0, 1.0)
-    ang_vel_range: tuple = (-0.5, 0.5)
+    lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
+    lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
+    ang_vel_range: tuple[float, float] = (-0.5, 0.5)
 
     # Algorithm settings
     algorithm_name: str = "PPO"
@@ -79,56 +79,9 @@ class G1FlatMujocoConfig:
     actor_class_name: str = "MLPActor"
     run_name: str = "G1_Mujoco"
 
-    def __post_init__(self):
-        if self.observations is None:
-            self.observations = LocomotionObservations(
-                # Base linear velocity (matching mjlab noise)
-                base_lin_vel_scale=1.0,
-                base_lin_vel_noise=Unoise(-0.5, 0.5),
-                # IMU angular velocity
-                ang_vel_scale=1.0,
-                ang_vel_noise=Unoise(-0.2, 0.2),
-                # Projected gravity
-                gravity_scale=1.0,
-                gravity_noise=Unoise(-0.05, 0.05),
-                # Command
-                command_scale=1.0,
-                # DOF position (relative to default)
-                dof_pos_scale=1.0,
-                dof_pos_noise=Unoise(-0.01, 0.01),
-                include_dof_pos=True,
-                include_nominal_difference=False,
-                # DOF velocity
-                dof_vel_scale=1.0,
-                dof_vel_noise=Unoise(-1.5, 1.5),
-                # Previous actions
-                prev_actions_scale=1.0,
-            )
-
-        if not self.extra_actor_observations:
-            self.extra_actor_observations = self._default_extra_actor_observations()
-        if not self.extra_critic_observations:
-            self.extra_critic_observations = self._default_extra_critic_observations()
-
-    def _default_extra_actor_observations(self) -> List[ObservationTermConfig]:
-        """G1-specific extra actor observations."""
-        return []
-
-    def _default_extra_critic_observations(self) -> List[ObservationTermConfig]:
-        """G1-specific extra critic observations."""
-        site_names = ("left_foot", "right_foot")
-        return [
-            ObservationTermConfig(proprioception.base_height, scale=1.0),
-            ObservationTermConfig(proprioception.base_quat, scale=1.0),
-            ObservationTermConfig(proprioception.foot_height, scale=1.0, params={"site_names": site_names}),
-            ObservationTermConfig(proprioception.foot_air_time, scale=1.0),
-            ObservationTermConfig(proprioception.foot_contact, scale=1.0),
-            ObservationTermConfig(proprioception.foot_contact_forces, scale=0.01)
-        ]
-
     def build(self) -> "MujocoConfigsForRun":
         """Build the complete configuration as a typed MujocoConfigsForRun."""
-        return MujocoConfigsForRun(
+        cfgs = MujocoConfigsForRun(
             env=self._build_env_config(),
             scene=self._build_scene_config(),
             visualization=VisualizationConfig(show_viewer=False, record_video=False),
@@ -141,12 +94,22 @@ class G1FlatMujocoConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""
         return self.build().recursive_to_dict()
 
     def _build_env_config(self) -> MujocoEnvConfig:
+        @dataclass
+        class _TerminationsCfg(TerminationsConfig):
+            bad_orientation = TerminationTermConfig(
+                tf.bad_orientation,
+                {"limit_angle": math.radians(70.0)},
+            )
+            time_out = TerminationTermConfig(tf.time_out)
+
         return MujocoEnvConfig(
             num_envs=self.num_envs,
             env_name="MujocoEnv",
@@ -154,13 +117,7 @@ class G1FlatMujocoConfig:
             seed=self.seed,
             episode_length_s=self.episode_length_s,
             decimation=self.decimation,
-            termination_criteria=[
-                TerminationTermConfig(
-                    tf.bad_orientation,
-                    {"limit_angle": math.radians(70.0)}
-                ),
-                TerminationTermConfig(tf.time_out),
-            ],
+            terminations=_TerminationsCfg(),
         )
 
     def _build_scene_config(self) -> MujocoSceneConfig:
@@ -250,9 +207,10 @@ class G1FlatMujocoConfig:
             for i in range(1, 8)
         )
 
-        return EventConfig([
+        @dataclass
+        class _EventsCfg(EventConfig):
             # Reset events
-            EventTermConfig(
+            reset_root = EventTermConfig(
                 func=ef.reset_root_state_uniform,
                 mode="reset",
                 params={
@@ -264,8 +222,8 @@ class G1FlatMujocoConfig:
                     },
                     "velocity_range": {},
                 },
-            ),
-            EventTermConfig(
+            )
+            reset_joints = EventTermConfig(
                 func=ef.reset_joints_by_offset,
                 mode="reset",
                 params={
@@ -273,10 +231,10 @@ class G1FlatMujocoConfig:
                     "velocity_range": (0.0, 0.0),
                     "entity_cfg": EntityCfg(name="robot", joint_names=(".*",)),
                 },
-            ),
+            )
 
             # Interval events
-            EventTermConfig(
+            push_robot = EventTermConfig(
                 func=ef.push_by_setting_velocity,
                 mode="interval",
                 interval_range_s=(1.0, 3.0),
@@ -290,10 +248,10 @@ class G1FlatMujocoConfig:
                         "yaw": (-0.78, 0.78),
                     },
                 },
-            ),
+            )
 
             # Startup events (domain randomization)
-            EventTermConfig(
+            randomize_friction = EventTermConfig(
                 func=ef.randomize_geom_friction,
                 mode="startup",
                 params={
@@ -302,16 +260,16 @@ class G1FlatMujocoConfig:
                     "shared_random": True,
                     "entity_cfg": EntityCfg(name="robot", geom_names=geom_names),
                 },
-            ),
-            EventTermConfig(
+            )
+            randomize_encoder_bias = EventTermConfig(
                 func=ef.randomize_encoder_bias,
                 mode="startup",
                 params={
                     "bias_range": (-0.015, 0.015),
                     "entity_cfg": EntityCfg(name="robot"),
                 },
-            ),
-            EventTermConfig(
+            )
+            randomize_body_com = EventTermConfig(
                 func=ef.randomize_body_com_offset,
                 mode="startup",
                 params={
@@ -323,18 +281,41 @@ class G1FlatMujocoConfig:
                     "operation": "add",
                     "entity_cfg": EntityCfg(name="robot", body_names=("torso_link",)),
                 },
-            ),
-        ])
+            )
+
+        return _EventsCfg()
 
     def _build_observation_config(self) -> MujocoObservationConfig:
-        actor_obs = self.observations.to_terms() + self.extra_actor_observations
-        critic_obs = self.observations.to_critic_terms() + self.extra_critic_observations
-        return MujocoObservationConfig(
-            obs_group={
-                "actor": actor_obs,
-                "critic": critic_obs,
-            },
-        )
+        @dataclass
+        class _ActorObsCfg(ObservationGroupConfig):
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+            projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            command = ObservationTermConfig(func=command_obs, scale=1.0)
+            dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+            actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+            dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+
+        @dataclass
+        class _CriticObsCfg(ObservationGroupConfig):
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+            projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            command = ObservationTermConfig(func=command_obs, scale=1.0)
+            dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+            dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+            base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
+            base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
+            foot_height_obs = ObservationTermConfig(func=foot_height, scale=1.0, params={"site_names": ("left_foot", "right_foot")})
+            foot_air_time_obs = ObservationTermConfig(func=foot_air_time, scale=1.0)
+            foot_contact_obs = ObservationTermConfig(func=foot_contact, scale=1.0)
+            foot_contact_forces_obs = ObservationTermConfig(func=foot_contact_forces, scale=0.01)
+
+        @dataclass
+        class _ObsCfg(MujocoObservationConfig):
+            actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
+            critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
+
+        return _ObsCfg()
 
     def _build_action_config(self) -> MujocoActionConfig:
         return MujocoActionConfig(
@@ -349,21 +330,22 @@ class G1FlatMujocoConfig:
         """Build reward configuration matching mjlab G1 velocity task."""
         site_names = ("left_foot", "right_foot")
 
-        reward_terms = {
+        @dataclass
+        class _RewardsCfg(RewardConfig):
             # Tracking rewards (common — uses RobotData interface)
-            "track_lin_vel": RewardTermConfig(
+            track_lin_vel = RewardTermConfig(
                 func=rf_common.track_lin_vel,
                 weight=2.0,
                 params={"std": math.sqrt(0.25), "penalize_z": True},
-            ),
-            "track_ang_vel": RewardTermConfig(
+            )
+            track_ang_vel = RewardTermConfig(
                 func=rf_common.track_ang_vel,
                 weight=2.0,
                 params={"std": math.sqrt(0.5), "penalize_xy": True},
-            ),
+            )
 
             # Orientation reward
-            "flat_orientation": RewardTermConfig(
+            flat_orientation = RewardTermConfig(
                 func=rf.flat_orientation,
                 weight=1.0,
                 params={
@@ -373,16 +355,16 @@ class G1FlatMujocoConfig:
                         body_names=("torso_link",),
                     ),
                 },
-            ),
+            )
 
-            "self_collision_cost": RewardTermConfig(
+            self_collision_cost = RewardTermConfig(
                 func=rf.self_collision_cost,
                 weight=1.0,
                 params={"sensor_name": "self_collision"},
-            ),
+            )
 
             # Variable posture reward (G1-specific std values)
-            "variable_posture": RewardTermConfig(
+            variable_posture = RewardTermConfig(
                 func=rf.variable_posture,
                 weight=1.0,
                 params={
@@ -426,10 +408,10 @@ class G1FlatMujocoConfig:
                     "walking_threshold": 0.05,
                     "running_threshold": 1.5,
                 },
-            ),
+            )
 
             # Body angular velocity penalty
-            "body_angular_velocity_penalty": RewardTermConfig(
+            body_angular_velocity_penalty = RewardTermConfig(
                 func=rf.body_angular_velocity_penalty,
                 weight=0.05,
                 params={
@@ -438,29 +420,29 @@ class G1FlatMujocoConfig:
                         body_names=("torso_link",),
                     ),
                 },
-            ),
+            )
 
             # Angular momentum penalty
-            "angular_momentum_penalty": RewardTermConfig(
+            angular_momentum_penalty = RewardTermConfig(
                 func=rf.angular_momentum_penalty,
                 weight=0.02,
                 params={"sensor_name": "robot/root_angmom"},
-            ),
+            )
 
             # Joint position limits
-            "joint_pos_limits": RewardTermConfig(
+            joint_pos_limits = RewardTermConfig(
                 func=rf.joint_pos_limits,
                 weight=1.0,
-            ),
+            )
 
             # Action rate
-            "raw_action_rate_l2": RewardTermConfig(
+            raw_action_rate_l2 = RewardTermConfig(
                 func=rf.raw_action_rate_l2,
                 weight=0.1,
-            ),
+            )
 
             # Feet clearance
-            "feet_clearance": RewardTermConfig(
+            feet_clearance = RewardTermConfig(
                 func=rf.feet_clearance,
                 weight=2.0,
                 params={
@@ -471,10 +453,10 @@ class G1FlatMujocoConfig:
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
-            ),
+            )
 
             # Feet swing height
-            "feet_swing_height": RewardTermConfig(
+            feet_swing_height = RewardTermConfig(
                 func=rf.feet_swing_height,
                 weight=0.25,
                 params={
@@ -486,10 +468,10 @@ class G1FlatMujocoConfig:
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
-            ),
+            )
 
             # Feet slip
-            "feet_slip": RewardTermConfig(
+            feet_slip = RewardTermConfig(
                 func=rf.feet_slip,
                 weight=0.1,
                 params={
@@ -500,34 +482,36 @@ class G1FlatMujocoConfig:
                     ),
                     "command_threshold": 0.05,
                 },
-            ),
+            )
 
             # Soft landing
-            "soft_landing": RewardTermConfig(
+            soft_landing = RewardTermConfig(
                 func=rf.soft_landing,
                 weight=1e-5,
                 params={
                     "sensor_name": "feet_ground_contact",
                     "command_threshold": 0.05,
                 },
-            ),
-        }
+            )
 
-        return RewardConfig(reward_terms=reward_terms)
+        return _RewardsCfg()
 
     def _build_command_config(self) -> CommandConfig:
+        from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
         return CommandConfig(
-            resampling_time_s=(3.0, 8.0),
-            sampler=[
-                CommandTermConfig(cf.lin_vel_x, params={"range": self.lin_vel_x_range}),
-                CommandTermConfig(cf.lin_vel_y, params={"range": self.lin_vel_y_range}),
-                CommandTermConfig(cf.ang_vel, params={"range": self.ang_vel_range}),
-            ],
-            rel_standing_envs=0.1,
-            heading_command=True,
-            heading_control_stiffness=0.5,
-            heading_range=(-3.14, 3.14),
-            rel_heading_envs=0.3,
+            terms={
+                "velocity": VelocityCommandTermCfg(
+                    resampling_time_range=(3.0, 8.0),
+                    lin_vel_x_range=self.lin_vel_x_range,
+                    lin_vel_y_range=self.lin_vel_y_range,
+                    ang_vel_range=self.ang_vel_range,
+                    rel_standing_envs=0.1,
+                    heading_command=True,
+                    heading_control_stiffness=0.5,
+                    heading_range=(-3.14, 3.14),
+                    rel_heading_envs=0.3,
+                ),
+            }
         )
 
     def _build_algorithm_config(self) -> PPOConfig:

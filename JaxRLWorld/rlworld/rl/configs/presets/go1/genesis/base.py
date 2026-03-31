@@ -91,7 +91,7 @@ class Go1FlatGenesisConfig:
         """Build the complete configuration as a typed GenesisConfigsForRun."""
         from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
 
-        return GenesisConfigsForRun(
+        cfgs = GenesisConfigsForRun(
             env=self._build_env_config(),
             scene=self._build_scene_config(),
             visualization=VisualizationConfig(show_viewer=False),
@@ -105,6 +105,8 @@ class Go1FlatGenesisConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""

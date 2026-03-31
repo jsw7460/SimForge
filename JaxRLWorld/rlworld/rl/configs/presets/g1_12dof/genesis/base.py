@@ -20,14 +20,13 @@ from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
-    StateInitializationTermConfig,
     CommandTermConfig,
 )
-from rlworld.rl.envs.mdp.observations import proprioception, state
-from rlworld.rl.envs.mdp.reset import reset_terms as initf
+# from rlworld.rl.envs.mdp.observations import proprioception, state
+# from rlworld.rl.envs.mdp.reset import reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf
 from rlworld.rl.envs.mdp.rewards.genesis.tasks import g1 as g1rf
-from rlworld.rl.envs.mdp.terminations import terminations as tf
+# from rlworld.rl.envs.mdp.terminations import terminations as tf
 
 
 @dataclass
@@ -167,7 +166,7 @@ class G1FlatGenesisConfig:
         """Build the complete configuration as a typed GenesisConfigsForRun."""
         from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
 
-        return GenesisConfigsForRun(
+        cfgs = GenesisConfigsForRun(
             env=self._build_env_config(),
             scene=self._build_scene_config(),
             visualization=VisualizationConfig(show_viewer=False),
@@ -181,6 +180,8 @@ class G1FlatGenesisConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""

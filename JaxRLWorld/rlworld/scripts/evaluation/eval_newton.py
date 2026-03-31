@@ -15,9 +15,9 @@ if __name__ == '__main__':
             "num_envs": 1,
             "episode_length_s": 10e+9,
         },
-        "command": {
-            "rel_standing_envs": 0.3,
-        },
+        # "command": {
+        #     "rel_standing_envs": 0.3,
+        # },
     }
 
     if args.eval:
@@ -27,7 +27,7 @@ if __name__ == '__main__':
         }
 
     evaluator = PolicyEvaluator(
-        policy_path="./outputs/models/2026-03-30/23-37-05/checkpoint_latest/",
+        policy_path="./outputs/models/2026-03-31/18-10-19/checkpoint_latest/",
         seed=42,
         num_evals=100000000,
         record_video=args.record_video,

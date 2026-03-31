@@ -1,13 +1,9 @@
 import argparse
 
 import genesis as gs
-from rlworld.rl.evals import PolicyEvaluator
-from rlworld.rl.envs.mdp.commands import command_terms as cf
-from rlworld.rl.envs.mdp.configs import CommandTermConfig
-from rlworld.rl.vis.overlays.hud_items import LinkPositionItem, LinkPositionItemConfig
-
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
-
+from rlworld.rl.evals import PolicyEvaluator
+from rlworld.rl.vis.overlays.hud_items import LinkPositionItem, LinkPositionItemConfig
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Genesis evaluation")
@@ -39,14 +35,6 @@ if __name__ == '__main__':
                 ],
             ),
         },
-        # "command": {
-        #     "sampler": [
-        #         CommandTermConfig(cf.lin_vel_x, params={"range": (-1.0, 1.5)}),
-        #         CommandTermConfig(cf.lin_vel_y, params={"range": (-0.5, 0.5)}),
-        #         CommandTermConfig(cf.ang_vel, params={"range": (-0.5, 0.5)})
-        #     ],
-        #     "rel_standing_envs": 0.3,
-        # },
     }
 
     if args.eval:
@@ -57,7 +45,7 @@ if __name__ == '__main__':
         }
 
     evaluator = PolicyEvaluator(
-        policy_path="outputs/models/2026-03-31/00-05-37/checkpoint_latest/",
+        policy_path="outputs/models/2026-03-31/18-10-11/checkpoint_latest/",
         num_evals=1,
         seed=42,
         record_video=args.record_video,

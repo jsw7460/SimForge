@@ -7,8 +7,10 @@ import warp as wp
 import newton
 from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig
-from rlworld.rl.configs.components.observations.newton import LocomotionObservations
+from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, ObservationGroupConfig
+from rlworld.rl.configs.observations import ObservationTermConfig
+from rlworld.rl.envs.mdp.observations.common.proprioception import base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions, base_lin_vel, base_height
+from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.configs.components.rewards.newton import TrackingRewards, RegularizationRewards
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.newton_config_classes import (
@@ -46,31 +48,6 @@ class Go2FlatNewtonConfig:
 
     robot: Go2Config = field(default_factory=Go2Config)
 
-    observations: LocomotionObservations = field(default_factory=lambda: LocomotionObservations(
-                # Base linear velocity
-                include_base_lin_vel=False,
-                # base_lin_vel_scale=2.0,
-                # base_lin_vel_noise=Unoise(-0.2, 0.2),
-                # IMU angular velocity
-                ang_vel_scale=0.25,
-                ang_vel_noise=Unoise(-0.2, 0.2),
-                # Projected gravity
-                gravity_scale=1.0,
-                gravity_noise=Unoise(-0.05, 0.05),
-                # Command
-                command_scale=1.0,
-                # DOF position
-                dof_pos_scale=1.0,
-                dof_pos_noise=Unoise(-0.01, 0.01),
-                include_dof_pos=True,
-                include_nominal_difference=False,
-                # DOF velocity
-                dof_vel_scale=0.05,
-                dof_vel_noise=Unoise(-1.5, 1.5),
-                # Previous actions
-                prev_actions_scale=1.0,
-    ))
-
     tracking_rewards: TrackingRewards = field(default_factory=TrackingRewards)
     regularization_rewards: RegularizationRewards = field(default_factory=RegularizationRewards)
 
@@ -97,7 +74,7 @@ class Go2FlatNewtonConfig:
         from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun
         quat = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), wp.pi * 0.5)
 
-        return NewtonConfigsForRun(
+        cfgs = NewtonConfigsForRun(
             env=self._build_env_config(quat),
             scene=self._build_scene_config(quat),
             visualization=VisualizationConfig(show_viewer=False, record_video=False),
@@ -111,12 +88,22 @@ class Go2FlatNewtonConfig:
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
         )
+        cfgs.preset_module = type(self).__module__
+        return cfgs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""
         return self.build().recursive_to_dict()
 
     def _build_env_config(self, quat) -> NewtonEnvConfig:
+        @dataclass
+        class _TerminationsCfg(TerminationsConfig):
+            roll_pitch = TerminationTermConfig(
+                common_tf.roll_pitch_violation,
+                {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0},
+            )
+            max_episode = TerminationTermConfig(max_episode_exceed)
+
         return NewtonEnvConfig(
             env_name="NewtonLocomotionEnv",
             num_envs=self.num_envs,
@@ -124,13 +111,7 @@ class Go2FlatNewtonConfig:
             seed=self.seed,
             episode_length_s=self.episode_length_s,
             decimation=4,
-            termination_criteria=[
-                TerminationTermConfig(
-                    common_tf.roll_pitch_violation,
-                    {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0}
-                ),
-                TerminationTermConfig(max_episode_exceed),
-            ],
+            terminations=_TerminationsCfg(),
         )
 
     def _build_scene_config(self, quat) -> NewtonSceneConfig:
@@ -201,12 +182,26 @@ class Go2FlatNewtonConfig:
         )
 
     def _build_observation_config(self) -> NewtonObservationConfig:
-        return NewtonObservationConfig(
-            obs_group={
-                "actor": self.observations.to_terms(),
-                "critic": self.observations.to_critic_terms(),
-            },
-        )
+        @dataclass
+        class _ActorObsCfg(ObservationGroupConfig):
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=0.25, noise=Unoise(-0.2, 0.2))
+            projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            command = ObservationTermConfig(func=command_obs, scale=1.0)
+            dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+            dof_vel = ObservationTermConfig(func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5))
+            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+
+        @dataclass
+        class _CriticObsCfg(_ActorObsCfg):
+            base_lin_vel = ObservationTermConfig(func=base_lin_vel, scale=2.0)
+            base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
+
+        @dataclass
+        class _ObsCfg(NewtonObservationConfig):
+            actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
+            critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
+
+        return _ObsCfg()
 
     def _build_action_config(self) -> NewtonActionConfig:
         r = self.robot
@@ -220,27 +215,27 @@ class Go2FlatNewtonConfig:
     def _build_reward_config(self) -> RewardConfig:
         r = self.robot
         feet = list(r.prefixed_foot_names)
-        base = r.prefixed("base")
 
-        reward_terms = {
+        @dataclass
+        class _RewardsCfg(RewardConfig):
             # Tracking rewards (common — uses RobotData interface)
-            "track_lin_vel": RewardTermConfig(
+            track_lin_vel = RewardTermConfig(
                 func=rf_common.track_lin_vel,
                 weight=2.0,
                 params={"std": 0.5, "penalize_z": True},
-            ),
-            "track_ang_vel": RewardTermConfig(
+            )
+            track_ang_vel = RewardTermConfig(
                 func=rf_common.track_ang_vel,
                 weight=2.0,
                 params={"std": 0.707, "penalize_xy": True},
-            ),
+            )
             # Orientation (common — uses RobotData interface)
-            "flat_orientation": RewardTermConfig(
+            flat_orientation = RewardTermConfig(
                 func=rf_common.flat_orientation,
                 weight=1.0,
                 params={"std": 0.447},
-            ),
-            "variable_posture": RewardTermConfig(
+            )
+            variable_posture = RewardTermConfig(
                 func=rf_mjlab.variable_posture,
                 weight=1.0,
                 params={
@@ -259,8 +254,8 @@ class Go2FlatNewtonConfig:
                     "walking_threshold": 0.05,
                     "running_threshold": 1.5,
                 },
-            ),
-            "feet_swing_height_mjlab": RewardTermConfig(
+            )
+            feet_swing_height_mjlab = RewardTermConfig(
                 func=rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -268,8 +263,8 @@ class Go2FlatNewtonConfig:
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
-            ),
-            "feet_clearance_mjlab": RewardTermConfig(
+            )
+            feet_clearance_mjlab = RewardTermConfig(
                 func=rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -277,35 +272,34 @@ class Go2FlatNewtonConfig:
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
-            ),
-            "feet_slip_mjlab": RewardTermConfig(
+            )
+            feet_slip_mjlab = RewardTermConfig(
                 func=rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
                     "feet_bodies": feet,
                     "command_threshold": 0.05,
                 },
-            ),
-            "soft_landing_mjlab": RewardTermConfig(
+            )
+            soft_landing_mjlab = RewardTermConfig(
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
                     "feet_bodies": feet,
                     "command_threshold": 0.05,
                 },
-            ),
-            "joint_pos_limits_mjlab": RewardTermConfig(
+            )
+            joint_pos_limits_mjlab = RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
                 params={"soft_limit_factor": 1.0},
-            ),
-            "processed_action_rate_l2_mjlab": RewardTermConfig(
+            )
+            processed_action_rate_l2_mjlab = RewardTermConfig(
                 func=rf_mjlab.processed_action_rate_l2_mjlab,
                 weight=0.1,
-            ),
-        }
+            )
 
-        return RewardConfig(reward_terms)
+        return _RewardsCfg()
 
     def _build_command_config(self) -> CommandConfig:
         from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
@@ -332,28 +326,30 @@ class Go2FlatNewtonConfig:
 
     def _build_event_config(self, quat) -> EventConfig:
         r = self.robot
-        from rlworld.rl.envs.mdp.events.newton_event_terms import push_robot
-        return EventConfig([
-            EventTermConfig(
+        from rlworld.rl.envs.mdp.events.newton_event_terms import push_robot as _push_robot_fn
+
+        @dataclass
+        class _EventsCfg(EventConfig):
+            reset_base_pose = EventTermConfig(
                 func=initf.initialize_base_pose,
                 params={
                     "base_init_pos": [0.0, 0.0, r.base_init_height],
                     "base_init_quat": [quat[0], quat[1], quat[2], quat[3]],
                 },
-                mode="reset"
-            ),
-            EventTermConfig(
+                mode="reset",
+            )
+            reset_dof_pos = EventTermConfig(
                 func=initf.initialize_dof_pos_with_noise,
                 params={"position_noise_range": (math.pi / 360, math.pi / 120)},
-                mode="reset"
-            ),
-            EventTermConfig(
+                mode="reset",
+            )
+            randomize_body_mass = EventTermConfig(
                 func=initf.randomize_body_mass,
                 params={"mass_ratio_range": (0.8, 1.2), "body_patterns": r.prefixed("base")},
                 mode="reset",
-            ),
-            EventTermConfig(
-                func=push_robot,
+            )
+            push_robot = EventTermConfig(
+                func=_push_robot_fn,
                 mode="interval",
                 interval_range_s=(2.0, 20.0),
                 params={
@@ -367,7 +363,8 @@ class Go2FlatNewtonConfig:
                     },
                 },
             )
-        ])
+
+        return _EventsCfg()
 
     def _build_algorithm_config(self) -> PPOConfig:
         return PPOConfig(
