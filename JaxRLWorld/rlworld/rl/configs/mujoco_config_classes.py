@@ -136,7 +136,7 @@ class MujocoConfigsForRun(BaseConfig):
         if isinstance(reward, dict):
             reward = RewardConfig(**reward)
         if isinstance(command, dict):
-            command = CommandConfig(**command)
+            command = CommandConfig.from_dict(command)
         if isinstance(event, dict):
             event = EventConfig(**event)
         if isinstance(nn, dict):
