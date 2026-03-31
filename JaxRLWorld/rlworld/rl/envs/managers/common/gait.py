@@ -194,14 +194,14 @@ class GaitManager(BaseManager):
         self.clock_inputs = torch.zeros(num_envs, self.num_feet, device=self.device)
         self.desired_contact_states = torch.zeros(num_envs, self.num_feet, device=self.device)
 
-        # ── Validate foot_offset_provider foot count ──
+        # ── Validate foot_offset_provider foot_names match ──
         if config.offset_mode == "command":
             provider = config.foot_offset_provider
-            if hasattr(provider, "num_feet") and provider.num_feet != self.num_feet:
+            if hasattr(provider, "foot_names") and tuple(provider.foot_names) != self.foot_names:
                 raise ValueError(
-                    f"foot_offset_provider was built with {provider.num_feet} feet, "
-                    f"but GaitManager has {self.num_feet} feet ({self.foot_names}). "
-                    f"Make sure QuadrupedOffsets receives the same foot_names as GaitConfig."
+                    f"foot_offset_provider foot_names {provider.foot_names} does not match "
+                    f"GaitManager foot_names {self.foot_names}. "
+                    f"Use the same foot_names for both GaitConfig and QuadrupedOffsets."
                 )
 
         # ── Fixed-mode precomputation ──
