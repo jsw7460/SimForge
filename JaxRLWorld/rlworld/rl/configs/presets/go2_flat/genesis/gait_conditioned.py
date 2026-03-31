@@ -56,5 +56,5 @@ class Go2GaitConditionedGenesisConfig(Go2FlatGenesisConfig):
             offset_mode="command",
             freq_command="gait_freq",
             duration_command="gait_duration",
-            foot_offset_provider=QuadrupedOffsets(),
+            foot_offset_provider=QuadrupedOffsets(foot_names=self.robot.foot_names),
         )

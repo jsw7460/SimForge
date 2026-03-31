@@ -33,21 +33,42 @@ class FootOffsetProvider(Protocol):
 class QuadrupedOffsets:
     """Reads (phase, offset, bound) commands and produces 4-foot offsets.
 
-    Parameterization:
+    Maps the three gait parameters to per-foot phase offsets using
+    the Walk-These-Ways convention:
+        FL = phase + offset + bound
+        FR = offset
+        RL = bound
+        RR = phase
+
+    This parameterization expresses all symmetric quadrupedal gaits:
         - Trot:  (0.5, 0, 0) -- diagonal legs in sync
         - Pace:  (0, 0.5, 0) -- same-side legs in sync
         - Bound: (0, 0, 0.5) -- front/hind legs in sync
         - Pronk: (0, 0, 0)   -- all legs in sync
 
-    Output order: [FL, FR, RL, RR].
+    Output order is determined by ``foot_names``: each name is matched
+    to FL/FR/RL/RR by looking for those substrings, so the output
+    aligns with GaitManager's foot order regardless of config ordering.
 
     Args:
-        phase_cmd:  Command name for phase parameter.
-        offset_cmd: Command name for offset parameter.
-        bound_cmd:  Command name for bound parameter.
+        foot_names: Foot link names (e.g., ["FR_foot", "FL_foot", "RL_foot", "RR_foot"]).
+                    Each name must contain exactly one of "FL", "FR", "RL", "RR".
+        phase_cmd:  Command name for phase parameter (θ₁).
+        offset_cmd: Command name for offset parameter (θ₂).
+        bound_cmd:  Command name for bound parameter (θ₃).
     """
+
+    # Canonical offset formula for each leg.
+    _LEG_FORMULAS = {
+        "FL": lambda p, o, b: p + o + b,
+        "FR": lambda p, o, b: o,
+        "RL": lambda p, o, b: b,
+        "RR": lambda p, o, b: p,
+    }
+
     def __init__(
         self,
+        foot_names: tuple[str, ...] | list[str],
         phase_cmd: str = "gait_phase",
         offset_cmd: str = "gait_offset",
         bound_cmd: str = "gait_bound",
@@ -56,16 +77,25 @@ class QuadrupedOffsets:
         self.offset_cmd = offset_cmd
         self.bound_cmd = bound_cmd
 
+        # Build ordered list of formula functions matching foot_names order.
+        self._formulas = []
+        for name in foot_names:
+            matched = [key for key in self._LEG_FORMULAS if key in name]
+            if len(matched) != 1:
+                raise ValueError(
+                    f"Cannot identify leg from foot name '{name}'. "
+                    f"Expected exactly one of {list(self._LEG_FORMULAS.keys())} "
+                    f"as substring, got {matched}."
+                )
+            self._formulas.append(self._LEG_FORMULAS[matched[0]])
+
     def __call__(self, cmd: "CommandManager") -> torch.Tensor:
         phase = getattr(cmd, self.phase_cmd)
         offset = getattr(cmd, self.offset_cmd)
         bound = getattr(cmd, self.bound_cmd)
-        return torch.stack([
-            phase + offset + bound,  # FL
-            offset,                  # FR
-            bound,                   # RL
-            phase,                   # RR
-        ], dim=1)
+        return torch.stack(
+            [fn(phase, offset, bound) for fn in self._formulas], dim=1
+        )
 
 
 class DirectOffsets:
