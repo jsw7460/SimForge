@@ -612,11 +612,10 @@ class BaseRunner(ABC):
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         alg_metadata = self.alg.save_train_state(checkpoint_dir)
-
         metadata = {
             "runner_class": self.__class__.__name__,
             "algorithm_name": self.algorithm_name,
-            "sim_type": getattr(self.cfgs, "sim_type", None),
+            "sim_type": self.cfgs.sim_type,
             "iteration": iteration,
             "total_timesteps": self.total_timesteps,
             "total_time": self.total_time,

@@ -197,6 +197,7 @@ class GaitManager(BaseManager):
         # ── Validate foot_offset_provider foot_names match ──
         if config.offset_mode == "command":
             provider = config.foot_offset_provider
+
             if hasattr(provider, "foot_names") and tuple(provider.foot_names) != self.foot_names:
                 raise ValueError(
                     f"foot_offset_provider foot_names {provider.foot_names} does not match "

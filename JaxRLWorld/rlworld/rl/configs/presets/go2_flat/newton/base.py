@@ -81,9 +81,9 @@ class Go2FlatNewtonConfig:
     dt: float = 0.005
     substeps: int = 2
 
-    lin_vel_x_range: tuple = (-1.0, 1.0)
-    lin_vel_y_range: tuple = (-1.0, 1.0)
-    ang_vel_range: tuple = (-1.0, 1.0)
+    lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
+    lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
+    ang_vel_range: tuple[float, float] = (-1.0, 1.0)
 
     algorithm_name: str = "PPO"
     max_iterations: int = 6000

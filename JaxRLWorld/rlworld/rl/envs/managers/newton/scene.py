@@ -191,7 +191,7 @@ class NewtonSceneManager(BaseManager):
         num_bodies_per_env = len(self.model.body_label) // self.env.num_envs
         bodies_key = self.model.body_label[:num_bodies_per_env]
 
-        _, names = string_utils.resolve_matching_names(body_names, bodies_key)
+        _, names = string_utils.resolve_matching_names(body_names, bodies_key, preserve_order=True)
         return names
 
     def _prefix_names(

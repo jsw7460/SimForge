@@ -403,7 +403,7 @@ class MujocoSceneManager(BaseManager):
         """
         entity = self.get_entity(entity_name)
         # Use mjlab's find_bodies API
-        _, matched_names = entity.find_bodies(body_names)
+        _, matched_names = entity.find_bodies(body_names, preserve_order=True)
         return matched_names
 
     def _set_kinematic_tree(self) -> None:

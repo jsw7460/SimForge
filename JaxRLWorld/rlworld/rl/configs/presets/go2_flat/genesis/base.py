@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 import math
 
 import genesis as gs
+from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
     RewardConfig, CommandConfig, GaitConfig, EventConfig, NNConfig, PPOPolicyConfig, RunnerConfig, VisualizationConfig,
@@ -15,9 +16,10 @@ from rlworld.rl.configs.genesis_config_classes import (
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE, ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE
-from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg
-from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
+from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, \
+    DAMPING_KNEE, ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE
+from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, \
+    GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
@@ -28,7 +30,6 @@ from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
-from rlworld.rl.envs.mdp.terminations.genesis import terminations as tf
 
 
 @dataclass
@@ -58,9 +59,9 @@ class Go2FlatGenesisConfig:
     decimation: int = 4
 
     # Command ranges
-    lin_vel_x_range: tuple = (-1.0, 1.0)
-    lin_vel_y_range: tuple = (-1.0, 1.0)
-    ang_vel_range: tuple = (-1.0, 1.0)
+    lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
+    lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
+    ang_vel_range: tuple[float, float] = (-1.0, 1.0)
 
     # Algorithm settings
     algorithm_name: str = "PPO"
