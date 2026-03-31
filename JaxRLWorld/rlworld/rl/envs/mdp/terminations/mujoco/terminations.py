@@ -13,14 +13,14 @@ from rlworld.rl.envs.mdp.configs.terminations import TerminationResult
 from rlworld.rl.envs.mdp.observations.mujoco import proprioception
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mujoco import MjlabEnv
+    from rlworld.rl.envs.mujoco import MujocoEnv
 
 
-def time_out(env: "MjlabEnv") -> TerminationResult:
+def time_out(env: "MujocoEnv") -> TerminationResult:
     """Terminate when the episode length exceeds maximum.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
 
     Returns:
         TerminationResult indicating timeout.
@@ -30,7 +30,7 @@ def time_out(env: "MjlabEnv") -> TerminationResult:
 
 
 def bad_orientation(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     limit_angle: float = 1.0,
 ) -> TerminationResult:
     """Terminate when the robot's orientation exceeds the limit angle.
@@ -38,7 +38,7 @@ def bad_orientation(
     The limit angle is computed from the projected gravity vector.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
         limit_angle: Maximum allowed tilt angle in radians.
 
     Returns:
@@ -55,13 +55,13 @@ def bad_orientation(
 
 
 def root_height_below_minimum(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     minimum_height: float = 0.2,
 ) -> TerminationResult:
     """Terminate when the robot's root height falls below minimum.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
         minimum_height: Minimum allowed root height in meters.
 
     Returns:
@@ -75,7 +75,7 @@ def root_height_below_minimum(
 
 
 def roll_pitch_violation(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     roll_threshold: float = 0.5,
     pitch_threshold: float = 0.5,
 ) -> TerminationResult:
@@ -84,7 +84,7 @@ def roll_pitch_violation(
     Uses projected gravity to compute approximate roll/pitch.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
         roll_threshold: Maximum allowed roll in radians.
         pitch_threshold: Maximum allowed pitch in radians.
 
@@ -105,7 +105,7 @@ def roll_pitch_violation(
 
 
 def illegal_contact(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     sensor_name: str | None = None,
     force_threshold: float = 10.0,
 ) -> TerminationResult:
@@ -119,7 +119,7 @@ def illegal_contact(
     When ``sensor_name`` is None, uses the legacy contact_manager-based path.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
         sensor_name: Optional contact sensor name for sensor-based detection.
         force_threshold: Force magnitude threshold for history-based detection.
 
@@ -142,11 +142,11 @@ def illegal_contact(
     return TerminationResult(torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
 
 
-def base_contact(env: "MjlabEnv") -> TerminationResult:
+def base_contact(env: "MujocoEnv") -> TerminationResult:
     """Terminate when the base/torso makes contact with ground.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
 
     Returns:
         TerminationResult for base contact.
@@ -162,11 +162,11 @@ def base_contact(env: "MjlabEnv") -> TerminationResult:
     return TerminationResult(terminated)
 
 
-def nan_detection(env: "MjlabEnv") -> TerminationResult:
+def nan_detection(env: "MujocoEnv") -> TerminationResult:
     """Terminate environments that have NaN/Inf values in physics state.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
 
     Returns:
         TerminationResult for NaN detection.
@@ -184,13 +184,13 @@ def nan_detection(env: "MjlabEnv") -> TerminationResult:
 
 
 def joint_limit_violation(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     margin: float = 0.0,
 ) -> TerminationResult:
     """Terminate when joint positions exceed limits.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
         margin: Additional margin beyond soft limits.
 
     Returns:
@@ -216,14 +216,14 @@ def joint_limit_violation(
 
 
 def velocity_limit_violation(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     max_linear_velocity: float = 10.0,
     max_angular_velocity: float = 20.0,
 ) -> TerminationResult:
     """Terminate when base velocities exceed safe limits.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
         max_linear_velocity: Maximum allowed linear velocity (m/s).
         max_angular_velocity: Maximum allowed angular velocity (rad/s).
 

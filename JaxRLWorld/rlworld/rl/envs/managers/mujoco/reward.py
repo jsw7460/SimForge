@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 
-class MjlabRewardManager(RewardManager):
+class MujocoRewardManager(RewardManager):
     """MuJoCo-specific reward manager with SceneEntityCfg resolution."""
 
     def __init__(self, env: "World", config: RewardManagerConfig):

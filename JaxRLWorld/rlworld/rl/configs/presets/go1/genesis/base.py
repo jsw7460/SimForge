@@ -15,7 +15,7 @@ from rlworld.rl.configs.genesis_config_classes import (
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.go1 import Go1MjlabConfig
+from rlworld.rl.configs.robots.go1 import Go1MujocoConfig
 from rlworld.rl.configs.scene import EntityConfig
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -33,7 +33,7 @@ from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 @dataclass
 class Go1FlatGenesisConfig:
     # Robot configuration
-    robot: Go1MjlabConfig = field(default_factory=Go1MjlabConfig)
+    robot: Go1MujocoConfig = field(default_factory=Go1MujocoConfig)
 
     # Observation component
     observations: LocomotionObservations | None = None

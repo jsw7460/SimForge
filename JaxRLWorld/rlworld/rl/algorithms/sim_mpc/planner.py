@@ -52,6 +52,9 @@ def planning_step(
     plan_env.contact_manager.advance()
 
     # Reward computation
+    # Pre-reward hook (e.g., gait_manager.advance() in LocomotionEnv)
+    plan_env._pre_reward_hook()
+
     plan_env.rew_buf[:] = 0.0
     plan_env.reward_manager.set_rewards(
         reward_buffer=plan_env.rew_buf,
@@ -59,7 +62,7 @@ def planning_step(
         reward_buffer_per_type=plan_env.rew_buf_per_type,
     )
 
-    # Pre-termination hook (e.g., gait_manager.advance() in LocomotionEnv)
+    # Pre-termination hook
     plan_env._pre_termination_hook()
 
     # Termination check

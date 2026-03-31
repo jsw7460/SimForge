@@ -1,5 +1,6 @@
 """MuJoCo/mjlab environment module."""
 
-from .mjlab_env import MjlabEnv
+from .mjlab_env import MujocoEnv
+from .locomotion_env import MujocoLocomotionEnv
 
-__all__ = ["MjlabEnv"]
+__all__ = ["MujocoEnv", "MujocoLocomotionEnv"]

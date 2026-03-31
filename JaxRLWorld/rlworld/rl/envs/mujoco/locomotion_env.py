@@ -1,44 +1,26 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
-from rlworld.rl.envs import GenesisEnv
-from rlworld.rl.envs.managers import GaitManagerConfig, GaitManager
-from rlworld.rl.configs import (
-    EnvConfig,
-    SceneConfig,
-    VisualizationConfig,
-    ObservationConfig,
-    ActionConfig,
-    RewardConfig,
-    CommandConfig,
-    GaitConfig,
-    EventConfig
+from rlworld.rl.envs.mujoco.mjlab_env import MujocoEnv
+from rlworld.rl.envs.managers import GaitManager
+from rlworld.rl.envs.genesis.locomotion_env import _gait_config_to_manager_config
+from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
+from rlworld.rl.configs.common_config_classes import VisualizationConfig
+from rlworld.rl.configs.mujoco_config_classes import (
+    MujocoEnvConfig,
+    MujocoSceneConfig,
+    MujocoObservationConfig,
+    MujocoActionConfig,
 )
 
 if TYPE_CHECKING:
     pass
 
 
-def _gait_config_to_manager_config(gait_cfg: GaitConfig, num_envs: int) -> GaitManagerConfig:
-    """Convert high-level GaitConfig to internal GaitManagerConfig."""
-    return GaitManagerConfig(
-        num_envs=num_envs,
-        foot_names=gait_cfg.foot_names,
-        offset_mode=gait_cfg.offset_mode,
-        gait_period=gait_cfg.gait_period,
-        default_freq=gait_cfg.default_freq,
-        default_duration=gait_cfg.default_duration,
-        freq_command=gait_cfg.freq_command,
-        duration_command=gait_cfg.duration_command,
-        foot_offset_provider=gait_cfg.foot_offset_provider,
-        contact_smoothing_sigma=gait_cfg.contact_smoothing_sigma,
-    )
+class MujocoLocomotionEnv(MujocoEnv):
+    """Specialized MuJoCo/mjlab environment for legged locomotion tasks.
 
-
-class GenesisLocomotionEnv(GenesisEnv):
-    """Specialized environment for legged locomotion tasks.
-
-    Extends GenesisEnv with gait pattern management.
+    Extends MujocoEnv with gait pattern management.
     """
 
     gait_manager: GaitManager
@@ -46,11 +28,11 @@ class GenesisLocomotionEnv(GenesisEnv):
     def __init__(
         self,
         num_envs: int,
-        env_cfg: EnvConfig,
-        scene_cfg: SceneConfig,
+        env_cfg: MujocoEnvConfig,
+        scene_cfg: MujocoSceneConfig,
         visualization_cfg: VisualizationConfig,
-        obs_cfg: ObservationConfig,
-        act_cfg: ActionConfig,
+        obs_cfg: MujocoObservationConfig,
+        act_cfg: MujocoActionConfig,
         reward_cfg: RewardConfig,
         command_cfg: CommandConfig,
         event_cfg: EventConfig,

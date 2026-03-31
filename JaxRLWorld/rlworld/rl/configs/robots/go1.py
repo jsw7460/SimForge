@@ -85,7 +85,7 @@ DAMPING_KNEE = 2 * DAMPING_RATIO * KNEE_REFLECTED_INERTIA * NATURAL_FREQ  # ~4.7
 
 
 @dataclass
-class Go1MjlabConfig(RobotConfig):
+class Go1MujocoConfig(RobotConfig):
     """Go1 config with mjlab-derived actuator parameters."""
 
     name: str = "go1"

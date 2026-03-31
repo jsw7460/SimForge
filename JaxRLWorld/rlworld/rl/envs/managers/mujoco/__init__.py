@@ -1,15 +1,15 @@
 """MuJoCo/mjlab managers module."""
 
-from .scene import MjlabSceneManager, MjlabSceneManagerConfig
-from .action import MjlabActionManager, MjlabActionManagerConfig
-from .contact import MjlabContactManager
-from .reward import MjlabRewardManager
+from .scene import MujocoSceneManager, MujocoSceneManagerConfig
+from .action import MujocoActionManager, MujocoActionManagerConfig
+from .contact import MujocoContactManager
+from .reward import MujocoRewardManager
 
 __all__ = [
-    "MjlabSceneManager",
-    "MjlabSceneManagerConfig",
-    "MjlabActionManager",
-    "MjlabActionManagerConfig",
-    "MjlabContactManager",
-    "MjlabRewardManager",
+    "MujocoSceneManager",
+    "MujocoSceneManagerConfig",
+    "MujocoActionManager",
+    "MujocoActionManagerConfig",
+    "MujocoContactManager",
+    "MujocoRewardManager",
 ]

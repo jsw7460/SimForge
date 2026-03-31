@@ -1,7 +1,7 @@
 """G1 MuJoCo base configuration.
 
 This configuration follows the mjlab velocity task setup,
-adapted for rlworld's MjlabEnv interface.
+adapted for rlworld's MujocoEnv interface.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Any, List
@@ -27,7 +27,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
+from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import MujocoEntityCfg, ArticulationCfg, InitialStateCfg
 from rlworld.rl.envs.mdp.commands import command_terms as cf
@@ -51,7 +51,7 @@ class G1FlatMujocoConfig:
     """
 
     # Robot configuration
-    robot: G1MjlabConfig = field(default_factory=G1MjlabConfig)
+    robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
     # Observation component
     observations: LocomotionObservations | None = None
@@ -149,7 +149,7 @@ class G1FlatMujocoConfig:
     def _build_env_config(self) -> MujocoEnvConfig:
         return MujocoEnvConfig(
             num_envs=self.num_envs,
-            env_name="MjlabEnv",
+            env_name="MujocoEnv",
             task_name="G1 Velocity Tracking",
             seed=self.seed,
             episode_length_s=self.episode_length_s,

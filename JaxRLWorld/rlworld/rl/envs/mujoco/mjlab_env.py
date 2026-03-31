@@ -1,6 +1,6 @@
 """MuJoCo/mjlab environment for rlworld.
 
-This module provides MjlabEnv, which wraps mjlab's Scene and Simulation
+This module provides MujocoEnv, which wraps mjlab's Scene and Simulation
 while following rlworld's World interface and manager pattern.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
 
 
-class MjlabEnv(World):
+class MujocoEnv(World):
     """MuJoCo/mjlab environment following rlworld's World interface.
 
     This environment wraps mjlab's Scene and Simulation while providing
@@ -39,7 +39,7 @@ class MjlabEnv(World):
             mjlab_scene_cfg=scene_cfg,
         )
 
-        env = MjlabEnv(
+        env = MujocoEnv(
             num_envs=4096,
             env_cfg=env_cfg,
             scene_cfg=mujoco_scene_cfg,
@@ -185,14 +185,14 @@ class MjlabEnv(World):
         viewer_type = getattr(self.visualization_cfg, "viewer_type", None)
         if viewer_type == "viser":
             from rlworld.rl.envs.managers.mujoco.visualization import (
-                MjlabVisualizationManager,
-                MjlabVisualizationManagerConfig,
+                MujocoVisualizationManager,
+                MujocoVisualizationManagerConfig,
             )
-            viz_config = MjlabVisualizationManagerConfig(
+            viz_config = MujocoVisualizationManagerConfig(
                 viewer_type="viser",
                 viser_port=self.visualization_cfg.viser_port,
             )
-            self.visualization_manager = MjlabVisualizationManager(
+            self.visualization_manager = MujocoVisualizationManager(
                 env=self, config=viz_config
             )
             self.visualization_manager.setup()

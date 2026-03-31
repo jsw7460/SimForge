@@ -38,14 +38,14 @@ def __getattr__(name):
         "NewtonContactManager",
     }
     mujoco_names = {
-        "MjlabSceneManager",
-        "MjlabSceneManagerConfig",
-        "MjlabActionManager",
-        "MjlabActionManagerConfig",
-        "MjlabContactManager",
-        "MjlabRewardManager",
-        "MjlabStateInitManager",
-        "MjlabStateInitConfig",
+        "MujocoSceneManager",
+        "MujocoSceneManagerConfig",
+        "MujocoActionManager",
+        "MujocoActionManagerConfig",
+        "MujocoContactManager",
+        "MujocoRewardManager",
+        "MujocoStateInitManager",
+        "MujocoStateInitConfig",
     }
     if name in newton_names:
         from . import newton as newton_module
@@ -91,10 +91,10 @@ __all__ = [
     "NewtonStateInitManager", "NewtonStateInitConfig",
     "NewtonContactManager",
     # MuJoCo/mjlab (lazy loaded)
-    "MjlabSceneManager", "MjlabSceneManagerConfig",
-    "MjlabActionManager", "MjlabActionManagerConfig",
-    "MjlabContactManager", "MjlabRewardManager",
-    "MjlabStateInitManager", "MjlabStateInitConfig",
+    "MujocoSceneManager", "MujocoSceneManagerConfig",
+    "MujocoActionManager", "MujocoActionManagerConfig",
+    "MujocoContactManager", "MujocoRewardManager",
+    "MujocoStateInitManager", "MujocoStateInitConfig",
     # Backward compatibility
     "ActionManager", "ActionManagerConfig",
     "ObservationManager", "ObsManagerConfig",

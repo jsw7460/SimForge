@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mujoco import MjlabEnv
+    from rlworld.rl.envs.mujoco import MujocoEnv
 
 
 # =============================================================================
@@ -34,7 +34,7 @@ class EntityCfg:
     site_names: tuple[str, ...] | None = None
 
 
-def _resolve_entity_cfg(env: "MjlabEnv", cfg: EntityCfg) -> EntityCfg:
+def _resolve_entity_cfg(env: "MujocoEnv", cfg: EntityCfg) -> EntityCfg:
     """Resolve named components to IDs."""
     entity = env.scene_manager.get_entity(cfg.name)
 
@@ -70,7 +70,7 @@ def _sample_uniform(
 # =============================================================================
 
 def reset_scene_to_default(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     env_ids: torch.Tensor | None = None,
 ) -> None:
     """Reset all entities in the scene to their default states."""
@@ -105,7 +105,7 @@ def reset_scene_to_default(
 
 
 def reset_root_state_uniform(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     env_ids: torch.Tensor | None,
     pose_range: dict[str, tuple[float, float]],
     velocity_range: dict[str, tuple[float, float]] | None = None,
@@ -168,7 +168,7 @@ def reset_root_state_uniform(
 
 
 def reset_joints_by_offset(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     env_ids: torch.Tensor | None,
     position_range: tuple[float, float],
     velocity_range: tuple[float, float],
@@ -233,7 +233,7 @@ def reset_joints_by_offset(
 # =============================================================================
 
 def push_by_setting_velocity(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     env_ids: torch.Tensor,
     velocity_range: dict[str, tuple[float, float]],
     entity_cfg: EntityCfg | None = None,
@@ -255,13 +255,13 @@ def push_by_setting_velocity(
 
 
 # =============================================================================
-# Mjlab env adapter (bridges rlworld's MjlabEnv to mjlab's ManagerBasedRlEnv)
+# Mjlab env adapter (bridges rlworld's MujocoEnv to mjlab's ManagerBasedRlEnv)
 # =============================================================================
 
-class _MjlabEnvAdapter:
+class _MujocoEnvAdapter:
     """Adapter that exposes the interface mjlab DR functions expect."""
 
-    def __init__(self, rlworld_env: "MjlabEnv"):
+    def __init__(self, rlworld_env: "MujocoEnv"):
         self._env = rlworld_env
 
     @property
@@ -303,7 +303,7 @@ def _to_scene_entity_cfg(entity_cfg: EntityCfg):
 # =============================================================================
 
 def randomize_geom_friction(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "abs",
     entity_cfg: EntityCfg | None = None,
@@ -316,7 +316,7 @@ def randomize_geom_friction(
 
     entity_cfg = entity_cfg or EntityCfg()
     geom_friction(
-        env=_MjlabEnvAdapter(env),
+        env=_MujocoEnvAdapter(env),
         env_ids=env_ids,
         ranges=ranges,
         asset_cfg=_to_scene_entity_cfg(entity_cfg),
@@ -327,7 +327,7 @@ def randomize_geom_friction(
 
 
 def randomize_body_com_offset(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "add",
     entity_cfg: EntityCfg | None = None,
@@ -340,7 +340,7 @@ def randomize_body_com_offset(
 
     entity_cfg = entity_cfg or EntityCfg()
     body_com_offset(
-        env=_MjlabEnvAdapter(env),
+        env=_MujocoEnvAdapter(env),
         env_ids=env_ids,
         ranges=ranges,
         asset_cfg=_to_scene_entity_cfg(entity_cfg),
@@ -351,7 +351,7 @@ def randomize_body_com_offset(
 
 
 def randomize_encoder_bias(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     bias_range: tuple[float, float],
     entity_cfg: EntityCfg | None = None,
     env_ids: torch.Tensor | None = None,
@@ -361,7 +361,7 @@ def randomize_encoder_bias(
 
     entity_cfg = entity_cfg or EntityCfg()
     encoder_bias(
-        env=_MjlabEnvAdapter(env),
+        env=_MujocoEnvAdapter(env),
         env_ids=env_ids,
         bias_range=bias_range,
         asset_cfg=_to_scene_entity_cfg(entity_cfg),
@@ -369,7 +369,7 @@ def randomize_encoder_bias(
 
 
 def randomize_pd_gains(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     kp_range: tuple[float, float],
     kd_range: tuple[float, float],
     distribution: Literal["uniform", "log_uniform"] = "uniform",
@@ -382,7 +382,7 @@ def randomize_pd_gains(
 
     entity_cfg = entity_cfg or EntityCfg()
     pd_gains(
-        env=_MjlabEnvAdapter(env),
+        env=_MujocoEnvAdapter(env),
         env_ids=env_ids,
         kp_range=kp_range,
         kd_range=kd_range,

@@ -154,8 +154,8 @@ def detect_sim_type(metadata: dict) -> str:
         return "Genesis"
     elif "Newton" in env_name:
         return "Newton"
-    elif "MjlabEnv" in env_name:
-        return "MjlabEnv"
+    elif "MujocoEnv" in env_name:
+        return "MujocoEnv"
     elif env_name == 'Maniskill':
         return "ManiSkill"
     elif env_name == 'Gymnasium':
@@ -168,7 +168,7 @@ def detect_sim_type(metadata: dict) -> str:
     elif sim_type == "newton":
         return "Newton"
     elif sim_type in ("mujoco", "mjlab"):
-        return "MjlabEnv"
+        return "MujocoEnv"
 
     return "Unknown"
 
@@ -181,9 +181,9 @@ def get_initializer(sim_type: str) -> SimInitializer:
     elif sim_type == "Newton":
         from .newton import NewtonInitializer
         return NewtonInitializer()
-    elif sim_type == "MjlabEnv":
-        from .mjlab import MjlabInitializer
-        return MjlabInitializer()
+    elif sim_type == "MujocoEnv":
+        from .mjlab import MujocoInitializer
+        return MujocoInitializer()
     elif sim_type == "ManiSkill":
         from .maniskill import ManiSkillInitializer
         return ManiSkillInitializer()

@@ -83,7 +83,7 @@ G1_ACTION_SCALE: Dict[str, float] = {
 
 
 @dataclass
-class G1MjlabConfig(RobotConfig):
+class G1MujocoConfig(RobotConfig):
     """G1 config with mjlab-derived actuator parameters."""
 
     name: str = "g1_29dof"

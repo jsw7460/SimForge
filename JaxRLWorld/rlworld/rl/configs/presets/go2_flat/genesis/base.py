@@ -125,7 +125,7 @@ class Go2FlatGenesisConfig:
 
     def _build_env_config(self) -> EnvConfig:
         return EnvConfig(
-            env_name="LocomotionEnv",
+            env_name="GenesisEnv",
             task_name="Go2_Locomotion",
             num_envs=self.num_envs,
             seed=self.seed,

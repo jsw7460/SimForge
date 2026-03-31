@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Literal
 from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs import MjlabEnv
+    from rlworld.rl.envs import MujocoEnv
 
 
 @dataclass
-class MjlabVisualizationManagerConfig:
-    """Config for MjlabVisualizationManager."""
+class MujocoVisualizationManagerConfig:
+    """Config for MujocoVisualizationManager."""
     show_viewer: bool = False
     viewer_type: Literal["viser"] = "viser"
     viser_port: int = 8080
@@ -23,10 +23,10 @@ class MjlabVisualizationManagerConfig:
     camera_elevation: float = 30.0
 
 
-class MjlabVisualizationManager(BaseManager):
-    """Manages Viser visualization for MjlabEnv using ViserMujocoScene."""
+class MujocoVisualizationManager(BaseManager):
+    """Manages Viser visualization for MujocoEnv using ViserMujocoScene."""
 
-    def __init__(self, env: "MjlabEnv", config: MjlabVisualizationManagerConfig):
+    def __init__(self, env: "MujocoEnv", config: MujocoVisualizationManagerConfig):
         super().__init__(env=env)
         self.config = config
         self._scene = None

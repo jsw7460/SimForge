@@ -1,6 +1,7 @@
 from .common_config_classes import (
     RewardConfig,
     CommandConfig,
+    GaitConfig,
     EventConfig,
     PolicyConfig,
     PPOPolicyConfig,

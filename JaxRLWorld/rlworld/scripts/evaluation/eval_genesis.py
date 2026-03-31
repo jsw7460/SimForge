@@ -6,7 +6,7 @@ from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import CommandTermConfig
 from rlworld.rl.vis.overlays.hud_items import LinkPositionItem, LinkPositionItemConfig
 
-from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
+from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 
 
 if __name__ == '__main__':
@@ -16,7 +16,7 @@ if __name__ == '__main__':
     parser.add_argument("--port", type=int, default=2026, help="Viser viewer port")
     args = parser.parse_args()
 
-    g1_29dof = G1MjlabConfig()
+    g1_29dof = G1MujocoConfig()
     link_pos_item = LinkPositionItem(
         LinkPositionItemConfig(link_patterns=("left_ankle_roll_link", "right_ankle_roll_link")),
     )

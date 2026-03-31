@@ -4,7 +4,7 @@ Decouples the play viewer from any specific scene implementation.
 Two backends:
 
 - BridgePlayScene: Newton/Genesis via SimulatorBridge + ViserScene.
-- MjlabPlayScene: MuJoCo via mjlab's ViserMujocoScene (batched GLB + LOD).
+- MujocoPlayScene: MuJoCo via mjlab's ViserMujocoScene (batched GLB + LOD).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import viser
 
 if TYPE_CHECKING:
     from .bridge import SimulatorBridge
-    from rlworld.rl.envs.managers.mujoco.scene import MjlabSceneManager
+    from rlworld.rl.envs.managers.mujoco.scene import MujocoSceneManager
 
 
 @dataclass
@@ -116,13 +116,13 @@ class BridgePlayScene:
         )
 
 
-# ── MjlabPlayScene (MuJoCo) ───────────────────────────────────
+# ── MujocoPlayScene (MuJoCo) ───────────────────────────────────
 
 
-class MjlabPlayScene:
+class MujocoPlayScene:
     """PlayScene backed by mjlab's ViserMujocoScene (batched GLB + LOD)."""
 
-    def __init__(self, scene_manager: MjlabSceneManager):
+    def __init__(self, scene_manager: MujocoSceneManager):
         self._scene_manager = scene_manager
         self._mj_scene = None
 

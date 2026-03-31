@@ -9,23 +9,23 @@ from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_in
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mujoco import MjlabEnv
+    from rlworld.rl.envs.mujoco import MujocoEnv
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
-def is_alive(env: "MjlabEnv") -> torch.Tensor:
+def is_alive(env: "MujocoEnv") -> torch.Tensor:
     """Reward for being alive."""
     return (~env.termination_manager.dones).float()
 
 
-def is_terminated(env: "MjlabEnv") -> torch.Tensor:
+def is_terminated(env: "MujocoEnv") -> torch.Tensor:
     """Penalize terminated episodes that don't correspond to episodic timeouts."""
     return env.termination_manager.dones.float()
 
 
 def track_linear_velocity(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     std: float,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
@@ -45,7 +45,7 @@ def track_linear_velocity(
 
 
 def track_angular_velocity(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     std: float,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
@@ -69,7 +69,7 @@ def track_angular_velocity(
 # =============================================================================
 
 def joint_torques_l2(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Penalize joint torques applied on the articulation using L2 squared kernel."""
@@ -78,7 +78,7 @@ def joint_torques_l2(
 
 
 def joint_vel_l2(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Penalize joint velocities on the articulation using L2 squared kernel."""
@@ -87,7 +87,7 @@ def joint_vel_l2(
 
 
 def joint_acc_l2(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Penalize joint accelerations on the articulation using L2 squared kernel."""
@@ -95,7 +95,7 @@ def joint_acc_l2(
     return torch.sum(torch.square(robot.data.joint_acc[:, asset_cfg.joint_ids]), dim=1)
 
 
-def action_rate_l2(env: "MjlabEnv") -> torch.Tensor:
+def action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel."""
     return -torch.sum(
         torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions),
@@ -103,7 +103,7 @@ def action_rate_l2(env: "MjlabEnv") -> torch.Tensor:
     )
 
 
-def raw_action_rate_l2(env: "MjlabEnv") -> torch.Tensor:
+def raw_action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel."""
     return -torch.sum(
         torch.square(env.act_manager.raw_actions - env.act_manager.prev_raw_actions),
@@ -112,7 +112,7 @@ def raw_action_rate_l2(env: "MjlabEnv") -> torch.Tensor:
 
 
 def joint_pos_limits(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Penalize joint positions if they cross the soft limits."""
@@ -132,7 +132,7 @@ def joint_pos_limits(
 
 
 def flat_orientation_l2(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Penalize non-flat base orientation."""
@@ -141,7 +141,7 @@ def flat_orientation_l2(
 
 
 def flat_orientation(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     std: float,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
@@ -169,7 +169,7 @@ def flat_orientation(
 # =============================================================================
 
 def body_angular_velocity_penalty(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities."""
@@ -185,7 +185,7 @@ def body_angular_velocity_penalty(
 
 
 def angular_momentum_penalty(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     sensor_name: str,
 ) -> torch.Tensor:
     """Penalize whole-body angular momentum to encourage natural arm swing."""
@@ -196,7 +196,7 @@ def angular_momentum_penalty(
 
 
 def self_collision_cost(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     sensor_name: str,
     force_threshold: float = 10.0,
 ) -> torch.Tensor:
@@ -217,7 +217,7 @@ def self_collision_cost(
 
 
 def feet_air_time(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     sensor_name: str,
     threshold_min: float = 0.05,
     threshold_max: float = 0.5,
@@ -241,7 +241,7 @@ def feet_air_time(
 
 
 def feet_clearance(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     target_height: float,
     command_threshold: float = 0.01,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
@@ -266,7 +266,7 @@ def feet_clearance(
 
 
 def feet_slip(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     sensor_name: str,
     command_threshold: float = 0.01,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
@@ -296,7 +296,7 @@ def feet_slip(
 
 
 def soft_landing(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     sensor_name: str,
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
@@ -321,12 +321,12 @@ def soft_landing(
     return -cost * active
 
 
-def alive_bonus(env: "MjlabEnv") -> torch.Tensor:
+def alive_bonus(env: "MujocoEnv") -> torch.Tensor:
     """Constant reward for staying alive."""
     return torch.ones(env.num_envs, device=env.device)
 
 
-def lin_vel_z_penalty(env: "MjlabEnv") -> torch.Tensor:
+def lin_vel_z_penalty(env: "MujocoEnv") -> torch.Tensor:
     """Penalize vertical velocity to discourage bouncing."""
     robot = env.scene_manager.get_entity("robot")
     base_lin_vel = robot.data.root_link_lin_vel_b
@@ -340,7 +340,7 @@ class variable_posture:
 
     def __init__(
         self,
-        env: "MjlabEnv",
+        env: "MujocoEnv",
         asset_cfg: SceneEntityCfg,
         std_standing: Dict[str, float],
         std_walking: Dict[str, float],
@@ -384,7 +384,7 @@ class variable_posture:
             std_running_vals, device=env.device, dtype=torch.float32
         )
 
-    def __call__(self, env: "MjlabEnv", **kwargs) -> torch.Tensor:
+    def __call__(self, env: "MujocoEnv", **kwargs) -> torch.Tensor:
         robot = env.scene_manager.get_entity(self._asset_cfg.name)
         command = env.command_manager.get_commands_tensor()
 
@@ -418,7 +418,7 @@ class feet_swing_height:
 
     def __init__(
         self,
-        env: "MjlabEnv",
+        env: "MujocoEnv",
         sensor_name: str,
         target_height: float,
         command_threshold: float,
@@ -435,7 +435,7 @@ class feet_swing_height:
         )
         self.control_dt = env.control_dt
 
-    def __call__(self, env: "MjlabEnv", **kwargs) -> torch.Tensor:
+    def __call__(self, env: "MujocoEnv", **kwargs) -> torch.Tensor:
         robot = env.scene_manager.get_entity(self._asset_cfg.name)
         contact_sensor = env.scene_manager.get_sensor(self._sensor_name)
         command = env.command_manager.get_commands_tensor()
@@ -475,7 +475,7 @@ class posture:
 
     def __init__(
         self,
-        env: "MjlabEnv",
+        env: "MujocoEnv",
         std: float | Dict[str, float],
         asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
     ):
@@ -498,7 +498,7 @@ class posture:
             num_joints = robot.data.joint_pos.shape[1] if isinstance(joint_ids, slice) else len(joint_ids)
             self.std = torch.full((num_joints,), std, device=env.device, dtype=torch.float32)
 
-    def __call__(self, env: "MjlabEnv", **kwargs) -> torch.Tensor:
+    def __call__(self, env: "MujocoEnv", **kwargs) -> torch.Tensor:
         robot = env.scene_manager.get_entity("robot")
         current_joint_pos = robot.data.joint_pos[:, self._joint_ids]
         desired_joint_pos = self.default_joint_pos[:, self._joint_ids]

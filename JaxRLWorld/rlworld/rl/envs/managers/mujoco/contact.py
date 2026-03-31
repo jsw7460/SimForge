@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from mjlab.sensor.contact_sensor import ContactSensor
 
 
-class MjlabContactManager(BaseContactManager):
+class MujocoContactManager(BaseContactManager):
     """Manages contact information for MuJoCo/mjlab environments.
 
     Tracks contact state and timing for shapes registered with mjlab ContactSensor.

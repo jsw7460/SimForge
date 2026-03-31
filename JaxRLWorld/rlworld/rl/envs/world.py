@@ -243,7 +243,7 @@ class World(ABC):
         """Create simulator-agnostic managers (command, reward, termination, event).
 
         The reward manager class is resolved via ManagerRegistry so that
-        backends like MuJoCo automatically get MjlabRewardManager without
+        backends like MuJoCo automatically get MujocoRewardManager without
         needing a subclass hook.
         """
         from rlworld.rl.envs.managers import (
@@ -324,6 +324,9 @@ class World(ABC):
             if "interval" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="interval", dt=self.control_dt)
 
+        # Pre-reward hook (e.g., gait advance that rewards depend on)
+        self._pre_reward_hook()
+
         # Compute rewards
         self.rew_buf[:] = 0.0
         self.reward_manager.set_rewards(
@@ -383,8 +386,16 @@ class World(ABC):
         elif hasattr(self.act_manager, 'apply_dofs_position'):
             self.act_manager.apply_dofs_position(processed_actions)
 
+    def _pre_reward_hook(self) -> None:
+        """Override in subclass for logic that must run before reward computation.
+
+        Example: advancing gait manager so desired_contact_states are available
+        for gait-tracking rewards.
+        """
+        pass
+
     def _pre_termination_hook(self) -> None:
-        """Override in subclass for pre-termination logic (e.g., gait advance)."""
+        """Override in subclass for pre-termination logic."""
         pass
 
     def _advance_managers(self) -> None:

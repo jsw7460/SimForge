@@ -1,7 +1,7 @@
 """Go1 MuJoCo base configuration.
 
 This configuration follows the mjlab velocity task setup,
-adapted for rlworld's MjlabEnv interface.
+adapted for rlworld's MujocoEnv interface.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Any, List
@@ -29,7 +29,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.go1 import Go1MjlabConfig
+from rlworld.rl.configs.robots.go1 import Go1MujocoConfig
 from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
@@ -49,7 +49,7 @@ class Go1FlatMujocoConfig:
     """
 
     # Robot configuration
-    robot: Go1MjlabConfig = field(default_factory=Go1MjlabConfig)
+    robot: Go1MujocoConfig = field(default_factory=Go1MujocoConfig)
 
     # Observation component
     observations: LocomotionObservations | None = None
@@ -126,7 +126,7 @@ class Go1FlatMujocoConfig:
     def _build_env_config(self) -> MujocoEnvConfig:
         return MujocoEnvConfig(
             num_envs=self.num_envs,
-            env_name="MjlabEnv",
+            env_name="MujocoEnv",
             task_name="Go1 Velocity Tracking",
             seed=self.seed,
             episode_length_s=self.episode_length_s,

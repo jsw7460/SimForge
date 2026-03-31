@@ -36,6 +36,48 @@ class CommandConfig(BaseConfig):
 
 
 @dataclass
+class GaitConfig(BaseConfig):
+    """Gait configuration (shared across simulators).
+
+    Two modes:
+        ``"fixed"``
+            Evenly-spaced phase offsets with constant period.
+            No commands needed. Suitable for basic locomotion training.
+
+        ``"command"``
+            Frequency and stance duration read from CommandManager each step.
+            Per-foot phase offsets produced by ``foot_offset_provider``.
+            Use this for gait-conditioned training (e.g. Walk-These-Ways style).
+
+    The ``foot_offset_provider`` is a callable
+    ``(CommandManager) -> [num_envs, num_feet]`` that reads whatever commands
+    it needs and returns per-foot phase offsets. Pre-built providers:
+        - ``QuadrupedOffsets()``:  reads (phase, offset, bound) -> 4-foot offsets
+        - ``DirectOffsets(names)``: reads N named commands -> N-foot offsets
+    """
+    foot_names: tuple[str, ...] | list[str] = field(default_factory=tuple)
+
+    # "fixed" or "command"
+    offset_mode: str = "fixed"
+
+    # ── Fixed-mode settings ──
+    gait_period: float = 0.8
+    default_freq: float = 2.5
+    default_duration: float = 0.5
+
+    # ── Command-mode settings ──
+    freq_command: str = "gait_freq"
+    duration_command: str = "gait_duration"
+
+    # Callable: (CommandManager) -> [num_envs, num_feet].
+    # See QuadrupedOffsets and DirectOffsets in managers/common/gait.py.
+    foot_offset_provider: Any = None
+
+    # Von Mises smoothing for desired contact states
+    contact_smoothing_sigma: float = 0.07
+
+
+@dataclass
 class EventConfig(BaseConfig):
     """Event configuration (shared)."""
     event_terms: list = field(default_factory=list)

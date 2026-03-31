@@ -66,22 +66,22 @@ def _register_newton() -> None:
 def _register_mujoco() -> None:
     """Register MuJoCo/mjlab-specific managers (lazy — imports mjlab)."""
     from rlworld.rl.envs.managers.mujoco import (
-        MjlabSceneManager, MjlabSceneManagerConfig,
-        MjlabActionManager, MjlabActionManagerConfig,
-        MjlabContactManager,
-        MjlabRewardManager,
+        MujocoSceneManager, MujocoSceneManagerConfig,
+        MujocoActionManager, MujocoActionManagerConfig,
+        MujocoContactManager,
+        MujocoRewardManager,
     )
     from rlworld.rl.envs.managers.common import (
         ObservationManager, ObsManagerConfig,
         RewardManagerConfig,
     )
 
-    ManagerRegistry.register("mujoco", "scene", MjlabSceneManager, MjlabSceneManagerConfig)
-    ManagerRegistry.register("mujoco", "action", MjlabActionManager, MjlabActionManagerConfig)
+    ManagerRegistry.register("mujoco", "scene", MujocoSceneManager, MujocoSceneManagerConfig)
+    ManagerRegistry.register("mujoco", "action", MujocoActionManager, MujocoActionManagerConfig)
     ManagerRegistry.register("mujoco", "observation", ObservationManager, ObsManagerConfig)
-    ManagerRegistry.register("mujoco", "contact", MjlabContactManager)
-    # MuJoCo overrides the common reward manager with MjlabRewardManager
-    ManagerRegistry.register("mujoco", "reward", MjlabRewardManager, RewardManagerConfig)
+    ManagerRegistry.register("mujoco", "contact", MujocoContactManager)
+    # MuJoCo overrides the common reward manager with MujocoRewardManager
+    ManagerRegistry.register("mujoco", "reward", MujocoRewardManager, RewardManagerConfig)
 
 
 def register_all_for(sim_type: str) -> None:

@@ -16,7 +16,7 @@ from rlworld.rl.configs.genesis_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
+from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import EntityConfig
 from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
@@ -39,7 +39,7 @@ class G1FlatGenesisConfig:
     """Configuration for G1 humanoid flat terrain locomotion."""
 
     # Robot
-    robot: G1MjlabConfig = field(default_factory=G1MjlabConfig)
+    robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
     # Observations
     observations: LocomotionObservations | None = None
@@ -279,7 +279,7 @@ class G1FlatGenesisConfig:
 
     def _build_env_config(self) -> EnvConfig:
         return EnvConfig(
-            env_name="LocomotionEnv",
+            env_name="GenesisEnv",
             task_name="G1_Velocity_Tracking",
             num_envs=self.num_envs,
             seed=self.seed,

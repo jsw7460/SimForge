@@ -22,7 +22,7 @@ from rlworld.rl.configs.newton_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig, G1_ACTION_SCALE
+from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig, G1_ACTION_SCALE
 from rlworld.rl.configs.scene import NewtonEntityConfig
 from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import NewtonEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
@@ -45,7 +45,7 @@ from rlworld.rl.configs.events.event_term_config import EventTermConfig
 @dataclass
 class G1FlatNewtonConfig:
     # Robot configuration
-    robot: G1MjlabConfig = field(default_factory=G1MjlabConfig)
+    robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
     # Observation component
     observations: LocomotionObservations | None = None

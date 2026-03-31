@@ -12,10 +12,10 @@ import torch
 from rlworld.rl.envs.utils import EnvStepCache
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mujoco import MjlabEnv
+    from rlworld.rl.envs.mujoco import MujocoEnv
 
 
-def _get_robot_data(env: "MjlabEnv"):
+def _get_robot_data(env: "MujocoEnv"):
     """Get robot entity data from scene manager."""
     return env.scene_manager.robot.data
 
@@ -56,7 +56,7 @@ def quat_apply_inverse(quat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
 # =============================================================================
 
 @EnvStepCache()
-def projected_gravity(env: "MjlabEnv") -> torch.Tensor:
+def projected_gravity(env: "MujocoEnv") -> torch.Tensor:
     """Get gravity vector projected to body frame.
 
     Returns:
@@ -67,7 +67,7 @@ def projected_gravity(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def base_lin_vel(env: "MjlabEnv") -> torch.Tensor:
+def base_lin_vel(env: "MujocoEnv") -> torch.Tensor:
     """Get base linear velocity in body frame.
 
     Returns:
@@ -78,7 +78,7 @@ def base_lin_vel(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def base_ang_vel(env: "MjlabEnv") -> torch.Tensor:
+def base_ang_vel(env: "MujocoEnv") -> torch.Tensor:
     """Get base angular velocity in body frame.
 
     Returns:
@@ -89,7 +89,7 @@ def base_ang_vel(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def base_pos(env: "MjlabEnv") -> torch.Tensor:
+def base_pos(env: "MujocoEnv") -> torch.Tensor:
     """Get base position in world frame.
 
     Returns:
@@ -100,7 +100,7 @@ def base_pos(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def base_quat(env: "MjlabEnv") -> torch.Tensor:
+def base_quat(env: "MujocoEnv") -> torch.Tensor:
     """Get base quaternion orientation in world frame.
 
     Returns:
@@ -111,7 +111,7 @@ def base_quat(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def base_height(env: "MjlabEnv") -> torch.Tensor:
+def base_height(env: "MujocoEnv") -> torch.Tensor:
     """Get base height above ground.
 
     Returns:
@@ -126,7 +126,7 @@ def base_height(env: "MjlabEnv") -> torch.Tensor:
 # =============================================================================
 
 @EnvStepCache()
-def dof_pos(env: "MjlabEnv") -> torch.Tensor:
+def dof_pos(env: "MujocoEnv") -> torch.Tensor:
     """Get actuated joint positions.
 
     Returns:
@@ -138,7 +138,7 @@ def dof_pos(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def dof_pos_nominal_difference(env: "MjlabEnv") -> torch.Tensor:
+def dof_pos_nominal_difference(env: "MujocoEnv") -> torch.Tensor:
     """Get joint positions relative to nominal (default) positions.
 
     Returns:
@@ -148,7 +148,7 @@ def dof_pos_nominal_difference(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def dof_vel(env: "MjlabEnv") -> torch.Tensor:
+def dof_vel(env: "MujocoEnv") -> torch.Tensor:
     """Get actuated joint velocities.
 
     Returns:
@@ -160,7 +160,7 @@ def dof_vel(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def all_joint_pos(env: "MjlabEnv") -> torch.Tensor:
+def all_joint_pos(env: "MujocoEnv") -> torch.Tensor:
     """Get all joint positions (including non-actuated).
 
     Returns:
@@ -171,7 +171,7 @@ def all_joint_pos(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def all_joint_vel(env: "MjlabEnv") -> torch.Tensor:
+def all_joint_vel(env: "MujocoEnv") -> torch.Tensor:
     """Get all joint velocities (including non-actuated).
 
     Returns:
@@ -182,7 +182,7 @@ def all_joint_vel(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def joint_pos_rel(env: "MjlabEnv") -> torch.Tensor:
+def joint_pos_rel(env: "MujocoEnv") -> torch.Tensor:
     """Get joint positions relative to default positions.
 
     Alias for dof_pos_nominal_difference.
@@ -194,7 +194,7 @@ def joint_pos_rel(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def joint_vel_rel(env: "MjlabEnv") -> torch.Tensor:
+def joint_vel_rel(env: "MujocoEnv") -> torch.Tensor:
     """Get joint velocities (default velocity is assumed zero).
 
     Returns:
@@ -208,7 +208,7 @@ def joint_vel_rel(env: "MjlabEnv") -> torch.Tensor:
 # =============================================================================
 
 @EnvStepCache()
-def raw_actions(env: "MjlabEnv") -> torch.Tensor:
+def raw_actions(env: "MujocoEnv") -> torch.Tensor:
     """Get raw (unprocessed) actions from current step.
 
     Returns:
@@ -218,7 +218,7 @@ def raw_actions(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def processed_actions(env: "MjlabEnv") -> torch.Tensor:
+def processed_actions(env: "MujocoEnv") -> torch.Tensor:
     """Get processed actions from current step.
 
     Returns:
@@ -228,7 +228,7 @@ def processed_actions(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def prev_processed_actions(env: "MjlabEnv") -> torch.Tensor:
+def prev_processed_actions(env: "MujocoEnv") -> torch.Tensor:
     """Get processed actions from previous step.
 
     Returns:
@@ -238,7 +238,7 @@ def prev_processed_actions(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def last_action(env: "MjlabEnv") -> torch.Tensor:
+def last_action(env: "MujocoEnv") -> torch.Tensor:
     """Get last action (alias for processed_actions).
 
     Returns:
@@ -248,7 +248,7 @@ def last_action(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def last_raw_action(env: "MjlabEnv") -> torch.Tensor:
+def last_raw_action(env: "MujocoEnv") -> torch.Tensor:
     """Get last action (alias for processed_actions).
 
     Returns:
@@ -262,7 +262,7 @@ def last_raw_action(env: "MjlabEnv") -> torch.Tensor:
 # =============================================================================
 
 @EnvStepCache()
-def command_velocity(env: "MjlabEnv") -> torch.Tensor:
+def command_velocity(env: "MujocoEnv") -> torch.Tensor:
     """Get velocity command.
 
     Returns:
@@ -272,7 +272,7 @@ def command_velocity(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def generated_commands(env: "MjlabEnv") -> torch.Tensor:
+def generated_commands(env: "MujocoEnv") -> torch.Tensor:
     """Get generated commands (alias for command_velocity).
 
     Returns:
@@ -287,7 +287,7 @@ def generated_commands(env: "MjlabEnv") -> torch.Tensor:
 
 @EnvStepCache()
 def foot_height(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     site_names: tuple[str, ...],
     asset_cfg_name: str = "robot",
 ) -> torch.Tensor:
@@ -298,7 +298,7 @@ def foot_height(
 
 
 @EnvStepCache()
-def foot_air_time(env: "MjlabEnv") -> torch.Tensor:
+def foot_air_time(env: "MujocoEnv") -> torch.Tensor:
     """Get current air time of feet.
 
     Returns:
@@ -309,7 +309,7 @@ def foot_air_time(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def foot_contact(env: "MjlabEnv") -> torch.Tensor:
+def foot_contact(env: "MujocoEnv") -> torch.Tensor:
     """Get binary contact state of feet.
 
     Returns:
@@ -320,7 +320,7 @@ def foot_contact(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def foot_contact_forces(env: "MjlabEnv") -> torch.Tensor:
+def foot_contact_forces(env: "MujocoEnv") -> torch.Tensor:
     """Get contact forces on feet (log-scaled).
 
     Returns log1p scaled forces to compress large force magnitudes.
@@ -335,7 +335,7 @@ def foot_contact_forces(env: "MjlabEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def foot_contact_time(env: "MjlabEnv") -> torch.Tensor:
+def foot_contact_time(env: "MujocoEnv") -> torch.Tensor:
     """Get current contact time of feet.
 
     Returns:
@@ -347,14 +347,14 @@ def foot_contact_time(env: "MjlabEnv") -> torch.Tensor:
 
 @EnvStepCache()
 def relative_sites_pos(
-    env: "MjlabEnv",
+    env: "MujocoEnv",
     base_name: str,
     sites: tuple[str, ...],
 ) -> torch.Tensor:
     """Get site positions relative to base body in base frame.
 
     Args:
-        env: The MjlabEnv environment.
+        env: The MujocoEnv environment.
         base_name: Name of the base body.
         sites: Tuple of site names.
 

@@ -14,20 +14,20 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class MjlabActionManagerConfig(ActionManagerBaseConfig):
+class MujocoActionManagerConfig(ActionManagerBaseConfig):
     """MuJoCo/mjlab-specific action manager configuration."""
 
     pass
 
 
-class MjlabActionManager(ActionManagerBase):
+class MujocoActionManager(ActionManagerBase):
     """MuJoCo/mjlab action manager.
 
     Uses ArticulationIndexing.sim_indices as joint_ids for
     mjlab set_joint_position_target / set_joint_effort_target.
     """
 
-    def __init__(self, env: "World", config: MjlabActionManagerConfig):
+    def __init__(self, env: "World", config: MujocoActionManagerConfig):
         self._entity: "Entity" = env.scene_manager.robot
         super().__init__(env, config)
 

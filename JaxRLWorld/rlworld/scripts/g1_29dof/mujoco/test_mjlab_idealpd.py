@@ -32,9 +32,9 @@ def main():
     from mjlab.entity import EntityCfg as MjlabEntityCfg, EntityArticulationInfoCfg
     from mjlab.scene import SceneCfg
     from mjlab.terrains import TerrainEntityCfg
-    from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
+    from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 
-    robot = G1MjlabConfig()
+    robot = G1MujocoConfig()
 
     # Build mjlab actuators from robot gains — one per gain group
     mjlab_actuators = []

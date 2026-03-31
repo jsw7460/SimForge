@@ -1,4 +1,4 @@
-"""MjlabEnv (MuJoCo) simulator initializer."""
+"""MujocoEnv (MuJoCo) simulator initializer."""
 
 from typing import Any
 
@@ -8,7 +8,7 @@ from rlworld.rl.evals.sim_initializers import SimInitializer
 from rlworld.rl.utils.console import print_info, print_success, print_error
 
 
-class MjlabInitializer(SimInitializer):
+class MujocoInitializer(SimInitializer):
 
     def init_device(self) -> torch.device:
         return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -42,9 +42,9 @@ class MjlabInitializer(SimInitializer):
         return eval_cfgs
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
-        from rlworld.rl.envs import MjlabEnv
+        from rlworld.rl.envs import MujocoEnv
 
-        return MjlabEnv(
+        return MujocoEnv(
             num_envs=eval_cfgs.env.num_envs,
             env_cfg=eval_cfgs.env,
             scene_cfg=eval_cfgs.scene,

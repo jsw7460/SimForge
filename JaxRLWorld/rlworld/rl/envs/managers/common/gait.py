@@ -1,160 +1,297 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import math
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol
 
 import torch
 
 from rlworld.rl.envs.managers.base import BaseManager
+
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
+    from rlworld.rl.envs.managers.common.command import CommandManager
 
+
+# ────────────────────────────────────────────────────
+# Foot-offset providers
+# ────────────────────────────────────────────────────
+#
+# A foot-offset provider is a callable that reads gait-related commands
+# and returns per-foot phase offsets.
+#
+#   (CommandManager) -> [num_envs, num_feet]
+#
+# Users plug one of these into GaitConfig.foot_offset_provider to control how commands map to per-foot timing.
+
+
+class FootOffsetProvider(Protocol):
+    """Protocol for foot-offset providers."""
+    def __call__(self, cmd: "CommandManager") -> torch.Tensor: ...
+
+
+class QuadrupedOffsets:
+    """Reads (phase, offset, bound) commands and produces 4-foot offsets.
+
+    Parameterization:
+        - Trot:  (0.5, 0, 0) -- diagonal legs in sync
+        - Pace:  (0, 0.5, 0) -- same-side legs in sync
+        - Bound: (0, 0, 0.5) -- front/hind legs in sync
+        - Pronk: (0, 0, 0)   -- all legs in sync
+
+    Output order: [FL, FR, RL, RR].
+
+    Args:
+        phase_cmd:  Command name for phase parameter.
+        offset_cmd: Command name for offset parameter.
+        bound_cmd:  Command name for bound parameter.
+    """
+    def __init__(
+        self,
+        phase_cmd: str = "gait_phase",
+        offset_cmd: str = "gait_offset",
+        bound_cmd: str = "gait_bound",
+    ):
+        self.phase_cmd = phase_cmd
+        self.offset_cmd = offset_cmd
+        self.bound_cmd = bound_cmd
+
+    def __call__(self, cmd: "CommandManager") -> torch.Tensor:
+        phase = getattr(cmd, self.phase_cmd)
+        offset = getattr(cmd, self.offset_cmd)
+        bound = getattr(cmd, self.bound_cmd)
+        return torch.stack([
+            phase + offset + bound,  # FL
+            offset,                  # FR
+            bound,                   # RL
+            phase,                   # RR
+        ], dim=1)
+
+
+class DirectOffsets:
+    """Reads per-foot phase offsets directly from named commands.
+
+    Works with any number of feet.
+
+    Args:
+        command_names: One command name per foot, in foot order.
+    """
+    def __init__(self, command_names: tuple[str, ...]):
+        self.command_names = command_names
+
+    def __call__(self, cmd: "CommandManager") -> torch.Tensor:
+        return torch.stack(
+            [getattr(cmd, name) for name in self.command_names], dim=1
+        )
+
+
+# ─────────────────────────────────────────────────────
+# Config
+# ─────────────────────────────────────────────────────
 
 @dataclass
 class GaitManagerConfig:
-    num_envs: int
-    gait_period: float  # Full gait cycle duration (seconds). One complete cycle = all feet swing once.
-    foot_names: tuple[str, ...] | list[str]
+    """Internal config for GaitManager. Built from GaitConfig by LocomotionEnv.
+
+    Two modes:
+        - "fixed":   No commands needed. Foot offsets are evenly spaced,
+                     frequency and duration are constants from config.
+        - "command": Frequency and duration are read from CommandManager.
+                     Foot offsets are produced by ``foot_offset_provider``.
+    """
+    num_envs: int = 0
+    foot_names: tuple[str, ...] | list[str] = field(default_factory=tuple)
+
+    # "fixed" or "command"
+    offset_mode: str = "fixed"
+
+    # ── Fixed-mode settings ──
+    gait_period: float = 0.8    # seconds per gait cycle (freq = 1/period)
+    default_freq: float = 2.5   # Hz, used only if offset_mode == "fixed"
+    default_duration: float = 0.5  # stance fraction [0, 1]
+
+    # ── Command-mode settings ─
+    freq_command: str = "gait_freq"
+    duration_command: str = "gait_duration"
+
+    # Callable: (CommandManager) -> [num_envs, num_feet] foot offsets.
+    # Only used when offset_mode == "command".
+    # Example providers: QuadrupedOffsets(), DirectOffsets(("off_0", "off_1", ...))
+    foot_offset_provider: FootOffsetProvider | None = None
+
+    # Von Mises smoothing sigma for desired_contact_states.
+    # Smaller = smoother stance/swing transition.
+    contact_smoothing_sigma: float = 0.07
 
 
 class GaitManager(BaseManager):
-    """Manages gait pattern generation for legged locomotion.
+    """Manages gait phase generation for legged locomotion.
 
-    Generates alternating swing/stance patterns for each foot based on a periodic
-    phase clock. Each foot swings once per gait_period, with evenly distributed
-    phase offsets between feet.
+    Two modes:
+        ``"fixed"``
+            Phase offsets are evenly distributed across feet.
+            Frequency and duration are constants. No commands needed.
 
-    For bipedal (gait_period=0.8s):
-        - Left foot: swing at t=0.0-0.4s, stance at t=0.4-0.8s
-        - Right foot: swing at t=0.4-0.8s, stance at t=0.0-0.4s
-        - Each foot swings for 50% of the period (phase_width = π)
+        ``"command"``
+            Frequency and duration are read from CommandManager each step.
+            Per-foot phase offsets are produced by a pluggable
+            ``foot_offset_provider`` callable.
 
-    For quadrupedal (gait_period=1.0s):
-        - Each foot swings for 25% of the period (phase_width = π/2)
-        - Phase offsets: LF=0, RF=-π/2, LH=-π, RH=-3π/2
+    Outputs (updated each ``advance()``):
+        ``foot_phases``             [num_envs, num_feet]  Phase in [0, 1).
+        ``clock_inputs``            [num_envs, num_feet]  sin(2*pi*warped).
+        ``desired_contact_states``  [num_envs, num_feet]  Smooth stance prob.
     """
 
     def __init__(self, env: "World", config: GaitManagerConfig):
         super().__init__(env)
         self.config = config
+        num_envs = config.num_envs
 
-        self.foot_names = tuple(self.env.scene_manager.find_body_names(body_names=config.foot_names))
-
-        # self.foot_names = config.foot_names
+        self.foot_names = tuple(
+            self.env.scene_manager.find_body_names(body_names=config.foot_names)
+        )
         self.num_feet = len(self.foot_names)
 
-        self.gait_period = config.gait_period
-        self.phase_width = 2 * torch.pi / self.num_feet
+        # ── Phase state ──
+        self.gait_timer = torch.zeros(num_envs, device=self.device)
+        self.foot_phases = torch.zeros(num_envs, self.num_feet, device=self.device)
 
-        self.phase_offsets = torch.tensor(
-            [-2 * torch.pi * i / self.num_feet for i in range(self.num_feet)],
-            device=self.device
-        )
+        # ── Outputs ──
+        self.clock_inputs = torch.zeros(num_envs, self.num_feet, device=self.device)
+        self.desired_contact_states = torch.zeros(num_envs, self.num_feet, device=self.device)
 
-        self.gait_timer = torch.zeros(config.num_envs, device=self.device)
+        # ── Fixed-mode precomputation ──
+        if config.offset_mode == "fixed":
+            self._fixed_offsets = torch.tensor(
+                [i / self.num_feet for i in range(self.num_feet)],
+                device=self.device,
+            )
+
+        # ── Von Mises (Normal CDF) for smooth contact targets ──
+        self._smoothing_dist = torch.distributions.Normal(0.0, config.contact_smoothing_sigma)
+
+    # ──────────────────────────────────────────────
+    # Core update
+    # ──────────────────────────────────────────────
 
     def advance(self) -> None:
-        self.gait_timer += self.env.control_dt
+        freq, duration, foot_offsets = self._read_gait_params()
 
-    def get_swing_mask(self) -> torch.Tensor:
-        """Get boolean mask indicating which feet are in swing phase.
+        self.gait_timer = (self.gait_timer + self.env.control_dt * freq) % 1.0
 
-        A foot is in swing phase when its phase angle φ is in [0, phase_width).
-        φ = (2π * timer / period) + offset, wrapped to [0, 2π)
+        raw_foot_phases = (self.gait_timer.unsqueeze(1) + foot_offsets) % 1.0
+        self.foot_phases = raw_foot_phases
 
-        Returns:
-            Boolean tensor of shape (num_envs, num_feet).
-            True = swing phase, False = stance phase.
-        """
-        timer_expanded = self.gait_timer.unsqueeze(1)
-        offsets_expanded = self.phase_offsets.unsqueeze(0)
-
-        phi = 2 * torch.pi * (timer_expanded / self.gait_period) + offsets_expanded
-        phi = phi % (2 * torch.pi)
-
-        return (0 <= phi) & (phi < self.phase_width)
-
-    def get_phase_encoding(self) -> torch.Tensor:
-        """Get sin/cos encoding of each foot's phase for observation.
-
-        Returns:
-            Tensor of shape (num_envs, num_feet * 2).
-            Format: [cos(φ_0), sin(φ_0), cos(φ_1), sin(φ_1), ...]
-        """
-        timer_expanded = self.gait_timer.unsqueeze(1)
-        offsets_expanded = self.phase_offsets.unsqueeze(0)
-
-        phi = 2 * torch.pi * (timer_expanded / self.gait_period) + offsets_expanded
-
-        cos_phi = torch.cos(phi)
-        sin_phi = torch.sin(phi)
-
-        encoding = torch.stack([cos_phi, sin_phi], dim=-1)
-        return encoding.reshape(self.env.num_envs, -1)
+        warped = self._apply_duration_warp(raw_foot_phases, duration)
+        self.clock_inputs = torch.sin(2.0 * math.pi * warped)
+        self.desired_contact_states = self._compute_desired_contacts(warped)
 
     def reset(self, env_ids: torch.Tensor) -> None:
-        """Reset gait timer for specified environments."""
         self.gait_timer[env_ids] = 0.0
+        self.foot_phases[env_ids] = 0.0
+        self.clock_inputs[env_ids] = 0.0
+        self.desired_contact_states[env_ids] = 0.0
+
+    # ────────────────────────────────────────────
+    # Public queries
+    # ────────────────────────────────────────────
+
+    def get_swing_mask(self) -> torch.Tensor:
+        """Boolean mask: True = swing, False = stance.  [num_envs, num_feet]."""
+        return self.desired_contact_states < 0.5
+
+    def get_phase_encoding(self) -> torch.Tensor:
+        """Sin/cos encoding. [num_envs, num_feet * 2]: [sin0, cos0, sin1, cos1, ...]."""
+        phi = 2.0 * math.pi * self.foot_phases
+        return torch.stack([torch.sin(phi), torch.cos(phi)], dim=-1).reshape(
+            self.env.num_envs, -1
+        )
 
     def get_swing_progress(self) -> torch.Tensor:
-        """Get normalized progress within swing phase for each foot.
+        """Normalized [0,1] progress within swing phase. -1 during stance.
 
         Returns:
-            Tensor of shape (num_envs, num_feet).
-            Value in [0, 1] during swing phase, -1 during stance phase.
-            0 = swing start, 1 = swing end.
+            [num_envs, num_feet].
         """
-        timer_expanded = self.gait_timer.unsqueeze(1)
-        offsets_expanded = self.phase_offsets.unsqueeze(0)
+        swing_mask = self.get_swing_mask()
+        _, duration, _ = self._read_gait_params()
+        phase_in_cycle = self.foot_phases % 1.0
 
-        phi = 2 * torch.pi * (timer_expanded / self.gait_period) + offsets_expanded
-        phi = phi % (2 * torch.pi)
-
-        is_swing = (0 <= phi) & (phi < self.phase_width)
-
-        # Normalize phi to [0, 1] within swing phase
-        progress = phi / self.phase_width
-
-        # Mark stance phase as -1
-        progress = torch.where(is_swing, progress, torch.full_like(progress, -1.0))
-
-        return progress
+        swing_progress = (phase_in_cycle - duration.unsqueeze(1)) / (
+            1.0 - duration.unsqueeze(1) + 1e-8
+        )
+        swing_progress = swing_progress.clamp(0.0, 1.0)
+        return torch.where(swing_mask, swing_progress, torch.full_like(swing_progress, -1.0))
 
     def get_target_foot_height(
         self,
         max_height: float,
         profile: str = "sine",
     ) -> torch.Tensor:
-        """Get target foot height based on swing phase progress.
+        """Target foot height during swing. 0 during stance.
 
         Args:
-            max_height: Peak foot height during swing (meters).
-            profile: Height profile function.
-                - "sine": sin(π × φ), smooth lift and lower
-                - "cosine": 0.5 × (1 - cos(2π × φ)), slower at peak
+            max_height: Peak height (meters).
+            profile: ``"sine"`` | ``"cosine"`` | ``"triangle"``.
 
         Returns:
-            Tensor of shape (num_envs, num_feet).
-            Target height for each foot. 0 during stance phase.
+            [num_envs, num_feet].
         """
-        progress = self.get_swing_progress()  # (num_envs, num_feet)
+        progress = self.get_swing_progress()
         is_swing = progress >= 0
-
-        # Clamp for safety (stance marked as -1)
         phi = progress.clamp(min=0.0, max=1.0)
 
         if profile == "sine":
-            # 0 -> 1 -> 0, symmetric
-            height_ratio = torch.sin(torch.pi * phi)
+            height_ratio = torch.sin(math.pi * phi)
         elif profile == "cosine":
-            # 0 -> 1 -> 0, slower at peak
-            height_ratio = 0.5 * (1 - torch.cos(2 * torch.pi * phi))
+            height_ratio = 0.5 * (1.0 - torch.cos(2.0 * math.pi * phi))
+        elif profile == "triangle":
+            height_ratio = 1.0 - torch.abs(1.0 - 2.0 * phi)
         else:
-            raise ValueError(f"Unknown profile: {profile}")
+            raise ValueError(f"Unknown height profile: {profile}")
 
-        target_height = max_height * height_ratio
+        target = max_height * height_ratio
+        return torch.where(is_swing, target, torch.zeros_like(target))
 
-        # Zero during stance
-        target_height = torch.where(is_swing, target_height, torch.zeros_like(target_height))
+    # ────────────────────────────────────────────
+    # Internal
+    # ────────────────────────────────────────────
 
-        return target_height
+    def _read_gait_params(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Returns (freq, duration, foot_offsets)."""
+        cfg = self.config
+        N = cfg.num_envs
+
+        if cfg.offset_mode == "fixed":
+            freq = torch.full((N,), 1.0 / cfg.gait_period, device=self.device)
+            duration = torch.full((N,), cfg.default_duration, device=self.device)
+            foot_offsets = self._fixed_offsets.unsqueeze(0).expand(N, -1)
+            return freq, duration, foot_offsets
+
+        # offset_mode == "command"
+        cmd = self.env.command_manager
+        freq = getattr(cmd, cfg.freq_command)
+        duration = getattr(cmd, cfg.duration_command)
+        foot_offsets = cfg.foot_offset_provider(cmd)
+        return freq, duration, foot_offsets
+
+    def _apply_duration_warp(
+        self, phases: torch.Tensor, duration: torch.Tensor,
+    ) -> torch.Tensor:
+        """Remap so stance -> [0, 0.5), swing -> [0.5, 1)."""
+        dur = duration.unsqueeze(1)
+        p = phases % 1.0
+        stance_mask = p < dur
+        warped_stance = p * (0.5 / (dur + 1e-8))
+        warped_swing = 0.5 + (p - dur) * (0.5 / (1.0 - dur + 1e-8))
+        return torch.where(stance_mask, warped_stance, warped_swing)
+
+    def _compute_desired_contacts(self, warped_phases: torch.Tensor) -> torch.Tensor:
+        """Smooth desired contact: ~1 during stance, ~0 during swing."""
+        cdf = self._smoothing_dist.cdf
+        t = warped_phases
+        return (
+            cdf(t) * (1.0 - cdf(t - 0.5))
+            + cdf(t - 1.0) * (1.0 - cdf(t - 1.5))
+        )

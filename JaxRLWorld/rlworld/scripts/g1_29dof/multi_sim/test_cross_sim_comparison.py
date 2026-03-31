@@ -131,11 +131,11 @@ def _genesis_reward_terms():
 
 def _newton_reward_terms():
     from rlworld.rl.configs.rewards import RewardTermConfig
-    from rlworld.rl.configs.robots.g1_29dof import G1MjlabConfig
+    from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
     from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
     from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_n
 
-    robot = G1MjlabConfig()
+    robot = G1MujocoConfig()
     feet = robot.prefixed_foot_names
 
     return OrderedDict({

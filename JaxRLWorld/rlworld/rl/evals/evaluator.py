@@ -30,7 +30,7 @@ from rlworld.rl.utils.console import (
 class PolicyEvaluator:
     """
     Evaluates trained policies by loading checkpoints and running episodes.
-    Supports Genesis, Newton, MjlabEnv, ManiSkill, and Gymnasium environments.
+    Supports Genesis, Newton, MujocoEnv, ManiSkill, and Gymnasium environments.
 
     Args:
         policy_path: Path to checkpoint directory.
@@ -218,7 +218,7 @@ class PolicyEvaluator:
         elif sim_type == "newton":
             return "Newton"
         elif sim_type == "mujoco":
-            return "MjlabEnv"
+            return "MujocoEnv"
         raise ValueError(
             f"Cannot detect sim_type from eval_cfgs (sim_type={sim_type!r}). "
             f"eval_cfgs must be a GenesisConfigsForRun, NewtonConfigsForRun, "
@@ -458,10 +458,10 @@ class PolicyEvaluator:
 
     def _create_play_scene(self):
         """Create the appropriate PlayScene for this simulator."""
-        from rlworld.rl.vis.viser.play_scene import BridgePlayScene, MjlabPlayScene
+        from rlworld.rl.vis.viser.play_scene import BridgePlayScene, MujocoPlayScene
 
-        if self.sim_type == "MjlabEnv":
-            return MjlabPlayScene(self.env.scene_manager)
+        if self.sim_type == "MujocoEnv":
+            return MujocoPlayScene(self.env.scene_manager)
 
         # Newton / Genesis: use SimulatorBridge + ViserScene.
         if self.sim_type == "Newton":

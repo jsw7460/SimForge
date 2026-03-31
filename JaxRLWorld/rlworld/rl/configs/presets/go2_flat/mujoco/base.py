@@ -1,7 +1,7 @@
 """Go2 MuJoCo base configuration.
 
 This configuration mirrors the Genesis/Newton Go2 flat terrain setup,
-adapted for rlworld's MjlabEnv interface.
+adapted for rlworld's MujocoEnv interface.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Any, List
@@ -143,7 +143,7 @@ class Go2FlatMujocoConfig:
     def _build_env_config(self) -> MujocoEnvConfig:
         return MujocoEnvConfig(
             num_envs=self.num_envs,
-            env_name="MjlabEnv",
+            env_name="MujocoEnv",
             task_name="Go2 Velocity Tracking",
             seed=self.seed,
             episode_length_s=self.episode_length_s,

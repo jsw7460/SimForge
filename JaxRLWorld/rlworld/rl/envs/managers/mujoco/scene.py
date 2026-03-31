@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class MjlabSceneManagerConfig:
-    """Internal config consumed by MjlabSceneManager.
+class MujocoSceneManagerConfig:
+    """Internal config consumed by MujocoSceneManager.
 
     Populated from MujocoSceneConfig by mjlab_env at build time.
     Users should not construct this directly — use MujocoSceneConfig
@@ -57,7 +57,7 @@ class MjlabSceneManagerConfig:
     unified_entities: Any = None
 
 
-class MjlabSceneManager(BaseManager):
+class MujocoSceneManager(BaseManager):
     """Manages mjlab Scene and Simulation lifecycle.
 
     This manager wraps mjlab's Scene and Simulation classes to provide
@@ -70,14 +70,14 @@ class MjlabSceneManager(BaseManager):
     4. Initialize Scene with Simulation data
 
     Example:
-        scene_manager = MjlabSceneManager(env, config)
+        scene_manager = MujocoSceneManager(env, config)
         scene_manager.build_scene()
 
         # In simulation loop:
         scene_manager.step()
     """
 
-    def __init__(self, env: "World", config: MjlabSceneManagerConfig):
+    def __init__(self, env: "World", config: MujocoSceneManagerConfig):
         super().__init__(env)
         self.config = config
 
