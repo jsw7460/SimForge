@@ -26,6 +26,7 @@ dependencies = [
     "optax>=0.2.0",
     "gymnasium>=0.29.0",
     "pytz",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
