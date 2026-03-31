@@ -155,9 +155,9 @@ class NewtonEntityCfg(EntityCfg):
 class MujocoEntityCfg(EntityCfg):
     """MuJoCo-specific entity configuration."""
 
-    spec_fn: Callable | None = None
-    """Factory callable returning an mujoco.MjSpec.  Required for MuJoCo
-    since URDF must be converted to MjSpec."""
+    spec_fn: Callable | str | None = None
+    """Factory callable returning an ``mujoco.MjSpec``, or a string reference
+    (``"module:func"``).  Automatically serialized to string by ``recursive_to_dict()``."""
 
     collisions: tuple = ()
     """mjlab CollisionCfg objects for contact customization."""

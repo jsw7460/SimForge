@@ -26,7 +26,7 @@ class MujocoEnvConfig(BaseConfig):
     seed: int = 42
     episode_length_s: float = 20.0
     decimation: int = 10
-    termination_criteria: list["TerminationTermConfig"] = field(default_factory=list)
+    terminations: Any = None  # TerminationsConfig instance, set by preset
 
 
 @dataclass
@@ -77,8 +77,7 @@ class MujocoSceneConfig(BaseConfig):
 
 @dataclass
 class MujocoObservationConfig(BaseConfig):
-    """MuJoCo/mjlab observation configuration."""
-    obs_group: dict[str, list["ObservationTermConfig"]] = field(default_factory=dict)
+    """MuJoCo/mjlab observation configuration. Groups are named ObservationGroupConfig attributes."""
     enable_noise: bool = True
 
 
@@ -96,6 +95,7 @@ class MujocoActionConfig(BaseConfig):
 class MujocoConfigsForRun(BaseConfig):
     """Complete configuration for MuJoCo/mjlab training runs."""
     sim_type: str = "mujoco"
+    preset_module: str | None = None
     env: MujocoEnvConfig = field(default_factory=MujocoEnvConfig)
     scene: MujocoSceneConfig = field(default_factory=MujocoSceneConfig)
     observation: MujocoObservationConfig = field(default_factory=MujocoObservationConfig)

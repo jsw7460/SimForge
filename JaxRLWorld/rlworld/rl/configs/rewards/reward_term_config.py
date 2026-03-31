@@ -76,8 +76,18 @@ def get_weight_value(weight: float | WeightSchedule, step: int) -> float:
 
 @dataclass
 class RewardTermConfig:
-    """Configuration for a reward term."""
+    """Configuration for a reward term.
 
-    func: Callable[..., torch.Tensor]
+    ``func`` is a string reference in ``"module.path:attr_name"`` format.
+    """
+
+    func: Callable | str
     weight: float | WeightSchedule = 0.0
     params: dict = field(default_factory=dict)
+
+    @property
+    def resolved_func(self) -> Callable:
+        if callable(self.func):
+            return self.func
+        from rlworld.rl.utils.resolve import resolve_callable
+        return resolve_callable(self.func)

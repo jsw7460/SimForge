@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Tuple, Any, Dict, Union, TYPE_CHECKING, Literal
+from typing import Any, Dict, Union, TYPE_CHECKING, Literal
 
 import genesis as gs
 from .algorithms import AlgorithmConfig, get_algorithm_config_class
@@ -13,12 +13,9 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
-from .observations import ObservationTermConfig
-from .scene import EntityConfig
 from .sensors import SensorConfig
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mdp.configs import TerminationTermConfig
     from rlworld.rl.configs.robots.base import RobotConfig
 
 
@@ -31,13 +28,15 @@ class EnvConfig(BaseConfig):
     num_envs: int = 10000
     decimation: int = 1
     seed: int = 42
-    termination_criteria: list["TerminationTermConfig"] = field(default_factory=list)
+    terminations: Any = None  # TerminationsConfig instance, set by preset
     episode_length_s: float = 20.0
 
 
 @dataclass
 class SceneConfig(BaseConfig):
     """Genesis scene configuration."""
+    _EXCLUDE_FROM_SERIALIZATION = ("sim_options", "viewer_options", "vis_options", "rigid_options", "robot_cfg")
+
     sim_options: gs.options.SimOptions = field(default_factory=gs.options.SimOptions)
     viewer_options: gs.options.ViewerOptions = field(default_factory=gs.options.ViewerOptions)
     vis_options: gs.options.VisOptions = field(default_factory=gs.options.VisOptions)
@@ -50,8 +49,16 @@ class SceneConfig(BaseConfig):
 
 @dataclass
 class ObservationConfig(BaseConfig):
-    """Genesis observation configuration."""
-    obs_group: dict[str, list[ObservationTermConfig]] = None
+    """Genesis observation configuration.
+
+    Groups are named attributes of type ObservationGroupConfig.
+    Subclass and add groups::
+
+        @dataclass
+        class MyObsCfg(ObservationConfig):
+            actor: ActorObsCfg = field(default_factory=ActorObsCfg)
+            critic: CriticObsCfg = field(default_factory=CriticObsCfg)
+    """
     enable_noise: bool = True
 
 
@@ -81,6 +88,7 @@ class CurriculumConfig(BaseConfig):
 class GenesisConfigsForRun(BaseConfig):
     """Complete configuration for Genesis training runs."""
     sim_type: str = "genesis"
+    preset_module: str | None = None  # "rlworld.rl.configs.presets.go2_flat.genesis.mlp"
     env: EnvConfig = field(default_factory=EnvConfig)
     scene: SceneConfig = field(default_factory=SceneConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)

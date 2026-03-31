@@ -10,8 +10,16 @@ if TYPE_CHECKING:
 
 @dataclass
 class RewardConfig(BaseConfig):
-    """Reward configuration (shared)."""
-    reward_terms: dict[str, RewardTermConfig] = None
+    """Reward configuration. Terms are named class attributes of type RewardTermConfig.
+
+    Subclass and add terms as class-level attributes::
+
+        @dataclass
+        class MyRewardsCfg(RewardConfig):
+            track_lin_vel = RewardTermConfig(func=rf.track_lin_vel, weight=2.0)
+            action_rate = RewardTermConfig(func=rf.action_rate, weight=-0.01)
+    """
+    pass
 
 
 @dataclass
@@ -58,8 +66,9 @@ class GaitConfig(BaseConfig):
     freq_command: str = "gait_freq"
     duration_command: str = "gait_duration"
 
-    # Callable: (CommandManager) -> [num_envs, num_feet].
+    # Callable instance: (CommandManager) -> [num_envs, num_feet].
     # See QuadrupedOffsets and DirectOffsets in managers/common/gait.py.
+    # Automatically serialized to string by recursive_to_dict().
     foot_offset_provider: Any = None
 
     # Von Mises smoothing for desired contact states
@@ -67,9 +76,45 @@ class GaitConfig(BaseConfig):
 
 
 @dataclass
+class TerminationsConfig(BaseConfig):
+    """Termination configuration. Terms are named class attributes of type TerminationTermConfig.
+
+    Subclass and add terms as class-level attributes::
+
+        @dataclass
+        class MyTerminationsCfg(TerminationsConfig):
+            bad_orientation = TerminationTermConfig(func=tf.roll_pitch, params={...})
+            time_out = TerminationTermConfig(func=tf.max_episode)
+    """
+    pass
+
+
+@dataclass
 class EventConfig(BaseConfig):
-    """Event configuration (shared)."""
-    event_terms: list = field(default_factory=list)
+    """Event configuration. Terms are named class attributes of type EventTermConfig.
+
+    Subclass and add terms as class-level attributes::
+
+        @dataclass
+        class MyEventsCfg(EventConfig):
+            reset_dof = EventTermConfig(func=init_dof, mode="reset")
+            push_robot = EventTermConfig(func=push, mode="interval", interval_range_s=(2, 20))
+    """
+    pass
+
+
+@dataclass
+class ObservationGroupConfig(BaseConfig):
+    """An observation group. Terms are named class attributes of type ObservationTermConfig.
+
+    Example::
+
+        @dataclass
+        class ActorObsCfg(ObservationGroupConfig):
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=0.25)
+            dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0)
+    """
+    pass
 
 
 @dataclass
@@ -186,6 +231,8 @@ from rlworld.rl.vis.overlays.hud_items.items import HUDItem
 @dataclass
 class VisualizationConfig(BaseConfig):
     """Visualization configuration (shared)."""
+    _EXCLUDE_FROM_SERIALIZATION = ("extra_hud_items",)
+
     show_viewer: bool = False
     record_video: bool = False
     video_dir: str = ""
@@ -207,7 +254,7 @@ class VisualizationConfig(BaseConfig):
     show_feet_height: bool = True
     show_episode_info: bool = True
     feet_names: tuple[str, ...] = ("FL", "FR", "RL", "RR")
-    extra_hud_items: list[HUDItem] = field(default_factory=lambda: [])
+    extra_hud_items: list[HUDItem] = field(default_factory=list)
 
     # Viewer type
     viewer_type: Literal["gl", "viser", "rerun", "usd", "file"] = "gl"

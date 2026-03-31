@@ -26,6 +26,28 @@ class GaussianNoiseConfig(NoiseConfig):
     operation: Literal["add", "scale", "abs"] = "add"
 
 
+_NOISE_REGISTRY: dict[str, type] = {}
+
+
+def _register_noise_classes() -> None:
+    """Populate registry after class definitions."""
+    for cls in (UniformNoiseConfig, GaussianNoiseConfig):
+        _NOISE_REGISTRY[cls.__qualname__] = cls
+
+
+def noise_config_from_dict(d: dict) -> NoiseConfig:
+    """Reconstruct a NoiseConfig subclass from a serialized dict."""
+    _register_noise_classes()
+    d = dict(d)
+    type_name = d.pop("_type", None)
+    if type_name is None:
+        raise ValueError("Missing '_type' in noise config dict")
+    cls = _NOISE_REGISTRY.get(type_name)
+    if cls is None:
+        raise ValueError(f"Unknown noise type: {type_name}")
+    return cls(**d)
+
+
 def apply_noise(obs: torch.Tensor, noise_cfg: NoiseConfig) -> torch.Tensor:
     """Apply noise to observation tensor.
 

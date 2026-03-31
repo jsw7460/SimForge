@@ -1,58 +1,38 @@
 from dataclasses import dataclass, field
-from typing import Any, Type
+from typing import Any, Callable
 
-import genesis as gs
-from genesis.engine.sensors.base_sensor import Sensor
+from rlworld.rl.utils.resolve import resolve_callable
 
 
 @dataclass
 class SensorConfig:
-    """
-    Configuration for a sensor (declaration phase).
+    """Configuration for a sensor (declaration phase).
 
-    This config uses entity names (strings) instead of indices,
-    making it easier to define sensors before the scene is built.
+    Uses entity names (strings) instead of indices, making it easier to
+    define sensors before the scene is built.
+
+    ``sensor_class`` accepts a class or ``"module:ClassName"`` string.
+    Automatically serialized to string by ``recursive_to_dict()``.
     """
 
     entity_name: str  # Name of the entity (e.g., "robot")
     link_name: str = "base"  # Name of the link (e.g., "base", "hand")
-    sensor_class: Type[gs.sensors.SensorOptions] = None  # Sensor class (IMU, Contact, etc.)
-    sensor_params: dict[str, Any] = field(default_factory=dict)  # Additional parameters
+    sensor_class: Callable | str | None = None  # gs.sensors.IMU or "genesis.engine.sensors:IMU"
+    sensor_params: dict[str, Any] = field(default_factory=dict)
 
-    def create_sensor(
-        self,
-        scene: gs.Scene,
-        entity
-    ) -> Sensor:
-        """
-        Create the actual sensor object after the scene is built.
-
-        This method is called after scene.build(), when entity_idx
-        and link_idx_local are available.
-
-        Parameters
-        ----------
-        scene : gs.Scene
-            The built scene
-        entity : RigidEntity
-            The entity to attach the sensor to
-
-        Returns
-        -------
-        sensor : gs.sensors.Sensor
-            The created sensor object
-        """
-        # Get the link from the entity
+    def create_sensor(self, scene, entity):
+        """Create the actual sensor object after the scene is built."""
         link = entity.get_link(self.link_name)
 
-        # Create Genesis sensor options with actual indices
-        sensor_options = self.sensor_class(
+        sensor_cls = self.sensor_class
+        if isinstance(sensor_cls, str):
+            sensor_cls = resolve_callable(sensor_cls)
+
+        sensor_options = sensor_cls(
             entity_idx=entity.idx,
             link_idx_local=link.idx_local,
-            **self.sensor_params  # User-provided additional parameters
+            **self.sensor_params,
         )
 
-        # Add sensor to the scene
         sensor = scene.add_sensor(sensor_options)
-
         return sensor

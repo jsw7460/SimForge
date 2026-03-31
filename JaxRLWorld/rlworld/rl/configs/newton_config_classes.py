@@ -30,12 +30,14 @@ class NewtonEnvConfig(BaseConfig):
     seed: int = 42
     episode_length_s: float = 20.0
     decimation: int = 1
-    termination_criteria: list["TerminationTermConfig"] = field(default_factory=list)
+    terminations: Any = None  # TerminationsConfig instance, set by preset
 
 
 @dataclass
 class NewtonSceneConfig(BaseConfig):
     """Newton scene configuration."""
+    _EXCLUDE_FROM_SERIALIZATION = ("robot_cfg",)
+
     dt: float = 0.02
     substeps: int = 4
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
@@ -49,8 +51,7 @@ class NewtonSceneConfig(BaseConfig):
 
 @dataclass
 class NewtonObservationConfig(BaseConfig):
-    """Newton observation configuration."""
-    obs_group: dict[str, list["ObservationTermConfig"]] = field(default_factory=dict)
+    """Newton observation configuration. Groups are named ObservationGroupConfig attributes."""
     enable_noise: bool = True
 
 
@@ -67,6 +68,7 @@ class NewtonActionConfig(BaseConfig):
 class NewtonConfigsForRun(BaseConfig):
     """Complete configuration for Newton training runs."""
     sim_type: str = "newton"
+    preset_module: str | None = None
     env: NewtonEnvConfig = field(default_factory=NewtonEnvConfig)
     scene: NewtonSceneConfig = field(default_factory=NewtonSceneConfig)
     observation: NewtonObservationConfig = field(default_factory=NewtonObservationConfig)

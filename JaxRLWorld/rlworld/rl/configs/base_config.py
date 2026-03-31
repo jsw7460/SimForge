@@ -1,14 +1,11 @@
+import dataclasses
 import json
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, TYPE_CHECKING, Union, TypeVar
+from typing import Any, ClassVar, Dict, TypeVar
 
 from colorama import Fore, Style
 
-if TYPE_CHECKING:
-    from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
-    from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun
-    from rlworld.rl.configs.mujoco_config_classes import MujocoEnvConfig
 T = TypeVar("T", bound="BaseConfig")
 
 
@@ -88,6 +85,172 @@ def _print_override_changes(overrides, config):
     print(f"\n{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}\n")
 
 
+import numpy as np
+from collections.abc import Mapping, Iterable, Sized
+
+
+# ── Term discovery (IsaacLab pattern) ──────────────────────────────────────
+
+def iter_terms(cfg: Any, term_type: type) -> dict:
+    """Discover named term attributes on *cfg* that are instances of *term_type*.
+
+    Walks the MRO to find class-level defaults, then checks instance overrides.
+    Terms set to ``None`` are considered disabled and excluded.
+    """
+    result = {}
+    # Class-level attributes (term defaults defined on the class body)
+    for cls in type(cfg).__mro__:
+        if cls is object:
+            continue
+        for name, val in vars(cls).items():
+            if name.startswith("_") or name in result:
+                continue
+            # Get instance value (may override class default)
+            instance_val = getattr(cfg, name, val)
+            if isinstance(instance_val, term_type):
+                result[name] = instance_val
+    # Instance-level: check for None overrides (disabling a term)
+    for name, val in getattr(cfg, "__dict__", {}).items():
+        if name.startswith("_"):
+            continue
+        if isinstance(val, term_type):
+            result[name] = val
+        elif val is None and name in result:
+            del result[name]
+    return result
+
+
+# ── Serialization (object → dict) ──────────────────────────────────────────
+
+_YAML_SAFE_TYPES = (str, int, float, bool, type(None))
+
+
+def _convert_value(v: Any) -> Any:
+    """Recursively convert a value to a YAML-safe representation.
+
+    Callables are automatically converted to ``"module:qualname"`` strings.
+    """
+    if isinstance(v, _YAML_SAFE_TYPES):
+        return v
+    if isinstance(v, BaseConfig):
+        return v.recursive_to_dict()
+    if dataclasses.is_dataclass(v) and not isinstance(v, type):
+        return _dataclass_to_dict(v)
+    if isinstance(v, dict):
+        return {str(dk): _convert_value(dv) for dk, dv in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_convert_value(item) for item in v]
+    if isinstance(v, np.ndarray):
+        return v.tolist()
+    if isinstance(v, (np.integer, np.floating, np.bool_)):
+        return v.item()
+    if callable(v):
+        from rlworld.rl.utils.resolve import callable_to_string
+        return callable_to_string(v)
+    return str(v)
+
+
+def _dataclass_to_dict(obj: Any) -> Dict:
+    """Convert a non-BaseConfig dataclass to a plain dict (no _type metadata)."""
+    result = {}
+    for f in dataclasses.fields(obj):
+        if f.name.startswith("_"):
+            continue
+        result[f.name] = _convert_value(getattr(obj, f.name))
+    return result
+
+
+def _recursive_to_dict(obj: "BaseConfig") -> Dict:
+    """Convert a BaseConfig hierarchy to a serializable dict.
+
+    Walks class-level attributes (for named terms) and instance attributes.
+    """
+    exclude = set(getattr(obj, "_EXCLUDE_FROM_SERIALIZATION", ()))
+    result = {}
+    # Collect class-level attributes first (named terms, class defaults)
+    for cls in type(obj).__mro__:
+        if cls is object:
+            continue
+        for k, v in vars(cls).items():
+            if k.startswith("_") or k in exclude or k in result:
+                continue
+            # Skip methods, properties, classmethods, ClassVar-like things
+            if isinstance(v, (property, classmethod, staticmethod)):
+                continue
+            if callable(v) and not dataclasses.is_dataclass(v):
+                # Skip plain methods but keep callable term configs (dataclasses are callable)
+                continue
+            # Get actual instance value (may override class default)
+            actual = getattr(obj, k, v)
+            if actual is None:
+                continue
+            result[k] = _convert_value(actual)
+    # Instance-level attributes override/add
+    for k, v in obj.__dict__.items():
+        if k.startswith("_") or k in exclude:
+            continue
+        result[k] = _convert_value(v)
+    return result
+
+
+# ── Deserialization (dict → object, in-place update) ───────────────────────
+
+def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
+    """Update *obj* in-place from *data*, following IsaacLab's pattern.
+
+    - Nested Mapping → recurse into existing member.
+    - Iterable with nested Mappings → recurse element-wise.
+    - Callable attribute + string value → keep as string (resolved lazily).
+    - Simple value → assign directly.
+    """
+    for key, value in data.items():
+        key_ns = f"{_ns}/{key}"
+
+        # Check key exists
+        if isinstance(obj, dict):
+            if key not in obj:
+                # For dicts, allow new keys (e.g. entities dict)
+                obj[key] = value
+                continue
+            obj_mem = obj[key]
+        elif hasattr(obj, key):
+            obj_mem = getattr(obj, key)
+        else:
+            # Skip unknown keys silently (fields removed, _EXCLUDE_FROM_SERIALIZATION, etc.)
+            continue
+
+        # 1) Nested mapping → recurse
+        if isinstance(value, Mapping):
+            if obj_mem is not None and (hasattr(obj_mem, "__dict__") or isinstance(obj_mem, dict)):
+                update_from_dict(obj_mem, value, _ns=key_ns)
+                continue
+            # obj_mem is None → assign the dict directly
+            # (will be a plain dict; consumer code should handle it)
+
+        # 2) Iterable (non-string)
+        elif isinstance(value, Iterable) and not isinstance(value, str):
+            # 2a) Flat iterable (no nested Mappings) → assign
+            if all(not isinstance(el, Mapping) for el in value):
+                value = tuple(value) if isinstance(obj_mem, tuple) else value
+            # 2b) Iterable with nested Mappings
+            elif obj_mem is not None and isinstance(obj_mem, Sized) and len(obj_mem) == len(value):
+                for i in range(len(obj_mem)):
+                    if isinstance(value[i], Mapping):
+                        update_from_dict(obj_mem[i], value[i], _ns=key_ns)
+                continue
+            # else: length mismatch or obj_mem is None → assign directly
+
+        # 3) Callable attribute + string → keep string for lazy resolution
+        elif callable(obj_mem) and isinstance(value, str):
+            pass  # value stays as string, resolved_func handles it
+
+        # Assign
+        if isinstance(obj, dict):
+            obj[key] = value
+        else:
+            setattr(obj, key, value)
+
+
 @dataclass
 class BaseConfig:
 
@@ -98,36 +261,19 @@ class BaseConfig:
     def to_dict(self) -> Dict:
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
+    # Fields listed here will be excluded from serialization (e.g. sim-specific objects).
+    # ClassVar so dataclass does NOT treat this as an instance field.
+    _EXCLUDE_FROM_SERIALIZATION: ClassVar[tuple[str, ...]] = ()
+
     def recursive_to_dict(self) -> Dict:
-        result = {}
-        for k, v in self.__dict__.items():
-            if k.startswith('_'):
-                continue
-            if isinstance(v, BaseConfig):
-                result[k] = v.recursive_to_dict()
-            elif isinstance(v, dict):
-                result[k] = {dk: dv.recursive_to_dict() if isinstance(dv, BaseConfig) else dv
-                             for dk, dv in v.items()}
-            elif isinstance(v, (list, tuple)):
-                result[k] = [item.recursive_to_dict() if isinstance(item, BaseConfig) else item
-                             for item in v]
-            else:
-                result[k] = v
-        return result
+        return _recursive_to_dict(self)
 
     @classmethod
     def from_dict(cls, config_dict: Dict):
-        # Collect all field names from the full class hierarchy
-        all_fields = set()
-        for klass in cls.__mro__:
-            all_fields.update(getattr(klass, '__annotations__', {}).keys())
-
-        return cls(
-            **{
-                k: v for k, v in config_dict.items()
-                if k in all_fields
-            }
-        )
+        """Create a default instance and update it in-place from *config_dict*."""
+        obj = cls()
+        update_from_dict(obj, config_dict)
+        return obj
 
     def __repr__(self) -> str:
         """Pretty print the config object with proper indentation and colors"""
