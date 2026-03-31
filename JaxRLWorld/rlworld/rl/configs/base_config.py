@@ -236,13 +236,7 @@ class BaseConfig:
                     raise ValueError(f"Cannot override immutable setting: {config_type}.{param_name}")
 
                 if not hasattr(config_obj, param_name):
-                    import warnings
-                    warnings.warn(
-                        f"Ignoring unknown parameter: {config_type}.{param_name} "
-                        f"(may be from an older checkpoint)",
-                        stacklevel=2,
-                    )
-                    continue
+                    raise ValueError(f"Unknown parameter: {config_type}.{param_name}")
 
                 if isinstance(value, dict) and isinstance(getattr(config_obj, param_name), dict):
                     current_dict = getattr(config_obj, param_name).copy()

@@ -110,45 +110,30 @@ class MujocoConfigsForRun(BaseConfig):
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "MujocoConfigsForRun":
-        """Create MujocoConfigsForRun from dictionary."""
-        env = config_dict.get("env", MujocoEnvConfig())
-        scene = config_dict.get("scene", MujocoSceneConfig())
-        observation = config_dict.get("observation", MujocoObservationConfig())
-        action = config_dict.get("action", MujocoActionConfig())
-        visualization = config_dict.get("visualization", VisualizationConfig())
-        reward = config_dict.get("reward", RewardConfig())
-        command = config_dict.get("command", CommandConfig())
-        event = config_dict.get("event", EventConfig())
-        nn = config_dict.get("nn", NNConfig())
-        runner = config_dict.get("runner", RunnerConfig())
+        def _get_or_convert(key, config_cls, default_factory):
+            val = config_dict.get(key, default_factory())
+            if isinstance(val, dict):
+                return config_cls.from_dict(val)
+            return val
 
-        # Handle dataclass or dict
-        if isinstance(env, dict):
-            env = MujocoEnvConfig(**env)
-        if isinstance(scene, dict):
-            scene = MujocoSceneConfig(**scene)
-        if isinstance(observation, dict):
-            observation = MujocoObservationConfig(**observation)
-        if isinstance(action, dict):
-            action = MujocoActionConfig(**action)
-        if isinstance(visualization, dict):
-            visualization = VisualizationConfig(**visualization)
-        if isinstance(reward, dict):
-            reward = RewardConfig(**reward)
-        if isinstance(command, dict):
-            command = CommandConfig.from_dict(command)
-        if isinstance(event, dict):
-            event = EventConfig(**event)
-        if isinstance(nn, dict):
-            nn = NNConfig(**nn)
-        if isinstance(runner, dict):
-            runner = RunnerConfig(**runner)
+        env = _get_or_convert("env", MujocoEnvConfig, MujocoEnvConfig)
+        scene = _get_or_convert("scene", MujocoSceneConfig, MujocoSceneConfig)
+        observation = _get_or_convert("observation", MujocoObservationConfig, MujocoObservationConfig)
+        action = _get_or_convert("action", MujocoActionConfig, MujocoActionConfig)
+        visualization = _get_or_convert("visualization", VisualizationConfig, VisualizationConfig)
+        reward = _get_or_convert("reward", RewardConfig, RewardConfig)
+        command = _get_or_convert("command", CommandConfig, CommandConfig)
+        event = _get_or_convert("event", EventConfig, EventConfig)
+        nn = _get_or_convert("nn", NNConfig, NNConfig)
+        runner = _get_or_convert("runner", RunnerConfig, RunnerConfig)
 
-        # Algorithm config dispatch
-        algo_dict = config_dict["algorithm"]
-        algo_name = algo_dict["algorithm_name"]
-        algo_config_cls = get_algorithm_config_class(algo_name)
-        algorithm = algo_config_cls.from_dict(algo_dict)
+        algo_val = config_dict.get("algorithm", {})
+        if isinstance(algo_val, dict):
+            algo_name = algo_val.get("algorithm_name", "PPO")
+            algo_config_cls = get_algorithm_config_class(algo_name)
+            algorithm = algo_config_cls.from_dict(algo_val)
+        else:
+            algorithm = algo_val
 
         return cls(
             env=env,

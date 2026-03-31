@@ -23,19 +23,6 @@ class CommandConfig(BaseConfig):
     """
     terms: dict[str, Any] = field(default_factory=dict)  # str -> CommandTermCfg
 
-    @classmethod
-    def from_dict(cls, d: dict) -> "CommandConfig":
-        """Create CommandConfig from dict, ignoring legacy fields.
-
-        Old checkpoints may contain fields like 'sampler', 'resampling_time_s',
-        'rel_standing_envs', etc. that no longer exist on CommandConfig.
-        These are silently dropped.
-        """
-        if "terms" in d:
-            return cls(terms=d["terms"])
-        # Legacy dict without 'terms' → return empty CommandConfig
-        return cls()
-
 
 @dataclass
 class GaitConfig(BaseConfig):
