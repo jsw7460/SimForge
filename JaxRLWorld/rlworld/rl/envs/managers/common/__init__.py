@@ -1,6 +1,10 @@
 from .contact import BaseContactManager
 from .command import CommandManager, CommandManagerConfig
-from .command_term import CommandTerm, CommandTermCfg, VelocityCommandTermCfg, VelocityCommandTerm
+from .command_term import (
+    CommandTerm, CommandTermCfg,
+    VelocityCommandTermCfg, VelocityCommandTerm,
+    GaitCommandTermCfg, GaitCommandTerm,
+)
 from .reward import RewardManager, RewardManagerConfig
 from .termination import TerminationManager, TerminationConfig
 from .event import EventManager, EventManagerConfig
@@ -15,6 +19,8 @@ __all__ = [
     "CommandTermCfg",
     "VelocityCommandTermCfg",
     "VelocityCommandTerm",
+    "GaitCommandTermCfg",
+    "GaitCommandTerm",
     "RewardManager",
     "RewardManagerConfig",
     "TerminationManager",
