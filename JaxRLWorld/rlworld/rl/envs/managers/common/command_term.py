@@ -79,13 +79,13 @@ class CommandTerm(ABC):
         self.time_left -= dt
         resample_ids = (self.time_left <= 0.0).nonzero(as_tuple=False).flatten()
         if len(resample_ids) > 0:
-            self.time_left[resample_ids].uniform_(*self.cfg.resampling_time_range)
+            self.time_left[resample_ids] = torch.empty(len(resample_ids), device=self.device).uniform_(*self.cfg.resampling_time_range)
             self._resample_command(resample_ids)
         self._update_command()
 
     def reset(self, env_ids: torch.Tensor) -> None:
         """Force resample for the given environments."""
-        self.time_left[env_ids].uniform_(*self.cfg.resampling_time_range)
+        self.time_left[env_ids] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.resampling_time_range)
         self._resample_command(env_ids)
 
 
@@ -146,9 +146,9 @@ class VelocityCommandTerm(CommandTerm):
 
     def _resample_command(self, env_ids: torch.Tensor) -> None:
         n = len(env_ids)
-        self._command[env_ids, 0].uniform_(*self.cfg.lin_vel_x_range)
-        self._command[env_ids, 1].uniform_(*self.cfg.lin_vel_y_range)
-        self._command[env_ids, 2].uniform_(*self.cfg.ang_vel_range)
+        self._command[env_ids, 0] = torch.empty(n, device=self.device).uniform_(*self.cfg.lin_vel_x_range)
+        self._command[env_ids, 1] = torch.empty(n, device=self.device).uniform_(*self.cfg.lin_vel_y_range)
+        self._command[env_ids, 2] = torch.empty(n, device=self.device).uniform_(*self.cfg.ang_vel_range)
 
         if self.cfg.rel_standing_envs > 0.0:
             r = torch.rand(n, device=self.device)
@@ -157,7 +157,7 @@ class VelocityCommandTerm(CommandTerm):
         if self.cfg.heading_command:
             r = torch.rand(n, device=self.device)
             self.is_heading_env[env_ids] = r < self.cfg.rel_heading_envs
-            self.heading_target[env_ids].uniform_(*self.cfg.heading_range)
+            self.heading_target[env_ids] = torch.empty(n, device=self.device).uniform_(*self.cfg.heading_range)
 
     def _update_command(self) -> None:
         # Heading P-control: overwrite ang_vel for heading envs
