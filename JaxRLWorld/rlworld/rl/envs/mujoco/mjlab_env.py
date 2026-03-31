@@ -168,14 +168,9 @@ class MujocoEnv(World):
         )
 
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
-        ObsCfgCls = ManagerRegistry.get_config_class(self.sim_type, "observation")
         self.obs_manager = ObsCls(
             env=self,
-            config=ObsCfgCls(
-                num_envs=self.num_envs,
-                obs_group=self.obs_cfg.obs_group,
-                enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
-            )
+            config=self.obs_cfg,
         )
 
         ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
@@ -201,8 +196,11 @@ class MujocoEnv(World):
 
     def _post_setup(self) -> None:
         """Expand model fields for per-env domain randomization."""
+        from rlworld.rl.configs.base_config import iter_terms
+        from rlworld.rl.configs.events.event_term_config import EventTermConfig
+
         dr_fields = []
-        for term in self.event_cfg.event_terms:
+        for name, term in iter_terms(self.event_cfg, EventTermConfig).items():
             if term.mode == "startup" and "field" in term.params:
                 dr_fields.append(term.params["field"])
         if dr_fields:

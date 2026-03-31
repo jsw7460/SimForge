@@ -1,39 +1,43 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.base_config import iter_terms
+from rlworld.rl.configs.common_config_classes import RewardConfig
 from rlworld.rl.configs.rewards import RewardTermConfig, get_weight_value
 from rlworld.rl.envs.managers.base import BaseManager
+
+# Backward-compatible alias (used by ManagerRegistry and imports)
+RewardManagerConfig = RewardConfig
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 
-@dataclass
-class RewardManagerConfig:
-    """Configuration for reward management."""
-    reward_terms: dict[str, RewardTermConfig] = None
-
-
 class RewardManager(BaseManager):
-    """Manages reward computation from configurable reward terms."""
+    """Manages reward computation from configurable reward terms.
 
-    def __init__(self, env: "World", config: RewardManagerConfig):
+    Terms are discovered via :func:`iter_terms` on the ``RewardConfig`` instance.
+    """
+
+    def __init__(self, env: "World", config: RewardConfig):
         super().__init__(env=env)
         self.config = config
-        self.reward_terms = config.reward_terms
 
-        # Initialize stateful reward instances
+        # Discover named terms from config attributes
+        self.reward_terms: dict[str, RewardTermConfig] = iter_terms(config, RewardTermConfig)
+
+        # Resolve func (callable or string) → actual callable, cached at init
+        self._resolved_fns: dict[str, object] = {}
         self._instances: dict[str, object] = {}
-        if self.reward_terms:
-            for name, reward_term in self.reward_terms.items():
-                func = reward_term.func
-                # Check if func is a class (not an instance, not a function)
-                if isinstance(func, type):
-                    self._instances[name] = func(env=self.env, **reward_term.params)
+        for name, reward_term in self.reward_terms.items():
+            func = reward_term.resolved_func
+            self._resolved_fns[name] = func
+            # Check if func is a class (stateful reward)
+            if isinstance(func, type):
+                self._instances[name] = func(env=self.env, **reward_term.params)
 
     def set_rewards(
         self,
@@ -52,11 +56,10 @@ class RewardManager(BaseManager):
         reward_buffer_per_type["total_reward"] = reward_buffer
 
     def _compute_weighted_reward(self, name: str, reward_term: RewardTermConfig) -> torch.Tensor:
-        # Use instance if available (stateful class), otherwise call function
         if name in self._instances:
             raw_reward = self._instances[name](self.env)
         else:
-            raw_reward = reward_term.func(self.env, **reward_term.params)
+            raw_reward = self._resolved_fns[name](self.env, **reward_term.params)
 
         weight = get_weight_value(reward_term.weight, self.env_step_calls)
         return raw_reward * weight * self.env.control_dt
@@ -81,10 +84,8 @@ class RewardManager(BaseManager):
         for name, term in self.reward_terms.items():
             weight_str = format_weight(term.weight)
 
-            # Format params if present
             params_str = "-"
             if term.params and name not in self._instances:
-                # Only show params for non-class rewards (class params used in __init__)
                 param_items = [f"{k}={v}" for k, v in list(term.params.items())[:2]]
                 params_str = ", ".join(param_items)
                 if len(term.params) > 2:

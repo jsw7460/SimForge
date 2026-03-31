@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 import torch
 
 from rlworld.rl.envs.managers.base import BaseManager
+from rlworld.rl.utils.resolve import resolve_callable
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -149,7 +150,6 @@ class GaitManagerConfig:
 
     # Callable: (CommandManager) -> [num_envs, num_feet] foot offsets.
     # Only used when offset_mode == "command".
-    # Example providers: QuadrupedOffsets(), DirectOffsets(("off_0", "off_1", ...))
     foot_offset_provider: FootOffsetProvider | None = None
 
     # Von Mises smoothing sigma for desired_contact_states.
@@ -195,12 +195,13 @@ class GaitManager(BaseManager):
         self.desired_contact_states = torch.zeros(num_envs, self.num_feet, device=self.device)
 
         # ── Validate foot_offset_provider foot_names match ──
+        self._foot_offset_provider: FootOffsetProvider | None = None
         if config.offset_mode == "command":
-            provider = config.foot_offset_provider
+            self._foot_offset_provider = config.foot_offset_provider
 
-            if hasattr(provider, "foot_names") and tuple(provider.foot_names) != self.foot_names:
+            if hasattr(self._foot_offset_provider, "foot_names") and tuple(self._foot_offset_provider.foot_names) != self.foot_names:
                 raise ValueError(
-                    f"foot_offset_provider foot_names {provider.foot_names} does not match "
+                    f"foot_offset_provider foot_names {self._foot_offset_provider.foot_names} does not match "
                     f"GaitManager foot_names {self.foot_names}. "
                     f"Use the same foot_names for both GaitConfig and QuadrupedOffsets."
                 )
@@ -317,7 +318,7 @@ class GaitManager(BaseManager):
         cmd = self.env.command_manager
         freq = getattr(cmd, cfg.freq_command)
         duration = getattr(cmd, cfg.duration_command)
-        foot_offsets = cfg.foot_offset_provider(cmd)
+        foot_offsets = self._foot_offset_provider(cmd)
         return freq, duration, foot_offsets
 
     def _apply_duration_warp(

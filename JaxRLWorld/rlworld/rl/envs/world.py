@@ -262,21 +262,18 @@ class World(ABC):
         reward_cls = ManagerRegistry.get_class(self.sim_type, "reward")
         self.reward_manager = reward_cls(
             env=self,
-            config=RewardManagerConfig(reward_terms=self.reward_cfg.reward_terms),
+            config=self.reward_cfg,
         )
 
         self.termination_manager = TerminationManager(
             env=self,
-            config=TerminationConfig(
-                num_envs=self.num_envs,
-                termination_criteria=self.env_cfg.termination_criteria,
-                episode_length_s=self.env_cfg.episode_length_s,
-            ),
+            config=self.env_cfg.terminations,
+            episode_length_s=self.env_cfg.episode_length_s,
         )
 
         self.event_manager = EventManager(
             env=self,
-            config=EventManagerConfig(event_terms=self.event_cfg.event_terms),
+            config=self.event_cfg,
         )
 
     def _post_setup(self) -> None:

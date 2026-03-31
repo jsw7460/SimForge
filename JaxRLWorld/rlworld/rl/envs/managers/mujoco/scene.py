@@ -307,9 +307,14 @@ class MujocoSceneManager(BaseManager):
                 joint_pos=cfg.init_state.joint_pos or None,
                 joint_vel=cfg.init_state.joint_vel,
             )
+            spec_fn = cfg.spec_fn
+            if isinstance(spec_fn, str):
+                from rlworld.rl.utils.resolve import resolve_callable
+                spec_fn = resolve_callable(spec_fn)
+
             mjlab_cfg = MjlabEntityCfg(
                 init_state=init_state,
-                spec_fn=cfg.spec_fn,
+                spec_fn=spec_fn,
                 articulation=articulation_info,
                 collisions=cfg.collisions,
                 sort_actuators=True,

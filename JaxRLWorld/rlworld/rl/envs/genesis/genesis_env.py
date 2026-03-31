@@ -135,14 +135,9 @@ class GenesisEnv(World):
     def _build_sim_managers(self) -> None:
         """Create Genesis-specific managers via ManagerRegistry."""
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
-        ObsCfgCls = ManagerRegistry.get_config_class(self.sim_type, "observation")
         self.obs_manager = ObsCls(
             env=self,
-            config=ObsCfgCls(
-                num_envs=self.num_envs,
-                obs_group=self.obs_cfg.obs_group,
-                enable_noise=getattr(self.obs_cfg, 'enable_noise', True),
-            )
+            config=self.obs_cfg,
         )
 
         ActCls = ManagerRegistry.get_class(self.sim_type, "action")
