@@ -24,19 +24,29 @@ class CommandManager(BaseManager):
     Each term independently samples, resamples on its own timer,
     and applies per-step post-processing.
 
-    Access patterns:
-        ``command_manager.get_command("velocity")``  → [num_envs, 3]
-        ``command_manager.get_term("velocity")``     → VelocityCommandTerm
-        ``command_manager.lin_vel_x``                → [num_envs] (column lookup)
-        ``command_manager.get_commands_tensor()``     → all terms concatenated
+    Access patterns::
+
+        command_manager.get_command("velocity")   # → [num_envs, 3]
+        command_manager.get_term("velocity")      # → VelocityCommandTerm
+        command_manager.lin_vel_x                 # → [num_envs] (shortcut)
+        command_manager.get_commands_tensor()      # → all terms concatenated
     """
 
     def __init__(self, env: "World", config: CommandManagerConfig):
         super().__init__(env)
         self.config = config
 
-        # Build terms from config
         self._terms: dict[str, CommandTerm] = {}
+
+        # Maps column name → (term_name, column_index).
+        #
+        # Each CommandTerm declares column_names for its command dimensions.
+        # For example, VelocityCommandTerm.column_names = ("lin_vel_x", "lin_vel_y", "ang_vel")
+        # so _column_map becomes:
+        #   {"lin_vel_x": ("velocity", 0), "lin_vel_y": ("velocity", 1), "ang_vel": ("velocity", 2)}
+        #
+        # This allows `command_manager.lin_vel_x` to resolve to
+        # `_terms["velocity"].command[:, 0]` via __getattr__.
         self._column_map: dict[str, tuple[str, int]] = {}
 
         for name, term_cfg in config.terms.items():
@@ -80,31 +90,38 @@ class CommandManager(BaseManager):
             term.reset(env_ids)
 
     def __getattr__(self, name: str):
-        """Attribute access for individual command columns and term properties.
+        """Shortcut access for command columns and term attributes.
 
-        Searches column_names across all terms, then falls back to
-        direct attribute lookup on term objects.
+        Enables ``command_manager.lin_vel_x`` instead of
+        ``command_manager.get_command("velocity")[:, 0]``.
+
+        Lookup order:
+          1. _column_map: name matches a declared column → return that slice.
+          2. Term attributes: name matches a property on one of the terms
+             (e.g., is_standing_env on VelocityCommandTerm).
+          3. Fall through to normal AttributeError.
         """
+        # Guard: avoid infinite recursion during __init__ before _column_map exists.
         if name.startswith("_") or name in ("config", "env", "device"):
             return object.__getattribute__(self, name)
 
         try:
-            _column_map = object.__getattribute__(self, "_column_map")
+            column_map = object.__getattribute__(self, "_column_map")
         except AttributeError:
+            # __init__ not finished yet — _column_map doesn't exist.
             return object.__getattribute__(self, name)
 
-        if name in _column_map:
-            term_name, col_idx = _column_map[name]
+        # 1. Column lookup: "lin_vel_x" → _terms["velocity"].command[:, 0]
+        if name in column_map:
+            term_name, col_idx = column_map[name]
             terms = object.__getattribute__(self, "_terms")
             return terms[term_name].command[:, col_idx]
 
-        # Try direct attribute on terms (e.g., is_standing_env)
+        # 2. Term attribute lookup: "is_standing_env" → VelocityCommandTerm.is_standing_env
         terms = object.__getattribute__(self, "_terms")
         for term in terms.values():
-            try:
+            if hasattr(term, name):
                 return getattr(term, name)
-            except AttributeError:
-                continue
 
         return object.__getattribute__(self, name)
 
