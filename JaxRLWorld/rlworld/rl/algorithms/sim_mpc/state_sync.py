@@ -114,26 +114,17 @@ class GenesisStateSync:
         )
 
         # --- Action Manager (action history for action_rate reward) ---
-        self.plan_env.act_manager._prev_processed_actions[:] = (
-            _d(self.train_env.act_manager._prev_processed_actions[idx])
-            .unsqueeze(0)
-            .expand(S, -1)
-        )
-        self.plan_env.act_manager._processed_actions[:] = (
-            _d(self.train_env.act_manager._processed_actions[idx])
-            .unsqueeze(0)
-            .expand(S, -1)
-        )
-        self.plan_env.act_manager._prev_raw_actions[:] = (
-            _d(self.train_env.act_manager._prev_raw_actions[idx])
-            .unsqueeze(0)
-            .expand(S, -1)
-        )
-        self.plan_env.act_manager._raw_actions[:] = (
-            _d(self.train_env.act_manager._raw_actions[idx])
-            .unsqueeze(0)
-            .expand(S, -1)
-        )
+        for i in range(self.train_env.act_manager._action_history_len):
+            self.plan_env.act_manager._raw_action_history[i][:] = (
+                _d(self.train_env.act_manager._raw_action_history[i][idx])
+                .unsqueeze(0)
+                .expand(S, -1)
+            )
+            self.plan_env.act_manager._processed_action_history[i][:] = (
+                _d(self.train_env.act_manager._processed_action_history[i][idx])
+                .unsqueeze(0)
+                .expand(S, -1)
+            )
 
         # --- Contact Manager ---
         for attr in [

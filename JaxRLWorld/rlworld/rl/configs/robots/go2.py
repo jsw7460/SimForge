@@ -86,7 +86,7 @@ class Go2Config(RobotConfig):
     })
 
     foot_names: List[str] = field(default_factory=lambda: [
-        "FR_foot", "FL_foot", "RL_foot", "RR_foot"
+        "FR_foot", "FL_foot", "RR_foot", "RL_foot"
     ])
 
     @property

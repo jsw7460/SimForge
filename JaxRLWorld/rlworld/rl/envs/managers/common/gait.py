@@ -31,6 +31,7 @@ class FootOffsetProvider(Protocol):
     def __call__(self, cmd: "CommandManager") -> torch.Tensor: ...
 
 
+@dataclass
 class QuadrupedOffsets:
     """Reads (phase, offset, bound) commands and produces 4-foot offsets.
 
@@ -59,6 +60,11 @@ class QuadrupedOffsets:
         bound_cmd:  Command name for bound parameter (θ₃).
     """
 
+    foot_names: tuple[str, ...] | list[str] = field(default_factory=tuple)
+    phase_cmd: str = "gait_phase"
+    offset_cmd: str = "gait_offset"
+    bound_cmd: str = "gait_bound"
+
     # Canonical offset formula for each leg.
     _LEG_FORMULAS = {
         "FL": lambda p, o, b: p + o + b,
@@ -67,23 +73,13 @@ class QuadrupedOffsets:
         "RR": lambda p, o, b: p,
     }
 
-    def __init__(
-        self,
-        foot_names: tuple[str, ...] | list[str],
-        phase_cmd: str = "gait_phase",
-        offset_cmd: str = "gait_offset",
-        bound_cmd: str = "gait_bound",
-    ):
-        self.phase_cmd = phase_cmd
-        self.offset_cmd = offset_cmd
-        self.bound_cmd = bound_cmd
-
-        self.foot_names = tuple(foot_names)
-        self.num_feet = len(foot_names)
+    def __post_init__(self):
+        self.foot_names = tuple(self.foot_names)
+        self.num_feet = len(self.foot_names)
 
         # Build ordered list of formula functions matching foot_names order.
         self._formulas = []
-        for name in foot_names:
+        for name in self.foot_names:
             matched = [key for key in self._LEG_FORMULAS if key in name]
             if len(matched) != 1:
                 raise ValueError(
@@ -102,6 +98,7 @@ class QuadrupedOffsets:
         )
 
 
+@dataclass
 class DirectOffsets:
     """Reads per-foot phase offsets directly from named commands.
 
@@ -110,8 +107,7 @@ class DirectOffsets:
     Args:
         command_names: One command name per foot, in foot order.
     """
-    def __init__(self, command_names: tuple[str, ...]):
-        self.command_names = command_names
+    command_names: tuple[str, ...] = field(default_factory=tuple)
 
     def __call__(self, cmd: "CommandManager") -> torch.Tensor:
         return torch.stack(

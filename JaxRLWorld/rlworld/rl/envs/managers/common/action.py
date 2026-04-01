@@ -88,13 +88,13 @@ class ActionManagerBase(BaseManager):
         self._actuated_joint_indices = self._indexing.sim_indices.tolist()
         self._total_action_dim = self._indexing.num_joints
 
-        # Action buffers
-        self._raw_actions = torch.zeros(
+        # Action history buffers: index 0 = current (t), 1 = t-1, 2 = t-2, ...
+        self._action_history_len = 3
+        _z = lambda: torch.zeros(
             (self.env.num_envs, self._total_action_dim), device=self.device
         )
-        self._processed_actions = torch.zeros_like(self._raw_actions)
-        self._prev_raw_actions = torch.zeros_like(self._raw_actions)
-        self._prev_processed_actions = torch.zeros_like(self._raw_actions)
+        self._raw_action_history = [_z() for _ in range(self._action_history_len)]
+        self._processed_action_history = [_z() for _ in range(self._action_history_len)]
 
         # Initialize offset first (needed for joint_limit clip computation)
         self._offset = self._initialize_offsets()
@@ -280,20 +280,31 @@ class ActionManagerBase(BaseManager):
         return self._actuated_joint_indices
 
     @property
+    def raw_action_history(self) -> list[torch.Tensor]:
+        """Raw action history: [0] = current (t), [1] = t-1, [2] = t-2, ..."""
+        return self._raw_action_history
+
+    @property
+    def processed_action_history(self) -> list[torch.Tensor]:
+        """Processed action history: [0] = current (t), [1] = t-1, [2] = t-2, ..."""
+        return self._processed_action_history
+
+    # Convenience aliases for common access patterns
+    @property
     def raw_actions(self) -> torch.Tensor:
-        return self._raw_actions
+        return self._raw_action_history[0]
 
     @property
     def processed_actions(self) -> torch.Tensor:
-        return self._processed_actions
+        return self._processed_action_history[0]
 
     @property
     def prev_raw_actions(self) -> torch.Tensor:
-        return self._prev_raw_actions
+        return self._raw_action_history[1]
 
     @property
     def prev_processed_actions(self) -> torch.Tensor:
-        return self._prev_processed_actions
+        return self._processed_action_history[1]
 
     @property
     def clip_bounds(self) -> tuple[float, float] | None:
@@ -449,26 +460,27 @@ class ActionManagerBase(BaseManager):
         Returns:
             Processed action tensor of shape (num_envs, total_action_dim).
         """
-        self._raw_actions = actions.clone()
+        self._raw_action_history[0] = actions.clone()
         clipped = torch.clip(actions, self._clip_low, self._clip_high)
-        self._processed_actions = clipped * self._scale + self._offset
-        return self._processed_actions
+        self._processed_action_history[0] = clipped * self._scale + self._offset
+        return self._processed_action_history[0]
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         """Reset action buffers and actuator state for specified environments."""
         if env_ids is None:
             return
-        self._raw_actions[env_ids] = 0.0
-        self._processed_actions[env_ids] = 0.0
-        self._prev_raw_actions[env_ids] = 0.0
-        self._prev_processed_actions[env_ids] = 0.0
+        for buf in self._raw_action_history:
+            buf[env_ids] = 0.0
+        for buf in self._processed_action_history:
+            buf[env_ids] = 0.0
         for actuator, _ in self._actuators:
             actuator.reset(env_ids)
 
     def advance(self) -> None:
-        """Advance action history by one step."""
-        self._prev_raw_actions = self._raw_actions.clone()
-        self._prev_processed_actions = self._processed_actions.clone()
+        """Advance action history by one step (shift towards older)."""
+        for i in range(self._action_history_len - 1, 0, -1):
+            self._raw_action_history[i] = self._raw_action_history[i - 1].clone()
+            self._processed_action_history[i] = self._processed_action_history[i - 1].clone()
 
     def print_joint_mapping(self) -> None:
         """Print joint names, indices, and actuator assignments for debugging.

@@ -48,6 +48,72 @@ def quat_rotate_wxyz(q: Tensor, v: Tensor) -> Tensor:
     return a + b + c
 
 
+def quat_from_angle_axis_wxyz(angle: Tensor, axis: Tensor) -> Tensor:
+    """Create quaternion from angle-axis representation (wxyz convention).
+
+    Args:
+        angle: Rotation angles, shape (...,).
+        axis: Unit rotation axis, shape (3,).
+
+    Returns:
+        Quaternion in (w, x, y, z) format, shape (..., 4).
+    """
+    half = angle * 0.5
+    sin_half = torch.sin(half)
+    w = torch.cos(half)
+    xyz = axis * sin_half.unsqueeze(-1)
+    return torch.cat([w.unsqueeze(-1), xyz], dim=-1)
+
+
+def quat_mul_wxyz(q1: Tensor, q2: Tensor) -> Tensor:
+    """Multiply two quaternions (wxyz convention).
+
+    Args:
+        q1, q2: Quaternions in (w, x, y, z) format, shape (..., 4).
+
+    Returns:
+        Product quaternion, shape (..., 4).
+    """
+    w1, x1, y1, z1 = q1.unbind(-1)
+    w2, x2, y2, z2 = q2.unbind(-1)
+    return torch.stack([
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ], dim=-1)
+
+
+def quat_apply_yaw_wxyz(q: Tensor, v: Tensor) -> Tensor:
+    """Rotate vector by yaw-only component of a quaternion (wxyz convention).
+
+    Zeros out roll/pitch components (x, y in wxyz), keeping only yaw (z).
+
+    Args:
+        q: Quaternion in (w, x, y, z) format, shape (..., 4).
+        v: Vector to rotate, shape (..., 3).
+
+    Returns:
+        Rotated vector, shape (..., 3).
+    """
+    q_yaw = q.clone()
+    q_yaw[..., 1:3] = 0.0  # zero out x, y (roll/pitch)
+    q_yaw = q_yaw / torch.norm(q_yaw, dim=-1, keepdim=True)
+    return quat_rotate_wxyz(q_yaw, v)
+
+
+def quat_conjugate_wxyz(q: Tensor) -> Tensor:
+    """Quaternion conjugate (wxyz convention).
+
+    Args:
+        q: Quaternion in (w, x, y, z) format, shape (..., 4).
+
+    Returns:
+        Conjugate quaternion, shape (..., 4).
+    """
+    return q * torch.tensor([1.0, -1.0, -1.0, -1.0], device=q.device, dtype=q.dtype)
+
+
 def xyzw_to_wxyz(q: Tensor) -> Tensor:
     """Convert quaternion from xyzw to wxyz convention.
 

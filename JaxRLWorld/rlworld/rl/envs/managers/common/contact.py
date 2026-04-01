@@ -76,6 +76,11 @@ class BaseContactManager(BaseManager, ABC):
     def is_contact(self) -> torch.Tensor:
         return self._compute_is_contact()
 
+    @property
+    def prev_is_contact(self) -> torch.Tensor:
+        """Contact state from the previous step. [num_envs, num_tracked] bool."""
+        return self._prev_is_contact
+
     def get_link_indices(
         self,
         links: str | list[str],

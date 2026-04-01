@@ -45,7 +45,7 @@ if __name__ == '__main__':
         }
 
     evaluator = PolicyEvaluator(
-        policy_path="outputs/models/2026-03-31/18-10-11/checkpoint_latest/",
+        policy_path="outputs/models/2026-03-31/22-11-56/checkpoint_latest/",
         num_evals=1,
         seed=42,
         record_video=args.record_video,

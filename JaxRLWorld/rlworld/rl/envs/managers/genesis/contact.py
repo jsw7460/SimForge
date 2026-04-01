@@ -58,6 +58,7 @@ class ContactManager(BaseContactManager):
 
     def _discover_sensors(self) -> None:
         sensors = self.env.scene_manager.sensors
+        import ipdb; ipdb.set_trace()
         for entity_name, entity_sensors in sensors.items():
             for link_name, link_sensors in entity_sensors.items():
                 if "ContactSensor" in link_sensors:

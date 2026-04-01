@@ -18,8 +18,15 @@ class RewardConfig(BaseConfig):
         class MyRewardsCfg(RewardConfig):
             track_lin_vel = RewardTermConfig(func=rf.track_lin_vel, weight=2.0)
             action_rate = RewardTermConfig(func=rf.action_rate, weight=-0.01)
+
+    Exponential shaping (Walk-These-Ways style):
+        When ``exponential_shaping`` is True, the total reward is computed as
+        ``rew_pos * exp(rew_neg / shaping_sigma)`` instead of ``rew_pos + rew_neg``.
+        This ensures the total reward is always a positive function of the task
+        reward, preventing early termination from penalty dominance.
     """
-    pass
+    exponential_shaping: bool = False
+    shaping_sigma: float = 0.02
 
 
 @dataclass

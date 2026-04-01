@@ -46,14 +46,44 @@ class RewardManager(BaseManager):
         reward_buffer_per_type: dict[str, torch.Tensor]
     ) -> None:
 
-        for name, reward_term in self.reward_terms.items():
-            reward_value = self._compute_weighted_reward(name, reward_term)
-
-            reward_buffer_per_type[name] = reward_value
-            episode_sums[name] += reward_value
-            reward_buffer += reward_value
+        if self.config.exponential_shaping:
+            self._set_rewards_exponential(
+                reward_buffer, episode_sums, reward_buffer_per_type
+            )
+        else:
+            for name, reward_term in self.reward_terms.items():
+                reward_value = self._compute_weighted_reward(name, reward_term)
+                reward_buffer_per_type[name] = reward_value
+                episode_sums[name] += reward_value
+                reward_buffer += reward_value
 
         reward_buffer_per_type["total_reward"] = reward_buffer
+
+    def _set_rewards_exponential(
+        self,
+        reward_buffer: torch.Tensor,
+        episode_sums: dict[str, torch.Tensor],
+        reward_buffer_per_type: dict[str, torch.Tensor],
+    ) -> None:
+        """WTW-style exponential shaping: rew_pos * exp(rew_neg / sigma).
+
+        Positive/negative classification uses global sum (torch.sum) across
+        all environments, matching the original Walk-These-Ways implementation.
+        """
+        rew_pos = torch.zeros_like(reward_buffer)
+        rew_neg = torch.zeros_like(reward_buffer)
+
+        for name, reward_term in self.reward_terms.items():
+            reward_value = self._compute_weighted_reward(name, reward_term)
+            reward_buffer_per_type[name] = reward_value
+            episode_sums[name] += reward_value
+
+            if torch.sum(reward_value) >= 0:
+                rew_pos += reward_value
+            else:
+                rew_neg += reward_value
+
+        reward_buffer += rew_pos * torch.exp(rew_neg / self.config.shaping_sigma)
 
     def _compute_weighted_reward(self, name: str, reward_term: RewardTermConfig) -> torch.Tensor:
         if name in self._instances:

@@ -107,6 +107,11 @@ def prev_processed_actions(env: World) -> torch.Tensor:
     """
     return env.act_manager.processed_actions.clone()
 
+def prev_raw_actions(env: World, entity_name: str = "robot") -> torch.Tensor:
+    """Current step's processed actions (used as observation input)."""
+
+    return env.act_manager.prev_raw_actions
+
 
 def raw_actions(env: World) -> torch.Tensor:
     """Current step's raw (unprocessed) actions.

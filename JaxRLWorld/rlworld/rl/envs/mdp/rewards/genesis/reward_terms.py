@@ -91,7 +91,7 @@ def action_rate(env: GenesisEnv) -> torch.Tensor:
     """Penalty for sudden joint action changes
        Returns negative squared difference between consecutive joint actions"""
     return -torch.sum(
-        torch.square(env.act_manager.prev_processed_actions - env.act_manager._processed_actions), dim=1
+        torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions), dim=1
     )
 
 
@@ -103,7 +103,12 @@ def similar_to_default(env: GenesisEnv) -> torch.Tensor:
     return -torch.sum(torch.abs(dof_pos - env.act_manager.offset), dim=1)
 
 
-def penalize_invalid_contact(env: GenesisEnv, contact_allowed_links: list[str], entity_name: str = "robot"):
+def penalize_invalid_contact(
+    env: GenesisEnv,
+    contact_allowed_links: list[str],
+    entity_name: str = "robot",
+    exclude_self_contact: bool = True,
+):
     entity = env.scene_manager[entity_name]
 
     # Get allowed link indices (global)
@@ -119,7 +124,7 @@ def penalize_invalid_contact(env: GenesisEnv, contact_allowed_links: list[str], 
     )
 
     # Get contact information
-    contact_info = entity.get_contacts(exclude_self_contact=True)
+    contact_info = entity.get_contacts(exclude_self_contact=exclude_self_contact)
 
     valid_mask = contact_info["valid_mask"]
     link_a = contact_info["link_a"]
@@ -605,3 +610,178 @@ def penalize_hip_deviation_huber(
     )
 
     return -torch.sum(penalty, dim=-1)
+
+
+# ── Walk-These-Ways reward terms (Genesis) ───────────────────────────────
+
+def wtw_feet_slip(
+    env: LocomotionEnv,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact.
+
+    Uses contact OR prev_contact (2-step filtering), matching WTW exactly.
+    """
+    feet_links = tuple(env.gait_manager.foot_names)
+    entity = env.scene_manager[entity_name]
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local)
+
+    # Contact: current OR previous step
+    contact = state.contact_indicator(
+        env, entity_name=entity_name, links=feet_links
+    ).bool()
+    link_indices = env.contact_manager.get_link_indices(feet_links, entity_name, preserve_order=True)
+    prev_contact = env.contact_manager.prev_is_contact[:, link_indices]
+    contact_filt = contact | prev_contact
+
+    vel_sq = torch.sum(torch.square(feet_vel[..., :2]), dim=-1)
+    return -torch.sum(contact_filt.float() * vel_sq, dim=-1)
+
+
+def wtw_tracking_contacts_shaped_force(
+    env: LocomotionEnv,
+    gait_force_sigma: float = 100.0,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """WTW: penalize foot contact force when foot should be in swing.
+
+    reward = mean_over_feet[ -(1 - desired_contact) * (1 - exp(-force² / σ)) ]
+    """
+    feet_links = tuple(env.gait_manager.foot_names)
+    link_indices = env.contact_manager.get_link_indices(feet_links, entity_name, preserve_order=True)
+    link_names = env.contact_manager.get_link_names(link_indices)
+
+    sensors = env.scene_manager.sensors[entity_name]
+    foot_forces = torch.stack([
+        torch.norm(sensors[name]["ContactForceSensor"].read(), dim=-1)
+        for name in link_names
+    ], dim=1)
+
+    desired_contact = env.gait_manager.desired_contact_states
+    num_feet = desired_contact.shape[1]
+
+    reward = torch.zeros(env.num_envs, device=env.device)
+    for i in range(num_feet):
+        reward += -(1.0 - desired_contact[:, i]) * (
+            1.0 - torch.exp(-foot_forces[:, i] ** 2 / gait_force_sigma)
+        )
+    return reward / num_feet
+
+
+def wtw_tracking_contacts_shaped_vel(
+    env: LocomotionEnv,
+    gait_vel_sigma: float = 10.0,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """WTW: penalize foot velocity when foot should be in stance.
+
+    reward = mean_over_feet[ -(desired_contact) * (1 - exp(-vel² / σ)) ]
+    """
+    feet_links = tuple(env.gait_manager.foot_names)
+    entity = env.scene_manager[entity_name]
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local)
+
+    foot_vel_norm = torch.norm(feet_vel, dim=-1)
+    desired_contact = env.gait_manager.desired_contact_states
+    num_feet = desired_contact.shape[1]
+
+    reward = torch.zeros(env.num_envs, device=env.device)
+    for i in range(num_feet):
+        reward += -(desired_contact[:, i] * (
+            1.0 - torch.exp(-foot_vel_norm[:, i] ** 2 / gait_vel_sigma)
+        ))
+    return reward / num_feet
+
+
+def wtw_feet_clearance_cmd_linear(
+    env: LocomotionEnv,
+    foot_radius: float = 0.02,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """WTW: penalize foot height error during swing, scaled by commanded footswing height.
+
+    target_height = footswing_height_cmd * phase_triangle + foot_radius
+    penalty = (target - actual)² * (1 - desired_contact)
+    """
+    feet_links = tuple(env.gait_manager.foot_names)
+    entity = env.scene_manager[entity_name]
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+    feet_pos = entity.get_links_pos(links_idx_local=links_idx_local)
+    foot_height = feet_pos[..., 2]
+
+    # Triangle wave from foot phases: peaks at mid-swing (phase=0.75)
+    foot_phases = env.gait_manager.foot_phases
+    phases = 1.0 - torch.abs(
+        1.0 - torch.clip((foot_phases * 2.0) - 1.0, 0.0, 1.0) * 2.0
+    )
+
+    footswing_height = env.command_manager.footswing_height
+    target_height = footswing_height.unsqueeze(1) * phases + foot_radius
+
+    desired_contact = env.gait_manager.desired_contact_states
+    clearance_error = torch.square(target_height - foot_height) * (1.0 - desired_contact)
+    return -torch.sum(clearance_error, dim=-1)
+
+
+def wtw_raibert_heuristic(
+    env: LocomotionEnv,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """WTW: penalize footstep placement error vs Raibert heuristic.
+
+    Computes desired foot positions in body frame using commanded velocity,
+    stance dimensions, and gait phase, then penalizes deviation.
+    """
+    from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
+
+    feet_links = tuple(env.gait_manager.foot_names)
+    entity = env.scene_manager[entity_name]
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+
+    foot_positions = entity.get_links_pos(links_idx_local=links_idx_local)
+    base_pos = env.get_robot_data(entity_name).root_link_pos_w
+    base_quat = env.get_robot_data(entity_name).root_link_quat_w
+
+    num_feet = foot_positions.shape[1]
+    cur_footsteps_translated = foot_positions - base_pos.unsqueeze(1)
+
+    footsteps_in_body = torch.zeros_like(cur_footsteps_translated)
+    for i in range(num_feet):
+        footsteps_in_body[:, i, :] = quat_apply_yaw_wxyz(
+            quat_conjugate_wxyz(base_quat), cur_footsteps_translated[:, i, :]
+        )
+
+    # Nominal positions from stance commands, order-independent via leg parsing
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import get_leg_xy_signs
+
+    stance_width = env.command_manager.stance_width
+    stance_length = env.command_manager.stance_length
+
+    leg_signs = get_leg_xy_signs(feet_links)
+    x_signs = torch.tensor([s[0] for s in leg_signs], device=env.device)
+    y_signs = torch.tensor([s[1] for s in leg_signs], device=env.device)
+
+    desired_xs = (stance_length.unsqueeze(1) / 2) * x_signs.unsqueeze(0)
+    desired_ys = (stance_width.unsqueeze(1) / 2) * y_signs.unsqueeze(0)
+
+    # Raibert offsets based on velocity and gait phase
+    foot_phases = env.gait_manager.foot_phases
+    phases = torch.abs(1.0 - (foot_phases * 2.0)) * 1.0 - 0.5
+    freq = env.command_manager.gait_freq
+    x_vel = env.command_manager.lin_vel_x.unsqueeze(1)
+    yaw_vel = env.command_manager.ang_vel.unsqueeze(1)
+    y_vel_des = yaw_vel * stance_length.unsqueeze(1) / 2
+
+    desired_xs_offset = phases * x_vel * (0.5 / freq.unsqueeze(1))
+    # y offset flips for rear legs (x_sign < 0)
+    desired_ys_offset = phases * y_vel_des * (0.5 / freq.unsqueeze(1))
+    desired_ys_offset = desired_ys_offset * x_signs.unsqueeze(0)
+
+    desired_xs = desired_xs + desired_xs_offset
+    desired_ys = desired_ys + desired_ys_offset
+
+    desired_footsteps = torch.stack([desired_xs, desired_ys], dim=2)
+    err = torch.abs(desired_footsteps - footsteps_in_body[:, :, 0:2])
+    return -torch.sum(torch.square(err), dim=(1, 2))

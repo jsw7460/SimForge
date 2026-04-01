@@ -212,8 +212,33 @@ def self_collision_cost(
         force_mag = torch.norm(data.force_history, dim=-1)  # [B, N, H]
         hit = (force_mag > force_threshold).any(dim=1)       # [B, H]
         return -hit.sum(dim=-1).float()                      # [B]
-    assert data.found is not None
     return -data.found.squeeze(-1).float()
+
+
+def wtw_collision(
+    env: "MujocoEnv",
+    sensor_name: str,
+    force_threshold: float = 0.1,
+) -> torch.Tensor:
+    """WTW collision: count non-foot bodies with contact force > threshold.
+
+    Matches WTW _reward_collision: counts bodies where net contact force
+    magnitude exceeds threshold, regardless of contact source (ground + self).
+    """
+    sensor = env.scene_manager.get_sensor(sensor_name)
+    data = sensor.data
+
+    if data.force is not None:
+        force_mag = torch.norm(data.force, dim=-1)  # [B, N]
+        return -torch.sum((force_mag > force_threshold).float(), dim=-1)
+
+    if data.found is not None:
+        found = data.found
+        if found.dim() == 3:
+            found = found.squeeze(-1)
+        return -torch.sum((found > 0).float(), dim=-1)
+
+    return torch.zeros(env.num_envs, device=env.device)
 
 
 def feet_air_time(
@@ -504,3 +529,148 @@ class posture:
         desired_joint_pos = self.default_joint_pos[:, self._joint_ids]
         error_squared = torch.square(current_joint_pos - desired_joint_pos)
         return torch.exp(-torch.mean(error_squared / (self.std**2), dim=1))
+
+
+# ── Walk-These-Ways reward terms (MuJoCo) ────────────────────────────────
+
+def wtw_feet_slip(
+    env: "MujocoEnv",
+    sensor_name: str,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
+    robot = env.scene_manager.get_entity(asset_cfg.name)
+    contact_sensor = env.scene_manager.get_sensor(sensor_name)
+
+    data = contact_sensor.data
+    if data.force_history is not None:
+        force_mag = torch.norm(data.force_history, dim=-1)
+        in_contact = (force_mag > 1e-6).any(dim=-1)
+    else:
+        in_contact = (data.found > 0).squeeze(-1).bool()
+
+    # prev_is_contact via contact_manager
+    link_indices = list(range(in_contact.shape[1]))
+    prev_contact = env.contact_manager.prev_is_contact[:, link_indices]
+    contact_filt = (in_contact | prev_contact).float()
+
+    foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
+    vel_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
+    return -torch.sum(contact_filt * vel_sq, dim=-1)
+
+
+def wtw_tracking_contacts_shaped_force(
+    env: "MujocoEnv",
+    sensor_name: str,
+    gait_force_sigma: float = 100.0,
+) -> torch.Tensor:
+    """WTW: penalize foot contact force when foot should be in swing."""
+    contact_sensor = env.scene_manager.get_sensor(sensor_name)
+    forces = contact_sensor.data.force
+    foot_forces = torch.norm(forces, dim=-1)
+
+    desired_contact = env.gait_manager.desired_contact_states
+    num_feet = desired_contact.shape[1]
+
+    reward = torch.zeros(env.num_envs, device=env.device)
+    for i in range(num_feet):
+        reward += -(1.0 - desired_contact[:, i]) * (
+            1.0 - torch.exp(-foot_forces[:, i] ** 2 / gait_force_sigma)
+        )
+    return reward / num_feet
+
+
+def wtw_tracking_contacts_shaped_vel(
+    env: "MujocoEnv",
+    gait_vel_sigma: float = 10.0,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """WTW: penalize foot velocity when foot should be in stance."""
+    robot = env.scene_manager.get_entity(asset_cfg.name)
+    foot_vel = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :]
+    foot_vel_norm = torch.norm(foot_vel, dim=-1)
+
+    desired_contact = env.gait_manager.desired_contact_states
+    num_feet = desired_contact.shape[1]
+
+    reward = torch.zeros(env.num_envs, device=env.device)
+    for i in range(num_feet):
+        reward += -(desired_contact[:, i] * (
+            1.0 - torch.exp(-foot_vel_norm[:, i] ** 2 / gait_vel_sigma)
+        ))
+    return reward / num_feet
+
+
+def wtw_feet_clearance_cmd_linear(
+    env: "MujocoEnv",
+    foot_radius: float = 0.02,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """WTW: penalize foot height error during swing, scaled by commanded footswing height."""
+    robot = env.scene_manager.get_entity(asset_cfg.name)
+    foot_height = robot.data.site_pos_w[:, asset_cfg.site_ids, 2]
+
+    foot_phases = env.gait_manager.foot_phases
+    phases = 1.0 - torch.abs(
+        1.0 - torch.clip((foot_phases * 2.0) - 1.0, 0.0, 1.0) * 2.0
+    )
+
+    footswing_height = env.command_manager.footswing_height
+    target_height = footswing_height.unsqueeze(1) * phases + foot_radius
+
+    desired_contact = env.gait_manager.desired_contact_states
+    clearance_error = torch.square(target_height - foot_height) * (1.0 - desired_contact)
+    return -torch.sum(clearance_error, dim=-1)
+
+
+def wtw_raibert_heuristic(
+    env: "MujocoEnv",
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """WTW: penalize footstep placement error vs Raibert heuristic."""
+    from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
+
+    robot = env.scene_manager.get_entity(asset_cfg.name)
+    foot_positions = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
+    base_pos = env.get_robot_data().root_link_pos_w
+    base_quat = env.get_robot_data().root_link_quat_w
+
+    num_feet = foot_positions.shape[1]
+    cur_footsteps_translated = foot_positions - base_pos.unsqueeze(1)
+
+    footsteps_in_body = torch.zeros_like(cur_footsteps_translated)
+    for i in range(num_feet):
+        footsteps_in_body[:, i, :] = quat_apply_yaw_wxyz(
+            quat_conjugate_wxyz(base_quat), cur_footsteps_translated[:, i, :]
+        )
+
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import get_leg_xy_signs
+
+    feet_names = env.gait_manager.foot_names
+    stance_width = env.command_manager.stance_width
+    stance_length = env.command_manager.stance_length
+
+    leg_signs = get_leg_xy_signs(feet_names)
+    x_signs = torch.tensor([s[0] for s in leg_signs], device=env.device)
+    y_signs = torch.tensor([s[1] for s in leg_signs], device=env.device)
+
+    desired_xs = (stance_length.unsqueeze(1) / 2) * x_signs.unsqueeze(0)
+    desired_ys = (stance_width.unsqueeze(1) / 2) * y_signs.unsqueeze(0)
+
+    foot_phases = env.gait_manager.foot_phases
+    phases = torch.abs(1.0 - (foot_phases * 2.0)) * 1.0 - 0.5
+    freq = env.command_manager.gait_freq
+    x_vel = env.command_manager.lin_vel_x.unsqueeze(1)
+    yaw_vel = env.command_manager.ang_vel.unsqueeze(1)
+    y_vel_des = yaw_vel * stance_length.unsqueeze(1) / 2
+
+    desired_xs_offset = phases * x_vel * (0.5 / freq.unsqueeze(1))
+    desired_ys_offset = phases * y_vel_des * (0.5 / freq.unsqueeze(1))
+    desired_ys_offset = desired_ys_offset * x_signs.unsqueeze(0)
+
+    desired_xs = desired_xs + desired_xs_offset
+    desired_ys = desired_ys + desired_ys_offset
+
+    desired_footsteps = torch.stack([desired_xs, desired_ys], dim=2)
+    err = torch.abs(desired_footsteps - footsteps_in_body[:, :, 0:2])
+    return -torch.sum(torch.square(err), dim=(1, 2))

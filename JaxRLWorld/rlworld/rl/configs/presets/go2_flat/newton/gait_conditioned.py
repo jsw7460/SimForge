@@ -5,10 +5,11 @@ See genesis/gait_conditioned.py for detailed documentation.
 """
 from dataclasses import dataclass, field
 
-from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig
+from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
 from rlworld.rl.configs.newton_config_classes import NewtonObservationConfig as ObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.envs.managers.common.command_term import (
     VelocityCommandTermCfg,
     GaitCommandTermCfg,
@@ -18,13 +19,15 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     dof_pos_nominal_difference,
     dof_vel,
-    prev_processed_actions,
-    last_processed_actions,
+    raw_actions,
+    prev_raw_actions,
     clock_inputs,
     all_commands,
     base_lin_vel,
     base_height,
 )
+from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
+from rlworld.rl.envs.mdp.rewards.newton import reward_terms as rf_newton
 from .base import Go2FlatNewtonConfig
 
 
@@ -72,6 +75,66 @@ class Go2GaitConditionedNewtonConfig(Go2FlatNewtonConfig):
             foot_offset_provider=QuadrupedOffsets(foot_names=self.robot.prefixed_foot_names),
         )
 
+    def _build_reward_config(self) -> RewardConfig:
+        @dataclass
+        class _WTWRewardsCfg(RewardConfig):
+            exponential_shaping: bool = True
+            shaping_sigma: float = 0.02
+
+            track_lin_vel = RewardTermConfig(
+                func=rf_common.track_lin_vel, weight=1.0,
+                params={"std": 0.5},
+            )
+            track_ang_vel = RewardTermConfig(
+                func=rf_common.track_ang_vel, weight=0.5,
+                params={"std": 0.5},
+            )
+            tracking_contacts_shaped_force = RewardTermConfig(
+                func=rf_newton.wtw_tracking_contacts_shaped_force, weight=4.0,
+                params={"gait_force_sigma": 100.0},
+            )
+            tracking_contacts_shaped_vel = RewardTermConfig(
+                func=rf_newton.wtw_tracking_contacts_shaped_vel, weight=4.0,
+                params={"gait_vel_sigma": 10.0},
+            )
+            body_height_cmd = RewardTermConfig(
+                func=rf_common.reward_body_height_cmd, weight=10.0,
+                params={"base_height_target": 0.30},
+            )
+            orientation_control = RewardTermConfig(
+                func=rf_common.penalize_orientation_control, weight=5.0,
+            )
+            raibert_heuristic = RewardTermConfig(
+                func=rf_newton.wtw_raibert_heuristic, weight=10.0,
+            )
+            feet_clearance_cmd_linear = RewardTermConfig(
+                func=rf_newton.wtw_feet_clearance_cmd_linear, weight=30.0,
+            )
+            feet_slip = RewardTermConfig(
+                func=rf_newton.wtw_feet_slip, weight=0.04,
+            )
+            action_smoothness_1 = RewardTermConfig(
+                func=rf_common.penalize_action_smoothness_1, weight=0.1,
+            )
+            action_smoothness_2 = RewardTermConfig(
+                func=rf_common.penalize_action_smoothness_2, weight=0.1,
+            )
+            dof_vel = RewardTermConfig(
+                func=rf_common.penalize_dof_vel, weight=1e-4,
+            )
+            lin_vel_z = RewardTermConfig(
+                func=rf_common.penalize_lin_vel_z, weight=0.02,
+            )
+            ang_vel_xy = RewardTermConfig(
+                func=rf_common.penalize_ang_vel_xy, weight=0.001,
+            )
+            collision = RewardTermConfig(
+                func=rf_newton.penalize_invalid_contact, weight=5.0,
+                params={"allowed_bodies": list(self.robot.prefixed_foot_names)},
+            )
+
+        return _WTWRewardsCfg()
+
     def _build_observation_config(self) -> ObservationConfig:
         @dataclass
         class _ActorObsCfg(ObservationGroupConfig):
@@ -85,8 +148,8 @@ class Go2GaitConditionedNewtonConfig(Go2FlatNewtonConfig):
             dof_vel = ObservationTermConfig(
                 func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5),
             )
-            actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
-            last_actions = ObservationTermConfig(func=last_processed_actions, scale=1.0)
+            actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+            last_actions = ObservationTermConfig(func=prev_raw_actions, scale=1.0)
             clock = ObservationTermConfig(func=clock_inputs, scale=1.0)
 
         @dataclass
@@ -100,3 +163,7 @@ class Go2GaitConditionedNewtonConfig(Go2FlatNewtonConfig):
             critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
 
         return _ObsCfg()
+
+
+def get_config():
+    return Go2GaitConditionedNewtonConfig().build()

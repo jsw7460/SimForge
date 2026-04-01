@@ -218,9 +218,9 @@ def test_manager_sync(train_env, plan_env):
     ), "")
 
     # Action history
-    act_src = train_env.act_manager._prev_processed_actions[0]
+    act_src = train_env.act_manager._processed_action_history[1][0]
     report("action history sync", all(
-        close_enough(plan_env.act_manager._prev_processed_actions[s], act_src)
+        close_enough(plan_env.act_manager._processed_action_history[1][s], act_src)
         for s in range(N_PLAN)
     ), "")
 

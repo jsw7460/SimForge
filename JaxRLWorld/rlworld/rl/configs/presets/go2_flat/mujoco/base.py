@@ -143,9 +143,21 @@ class Go2FlatMujocoConfig:
             track_air_time=True,
         )
 
-        # Unified entity config — actuator type determines mjlab actuator:
-        #   ImplicitActuatorCfg → BuiltinPositionActuator (simulator PD)
-        #   IdealPD/Delayed/etc → BuiltinMotorActuator (direct torque)
+        body_ground_cfg = ContactSensorCfg(
+            name="body_ground_contact",
+            primary=ContactMatch(
+                mode="body",
+                pattern=".*",
+                entity="robot",
+                exclude=(".*foot.*",)
+            ),
+            secondary=None,
+            fields=("found",),
+            reduce="none",
+            num_slots=1,
+            track_air_time=False
+        )
+
         robot_entity = MujocoEntityCfg(
             urdf_path=self.robot.urdf_path,
             init_state=InitialStateCfg(
@@ -185,7 +197,7 @@ class Go2FlatMujocoConfig:
             env_spacing=2.0,
             robot_entity_name="robot",
             entities={"robot": robot_entity},
-            sensors=(feet_ground_cfg,),
+            sensors=(feet_ground_cfg, body_ground_cfg),
             terrain_type="plane",
             solver_iterations=10,
             solver_ls_iterations=20,
