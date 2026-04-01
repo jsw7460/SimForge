@@ -1,12 +1,30 @@
-"""Go2 MuJoCo config with gait-conditioned commands."""
-from dataclasses import dataclass
+"""Go2 MuJoCo config with gait-conditioned commands.
 
-from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig
+Observation structure matching Walk-These-Ways (69 dim).
+See genesis/gait_conditioned.py for detailed documentation.
+"""
+from dataclasses import dataclass, field
+
+from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig
+from rlworld.rl.configs.mujoco_config_classes import MujocoObservationConfig as ObservationConfig
+from rlworld.rl.configs.observations import ObservationTermConfig
+from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.envs.managers.common.command_term import (
     VelocityCommandTermCfg,
     GaitCommandTermCfg,
 )
 from rlworld.rl.envs.managers.common.gait import QuadrupedOffsets
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    projected_gravity,
+    dof_pos_nominal_difference,
+    dof_vel,
+    prev_processed_actions,
+    last_processed_actions,
+    clock_inputs,
+    all_commands,
+    base_lin_vel,
+    base_height,
+)
 from .base import Go2FlatMujocoConfig
 
 
@@ -53,3 +71,32 @@ class Go2GaitConditionedMujocoConfig(Go2FlatMujocoConfig):
             duration_command="gait_duration",
             foot_offset_provider=QuadrupedOffsets(foot_names=self.robot.foot_names),
         )
+
+    def _build_observation_config(self) -> ObservationConfig:
+        @dataclass
+        class _ActorObsCfg(ObservationGroupConfig):
+            projected_gravity = ObservationTermConfig(
+                func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05),
+            )
+            commands = ObservationTermConfig(func=all_commands, scale=1.0)
+            dof_pos = ObservationTermConfig(
+                func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.01, 0.01),
+            )
+            dof_vel = ObservationTermConfig(
+                func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5),
+            )
+            actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+            last_actions = ObservationTermConfig(func=last_processed_actions, scale=1.0)
+            clock = ObservationTermConfig(func=clock_inputs, scale=1.0)
+
+        @dataclass
+        class _CriticObsCfg(_ActorObsCfg):
+            base_lin_vel = ObservationTermConfig(func=base_lin_vel, scale=2.0)
+            base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
+
+        @dataclass
+        class _ObsCfg(ObservationConfig):
+            actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
+            critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
+
+        return _ObsCfg()

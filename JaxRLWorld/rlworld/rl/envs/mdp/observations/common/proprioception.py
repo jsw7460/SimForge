@@ -115,3 +115,39 @@ def raw_actions(env: World) -> torch.Tensor:
         Tensor of shape (num_envs, num_actions).
     """
     return env.act_manager.raw_actions
+
+
+def last_processed_actions(env: World) -> torch.Tensor:
+    """Previous step's processed actions.
+
+    This is the action applied one step before the current one.
+    Matches Walk-These-Ways ``self.last_actions`` in observations.
+
+    Returns:
+        Tensor of shape (num_envs, num_actions).
+    """
+    return env.act_manager.prev_processed_actions.clone()
+
+
+def clock_inputs(env: World) -> torch.Tensor:
+    """Gait clock signals from GaitManager.
+
+    Returns sin(2*pi * warped_foot_phase) for each foot.
+    Requires the environment to have a ``gait_manager`` attribute.
+
+    Returns:
+        Tensor of shape (num_envs, num_feet).
+    """
+    return env.gait_manager.clock_inputs
+
+
+def all_commands(env: World) -> torch.Tensor:
+    """All command terms concatenated.
+
+    Returns all registered command terms (e.g., velocity + gait)
+    as a single tensor via CommandManager.get_commands_tensor().
+
+    Returns:
+        Tensor of shape (num_envs, total_command_dim).
+    """
+    return env.command_manager.get_commands_tensor()
