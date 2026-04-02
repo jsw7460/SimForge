@@ -155,7 +155,8 @@ class Go2FlatMujocoConfig:
             fields=("found", "force"),
             reduce="none",
             num_slots=1,
-            track_air_time=False
+            track_air_time=False,
+            history_length=self.decimation,
         )
 
         robot_entity = MujocoEntityCfg(

@@ -89,6 +89,14 @@ class BaseContactManager(BaseManager, ABC):
         """Return contact forces ``(num_envs, group.num_tracked, 3)`` or ``None``."""
         ...
 
+    def _compute_group_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
+        """Return contact force history ``(num_envs, group.num_tracked, H, 3)`` or ``None``.
+
+        Override in backends that support substep history (e.g. MuJoCo).
+        Returns ``None`` by default (no history available).
+        """
+        return None
+
     # ------------------------------------------------------------------
     # Public API — named group access
     # ------------------------------------------------------------------
@@ -175,6 +183,24 @@ class BaseContactManager(BaseManager, ABC):
                 self.num_envs, group.num_tracked, 3, device=self.device
             )
         return self._apply_order_3d(force, group_name, order)
+
+    def contact_force_history(
+        self, group_name: str, order: list[str] | None = None
+    ) -> torch.Tensor | None:
+        """Contact force history across substeps. Shape: ``(num_envs, N, H, 3)``.
+
+        Returns ``None`` if the backend does not support substep history
+        (Genesis, Newton). MuJoCo returns history when ``history_length > 0``
+        in the ContactSensorCfg.
+        """
+        group = self._get_group(group_name)
+        history = self._compute_group_contact_force_history(group)
+        if history is None:
+            return None
+        if order is not None:
+            reindex = self._get_reindex(group_name, order)
+            history = history[:, reindex, :, :]
+        return history
 
     def current_air_time(
         self, group_name: str, order: list[str] | None = None

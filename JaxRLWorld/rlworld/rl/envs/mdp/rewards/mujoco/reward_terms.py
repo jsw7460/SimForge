@@ -200,11 +200,21 @@ def self_collision_cost(
     contact_group: str = "body_ground_contact",
     force_threshold: float = 10.0,
 ) -> torch.Tensor:
-    """Penalize self-collisions based on contact force magnitude."""
+    """Penalize self-collisions based on contact force magnitude.
+
+    Uses force_history if available (substep-aware), otherwise falls back
+    to instantaneous force.
+    """
+    history = env.contact_manager.contact_force_history(contact_group)
+    if history is not None:
+        # [B, N, H, 3] → [B, N, H] → any substep > threshold → [B, N]
+        force_mag = torch.norm(history, dim=-1)
+        hit = (force_mag > force_threshold).any(dim=2)  # [B, N]
+        return -hit.float().sum(dim=-1)
+
     forces = env.contact_manager.contact_force(contact_group)
     force_mag = torch.norm(forces, dim=-1)  # [B, N]
-    hit = (force_mag > force_threshold).float()
-    return -hit.sum(dim=-1)
+    return -(force_mag > force_threshold).float().sum(dim=-1)
 
 
 def wtw_collision(
@@ -214,12 +224,18 @@ def wtw_collision(
 ) -> torch.Tensor:
     """WTW collision: count non-foot bodies with contact force > threshold.
 
-    Matches WTW _reward_collision: counts bodies where net contact force
-    magnitude exceeds threshold, regardless of contact source (ground + self).
+    Uses force_history if available (substep-aware), otherwise falls back
+    to instantaneous force.
     """
+    history = env.contact_manager.contact_force_history(contact_group)
+    if history is not None:
+        force_mag = torch.norm(history, dim=-1)  # [B, N, H]
+        hit = (force_mag > force_threshold).any(dim=2)  # [B, N]
+        return -hit.float().sum(dim=-1)
+
     forces = env.contact_manager.contact_force(contact_group)
     force_mag = torch.norm(forces, dim=-1)  # [B, N]
-    return -torch.sum((force_mag > force_threshold).float(), dim=-1)
+    return -(force_mag > force_threshold).float().sum(dim=-1)
 
 
 def feet_air_time(

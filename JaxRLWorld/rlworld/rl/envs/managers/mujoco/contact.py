@@ -51,6 +51,10 @@ class MujocoContactManager(BaseContactManager):
         sensor = self._group_sensors[group.name]
         return sensor.data.force
 
+    def _compute_group_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
+        sensor = self._group_sensors[group.name]
+        return sensor.data.force_history  # (num_envs, N, H, 3) or None
+
     # -- pretty print --
 
     def __str__(self) -> str:
