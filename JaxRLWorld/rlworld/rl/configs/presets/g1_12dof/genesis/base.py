@@ -11,6 +11,7 @@ from rlworld.rl.configs.components.rewards.genesis import TrackingRewards, Regul
 from rlworld.rl.configs.components.rewards.genesis import ContactRewards
 from rlworld.rl.configs.genesis_config_classes import (
     EnvConfig, SceneConfig, ObservationConfig, ActionConfig, CurriculumConfig,
+    GenesisContactSensorCfg,
 )
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
@@ -257,6 +258,13 @@ class G1FlatGenesisConfig:
                     link_name="right_ankle_roll_link",
                     sensor_class=gs.sensors.ContactForce,
                 )
+            ],
+            contact_sensors=[
+                GenesisContactSensorCfg(
+                    name="feet_ground_contact",
+                    primary_links=["left_ankle_roll_link", "right_ankle_roll_link"],
+                    secondary_entity="ground",
+                ),
             ],
             sim_options=gs.options.SimOptions(dt=0.005, substeps=1),
             rigid_options=gs.options.RigidOptions(

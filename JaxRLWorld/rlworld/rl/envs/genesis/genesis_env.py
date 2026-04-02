@@ -154,6 +154,10 @@ class GenesisEnv(World):
 
         ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
         self.contact_manager = ContactCls(env=self)
+        contact_sensors = getattr(self.scene_cfg, "contact_sensors", None)
+        if contact_sensors:
+            for sensor_cfg in contact_sensors:
+                self.contact_manager.register_sensor(sensor_cfg)
 
         from rlworld.rl.envs.genesis.robot_data import GenesisRobotData
         self._robot_data_cache = {}

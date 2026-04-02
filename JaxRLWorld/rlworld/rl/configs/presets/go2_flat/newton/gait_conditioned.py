@@ -129,8 +129,8 @@ class Go2GaitConditionedNewtonConfig(Go2FlatNewtonConfig):
                 func=rf_common.penalize_ang_vel_xy, weight=0.001,
             )
             collision = RewardTermConfig(
-                func=rf_newton.penalize_invalid_contact, weight=5.0,
-                params={"allowed_bodies": list(self.robot.prefixed_foot_names)},
+                func=rf_newton.wtw_collision, weight=5.0,
+                params={"contact_group": "body_ground_contact", "force_threshold": 1.0},
             )
 
         return _WTWRewardsCfg()

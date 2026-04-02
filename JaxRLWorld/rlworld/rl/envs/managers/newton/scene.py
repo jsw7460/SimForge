@@ -561,10 +561,36 @@ class NewtonSceneManager(BaseManager):
 
         elif isinstance(config, NewtonContactSensorConfig):
             entity_name = config.entity_name
+            sensing_bodies = self._prefix_names(entity_name, config.sensing_obj_bodies)
+            sensing_shapes = self._prefix_names(entity_name, config.sensing_obj_shapes)
+
+            # Apply exclude filter using fnmatch on first world's labels
+            if config.exclude_bodies and sensing_bodies is not None:
+                from fnmatch import fnmatch
+                all_labels = self.model.body_label
+                world_count = self.model.world_count
+                bodies_per_env = len(all_labels) // world_count
+                first_env_labels = all_labels[:bodies_per_env]
+
+                # Resolve sensing patterns via fnmatch (same as Newton internal)
+                patterns = [sensing_bodies] if isinstance(sensing_bodies, str) else sensing_bodies
+                matched_indices = [
+                    idx for idx, label in enumerate(first_env_labels)
+                    if any(fnmatch(label, p) for p in patterns)
+                ]
+
+                # Remove excluded
+                matched_indices = [
+                    idx for idx in matched_indices
+                    if not any(fnmatch(first_env_labels[idx], exc) for exc in config.exclude_bodies)
+                ]
+
+                sensing_bodies = [first_env_labels[idx] for idx in matched_indices]
+
             sensor = SensorContact(
                 self.model,
-                sensing_obj_bodies=self._prefix_names(entity_name, config.sensing_obj_bodies),
-                sensing_obj_shapes=self._prefix_names(entity_name, config.sensing_obj_shapes),
+                sensing_obj_bodies=sensing_bodies,
+                sensing_obj_shapes=sensing_shapes,
                 counterpart_bodies=self._prefix_names(entity_name, config.counterpart_bodies),
                 counterpart_shapes=config.counterpart_shapes,
                 measure_total=config.include_total,

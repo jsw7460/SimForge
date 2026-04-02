@@ -56,68 +56,26 @@ def base_euler(env: GenesisEnv, rpy: bool = False, degrees: bool = False):
 
 
 @EnvStepCache()
-def foot_air_time(env: GenesisEnv, links: tuple[str, ...], entity_name: str = "robot"):
-    link_indices = env.contact_manager.get_link_indices(links, entity_name)
-
-    current_air_time = env.contact_manager.current_air_time[:, link_indices]
+def foot_air_time(env: GenesisEnv, contact_group: str = "feet_ground_contact"):
+    current_air_time = env.contact_manager.current_air_time(contact_group)
     return current_air_time
 
 @EnvStepCache()
 def contact_indicator(
     env: GenesisEnv,
-    entity_name: str = "robot",
-    links: tuple[str, ...] | None = None,
-    preserve_order: bool = False
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    """
-    Output: [num_envs, num_links]
-    """
-    entity = env.scene_manager[entity_name]
-    if links is None:
-        link_ids = list(range(entity.link_start, entity.link_end))
-    else:
-        link_ids, _ = eu.find_links(entity, list(links), global_ids=True, preserve_order=preserve_order)
-
-    link_ids_tensor = torch.tensor(link_ids, dtype=torch.int32, device=env.device)
-
-    contact_info = entity.get_contacts(exclude_self_contact=True)
-    valid_mask = contact_info["valid_mask"]
-    link_a = contact_info["link_a"]
-    link_b = contact_info["link_b"]
-
-    # Vectorized checking: [num_envs, num_contacts, num_links]
-    link_a_match = link_a.unsqueeze(-1) == link_ids_tensor.unsqueeze(0).unsqueeze(0)
-    link_b_match = link_b.unsqueeze(-1) == link_ids_tensor.unsqueeze(0).unsqueeze(0)
-
-    # Check if each link has any contact
-    valid_mask_expanded = valid_mask.unsqueeze(-1)  # [num_envs, num_contacts, 1]
-    has_contact = torch.any(
-        valid_mask_expanded & (link_a_match | link_b_match),
-        dim=1  # Reduce over contacts dimension
-    )  # [num_envs, num_links]
-
-    return has_contact.float()
+    """Binary contact indicator. Shape: (num_envs, N)."""
+    return env.contact_manager.is_contact(contact_group).float()
 
 @EnvStepCache()
 def contact_force(
     env: GenesisEnv,
-    entity_name: str = "robot",
-    links: tuple[str, ...] | None = None,
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    if isinstance(links, str):
-        links = [links]
-
-    link_indices = env.contact_manager.get_link_indices(list(links), entity_name, preserve_order=True)
-    link_names = env.contact_manager.get_link_names(link_indices)
-
-    # Get contact forces
-    sensors = env.scene_manager.sensors[entity_name]
-    forces = torch.stack([
-        torch.norm(sensors[name]["ContactForceSensor"].read(), dim=-1)
-        for name in link_names
-    ], dim=1)  # (num_envs, num_feet)
-
-    return forces
+    """Per-link contact force magnitude. Shape: (num_envs, N)."""
+    forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, N, 3)
+    return torch.norm(forces_3d, dim=-1)  # (num_envs, N)
 
 
 @EnvStepCache()

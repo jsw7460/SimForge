@@ -16,6 +16,7 @@ from rlworld.rl.configs.components.rewards.genesis import TrackingRewards, Regul
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.genesis_config_classes import (
     EnvConfig, SceneConfig, ObservationConfig, ActionConfig, CurriculumConfig,
+    GenesisContactSensorCfg,
 )
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
@@ -196,7 +197,6 @@ class G1FlatGenesisConfig:
                 rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
-                    "feet_links": feet_links,
                     "command_threshold": 0.05,
                 },
             ),
@@ -323,6 +323,13 @@ class G1FlatGenesisConfig:
                     sensor_class=gs.sensors.ContactForce,
                 )
             ],
+            contact_sensors=[
+                GenesisContactSensorCfg(
+                    name="feet_ground_contact",
+                    primary_links=["left_ankle_roll_link", "right_ankle_roll_link"],
+                    secondary_entity="ground",
+                ),
+            ],
             sim_options=gs.options.SimOptions(dt=0.005, substeps=1),
             rigid_options=gs.options.RigidOptions(
                 dt=0.005,
@@ -352,10 +359,10 @@ class G1FlatGenesisConfig:
             base_lin_vel_obs = ObservationTermConfig(func=state.base_lin_vel, scale=1.0)
             base_height = ObservationTermConfig(func=state.base_height, scale=1.0)
             base_euler = ObservationTermConfig(func=state.base_euler, scale=1.0)
-            contact_indicator = ObservationTermConfig(func=state.contact_indicator, scale=1.0, params={"links": feet_links})
-            contact_force = ObservationTermConfig(func=state.contact_force, scale=0.01, params={"links": feet_links})
+            contact_indicator = ObservationTermConfig(func=state.contact_indicator, scale=1.0)
+            contact_force = ObservationTermConfig(func=state.contact_force, scale=0.01)
             feet_height = ObservationTermConfig(func=state.feet_height, scale=1.0, params={"links": feet_links})
-            foot_air_time = ObservationTermConfig(func=state.foot_air_time, scale=1.0, params={"links": feet_links})
+            foot_air_time = ObservationTermConfig(func=state.foot_air_time, scale=1.0)
 
         @dataclass
         class _ObsCfg(ObservationConfig):
@@ -477,7 +484,6 @@ class G1FlatGenesisConfig:
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
-                    "feet_links": feet_links,
                     "command_threshold": 0.05,
                 },
             )

@@ -17,10 +17,10 @@ if TYPE_CHECKING:
 
 # Nominal x/y sign for each leg in body frame (x=forward, y=left).
 _LEG_NOMINAL_SIGNS = {
-    "FL": (+1.0, -1.0),  # Front-Left:  +x, -y
-    "FR": (+1.0, +1.0),  # Front-Right: +x, +y
-    "RL": (-1.0, -1.0),  # Rear-Left:   -x, -y
-    "RR": (-1.0, +1.0),  # Rear-Right:  -x, +y
+      "FL": (+1.0, +1.0),   # Front-Left:  +x, +y (URDF: left = +y)
+      "FR": (+1.0, -1.0),   # Front-Right: +x, -y (URDF: right = -y)
+      "RL": (-1.0, +1.0),   # Rear-Left:   -x, +y
+      "RR": (-1.0, -1.0),   # Rear-Right:  -x, -y
 }
 
 

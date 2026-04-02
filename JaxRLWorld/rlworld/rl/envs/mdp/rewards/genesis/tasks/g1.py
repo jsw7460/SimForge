@@ -76,6 +76,7 @@ def penalize_feet_swing_height(
     env: "LocomotionEnv",
     max_height: float = 0.08,
     profile: str = "sine",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Penalize feet height error from smooth trajectory during swing phase."""
     entity = env.scene_manager["robot"]
@@ -90,11 +91,8 @@ def penalize_feet_swing_height(
 
     target_height = env.gait_manager.get_target_foot_height(max_height, profile)
 
-    # Contact: preserve_order=True
-    contact_indices = env.contact_manager.get_link_indices(
-        list(foot_names), preserve_order=True
-    )
-    is_contact = env.contact_manager.is_contact[:, contact_indices]
+    # Contact from named group
+    is_contact = env.contact_manager.is_contact(contact_group)
     is_swing = ~is_contact
 
     height_error = torch.square(feet_height - target_height) * is_swing.float()

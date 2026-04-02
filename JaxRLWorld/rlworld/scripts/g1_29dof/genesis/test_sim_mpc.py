@@ -224,16 +224,19 @@ def test_manager_sync(train_env, plan_env):
         for s in range(N_PLAN)
     ), "")
 
-    # Contact
+    # Contact (per-group)
     contact_ok = True
-    for attr in ["current_air_time", "current_contact_time", "_prev_is_contact"]:
-        src = getattr(train_env.contact_manager, attr, None)
-        if src is None:
-            continue
-        dst = getattr(plan_env.contact_manager, attr)
-        for s in range(N_PLAN):
-            if not close_enough(dst[s].float(), src[0].float()):
-                contact_ok = False
+    for group_name in train_env.contact_manager.group_names():
+        train_group = train_env.contact_manager._get_group(group_name)
+        plan_group = plan_env.contact_manager._get_group(group_name)
+        for attr in ["current_air_time", "current_contact_time", "_prev_is_contact"]:
+            src = getattr(train_group, attr, None)
+            if src is None:
+                continue
+            dst = getattr(plan_group, attr)
+            for s in range(N_PLAN):
+                if not close_enough(dst[s].float(), src[0].float()):
+                    contact_ok = False
     report("contact sync", contact_ok, "")
 
     # Termination

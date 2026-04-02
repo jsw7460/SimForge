@@ -26,18 +26,28 @@ class NewtonBodyCache:
         self.original_body_mass = body_mass[0].clone()  # (bodies_per_env,)
 
     def get_body_indices(self, body_patterns: str | list[str]) -> list[int]:
-        """Get body_q indices for patterns (no contact requirement)."""
+        """Get body_q indices for patterns, preserving query pattern order.
+
+        Each pattern is matched against body_names in order. Results are
+        appended per-pattern so that the output follows the query order,
+        not the internal body_names order.
+        """
         if isinstance(body_patterns, str):
             body_patterns = [body_patterns]
 
         key = tuple(body_patterns)
         if key not in self._body_cache:
+            seen = set()
             body_indices = []
             for pattern in body_patterns:
                 regex = re.compile(pattern)
-                for idx, name in enumerate(self.body_names):
-                    if regex.match(name) and idx not in body_indices:
-                        body_indices.append(idx)
+                pattern_matches = [
+                    idx for idx, name in enumerate(self.body_names)
+                    if regex.match(name) and idx not in seen
+                ]
+                for idx in pattern_matches:
+                    seen.add(idx)
+                body_indices.extend(pattern_matches)
 
             if not body_indices:
                 raise ValueError(
@@ -57,17 +67,19 @@ class NewtonBodyCache:
 
         key = tuple(body_patterns)
         if key not in self._contact_cache:
-            contact_indices = self.env.contact_manager.get_shape_indices(
-                list(body_patterns), use_regex=True, preserve_order=True
+            contact_indices = self.env.contact_manager.get_indices(
+                "foot_contact", list(body_patterns), preserve_order=True
             )
 
             if not contact_indices:
+                tracked = self.env.contact_manager.tracked_names("foot_contact")
                 raise ValueError(
-                    f"No bodies matching '{body_patterns}' in contact_manager. "
-                    f"Available: {self.env.contact_manager.shape_names}"
+                    f"No bodies matching '{body_patterns}' in contact group 'contact'. "
+                    f"Available: {tracked}"
                 )
 
-            body_names = [self.env.contact_manager.shape_names[i] for i in contact_indices]
+            tracked_names = self.env.contact_manager.tracked_names("foot_contact")
+            body_names = [tracked_names[i] for i in contact_indices]
             body_indices = [self.body_names.index(name) for name in body_names]
             self._contact_cache[key] = (body_indices, contact_indices)
 

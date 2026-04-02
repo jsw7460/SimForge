@@ -182,7 +182,7 @@ def feet_air_time_mjlab(
     result = get_bodies_height_with_contact(env, feet_bodies)
     contact_indices = result.contact_indices
 
-    current_air_time = env.contact_manager.current_air_time[:, contact_indices]
+    current_air_time = env.contact_manager.current_air_time("foot_contact")[:, contact_indices]
 
     in_range = (current_air_time > threshold_min) & (current_air_time < threshold_max)
     reward = torch.sum(in_range.float(), dim=1)
@@ -287,7 +287,7 @@ def feet_slip_mjlab(
     foot_vel_xy = body_qd[:, body_indices, :2]  # (num_envs, num_feet, 2)
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)  # (num_envs, num_feet)
 
-    is_contact = env.contact_manager.is_contact[:, contact_indices]  # (num_envs, num_feet)
+    is_contact = env.contact_manager.is_contact("foot_contact")[:, contact_indices]  # (num_envs, num_feet)
 
     command = torch.stack([
         env.command_manager.lin_vel_x,
@@ -329,10 +329,10 @@ def soft_landing_mjlab(
     result = get_bodies_height_with_contact(env, feet_bodies)
     contact_indices = result.contact_indices
 
-    contact_force = env.contact_manager.contact_force[:, contact_indices]  # (num_envs, num_feet, 3)
+    contact_force = env.contact_manager.contact_force("foot_contact")[:, contact_indices]  # (num_envs, num_feet, 3)
     forces = torch.norm(contact_force, dim=-1)  # (num_envs, num_feet)
 
-    first_contact = env.contact_manager.compute_first_contact()[:, contact_indices]
+    first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, contact_indices]
 
     landing_impact = forces * first_contact.float()
     cost = torch.sum(landing_impact, dim=1)
@@ -553,7 +553,7 @@ class feet_swing_height_mjlab:
         result = get_bodies_height_with_contact(env, self.feet_bodies)
         foot_heights = result.data
 
-        contact_found = env.contact_manager.is_contact[:, self.contact_indices]
+        contact_found = env.contact_manager.is_contact("foot_contact")[:, self.contact_indices]
         in_air = ~contact_found
 
         self.peak_heights = torch.where(
@@ -562,7 +562,7 @@ class feet_swing_height_mjlab:
             self.peak_heights,
         )
 
-        first_contact = env.contact_manager.compute_first_contact()[:, self.contact_indices]
+        first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, self.contact_indices]
 
         lin_vel_x = env.command_manager.lin_vel_x
         lin_vel_y = env.command_manager.lin_vel_y
@@ -615,7 +615,7 @@ class feet_swing_height(feet_swing_height_mjlab):
         result = get_bodies_height_with_contact(env, self.feet_bodies)
         foot_heights = result.data
 
-        contact_found = env.contact_manager.is_contact[:, self.contact_indices]
+        contact_found = env.contact_manager.is_contact("foot_contact")[:, self.contact_indices]
         in_air = ~contact_found
 
         self.peak_heights = torch.where(
@@ -624,7 +624,7 @@ class feet_swing_height(feet_swing_height_mjlab):
             self.peak_heights,
         )
 
-        first_contact = env.contact_manager.compute_first_contact()[:, self.contact_indices]
+        first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, self.contact_indices]
 
         lin_vel_x = env.command_manager.lin_vel_x
         lin_vel_y = env.command_manager.lin_vel_y

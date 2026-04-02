@@ -126,16 +126,19 @@ class GenesisStateSync:
                 .expand(S, -1)
             )
 
-        # --- Contact Manager ---
-        for attr in [
-            "current_air_time", "current_contact_time",
-            "last_air_time", "last_contact_time", "_prev_is_contact",
-        ]:
-            src = getattr(self.train_env.contact_manager, attr, None)
-            if src is None:
-                continue
-            dst = getattr(self.plan_env.contact_manager, attr)
-            dst[:] = _d(src[idx]).unsqueeze(0).expand_as(dst)
+        # --- Contact Manager (per-group buffers) ---
+        for group_name in self.train_env.contact_manager.group_names():
+            train_group = self.train_env.contact_manager._get_group(group_name)
+            plan_group = self.plan_env.contact_manager._get_group(group_name)
+            for attr in [
+                "current_air_time", "current_contact_time",
+                "last_air_time", "last_contact_time", "_prev_is_contact",
+            ]:
+                src = getattr(train_group, attr, None)
+                if src is None:
+                    continue
+                dst = getattr(plan_group, attr)
+                dst[:] = _d(src[idx]).unsqueeze(0).expand_as(dst)
 
         # --- Termination Manager ---
         self.plan_env.termination_manager.episode_length_buf[:] = (

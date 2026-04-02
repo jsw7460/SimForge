@@ -298,29 +298,36 @@ def foot_height(
 
 
 @EnvStepCache()
-def foot_air_time(env: "MujocoEnv") -> torch.Tensor:
+def foot_air_time(
+    env: "MujocoEnv",
+    contact_group: str = "feet_ground_contact",
+) -> torch.Tensor:
     """Get current air time of feet.
 
     Returns:
         Tensor of shape [num_envs, num_feet]
     """
-    contact_data = env.contact_manager
-    return contact_data.current_air_time
+    return env.contact_manager.current_air_time(contact_group)
 
 
 @EnvStepCache()
-def foot_contact(env: "MujocoEnv") -> torch.Tensor:
+def foot_contact(
+    env: "MujocoEnv",
+    contact_group: str = "feet_ground_contact",
+) -> torch.Tensor:
     """Get binary contact state of feet.
 
     Returns:
         Tensor of shape [num_envs, num_feet] with values 0.0 or 1.0
     """
-    contact_data = env.contact_manager
-    return contact_data.is_contact.float()
+    return env.contact_manager.is_contact(contact_group).float()
 
 
 @EnvStepCache()
-def foot_contact_forces(env: "MujocoEnv") -> torch.Tensor:
+def foot_contact_forces(
+    env: "MujocoEnv",
+    contact_group: str = "feet_ground_contact",
+) -> torch.Tensor:
     """Get contact forces on feet (log-scaled).
 
     Returns log1p scaled forces to compress large force magnitudes.
@@ -328,21 +335,22 @@ def foot_contact_forces(env: "MujocoEnv") -> torch.Tensor:
     Returns:
         Tensor of shape [num_envs, num_feet * 3]
     """
-    contact_data = env.contact_manager
-    forces = contact_data.contact_force  # [B, N, 3]
+    forces = env.contact_manager.contact_force(contact_group)  # [B, N, 3]
     forces_flat = forces.flatten(start_dim=1)  # [B, N*3]
     return torch.sign(forces_flat) * torch.log1p(torch.abs(forces_flat))
 
 
 @EnvStepCache()
-def foot_contact_time(env: "MujocoEnv") -> torch.Tensor:
+def foot_contact_time(
+    env: "MujocoEnv",
+    contact_group: str = "feet_ground_contact",
+) -> torch.Tensor:
     """Get current contact time of feet.
 
     Returns:
         Tensor of shape [num_envs, num_feet]
     """
-    contact_data = env.contact_manager
-    return contact_data.current_contact_time
+    return env.contact_manager.current_contact_time(contact_group)
 
 
 @EnvStepCache()

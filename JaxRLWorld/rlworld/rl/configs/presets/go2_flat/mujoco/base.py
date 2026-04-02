@@ -149,10 +149,10 @@ class Go2FlatMujocoConfig:
                 mode="body",
                 pattern=".*",
                 entity="robot",
-                exclude=(".*foot.*",)
+                exclude=(".*foot.*", ".*calf.*")
             ),
-            secondary=None,
-            fields=("found",),
+            secondary=ContactMatch(mode="body", pattern="terrain"),
+            fields=("found", "force"),
             reduce="none",
             num_slots=1,
             track_air_time=False
@@ -161,7 +161,7 @@ class Go2FlatMujocoConfig:
         robot_entity = MujocoEntityCfg(
             urdf_path=self.robot.urdf_path,
             init_state=InitialStateCfg(
-                pos=(0, 0, self.robot.base_init_height),
+                pos=(0, 0, self.robot.base_init_height + 0.025),
                 joint_pos=self.robot.default_joint_angles,
             ),
             floating=True,
@@ -229,7 +229,7 @@ class Go2FlatMujocoConfig:
                     "pose_range": {
                         "x": (-0.5, 0.5),
                         "y": (-0.5, 0.5),
-                        "z": (0.01, 0.05),
+                        "z": (0.00, 0.00),
                         "yaw": (-3.14, 3.14),
                     },
                     "velocity_range": {},
@@ -390,7 +390,7 @@ class Go2FlatMujocoConfig:
                 func=rf.feet_swing_height,
                 weight=0.25,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "asset_cfg": SceneEntityCfg(
                         name="robot",
                         site_names=site_names,
@@ -405,7 +405,7 @@ class Go2FlatMujocoConfig:
                 func=rf.feet_slip,
                 weight=0.1,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "asset_cfg": SceneEntityCfg(
                         name="robot",
                         site_names=site_names,
@@ -419,7 +419,7 @@ class Go2FlatMujocoConfig:
                 func=rf.soft_landing,
                 weight=1e-5,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "command_threshold": 0.05,
                 },
             )

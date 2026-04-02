@@ -200,7 +200,7 @@ def feet_air_time(env: "NewtonEnv", feet_bodies: str | list[str]) -> torch.Tenso
         Tensor of shape [num_envs, num_feet]
     """
     result = get_bodies_height_with_contact(env, feet_bodies)
-    return env.contact_manager.last_air_time[:, result.contact_indices]
+    return env.contact_manager.last_air_time("foot_contact")[:, result.contact_indices]
 
 
 @EnvStepCache()
@@ -211,7 +211,7 @@ def feet_contact_indicator(env: "NewtonEnv", feet_bodies: str | list[str]) -> to
         Tensor of shape [num_envs, num_feet] (float: 0.0 or 1.0)
     """
     result = get_bodies_height_with_contact(env, feet_bodies)
-    return env.contact_manager.is_contact[:, result.contact_indices].float()
+    return env.contact_manager.is_contact("foot_contact")[:, result.contact_indices].float()
 
 
 @EnvStepCache()
@@ -233,7 +233,7 @@ def feet_contact_force(env: "NewtonEnv", feet_bodies: str | list[str]) -> torch.
         Tensor of shape [num_envs, num_feet]
     """
     result = get_bodies_height_with_contact(env, feet_bodies)
-    force = env.contact_manager.contact_force[:, result.contact_indices]  # (num_envs, num_feet, 3)
+    force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]  # (num_envs, num_feet, 3)
     return torch.norm(force, dim=-1)
 
 
@@ -245,5 +245,5 @@ def feet_contact_force_3d(env: "NewtonEnv", feet_bodies: str | list[str]) -> tor
         Tensor of shape [num_envs, num_feet * 3]
     """
     result = get_bodies_height_with_contact(env, feet_bodies)
-    force = env.contact_manager.contact_force[:, result.contact_indices]  # (num_envs, num_feet, 3)
+    force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]  # (num_envs, num_feet, 3)
     return force.reshape(env.num_envs, -1)

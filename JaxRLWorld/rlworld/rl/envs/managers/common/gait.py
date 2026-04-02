@@ -202,6 +202,21 @@ class GaitManager(BaseManager):
                     f"Use the same foot_names for both GaitConfig and QuadrupedOffsets."
                 )
 
+        # ── Validate contact_manager group order matches foot_names ──
+        import warnings
+        cm = self.env.contact_manager
+        for group_name in cm.group_names():
+            tracked = tuple(cm.tracked_names(group_name))
+            if len(tracked) == self.num_feet and set(tracked) == set(self.foot_names):
+                if tracked != self.foot_names:
+                    warnings.warn(
+                        f"Contact group '{group_name}' tracked_names {list(tracked)} "
+                        f"has same elements as gait foot_names {list(self.foot_names)} "
+                        f"but in different order. Reward functions that use both "
+                        f"contact and gait data may have misaligned indices.",
+                        stacklevel=2,
+                    )
+
         # ── Fixed-mode precomputation ──
         if config.offset_mode == "fixed":
             self._fixed_offsets = torch.tensor(

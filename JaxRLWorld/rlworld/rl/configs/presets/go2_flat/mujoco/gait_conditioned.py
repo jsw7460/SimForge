@@ -78,7 +78,7 @@ class Go2GaitConditionedMujocoConfig(Go2FlatMujocoConfig):
 
     def _build_reward_config(self) -> RewardConfig:
         site_names = ("FR", "FL", "RR", "RL")
-        foot_asset_cfg = SceneEntityCfg(name="robot", site_names=site_names)
+        foot_asset_cfg = SceneEntityCfg(name="robot", site_names=site_names, preserve_order=False)
 
         @dataclass
         class _WTWRewardsCfg(RewardConfig):
@@ -95,7 +95,7 @@ class Go2GaitConditionedMujocoConfig(Go2FlatMujocoConfig):
             )
             tracking_contacts_shaped_force = RewardTermConfig(
                 func=rf_mujoco.wtw_tracking_contacts_shaped_force, weight=4.0,
-                params={"sensor_name": "feet_ground_contact", "gait_force_sigma": 100.0},
+                params={"contact_group": "feet_ground_contact", "gait_force_sigma": 100.0},
             )
             tracking_contacts_shaped_vel = RewardTermConfig(
                 func=rf_mujoco.wtw_tracking_contacts_shaped_vel, weight=4.0,
@@ -118,7 +118,7 @@ class Go2GaitConditionedMujocoConfig(Go2FlatMujocoConfig):
             )
             feet_slip = RewardTermConfig(
                 func=rf_mujoco.wtw_feet_slip, weight=0.04,
-                params={"sensor_name": "feet_ground_contact", "asset_cfg": foot_asset_cfg},
+                params={"contact_group": "feet_ground_contact", "asset_cfg": foot_asset_cfg},
             )
             action_smoothness_1 = RewardTermConfig(
                 func=rf_common.penalize_action_smoothness_1, weight=0.1,
@@ -137,7 +137,7 @@ class Go2GaitConditionedMujocoConfig(Go2FlatMujocoConfig):
             )
             collision = RewardTermConfig(
                 func=rf_mujoco.wtw_collision, weight=5.0,
-                params={"sensor_name": "body_ground_contact", "force_threshold": 0.1},
+                params={"contact_group": "body_ground_contact", "force_threshold": 1.0},
             )
 
         return _WTWRewardsCfg()

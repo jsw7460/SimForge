@@ -54,7 +54,15 @@ def find_links(
     global_ids: bool = False,
     preserve_order: bool = False,
 ) -> tuple[list[int], list[str]]:
-    """Find links based on name keys."""
+    """Find links by name patterns (regex supported).
+
+    Args:
+        preserve_order: **Counterintuitive naming (from IsaacLab).
+            The docstring in the underlying ``resolve_matching_names`` has
+            True/False descriptions swapped. Actual behavior:**
+            - ``False`` (default): results follow the entity's internal link order.
+            - ``True``: results follow ``name_keys`` (your query) order.
+    """
     links_names = [link.name for link in entity._links]
 
     if link_subset is None:

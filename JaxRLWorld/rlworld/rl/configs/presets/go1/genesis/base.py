@@ -12,6 +12,7 @@ from rlworld.rl.configs.components.observations.genesis import LocomotionObserva
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.genesis_config_classes import (
     EnvConfig, SceneConfig, ObservationConfig, ActionConfig, CurriculumConfig,
+    GenesisContactSensorCfg,
 )
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
@@ -168,6 +169,13 @@ class Go1FlatGenesisConfig:
                 SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.ContactForce),
                 SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.ContactForce),
             ],
+            contact_sensors=[
+                GenesisContactSensorCfg(
+                    name="feet_ground_contact",
+                    primary_links=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+                    secondary_entity="ground",
+                ),
+            ],
             sim_options=gs.options.SimOptions(dt=self.sim_dt, substeps=1),
             rigid_options=gs.options.RigidOptions(
                 dt=self.sim_dt,
@@ -267,7 +275,6 @@ class Go1FlatGenesisConfig:
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
-                    "feet_links": ["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
                     "command_threshold": 0.05,
                 },
             ),

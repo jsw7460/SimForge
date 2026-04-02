@@ -274,11 +274,10 @@ def body_ang_vel_penalty_mjlab(
 
 def feet_air_time_mjlab(
     env: "GenesisEnv",
-    feet_links: str | list[str],
     threshold_min: float = 0.05,
     threshold_max: float = 0.5,
     command_threshold: float = 0.5,
-    entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Reward feet air time.
 
@@ -286,18 +285,15 @@ def feet_air_time_mjlab(
 
     Args:
         env: Genesis environment.
-        feet_links: Foot link name pattern(s).
         threshold_min: Minimum air time to receive reward.
         threshold_max: Maximum air time to receive reward.
         command_threshold: Minimum command velocity to activate reward.
-        entity_name: Name of the robot entity.
+        contact_group: Name of the contact group to use.
 
     Returns:
         Reward tensor of shape (num_envs,).
     """
-    link_indices = env.contact_manager.get_link_indices(feet_links, entity_name)
-
-    current_air_time = env.contact_manager.current_air_time[:, link_indices]
+    current_air_time = env.contact_manager.current_air_time(contact_group)
 
     # Reward if air time is in valid range
     in_range = (current_air_time > threshold_min) & (current_air_time < threshold_max)
@@ -393,10 +389,12 @@ class feet_swing_height_mjlab:
         target_height: float,
         command_threshold: float = 0.05,
         entity_name: str = "robot",
+        contact_group: str = "feet_ground_contact",
     ):
         self.target_height = target_height
         self.command_threshold = command_threshold
         self.entity_name = entity_name
+        self.contact_group = contact_group
 
         if isinstance(feet_links, str):
             feet_links = [feet_links]
@@ -405,7 +403,6 @@ class feet_swing_height_mjlab:
         # Lazy initialization - will be set on first call
         self._initialized = False
         self.links_idx_local = None
-        self.link_indices = None
         self.num_feet = None
         self.peak_heights = None
 
@@ -414,9 +411,6 @@ class feet_swing_height_mjlab:
         entity = env.scene_manager[self.entity_name]
         self.links_idx_local, _ = eu.find_links(
             entity, list(self.feet_links), global_ids=False, preserve_order=True
-        )
-        self.link_indices = env.contact_manager.get_link_indices(
-            list(self.feet_links), self.entity_name, preserve_order=True
         )
         self.num_feet = len(self.links_idx_local)
         self.peak_heights = torch.zeros(
@@ -435,7 +429,7 @@ class feet_swing_height_mjlab:
         foot_heights = foot_pos[:, :, 2]
 
         # Get contact states
-        is_contact = env.contact_manager.is_contact[:, self.link_indices]
+        is_contact = env.contact_manager.is_contact(self.contact_group)
         in_air = ~is_contact
 
         # Update peak heights during swing
@@ -446,7 +440,7 @@ class feet_swing_height_mjlab:
         )
 
         # Detect first contact
-        first_contact = env.contact_manager.compute_first_contact()[:, self.link_indices]
+        first_contact = env.contact_manager.compute_first_contact(self.contact_group)
 
         # Get command velocity
         command = torch.stack([
@@ -488,6 +482,7 @@ def feet_slip_mjlab(
     feet_links: str | list[str],
     command_threshold: float = 0.05,
     entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Penalize foot sliding (xy velocity while in contact).
 
@@ -498,6 +493,7 @@ def feet_slip_mjlab(
         feet_links: Foot link name pattern(s).
         command_threshold: Minimum command velocity to activate penalty.
         entity_name: Name of the robot entity.
+        contact_group: Name of the contact group to use.
 
     Returns:
         Penalty tensor of shape (num_envs,).
@@ -508,7 +504,6 @@ def feet_slip_mjlab(
         feet_links = [feet_links]
 
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
-    link_indices = env.contact_manager.get_link_indices(list(feet_links), entity_name, preserve_order=True)
 
     # Get foot velocities
     foot_vel = entity.get_links_vel(links_idx_local=links_idx_local)  # (num_envs, num_feet, 3)
@@ -516,7 +511,7 @@ def feet_slip_mjlab(
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)  # (num_envs, num_feet)
 
     # Get contact states
-    is_contact = env.contact_manager.is_contact[:, link_indices]  # (num_envs, num_feet)
+    is_contact = env.contact_manager.is_contact(contact_group)  # (num_envs, num_feet)
 
     # Command scaling
     command = torch.stack([
@@ -541,9 +536,8 @@ def feet_slip_mjlab(
 
 def soft_landing_mjlab(
     env: "GenesisEnv",
-    feet_links: str | list[str],
     command_threshold: float = 0.05,
-    entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Penalize high impact forces at landing.
 
@@ -551,28 +545,18 @@ def soft_landing_mjlab(
 
     Args:
         env: Genesis environment.
-        feet_links: Foot link name pattern(s).
         command_threshold: Minimum command velocity to activate penalty.
-        entity_name: Name of the robot entity.
+        contact_group: Name of the contact group to use.
 
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    if isinstance(feet_links, str):
-        feet_links = [feet_links]
-
-    link_indices = env.contact_manager.get_link_indices(list(feet_links), entity_name, preserve_order=True)
-    link_names = env.contact_manager.get_link_names(link_indices)
-
-    # Get contact forces
-    sensors = env.scene_manager.sensors[entity_name]
-    forces = torch.stack([
-        torch.norm(sensors[name]["ContactForceSensor"].read(), dim=-1)
-        for name in link_names
-    ], dim=1)  # (num_envs, num_feet)
+    # Get contact force magnitudes
+    forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, num_feet, 3)
+    forces = torch.norm(forces_3d, dim=-1)  # (num_envs, num_feet)
 
     # Detect first contact
-    first_contact = env.contact_manager.compute_first_contact()[:, link_indices]
+    first_contact = env.contact_manager.compute_first_contact(contact_group)
 
     # Landing impact
     landing_impact = forces * first_contact.float()

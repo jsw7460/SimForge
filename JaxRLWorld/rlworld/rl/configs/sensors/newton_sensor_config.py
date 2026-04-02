@@ -103,6 +103,9 @@ class NewtonContactSensorConfig(NewtonSensorConfig):
     sensing_obj_bodies: str | list[str] | None = None
     sensing_obj_shapes: str | list[str] | None = None
 
+    # Exclude patterns (regex) — matched bodies/shapes are removed from sensing_obj
+    exclude_bodies: tuple[str, ...] = ()
+
     # Counterparts (optional, at most one)
     counterpart_bodies: str | list[str] | None = None
     counterpart_shapes: str | list[str] | None = None

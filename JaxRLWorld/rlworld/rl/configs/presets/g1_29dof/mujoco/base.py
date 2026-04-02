@@ -360,7 +360,7 @@ class G1FlatMujocoConfig:
             self_collision_cost = RewardTermConfig(
                 func=rf.self_collision_cost,
                 weight=1.0,
-                params={"sensor_name": "self_collision"},
+                params={"contact_group": "self_collision"},
             )
 
             # Variable posture reward (G1-specific std values)
@@ -460,7 +460,7 @@ class G1FlatMujocoConfig:
                 func=rf.feet_swing_height,
                 weight=0.25,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "asset_cfg": SceneEntityCfg(
                         name="robot",
                         site_names=site_names,
@@ -475,7 +475,7 @@ class G1FlatMujocoConfig:
                 func=rf.feet_slip,
                 weight=0.1,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "asset_cfg": SceneEntityCfg(
                         name="robot",
                         site_names=site_names,
@@ -489,7 +489,7 @@ class G1FlatMujocoConfig:
                 func=rf.soft_landing,
                 weight=1e-5,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "command_threshold": 0.05,
                 },
             )

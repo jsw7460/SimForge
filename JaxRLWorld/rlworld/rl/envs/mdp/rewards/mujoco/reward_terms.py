@@ -197,27 +197,19 @@ def angular_momentum_penalty(
 
 def self_collision_cost(
     env: "MujocoEnv",
-    sensor_name: str,
+    contact_group: str = "body_ground_contact",
     force_threshold: float = 10.0,
 ) -> torch.Tensor:
-    """Penalize self-collisions.
-
-    When the sensor has force_history (history_length > 0), detects collisions
-    across decimation substeps using force magnitude thresholding. Otherwise,
-    falls back to the instantaneous ``found`` flag.
-    """
-    sensor = env.scene_manager.get_sensor(sensor_name)
-    data = sensor.data
-    if data.force_history is not None:
-        force_mag = torch.norm(data.force_history, dim=-1)  # [B, N, H]
-        hit = (force_mag > force_threshold).any(dim=1)       # [B, H]
-        return -hit.sum(dim=-1).float()                      # [B]
-    return -data.found.squeeze(-1).float()
+    """Penalize self-collisions based on contact force magnitude."""
+    forces = env.contact_manager.contact_force(contact_group)
+    force_mag = torch.norm(forces, dim=-1)  # [B, N]
+    hit = (force_mag > force_threshold).float()
+    return -hit.sum(dim=-1)
 
 
 def wtw_collision(
     env: "MujocoEnv",
-    sensor_name: str,
+    contact_group: str = "body_ground_contact",
     force_threshold: float = 0.1,
 ) -> torch.Tensor:
     """WTW collision: count non-foot bodies with contact force > threshold.
@@ -225,33 +217,20 @@ def wtw_collision(
     Matches WTW _reward_collision: counts bodies where net contact force
     magnitude exceeds threshold, regardless of contact source (ground + self).
     """
-    sensor = env.scene_manager.get_sensor(sensor_name)
-    data = sensor.data
-
-    if data.force is not None:
-        force_mag = torch.norm(data.force, dim=-1)  # [B, N]
-        return -torch.sum((force_mag > force_threshold).float(), dim=-1)
-
-    if data.found is not None:
-        found = data.found
-        if found.dim() == 3:
-            found = found.squeeze(-1)
-        return -torch.sum((found > 0).float(), dim=-1)
-
-    return torch.zeros(env.num_envs, device=env.device)
+    forces = env.contact_manager.contact_force(contact_group)
+    force_mag = torch.norm(forces, dim=-1)  # [B, N]
+    return -torch.sum((force_mag > force_threshold).float(), dim=-1)
 
 
 def feet_air_time(
     env: "MujocoEnv",
-    sensor_name: str,
+    contact_group: str = "feet_ground_contact",
     threshold_min: float = 0.05,
     threshold_max: float = 0.5,
     command_threshold: float = 0.5,
 ) -> torch.Tensor:
     """Reward feet air time."""
-    sensor = env.scene_manager.get_sensor(sensor_name)
-    sensor_data = sensor.data
-    current_air_time = sensor_data.current_air_time
+    current_air_time = env.contact_manager.current_air_time(contact_group)
 
     in_range = (current_air_time > threshold_min) & (current_air_time < threshold_max)
     reward = torch.sum(in_range.float(), dim=1)
@@ -292,13 +271,12 @@ def feet_clearance(
 
 def feet_slip(
     env: "MujocoEnv",
-    sensor_name: str,
+    contact_group: str = "feet_ground_contact",
     command_threshold: float = 0.01,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """Penalize foot sliding (xy velocity while in contact)."""
     robot = env.scene_manager.get_entity(asset_cfg.name)
-    contact_sensor = env.scene_manager.get_sensor(sensor_name)
     command = env.command_manager.get_commands_tensor()
 
     linear_norm = torch.norm(command[:, :2], dim=1)
@@ -306,12 +284,7 @@ def feet_slip(
     total_command = linear_norm + angular_norm
     active = (total_command > command_threshold).float()
 
-    data = contact_sensor.data
-    if data.force_history is not None:
-        force_mag = torch.norm(data.force_history, dim=-1)  # [B, N, H]
-        in_contact = (force_mag > 1e-6).any(dim=-1).float()  # [B, N]
-    else:
-        in_contact = (data.found > 0).float()
+    in_contact = env.contact_manager.is_contact(contact_group).float()
     foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
 
@@ -322,17 +295,14 @@ def feet_slip(
 
 def soft_landing(
     env: "MujocoEnv",
-    sensor_name: str,
+    contact_group: str = "feet_ground_contact",
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
     """Penalize high impact forces at landing to encourage soft footfalls."""
-    contact_sensor = env.scene_manager.get_sensor(sensor_name)
-    sensor_data = contact_sensor.data
-
-    forces = sensor_data.force
+    forces = env.contact_manager.contact_force(contact_group)
     force_magnitude = torch.norm(forces, dim=-1)
 
-    first_contact = contact_sensor.compute_first_contact(dt=env.control_dt)
+    first_contact = env.contact_manager.compute_first_contact(contact_group)
 
     landing_impact = force_magnitude * first_contact.float()
     cost = torch.sum(landing_impact, dim=1)
@@ -444,12 +414,12 @@ class feet_swing_height:
     def __init__(
         self,
         env: "MujocoEnv",
-        sensor_name: str,
-        target_height: float,
-        command_threshold: float,
-        asset_cfg: SceneEntityCfg,
+        contact_group: str = "feet_ground_contact",
+        target_height: float = 0.08,
+        command_threshold: float = 0.01,
+        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
     ):
-        self._sensor_name = sensor_name
+        self._contact_group = contact_group
         self._target_height = target_height
         self._command_threshold = command_threshold
         self._asset_cfg = asset_cfg
@@ -458,15 +428,13 @@ class feet_swing_height:
         self.peak_heights = torch.zeros(
             (env.num_envs, num_sites), device=env.device, dtype=torch.float32
         )
-        self.control_dt = env.control_dt
 
     def __call__(self, env: "MujocoEnv", **kwargs) -> torch.Tensor:
         robot = env.scene_manager.get_entity(self._asset_cfg.name)
-        contact_sensor = env.scene_manager.get_sensor(self._sensor_name)
         command = env.command_manager.get_commands_tensor()
 
         foot_heights = robot.data.site_pos_w[:, self._asset_cfg.site_ids, 2]
-        in_air = contact_sensor.data.found == 0
+        in_air = ~env.contact_manager.is_contact(self._contact_group)
 
         self.peak_heights = torch.where(
             in_air,
@@ -474,7 +442,7 @@ class feet_swing_height:
             self.peak_heights,
         )
 
-        first_contact = contact_sensor.compute_first_contact(dt=self.control_dt)
+        first_contact = env.contact_manager.compute_first_contact(self._contact_group)
 
         linear_norm = torch.norm(command[:, :2], dim=1)
         angular_norm = torch.abs(command[:, 2])
@@ -535,23 +503,14 @@ class posture:
 
 def wtw_feet_slip(
     env: "MujocoEnv",
-    sensor_name: str,
+    contact_group: str = "feet_ground_contact",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
     robot = env.scene_manager.get_entity(asset_cfg.name)
-    contact_sensor = env.scene_manager.get_sensor(sensor_name)
 
-    data = contact_sensor.data
-    if data.force_history is not None:
-        force_mag = torch.norm(data.force_history, dim=-1)
-        in_contact = (force_mag > 1e-6).any(dim=-1)
-    else:
-        in_contact = (data.found > 0).squeeze(-1).bool()
-
-    # prev_is_contact via contact_manager
-    link_indices = list(range(in_contact.shape[1]))
-    prev_contact = env.contact_manager.prev_is_contact[:, link_indices]
+    in_contact = env.contact_manager.is_contact(contact_group)
+    prev_contact = env.contact_manager.prev_is_contact(contact_group)
     contact_filt = (in_contact | prev_contact).float()
 
     foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
@@ -561,23 +520,17 @@ def wtw_feet_slip(
 
 def wtw_tracking_contacts_shaped_force(
     env: "MujocoEnv",
-    sensor_name: str,
+    contact_group: str = "feet_ground_contact",
     gait_force_sigma: float = 100.0,
 ) -> torch.Tensor:
     """WTW: penalize foot contact force when foot should be in swing."""
-    contact_sensor = env.scene_manager.get_sensor(sensor_name)
-    forces = contact_sensor.data.force
+    forces = env.contact_manager.contact_force(contact_group)
     foot_forces = torch.norm(forces, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
-    num_feet = desired_contact.shape[1]
 
-    reward = torch.zeros(env.num_envs, device=env.device)
-    for i in range(num_feet):
-        reward += -(1.0 - desired_contact[:, i]) * (
-            1.0 - torch.exp(-foot_forces[:, i] ** 2 / gait_force_sigma)
-        )
-    return reward / num_feet
+    reward = -(1.0 - desired_contact) * (1.0 - torch.exp(-foot_forces ** 2 / gait_force_sigma))
+    return reward.mean(dim=-1)
 
 
 def wtw_tracking_contacts_shaped_vel(
@@ -591,14 +544,9 @@ def wtw_tracking_contacts_shaped_vel(
     foot_vel_norm = torch.norm(foot_vel, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
-    num_feet = desired_contact.shape[1]
 
-    reward = torch.zeros(env.num_envs, device=env.device)
-    for i in range(num_feet):
-        reward += -(desired_contact[:, i] * (
-            1.0 - torch.exp(-foot_vel_norm[:, i] ** 2 / gait_vel_sigma)
-        ))
-    return reward / num_feet
+    reward = -(desired_contact * (1.0 - torch.exp(-foot_vel_norm ** 2 / gait_vel_sigma)))
+    return reward.mean(dim=-1)
 
 
 def wtw_feet_clearance_cmd_linear(
@@ -630,8 +578,22 @@ def wtw_raibert_heuristic(
     """WTW: penalize footstep placement error vs Raibert heuristic."""
     from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
+    feet_names = env.gait_manager.foot_names
+
+    # Get foot positions in gait_manager.foot_names order
     robot = env.scene_manager.get_entity(asset_cfg.name)
-    foot_positions = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
+    all_site_positions = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
+    # site_names from config may differ from gait_manager order — reindex
+    site_name_list = list(asset_cfg.site_names)
+    foot_name_to_site_idx = {
+        sname: i for i, sname in enumerate(site_name_list)
+    }
+    reindex = [
+        foot_name_to_site_idx[fn.replace("_foot", "")]
+        for fn in feet_names
+    ]
+    foot_positions = all_site_positions[:, reindex, :]
+
     base_pos = env.get_robot_data().root_link_pos_w
     base_quat = env.get_robot_data().root_link_quat_w
 
@@ -645,8 +607,6 @@ def wtw_raibert_heuristic(
         )
 
     from rlworld.rl.envs.mdp.rewards.common.reward_terms import get_leg_xy_signs
-
-    feet_names = env.gait_manager.foot_names
     stance_width = env.command_manager.stance_width
     stance_length = env.command_manager.stance_length
 

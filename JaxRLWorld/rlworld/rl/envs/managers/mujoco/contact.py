@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from rlworld.rl.envs.managers.common.contact import BaseContactManager
+from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -12,30 +12,14 @@ if TYPE_CHECKING:
 
 
 class MujocoContactManager(BaseContactManager):
-    """Manages contact information for MuJoCo/mjlab environments.
+    """Named-group contact manager for MuJoCo/mjlab environments.
 
-    Tracks contact state and timing for shapes registered with mjlab ContactSensor.
-    All tensors have shape ``(num_envs, num_shapes)``.
+    Each mjlab ``ContactSensor`` becomes a named group (sensor cfg name = group name).
     """
 
     def __init__(self, env: "World"):
         super().__init__(env)
-        self._contact_sensors: dict[str, "ContactSensor"] = {}
-        self._shape_names: list[str] = []
-
-    # -- backward compat aliases --
-
-    @property
-    def num_shapes(self) -> int:
-        return self._num_tracked
-
-    @property
-    def shape_names(self) -> list[str]:
-        return self._shape_names
-
-    @property
-    def tracked_names(self) -> list[str]:
-        return self._shape_names
+        self._group_sensors: dict[str, "ContactSensor"] = {}
 
     # -- sensor registration --
 
@@ -44,138 +28,46 @@ class MujocoContactManager(BaseContactManager):
 
         for sensor_name, sensor in self.env.scene_manager.sensors.items():
             if isinstance(sensor, ContactSensor):
-                self._contact_sensors[sensor_name] = sensor
-
-        if not self._contact_sensors:
-            return
-
-        for sensor in self._contact_sensors.values():
-            primary_names = list(
-                dict.fromkeys(slot.primary_name for slot in sensor._slots)
-            )
-            self._shape_names.extend(primary_names)
-
-        self._num_tracked = len(self._shape_names)
-        self._init_buffers()
+                self._group_sensors[sensor_name] = sensor
+                primary_names = list(
+                    dict.fromkeys(slot.primary_name for slot in sensor._slots)
+                )
+                self._register_group(sensor_name, primary_names)
 
     # -- abstract impl --
 
-    def _compute_is_contact(self) -> torch.Tensor:
-        if self._num_tracked == 0:
+    def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
+        sensor = self._group_sensors[group.name]
+        found = sensor.data.found
+        if found is None:
             return torch.zeros(
-                self.num_envs, 0, dtype=torch.bool, device=self.device
+                self.num_envs, group.num_tracked, dtype=torch.bool, device=self.device
             )
+        if found.dim() == 3:
+            found = found.squeeze(-1)
+        return found > 0
 
-        contact_states = []
-        for sensor in self._contact_sensors.values():
-            found = sensor.data.found
-            if found is not None:
-                contact_states.append(found > 0)
-
-        if not contact_states:
-            return torch.zeros(
-                self.num_envs, 0, dtype=torch.bool, device=self.device
-            )
-
-        return torch.cat(contact_states, dim=1)
-
-    # -- MuJoCo-specific --
-
-    @property
-    def contact_force(self) -> torch.Tensor:
-        """Contact force ``(num_envs, num_shapes, 3)``."""
-        if self._num_tracked == 0:
-            return torch.zeros(self.num_envs, 0, 3, device=self.device)
-
-        forces = []
-        for sensor in self._contact_sensors.values():
-            force = sensor.data.force
-            if force is not None:
-                forces.append(force)
-            else:
-                num_primaries = len(
-                    list(
-                        dict.fromkeys(
-                            slot.primary_name for slot in sensor._slots
-                        )
-                    )
-                )
-                forces.append(
-                    torch.zeros(
-                        self.num_envs, num_primaries, 3, device=self.device
-                    )
-                )
-        return torch.cat(forces, dim=1)
-
-    def get_sensor(self, sensor_name: str) -> "ContactSensor":
-        return self._contact_sensors[sensor_name]
-
-    def get_sensor_air_time(
-        self,
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        current_times = []
-        last_times = []
-        for sensor in self._contact_sensors.values():
-            if sensor.cfg.track_air_time:
-                if sensor.data.current_air_time is not None:
-                    current_times.append(sensor.data.current_air_time)
-                if sensor.data.last_air_time is not None:
-                    last_times.append(sensor.data.last_air_time)
-        if current_times:
-            return torch.cat(current_times, dim=1), torch.cat(last_times, dim=1)
-        return None, None
-
-    def get_sensor_contact_time(
-        self,
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        current_times = []
-        last_times = []
-        for sensor in self._contact_sensors.values():
-            if sensor.cfg.track_air_time:
-                if sensor.data.current_contact_time is not None:
-                    current_times.append(sensor.data.current_contact_time)
-                if sensor.data.last_contact_time is not None:
-                    last_times.append(sensor.data.last_contact_time)
-        if current_times:
-            return torch.cat(current_times, dim=1), torch.cat(last_times, dim=1)
-        return None, None
-
-    def get_shape_indices(
-        self,
-        patterns: str | list[str],
-        use_regex: bool = False,
-        preserve_order: bool = False,
-    ) -> list[int]:
-        import re
-
-        if isinstance(patterns, str):
-            patterns = [patterns]
-
-        matched_indices = []
-        for i, name in enumerate(self._shape_names):
-            for pattern in patterns:
-                if use_regex:
-                    if re.search(pattern, name):
-                        matched_indices.append(i)
-                        break
-                else:
-                    if pattern in name or pattern == name:
-                        matched_indices.append(i)
-                        break
-        return matched_indices
+    def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
+        sensor = self._group_sensors[group.name]
+        return sensor.data.force
 
     # -- pretty print --
 
     def __str__(self) -> str:
         from rlworld.rl.utils.pretty import create_manager_table, table_to_string
 
-        if self._num_tracked == 0:
+        if not self._groups:
             return ""
-        rows = [[idx, name] for idx, name in enumerate(self._shape_names)]
+
+        rows = []
+        for gname, group in self._groups.items():
+            for idx, name in enumerate(group.tracked_names):
+                rows.append([gname, idx, name])
+
         table = create_manager_table(
             title="Contact Tracking (MuJoCo/mjlab)",
-            columns=["Idx", "Shape Name"],
+            columns=["Group", "Idx", "Name"],
             rows=rows,
-            footer=f"{self._num_tracked} tracked shapes",
+            footer=f"{len(self._groups)} groups, {sum(g.num_tracked for g in self._groups.values())} tracked",
         )
         return table_to_string(table)

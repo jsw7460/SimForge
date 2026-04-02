@@ -362,7 +362,7 @@ class Go1FlatMujocoConfig:
                 func=rf.feet_air_time,
                 weight=0.0,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "threshold_min": 0.05,
                     "threshold_max": 0.5,
                     "command_threshold": 0.5,
@@ -388,7 +388,7 @@ class Go1FlatMujocoConfig:
                 func=rf.feet_slip,
                 weight=0.1,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "asset_cfg": SceneEntityCfg(
                         name="robot",
                         site_names=("FR", "FL", "RR", "RL"),
@@ -402,7 +402,7 @@ class Go1FlatMujocoConfig:
                 func=rf.soft_landing,
                 weight=1e-5,
                 params={
-                    "sensor_name": "feet_ground_contact",
+                    "contact_group": "feet_ground_contact",
                     "command_threshold": 0.05,
                 },
             ),

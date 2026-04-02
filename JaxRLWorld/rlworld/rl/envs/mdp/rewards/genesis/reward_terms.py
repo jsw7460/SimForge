@@ -12,7 +12,7 @@ from rlworld.rl.utils import entity_utils as eu
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs import GenesisEnv, LocomotionEnv
+    from rlworld.rl.envs import GenesisEnv, GenesisLocomotionEnv
 
 
 def tracking_lin_vel(env: GenesisEnv) -> torch.Tensor:
@@ -150,6 +150,16 @@ def penalize_invalid_contact(
     return - (torch.sum(torch.norm(contact_force_a, dim=-1) > 1.0, dim=-1)
            + torch.sum(torch.norm(contact_force_b, dim=-1) > 1.0, dim=-1))
 
+
+def wtw_collision(
+    env: GenesisEnv,
+    contact_group: str = "body_ground_contact",
+    force_threshold: float = 0.1,
+) -> torch.Tensor:
+    """WTW collision: count non-foot bodies with contact force > threshold."""
+    force = env.contact_manager.contact_force(contact_group)  # (num_envs, N, 3)
+    force_mag = torch.norm(force, dim=-1)  # (num_envs, N)
+    return -torch.sum((force_mag > force_threshold).float(), dim=-1)
 
 
 def penalize_ang_vel_xy(
@@ -399,7 +409,7 @@ def penalize_feet_distance(
 
 
 def reward_gait_pattern(
-    env: LocomotionEnv,
+    env: GenesisLocomotionEnv,
     entity_name: str = "robot"
 ) -> torch.Tensor:
     """Reward for matching desired gait pattern.
@@ -435,10 +445,9 @@ def reward_gait_pattern(
 
 def reward_feet_air_time(
     env: GenesisEnv,
-    links: str | list[str],
     threshold: float = 0.1,
     command_threshold: float = 0.1,
-    entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Reward for taking long steps.
 
@@ -447,18 +456,15 @@ def reward_feet_air_time(
 
     Args:
         env: Locomotion environment with ContactManager.
-        links: Link name pattern(s). Supports regex (e.g., ".*_foot").
         threshold: Minimum air time (seconds) to receive reward.
         command_threshold: Minimum command velocity magnitude to activate reward.
-        entity_name: Name of the entity containing the links.
+        contact_group: Name of the contact group to use.
 
     Returns:
         Reward tensor of shape (num_envs,).
     """
-    link_indices = env.contact_manager.get_link_indices(links, entity_name)
-
-    first_contact = env.contact_manager.compute_first_contact()[:, link_indices]
-    last_air_time = env.contact_manager.last_air_time[:, link_indices]
+    first_contact = env.contact_manager.compute_first_contact(contact_group)
+    last_air_time = env.contact_manager.last_air_time(contact_group)
 
     reward = torch.sum((last_air_time - threshold) * first_contact, dim=-1)
 
@@ -477,6 +483,7 @@ def reward_feet_height_exp(
     target_height: float = 0.08,
     sigma: float = 0.01,
     entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Reward feet reaching target height during swing (exponential kernel)."""
     entity = env.scene_manager[entity_name]
@@ -488,8 +495,7 @@ def reward_feet_height_exp(
     feet_pos = entity.get_links_pos(links_idx_local=links_idx_local)
     feet_height = feet_pos[..., 2]  # z pos
 
-    link_indices = env.contact_manager.get_link_indices(list(feet_links), entity_name, preserve_order=True)
-    is_contact = env.contact_manager.is_contact[:, link_indices]
+    is_contact = env.contact_manager.is_contact(contact_group)
     is_swing = ~is_contact
 
     # Exponential reward for being close to target height
@@ -504,20 +510,12 @@ def reward_feet_height_exp(
 
 def penalize_impact_force(
     env: GenesisEnv,
-    links: str | list[str],
-    entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Penalize contact force at the moment of landing."""
-    link_indices = env.contact_manager.get_link_indices(links, entity_name, preserve_order=True)
-    link_names = env.contact_manager.get_link_names(link_indices)
-
-    sensors = env.scene_manager.sensors[entity_name]
-    forces = torch.stack([
-        torch.norm(sensors[name]["ContactForceSensor"].read(), dim=-1)
-        for name in link_names
-    ], dim=1)  # (num_envs, num_links)
-
-    first_contact = env.contact_manager.compute_first_contact()[:, link_indices]
+    forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, num_links, 3)
+    forces = torch.norm(forces_3d, dim=-1)  # (num_envs, num_links)
+    first_contact = env.contact_manager.compute_first_contact(contact_group)
 
     return -torch.sum(forces * first_contact.float(), dim=-1)
 
@@ -615,8 +613,9 @@ def penalize_hip_deviation_huber(
 # ── Walk-These-Ways reward terms (Genesis) ───────────────────────────────
 
 def wtw_feet_slip(
-    env: LocomotionEnv,
+    env: GenesisLocomotionEnv,
     entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """WTW feet slip: penalize foot xy velocity when in contact OR was in contact.
 
@@ -628,11 +627,8 @@ def wtw_feet_slip(
     feet_vel = entity.get_links_vel(links_idx_local=links_idx_local)
 
     # Contact: current OR previous step
-    contact = state.contact_indicator(
-        env, entity_name=entity_name, links=feet_links
-    ).bool()
-    link_indices = env.contact_manager.get_link_indices(feet_links, entity_name, preserve_order=True)
-    prev_contact = env.contact_manager.prev_is_contact[:, link_indices]
+    contact = env.contact_manager.is_contact(contact_group, order=feet_links)
+    prev_contact = env.contact_manager.prev_is_contact(contact_group)
     contact_filt = contact | prev_contact
 
     vel_sq = torch.sum(torch.square(feet_vel[..., :2]), dim=-1)
@@ -640,37 +636,25 @@ def wtw_feet_slip(
 
 
 def wtw_tracking_contacts_shaped_force(
-    env: LocomotionEnv,
+    env: GenesisLocomotionEnv,
     gait_force_sigma: float = 100.0,
-    entity_name: str = "robot",
+    contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """WTW: penalize foot contact force when foot should be in swing.
 
     reward = mean_over_feet[ -(1 - desired_contact) * (1 - exp(-force² / σ)) ]
     """
-    feet_links = tuple(env.gait_manager.foot_names)
-    link_indices = env.contact_manager.get_link_indices(feet_links, entity_name, preserve_order=True)
-    link_names = env.contact_manager.get_link_names(link_indices)
-
-    sensors = env.scene_manager.sensors[entity_name]
-    foot_forces = torch.stack([
-        torch.norm(sensors[name]["ContactForceSensor"].read(), dim=-1)
-        for name in link_names
-    ], dim=1)
+    foot_forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, num_feet, 3)
+    foot_forces = torch.norm(foot_forces_3d, dim=-1)  # (num_envs, num_feet)
 
     desired_contact = env.gait_manager.desired_contact_states
-    num_feet = desired_contact.shape[1]
 
-    reward = torch.zeros(env.num_envs, device=env.device)
-    for i in range(num_feet):
-        reward += -(1.0 - desired_contact[:, i]) * (
-            1.0 - torch.exp(-foot_forces[:, i] ** 2 / gait_force_sigma)
-        )
-    return reward / num_feet
+    reward = -(1.0 - desired_contact) * (1.0 - torch.exp(-foot_forces ** 2 / gait_force_sigma))
+    return reward.mean(dim=-1)
 
 
 def wtw_tracking_contacts_shaped_vel(
-    env: LocomotionEnv,
+    env: GenesisLocomotionEnv,
     gait_vel_sigma: float = 10.0,
     entity_name: str = "robot",
 ) -> torch.Tensor:
@@ -685,18 +669,13 @@ def wtw_tracking_contacts_shaped_vel(
 
     foot_vel_norm = torch.norm(feet_vel, dim=-1)
     desired_contact = env.gait_manager.desired_contact_states
-    num_feet = desired_contact.shape[1]
 
-    reward = torch.zeros(env.num_envs, device=env.device)
-    for i in range(num_feet):
-        reward += -(desired_contact[:, i] * (
-            1.0 - torch.exp(-foot_vel_norm[:, i] ** 2 / gait_vel_sigma)
-        ))
-    return reward / num_feet
+    reward = -(desired_contact * (1.0 - torch.exp(-foot_vel_norm ** 2 / gait_vel_sigma)))
+    return reward.mean(dim=-1)
 
 
 def wtw_feet_clearance_cmd_linear(
-    env: LocomotionEnv,
+    env: GenesisLocomotionEnv,
     foot_radius: float = 0.02,
     entity_name: str = "robot",
 ) -> torch.Tensor:
@@ -726,7 +705,7 @@ def wtw_feet_clearance_cmd_linear(
 
 
 def wtw_raibert_heuristic(
-    env: LocomotionEnv,
+    env: GenesisLocomotionEnv,
     entity_name: str = "robot",
 ) -> torch.Tensor:
     """WTW: penalize footstep placement error vs Raibert heuristic.
@@ -738,7 +717,7 @@ def wtw_raibert_heuristic(
 
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
 
     foot_positions = entity.get_links_pos(links_idx_local=links_idx_local)
     base_pos = env.get_robot_data(entity_name).root_link_pos_w

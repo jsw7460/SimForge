@@ -100,8 +100,8 @@ def reward_feet_air_time(
     """
     result = get_bodies_height_with_contact(env, feet_bodies)
 
-    first_contact = env.contact_manager.compute_first_contact()[:, result.contact_indices]
-    last_air_time = env.contact_manager.last_air_time[:, result.contact_indices]
+    first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, result.contact_indices]
+    last_air_time = env.contact_manager.last_air_time("foot_contact")[:, result.contact_indices]
 
     reward = torch.sum((last_air_time - threshold) * first_contact, dim=-1)
 
@@ -137,7 +137,7 @@ def penalize_feet_swing_height(
     feet_height = result.data - foot_offset
     target_height = env.gait_manager.get_target_foot_height(max_height, profile)
 
-    is_contact = env.contact_manager.is_contact[:, result.contact_indices]
+    is_contact = env.contact_manager.is_contact("foot_contact")[:, result.contact_indices]
     is_swing = ~is_contact
 
     height_error = torch.square(feet_height - target_height) * is_swing.float()
@@ -231,7 +231,7 @@ def reward_feet_height_exp(
     result = get_bodies_height_with_contact(env, feet_bodies)
 
     feet_height = result.data  # (num_envs, num_feet)
-    is_contact = env.contact_manager.is_contact[:, result.contact_indices]
+    is_contact = env.contact_manager.is_contact("foot_contact")[:, result.contact_indices]
     is_swing = ~is_contact
 
     height_error = torch.square(feet_height - target_height)
@@ -258,7 +258,6 @@ def penalize_invalid_contact(
     model = env.scene_manager.model
 
     contacts = env.scene_manager.contacts
-
     contact_count = wp.to_torch(contacts.rigid_contact_count).item()
     if contact_count == 0:
         return torch.zeros(env.num_envs, device=env.device)
@@ -324,11 +323,11 @@ def penalize_impact_force(
     result = get_bodies_height_with_contact(env, feet_bodies)
 
     # Get contact force magnitude for each foot
-    contact_force = env.contact_manager.contact_force[:, result.contact_indices]  # (num_envs, num_feet, 3)
+    contact_force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]  # (num_envs, num_feet, 3)
     force_magnitude = torch.norm(contact_force, dim=-1)  # (num_envs, num_feet)
 
     # First contact mask
-    first_contact = env.contact_manager.compute_first_contact()[:, result.contact_indices]
+    first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, result.contact_indices]
     return -torch.sum(force_magnitude * first_contact.float(), dim=-1)
 
 
@@ -464,7 +463,7 @@ def reward_gait_pattern(env: "NewtonLocomotionEnv") -> torch.Tensor:
 
     result = get_bodies_height_with_contact(env, feet_bodies)
 
-    is_contact = env.contact_manager.is_contact[:, result.contact_indices]
+    is_contact = env.contact_manager.is_contact("foot_contact")[:, result.contact_indices]
     swing_mask = env.gait_manager.get_swing_mask()
 
     correct_swing = ~is_contact & swing_mask
@@ -546,7 +545,7 @@ def penalize_feet_slip(
     vel_magnitude_sq = torch.sum(torch.square(feet_vel_xy), dim=-1)  # (num_envs, num_feet)
 
     # Get contact states
-    is_contact = env.contact_manager.is_contact[:, result.contact_indices]  # (num_envs, num_feet)
+    is_contact = env.contact_manager.is_contact("foot_contact")[:, result.contact_indices]  # (num_envs, num_feet)
 
     # Apply contact mask
     penalty = torch.sum(vel_magnitude_sq * is_contact.float(), dim=-1)  # (num_envs,)
@@ -587,8 +586,8 @@ def wtw_feet_slip(env: "NewtonLocomotionEnv") -> torch.Tensor:
     feet_vel_xy = body_qd[:, result.body_indices, :2]
     vel_sq = torch.sum(torch.square(feet_vel_xy), dim=-1)
 
-    contact = env.contact_manager.is_contact[:, result.contact_indices]
-    prev_contact = env.contact_manager.prev_is_contact[:, result.contact_indices]
+    contact = env.contact_manager.is_contact("foot_contact", order=result.body_names)
+    prev_contact = env.contact_manager.prev_is_contact("foot_contact", order=result.body_names)
     contact_filt = contact | prev_contact
 
     return -torch.sum(contact_filt.float() * vel_sq, dim=-1)
@@ -601,18 +600,13 @@ def wtw_tracking_contacts_shaped_force(
     """WTW: penalize foot contact force when foot should be in swing."""
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_height_with_contact(env, feet_bodies)
-    contact_force = env.contact_manager.contact_force[:, result.contact_indices]
+    contact_force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]
     foot_forces = torch.norm(contact_force, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
-    num_feet = desired_contact.shape[1]
 
-    reward = torch.zeros(env.num_envs, device=env.device)
-    for i in range(num_feet):
-        reward += -(1.0 - desired_contact[:, i]) * (
-            1.0 - torch.exp(-foot_forces[:, i] ** 2 / gait_force_sigma)
-        )
-    return reward / num_feet
+    reward = -(1.0 - desired_contact) * (1.0 - torch.exp(-foot_forces ** 2 / gait_force_sigma))
+    return reward.mean(dim=-1)
 
 
 def wtw_tracking_contacts_shaped_vel(
@@ -631,14 +625,9 @@ def wtw_tracking_contacts_shaped_vel(
     foot_vel_norm = torch.norm(feet_vel, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
-    num_feet = desired_contact.shape[1]
 
-    reward = torch.zeros(env.num_envs, device=env.device)
-    for i in range(num_feet):
-        reward += -(desired_contact[:, i] * (
-            1.0 - torch.exp(-foot_vel_norm[:, i] ** 2 / gait_vel_sigma)
-        ))
-    return reward / num_feet
+    reward = -(desired_contact * (1.0 - torch.exp(-foot_vel_norm ** 2 / gait_vel_sigma)))
+    return reward.mean(dim=-1)
 
 
 def wtw_feet_clearance_cmd_linear(
@@ -713,6 +702,21 @@ def wtw_raibert_heuristic(env: "NewtonLocomotionEnv") -> torch.Tensor:
     desired_footsteps = torch.stack([desired_xs, desired_ys], dim=2)
     err = torch.abs(desired_footsteps - footsteps_in_body[:, :, 0:2])
     return -torch.sum(torch.square(err), dim=(1, 2))
+
+
+def wtw_collision(
+    env: "NewtonLocomotionEnv",
+    contact_group: str = "body_ground_contact",
+    force_threshold: float = 0.1,
+) -> torch.Tensor:
+    """WTW collision: count non-foot bodies with contact force > threshold.
+
+    Uses contact_manager instead of raw contacts.rigid_contact_force
+    (which is always zero in Newton without SensorContact).
+    """
+    force = env.contact_manager.contact_force(contact_group)  # (num_envs, N, 3)
+    force_mag = torch.norm(force, dim=-1)  # (num_envs, N)
+    return -torch.sum((force_mag > force_threshold).float(), dim=-1)
 
 
 def penalize_feet_yaw_mean_deviation(

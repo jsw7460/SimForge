@@ -173,7 +173,12 @@ class Go2FlatNewtonConfig:
                     entity_name="robot",
                     sensor_name="foot_contact",
                     sensing_obj_bodies=list(r.prefixed_foot_names),
-                    use_regex=True
+                ),
+                NewtonContactSensorConfig(
+                    entity_name="robot",
+                    sensor_name="body_ground_contact",
+                    sensing_obj_bodies=["*"],
+                    exclude_bodies=("*foot*",),
                 )
             ],
             add_ground=True,

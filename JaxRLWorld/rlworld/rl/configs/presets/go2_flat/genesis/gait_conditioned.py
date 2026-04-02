@@ -149,10 +149,10 @@ class Go2GaitConditionedGenesisConfig(Go2FlatGenesisConfig):
                 func=rf_common.penalize_ang_vel_xy, weight=0.001,
             )
 
-            # ── Collision (Genesis-specific, reuse existing) ──
+            # ── Collision ──
             collision = RewardTermConfig(
-                func=rf_genesis.penalize_invalid_contact, weight=5.0,
-                params={"contact_allowed_links": self.robot.foot_names, "exclude_self_contact": False},
+                func=rf_genesis.wtw_collision, weight=5.0,
+                params={"contact_group": "body_ground_contact", "force_threshold": 1.0},
             )
 
         return _WTWRewardsCfg()

@@ -5,149 +5,84 @@ from typing import TYPE_CHECKING
 import torch
 import warp as wp
 
+import newton
 from newton.sensors import SensorContact
-from rlworld.rl.envs.managers.common.contact import BaseContactManager
+from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
-import newton
-
 
 class NewtonContactManager(BaseContactManager):
-    """Manages contact information for Newton environments.
+    """Named-group contact manager for Newton environments.
 
-    Tracks contact state and timing for all shapes registered with SensorContact.
-
-    CRITICAL ORDERING INVARIANT:
-    Newton's SensorContact stores sensing_objs in env-major order.
-    ``shape_names`` stores names for ONE env (first env's shapes).
-    All output tensors have shape ``(num_envs, num_shapes)``.
+    Each ``SensorContact`` becomes a named group (sensor_name = group_name).
+    Multiple sensors are supported. Body order follows Newton's internal
+    ordering (typically alphabetical).
     """
 
     def __init__(self, env: "World"):
         super().__init__(env)
-        self._contact_sensors: dict[str, SensorContact] = {}
-        self._shape_names: list[str] = []
-
-    # -- backward compat aliases --
-
-    @property
-    def num_shapes(self) -> int:
-        return self._num_tracked
-
-    @property
-    def shape_names(self) -> list[str]:
-        return self._shape_names
-
-    @property
-    def tracked_names(self) -> list[str]:
-        return self._shape_names
+        self._group_sensors: dict[str, SensorContact] = {}
 
     # -- sensor registration --
 
     def register_sensors(self) -> None:
-        for sensor_name, sensor in self.env.scene_manager.sensors.items():
-            if isinstance(sensor, SensorContact):
-                self._contact_sensors[sensor_name] = sensor
-
-        if not self._contact_sensors:
-            return
-
-        if len(self._contact_sensors) > 1:
-            raise ValueError(
-                f"NewtonContactManager currently supports only one SensorContact. "
-                f"Found {len(self._contact_sensors)}: {list(self._contact_sensors.keys())}"
-            )
-
+        """Discover all SensorContact instances and register each as a group."""
         model: newton.Model = self.env.scene_manager.model
-        sensor: SensorContact = list(self._contact_sensors.values())[0]
 
-        obj_type = sensor.sensing_obj_type
-        label_list = model.body_label if obj_type == "body" else model.shape_label
+        for sensor_name, sensor in self.env.scene_manager.sensors.items():
+            if not isinstance(sensor, SensorContact):
+                continue
 
-        world_count = self.env.scene_manager.model.world_count
-        n_per_env = len(sensor.sensing_obj_idx) // world_count
-        first_env_indices = sensor.sensing_obj_idx[:n_per_env]
+            obj_type = sensor.sensing_obj_type
+            label_list = model.body_label if obj_type == "body" else model.shape_label
 
-        for idx in first_env_indices:
-            self._shape_names.append(label_list[idx])
+            world_count = model.world_count
+            n_per_env = len(sensor.sensing_obj_idx) // world_count
+            first_env_indices = sensor.sensing_obj_idx[:n_per_env]
 
-        self._num_tracked = len(self._shape_names)
-        self._init_buffers()
+            names = [label_list[idx] for idx in first_env_indices]
+
+            self._group_sensors[sensor_name] = sensor
+            self._register_group(sensor_name, names)
 
     # -- abstract impl --
 
-    def _compute_is_contact(self) -> torch.Tensor:
-        if self._num_tracked == 0:
-            return torch.zeros(
-                self.num_envs, 0, dtype=torch.bool, device=self.device
-            )
-
-        contact_states = []
-        for sensor in self._contact_sensors.values():
-            if sensor.total_force is not None:
-                total_force = wp.to_torch(sensor.total_force)
-            else:
-                force_matrix = wp.to_torch(sensor.force_matrix)
-                total_force = force_matrix.sum(dim=1)
-
-            force_magnitude = torch.norm(total_force, dim=-1)
-            contact_states.append(force_magnitude > 1.0)
-
-        if not contact_states:
-            return torch.zeros(
-                self.num_envs, 0, dtype=torch.bool, device=self.device
-            )
-
-        return torch.cat(contact_states, dim=0).reshape(
-            self.num_envs, self._num_tracked
-        )
-
-    # -- Newton-specific --
-
-    @property
-    def contact_force(self) -> torch.Tensor:
-        """Contact force ``(num_envs, num_shapes, 3)``."""
-        if self._num_tracked == 0:
-            return torch.zeros(self.num_envs, 0, 3, device=self.device)
-
-        sensor = list(self._contact_sensors.values())[0]
+    def _get_total_force(self, sensor: SensorContact, group: ContactGroup) -> torch.Tensor:
+        """Get total force. Returns (num_envs, N, 3)."""
         if sensor.total_force is not None:
             total_force = wp.to_torch(sensor.total_force)
         else:
             force_matrix = wp.to_torch(sensor.force_matrix)
             total_force = force_matrix.sum(dim=1)
 
-        return total_force.reshape(self.num_envs, self._num_tracked, 3)
+        return total_force.reshape(self.num_envs, group.num_tracked, 3)
 
-    def get_shape_indices(
-        self,
-        patterns: str | list[str],
-        use_regex: bool = False,
-        preserve_order: bool = False,
-    ) -> list[int]:
-        from rlworld.rl.utils import string as string_utils
+    def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
+        force = self._get_total_force(self._group_sensors[group.name], group)
+        return torch.norm(force, dim=-1) > 1.0
 
-        if isinstance(patterns, str):
-            patterns = [patterns]
-        _, matched = string_utils.resolve_matching_names(
-            patterns, self._shape_names, preserve_order=preserve_order
-        )
-        return [self._shape_names.index(n) for n in matched]
+    def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
+        return self._get_total_force(self._group_sensors[group.name], group)
 
     # -- pretty print --
 
     def __str__(self) -> str:
         from rlworld.rl.utils.pretty import create_manager_table, table_to_string
 
-        if self._num_tracked == 0:
+        if not self._groups:
             return ""
-        rows = [[idx, name] for idx, name in enumerate(self._shape_names)]
+
+        rows = []
+        for gname, group in self._groups.items():
+            for idx, name in enumerate(group.tracked_names):
+                rows.append([gname, idx, name])
+
         table = create_manager_table(
             title="Contact Tracking (Newton)",
-            columns=["Idx", "Shape Name"],
+            columns=["Group", "Idx", "Name"],
             rows=rows,
-            footer=f"{self._num_tracked} tracked shapes",
+            footer=f"{len(self._groups)} groups, {sum(g.num_tracked for g in self._groups.values())} tracked",
         )
         return table_to_string(table)

@@ -26,6 +26,7 @@ from rlworld.rl.configs.robots.go2 import Go2Config, GO2_ACTION_SCALE, STIFFNESS
 from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, \
     GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
+from rlworld.rl.configs.genesis_config_classes import GenesisContactSensorCfg
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
 )
@@ -171,14 +172,29 @@ class Go2FlatGenesisConfig:
             },
             sensors=[
                 SensorConfig(entity_name="robot", link_name="base", sensor_class=gs.sensors.IMU),
-                SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.Contact),
-                SensorConfig(entity_name="robot", link_name="FL_foot", sensor_class=gs.sensors.Contact),
-                SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.Contact),
-                SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.Contact),
-                SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.ContactForce),
-                SensorConfig(entity_name="robot", link_name="FL_foot", sensor_class=gs.sensors.ContactForce),
-                SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.ContactForce),
-                SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.ContactForce),
+                # SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.Contact),
+                # SensorConfig(entity_name="robot", link_name="FL_foot", sensor_class=gs.sensors.Contact),
+                # SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.Contact),
+                # SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.Contact),
+                # SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.ContactForce),
+                # SensorConfig(entity_name="robot", link_name="FL_foot", sensor_class=gs.sensors.ContactForce),
+                # SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.ContactForce),
+                # SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.ContactForce),
+            ],
+            contact_sensors=[
+                GenesisContactSensorCfg(
+                    name="feet_ground_contact",
+                    primary_links=self.robot.foot_names,
+                    secondary_entity="base_entity",
+                ),
+                GenesisContactSensorCfg(
+                    name="body_ground_contact",
+                    primary_links=[".*"],
+                    exclude_links=(".*foot.*",),
+                    entity_name="robot",
+                    exclude_self_contact=False,
+                    secondary_entity=None
+                )
             ],
             sim_options=gs.options.SimOptions(dt=self.sim_dt, substeps=1),
             rigid_options=gs.options.RigidOptions(
@@ -334,7 +350,6 @@ class Go2FlatGenesisConfig:
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
-                    "feet_links": ["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
                     "command_threshold": 0.05,
                 },
             )
