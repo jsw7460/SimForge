@@ -4,7 +4,7 @@ This configuration follows the mjlab velocity task setup,
 adapted for rlworld's MujocoEnv interface.
 """
 from dataclasses import dataclass, field
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 import math
 
@@ -12,9 +12,11 @@ from mjlab.asset_zoo.robots import G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as g1_get_spec, FULL_COLLISION as G1_FULL_COLLISION
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensorCfg, ContactMatch
+from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, ObservationGroupConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, \
+    ObservationGroupConfig
 from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,
@@ -27,18 +29,15 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
-from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import MujocoEntityCfg, ArticulationCfg, InitialStateCfg
-from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
-    CommandTermConfig,
 )
 from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.envs.mdp.observations.mujoco.proprioception import (
     base_ang_vel, projected_gravity, dof_pos, dof_vel,
     raw_actions, prev_processed_actions,
-    base_lin_vel, base_height, base_quat,
+    base_height, base_quat,
     foot_height, foot_air_time, foot_contact, foot_contact_forces,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
@@ -305,7 +304,8 @@ class G1FlatMujocoConfig:
             dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
             base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
             base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
-            foot_height_obs = ObservationTermConfig(func=foot_height, scale=1.0, params={"site_names": ("left_foot", "right_foot")})
+            foot_height_obs = ObservationTermConfig(func=foot_height, scale=1.0,
+                                                    params={"site_names": ("left_foot", "right_foot")})
             foot_air_time_obs = ObservationTermConfig(func=foot_air_time, scale=1.0)
             foot_contact_obs = ObservationTermConfig(func=foot_contact, scale=1.0)
             foot_contact_forces_obs = ObservationTermConfig(func=foot_contact_forces, scale=0.01)

@@ -108,8 +108,17 @@ def _detect_robot_key(metadata: dict) -> str:
 def resolve_cross_sim_config(metadata: dict, target_sim: str):
     """Auto-resolve a ConfigsForRun for the target simulator.
 
-    Uses the checkpoint metadata to detect the robot, then loads the
-    appropriate preset config for that robot on the target simulator.
+    Strategy:
+        1. Read ``preset_module`` from the checkpoint (e.g.
+           ``rlworld.rl.configs.presets.go2_flat.newton.gait_conditioned``).
+        2. Replace the simulator segment with *target_sim* (e.g.
+           ``...newton.gait_conditioned`` → ``...mujoco.gait_conditioned``).
+        3. Fall back to the legacy ``_PRESET_REGISTRY`` only when the
+           checkpoint has no ``preset_module`` or the derived module does
+           not exist.
+
+    This ensures cross-sim eval always uses the **same preset variant**
+    (e.g. gait_conditioned, mlp) as training — only the simulator changes.
 
     Args:
         metadata: Checkpoint metadata dict.
@@ -120,12 +129,35 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     """
     import importlib
 
-    robot_key = _detect_robot_key(metadata)
     sim_key = target_sim.lower()
-    # Normalize sim names
     if sim_key in ("mjlabenv", "mjlab"):
         sim_key = "mujoco"
 
+    _SIM_NAMES = {"genesis", "newton", "mujoco"}
+
+    # --- Strategy 1: derive from checkpoint's preset_module ---
+    config_dict = metadata.get("config", {})
+    preset_module_path = config_dict.get("preset_module")
+
+    if preset_module_path is not None:
+        parts = preset_module_path.split(".")
+        sim_idx = None
+        for i, part in enumerate(parts):
+            if part in _SIM_NAMES:
+                sim_idx = i
+                break
+
+        if sim_idx is not None:
+            parts[sim_idx] = sim_key
+            target_module_path = ".".join(parts)
+            try:
+                mod = importlib.import_module(target_module_path)
+                return mod.get_config()
+            except ModuleNotFoundError:
+                pass  # fall through to registry
+
+    # --- Strategy 2: legacy registry fallback ---
+    robot_key = _detect_robot_key(metadata)
     key = (robot_key, sim_key)
     if key not in _PRESET_REGISTRY:
         available = [
@@ -133,10 +165,11 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
         ]
         raise ValueError(
             f"No preset found for robot={robot_key!r} on sim={sim_key!r}. "
-            f"Available for {robot_key}: {available}. "
+            f"Checkpoint preset_module={preset_module_path!r} could not be "
+            f"mapped to target sim. "
+            f"Available fallbacks for {robot_key}: {available}. "
             f"Please provide eval_cfgs manually."
         )
-
     module_path = _PRESET_REGISTRY[key]
     mod = importlib.import_module(module_path)
     return mod.get_config()

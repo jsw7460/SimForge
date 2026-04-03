@@ -22,11 +22,6 @@ Examples:
 import argparse
 
 from rlworld.rl.evals import PolicyEvaluator
-from rlworld.rl.envs.mdp.configs import (
-    TerminationTermConfig,
-    CommandTermConfig,
-)
-from rlworld.rl.envs.mdp.commands import command_terms as cf
 
 
 def main():
@@ -46,14 +41,14 @@ def main():
             "num_envs": 1,
             "episode_length_s": 10e+9,
         },
-        "command": {
-            "rel_standing_envs": 0.0,
-            "sampler": [
-                CommandTermConfig(cf.lin_vel_x, params={"range": (1.0, 1.5)}),
-                CommandTermConfig(cf.lin_vel_y, params={"range": (0.0, 0.3)}),
-                CommandTermConfig(cf.ang_vel, params={"range": (-0.75, 0.75)}),
-            ]
-        },
+        # "command": {
+        #     "rel_standing_envs": 0.0,
+        #     "sampler": [
+        #         CommandTermConfig(cf.lin_vel_x, params={"range": (1.0, 1.5)}),
+        #         CommandTermConfig(cf.lin_vel_y, params={"range": (0.0, 0.3)}),
+        #         CommandTermConfig(cf.ang_vel, params={"range": (-0.75, 0.75)}),
+        #     ]
+        # },
     }
 
     # Eval mode: env's built-in viser viewer runs during batch eval.
@@ -65,7 +60,7 @@ def main():
         }
 
     evaluator = PolicyEvaluator(
-        # policy_path=args.policy_path,
+        policy_path=args.policy_path,
         eval_target=args.eval_sim,
         wandb_run_path=args.wandb_run_path,
         num_evals=args.num_evals,

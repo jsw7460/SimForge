@@ -9,7 +9,7 @@ from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventCon
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, ObservationGroupConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
-from rlworld.rl.envs.mdp.observations.common.proprioception import base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions, base_lin_vel, base_height
+from rlworld.rl.envs.mdp.observations.common.proprioception import base_ang_vel, projected_gravity, dof_pos, dof_vel, raw_actions, base_lin_vel, base_height
 from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.configs.components.rewards.newton import TrackingRewards, RegularizationRewards
 from rlworld.rl.configs.events import EventTermConfig
@@ -194,7 +194,7 @@ class Go2FlatNewtonConfig:
             command = ObservationTermConfig(func=command_obs, scale=1.0)
             dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
             dof_vel = ObservationTermConfig(func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5))
-            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+            prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
         @dataclass
         class _CriticObsCfg(_ActorObsCfg):
@@ -331,17 +331,26 @@ class Go2FlatNewtonConfig:
 
     def _build_event_config(self, quat) -> EventConfig:
         r = self.robot
-        from rlworld.rl.envs.mdp.events.newton_event_terms import push_robot as _push_robot_fn
+        from rlworld.rl.envs.mdp.events.newton_event_terms import (
+            push_robot as _push_robot_fn,
+            randomize_friction as _randomize_friction_fn,
+            reset_root_state_uniform as _reset_root_fn,
+        )
 
         @dataclass
         class _EventsCfg(EventConfig):
-            reset_base_pose = EventTermConfig(
-                func=initf.initialize_base_pose,
-                params={
-                    "base_init_pos": [0.0, 0.0, r.base_init_height],
-                    "base_init_quat": [quat[0], quat[1], quat[2], quat[3]],
-                },
+            reset_root = EventTermConfig(
+                func=_reset_root_fn,
                 mode="reset",
+                params={
+                    "pose_range": {
+                        "x": (-0.5, 0.5),
+                        "y": (-0.5, 0.5),
+                        "z": (0.0, 0.0),
+                        "yaw": (-3.14, 3.14),
+                    },
+                    "velocity_range": {},
+                },
             )
             reset_dof_pos = EventTermConfig(
                 func=initf.initialize_dof_pos_with_noise,
@@ -352,6 +361,11 @@ class Go2FlatNewtonConfig:
                 func=initf.randomize_body_mass,
                 params={"mass_ratio_range": (0.8, 1.2), "body_patterns": r.prefixed("base")},
                 mode="reset",
+            )
+            randomize_friction = EventTermConfig(
+                func=_randomize_friction_fn,
+                mode="reset",
+                params={"friction_range": (0.3, 1.2)},
             )
             push_robot = EventTermConfig(
                 func=_push_robot_fn,

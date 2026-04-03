@@ -1,17 +1,14 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 import genesis as gs
+from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
     RewardConfig, CommandConfig, NNConfig, PPOPolicyConfig, RunnerConfig, VisualizationConfig,
     TerminationsConfig, ObservationGroupConfig,
 )
-from rlworld.rl.envs.mdp.observations.common.proprioception import (
-    base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
-)
-from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.configs.components.rewards.genesis import TrackingRewards, RegularizationRewards
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.genesis_config_classes import (
@@ -22,16 +19,17 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig, G1_ACTION_SCALE
-from rlworld.rl.configs.scene import EntityConfig
-from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
-from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
+from rlworld.rl.configs.scene.unified_entity_config import GenesisEntityCfg, ArticulationCfg, InitialStateCfg, \
+    GroundPlaneCfg
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
-    CommandTermConfig,
+)
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
 )
 from rlworld.rl.envs.mdp.observations.genesis import state
+from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
@@ -327,7 +325,7 @@ class G1FlatGenesisConfig:
                 GenesisContactSensorCfg(
                     name="feet_ground_contact",
                     primary_links=["left_ankle_roll_link", "right_ankle_roll_link"],
-                    secondary_entity="ground",
+                    secondary_entity="base_entity",
                 ),
             ],
             sim_options=gs.options.SimOptions(dt=0.005, substeps=1),

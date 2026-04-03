@@ -127,13 +127,11 @@ class MujocoPlayScene:
         self._mj_scene = None
 
     def create(self, server: viser.ViserServer) -> None:
-        from mjlab.viewer.viser.scene import ViserMujocoScene
+        from mjlab.viewer.viser.scene import MjlabViserScene
 
         mj_model = self._scene_manager.mj_model
         num_envs = self._scene_manager.scene.num_envs
-        self._mj_scene = ViserMujocoScene.create(
-            server=server, mj_model=mj_model, num_envs=num_envs,
-        )
+        self._mj_scene = MjlabViserScene(server, mj_model, num_envs)
 
     @property
     def env_idx(self) -> int:

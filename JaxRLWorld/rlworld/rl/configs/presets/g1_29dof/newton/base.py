@@ -1,12 +1,14 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 import warp as wp
 
 import newton
+from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, ObservationGroupConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, \
+    ObservationGroupConfig
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
@@ -19,15 +21,13 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig, G1_ACTION_SCALE
-from rlworld.rl.configs.scene import NewtonEntityConfig
-from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg, IdealPDActuatorCfg
-from rlworld.rl.configs.scene.unified_entity_config import NewtonEntityCfg, ArticulationCfg, InitialStateCfg, GroundPlaneCfg
+from rlworld.rl.configs.scene.unified_entity_config import NewtonEntityCfg, ArticulationCfg, InitialStateCfg, \
+    GroundPlaneCfg
 from rlworld.rl.configs.sensors import NewtonIMUSensorConfig, NewtonContactSensorConfig
-from rlworld.rl.envs.mdp.commands import command_terms as cf
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
-    CommandTermConfig,
 )
+from rlworld.rl.envs.mdp.events.newton_event_terms import push_robot as _push_robot_fn
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
 )
@@ -38,7 +38,6 @@ from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
-from rlworld.rl.envs.mdp.events.newton_event_terms import push_robot as _push_robot_fn
 
 
 @dataclass
@@ -198,9 +197,12 @@ class G1FlatNewtonConfig:
             base_height = ObservationTermConfig(func=state.base_height, scale=1.0)
             base_lin_vel_obs = ObservationTermConfig(func=state.base_lin_vel, scale=1.0)
             base_euler = ObservationTermConfig(func=state.base_euler, scale=1.0)
-            feet_air_time = ObservationTermConfig(func=state.feet_air_time, scale=1.0, params={"feet_bodies": feet_bodies})
-            feet_contact_force = ObservationTermConfig(func=state.feet_contact_force, scale=0.01, params={"feet_bodies": feet_bodies})
-            feet_contact_indicator = ObservationTermConfig(func=state.feet_contact_indicator, scale=1.0, params={"feet_bodies": feet_bodies})
+            feet_air_time = ObservationTermConfig(func=state.feet_air_time, scale=1.0,
+                                                  params={"feet_bodies": feet_bodies})
+            feet_contact_force = ObservationTermConfig(func=state.feet_contact_force, scale=0.01,
+                                                       params={"feet_bodies": feet_bodies})
+            feet_contact_indicator = ObservationTermConfig(func=state.feet_contact_indicator, scale=1.0,
+                                                           params={"feet_bodies": feet_bodies})
             feet_height = ObservationTermConfig(func=state.feet_height, scale=1.0, params={"feet_bodies": feet_bodies})
 
         @dataclass

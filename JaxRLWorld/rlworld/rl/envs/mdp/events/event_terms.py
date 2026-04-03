@@ -99,6 +99,45 @@ def reset_root_state_uniform(
         )
 
 
+def push_by_setting_velocity(
+    env: "GenesisEnv",
+    env_ids: torch.Tensor,
+    velocity_range: dict[str, tuple[float, float]],
+    entity_name: str = "robot",
+) -> None:
+    """Push robot by adding velocity perturbation to the base DOFs (Genesis).
+
+    Matches the MuJoCo/Newton push interface: adds random velocity offsets
+    to the base 6 DOFs (linear xyz + angular rpy).
+
+    Args:
+        env: Genesis environment instance.
+        env_ids: Environment indices to apply push.
+        velocity_range: Dict with keys 'x', 'y', 'z', 'roll', 'pitch', 'yaw'
+                       and tuple (min, max) values.
+    """
+    if len(env_ids) == 0:
+        return
+
+    robot = env.scene_manager[entity_name]
+    n = len(env_ids)
+    device = env.device
+
+    keys = ["x", "y", "z", "roll", "pitch", "yaw"]
+    vel_delta = torch.zeros(n, 6, device=device)
+    for i, key in enumerate(keys):
+        lo, hi = velocity_range.get(key, (0.0, 0.0))
+        vel_delta[:, i] = torch.empty(n, device=device).uniform_(lo, hi)
+
+    # Read current base velocity (first 6 DOFs) and add perturbation
+    current_vel = robot.get_dofs_velocity(dofs_idx_local=list(range(6)), envs_idx=env_ids)
+    robot.set_dofs_velocity(
+        velocity=current_vel + vel_delta,
+        dofs_idx_local=list(range(6)),
+        envs_idx=env_ids,
+    )
+
+
 def apply_external_force_torque(
     env: GenesisEnv,
     env_ids: torch.Tensor,

@@ -304,12 +304,12 @@ def _to_scene_entity_cfg(entity_cfg: EntityCfg):
 
 def randomize_geom_friction(
     env: "MujocoEnv",
+    env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "abs",
     entity_cfg: EntityCfg | None = None,
     axes: list[int] | None = None,
     shared_random: bool = False,
-    env_ids: torch.Tensor | None = None,
 ) -> None:
     """Randomize geom friction via mjlab's dr.geom_friction."""
     from mjlab.envs.mdp.dr import geom_friction
@@ -365,6 +365,28 @@ def randomize_encoder_bias(
         env_ids=env_ids,
         bias_range=bias_range,
         asset_cfg=_to_scene_entity_cfg(entity_cfg),
+    )
+
+
+def randomize_body_mass(
+    env: "MujocoEnv",
+    env_ids: torch.Tensor,
+    ranges: tuple[float, float] | dict[int, tuple[float, float]],
+    operation: Literal["add", "scale", "abs"] = "scale",
+    entity_cfg: EntityCfg | None = None,
+    shared_random: bool = False,
+) -> None:
+    """Randomize body mass via mjlab's dr.body_mass."""
+    from mjlab.envs.mdp.dr import body_mass
+
+    entity_cfg = entity_cfg or EntityCfg()
+    body_mass(
+        env=_MujocoEnvAdapter(env),
+        env_ids=env_ids,
+        ranges=ranges,
+        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        operation=operation,
+        shared_random=shared_random,
     )
 
 

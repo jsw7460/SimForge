@@ -11,7 +11,7 @@ from rlworld.rl.configs.common_config_classes import (
     TerminationsConfig, ObservationGroupConfig,
 )
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
-    base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions, base_lin_vel, base_height
+    base_ang_vel, projected_gravity, dof_pos, dof_vel, raw_actions, base_lin_vel, base_height
 )
 from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.configs.events import EventTermConfig
@@ -172,14 +172,6 @@ class Go2FlatGenesisConfig:
             },
             sensors=[
                 SensorConfig(entity_name="robot", link_name="base", sensor_class=gs.sensors.IMU),
-                # SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.Contact),
-                # SensorConfig(entity_name="robot", link_name="FL_foot", sensor_class=gs.sensors.Contact),
-                # SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.Contact),
-                # SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.Contact),
-                # SensorConfig(entity_name="robot", link_name="FR_foot", sensor_class=gs.sensors.ContactForce),
-                # SensorConfig(entity_name="robot", link_name="FL_foot", sensor_class=gs.sensors.ContactForce),
-                # SensorConfig(entity_name="robot", link_name="RR_foot", sensor_class=gs.sensors.ContactForce),
-                # SensorConfig(entity_name="robot", link_name="RL_foot", sensor_class=gs.sensors.ContactForce),
             ],
             contact_sensors=[
                 GenesisContactSensorCfg(
@@ -215,12 +207,17 @@ class Go2FlatGenesisConfig:
                 mode="reset",
                 params={"position_noise_range": (math.pi / 360, math.pi / 120)},
             )
-            reset_pos_quat = EventTermConfig(
-                func=initf.initialize_pos_quat,
+            reset_root = EventTermConfig(
+                func=ef.reset_root_state_uniform,
                 mode="reset",
                 params={
-                    "base_init_pos": [1.5, 1.5, self.robot.base_init_height + 0.025],
-                    "base_init_quat": [1.0, 0.0, 0.0, 0.0],
+                    "pose_range": {
+                        "x": (-0.5, 0.5),
+                        "y": (-0.5, 0.5),
+                        "z": (0.0, 0.0),
+                        "yaw": (-3.14, 3.14),
+                    },
+                    "velocity_range": {},
                 },
             )
             randomize_base_mass = EventTermConfig(
@@ -233,11 +230,20 @@ class Go2FlatGenesisConfig:
                 mode="reset",
             )
             # Interval terms
-            apply_external_force_torque = EventTermConfig(
-                func=ef.apply_external_force_torque,
+            push_robot = EventTermConfig(
+                func=ef.push_by_setting_velocity,
                 mode="interval",
                 interval_range_s=(2.0, 20.0),
-                params={"force_range": {"x": (-50.0, 50.0), "y": (-50.0, 50.0), "z": (-20.0, 20.0)}},
+                params={
+                    "velocity_range": {
+                        "x": (-0.5, 0.5),
+                        "y": (-0.5, 0.5),
+                        "z": (-0.4, 0.4),
+                        "roll": (-0.52, 0.52),
+                        "pitch": (-0.52, 0.52),
+                        "yaw": (-0.78, 0.78),
+                    },
+                },
             )
 
         return _EventsCfg()
@@ -255,7 +261,7 @@ class Go2FlatGenesisConfig:
             command = ObservationTermConfig(func=command_obs, scale=1.0)
             dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
             dof_vel = ObservationTermConfig(func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5))
-            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+            prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
         @dataclass
         class _CriticObsCfg(_ActorObsCfg):

@@ -38,7 +38,7 @@ class MujocoVisualizationManager(BaseManager):
             return
 
         import viser
-        from mjlab.viewer.viser.scene import ViserMujocoScene
+        from mjlab.viewer.viser.scene import MjlabViserScene
 
         mj_model = self.env.scene_manager.mj_model
         num_envs = self.env.num_envs
@@ -49,11 +49,7 @@ class MujocoVisualizationManager(BaseManager):
         )
         self._server.request_share_url()
 
-        self._scene = ViserMujocoScene.create(
-            server=self._server,
-            mj_model=mj_model,
-            num_envs=num_envs,
-        )
+        self._scene = MjlabViserScene(self._server, mj_model, num_envs)
 
         self._scene.camera_tracking_enabled = self.config.camera_tracking
 

@@ -320,6 +320,8 @@ class MultiSimWorld:
 
         self._task_name = getattr(self._primary, "task_name", "multi_sim")
 
+        import ipdb; ipdb.set_trace()
+
     # ------------------------------------------------------------------
     # Joint permutation setup
     # ------------------------------------------------------------------

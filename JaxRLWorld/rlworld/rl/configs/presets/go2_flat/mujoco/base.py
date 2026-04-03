@@ -12,9 +12,11 @@ from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
 from mjlab.asset_zoo.robots.unitree_go2.go2_constants import get_spec as go2_get_spec, FULL_COLLISION
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensorCfg, ContactMatch
+from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
-from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, ObservationGroupConfig
+from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig, RunnerConfig, TerminationsConfig, \
+    ObservationGroupConfig
 from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,
@@ -31,7 +33,6 @@ from rlworld.rl.configs.robots.go2 import (
     STIFFNESS_HIP, STIFFNESS_KNEE, DAMPING_HIP, DAMPING_KNEE,
     ARMATURE_HIP, ARMATURE_KNEE, EFFORT_HIP, EFFORT_KNEE,
 )
-from rlworld.rl.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg, ArticulationCfg, InitialStateCfg,
 )
@@ -39,9 +40,8 @@ from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
 )
 from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
-from rlworld.rl.envs.mdp.observations.mujoco.proprioception import (
-    base_ang_vel, projected_gravity, dof_pos, dof_vel,
-    base_lin_vel, base_height, raw_actions, prev_processed_actions,
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    base_ang_vel, projected_gravity, dof_pos, dof_vel, raw_actions, base_lin_vel, base_height
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
@@ -240,7 +240,7 @@ class Go2FlatMujocoConfig:
                 func=ef.reset_joints_by_offset,
                 mode="reset",
                 params={
-                    "position_range": (0.0, 0.0),
+                    "position_range": (math.pi / 360, math.pi / 120),
                     "velocity_range": (0.0, 0.0),
                     "entity_cfg": EntityCfg(name="robot", joint_names=(".*",)),
                 },
@@ -263,15 +263,24 @@ class Go2FlatMujocoConfig:
                 },
             )
 
-            # Startup events (domain randomization)
+            # Domain randomization
             randomize_friction = EventTermConfig(
                 func=ef.randomize_geom_friction,
-                mode="startup",
+                mode="reset",
                 params={
                     "ranges": (0.3, 1.2),
                     "operation": "abs",
                     "shared_random": True,
                     "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
+                },
+            )
+            randomize_base_mass = EventTermConfig(
+                func=ef.randomize_body_mass,
+                mode="reset",
+                params={
+                    "ranges": (0.85, 1.15),
+                    "operation": "scale",
+                    "entity_cfg": EntityCfg(name="robot", body_names=("base",)),
                 },
             )
 
@@ -284,8 +293,8 @@ class Go2FlatMujocoConfig:
             projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
             command = ObservationTermConfig(func=command_obs, scale=1.0)
             dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
-            actions = ObservationTermConfig(func=raw_actions, scale=1.0)
             dof_vel = ObservationTermConfig(func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5))
+            prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
         @dataclass
         class _CriticObsCfg(_ActorObsCfg):

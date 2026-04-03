@@ -105,6 +105,47 @@ def reset_root_state_uniform(
     newton_lib.eval_fk(model, state.joint_q, state.joint_qd, state, indices=indices)
 
 
+def randomize_friction(
+    env: "NewtonEnv",
+    env_ids: torch.Tensor,
+    friction_range: tuple[float, float] = (0.3, 1.2),
+) -> None:
+    """Randomize ground-contact friction by scaling shape_material_mu.
+
+    Modifies the friction coefficient for all shapes in the specified
+    environments and notifies the solver of the change.
+
+    Args:
+        env: Newton environment instance.
+        env_ids: Environment indices to randomize.
+        friction_range: (min, max) absolute friction coefficient range.
+    """
+    if len(env_ids) == 0:
+        return
+
+    scene_manager = env.scene_manager
+    model = scene_manager.model
+
+    num_worlds = model.world_count
+    shape_count_total = len(wp.to_torch(model.shape_material_mu))
+    shapes_per_world = shape_count_total // num_worlds
+    import ipdb; ipdb.set_trace()
+    mu = wp.to_torch(model.shape_material_mu).reshape(num_worlds, shapes_per_world)
+
+    n = len(env_ids)
+    random_mu = (
+        torch.rand(n, shapes_per_world, device=env.device)
+        * (friction_range[1] - friction_range[0])
+        + friction_range[0]
+    )
+    mu[env_ids] = random_mu
+
+    wp.copy(model.shape_material_mu, wp.from_torch(mu.flatten(), dtype=wp.float32))
+
+    from newton.solvers import SolverNotifyFlags
+    scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
+
+
 def push_robot(
     env: "NewtonEnv",
     env_ids: torch.Tensor,
