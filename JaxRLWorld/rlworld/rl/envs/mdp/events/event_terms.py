@@ -71,12 +71,15 @@ def reset_root_state_uniform(
     ranges = torch.tensor(range_list, device=device)
     pose_samples = _sample_uniform(ranges[:, 0], ranges[:, 1], (n, 6), device)
 
-    # Default position from robot config
-    default_pos = robot.get_pos()[env_ids].clone()
+    # Default position/orientation from entity init_state config
+    entity_cfg = env.scene_manager.config.entities[entity_name]
+    init_state = entity_cfg.init_state
+    default_pos = torch.tensor(init_state.pos, device=device).unsqueeze(0).expand(n, -1)
+    default_quat = torch.tensor(init_state.rot, device=device).unsqueeze(0).expand(n, -1)
+
     positions = default_pos + pose_samples[:, 0:3]
 
     # Orientation: apply euler perturbation to default quat
-    default_quat = robot.get_quat()[env_ids].clone()  # wxyz
     delta_quat = _quat_from_euler_xyz(
         pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
     )

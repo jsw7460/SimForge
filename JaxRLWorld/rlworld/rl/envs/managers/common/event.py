@@ -86,7 +86,6 @@ class EventManager:
 
     def _apply_reset(self, env_ids: torch.Tensor) -> None:
         for name, term in self._terms_by_mode["reset"]:
-            import ipdb; ipdb.set_trace()
             self._resolved_fns[name](self.env, env_ids, **term.params)
 
     def _apply_interval(self, dt: float) -> None:

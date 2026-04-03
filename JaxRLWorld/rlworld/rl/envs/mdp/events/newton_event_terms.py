@@ -6,6 +6,7 @@ import torch
 import warp as wp
 
 import newton as newton_lib
+from newton.solvers import SolverNotifyFlags
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -40,10 +41,10 @@ def _quat_mul_xyzw(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     x1, y1, z1, w1 = q1[..., 0], q1[..., 1], q1[..., 2], q1[..., 3]
     x2, y2, z2, w2 = q2[..., 0], q2[..., 1], q2[..., 2], q2[..., 3]
     return torch.stack([
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2,
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
     ], dim=-1)
 
 
@@ -81,11 +82,17 @@ def reset_root_state_uniform(
     ranges = torch.tensor(range_list, device=device)
     pose_samples = _sample_uniform(ranges[:, 0], ranges[:, 1], (n, 6), device)
 
-    # Position: add perturbation to current
-    joint_q[env_ids, 0:3] += pose_samples[:, 0:3]
+    # Default position/orientation from entity init_state config
+    entity_cfg = scene_manager.config.entities["robot"]
+    init_state = entity_cfg.init_state
+    default_pos = torch.tensor(init_state.pos, device=device)
+    default_rot = torch.tensor(init_state.rot, device=device)
 
-    # Orientation: multiply delta quat (xyzw)
-    default_quat = joint_q[env_ids, 3:7].clone()
+    # Position: default + perturbation
+    joint_q[env_ids, 0:3] = default_pos.unsqueeze(0) + pose_samples[:, 0:3]
+
+    # Orientation: default quat * delta quat (xyzw)
+    default_quat = default_rot.unsqueeze(0).expand(n, -1)
     delta_quat = _quat_from_euler_xyz_xyzw(
         pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
     )
@@ -110,10 +117,10 @@ def randomize_friction(
     env_ids: torch.Tensor,
     friction_range: tuple[float, float] = (0.3, 1.2),
 ) -> None:
-    """Randomize ground-contact friction by scaling shape_material_mu.
+    """Randomize friction for the robot's shapes via ArticulationView.
 
-    Modifies the friction coefficient for all shapes in the specified
-    environments and notifies the solver of the change.
+    Uses the scene manager's ``robot_view`` to read/write only the robot's
+    shape_material_mu, leaving global shapes (ground plane) untouched.
 
     Args:
         env: Newton environment instance.
@@ -124,25 +131,24 @@ def randomize_friction(
         return
 
     scene_manager = env.scene_manager
+    view = scene_manager.robot_view
     model = scene_manager.model
 
-    num_worlds = model.world_count
-    shape_count_total = len(wp.to_torch(model.shape_material_mu))
-    shapes_per_world = shape_count_total // num_worlds
-    import ipdb; ipdb.set_trace()
-    mu = wp.to_torch(model.shape_material_mu).reshape(num_worlds, shapes_per_world)
+    # warp array → torch: (num_worlds, num_articulations, shapes_per_articulation)
+    mu_wp = view.get_attribute("shape_material_mu", model)
+    mu = wp.to_torch(mu_wp)
 
-    n = len(env_ids)
+    n_shapes = mu.shape[-1]
     random_mu = (
-        torch.rand(n, shapes_per_world, device=env.device)
+        torch.rand(len(env_ids), mu.shape[1], n_shapes, device=env.device)
         * (friction_range[1] - friction_range[0])
         + friction_range[0]
     )
     mu[env_ids] = random_mu
 
-    wp.copy(model.shape_material_mu, wp.from_torch(mu.flatten(), dtype=wp.float32))
+    # torch → warp and write back
+    view.set_attribute("shape_material_mu", model, mu)
 
-    from newton.solvers import SolverNotifyFlags
     scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
 
 

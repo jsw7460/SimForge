@@ -10,6 +10,7 @@ import torch
 import warp as wp
 
 import newton
+from newton.selection import ArticulationView
 from newton.sensors import SensorContact
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
@@ -162,6 +163,9 @@ class NewtonSceneManager(BaseManager):
         self.control: newton.Control | None = None
         self.contacts: newton.Contacts | None = None
         self.collision_pipeline: Any = None
+
+        # ArticulationView per entity (created in build_scene)
+        self.articulation_views: dict[str, ArticulationView] = {}
 
         # Entity tracking
         self.entities: dict[str, Any] = {}  # entity_name -> entity info
@@ -480,6 +484,9 @@ class NewtonSceneManager(BaseManager):
         # Validate actuator parameters
         self._validate_mujoco_actuators()
 
+        # Build ArticulationView for the primary robot entity
+        self._build_robot_view()
+
         # Build kinematic trees for URDF entities
         self._set_kinematic_trees()
 
@@ -511,6 +518,27 @@ class NewtonSceneManager(BaseManager):
         print(f"  kd range: [{kd.min():.2f}, {kd.max():.2f}]")
         if num_zero > 0:
             print(f"  ({num_zero} joints with ke=0: explicit actuator mode)")
+
+    def _build_robot_view(self) -> None:
+        """Create an ArticulationView for each non-ground-plane entity.
+
+        Uses each entity's body_label_prefix to select only that entity's
+        articulation, excluding ground plane and other global shapes.
+        """
+        for entity_name, entity_info in self.entities.items():
+            cfg = entity_info["config"]
+            if isinstance(cfg, GroundPlaneCfg):
+                continue
+            prefix = getattr(cfg, "body_label_prefix", None)
+            pattern = f"{prefix}*" if prefix else "*"
+            self.articulation_views[entity_name] = ArticulationView(
+                self.model, pattern=pattern
+            )
+
+    @property
+    def robot_view(self) -> ArticulationView:
+        """Shortcut for the 'robot' entity's ArticulationView."""
+        return self.articulation_views["robot"]
 
     def _set_kinematic_trees(self) -> None:
         """Build kinematic trees for entities with URDF."""
