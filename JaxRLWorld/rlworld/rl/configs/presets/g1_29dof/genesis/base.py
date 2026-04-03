@@ -230,7 +230,7 @@ class G1FlatGenesisConfig:
         class _TerminationsCfg(TerminationsConfig):
             roll_pitch_violation = TerminationTermConfig(
                 common_tf.roll_pitch_violation,
-                {"roll_threshold_degree": 70.0, "pitch_threshold_degree": 70.0},
+                {"roll_threshold_degree": 20.0, "pitch_threshold_degree": 20.0},
             )
             time_out = TerminationTermConfig(max_episode_exceed)
 
