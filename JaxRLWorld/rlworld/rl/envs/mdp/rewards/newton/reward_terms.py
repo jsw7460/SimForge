@@ -589,7 +589,6 @@ def wtw_feet_slip(env: "NewtonLocomotionEnv") -> torch.Tensor:
     contact = env.contact_manager.is_contact("foot_contact", order=result.body_names)
     prev_contact = env.contact_manager.prev_is_contact("foot_contact", order=result.body_names)
     contact_filt = contact | prev_contact
-
     return -torch.sum(contact_filt.float() * vel_sq, dim=-1)
 
 

@@ -300,26 +300,26 @@ class G1FlatGenesisConfig:
                     link_name="pelvis",
                     sensor_class=gs.sensors.IMU,
                 ),
-                SensorConfig(
-                    entity_name="robot",
-                    link_name="left_ankle_roll_link",
-                    sensor_class=gs.sensors.Contact,
-                ),
-                SensorConfig(
-                    entity_name="robot",
-                    link_name="right_ankle_roll_link",
-                    sensor_class=gs.sensors.Contact,
-                ),
-                SensorConfig(
-                    entity_name="robot",
-                    link_name="left_ankle_roll_link",
-                    sensor_class=gs.sensors.ContactForce,
-                ),
-                SensorConfig(
-                    entity_name="robot",
-                    link_name="right_ankle_roll_link",
-                    sensor_class=gs.sensors.ContactForce,
-                )
+                # SensorConfig(
+                #     entity_name="robot",
+                #     link_name="left_ankle_roll_link",
+                #     sensor_class=gs.sensors.Contact,
+                # ),
+                # SensorConfig(
+                #     entity_name="robot",
+                #     link_name="right_ankle_roll_link",
+                #     sensor_class=gs.sensors.Contact,
+                # ),
+                # SensorConfig(
+                #     entity_name="robot",
+                #     link_name="left_ankle_roll_link",
+                #     sensor_class=gs.sensors.ContactForce,
+                # ),
+                # SensorConfig(
+                #     entity_name="robot",
+                #     link_name="right_ankle_roll_link",
+                #     sensor_class=gs.sensors.ContactForce,
+                # )
             ],
             contact_sensors=[
                 GenesisContactSensorCfg(
@@ -483,6 +483,7 @@ class G1FlatGenesisConfig:
                 weight=1e-5,
                 params={
                     "command_threshold": 0.05,
+                    "contact_group": "feet_ground_contact"
                 },
             )
 

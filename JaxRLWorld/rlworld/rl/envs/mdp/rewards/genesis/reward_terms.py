@@ -624,7 +624,7 @@ def wtw_feet_slip(
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
-    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local)
+    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local, ref="link_com")
 
     # Contact: current OR previous step
     contact = env.contact_manager.is_contact(contact_group, order=feet_links)

@@ -328,12 +328,12 @@ def randomize_geom_friction(
 
 def randomize_body_com_offset(
     env: "MujocoEnv",
+    env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "add",
     entity_cfg: EntityCfg | None = None,
     axes: list[int] | None = None,
     shared_random: bool = False,
-    env_ids: torch.Tensor | None = None,
 ) -> None:
     """Randomize body COM offset (body_ipos) via mjlab's dr.body_com_offset."""
     from mjlab.envs.mdp.dr import body_com_offset
@@ -352,9 +352,9 @@ def randomize_body_com_offset(
 
 def randomize_encoder_bias(
     env: "MujocoEnv",
+    env_ids: torch.Tensor,
     bias_range: tuple[float, float],
     entity_cfg: EntityCfg | None = None,
-    env_ids: torch.Tensor | None = None,
 ) -> None:
     """Randomize joint encoder bias via mjlab's dr.encoder_bias."""
     from mjlab.envs.mdp.dr import encoder_bias
@@ -392,12 +392,12 @@ def randomize_body_mass(
 
 def randomize_pd_gains(
     env: "MujocoEnv",
+    env_ids: torch.Tensor,
     kp_range: tuple[float, float],
     kd_range: tuple[float, float],
     distribution: Literal["uniform", "log_uniform"] = "uniform",
     operation: Literal["scale", "abs"] = "scale",
     entity_cfg: EntityCfg | None = None,
-    env_ids: torch.Tensor | None = None,
 ) -> None:
     """Randomize PD gains via mjlab's dr.pd_gains."""
     from mjlab.envs.mdp.dr import pd_gains

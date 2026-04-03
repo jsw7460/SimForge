@@ -80,13 +80,17 @@ class EventManager:
             new_intervals = self._sample_interval(idx, batch_size=len(env_ids))
             self._interval_timers[idx][env_ids] = new_intervals
 
+    def _call_event_fn(self, name: str, term: EventTermConfig, env_ids: torch.Tensor) -> None:
+        self._resolved_fns[name](env=self.env, env_ids=env_ids, **term.params)
+
     def _apply_startup(self) -> None:
+        env_ids = torch.arange(self.num_envs, device=self.device)
         for name, term in self._terms_by_mode["startup"]:
-            self._resolved_fns[name](self.env, **term.params)
+            self._call_event_fn(name, term, env_ids=env_ids)
 
     def _apply_reset(self, env_ids: torch.Tensor) -> None:
         for name, term in self._terms_by_mode["reset"]:
-            self._resolved_fns[name](self.env, env_ids, **term.params)
+            self._call_event_fn(name, term, env_ids=env_ids)
 
     def _apply_interval(self, dt: float) -> None:
         for local_idx, (name, term) in enumerate(self._terms_by_mode["interval"]):
@@ -95,7 +99,7 @@ class EventManager:
             triggered_env_ids = triggered_mask.nonzero(as_tuple=False).flatten()
 
             if len(triggered_env_ids) > 0:
-                self._resolved_fns[name](self.env, triggered_env_ids, **term.params)
+                self._call_event_fn(name, term, env_ids=triggered_env_ids)
                 new_intervals = self._sample_interval(local_idx, batch_size=len(triggered_env_ids))
                 self._interval_timers[local_idx][triggered_env_ids] = new_intervals
 
