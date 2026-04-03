@@ -70,6 +70,7 @@ class G1FlatGenesisConfig:
         # Rewards
         if self.tracking_rewards is None:
             self.tracking_rewards = TrackingRewards(
+                # base_name=self.robot.base_link_name,
                 base_name=self.robot.base_link_name,
                 tracking_lin_vel_weight=1.0,
                 tracking_ang_vel_weight=1.0,
@@ -431,7 +432,7 @@ class G1FlatGenesisConfig:
             body_ang_vel_penalty_mjlab = RewardTermConfig(
                 func=rf_mjlab.body_ang_vel_penalty_mjlab,
                 weight=0.05,
-                params={"body_name": "pelvis"},
+                params={"body_name": self.robot.base_link_name},
             )
             joint_pos_limits_mjlab = RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
