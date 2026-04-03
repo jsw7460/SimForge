@@ -428,8 +428,9 @@ class feet_swing_height_mjlab:
         foot_pos = entity.get_links_pos(links_idx_local=self.links_idx_local)
         foot_heights = foot_pos[:, :, 2]
 
-        # Get contact states
-        is_contact = env.contact_manager.is_contact(self.contact_group)
+        # Get contact states (order=feet_links to match foot_heights column order)
+        feet_order = list(self.feet_links)
+        is_contact = env.contact_manager.is_contact(self.contact_group, order=feet_order)
         in_air = ~is_contact
 
         # Update peak heights during swing
@@ -440,7 +441,7 @@ class feet_swing_height_mjlab:
         )
 
         # Detect first contact
-        first_contact = env.contact_manager.compute_first_contact(self.contact_group)
+        first_contact = env.contact_manager.compute_first_contact(self.contact_group, order=feet_order)
 
         # Get command velocity
         command = torch.stack([
@@ -511,7 +512,7 @@ def feet_slip_mjlab(
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)  # (num_envs, num_feet)
 
     # Get contact states
-    is_contact = env.contact_manager.is_contact(contact_group)  # (num_envs, num_feet)
+    is_contact = env.contact_manager.is_contact(contact_group, order=feet_links)  # (num_envs, num_feet)
 
     # Command scaling
     command = torch.stack([

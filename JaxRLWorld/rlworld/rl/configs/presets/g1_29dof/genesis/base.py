@@ -303,29 +303,20 @@ class G1FlatGenesisConfig:
                 # SensorConfig(
                 #     entity_name="robot",
                 #     link_name="left_ankle_roll_link",
-                #     sensor_class=gs.sensors.Contact,
-                # ),
-                # SensorConfig(
-                #     entity_name="robot",
-                #     link_name="right_ankle_roll_link",
-                #     sensor_class=gs.sensors.Contact,
-                # ),
-                # SensorConfig(
-                #     entity_name="robot",
-                #     link_name="left_ankle_roll_link",
                 #     sensor_class=gs.sensors.ContactForce,
                 # ),
                 # SensorConfig(
                 #     entity_name="robot",
                 #     link_name="right_ankle_roll_link",
                 #     sensor_class=gs.sensors.ContactForce,
-                # )
+                # ),
             ],
             contact_sensors=[
                 GenesisContactSensorCfg(
                     name="feet_ground_contact",
                     primary_links=["left_ankle_roll_link", "right_ankle_roll_link"],
-                    secondary_entity="base_entity",
+                    secondary_entity=None,
+                    exclude_self_contact=True
                 ),
             ],
             sim_options=gs.options.SimOptions(dt=0.005, substeps=1),
