@@ -102,7 +102,7 @@ class G1FlatNewtonConfig:
         class _TerminationsCfg(TerminationsConfig):
             roll_pitch = TerminationTermConfig(
                 common_tf.roll_pitch_violation,
-                {"roll_threshold_degree": 70.0, "pitch_threshold_degree": 70.0},
+                {"roll_threshold_degree": 20.0, "pitch_threshold_degree": 20.0},
             )
             max_episode = TerminationTermConfig(max_episode_exceed)
 
@@ -223,6 +223,9 @@ class G1FlatNewtonConfig:
     def _build_reward_config(self) -> RewardConfig:
         @dataclass
         class _RewardsCfg(RewardConfig):
+            exponential_shaping: bool = True
+            shaping_sigma: float = 0.25
+
             # Tracking rewards (common -- uses RobotData interface)
             track_lin_vel = RewardTermConfig(
                 func=rf_common.track_lin_vel,
@@ -344,6 +347,55 @@ class G1FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             )
+
+        # # --- Previous reward config (without exponential shaping) ---
+        # @dataclass
+        # class _RewardsCfg(RewardConfig):
+        #     track_lin_vel = RewardTermConfig(
+        #         func=rf_common.track_lin_vel, weight=2.0,
+        #         params={"std": 0.5, "penalize_z": True},
+        #     )
+        #     track_ang_vel = RewardTermConfig(
+        #         func=rf_common.track_ang_vel, weight=2.0,
+        #         params={"std": 0.707, "penalize_xy": True},
+        #     )
+        #     flat_orientation = RewardTermConfig(
+        #         func=rf_common.flat_orientation, weight=1.0,
+        #         params={"std": 0.447},
+        #     )
+        #     variable_posture = RewardTermConfig(
+        #         func=rf_mjlab.variable_posture, weight=1.0,
+        #         params={...},  # same posture params as above
+        #     )
+        #     body_ang_vel_penalty_mjlab = RewardTermConfig(
+        #         func=rf_mjlab.body_ang_vel_penalty_mjlab, weight=0.05,
+        #         params={"body_name": self.robot.prefixed("torso_link")},
+        #     )
+        #     angular_momentum_penalty = RewardTermConfig(
+        #         func=rf_mjlab.angular_momentum_penalty, weight=0.02,
+        #     )
+        #     joint_pos_limits_mjlab = RewardTermConfig(
+        #         func=rf_mjlab.joint_pos_limits_mjlab, weight=1.0,
+        #     )
+        #     raw_action_rate_l2_mjlab = RewardTermConfig(
+        #         func=rf_mjlab.raw_action_rate_l2_mjlab, weight=0.1,
+        #     )
+        #     feet_clearance_mjlab = RewardTermConfig(
+        #         func=rf_mjlab.feet_clearance_mjlab, weight=2.0,
+        #         params={"feet_bodies": ..., "target_height": 0.1, "command_threshold": 0.05},
+        #     )
+        #     feet_swing_height_mjlab = RewardTermConfig(
+        #         func=rf_mjlab.feet_swing_height_mjlab, weight=0.25,
+        #         params={"feet_bodies": ..., "target_height": 0.1, "command_threshold": 0.05},
+        #     )
+        #     feet_slip_mjlab = RewardTermConfig(
+        #         func=rf_mjlab.feet_slip_mjlab, weight=0.1,
+        #         params={"feet_bodies": ..., "command_threshold": 0.05},
+        #     )
+        #     soft_landing_mjlab = RewardTermConfig(
+        #         func=rf_mjlab.soft_landing_mjlab, weight=1e-5,
+        #         params={"feet_bodies": ..., "command_threshold": 0.05},
+        #     )
 
         return _RewardsCfg()
 

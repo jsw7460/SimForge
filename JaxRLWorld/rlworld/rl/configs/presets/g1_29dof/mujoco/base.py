@@ -105,7 +105,7 @@ class G1FlatMujocoConfig:
         class _TerminationsCfg(TerminationsConfig):
             bad_orientation = TerminationTermConfig(
                 tf.bad_orientation,
-                {"limit_angle": math.radians(70.0)},
+                {"limit_angle": math.radians(20.0)},
             )
             time_out = TerminationTermConfig(tf.time_out)
 
