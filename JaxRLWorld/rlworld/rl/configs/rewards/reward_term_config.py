@@ -84,6 +84,9 @@ class RewardTermConfig:
     func: Callable | str
     weight: float | WeightSchedule = 0.0
     params: dict = field(default_factory=dict)
+    exp_shaping: bool = False
+    """When reward_mode is 'exponential', this term goes inside exp().
+    When reward_mode is 'exponential_auto', this field is ignored."""
 
     @property
     def resolved_func(self) -> Callable:

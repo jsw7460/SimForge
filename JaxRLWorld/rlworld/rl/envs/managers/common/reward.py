@@ -45,30 +45,61 @@ class RewardManager(BaseManager):
         episode_sums: dict[str, torch.Tensor],
         reward_buffer_per_type: dict[str, torch.Tensor]
     ) -> None:
+        mode = self.config.reward_mode
 
-        if self.config.exponential_shaping:
-            self._set_rewards_exponential(
-                reward_buffer, episode_sums, reward_buffer_per_type
-            )
-        else:
+        if mode == "sum":
             for name, reward_term in self.reward_terms.items():
                 reward_value = self._compute_weighted_reward(name, reward_term)
                 reward_buffer_per_type[name] = reward_value
                 episode_sums[name] += reward_value
                 reward_buffer += reward_value
+        elif mode == "exponential":
+            self._set_rewards_exponential_fixed(
+                reward_buffer, episode_sums, reward_buffer_per_type
+            )
+        elif mode == "exponential_auto":
+            self._set_rewards_exponential_auto(
+                reward_buffer, episode_sums, reward_buffer_per_type
+            )
+        else:
+            raise ValueError(f"Unknown reward_mode: {mode!r}")
 
         reward_buffer_per_type["total_reward"] = reward_buffer
 
-    def _set_rewards_exponential(
+    def _set_rewards_exponential_fixed(
         self,
         reward_buffer: torch.Tensor,
         episode_sums: dict[str, torch.Tensor],
         reward_buffer_per_type: dict[str, torch.Tensor],
     ) -> None:
-        """WTW-style exponential shaping: rew_pos * exp(rew_neg / sigma).
+        """Exponential shaping with fixed classification via exp_shaping flag.
 
-        Positive/negative classification uses global sum (torch.sum) across
-        all environments, matching the original Walk-These-Ways implementation.
+        total = (sum of exp_shaping=False terms) * exp((sum of exp_shaping=True terms) / sigma)
+        """
+        rew_task = torch.zeros_like(reward_buffer)
+        rew_shaped = torch.zeros_like(reward_buffer)
+
+        for name, reward_term in self.reward_terms.items():
+            reward_value = self._compute_weighted_reward(name, reward_term)
+            reward_buffer_per_type[name] = reward_value
+            episode_sums[name] += reward_value
+
+            if reward_term.exp_shaping:
+                rew_shaped += reward_value
+            else:
+                rew_task += reward_value
+
+        reward_buffer += rew_task * torch.exp(rew_shaped / self.config.shaping_sigma)
+
+    def _set_rewards_exponential_auto(
+        self,
+        reward_buffer: torch.Tensor,
+        episode_sums: dict[str, torch.Tensor],
+        reward_buffer_per_type: dict[str, torch.Tensor],
+    ) -> None:
+        """Exponential shaping with dynamic classification by global sum sign.
+
+        Each step, terms with negative global sum go inside exp().
         """
         rew_pos = torch.zeros_like(reward_buffer)
         rew_neg = torch.zeros_like(reward_buffer)
