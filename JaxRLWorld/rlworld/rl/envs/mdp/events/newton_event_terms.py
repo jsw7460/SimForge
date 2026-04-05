@@ -98,7 +98,8 @@ def reset_root_state_uniform(
     )
     joint_q[env_ids, 3:7] = _quat_mul_xyzw(default_quat, delta_quat)
 
-    # Velocity perturbation
+    # Velocity perturbation (zero out first to avoid stale values from previous episode)
+    joint_qd[env_ids, :] = 0.0
     if velocity_range:
         range_list = [velocity_range.get(key, (0.0, 0.0)) for key in keys]
         ranges = torch.tensor(range_list, device=device)
@@ -197,3 +198,52 @@ def push_robot(
         joint_qd[env_ids, 5] += torch.empty(n_envs, device=device).uniform_(*velocity_range["yaw"])
 
     wp.copy(state.joint_qd, wp.from_torch(joint_qd.flatten(), dtype=wp.float32))
+
+
+def randomize_body_com_offset(
+    env: "NewtonEnv",
+    env_ids: torch.Tensor,
+    ranges: dict[int, tuple[float, float]],
+    body_patterns: str | list[str] = ("torso_link",),
+) -> None:
+    """Randomize body COM offset for specified bodies (Newton).
+
+    Adds random offsets to the original body COM positions,
+    matching MuJoCo's ``randomize_body_com_offset`` with ``operation="add"``.
+
+    Args:
+        env: Newton environment instance.
+        env_ids: Environment indices to randomize.
+        ranges: Per-axis (min, max) offset ranges. Keys are axis indices (0=x, 1=y, 2=z).
+        body_patterns: Body name patterns to randomize COM for.
+    """
+    if len(env_ids) == 0:
+        return
+
+    from rlworld.rl.envs.mdp.observations.newton.body_utils import get_cache
+
+    cache = get_cache(env)
+    model = env.scene_manager.model
+    body_indices = cache.get_body_indices(body_patterns)
+
+    # body_com: wp.array(dtype=wp.vec3) → torch [total_bodies, 3]
+    body_com = wp.to_torch(model.body_com).reshape(env.num_envs, cache.bodies_per_env, 3)
+
+    # Cache original COM on first call
+    if not hasattr(cache, '_original_body_com'):
+        cache._original_body_com = body_com.clone()
+
+    n_envs = len(env_ids)
+    n_bodies = len(body_indices)
+    original = cache._original_body_com[:, body_indices, :][env_ids]  # [n_envs, n_bodies, 3]
+
+    offsets = torch.zeros(n_envs, n_bodies, 3, device=env.device)
+    for axis, (lo, hi) in ranges.items():
+        offsets[:, :, axis] = torch.empty(n_envs, n_bodies, device=env.device).uniform_(lo, hi)
+
+    body_com[env_ids.unsqueeze(1), body_indices] = original + offsets
+
+    wp.copy(model.body_com, wp.from_torch(body_com.reshape(-1, 3).contiguous(), dtype=wp.vec3))
+
+    solver = env.scene_manager.solver
+    solver.notify_model_changed(SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
