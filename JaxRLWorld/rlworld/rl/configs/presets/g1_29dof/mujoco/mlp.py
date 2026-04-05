@@ -7,7 +7,7 @@ from .base import G1FlatMujocoConfig
 @dataclass
 class G1MLPConfig(G1FlatMujocoConfig):
     actor_class_name: str = "MLPActor"
-    run_name: str = "G1_Mujoco_MLP"
+    run_name: str = "G1_29Dof_Mujoco_MLP"
 
 
 def get_config() -> MujocoConfigsForRun:

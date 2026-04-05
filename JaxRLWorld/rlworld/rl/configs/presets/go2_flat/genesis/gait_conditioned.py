@@ -89,7 +89,7 @@ class Go2GaitConditionedGenesisConfig(Go2FlatGenesisConfig):
     def _build_reward_config(self) -> RewardConfig:
         @dataclass
         class _WTWRewardsCfg(RewardConfig):
-            exponential_shaping: bool = True
+            reward_mode: str = "exponential_auto"
             shaping_sigma: float = 0.02
 
             # ── Tracking (common) ──

@@ -76,7 +76,7 @@ class G1FlatMujocoConfig:
     max_iterations: int = 30000
 
     actor_class_name: str = "MLPActor"
-    run_name: str = "G1_Mujoco"
+    run_name: str = "G1_29Dof_Mujoco"
 
     def build(self) -> "MujocoConfigsForRun":
         """Build the complete configuration as a typed MujocoConfigsForRun."""
@@ -105,7 +105,7 @@ class G1FlatMujocoConfig:
         class _TerminationsCfg(TerminationsConfig):
             bad_orientation = TerminationTermConfig(
                 tf.bad_orientation,
-                {"limit_angle": math.radians(20.0)},
+                {"limit_angle": math.radians(70.0)},
             )
             time_out = TerminationTermConfig(tf.time_out)
 
@@ -291,8 +291,8 @@ class G1FlatMujocoConfig:
             projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
             command = ObservationTermConfig(func=command_obs, scale=1.0)
             dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
-            actions = ObservationTermConfig(func=raw_actions, scale=1.0)
             dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+            actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
         @dataclass
         class _CriticObsCfg(ObservationGroupConfig):
@@ -300,7 +300,7 @@ class G1FlatMujocoConfig:
             projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
             command = ObservationTermConfig(func=command_obs, scale=1.0)
             dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
-            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+            prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
             dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
             base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
             base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
@@ -360,7 +360,7 @@ class G1FlatMujocoConfig:
             self_collision_cost = RewardTermConfig(
                 func=rf.self_collision_cost,
                 weight=1.0,
-                params={"contact_group": "self_collision"},
+                params={"contact_group": "self_collision", "force_threshold": 10.0},
             )
 
             # Variable posture reward (G1-specific std values)

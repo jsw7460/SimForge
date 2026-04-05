@@ -180,16 +180,16 @@ class GroundPlaneCfg:
         friction: Coulomb friction coefficient.
     """
 
-    contact_stiffness: float = 5000.0
-    contact_damping: float = 200.0
+    contact_stiffness: float = 2.5e3
+    contact_damping: float = 100.0
     friction: float = 1.0
 
     # Newton-specific ground options
-    ground_kf: float = 100.0
+    ground_kf: float = 1000.0
     """Newton tangential contact stiffness."""
 
-    ground_mu_rolling: float = 0.0
+    ground_mu_rolling: float = 0.0001
     """Newton rolling friction coefficient."""
 
-    ground_mu_torsional: float = 0.0
+    ground_mu_torsional: float = 0.005
     """Newton torsional friction coefficient."""

@@ -25,14 +25,15 @@ from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
 )
+from rlworld.rl.envs.mdp.events import event_terms as genesis_ef
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
-    base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
-)
+    base_ang_vel, projected_gravity, dof_pos, dof_vel, raw_actions, )
 from rlworld.rl.envs.mdp.observations.genesis import state
 from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
+from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 
@@ -231,7 +232,7 @@ class G1FlatGenesisConfig:
         class _TerminationsCfg(TerminationsConfig):
             roll_pitch_violation = TerminationTermConfig(
                 common_tf.roll_pitch_violation,
-                {"roll_threshold_degree": 20.0, "pitch_threshold_degree": 20.0},
+                {"roll_threshold_degree": 70.0, "pitch_threshold_degree": 70.0},
             )
             time_out = TerminationTermConfig(max_episode_exceed)
 
@@ -256,13 +257,62 @@ class G1FlatGenesisConfig:
     def _build_event_config(self) -> EventConfig:
         @dataclass
         class _EventsCfg(EventConfig):
-            reset_dof_pos = EventTermConfig(func=initf.initialize_dof_pos, mode="reset")
-            reset_pos_quat = EventTermConfig(
-                func=initf.initialize_pos_quat,
+            # Reset events
+            reset_root = EventTermConfig(
+                func=genesis_ef.reset_root_state_uniform,
                 mode="reset",
                 params={
-                    "base_init_pos": [0.0, 0.0, self.robot.base_init_height],
-                    "base_init_quat": [1.0, 0.0, 0.0, 0.0],
+                    "pose_range": {
+                        "x": (-0.5, 0.5),
+                        "y": (-0.5, 0.5),
+                        "z": (0.01, 0.05),
+                        "yaw": (-3.14, 3.14),
+                    },
+                    "velocity_range": {},
+                },
+            )
+            reset_dof_pos = EventTermConfig(
+                func=initf.initialize_dof_pos_with_noise,
+                mode="reset",
+                params={
+                    "position_noise_range": (0.0, 0.0),
+                    "velocity_noise_range": (0.0, 0.0),
+                },
+            )
+
+            # Interval events
+            push_robot = EventTermConfig(
+                func=genesis_ef.push_by_setting_velocity,
+                mode="interval",
+                interval_range_s=(1.0, 3.0),
+                params={
+                    "velocity_range": {
+                        "x": (-0.5, 0.5),
+                        "y": (-0.5, 0.5),
+                        "z": (-0.4, 0.4),
+                        "roll": (-0.52, 0.52),
+                        "pitch": (-0.52, 0.52),
+                        "yaw": (-0.78, 0.78),
+                    },
+                },
+            )
+
+            # Startup events (domain randomization)
+            randomize_friction = EventTermConfig(
+                func=initf.randomize_friction,
+                mode="startup",
+                params={"friction_ratio_range": (0.3, 1.2)},
+            )
+            randomize_body_com = EventTermConfig(
+                func=genesis_ef.randomize_body_com_offset,
+                mode="startup",
+                params={
+                    "ranges": {
+                        0: (-0.025, 0.025),
+                        1: (-0.025, 0.025),
+                        2: (-0.03, 0.03),
+                    },
+                    "link_names": ("torso_link",),
                 },
             )
 
@@ -319,13 +369,19 @@ class G1FlatGenesisConfig:
                     secondary_entity=None,
                     exclude_self_contact=True
                 ),
+                GenesisContactSensorCfg(
+                    name="self_collision",
+                    primary_links=[".*"],
+                    entity_name="robot",
+                    secondary_entity="self",
+                ),
             ],
             sim_options=gs.options.SimOptions(dt=0.005, substeps=1),
             rigid_options=gs.options.RigidOptions(
                 dt=0.005,
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
-                enable_self_collision=False,
+                enable_self_collision=True,
                 enable_joint_limit=True,
                 max_collision_pairs=30,
             ),
@@ -340,19 +396,24 @@ class G1FlatGenesisConfig:
             command = ObservationTermConfig(func=command_obs, scale=1.0)
             dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
             dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
-            prev_actions = ObservationTermConfig(func=prev_processed_actions, scale=1.0)
+            prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
         feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
 
         @dataclass
-        class _CriticObsCfg(_ActorObsCfg):
-            base_lin_vel_obs = ObservationTermConfig(func=state.base_lin_vel, scale=1.0)
-            base_height = ObservationTermConfig(func=state.base_height, scale=1.0)
-            base_euler = ObservationTermConfig(func=state.base_euler, scale=1.0)
-            contact_indicator = ObservationTermConfig(func=state.contact_indicator, scale=1.0)
-            contact_force = ObservationTermConfig(func=state.contact_force, scale=0.01)
-            feet_height = ObservationTermConfig(func=state.feet_height, scale=1.0, params={"links": feet_links})
-            foot_air_time = ObservationTermConfig(func=state.foot_air_time, scale=1.0)
+        class _CriticObsCfg(ObservationGroupConfig):
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+            projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            command = ObservationTermConfig(func=command_obs, scale=1.0)
+            dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+            prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+            dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+            base_height_obs = ObservationTermConfig(func=state.base_height, scale=1.0)
+            base_quat_obs = ObservationTermConfig(func=state.base_quat, scale=1.0)
+            foot_height_obs = ObservationTermConfig(func=state.feet_height, scale=1.0, params={"links": feet_links})
+            foot_air_time_obs = ObservationTermConfig(func=state.foot_air_time, scale=1.0)
+            foot_contact_obs = ObservationTermConfig(func=state.contact_indicator, scale=1.0)
+            foot_contact_forces_obs = ObservationTermConfig(func=state.contact_force_3d, scale=0.01)
 
         @dataclass
         class _ObsCfg(ObservationConfig):
@@ -428,23 +489,30 @@ class G1FlatGenesisConfig:
                 },
             )
 
+            # Self-collision
+            self_collision_cost = RewardTermConfig(
+                func=rf_genesis.wtw_collision,
+                weight=1.0,
+                params={"contact_group": "self_collision", "force_threshold": 1.0},
+            )
+
             # Penalties
-            body_ang_vel_penalty_mjlab = RewardTermConfig(
+            body_angular_velocity_penalty = RewardTermConfig(
                 func=rf_mjlab.body_ang_vel_penalty_mjlab,
                 weight=0.05,
                 params={"body_name": self.robot.base_link_name},
             )
-            joint_pos_limits_mjlab = RewardTermConfig(
+            joint_pos_limits = RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
             )
-            raw_action_rate_l2_mjlab = RewardTermConfig(
+            raw_action_rate_l2 = RewardTermConfig(
                 func=rf_mjlab.raw_action_rate_l2_mjlab,
                 weight=0.1,
             )
 
             # Feet rewards
-            feet_clearance_mjlab = RewardTermConfig(
+            feet_clearance = RewardTermConfig(
                 func=rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -453,7 +521,7 @@ class G1FlatGenesisConfig:
                     "command_threshold": 0.05,
                 },
             )
-            feet_swing_height_mjlab = RewardTermConfig(
+            feet_swing_height = RewardTermConfig(
                 func=rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -462,7 +530,7 @@ class G1FlatGenesisConfig:
                     "command_threshold": 0.05,
                 },
             )
-            feet_slip_mjlab = RewardTermConfig(
+            feet_slip = RewardTermConfig(
                 func=rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
@@ -470,7 +538,7 @@ class G1FlatGenesisConfig:
                     "command_threshold": 0.05,
                 },
             )
-            soft_landing_mjlab = RewardTermConfig(
+            soft_landing = RewardTermConfig(
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
@@ -538,18 +606,20 @@ class G1FlatGenesisConfig:
             policy=PPOPolicyConfig(
                 actor_class_name=self.actor_class_name,
                 actor_kwargs={
-                    "activation": "tanh",
+                    "activation": "elu",
                     "ortho_init": True,
+                    "output_gain": 0.01,
                     "hidden_dims": [512, 256, 128],
                 },
                 critic_kwargs={
-                    "activation": "tanh",
+                    "activation": "elu",
                     "ortho_init": True,
+                    "output_gain": 0.01,
                     "hidden_dims": [1024, 512, 256],
                 },
                 init_noise_std=1.0,
                 distribution_type="gaussian",
-                std_type="state_independent",
+                std_type="scalar",
             ),
         )
 
