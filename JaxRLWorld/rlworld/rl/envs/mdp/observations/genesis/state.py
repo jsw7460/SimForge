@@ -79,6 +79,17 @@ def contact_force(
 
 
 @EnvStepCache()
+def contact_force_3d(
+    env: GenesisEnv,
+    contact_group: str = "feet_ground_contact",
+) -> torch.Tensor:
+    """Per-link 3D contact force (log-scaled, flattened). Shape: (num_envs, N*3)."""
+    forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, N, 3)
+    flat = forces_3d.flatten(start_dim=1)  # (num_envs, N*3)
+    return torch.sign(flat) * torch.log1p(torch.abs(flat))
+
+
+@EnvStepCache()
 def links_acc(env: GenesisEnv, entity_name: str = "robot", links: tuple[str, ...] | None = None) -> torch.Tensor:
     entity = env.scene_manager[entity_name]
     if links is None:

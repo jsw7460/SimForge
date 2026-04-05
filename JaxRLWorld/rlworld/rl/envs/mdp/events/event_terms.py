@@ -196,3 +196,42 @@ def apply_external_force_torque(
             ref="link_com",
             local=False,
         )
+
+
+def randomize_body_com_offset(
+    env: "GenesisEnv",
+    env_ids: torch.Tensor,
+    ranges: dict[int, tuple[float, float]],
+    link_names: tuple[str, ...] = ("torso_link",),
+    entity_name: str = "robot",
+) -> None:
+    """Randomize body COM offset for specified links (Genesis).
+
+    Uses Genesis's ``set_COM_shift`` API to apply additive COM offsets,
+    matching MuJoCo's ``randomize_body_com_offset`` with ``operation="add"``.
+
+    Args:
+        env: Genesis environment instance.
+        env_ids: Environment indices to randomize.
+        ranges: Per-axis (min, max) offset ranges. Keys are axis indices (0=x, 1=y, 2=z).
+        link_names: Tuple of link names to randomize COM for.
+        entity_name: Name of the robot entity.
+    """
+    if len(env_ids) == 0:
+        return
+
+    robot = env.scene_manager[entity_name]
+    links_idx_local, _ = eu.find_links(robot, list(link_names), global_ids=False)
+
+    n_envs = len(env_ids)
+    n_links = len(links_idx_local)
+
+    com_shift = torch.zeros(n_envs, n_links, 3, device=env.device)
+    for axis, (lo, hi) in ranges.items():
+        com_shift[:, :, axis] = torch.empty(n_envs, n_links, device=env.device).uniform_(lo, hi)
+
+    robot.set_COM_shift(
+        com_shift=com_shift,
+        links_idx_local=links_idx_local,
+        envs_idx=env_ids,
+    )

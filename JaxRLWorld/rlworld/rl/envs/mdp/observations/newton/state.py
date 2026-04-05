@@ -239,11 +239,12 @@ def feet_contact_force(env: "NewtonEnv", feet_bodies: str | list[str]) -> torch.
 
 @EnvStepCache()
 def feet_contact_force_3d(env: "NewtonEnv", feet_bodies: str | list[str]) -> torch.Tensor:
-    """Get 3D contact force vector for each foot (flattened).
+    """Get 3D contact force vector for each foot (log-scaled, flattened).
 
     Returns:
         Tensor of shape [num_envs, num_feet * 3]
     """
     result = get_bodies_height_with_contact(env, feet_bodies)
     force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]  # (num_envs, num_feet, 3)
-    return force.reshape(env.num_envs, -1)
+    flat = force.reshape(env.num_envs, -1)
+    return torch.sign(flat) * torch.log1p(torch.abs(flat))
