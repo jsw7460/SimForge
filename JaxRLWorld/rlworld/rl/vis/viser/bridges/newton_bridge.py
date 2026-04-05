@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import trimesh
 import trimesh.visual
+from newton import ShapeFlags
 
 from ..bridge import SimulatorBridge, SimulatorGeometry, BodyMeshGroup
 
@@ -50,7 +51,12 @@ class NewtonBridge:
         model = self._model
 
         # Only extract shapes for world 0.
+        shape_flags = model.shape_flags.numpy()
         for shape_idx in range(self._shapes_per_world):
+            # Skip non-visible shapes (collision-only geometry).
+            if not (shape_flags[shape_idx] & ShapeFlags.VISIBLE):
+                continue
+
             geo_src = model.shape_source[shape_idx]
             if geo_src is None:
                 continue

@@ -755,12 +755,36 @@ class NewtonSceneManager(BaseManager):
                 sensor.update(self.state_0)  # IMU takes State
 
     def reset(self, env_ids=None) -> None:
-        """Reset environments to initial state."""
-        # For now, full reset if all environments
-        if env_ids is not None and len(env_ids) == self.config.num_worlds:
-            self.state_0 = self.model.state()
-            self.state_1 = self.model.state()
-            newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
+        """Reset specified environments to model defaults (joint_q, joint_qd).
+
+        Supports partial reset: only the given *env_ids* are overwritten while
+        the remaining environments keep their current state.
+        """
+        if env_ids is None or len(env_ids) == 0:
+            return
+
+        num_worlds = self.model.world_count
+        coords_per_world = self.model.joint_coord_count // num_worlds
+        dofs_per_world = self.model.joint_dof_count // num_worlds
+
+        # Read current state as 2-D tensors [num_worlds, coords/dofs]
+        joint_q = wp.to_torch(self.state_0.joint_q).reshape(num_worlds, coords_per_world)
+        joint_qd = wp.to_torch(self.state_0.joint_qd).reshape(num_worlds, dofs_per_world)
+
+        # Model defaults (initial values set during building)
+        default_q = wp.to_torch(self.model.joint_q).reshape(num_worlds, coords_per_world)
+        default_qd = wp.to_torch(self.model.joint_qd).reshape(num_worlds, dofs_per_world)
+
+        # Overwrite only the requested environments
+        joint_q[env_ids] = default_q[env_ids]
+        joint_qd[env_ids] = default_qd[env_ids]
+
+        wp.copy(self.state_0.joint_q, wp.from_torch(joint_q.flatten(), dtype=wp.float32))
+        wp.copy(self.state_0.joint_qd, wp.from_torch(joint_qd.flatten(), dtype=wp.float32))
+
+        # Re-evaluate FK for reset environments only
+        indices = wp.from_torch(env_ids.to(torch.int32), dtype=wp.int32)
+        newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0, indices=indices)
 
     def get_sensor(self, sensor_name: str) -> Any:
         """Get a sensor by name."""

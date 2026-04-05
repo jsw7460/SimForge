@@ -1,7 +1,8 @@
 import argparse
 
 from rlworld.rl.evals import PolicyEvaluator
-
+import newton
+from newton import ShapeFlags
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Newton evaluation")
