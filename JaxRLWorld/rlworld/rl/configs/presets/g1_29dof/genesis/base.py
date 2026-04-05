@@ -26,6 +26,7 @@ from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
 )
 from rlworld.rl.envs.mdp.events import event_terms as genesis_ef
+from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel, projected_gravity, dof_pos, dof_vel, raw_actions, )
 from rlworld.rl.envs.mdp.observations.genesis import state
@@ -299,12 +300,12 @@ class G1FlatGenesisConfig:
 
             # Startup events (domain randomization)
             randomize_friction = EventTermConfig(
-                func=initf.randomize_friction,
+                func=genesis_dr.randomize_friction,
                 mode="startup",
-                params={"friction_ratio_range": (0.3, 1.2)},
+                params={"friction_range": (0.3, 1.2)},
             )
             randomize_body_com = EventTermConfig(
-                func=genesis_ef.randomize_body_com_offset,
+                func=genesis_dr.randomize_body_com_offset,
                 mode="startup",
                 params={
                     "ranges": {
@@ -314,6 +315,24 @@ class G1FlatGenesisConfig:
                     },
                     "link_names": ("torso_link",),
                 },
+            )
+            randomize_body_mass = EventTermConfig(
+                func=genesis_dr.randomize_body_mass,
+                mode="startup",
+                params={
+                    "mass_ratio_range": (0.85, 1.15),
+                    "link_names": ("torso_link",),
+                },
+            )
+            randomize_joint_armature = EventTermConfig(
+                func=genesis_dr.randomize_joint_armature,
+                mode="startup",
+                params={"armature_range": (0.9, 1.1)},
+            )
+            randomize_joint_friction = EventTermConfig(
+                func=genesis_dr.randomize_joint_friction,
+                mode="startup",
+                params={"friction_range": (0.0, 0.05)},
             )
 
         return _EventsCfg()
@@ -351,16 +370,6 @@ class G1FlatGenesisConfig:
                     link_name="pelvis",
                     sensor_class=gs.sensors.IMU,
                 ),
-                # SensorConfig(
-                #     entity_name="robot",
-                #     link_name="left_ankle_roll_link",
-                #     sensor_class=gs.sensors.ContactForce,
-                # ),
-                # SensorConfig(
-                #     entity_name="robot",
-                #     link_name="right_ankle_roll_link",
-                #     sensor_class=gs.sensors.ContactForce,
-                # ),
             ],
             contact_sensors=[
                 GenesisContactSensorCfg(
@@ -384,6 +393,7 @@ class G1FlatGenesisConfig:
                 enable_self_collision=True,
                 enable_joint_limit=True,
                 max_collision_pairs=30,
+                batch_dofs_info=True
             ),
             robot_cfg=self.robot,
         )

@@ -412,3 +412,47 @@ def randomize_pd_gains(
         distribution=distribution,
         operation=operation,
     )
+
+
+def randomize_joint_armature(
+    env: "MujocoEnv",
+    env_ids: torch.Tensor,
+    ranges: tuple[float, float] | dict[int, tuple[float, float]],
+    operation: Literal["add", "scale", "abs"] = "scale",
+    entity_cfg: EntityCfg | None = None,
+    shared_random: bool = False,
+) -> None:
+    """Randomize joint armature via mjlab's dr.joint_armature."""
+    from mjlab.envs.mdp.dr import joint_armature
+
+    entity_cfg = entity_cfg or EntityCfg()
+    joint_armature(
+        env=_MujocoEnvAdapter(env),
+        env_ids=env_ids,
+        ranges=ranges,
+        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        operation=operation,
+        shared_random=shared_random,
+    )
+
+
+def randomize_joint_friction(
+    env: "MujocoEnv",
+    env_ids: torch.Tensor,
+    ranges: tuple[float, float] | dict[int, tuple[float, float]],
+    operation: Literal["add", "scale", "abs"] = "abs",
+    entity_cfg: EntityCfg | None = None,
+    shared_random: bool = False,
+) -> None:
+    """Randomize joint friction loss via mjlab's dr.joint_friction."""
+    from mjlab.envs.mdp.dr import joint_friction
+
+    entity_cfg = entity_cfg or EntityCfg()
+    joint_friction(
+        env=_MujocoEnvAdapter(env),
+        env_ids=env_ids,
+        ranges=ranges,
+        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        operation=operation,
+        shared_random=shared_random,
+    )

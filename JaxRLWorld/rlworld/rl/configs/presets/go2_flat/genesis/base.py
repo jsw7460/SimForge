@@ -32,6 +32,7 @@ from rlworld.rl.envs.mdp.configs import (
 )
 from rlworld.rl.envs.mdp.events import event_terms as ef
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
+from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
@@ -221,13 +222,21 @@ class Go2FlatGenesisConfig:
                 },
             )
             randomize_base_mass = EventTermConfig(
-                func=initf.randomize_base_mass,
+                func=genesis_dr.randomize_body_mass,
                 mode="reset",
                 params={"mass_ratio_range": (0.85, 1.15)},
             )
             randomize_friction = EventTermConfig(
-                func=initf.randomize_friction,
+                func=genesis_dr.randomize_friction,
                 mode="reset",
+            )
+            randomize_pd_gains = EventTermConfig(
+                func=genesis_dr.randomize_pd_gains,
+                mode="reset",
+                params={
+                    "kp_range": (0.9, 1.1),
+                    "kd_range": (0.9, 1.1),
+                },
             )
             # Interval terms
             push_robot = EventTermConfig(

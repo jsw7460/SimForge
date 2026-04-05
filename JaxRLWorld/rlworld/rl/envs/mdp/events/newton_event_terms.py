@@ -247,3 +247,13 @@ def randomize_body_com_offset(
 
     solver = env.scene_manager.solver
     solver.notify_model_changed(SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
+
+
+# -- Backward-compatible re-exports from the new dr module -----------
+# New code should import from ``rlworld.rl.envs.mdp.events.dr.newton``.
+from rlworld.rl.envs.mdp.events.dr.newton import (  # noqa: E402, F401
+    randomize_body_mass,
+    randomize_joint_armature,
+    randomize_joint_friction,
+    randomize_pd_gains,
+)

@@ -333,9 +333,9 @@ class Go2FlatNewtonConfig:
         r = self.robot
         from rlworld.rl.envs.mdp.events.newton_event_terms import (
             push_robot as _push_robot_fn,
-            randomize_friction as _randomize_friction_fn,
             reset_root_state_uniform as _reset_root_fn,
         )
+        from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 
         @dataclass
         class _EventsCfg(EventConfig):
@@ -358,14 +358,40 @@ class Go2FlatNewtonConfig:
                 mode="reset",
             )
             randomize_body_mass = EventTermConfig(
-                func=initf.randomize_body_mass,
-                params={"mass_ratio_range": (0.8, 1.2), "body_patterns": r.prefixed("base")},
+                func=newton_dr.randomize_body_mass,
+                params={
+                    "mass_range": (0.8, 1.2),
+                    "operation": "scale",
+                    "body_patterns": r.prefixed("base"),
+                },
                 mode="reset",
             )
             randomize_friction = EventTermConfig(
-                func=_randomize_friction_fn,
+                func=newton_dr.randomize_friction,
                 mode="reset",
                 params={"friction_range": (0.3, 1.2)},
+            )
+            randomize_pd_gains = EventTermConfig(
+                func=newton_dr.randomize_pd_gains,
+                mode="reset",
+                params={
+                    "kp_range": (0.9, 1.1),
+                    "kd_range": (0.9, 1.1),
+                    "operation": "scale",
+                },
+            )
+            randomize_joint_armature = EventTermConfig(
+                func=newton_dr.randomize_joint_armature,
+                mode="reset",
+                params={
+                    "armature_range": (0.9, 1.1),
+                    "operation": "scale",
+                },
+            )
+            randomize_joint_friction = EventTermConfig(
+                func=newton_dr.randomize_joint_friction,
+                mode="reset",
+                params={"friction_range": (0.0, 0.05)},
             )
             push_robot = EventTermConfig(
                 func=_push_robot_fn,

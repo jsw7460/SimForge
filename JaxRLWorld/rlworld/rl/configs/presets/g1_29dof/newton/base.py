@@ -27,6 +27,7 @@ from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
 )
 from rlworld.rl.envs.mdp.events import newton_event_terms as newton_ef
+from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel, projected_gravity, dof_pos, dof_vel, raw_actions, )
 from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
@@ -468,12 +469,15 @@ class G1FlatNewtonConfig:
 
             # Startup events (domain randomization)
             randomize_friction = EventTermConfig(
-                func=newton_ef.randomize_friction,
+                func=newton_dr.randomize_friction,
                 mode="startup",
-                params={"friction_range": (0.3, 1.2)},
+                params={
+                    "friction_range": (0.3, 1.2),
+                    "operation": "scale",
+                },
             )
             randomize_body_com = EventTermConfig(
-                func=newton_ef.randomize_body_com_offset,
+                func=newton_dr.randomize_body_com_offset,
                 mode="startup",
                 params={
                     "ranges": {
@@ -483,6 +487,28 @@ class G1FlatNewtonConfig:
                     },
                     "body_patterns": (self.robot.prefixed("torso_link"),),
                 },
+            )
+            randomize_body_mass = EventTermConfig(
+                func=newton_dr.randomize_body_mass,
+                mode="startup",
+                params={
+                    "mass_range": (0.85, 1.15),
+                    "operation": "scale",
+                    "body_patterns": (self.robot.prefixed("torso_link"),),
+                },
+            )
+            randomize_joint_armature = EventTermConfig(
+                func=newton_dr.randomize_joint_armature,
+                mode="startup",
+                params={
+                    "armature_range": (0.9, 1.1),
+                    "operation": "scale",
+                },
+            )
+            randomize_joint_friction = EventTermConfig(
+                func=newton_dr.randomize_joint_friction,
+                mode="startup",
+                params={"friction_range": (0.0, 0.05)},
             )
 
         return _EventsCfg()

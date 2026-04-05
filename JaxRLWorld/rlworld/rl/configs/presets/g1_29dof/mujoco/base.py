@@ -255,9 +255,8 @@ class G1FlatMujocoConfig:
                 mode="startup",
                 params={
                     "ranges": (0.3, 1.2),
-                    "operation": "abs",
-                    "shared_random": True,
-                    "entity_cfg": EntityCfg(name="robot", geom_names=geom_names),
+                    "operation": "scale",
+                    "entity_cfg": EntityCfg(name="robot"),
                 },
             )
             randomize_encoder_bias = EventTermConfig(
@@ -279,6 +278,31 @@ class G1FlatMujocoConfig:
                     },
                     "operation": "add",
                     "entity_cfg": EntityCfg(name="robot", body_names=("torso_link",)),
+                },
+            )
+            randomize_body_mass = EventTermConfig(
+                func=ef.randomize_body_mass,
+                mode="startup",
+                params={
+                    "ranges": (0.85, 1.15),
+                    "operation": "scale",
+                    "entity_cfg": EntityCfg(name="robot", body_names=("torso_link",)),
+                },
+            )
+            randomize_joint_armature = EventTermConfig(
+                func=ef.randomize_joint_armature,
+                mode="startup",
+                params={
+                    "ranges": (0.9, 1.1),
+                    "operation": "scale",
+                },
+            )
+            randomize_joint_friction = EventTermConfig(
+                func=ef.randomize_joint_friction,
+                mode="startup",
+                params={
+                    "ranges": (0.0, 0.05),
+                    "operation": "abs",
                 },
             )
 

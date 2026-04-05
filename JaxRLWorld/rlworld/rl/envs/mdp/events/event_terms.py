@@ -235,3 +235,11 @@ def randomize_body_com_offset(
         links_idx_local=links_idx_local,
         envs_idx=env_ids,
     )
+
+
+# -- Backward-compatible re-exports from the new dr module -----------
+# New code should import from ``rlworld.rl.envs.mdp.events.dr.genesis``.
+from rlworld.rl.envs.mdp.events.dr.genesis import (  # noqa: E402, F401
+    randomize_body_mass as randomize_body_mass_dr,
+    randomize_pd_gains,
+)
