@@ -263,10 +263,10 @@ class Go2FlatMujocoConfig:
                 },
             )
 
-            # Domain randomization
+            # Domain randomization (disabled during eval)
             randomize_friction = EventTermConfig(
                 func=ef.randomize_geom_friction,
-                mode="reset",
+                mode="reset_dr",
                 params={
                     "ranges": (0.3, 1.2),
                     "operation": "abs",
@@ -276,7 +276,7 @@ class Go2FlatMujocoConfig:
             )
             randomize_base_mass = EventTermConfig(
                 func=ef.randomize_body_mass,
-                mode="reset",
+                mode="reset_dr",
                 params={
                     "ranges": (0.85, 1.15),
                     "operation": "scale",

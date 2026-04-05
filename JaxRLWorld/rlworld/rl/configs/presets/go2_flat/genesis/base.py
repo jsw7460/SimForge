@@ -196,6 +196,7 @@ class Go2FlatGenesisConfig:
                 enable_collision=True,
                 enable_self_collision=True,
                 enable_joint_limit=True,
+                batch_dofs_info=True
             ),
             robot_cfg=self.robot,
         )
@@ -221,18 +222,19 @@ class Go2FlatGenesisConfig:
                     "velocity_range": {},
                 },
             )
+            # Domain randomization (disabled during eval)
             randomize_base_mass = EventTermConfig(
                 func=genesis_dr.randomize_body_mass,
-                mode="reset",
+                mode="reset_dr",
                 params={"mass_ratio_range": (0.85, 1.15)},
             )
             randomize_friction = EventTermConfig(
                 func=genesis_dr.randomize_friction,
-                mode="reset",
+                mode="reset_dr",
             )
             randomize_pd_gains = EventTermConfig(
                 func=genesis_dr.randomize_pd_gains,
-                mode="reset",
+                mode="reset_dr",
                 params={
                     "kp_range": (0.9, 1.1),
                     "kd_range": (0.9, 1.1),

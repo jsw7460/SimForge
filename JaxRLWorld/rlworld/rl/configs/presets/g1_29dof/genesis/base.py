@@ -298,15 +298,10 @@ class G1FlatGenesisConfig:
                 },
             )
 
-            # Startup events (domain randomization)
-            randomize_friction = EventTermConfig(
-                func=genesis_dr.randomize_friction,
-                mode="startup",
-                params={"friction_range": (0.3, 1.2)},
-            )
+            # Domain randomization (disabled during eval)
             randomize_body_com = EventTermConfig(
                 func=genesis_dr.randomize_body_com_offset,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "ranges": {
                         0: (-0.025, 0.025),
@@ -316,22 +311,9 @@ class G1FlatGenesisConfig:
                     "link_names": ("torso_link",),
                 },
             )
-            randomize_body_mass = EventTermConfig(
-                func=genesis_dr.randomize_body_mass,
-                mode="startup",
-                params={
-                    "mass_ratio_range": (0.85, 1.15),
-                    "link_names": ("torso_link",),
-                },
-            )
-            randomize_joint_armature = EventTermConfig(
-                func=genesis_dr.randomize_joint_armature,
-                mode="startup",
-                params={"armature_range": (0.9, 1.1)},
-            )
             randomize_joint_friction = EventTermConfig(
                 func=genesis_dr.randomize_joint_friction,
-                mode="startup",
+                mode="reset_dr",
                 params={"friction_range": (0.0, 0.05)},
             )
 
@@ -385,7 +367,7 @@ class G1FlatGenesisConfig:
                     secondary_entity="self",
                 ),
             ],
-            sim_options=gs.options.SimOptions(dt=0.005, substeps=1),
+            sim_options=gs.options.SimOptions(dt=0.005, substeps=2),
             rigid_options=gs.options.RigidOptions(
                 dt=0.005,
                 constraint_solver=gs.constraint_solver.Newton,

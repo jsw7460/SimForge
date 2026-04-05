@@ -70,6 +70,10 @@ class EventManager:
             if env_ids is None:
                 env_ids = torch.arange(self.num_envs, device=self.device)
             self._apply_reset(env_ids)
+        elif mode == "reset_dr":
+            if env_ids is None:
+                env_ids = torch.arange(self.num_envs, device=self.device)
+            self._apply_reset_dr(env_ids)
         elif mode == "interval":
             if dt is None:
                 raise ValueError("dt must be provided for interval mode")
@@ -90,6 +94,10 @@ class EventManager:
 
     def _apply_reset(self, env_ids: torch.Tensor) -> None:
         for name, term in self._terms_by_mode["reset"]:
+            self._call_event_fn(name, term, env_ids=env_ids)
+
+    def _apply_reset_dr(self, env_ids: torch.Tensor) -> None:
+        for name, term in self._terms_by_mode["reset_dr"]:
             self._call_event_fn(name, term, env_ids=env_ids)
 
     def _apply_interval(self, dt: float) -> None:

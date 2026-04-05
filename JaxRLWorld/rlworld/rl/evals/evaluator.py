@@ -194,19 +194,19 @@ class PolicyEvaluator:
         """Apply evaluation-mode defaults to configs.
 
         - Disables observation noise (enable_noise = False)
-        - Removes interval events (e.g. push_by_setting_velocity)
+        - Removes interval and reset_dr events
         """
         # Disable observation noise
         if hasattr(self.eval_cfgs, 'observation'):
             self.eval_cfgs.observation.enable_noise = False
 
-        # Disable interval events (external forces, etc.) by setting to None
+        # Disable interval and domain randomization events
         if hasattr(self.eval_cfgs, 'event'):
             from rlworld.rl.configs.base_config import iter_terms
             from rlworld.rl.configs.events.event_term_config import EventTermConfig
             event_cfg = self.eval_cfgs.event
             for name, term in iter_terms(event_cfg, EventTermConfig).items():
-                if term.mode == "interval":
+                if term.mode in ("interval", "reset_dr"):
                     setattr(event_cfg, name, None)
 
     @staticmethod

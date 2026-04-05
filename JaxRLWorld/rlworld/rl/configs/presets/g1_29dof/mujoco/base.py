@@ -63,8 +63,8 @@ class G1FlatMujocoConfig:
     seed: int = 42
 
     # Simulation settings (matching mjlab)
-    physics_dt: float = 0.005  # 5ms physics timestep (200Hz)
-    decimation: int = 4  # Control at 50Hz
+    physics_dt: float = 0.0025  # 5ms physics timestep (200Hz)
+    decimation: int = 8  # Control at 50Hz
 
     # Command ranges (matching mjlab velocity task)
     lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
@@ -249,19 +249,10 @@ class G1FlatMujocoConfig:
                 },
             )
 
-            # Startup events (domain randomization)
-            randomize_friction = EventTermConfig(
-                func=ef.randomize_geom_friction,
-                mode="startup",
-                params={
-                    "ranges": (0.3, 1.2),
-                    "operation": "scale",
-                    "entity_cfg": EntityCfg(name="robot"),
-                },
-            )
+            # Domain randomization (disabled during eval)
             randomize_encoder_bias = EventTermConfig(
                 func=ef.randomize_encoder_bias,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "bias_range": (-0.015, 0.015),
                     "entity_cfg": EntityCfg(name="robot"),
@@ -269,7 +260,7 @@ class G1FlatMujocoConfig:
             )
             randomize_body_com = EventTermConfig(
                 func=ef.randomize_body_com_offset,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "ranges": {
                         0: (-0.025, 0.025),
@@ -280,26 +271,9 @@ class G1FlatMujocoConfig:
                     "entity_cfg": EntityCfg(name="robot", body_names=("torso_link",)),
                 },
             )
-            randomize_body_mass = EventTermConfig(
-                func=ef.randomize_body_mass,
-                mode="startup",
-                params={
-                    "ranges": (0.85, 1.15),
-                    "operation": "scale",
-                    "entity_cfg": EntityCfg(name="robot", body_names=("torso_link",)),
-                },
-            )
-            randomize_joint_armature = EventTermConfig(
-                func=ef.randomize_joint_armature,
-                mode="startup",
-                params={
-                    "ranges": (0.9, 1.1),
-                    "operation": "scale",
-                },
-            )
             randomize_joint_friction = EventTermConfig(
                 func=ef.randomize_joint_friction,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "ranges": (0.0, 0.05),
                     "operation": "abs",

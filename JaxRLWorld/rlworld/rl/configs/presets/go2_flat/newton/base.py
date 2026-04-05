@@ -357,6 +357,7 @@ class Go2FlatNewtonConfig:
                 params={"position_noise_range": (math.pi / 360, math.pi / 120)},
                 mode="reset",
             )
+            # Domain randomization (disabled during eval)
             randomize_body_mass = EventTermConfig(
                 func=newton_dr.randomize_body_mass,
                 params={
@@ -364,16 +365,16 @@ class Go2FlatNewtonConfig:
                     "operation": "scale",
                     "body_patterns": r.prefixed("base"),
                 },
-                mode="reset",
+                mode="reset_dr",
             )
             randomize_friction = EventTermConfig(
                 func=newton_dr.randomize_friction,
-                mode="reset",
+                mode="reset_dr",
                 params={"friction_range": (0.3, 1.2)},
             )
             randomize_pd_gains = EventTermConfig(
                 func=newton_dr.randomize_pd_gains,
-                mode="reset",
+                mode="reset_dr",
                 params={
                     "kp_range": (0.9, 1.1),
                     "kd_range": (0.9, 1.1),
@@ -382,7 +383,7 @@ class Go2FlatNewtonConfig:
             )
             randomize_joint_armature = EventTermConfig(
                 func=newton_dr.randomize_joint_armature,
-                mode="reset",
+                mode="reset_dr",
                 params={
                     "armature_range": (0.9, 1.1),
                     "operation": "scale",
@@ -390,7 +391,7 @@ class Go2FlatNewtonConfig:
             )
             randomize_joint_friction = EventTermConfig(
                 func=newton_dr.randomize_joint_friction,
-                mode="reset",
+                mode="reset_dr",
                 params={"friction_range": (0.0, 0.05)},
             )
             push_robot = EventTermConfig(

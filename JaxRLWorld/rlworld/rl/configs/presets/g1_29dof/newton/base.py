@@ -467,18 +467,10 @@ class G1FlatNewtonConfig:
                 },
             )
 
-            # Startup events (domain randomization)
-            randomize_friction = EventTermConfig(
-                func=newton_dr.randomize_friction,
-                mode="startup",
-                params={
-                    "friction_range": (0.3, 1.2),
-                    "operation": "scale",
-                },
-            )
+            # Domain randomization (disabled during eval)
             randomize_body_com = EventTermConfig(
                 func=newton_dr.randomize_body_com_offset,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "ranges": {
                         0: (-0.025, 0.025),
@@ -488,26 +480,9 @@ class G1FlatNewtonConfig:
                     "body_patterns": (self.robot.prefixed("torso_link"),),
                 },
             )
-            randomize_body_mass = EventTermConfig(
-                func=newton_dr.randomize_body_mass,
-                mode="startup",
-                params={
-                    "mass_range": (0.85, 1.15),
-                    "operation": "scale",
-                    "body_patterns": (self.robot.prefixed("torso_link"),),
-                },
-            )
-            randomize_joint_armature = EventTermConfig(
-                func=newton_dr.randomize_joint_armature,
-                mode="startup",
-                params={
-                    "armature_range": (0.9, 1.1),
-                    "operation": "scale",
-                },
-            )
             randomize_joint_friction = EventTermConfig(
                 func=newton_dr.randomize_joint_friction,
-                mode="startup",
+                mode="reset_dr",
                 params={"friction_range": (0.0, 0.05)},
             )
 
