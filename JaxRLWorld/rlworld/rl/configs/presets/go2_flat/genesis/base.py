@@ -189,7 +189,7 @@ class Go2FlatGenesisConfig:
                     secondary_entity=None
                 )
             ],
-            sim_options=gs.options.SimOptions(dt=self.sim_dt, substeps=1),
+            sim_options=gs.options.SimOptions(dt=self.sim_dt, substeps=2),
             rigid_options=gs.options.RigidOptions(
                 dt=self.sim_dt,
                 constraint_solver=gs.constraint_solver.Newton,
@@ -204,11 +204,6 @@ class Go2FlatGenesisConfig:
     def _build_event_config(self) -> EventConfig:
         @dataclass
         class _EventsCfg(EventConfig):
-            reset_dof_pos = EventTermConfig(
-                func=initf.initialize_dof_pos_with_noise,
-                mode="reset",
-                params={"position_noise_range": (math.pi / 360, math.pi / 120)},
-            )
             reset_root = EventTermConfig(
                 func=ef.reset_root_state_uniform,
                 mode="reset",
@@ -222,23 +217,28 @@ class Go2FlatGenesisConfig:
                     "velocity_range": {},
                 },
             )
+
+            reset_dof_pos = EventTermConfig(
+                func=initf.initialize_dof_pos_with_noise,
+                mode="reset",
+                params={"position_noise_range": (math.pi / 360, math.pi / 120)},
+            )
+
             # Domain randomization (disabled during eval)
             randomize_base_mass = EventTermConfig(
                 func=genesis_dr.randomize_body_mass,
                 mode="reset_dr",
-                params={"mass_ratio_range": (0.85, 1.15)},
+                params={"mass_ratio_range": (0.8, 1.2)},
             )
             randomize_friction = EventTermConfig(
                 func=genesis_dr.randomize_friction,
                 mode="reset_dr",
+                params={"friction_range": (0.3, 1.2)},
             )
-            randomize_pd_gains = EventTermConfig(
-                func=genesis_dr.randomize_pd_gains,
+            randomize_joint_friction = EventTermConfig(
+                func=genesis_dr.randomize_joint_friction,
                 mode="reset_dr",
-                params={
-                    "kp_range": (0.9, 1.1),
-                    "kd_range": (0.9, 1.1),
-                },
+                params={"friction_range": (0.0, 0.05)},
             )
             # Interval terms
             push_robot = EventTermConfig(
@@ -330,8 +330,8 @@ class Go2FlatGenesisConfig:
                 },
             )
 
-            # Feet swing height (stateful class)
-            feet_swing_height_mjlab = RewardTermConfig(
+            # Feet swing height
+            feet_swing_height = RewardTermConfig(
                 func=rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -342,7 +342,7 @@ class Go2FlatGenesisConfig:
             )
 
             # Feet clearance
-            feet_clearance_mjlab = RewardTermConfig(
+            feet_clearance = RewardTermConfig(
                 func=rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -353,7 +353,7 @@ class Go2FlatGenesisConfig:
             )
 
             # Feet slip
-            feet_slip_mjlab = RewardTermConfig(
+            feet_slip = RewardTermConfig(
                 func=rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
@@ -363,7 +363,7 @@ class Go2FlatGenesisConfig:
             )
 
             # Soft landing
-            soft_landing_mjlab = RewardTermConfig(
+            soft_landing = RewardTermConfig(
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
@@ -372,15 +372,15 @@ class Go2FlatGenesisConfig:
             )
 
             # Joint position limits
-            joint_pos_limits_mjlab = RewardTermConfig(
+            joint_pos_limits = RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
                 params={"soft_limit_factor": 1.0},
             )
 
             # Action rate
-            processed_action_rate_l2_mjlab = RewardTermConfig(
-                func=rf_mjlab.processed_action_rate_l2_mjlab,
+            raw_action_rate_l2 = RewardTermConfig(
+                func=rf_mjlab.raw_action_rate_l2_mjlab,
                 weight=0.1,
             )
 

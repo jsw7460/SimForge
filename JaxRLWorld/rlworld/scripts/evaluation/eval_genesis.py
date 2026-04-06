@@ -45,7 +45,7 @@ if __name__ == '__main__':
         }
 
     evaluator = PolicyEvaluator(
-        policy_path="outputs/models/2026-04-05/12-10-13/checkpoint_latest/",
+        policy_path="outputs/models/2026-04-05/18-06-52/checkpoint_latest/",
         # wandb_run_path="jsw7460/RLArchitecture/4nad493x",
         num_evals=1,
         seed=42,

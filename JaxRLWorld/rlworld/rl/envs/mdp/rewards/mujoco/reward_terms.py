@@ -305,7 +305,6 @@ def feet_slip(
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
 
     cost = torch.sum(vel_xy_norm_sq * in_contact, dim=1) * active
-
     return -cost
 
 

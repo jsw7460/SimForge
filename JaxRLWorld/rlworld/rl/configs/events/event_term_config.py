@@ -8,7 +8,7 @@ from rlworld.rl.utils.resolve import resolve_callable
 class EventTermConfig:
     """``func`` accepts a callable or ``"module.path:attr_name"`` string."""
     func: Callable | str
-    mode: Literal["startup", "reset", "interval"]
+    mode: Literal["startup", "reset", "reset_dr", "interval"]
     params: dict[str, Any] = field(default_factory=dict)
     interval_range_s: tuple[float, float] | None = None  # for interval mode
 

@@ -260,7 +260,7 @@ class Go2FlatNewtonConfig:
                     "running_threshold": 1.5,
                 },
             )
-            feet_swing_height_mjlab = RewardTermConfig(
+            feet_swing_height = RewardTermConfig(
                 func=rf_mjlab.feet_swing_height_mjlab,
                 weight=0.25,
                 params={
@@ -269,7 +269,7 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             )
-            feet_clearance_mjlab = RewardTermConfig(
+            feet_clearance = RewardTermConfig(
                 func=rf_mjlab.feet_clearance_mjlab,
                 weight=2.0,
                 params={
@@ -278,7 +278,7 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             )
-            feet_slip_mjlab = RewardTermConfig(
+            feet_slip = RewardTermConfig(
                 func=rf_mjlab.feet_slip_mjlab,
                 weight=0.1,
                 params={
@@ -286,7 +286,7 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             )
-            soft_landing_mjlab = RewardTermConfig(
+            soft_landing = RewardTermConfig(
                 func=rf_mjlab.soft_landing_mjlab,
                 weight=1e-5,
                 params={
@@ -294,13 +294,13 @@ class Go2FlatNewtonConfig:
                     "command_threshold": 0.05,
                 },
             )
-            joint_pos_limits_mjlab = RewardTermConfig(
+            joint_pos_limits = RewardTermConfig(
                 func=rf_mjlab.joint_pos_limits_mjlab,
                 weight=1.0,
                 params={"soft_limit_factor": 1.0},
             )
-            processed_action_rate_l2_mjlab = RewardTermConfig(
-                func=rf_mjlab.processed_action_rate_l2_mjlab,
+            raw_action_rate_l2 = RewardTermConfig(
+                func=rf_mjlab.raw_action_rate_l2_mjlab,
                 weight=0.1,
             )
 
@@ -371,23 +371,6 @@ class Go2FlatNewtonConfig:
                 func=newton_dr.randomize_friction,
                 mode="reset_dr",
                 params={"friction_range": (0.3, 1.2)},
-            )
-            randomize_pd_gains = EventTermConfig(
-                func=newton_dr.randomize_pd_gains,
-                mode="reset_dr",
-                params={
-                    "kp_range": (0.9, 1.1),
-                    "kd_range": (0.9, 1.1),
-                    "operation": "scale",
-                },
-            )
-            randomize_joint_armature = EventTermConfig(
-                func=newton_dr.randomize_joint_armature,
-                mode="reset_dr",
-                params={
-                    "armature_range": (0.9, 1.1),
-                    "operation": "scale",
-                },
             )
             randomize_joint_friction = EventTermConfig(
                 func=newton_dr.randomize_joint_friction,

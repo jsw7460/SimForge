@@ -65,8 +65,8 @@ class Go2FlatMujocoConfig:
     seed: int = 42
 
     # Simulation settings
-    physics_dt: float = 0.005  # 5ms physics timestep (200Hz)
-    decimation: int = 4  # Control at 50Hz (matching Genesis/Newton)
+    physics_dt: float = 0.0025  # 5ms physics timestep (200Hz)
+    decimation: int = 8  # Control at 50Hz (matching Genesis/Newton)
 
     # Command ranges (matching Genesis/Newton Go2)
     lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
@@ -162,7 +162,7 @@ class Go2FlatMujocoConfig:
         robot_entity = MujocoEntityCfg(
             urdf_path=self.robot.urdf_path,
             init_state=InitialStateCfg(
-                pos=(0, 0, self.robot.base_init_height + 0.025),
+                pos=(0, 0, self.robot.base_init_height),
                 joint_pos=self.robot.default_joint_angles,
             ),
             floating=True,
@@ -278,9 +278,17 @@ class Go2FlatMujocoConfig:
                 func=ef.randomize_body_mass,
                 mode="reset_dr",
                 params={
-                    "ranges": (0.85, 1.15),
+                    "ranges": (0.8, 1.2),
                     "operation": "scale",
                     "entity_cfg": EntityCfg(name="robot", body_names=("base",)),
+                },
+            )
+            randomize_joint_friction = EventTermConfig(
+                func=ef.randomize_joint_friction,
+                mode="reset_dr",
+                params={
+                    "ranges": (0.0, 0.05),
+                    "operation": "abs",
                 },
             )
 
