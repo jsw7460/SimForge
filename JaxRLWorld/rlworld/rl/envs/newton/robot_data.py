@@ -1,6 +1,6 @@
 """NewtonRobotData — thin wrapper that satisfies the RobotData protocol.
 
-Lazily computes each property from Newton's warp state tensors.
+Uses RobotStateAccessor (backed by ArticulationView) to access Newton state.
 Newton uses **xyzw** quaternions, so we reorder to wxyz for the protocol.
 Newton velocities are in **world frame**, so we rotate to body frame.
 """
@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-import warp as wp
 from torch import Tensor
 
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_to_euler_wxyz
@@ -34,47 +33,33 @@ class NewtonRobotData:
             ).expand(self._env.num_envs, -1).contiguous()
         return self._gravity_vec
 
-    def _get_state_tensors(self):
-        """Get joint_q and joint_qd as reshaped torch tensors."""
-        sm = self._env.scene_manager
-        state = sm.state
-        num_worlds = sm.model.world_count
+    @property
+    def _accessor(self):
+        return self._env.scene_manager.robot_state
 
-        joint_q = wp.to_torch(state.joint_q)
-        joint_qd = wp.to_torch(state.joint_qd)
-
-        coords_per_world = joint_q.numel() // num_worlds
-        dofs_per_world = joint_qd.numel() // num_worlds
-
-        joint_q = joint_q.reshape(num_worlds, coords_per_world)
-        joint_qd = joint_qd.reshape(num_worlds, dofs_per_world)
-
-        return joint_q, joint_qd
+    @property
+    def _state(self):
+        return self._env.scene_manager.state
 
     @property
     def root_link_pos_w(self) -> Tensor:
-        joint_q, _ = self._get_state_tensors()
-        return joint_q[:, 0:3]
+        return self._accessor.root_pos_w(self._state)
 
     @property
     def root_link_quat_w(self) -> Tensor:
-        """Quaternion in wxyz. Newton stores xyzw at joint_q[:, 3:7]."""
-        joint_q, _ = self._get_state_tensors()
-        quat_xyzw = joint_q[:, 3:7]
-        return quat_xyzw[:, [3, 0, 1, 2]]  # xyzw -> wxyz
+        """Quaternion in wxyz."""
+        return self._accessor.root_quat_wxyz(self._state)
 
     @property
     def root_link_lin_vel_b(self) -> Tensor:
-        joint_q, joint_qd = self._get_state_tensors()
-        quat_wxyz = joint_q[:, [6, 3, 4, 5]]  # xyzw -> wxyz
-        lin_vel_w = joint_qd[:, 0:3]
+        quat_wxyz = self._accessor.root_quat_wxyz(self._state)
+        lin_vel_w = self._accessor.root_lin_vel_w(self._state)
         return quat_rotate_inverse_wxyz(quat_wxyz, lin_vel_w)
 
     @property
     def root_link_ang_vel_b(self) -> Tensor:
-        joint_q, joint_qd = self._get_state_tensors()
-        quat_wxyz = joint_q[:, [6, 3, 4, 5]]  # xyzw -> wxyz
-        ang_vel_w = joint_qd[:, 3:6]
+        quat_wxyz = self._accessor.root_quat_wxyz(self._state)
+        ang_vel_w = self._accessor.root_ang_vel_w(self._state)
         return quat_rotate_inverse_wxyz(quat_wxyz, ang_vel_w)
 
     @property
@@ -89,10 +74,10 @@ class NewtonRobotData:
 
     @property
     def joint_pos(self) -> Tensor:
-        joint_q, _ = self._get_state_tensors()
-        return joint_q[:, self._env.act_manager.indexing.newton_q_indices]
+        dof_pos = self._accessor.dof_positions(self._state)
+        return dof_pos[:, self._env.act_manager.indexing.newton_q_indices]
 
     @property
     def joint_vel(self) -> Tensor:
-        _, joint_qd = self._get_state_tensors()
-        return joint_qd[:, self._env.act_manager.indexing.newton_qd_indices]
+        dof_vel = self._accessor.dof_velocities(self._state)
+        return dof_vel[:, self._env.act_manager.indexing.newton_qd_indices]

@@ -56,25 +56,21 @@ def reset_root_state_uniform(
 ) -> None:
     """Reset root state with uniform random perturbations (Newton).
 
-    Matches the MuJoCo/Genesis version's interface.
+    Uses RobotStateAccessor (ArticulationView) for state access.
     Newton joint_q uses xyzw quaternion convention.
     """
     if len(env_ids) == 0:
         return
 
+    from rlworld.rl.envs.newton.robot_state_accessor import RobotStateAccessor
+
     scene_manager = env.scene_manager
-    model = scene_manager.model
+    accessor = scene_manager.robot_state
     state = scene_manager.state_0
-
-    num_worlds = model.world_count
-    coords_per_world = model.joint_coord_count // num_worlds
-    dofs_per_world = model.joint_dof_count // num_worlds
-
-    joint_q = wp.to_torch(state.joint_q).reshape(num_worlds, coords_per_world)
-    joint_qd = wp.to_torch(state.joint_qd).reshape(num_worlds, dofs_per_world)
 
     n = len(env_ids)
     device = env.device
+    mask = RobotStateAccessor.env_ids_to_mask(env_ids, scene_manager.model.world_count, device)
 
     # Sample pose perturbations
     keys = ["x", "y", "z", "roll", "pitch", "yaw"]
@@ -89,28 +85,37 @@ def reset_root_state_uniform(
     default_rot = torch.tensor(init_state.rot, device=device)
 
     # Position: default + perturbation
-    joint_q[env_ids, 0:3] = default_pos.unsqueeze(0) + pose_samples[:, 0:3]
+    pos = accessor.root_pos_w(state).clone()
+    pos[env_ids] = default_pos.unsqueeze(0) + pose_samples[:, 0:3]
 
     # Orientation: default quat * delta quat (xyzw)
+    quat_xyzw = accessor.root_quat_xyzw(state).clone()
     default_quat = default_rot.unsqueeze(0).expand(n, -1)
     delta_quat = _quat_from_euler_xyz_xyzw(
         pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
     )
-    joint_q[env_ids, 3:7] = _quat_mul_xyzw(default_quat, delta_quat)
+    quat_xyzw[env_ids] = _quat_mul_xyzw(default_quat, delta_quat)
 
-    # Velocity perturbation (zero out first to avoid stale values from previous episode)
-    joint_qd[env_ids, :] = 0.0
+    # Velocity: zero out first to avoid stale values from previous episode
+    lin_vel = accessor.root_lin_vel_w(state).clone()
+    ang_vel = accessor.root_ang_vel_w(state).clone()
+    lin_vel[env_ids] = 0.0
+    ang_vel[env_ids] = 0.0
     if velocity_range:
-        range_list = [velocity_range.get(key, (0.0, 0.0)) for key in keys]
-        ranges = torch.tensor(range_list, device=device)
-        vel_samples = _sample_uniform(ranges[:, 0], ranges[:, 1], (n, 6), device)
-        joint_qd[env_ids, 0:6] += vel_samples
+        vel_range_list = [velocity_range.get(key, (0.0, 0.0)) for key in keys]
+        vel_ranges = torch.tensor(vel_range_list, device=device)
+        vel_samples = _sample_uniform(vel_ranges[:, 0], vel_ranges[:, 1], (n, 6), device)
+        lin_vel[env_ids] += vel_samples[:, 0:3]
+        ang_vel[env_ids] += vel_samples[:, 3:6]
 
-    wp.copy(state.joint_q, wp.from_torch(joint_q.flatten(), dtype=wp.float32))
-    wp.copy(state.joint_qd, wp.from_torch(joint_qd.flatten(), dtype=wp.float32))
+    # Also zero out joint velocities (non-root DOFs)
+    dof_vel = accessor.dof_velocities(state).clone()
+    dof_vel[env_ids, :] = 0.0
+    accessor.set_dof_velocities(state, dof_vel, mask=mask)
 
-    indices = wp.from_torch(env_ids.to(torch.int32), dtype=wp.int32)
-    newton_lib.eval_fk(model, state.joint_q, state.joint_qd, state, indices=indices)
+    # Set root state and evaluate FK
+    accessor.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
+    accessor.eval_fk(state, mask=mask)
 
 
 def randomize_friction(
@@ -169,35 +174,38 @@ def push_robot(
     if len(env_ids) == 0:
         return
 
-    scene_manager = env.scene_manager
-    model = scene_manager.model
-    state = scene_manager.state_0
+    from rlworld.rl.envs.newton.robot_state_accessor import RobotStateAccessor
 
-    num_worlds = model.world_count
-    dofs_per_world = model.joint_dof_count // num_worlds
-
-    joint_qd = wp.to_torch(state.joint_qd).reshape(num_worlds, dofs_per_world)
+    accessor = env.scene_manager.robot_state
+    state = env.scene_manager.state_0
+    mask = RobotStateAccessor.env_ids_to_mask(env_ids, env.scene_manager.model.world_count, env.device)
 
     n_envs = len(env_ids)
     device = env.device
 
-    # Linear velocity perturbation (indices 0, 1, 2)
+    lin_vel = accessor.root_lin_vel_w(state).clone()
+    ang_vel = accessor.root_ang_vel_w(state).clone()
+
+    # Linear velocity perturbation
     if "x" in velocity_range:
-        joint_qd[env_ids, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["x"])
+        lin_vel[env_ids, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["x"])
     if "y" in velocity_range:
-        joint_qd[env_ids, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["y"])
+        lin_vel[env_ids, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["y"])
     if "z" in velocity_range:
-        joint_qd[env_ids, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["z"])
+        lin_vel[env_ids, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["z"])
 
-    # Angular velocity perturbation (indices 3, 4, 5)
+    # Angular velocity perturbation
     if "roll" in velocity_range:
-        joint_qd[env_ids, 3] += torch.empty(n_envs, device=device).uniform_(*velocity_range["roll"])
+        ang_vel[env_ids, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["roll"])
     if "pitch" in velocity_range:
-        joint_qd[env_ids, 4] += torch.empty(n_envs, device=device).uniform_(*velocity_range["pitch"])
+        ang_vel[env_ids, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["pitch"])
     if "yaw" in velocity_range:
-        joint_qd[env_ids, 5] += torch.empty(n_envs, device=device).uniform_(*velocity_range["yaw"])
+        ang_vel[env_ids, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["yaw"])
 
-    wp.copy(state.joint_qd, wp.from_torch(joint_qd.flatten(), dtype=wp.float32))
+    # Write back via accessor (only velocities, no transforms change)
+    pos = accessor.root_pos_w(state)
+    quat_xyzw = accessor.root_quat_xyzw(state)
+    accessor.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
 
 
 def randomize_body_com_offset(

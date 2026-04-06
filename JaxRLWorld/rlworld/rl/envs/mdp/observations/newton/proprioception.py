@@ -8,10 +8,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-import warp as wp
 
 from rlworld.rl.envs.utils import EnvStepCache
-from .state import base_quat, _quat_rotate_inverse, _get_newton_state_tensors
+from .state import base_quat, _quat_rotate_inverse
 from .body_utils import get_bodies_pos
 
 if TYPE_CHECKING:
@@ -40,8 +39,9 @@ def dof_pos(env: "NewtonEnv") -> torch.Tensor:
     Returns:
         Tensor of shape [num_envs, num_actions]
     """
-    joint_q, _ = _get_newton_state_tensors(env)
-    return joint_q[:, env.act_manager.actuated_q_indices]
+    accessor = env.scene_manager.robot_state
+    dof_q = accessor.dof_positions(env.scene_manager.state)
+    return dof_q[:, env.act_manager.actuated_q_indices]
 
 
 @EnvStepCache()
@@ -61,8 +61,9 @@ def dof_vel(env: "NewtonEnv") -> torch.Tensor:
     Returns:
         Tensor of shape [num_envs, num_actions]
     """
-    _, joint_qd = _get_newton_state_tensors(env)
-    return joint_qd[:, env.act_manager.actuated_qd_indices]
+    accessor = env.scene_manager.robot_state
+    dof_qd = accessor.dof_velocities(env.scene_manager.state)
+    return dof_qd[:, env.act_manager.actuated_qd_indices]
 
 
 @EnvStepCache()

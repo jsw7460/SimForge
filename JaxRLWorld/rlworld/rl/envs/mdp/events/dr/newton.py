@@ -106,9 +106,7 @@ def randomize_body_mass(
     n_bodies = len(body_indices)
     sampled = sample((n_envs, n_bodies), *mass_range, env.device, distribution)
 
-    defaults = _defaults.get_or_cache(
-        "body_mass", mass.clone(),
-    )
+    defaults = _defaults.get_or_cache("body_mass", mass.clone())
     mass[env_ids.unsqueeze(1), body_indices] = apply_operation(
         defaults[env_ids.unsqueeze(1), body_indices], sampled, operation,
     )
