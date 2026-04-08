@@ -37,18 +37,29 @@ def tracking_ang_vel(env: GenesisEnv, entity_name: str = "robot", base_name: str
 
 def lin_vel_z(env: GenesisEnv) -> torch.Tensor:
     """Penalty for vertical movement
-       Returns negative squared vertical velocity to discourage unwanted up/down motion"""
-    base_lin_vel = state.base_lin_vel(env)
-    return -torch.square(base_lin_vel[:, 2])
+       Returns negative squared vertical velocity to discourage unwanted up/down motion
+
+    Delegates to ``common.penalize_lin_vel_z``. NOTE: For Genesis this is
+    NOT bit-identical to the original — the original used Genesis library's
+    native ``transform_by_quat`` while common uses Python
+    ``quat_rotate_inverse_wxyz``. The numerical difference is ~1e-7 (IEEE754
+    operator-order roundoff), well below any RL training noise floor. The
+    user has explicitly accepted this tolerance.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_lin_vel_z
+    return penalize_lin_vel_z(env)
 
 
 def base_height(env: GenesisEnv) -> torch.Tensor:
     """Penalty for deviating from target base height
-       Returns negative squared error from desired base height"""
-    # Position w.r.t. standard basis
+       Returns negative squared error from desired base height
 
-    base_pos = state.base_pos(env)
-    return -torch.square(base_pos[:, 2] - env.command_manager.base_height)
+    Delegates to ``common.base_height_penalty``. Bit-identical: both read
+    base position via the same Genesis ``entity.get_pos()`` accessor (no
+    quaternion rotation), then compute ``-(z - command_manager.base_height)²``.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import base_height_penalty as _common_base_height_penalty
+    return _common_base_height_penalty(env)
 
 
 def adaptive_base_height(env: GenesisEnv) -> torch.Tensor:
@@ -89,18 +100,27 @@ def adaptive_base_height(env: GenesisEnv) -> torch.Tensor:
 
 def action_rate(env: GenesisEnv) -> torch.Tensor:
     """Penalty for sudden joint action changes
-       Returns negative squared difference between consecutive joint actions"""
-    return -torch.sum(
-        torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions), dim=1
-    )
+       Returns negative squared difference between consecutive joint actions
+
+    Delegates to the simulator-agnostic ``common.action_rate_l2``. The body
+    is bit-identical: the original Genesis impl computed ``square(cur - prev)``
+    while common computes ``square(prev - cur)`` — these are bitwise equal in
+    IEEE754 because squaring removes the sign.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import action_rate_l2
+    return action_rate_l2(env)
 
 
 def similar_to_default(env: GenesisEnv) -> torch.Tensor:
     """Penalty for deviating from default joint positions
-       Returns negative absolute difference from default pose"""
+       Returns negative absolute difference from default pose
 
-    dof_pos = proprioception.dof_pos(env)
-    return -torch.sum(torch.abs(dof_pos - env.act_manager.offset), dim=1)
+    Delegates to ``common.similar_to_default``. Bit-identical: both read
+    actuated joint positions via the same actuated_dof_ids and compute
+    ``-sum(abs(joint_pos - offset))``.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import similar_to_default as _common_sim_to_def
+    return _common_sim_to_def(env)
 
 
 def penalize_invalid_contact(
@@ -207,8 +227,14 @@ def penalize_torques(env: GenesisEnv, entity_name: str = "robot"):
 
 
 def penalize_dof_vel(env: GenesisEnv, entity_name: str = "robot"):
-    dof_vel = proprioception.dof_vel(env, entity_name=entity_name)
-    return - torch.sum(torch.square(dof_vel), dim=-1)
+    """Penalize joint velocities.
+
+    Delegates to ``common.penalize_dof_vel``. Bit-identical: same data path
+    (actuated joint velocities via the same actuated_dof_ids), same formula
+    ``-sum(square(joint_vel))``.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_dof_vel as _common_pen_dof_vel
+    return _common_pen_dof_vel(env, entity_name=entity_name)
 
 def penalize_dof_acc(env: GenesisEnv, entity_name: str = "robot"):
     """Todo"""
@@ -521,7 +547,9 @@ def penalize_impact_force(
 
 
 def reward_alive(env: GenesisEnv) -> torch.Tensor:
-    return torch.ones((env.num_envs,))
+    """Constant alive reward. Delegates to ``common.reward_alive`` (bit-identical)."""
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import reward_alive as _common_reward_alive
+    return _common_reward_alive(env)
 
 
 def penalize_joint_deviation_l1(

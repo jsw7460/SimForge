@@ -233,3 +233,26 @@ def similar_to_default(env: World, entity_name: str = "robot") -> torch.Tensor:
     return -torch.sum(
         torch.abs(env.get_robot_data(entity_name).joint_pos - env.act_manager.offset), dim=1
     )
+
+
+def reward_alive(env: World) -> torch.Tensor:
+    """Constant alive reward (1.0 per env).
+
+    Returns:
+        Tensor of shape (num_envs,) on the default device. Matches the
+        original sim-specific implementations exactly: ``torch.ones((num_envs,))``.
+    """
+    return torch.ones((env.num_envs,))
+
+
+def base_height_penalty(env: World, entity_name: str = "robot") -> torch.Tensor:
+    """Penalty for deviating from target base height.
+
+    Returns negative squared error between actual base z and the desired
+    height stored in ``env.command_manager.base_height``.
+
+    Returns:
+        Tensor of shape (num_envs,).
+    """
+    height_z = env.get_robot_data(entity_name).root_link_pos_w[:, 2]
+    return -torch.square(height_z - env.command_manager.base_height)

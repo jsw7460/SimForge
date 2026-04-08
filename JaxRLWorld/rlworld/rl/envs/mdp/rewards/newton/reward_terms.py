@@ -43,39 +43,49 @@ def tracking_ang_vel(env: "NewtonEnv", sigma: float = 0.25) -> torch.Tensor:
 def lin_vel_z(env: "NewtonEnv") -> torch.Tensor:
     """Penalty for vertical movement.
 
-    Returns negative squared vertical velocity to discourage unwanted up/down motion.
+    Delegates to ``common.penalize_lin_vel_z``. Both implementations apply
+    the same ``q⁻¹ ⊗ v ⊗ q`` formula to the world-frame velocity, with the
+    same operator order. The Newton-local helper uses xyzw indexing while
+    common uses wxyz indexing, but the actual float operations are identical
+    → bit-identical for Newton.
     """
-    lin_vel = state.base_lin_vel(env)
-    return -torch.square(lin_vel[:, 2])
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_lin_vel_z
+    return penalize_lin_vel_z(env)
 
 
 def base_height_penalty(env: "NewtonEnv") -> torch.Tensor:
     """Penalty for deviating from target base height.
 
-    Returns negative squared error from desired base height.
+    Delegates to ``common.base_height_penalty``. Bit-identical: both read
+    base z from the same root position accessor (no quaternion rotation
+    involved) and compute ``-(z - command_manager.base_height)²``.
     """
-    height = state.base_height(env)
-    return -torch.square(height[:, 0] - env.command_manager.base_height)
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import base_height_penalty as _common_base_height_penalty
+    return _common_base_height_penalty(env)
 
 
 def action_rate(env: "NewtonEnv") -> torch.Tensor:
     """Penalty for sudden joint action changes.
 
     Returns negative squared difference between consecutive joint actions.
+
+    Delegates to the simulator-agnostic ``common.action_rate_l2``. The body
+    is bit-identical to the original Newton implementation: both compute
+    ``-sum(square(prev - cur))``.
     """
-    return -torch.sum(
-        torch.square(env.act_manager.prev_processed_actions - env.act_manager.processed_actions),
-        dim=1
-    )
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import action_rate_l2
+    return action_rate_l2(env)
 
 
 def similar_to_default(env: "NewtonEnv") -> torch.Tensor:
     """Penalty for deviating from default joint positions.
 
-    Returns negative absolute difference from default pose.
+    Delegates to ``common.similar_to_default``. Bit-identical: both compute
+    ``-sum(abs(joint_pos - act_manager.offset))`` from the same actuated
+    joint indices.
     """
-    pos = proprioception.dof_pos(env)
-    return -torch.sum(torch.abs(pos - env.act_manager.offset), dim=1)
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import similar_to_default as _common_sim_to_def
+    return _common_sim_to_def(env)
 
 
 def reward_feet_air_time(
@@ -419,9 +429,13 @@ def penalize_joint_deviation_l1(
 
 
 def penalize_dof_vel(env: "NewtonEnv") -> torch.Tensor:
-    """Penalize joint velocities."""
-    vel = proprioception.dof_vel(env)
-    return -torch.sum(torch.square(vel), dim=-1)
+    """Penalize joint velocities.
+
+    Delegates to ``common.penalize_dof_vel``. Bit-identical: same data path
+    (actuated joint velocities), same formula ``-sum(square(joint_vel))``.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_dof_vel as _common_pen_dof_vel
+    return _common_pen_dof_vel(env)
 
 
 def penalize_dof_pos_limits(env: "NewtonEnv", soft_joint_pos_limit_factor: float = 1.0) -> torch.Tensor:
@@ -476,7 +490,9 @@ def reward_gait_pattern(env: "NewtonLocomotionEnv") -> torch.Tensor:
 
 
 def reward_alive(env: "NewtonEnv") -> torch.Tensor:
-    return torch.ones((env.num_envs,))
+    """Constant alive reward. Delegates to ``common.reward_alive`` (bit-identical)."""
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import reward_alive as _common_reward_alive
+    return _common_reward_alive(env)
 
 
 def penalize_base_acc(
