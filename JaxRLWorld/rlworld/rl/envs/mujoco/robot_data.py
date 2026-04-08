@@ -85,22 +85,3 @@ class MujocoRobotData:
     def joint_vel(self) -> Tensor:
         """Actuated joint velocities in action manager order."""
         return self._entity.data.joint_vel[:, self._joint_ids]
-
-    @property
-    def joint_torque(self) -> Tensor:
-        """Most-recently-applied actuator torques.
-
-        Reads mjlab's pre-computed ``actuator_force``. For mjlab,
-        ``actuator_force`` already contains only actuated joints (the
-        floating-base free joint has no motor tag and is excluded), so
-        no indexing by ``joint_ids`` is required for sum-style consumers.
-
-        NOTE: The order of ``actuator_force`` follows MuJoCo XML actuator
-        declaration order, which may differ from ``joint_pos`` order if
-        actuators are declared in a different sequence than joints. For
-        the current Phase D-1 consumer (``penalize_torques`` =
-        ``-sum(square(...))``) this ordering is irrelevant. If a future
-        reward needs ordered correspondence with ``joint_pos`` /
-        ``joint_vel``, the actuator→joint permutation must be added.
-        """
-        return self._entity.data.actuator_force

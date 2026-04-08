@@ -135,20 +135,6 @@ class NewtonRobotData:
         dof_vel = self.dof_velocities(self._state)
         return dof_vel[:, self._env.act_manager.indexing.newton_qd_indices]
 
-    @property
-    def joint_torque(self) -> Tensor:
-        """Most-recently-applied actuator torques on actuated joints.
-
-        Reads the MuJoCo solver's ``qfrc_actuator`` and indexes into the
-        actuated DOF subset. The first 6 DOFs of a floating-base
-        ``qfrc_actuator`` are the (unactuated) base translation/rotation,
-        which is why the legacy reward used ``[:, 6:]``; here we use the
-        proper ``newton_qd_indices`` which already excludes the base.
-        """
-        mjw_data = self._env.scene_manager.solver.mjw_data
-        qfrc_full = wp.to_torch(mjw_data.qfrc_actuator)
-        return qfrc_full[:, self._env.act_manager.indexing.newton_qd_indices]
-
     # ------------------------------------------------------------------
     # Write helpers (used by event terms, scene reset)
     # ------------------------------------------------------------------

@@ -256,19 +256,3 @@ def base_height_penalty(env: World, entity_name: str = "robot") -> torch.Tensor:
     """
     height_z = env.get_robot_data(entity_name).root_link_pos_w[:, 2]
     return -torch.square(height_z - env.command_manager.base_height)
-
-
-def penalize_torques(env: World, entity_name: str = "robot") -> torch.Tensor:
-    """Penalize joint torques (sim-agnostic).
-
-    Reads ``joint_torque`` from the RobotData protocol, which each
-    simulator implements via its native API:
-    - Newton: ``solver.mjw_data.qfrc_actuator`` indexed by actuated DOFs
-    - Genesis: ``entity.get_dofs_control_force(actuated_dof_ids)``
-    - MuJoCo: ``entity.data.actuator_force``
-
-    Returns:
-        Tensor of shape (num_envs,). Negative sum of squared torques.
-    """
-    torque = env.get_robot_data(entity_name).joint_torque
-    return -torch.sum(torch.square(torque), dim=-1)
