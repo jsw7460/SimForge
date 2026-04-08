@@ -16,7 +16,6 @@ import genesis as gs
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs.common_config_classes import (
-    CurriculumConfig,
     EventConfig,
     RewardConfig,
     TerminationsConfig,
@@ -25,6 +24,7 @@ from rlworld.rl.configs.common_config_classes import (
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.genesis_config_classes import (
     ActionConfig,
+    CurriculumConfig,
     EnvConfig,
     GenesisConfigsForRun,
     GenesisContactSensorCfg,
