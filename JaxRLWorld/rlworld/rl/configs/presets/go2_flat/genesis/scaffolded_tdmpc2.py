@@ -4,7 +4,7 @@ from typing import Dict, Any, List
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
 
-from .base import Go2FlatGenesisConfig
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatGenesisConfig
 
 
 @dataclass

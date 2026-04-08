@@ -1,0 +1,394 @@
+"""MuJoCo (mjlab) builders for Go2 flat-terrain locomotion.
+
+These functions are dispatched from ``Go2FlatConfig.build()`` when
+``sim_type == "mujoco"``. The bodies are extracted directly from the
+old ``presets/go2_flat/mujoco/base.py`` so the produced configs are
+identical.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict
+
+from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
+from mjlab.asset_zoo.robots.unitree_go2.go2_constants import (
+    FULL_COLLISION,
+    get_spec as go2_get_spec,
+)
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
+
+from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.configs import EventConfig, RewardConfig
+from rlworld.rl.configs.common_config_classes import TerminationsConfig
+from rlworld.rl.configs.events import EventTermConfig
+from rlworld.rl.configs.mujoco_config_classes import (
+    MujocoActionConfig,
+    MujocoConfigsForRun,
+    MujocoEnvConfig,
+    MujocoObservationConfig,
+    MujocoSceneConfig,
+    VisualizationConfig,
+)
+from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.robots.go2 import (
+    ARMATURE_HIP,
+    ARMATURE_KNEE,
+    DAMPING_HIP,
+    DAMPING_KNEE,
+    EFFORT_HIP,
+    EFFORT_KNEE,
+    STIFFNESS_HIP,
+    STIFFNESS_KNEE,
+)
+from rlworld.rl.configs.scene.unified_entity_config import (
+    ArticulationCfg,
+    InitialStateCfg,
+    MujocoEntityCfg,
+)
+from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
+from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
+from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
+
+if TYPE_CHECKING:
+    from .base import Go2FlatConfig
+
+
+# ── Module-level constants exposed to base.Go2FlatConfig.build() ─────
+
+CONFIGS_FOR_RUN_CLS = MujocoConfigsForRun
+OBSERVATION_CFG_CLS = MujocoObservationConfig
+
+
+def get_foot_names(robot) -> tuple[str, ...]:
+    """MuJoCo uses bare foot names."""
+    return robot.foot_names
+
+
+# ── Builders ─────────────────────────────────────────────────────────
+
+
+def build_visualization(cfg: "Go2FlatConfig") -> VisualizationConfig:
+    return VisualizationConfig(show_viewer=False, record_video=False)
+
+
+def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
+    @dataclass
+    class _TerminationsCfg(TerminationsConfig):
+        bad_orientation = TerminationTermConfig(
+            tf.bad_orientation,
+            {"limit_angle": math.radians(30.0)},
+        )
+        time_out = TerminationTermConfig(tf.time_out)
+
+    return MujocoEnvConfig(
+        num_envs=cfg.num_envs,
+        env_name="MujocoLocomotionEnv",
+        task_name="Go2 Velocity Tracking",
+        seed=cfg.seed,
+        episode_length_s=cfg.episode_length_s,
+        decimation=timing["decimation"],
+        terminations=_TerminationsCfg(),
+    )
+
+
+def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConfig:
+    """Build scene config with mjlab SceneCfg."""
+    r = cfg.robot
+    physics_dt = timing["dt"]
+
+    foot_names = ("FR", "FL", "RR", "RL")
+    geom_names = tuple(f"{name}_foot_collision" for name in foot_names)
+
+    feet_ground_cfg = ContactSensorCfg(
+        name="feet_ground_contact",
+        primary=ContactMatch(
+            mode="geom",
+            pattern=geom_names,
+            entity="robot",
+        ),
+        secondary=ContactMatch(mode="body", pattern="terrain"),
+        fields=("found", "force"),
+        reduce="netforce",
+        num_slots=1,
+        track_air_time=True,
+    )
+
+    body_ground_cfg = ContactSensorCfg(
+        name="body_ground_contact",
+        primary=ContactMatch(
+            mode="body",
+            pattern=".*",
+            entity="robot",
+            exclude=(".*foot.*", ".*calf.*"),
+        ),
+        secondary=ContactMatch(mode="body", pattern="terrain"),
+        fields=("found", "force"),
+        reduce="none",
+        num_slots=1,
+        track_air_time=False,
+        history_length=timing["decimation"],
+    )
+
+    robot_entity = MujocoEntityCfg(
+        urdf_path=r.urdf_path,
+        init_state=InitialStateCfg(
+            pos=(0, 0, r.base_init_height),
+            joint_pos=r.default_joint_angles,
+        ),
+        floating=True,
+        articulation=ArticulationCfg(
+            actuators=(
+                DelayedPDActuatorCfg(
+                    target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
+                    stiffness=STIFFNESS_HIP,
+                    damping=DAMPING_HIP,
+                    effort_limit=EFFORT_HIP,
+                    armature=ARMATURE_HIP,
+                    min_delay=1,
+                    max_delay=3,
+                ),
+                DelayedPDActuatorCfg(
+                    target_names_expr=(".*_calf_joint",),
+                    stiffness=STIFFNESS_KNEE,
+                    damping=DAMPING_KNEE,
+                    effort_limit=EFFORT_KNEE,
+                    armature=ARMATURE_KNEE,
+                    min_delay=1,
+                    max_delay=3,
+                ),
+            ),
+        ),
+        spec_fn=go2_get_spec,
+        collisions=(FULL_COLLISION,),
+    )
+
+    return MujocoSceneConfig(
+        physics_dt=physics_dt,
+        num_envs=cfg.num_envs,
+        env_spacing=2.0,
+        robot_entity_name="robot",
+        entities={"robot": robot_entity},
+        sensors=(feet_ground_cfg, body_ground_cfg),
+        terrain_type="plane",
+        solver_iterations=10,
+        solver_ls_iterations=20,
+        ccd_iterations=50,
+        nconmax=35,
+        njmax=1500,
+        contact_sensor_maxmatch=64,
+        preset_class_name=type(cfg).__name__,
+        preset_module_path=type(cfg).__module__,
+    )
+
+
+def build_action(cfg: "Go2FlatConfig") -> MujocoActionConfig:
+    r = cfg.robot
+    return MujocoActionConfig(
+        entity_name="robot",
+        actuated_dof_names=r.actuated_dof_patterns,
+        action_scale=MJLAB_GO2_ACTION_SCALE,
+        clip_actions=(-100.0, 100.0),
+        offset=r.get_action_offset(),
+    )
+
+
+def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
+    """Build reward configuration matching Genesis/Newton Go2 rewards."""
+    site_names = ("FR", "FL", "RR", "RL")
+
+    @dataclass
+    class _RewardsCfg(RewardConfig):
+        # Tracking rewards (common — uses RobotData interface)
+        track_lin_vel = RewardTermConfig(
+            func=rf_common.track_lin_vel,
+            weight=2.0,
+            params={"std": 0.5, "penalize_z": True},
+        )
+        track_ang_vel = RewardTermConfig(
+            func=rf_common.track_ang_vel,
+            weight=2.0,
+            params={"std": 0.707, "penalize_xy": True},
+        )
+
+        # Orientation reward (mjlab-native, not common)
+        flat_orientation = RewardTermConfig(
+            func=rf.flat_orientation,
+            weight=1.0,
+            params={"std": 0.447},
+        )
+
+        variable_posture = RewardTermConfig(
+            func=rf.variable_posture,
+            weight=1.0,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    name="robot",
+                    joint_names=(".*",),
+                ),
+                "std_standing": {
+                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
+                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.1,
+                },
+                "std_walking": {
+                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                },
+                "std_running": {
+                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                },
+                "walking_threshold": 0.05,
+                "running_threshold": 1.5,
+            },
+        )
+
+        joint_pos_limits = RewardTermConfig(
+            func=rf.joint_pos_limits,
+            weight=1.0,
+        )
+
+        raw_action_rate_l2 = RewardTermConfig(
+            func=rf.raw_action_rate_l2,
+            weight=0.1,
+        )
+
+        feet_clearance = RewardTermConfig(
+            func=rf.feet_clearance,
+            weight=2.0,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    name="robot",
+                    site_names=site_names,
+                ),
+                "target_height": 0.1,
+                "command_threshold": 0.05,
+            },
+        )
+
+        feet_swing_height = RewardTermConfig(
+            func=rf.feet_swing_height,
+            weight=0.25,
+            params={
+                "contact_group": "feet_ground_contact",
+                "asset_cfg": SceneEntityCfg(
+                    name="robot",
+                    site_names=site_names,
+                ),
+                "target_height": 0.1,
+                "command_threshold": 0.05,
+            },
+        )
+
+        feet_slip = RewardTermConfig(
+            func=rf.feet_slip,
+            weight=0.1,
+            params={
+                "contact_group": "feet_ground_contact",
+                "asset_cfg": SceneEntityCfg(
+                    name="robot",
+                    site_names=site_names,
+                ),
+                "command_threshold": 0.05,
+            },
+        )
+
+        soft_landing = RewardTermConfig(
+            func=rf.soft_landing,
+            weight=1e-5,
+            params={
+                "contact_group": "feet_ground_contact",
+                "command_threshold": 0.05,
+            },
+        )
+
+    return _RewardsCfg()
+
+
+def build_event(cfg: "Go2FlatConfig") -> EventConfig:
+    from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
+    from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
+
+    foot_geom_names = (
+        "FR_foot_collision",
+        "FL_foot_collision",
+        "RR_foot_collision",
+        "RL_foot_collision",
+    )
+
+    @dataclass
+    class _EventsCfg(EventConfig):
+        # Reset events
+        reset_root = EventTermConfig(
+            func=ef.reset_root_state_uniform,
+            mode="reset",
+            params={
+                "pose_range": {
+                    "x": (-0.5, 0.5),
+                    "y": (-0.5, 0.5),
+                    "z": (0.00, 0.00),
+                    "yaw": (-3.14, 3.14),
+                },
+                "velocity_range": {},
+            },
+        )
+        reset_joints = EventTermConfig(
+            func=ef.reset_joints_by_offset,
+            mode="reset",
+            params={
+                "position_range": (math.pi / 360, math.pi / 120),
+                "velocity_range": (0.0, 0.0),
+                "entity_cfg": EntityCfg(name="robot", joint_names=(".*",)),
+            },
+        )
+
+        # Interval events
+        push_robot = EventTermConfig(
+            func=ef.push_by_setting_velocity,
+            mode="interval",
+            interval_range_s=(2.0, 20.0),
+            params={
+                "velocity_range": {
+                    "x": (-0.5, 0.5),
+                    "y": (-0.5, 0.5),
+                    "z": (-0.4, 0.4),
+                    "roll": (-0.52, 0.52),
+                    "pitch": (-0.52, 0.52),
+                    "yaw": (-0.78, 0.78),
+                },
+            },
+        )
+
+        # Domain randomization (disabled during eval)
+        randomize_friction = EventTermConfig(
+            func=ef.randomize_geom_friction,
+            mode="reset_dr",
+            params={
+                "ranges": (0.3, 1.2),
+                "operation": "abs",
+                "shared_random": True,
+                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
+            },
+        )
+        randomize_base_mass = EventTermConfig(
+            func=ef.randomize_body_mass,
+            mode="reset_dr",
+            params={
+                "ranges": (0.8, 1.2),
+                "operation": "scale",
+                "entity_cfg": EntityCfg(name="robot", body_names=("base",)),
+            },
+        )
+        randomize_joint_friction = EventTermConfig(
+            func=ef.randomize_joint_friction,
+            mode="reset_dr",
+            params={
+                "ranges": (0.0, 0.05),
+                "operation": "abs",
+            },
+        )
+
+    return _EventsCfg()

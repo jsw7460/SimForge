@@ -1,13 +1,12 @@
-from rlworld.rl.configs import NewtonConfigsForRun
-from .base import Go2FlatNewtonConfig
-from dataclasses import dataclass
+"""Compat shim: delegates to the unified ``presets/go2_flat/mlp.py``.
 
-@dataclass
-class Go2FlatNewtonMLPConfig(Go2FlatNewtonConfig):
-    actor_class_name: str = "MLPActor"
-    run_name: str = "Go2_Newton_MLP"
+Phase A migration: kept so existing scripts that import from
+``presets.go2_flat.newton.mlp`` continue to work. Phase B will update
+those callers and remove this shim.
+"""
+
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config as _get_unified_config
 
 
-def get_config() -> NewtonConfigsForRun:
-    """Complete configuration for Go2 flat terrain with MLP actor on Newton."""
-    return Go2FlatNewtonMLPConfig().build()
+def get_config():
+    return _get_unified_config(sim="newton")

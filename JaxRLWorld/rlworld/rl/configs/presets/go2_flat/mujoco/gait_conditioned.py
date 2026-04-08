@@ -29,7 +29,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_mujoco
-from .base import Go2FlatMujocoConfig
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatMujocoConfig
 
 
 @dataclass

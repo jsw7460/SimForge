@@ -1,14 +1,12 @@
-from dataclasses import dataclass
+"""Compat shim: delegates to the unified ``presets/go2_flat/mlp.py``.
 
-from rlworld.rl.configs import MujocoConfigsForRun
-from .base import Go2FlatMujocoConfig
+Phase A migration: kept so existing scripts that import from
+``presets.go2_flat.mujoco.mlp`` continue to work. Phase B will update
+those callers and remove this shim.
+"""
 
-
-@dataclass
-class Go2MLPConfig(Go2FlatMujocoConfig):
-    actor_class_name: str = "MLPActor"
-    run_name: str = "Go2_Mujoco_MLP"
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config as _get_unified_config
 
 
-def get_config() -> MujocoConfigsForRun:
-    return Go2MLPConfig().build()
+def get_config():
+    return _get_unified_config(sim="mujoco")

@@ -28,7 +28,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import reward_terms as rf_newton
-from .base import Go2FlatNewtonConfig
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatNewtonConfig
 
 
 @dataclass

@@ -39,7 +39,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
-from .base import Go2FlatGenesisConfig
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatGenesisConfig
 
 
 @dataclass
