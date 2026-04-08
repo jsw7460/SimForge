@@ -29,12 +29,13 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_mujoco
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatMujocoConfig
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 
 
 @dataclass
-class Go2GaitConditionedMujocoConfig(Go2FlatMujocoConfig):
+class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
 
+    sim_type: str = "mujoco"
     run_name: str = "Go2_GaitConditioned_Mujoco"
 
     def _build_command_config(self) -> CommandConfig:

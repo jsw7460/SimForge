@@ -1,11 +1,11 @@
-from rlworld.rl.configs.presets.go2_flat.mujoco.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.actuators import IdealPDActuatorCfg
 from rlworld.rl.configs.robots.go2 import Go2Config
 
 
 def main():
-    cfgs_for_run = get_config().with_cli_overrides()
+    cfgs_for_run = get_config(sim="mujoco").with_cli_overrides()
     cfgs_for_run.action.actuator_cfg = IdealPDActuatorCfg(
         stiffness=Go2Config().p_gains,
         damping=Go2Config().d_gains,

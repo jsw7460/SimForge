@@ -31,7 +31,7 @@ from rlworld.rl.algorithms.sim_mpc.networks import SimMPCPolicy, QEnsemble
 from rlworld.rl.algorithms.sim_mpc.planner import planning_step, SimulatorMPPI
 from rlworld.rl.algorithms.sim_mpc.sim_mpc import SimMPC, SimpleReplayBuffer
 from rlworld.rl.algorithms.sim_mpc.state_sync import GenesisStateSync
-from rlworld.rl.configs.presets.g1_29dof.genesis.mlp import get_config
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 from rlworld.rl.envs.mdp.terminations.common import terminations as tf
@@ -78,7 +78,7 @@ NUM_ELITES = 4
 
 
 def create_envs():
-    cfgs = get_config()
+    cfgs = get_config(sim="genesis")
     cfgs.env.num_envs = N_TRAIN
     cfgs.env.termination_criteria = [
         TerminationTermConfig(

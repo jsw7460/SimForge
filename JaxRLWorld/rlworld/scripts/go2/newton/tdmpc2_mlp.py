@@ -11,12 +11,12 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs.algorithms import TDMPC2Config
 from rlworld.rl.runners import BaseRunner
-from rlworld.rl.configs.presets.go2_flat.newton.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 
 
 def main():
     # Get complete config from preset
-    cfgs_for_run = get_config().with_cli_overrides()
+    cfgs_for_run = get_config(sim="newton").with_cli_overrides()
 
     tdmpc2_config = TDMPC2Config(
         vmin=-5.0,

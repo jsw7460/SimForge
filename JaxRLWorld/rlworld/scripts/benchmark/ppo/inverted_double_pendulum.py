@@ -17,7 +17,7 @@ import gymnasium as gym
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
 
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)

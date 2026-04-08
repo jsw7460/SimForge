@@ -11,7 +11,7 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs import GenesisConfigsForRun
 from rlworld.rl.runners import OffPolicyRunner
-from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.configs.algorithms import TD3Config
 from rlworld.rl.configs import TD3PolicyConfig
 
@@ -20,7 +20,7 @@ import gymnasium as gym
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
 
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)

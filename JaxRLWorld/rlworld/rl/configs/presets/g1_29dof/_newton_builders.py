@@ -91,7 +91,7 @@ def build_env(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
     return NewtonEnvConfig(
         num_envs=cfg.num_envs,
         env_name="NewtonEnv",
-        task_name="G1_12Dof_Velocity_Tracking",
+        task_name="G1_Velocity_Tracking",
         seed=cfg.seed,
         episode_length_s=cfg.episode_length_s,
         decimation=timing["decimation"],

@@ -17,7 +17,7 @@ from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
 
     configs_dict["runner"]["run_name"] = "HalfCheetah_PPO"
 

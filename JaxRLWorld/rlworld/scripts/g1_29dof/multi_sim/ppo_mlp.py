@@ -94,15 +94,7 @@ def main():
     args = parse_args()
 
     # ── Import configs ──
-    from rlworld.rl.configs.presets.g1_29dof.genesis.mlp import (
-        get_config as get_genesis_config,
-    )
-    from rlworld.rl.configs.presets.g1_29dof.newton.mlp import (
-        get_config as get_newton_config,
-    )
-    from rlworld.rl.configs.presets.g1_29dof.mujoco.mlp import (
-        get_config as get_mujoco_config,
-    )
+    from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
     from rlworld.rl.envs.multi_sim_world import MultiSimWorld
     from rlworld.rl.runners import BaseRunner
     from rlworld.rl.runners.on_policy_runner import OnPolicyRunner
@@ -111,17 +103,17 @@ def main():
     common_obs = _build_common_obs()
 
     # ── Build per-simulator configs ──
-    genesis_cfg = get_genesis_config()
+    genesis_cfg = get_config(sim="genesis")
     genesis_cfg.env.num_envs = args.genesis_num_envs
     genesis_cfg.algorithm.obs_normalization = True
     genesis_cfg.observation.obs_group = common_obs
 
-    newton_cfg = get_newton_config()
+    newton_cfg = get_config(sim="newton")
     newton_cfg.env.num_envs = args.newton_num_envs
     newton_cfg.algorithm.obs_normalization = True
     newton_cfg.observation.obs_group = common_obs
 
-    mujoco_cfg = get_mujoco_config()
+    mujoco_cfg = get_config(sim="mujoco")
     mujoco_cfg.env.num_envs = args.mujoco_num_envs
     mujoco_cfg.algorithm.obs_normalization = True
     mujoco_cfg.observation.obs_group = common_obs

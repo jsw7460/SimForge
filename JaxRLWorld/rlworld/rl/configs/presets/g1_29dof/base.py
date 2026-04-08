@@ -17,11 +17,8 @@ Usage:
     from rlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
     cfgs_for_run = G1FlatConfig(sim_type="newton").build()
 
-Variants (e.g. ``newton/abdnet.py``) currently still inherit from the
-per-simulator subclasses (``G1FlatNewtonConfig``, ``G1FlatGenesisConfig``,
-``G1FlatMujocoConfig``) provided as compatibility shims at the bottom
-of this module. Phase B will migrate those variants to use
-``G1FlatConfig`` directly.
+Variants (e.g. ``newton/abdnet.py``) inherit ``G1FlatConfig`` directly
+and pin ``sim_type`` themselves.
 """
 
 from __future__ import annotations
@@ -236,24 +233,3 @@ class G1FlatConfig:
         )
 
 
-# ── Compatibility shims for variants (Phase B) ───────────────────────
-#
-# Variants like ``newton/abdnet.py`` still inherit per-simulator
-# subclasses. They will be migrated to use ``G1FlatConfig`` directly in
-# a later phase; for now these shims just pin ``sim_type`` so the
-# variants keep working unchanged.
-
-
-@dataclass
-class G1FlatNewtonConfig(G1FlatConfig):
-    sim_type: str = "newton"
-
-
-@dataclass
-class G1FlatGenesisConfig(G1FlatConfig):
-    sim_type: str = "genesis"
-
-
-@dataclass
-class G1FlatMujocoConfig(G1FlatConfig):
-    sim_type: str = "mujoco"

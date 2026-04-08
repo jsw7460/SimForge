@@ -18,12 +18,12 @@ genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.runners import BaseRunner
-from rlworld.rl.configs.presets.g1_29dof.mujoco.mlp import get_config
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.actuators import ImplicitActuatorCfg
 
 
 def main():
-    cfgs_for_run = get_config().with_cli_overrides()
+    cfgs_for_run = get_config(sim="mujoco").with_cli_overrides()
 
     # Override: use mjlab's native IdealPdActuator instead of BuiltinPositionActuator.
     # This creates motor actuators but mjlab computes PD torques in write_data_to_sim().

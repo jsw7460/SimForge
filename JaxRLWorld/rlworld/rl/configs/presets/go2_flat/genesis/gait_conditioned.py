@@ -39,12 +39,13 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatGenesisConfig
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 
 
 @dataclass
-class Go2GaitConditionedGenesisConfig(Go2FlatGenesisConfig):
+class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
 
+    sim_type: str = "genesis"
     run_name: str = "Go2_GaitConditioned_Genesis"
 
     def _build_command_config(self) -> CommandConfig:

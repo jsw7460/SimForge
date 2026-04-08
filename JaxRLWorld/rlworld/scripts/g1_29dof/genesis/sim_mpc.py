@@ -1,5 +1,5 @@
 from rlworld.rl.configs.algorithms import SimMPCConfig
-from rlworld.rl.configs.presets.g1_29dof.genesis.mlp import get_config
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
 )
@@ -9,7 +9,7 @@ from rlworld.rl.runners import BaseRunner
 
 
 def main():
-    cfgs_for_run = get_config().with_cli_overrides()
+    cfgs_for_run = get_config(sim="genesis").with_cli_overrides()
 
     sim_mpc_config = SimMPCConfig(
         horizon=10,

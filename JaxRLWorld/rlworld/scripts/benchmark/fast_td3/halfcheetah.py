@@ -17,12 +17,12 @@ from rlworld.rl.configs.algorithms import FastTD3Config
 from rlworld.rl.configs import FastTD3PolicyConfig
 from rlworld.rl.configs import GenesisConfigsForRun
 from rlworld.rl.runners import BaseRunner
-from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
 
     configs_dict["runner"]["run_name"] = "HalfCheetah_TD3"
 

@@ -17,7 +17,7 @@ import shimmy
 from rlworld.rl.configs.algorithms import TD3Config
 from rlworld.rl.configs import GenesisConfigsForRun, TD3PolicyConfig
 from rlworld.rl.runners import OffPolicyRunner
-from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from gymnasium.wrappers import FlattenObservation
 
 from gymnasium.vector import SyncVectorEnv, AutoresetMode
@@ -44,7 +44,7 @@ class ActionRepeatWrapper(gym.Wrapper):
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
 
     configs_dict["runner"]["run_name"] = "HalfCheetah_TD3"
 

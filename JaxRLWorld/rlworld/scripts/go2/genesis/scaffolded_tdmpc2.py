@@ -4,7 +4,7 @@ from rlworld.rl.configs.presets.go2_flat.genesis.scaffolded_tdmpc2 import get_co
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
 
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)

@@ -268,10 +268,10 @@ REWARD_NAMES = [
 # =====================================================================
 
 def _create_genesis_env():
-    from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
+    from rlworld.rl.configs.presets.go2_flat.mlp import get_config
     from rlworld.rl.runners import BaseRunner
 
-    cfg = get_config()
+    cfg = get_config(sim="genesis")
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
@@ -281,10 +281,10 @@ def _create_genesis_env():
 
 
 def _create_newton_env():
-    from rlworld.rl.configs.presets.go2_flat.newton.mlp import get_config
+    from rlworld.rl.configs.presets.go2_flat.mlp import get_config
     from rlworld.rl.runners import BaseRunner
 
-    cfg = get_config()
+    cfg = get_config(sim="newton")
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
@@ -294,10 +294,10 @@ def _create_newton_env():
 
 
 def _create_mujoco_env():
-    from rlworld.rl.configs.presets.go2_flat.mujoco.mlp import get_config
+    from rlworld.rl.configs.presets.go2_flat.mlp import get_config
     from rlworld.rl.runners import BaseRunner
 
-    cfg = get_config()
+    cfg = get_config(sim="mujoco")
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}

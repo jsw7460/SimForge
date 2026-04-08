@@ -10,12 +10,9 @@ Usage:
     from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
     cfgs_for_run = Go2FlatConfig(sim_type="newton").build()
 
-Variants (gait_conditioned, scaffolded_tdmpc2, ...) currently still
-inherit from the per-simulator subclasses (``Go2FlatNewtonConfig``,
-``Go2FlatGenesisConfig``, ``Go2FlatMujocoConfig``) provided as
-compatibility shims at the bottom of this module. Phase B will migrate
-those variants to use ``Go2FlatConfig`` directly; for now the shims
-just pin ``sim_type`` so the variants keep working unchanged.
+Variants (``gait_conditioned``, ``scaffolded_tdmpc2``) inherit
+``Go2FlatConfig`` directly and pin ``sim_type`` themselves; see
+``presets/go2_flat/{newton,genesis,mujoco}/`` for the variant files.
 """
 
 from __future__ import annotations
@@ -287,24 +284,3 @@ class Go2FlatConfig:
         )
 
 
-# ── Compatibility shims for variants (Phase A) ───────────────────────
-#
-# Variants like ``gait_conditioned.py`` and ``scaffolded_tdmpc2.py``
-# still inherit per-simulator subclasses. They will be migrated to use
-# ``Go2FlatConfig`` directly in Phase B; for now these shims just pin
-# ``sim_type`` so the variants keep working unchanged.
-
-
-@dataclass
-class Go2FlatNewtonConfig(Go2FlatConfig):
-    sim_type: str = "newton"
-
-
-@dataclass
-class Go2FlatGenesisConfig(Go2FlatConfig):
-    sim_type: str = "genesis"
-
-
-@dataclass
-class Go2FlatMujocoConfig(Go2FlatConfig):
-    sim_type: str = "mujoco"

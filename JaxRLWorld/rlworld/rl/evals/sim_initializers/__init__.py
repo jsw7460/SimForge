@@ -56,13 +56,13 @@ class SimInitializer(ABC):
 # robot_key is derived from checkpoint task_name (lowercased, keywords matched)
 _PRESET_REGISTRY: dict[tuple[str, str], str] = {
     # Go2
-    ("go2", "genesis"):  "rlworld.rl.configs.presets.go2_flat.genesis.mlp",
-    ("go2", "newton"):   "rlworld.rl.configs.presets.go2_flat.newton.mlp",
-    ("go2", "mujoco"):   "rlworld.rl.configs.presets.go2_flat.mujoco.mlp",
+    ("go2", "genesis"):  "rlworld.rl.configs.presets.go2_flat.mlp",
+    ("go2", "newton"):   "rlworld.rl.configs.presets.go2_flat.mlp",
+    ("go2", "mujoco"):   "rlworld.rl.configs.presets.go2_flat.mlp",
     # G1 29-DOF
-    ("g1_29dof", "genesis"): "rlworld.rl.configs.presets.g1_29dof.genesis.mlp",
-    ("g1_29dof", "newton"):  "rlworld.rl.configs.presets.g1_29dof.newton.mlp",
-    ("g1_29dof", "mujoco"):  "rlworld.rl.configs.presets.g1_29dof.mujoco.mlp",
+    ("g1_29dof", "genesis"): "rlworld.rl.configs.presets.g1_29dof.mlp",
+    ("g1_29dof", "newton"):  "rlworld.rl.configs.presets.g1_29dof.mlp",
+    ("g1_29dof", "mujoco"):  "rlworld.rl.configs.presets.g1_29dof.mlp",
 }
 
 
@@ -159,7 +159,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
         )
     module_path = _PRESET_REGISTRY[key]
     mod = importlib.import_module(module_path)
-    return mod.get_config()
+    return mod.get_config(sim=sim_key)
 
 
 def detect_sim_type(metadata: dict) -> str:

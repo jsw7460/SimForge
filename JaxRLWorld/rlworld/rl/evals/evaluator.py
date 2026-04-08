@@ -49,8 +49,8 @@ class PolicyEvaluator:
         PolicyEvaluator(policy_path="...", eval_target="newton")
 
         # Cross-sim eval (explicit config)
-        from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
-        PolicyEvaluator(policy_path="...", eval_target=get_config())
+        from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
+        PolicyEvaluator(policy_path="...", eval_target=get_config(sim="newton"))
     """
 
     def __init__(

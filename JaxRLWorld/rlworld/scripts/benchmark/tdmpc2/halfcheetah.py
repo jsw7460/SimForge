@@ -17,7 +17,7 @@ import shimmy
 from rlworld.rl.configs.algorithms import TDMPC2Config
 from rlworld.rl.configs import GenesisConfigsForRun
 from rlworld.rl.runners import BaseRunner, ModelBasedRunner
-from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from gymnasium.wrappers import FlattenObservation
 
 from gymnasium.vector import SyncVectorEnv, AutoresetMode
@@ -44,7 +44,7 @@ class ActionRepeatWrapper(gym.Wrapper):
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
 
     # Create configs and runner
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)

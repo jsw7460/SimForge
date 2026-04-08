@@ -28,12 +28,13 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import reward_terms as rf_newton
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatNewtonConfig
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 
 
 @dataclass
-class Go2GaitConditionedNewtonConfig(Go2FlatNewtonConfig):
+class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
 
+    sim_type: str = "newton"
     run_name: str = "Go2_GaitConditioned_Newton"
 
     def _build_command_config(self) -> CommandConfig:

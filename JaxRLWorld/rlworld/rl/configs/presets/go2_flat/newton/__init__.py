@@ -1,21 +1,6 @@
-"""Go2 flat terrain locomotion configs for Newton simulator.
+"""Newton-specific Go2 flat preset variants (e.g. ``gait_conditioned``).
 
-Phase A migration: ``Go2FlatNewtonConfig`` is now a thin compatibility
-shim defined in ``presets/go2_flat/base.py`` (subclass of the unified
-``Go2FlatConfig`` with ``sim_type="newton"``). It is re-exported here
-for variants (``gait_conditioned``, etc.) that still inherit from it.
+The unified ``Go2FlatConfig`` lives in
+``rlworld.rl.configs.presets.go2_flat.base``. This package is reserved
+for variants whose body is genuinely Newton-specific.
 """
-
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatNewtonConfig
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config as _get_unified_config
-
-
-def get_mlp_config():
-    """Backward-compatible entry point — delegates to ``mlp.get_config(sim="newton")``."""
-    return _get_unified_config(sim="newton")
-
-
-__all__ = [
-    "Go2FlatNewtonConfig",
-    "get_mlp_config",
-]

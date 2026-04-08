@@ -78,8 +78,8 @@ def _create_envs():
     obs = _build_common_obs_terms()
 
     print("  Creating Genesis env...", end="", flush=True)
-    from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config as gc
-    g_cfg = gc()
+    from rlworld.rl.configs.presets.go2_flat.mlp import get_config
+    g_cfg = get_config(sim="genesis")
     g_cfg.env.num_envs = NUM_ENVS
     g_cfg.observation.obs_group = {"actor": obs, "critic": obs}
     g_cfg.observation.enable_noise = False
@@ -87,8 +87,7 @@ def _create_envs():
     print(" done")
 
     print("  Creating Newton env...", end="", flush=True)
-    from rlworld.rl.configs.presets.go2_flat.newton.mlp import get_config as nc
-    n_cfg = nc()
+    n_cfg = get_config(sim="newton")
     n_cfg.env.num_envs = NUM_ENVS
     n_cfg.observation.obs_group = {"actor": obs, "critic": obs}
     n_cfg.observation.enable_noise = False
@@ -96,8 +95,7 @@ def _create_envs():
     print(" done")
 
     print("  Creating MuJoCo env...", end="", flush=True)
-    from rlworld.rl.configs.presets.go2_flat.mujoco.mlp import get_config as mc
-    m_cfg = mc()
+    m_cfg = get_config(sim="mujoco")
     m_cfg.env.num_envs = NUM_ENVS
     m_cfg.observation.obs_group = {"actor": obs, "critic": obs}
     m_cfg.observation.enable_noise = False

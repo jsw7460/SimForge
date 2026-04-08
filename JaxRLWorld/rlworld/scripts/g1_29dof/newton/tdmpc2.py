@@ -1,5 +1,5 @@
 from rlworld.rl.configs.algorithms import TDMPC2Config
-from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.envs.mdp.configs import (
     TerminationTermConfig,
@@ -10,7 +10,7 @@ from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 
 
 def main():
-    cfgs_for_run = get_config().with_cli_overrides()
+    cfgs_for_run = get_config(sim="newton").with_cli_overrides()
 
     tdmpc2_config = TDMPC2Config(
         vmin=-5.0,

@@ -12,14 +12,14 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 from rlworld.rl.configs.algorithms.sac import SACConfig
 from rlworld.rl.configs import GenesisConfigsForRun, SACPolicyConfig
 from rlworld.rl.runners import OffPolicyRunner
-from rlworld.rl.configs.presets.go2_flat.genesis.mlp import get_config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 
 import gymnasium as gym
 
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config()
+    configs_dict = get_config(sim="genesis")
     configs_dict["runner"]["algorithm_class_name"] = "SAC"
     configs_dict["runner"]["policy_class_name"] = "SACActorCritic"
 
