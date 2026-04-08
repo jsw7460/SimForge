@@ -541,12 +541,14 @@ class NewtonSceneManager(BaseManager):
         return self.articulation_views["robot"]
 
     @property
+    def robot_data(self):
+        """NewtonRobotData from the environment (single instance)."""
+        return self.env._robot_data
+
+    @property
     def robot_state(self):
-        """Lazily-initialized RobotStateAccessor for the 'robot' entity."""
-        if not hasattr(self, "_robot_state_accessor") or self._robot_state_accessor is None:
-            from rlworld.rl.envs.newton.robot_state_accessor import RobotStateAccessor
-            self._robot_state_accessor = RobotStateAccessor(self.robot_view, self.env.device)
-        return self._robot_state_accessor
+        """Alias for robot_data (backward compat)."""
+        return self.robot_data
 
     def _set_kinematic_trees(self) -> None:
         """Build kinematic trees for entities with URDF."""
@@ -771,10 +773,10 @@ class NewtonSceneManager(BaseManager):
         if env_ids is None or len(env_ids) == 0:
             return
 
-        from rlworld.rl.envs.newton.robot_state_accessor import RobotStateAccessor
+        from rlworld.rl.envs.newton.robot_data import NewtonRobotData
 
         view = self.robot_view
-        mask = RobotStateAccessor.env_ids_to_mask(env_ids, self.model.world_count, self.env.device)
+        mask = NewtonRobotData.env_ids_to_mask(env_ids, self.model.world_count, self.env.device)
 
         # Copy model defaults into state for the reset environments
         view.set_dof_positions(self.state_0, view.get_dof_positions(self.model), mask=mask)

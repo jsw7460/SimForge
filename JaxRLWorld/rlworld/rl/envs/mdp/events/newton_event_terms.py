@@ -62,7 +62,7 @@ def reset_root_state_uniform(
     if len(env_ids) == 0:
         return
 
-    from rlworld.rl.envs.newton.robot_state_accessor import RobotStateAccessor
+    from rlworld.rl.envs.newton.robot_data import NewtonRobotData
 
     scene_manager = env.scene_manager
     accessor = scene_manager.robot_state
@@ -70,7 +70,7 @@ def reset_root_state_uniform(
 
     n = len(env_ids)
     device = env.device
-    mask = RobotStateAccessor.env_ids_to_mask(env_ids, scene_manager.model.world_count, device)
+    mask = NewtonRobotData.env_ids_to_mask(env_ids, scene_manager.model.world_count, device)
 
     # Sample pose perturbations
     keys = ["x", "y", "z", "roll", "pitch", "yaw"]
@@ -174,11 +174,11 @@ def push_robot(
     if len(env_ids) == 0:
         return
 
-    from rlworld.rl.envs.newton.robot_state_accessor import RobotStateAccessor
+    from rlworld.rl.envs.newton.robot_data import NewtonRobotData
 
     accessor = env.scene_manager.robot_state
     state = env.scene_manager.state_0
-    mask = RobotStateAccessor.env_ids_to_mask(env_ids, env.scene_manager.model.world_count, env.device)
+    mask = NewtonRobotData.env_ids_to_mask(env_ids, env.scene_manager.model.world_count, env.device)
 
     n_envs = len(env_ids)
     device = env.device

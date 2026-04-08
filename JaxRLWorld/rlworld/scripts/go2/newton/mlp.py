@@ -3,7 +3,7 @@ from rlworld.rl.runners import BaseRunner
 
 
 def main():
-    cfgs_for_run = get_config()
+    cfgs_for_run = get_config().with_cli_overrides()
     runner = BaseRunner.create_with_env(cfgs_for_run)
 
     # Start training

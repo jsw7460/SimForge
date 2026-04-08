@@ -156,7 +156,7 @@ class NewtonEnv(World):
         self.contact_manager.register_sensors()
 
         from rlworld.rl.envs.newton.robot_data import NewtonRobotData
-        self._robot_data = NewtonRobotData(self)
+        self._robot_data = NewtonRobotData(self, self.scene_manager.robot_view)
 
     def _post_setup(self) -> None:
         """Capture CUDA graph for Newton performance."""
