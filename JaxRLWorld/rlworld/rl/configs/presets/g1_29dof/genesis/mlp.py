@@ -1,14 +1,17 @@
-from dataclasses import dataclass
+"""Compat shim: delegates to the unified ``presets/g1_29dof/mlp.py``.
 
-from rlworld.rl.configs import GenesisConfigsForRun
-from .base import G1FlatGenesisConfig
+Phase B migration: kept so existing scripts that import from
+``presets.g1_29dof.genesis.mlp`` continue to work. A later phase will
+update those callers and remove this shim.
+"""
 
-
-@dataclass
-class G1MLPConfig(G1FlatGenesisConfig):
-    actor_class_name: str = "MLPActor"
-    run_name: str = "G1_29Dof_Genesis_MLP"
+from rlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 
 
-def get_config() -> GenesisConfigsForRun:
-    return G1MLPConfig().build()
+def get_config():
+    cfg = G1FlatConfig(
+        sim_type="genesis",
+        actor_class_name="MLPActor",
+        run_name="G1_29Dof_Genesis_MLP",
+    )
+    return cfg.build()

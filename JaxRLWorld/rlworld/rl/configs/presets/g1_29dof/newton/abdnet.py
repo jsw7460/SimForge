@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from rlworld.rl.configs import NewtonConfigsForRun
-from .base import G1FlatNewtonConfig
+from rlworld.rl.configs.presets.g1_29dof.base import G1FlatNewtonConfig
 
 
 @dataclass

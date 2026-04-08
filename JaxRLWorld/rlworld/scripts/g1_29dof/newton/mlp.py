@@ -1,9 +1,9 @@
-from rlworld.rl.configs.presets.g1_29dof.newton.mlp import get_config
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 
 
 def main():
-    cfgs_for_run = get_config().with_cli_overrides()
+    cfgs_for_run = get_config(sim="newton").with_cli_overrides()
 
     runner = BaseRunner.create_with_env(cfgs_for_run)
 
