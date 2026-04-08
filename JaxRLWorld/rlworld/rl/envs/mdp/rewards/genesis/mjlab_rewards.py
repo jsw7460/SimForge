@@ -589,32 +589,25 @@ def joint_pos_limits_mjlab(
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits.
 
-    Matches mjlab.envs.mdp.joint_pos_limits exactly.
+    Delegates to ``common.penalize_joint_pos_limits_l1`` which reads
+    ``RobotData.joint_pos`` and ``RobotData.joint_pos_limits``. The
+    Genesis implementation of ``joint_pos_limits`` calls the same
+    ``entity.get_dofs_limit(actuated_dof_ids)`` that the legacy code
+    used (with a ``squeeze(0)`` to drop the leading dim), so the
+    resulting penalty is bit-identical to the legacy direct-access path.
 
     Args:
         env: Genesis environment.
-        soft_limit_factor: Factor to scale hard limits to get soft limits (e.g., 0.95).
+        soft_limit_factor: Factor to scale hard limits to get soft limits.
         entity_name: Name of the robot entity.
 
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    entity = env.scene_manager[entity_name]
-
-    # Get only actuated DOFs
-    actuated_ids = env.act_manager.actuated_dof_ids
-
-    dof_pos = env.get_robot_data(entity_name).joint_pos
-    dof_lower, dof_upper = entity.get_dofs_limit(dofs_idx_local=actuated_ids)
-
-    dof_lower = dof_lower * soft_limit_factor
-    dof_upper = dof_upper * soft_limit_factor
-
-    # Penalize dof positions too close to the limit
-    out_of_limits = -(dof_pos - dof_lower).clamp(max=0.0)  # lower limit
-    out_of_limits += (dof_pos - dof_upper).clamp(min=0.0)  # upper limit
-
-    return -torch.sum(out_of_limits, dim=1)
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        penalize_joint_pos_limits_l1 as _common_fn,
+    )
+    return _common_fn(env, soft_limit_factor=soft_limit_factor, entity_name=entity_name)
 
 
 # ============================================================

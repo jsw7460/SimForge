@@ -361,7 +361,12 @@ def joint_pos_limits_mjlab(
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits.
 
-    Matches mjlab.envs.mdp.joint_pos_limits exactly.
+    Delegates to ``common.penalize_joint_pos_limits_l1`` which reads
+    ``RobotData.joint_pos`` and ``RobotData.joint_pos_limits``. The
+    Newton implementation of ``joint_pos_limits`` reads the same
+    ``model.joint_limit_lower/upper`` arrays indexed by
+    ``newton_qd_indices`` that the legacy code accessed, so the result
+    is bit-identical to the legacy direct-access path.
 
     Args:
         env: Newton environment.
@@ -370,21 +375,10 @@ def joint_pos_limits_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    model = env.scene_manager.model
-    dofs_per_world = model.joint_dof_count // model.world_count
-
-    dof_pos = env.robot_data.joint_pos  # (num_envs, num_actuated)
-
-    lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
-    upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
-
-    lower = lower_all[env.act_manager.actuated_qd_indices] * soft_limit_factor
-    upper = upper_all[env.act_manager.actuated_qd_indices] * soft_limit_factor
-
-    out_of_limits = -(dof_pos - lower).clamp(max=0.0)
-    out_of_limits += (dof_pos - upper).clamp(min=0.0)
-
-    return -torch.sum(out_of_limits, dim=-1)
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        penalize_joint_pos_limits_l1 as _common_fn,
+    )
+    return _common_fn(env, soft_limit_factor=soft_limit_factor)
 
 
 # ============================================================

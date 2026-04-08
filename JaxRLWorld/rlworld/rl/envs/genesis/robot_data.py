@@ -79,3 +79,19 @@ class GenesisRobotData:
     @property
     def joint_vel(self) -> Tensor:
         return self._entity.get_dofs_velocity(self._actuated_dof_ids)
+
+    @property
+    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+        """Hard joint position limits in canonical actuated order.
+
+        Calls Genesis's ``entity.get_dofs_limit(actuated_dof_ids)`` which
+        returns ``(lower, upper)`` each of shape ``(1, num_joints)``. We
+        squeeze the leading dim so the result matches the protocol shape
+        ``(num_joints,)`` consistent with Newton's implementation.
+
+        Returns:
+            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
+        """
+        lower, upper = self._entity.get_dofs_limit(dofs_idx_local=self._actuated_dof_ids)
+        # Genesis returns shape (1, N); squeeze to (N,)
+        return lower.squeeze(0), upper.squeeze(0)

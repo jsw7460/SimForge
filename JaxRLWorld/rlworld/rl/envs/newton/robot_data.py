@@ -135,6 +135,25 @@ class NewtonRobotData:
         dof_vel = self.dof_velocities(self._state)
         return dof_vel[:, self._env.act_manager.indexing.newton_qd_indices]
 
+    @property
+    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+        """Hard joint position limits in canonical actuated order.
+
+        Reads ``model.joint_limit_lower`` / ``joint_limit_upper`` (which
+        are flattened across worlds), takes the first world's slice, and
+        indexes by ``newton_qd_indices`` to select actuated DOFs in the
+        same order as ``joint_pos`` / ``joint_vel``.
+
+        Returns:
+            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
+        """
+        model = self._env.scene_manager.model
+        dofs_per_world = model.joint_dof_count // model.world_count
+        lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
+        upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
+        qd_indices = self._env.act_manager.indexing.newton_qd_indices
+        return lower_all[qd_indices], upper_all[qd_indices]
+
     # ------------------------------------------------------------------
     # Write helpers (used by event terms, scene reset)
     # ------------------------------------------------------------------

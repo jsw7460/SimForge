@@ -256,3 +256,45 @@ def base_height_penalty(env: World, entity_name: str = "robot") -> torch.Tensor:
     """
     height_z = env.get_robot_data(entity_name).root_link_pos_w[:, 2]
     return -torch.square(height_z - env.command_manager.base_height)
+
+
+def penalize_joint_pos_limits_l1(
+    env: World,
+    soft_limit_factor: float = 1.0,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """Penalize joint positions exceeding soft limits (L1, sim-agnostic).
+
+    Matches the math of mjlab's ``joint_pos_limits`` exactly:
+
+        out = max(lower - q, 0) + max(q - upper, 0)
+        return -sum(out, dim=-1)
+
+    Where ``lower``, ``upper`` are the *soft* limits, computed as
+    ``hard_lower * soft_limit_factor`` and ``hard_upper * soft_limit_factor``.
+
+    Reads ``RobotData.joint_pos`` and ``RobotData.joint_pos_limits``, both
+    in canonical actuated joint order.
+
+    Args:
+        env: Any environment whose ``RobotData`` implements
+            ``joint_pos_limits`` (Newton, Genesis). Note: not callable on
+            MuJoCo, which uses its own ``joint_pos_limits`` reward function
+            in ``mdp/rewards/mujoco/reward_terms.py``.
+        soft_limit_factor: Multiplicative factor on the hard limits.
+            ``1.0`` (the active default in current presets) means
+            penalize whenever the joint exceeds its hard limit.
+        entity_name: Name of the entity to query. Default ``"robot"``.
+
+    Returns:
+        Tensor of shape ``(num_envs,)`` — negative sum of soft-limit
+        violations across joints.
+    """
+    rd = env.get_robot_data(entity_name)
+    dof_pos = rd.joint_pos
+    lower, upper = rd.joint_pos_limits
+    lower = lower * soft_limit_factor
+    upper = upper * soft_limit_factor
+    out_of_limits = -(dof_pos - lower).clamp(max=0.0)
+    out_of_limits += (dof_pos - upper).clamp(min=0.0)
+    return -torch.sum(out_of_limits, dim=-1)

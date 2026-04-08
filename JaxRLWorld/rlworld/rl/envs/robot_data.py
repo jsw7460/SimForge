@@ -14,6 +14,9 @@ from typing import Protocol, runtime_checkable
 
 from torch import Tensor
 
+# Type alias for (lower, upper) joint limit tuple
+JointLimitsTuple = "tuple[Tensor, Tensor]"
+
 
 @runtime_checkable
 class RobotData(Protocol):
@@ -57,4 +60,17 @@ class RobotData(Protocol):
     @property
     def joint_vel(self) -> Tensor:
         """Actuated joint velocities. Shape (num_envs, num_joints)."""
+        ...
+
+    @property
+    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+        """Hard joint position limits in canonical actuated order.
+
+        Returns ``(lower, upper)``, each of shape ``(num_joints,)``. These
+        are the *hard* limits as stored in the simulator's model — apply
+        any soft-limit factor in the consumer.
+
+        Implementations that don't natively expose hard limits (e.g. mjlab,
+        which only stores soft limits) may raise ``NotImplementedError``.
+        """
         ...

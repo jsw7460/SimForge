@@ -85,3 +85,29 @@ class MujocoRobotData:
     def joint_vel(self) -> Tensor:
         """Actuated joint velocities in action manager order."""
         return self._entity.data.joint_vel[:, self._joint_ids]
+
+    @property
+    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+        """Hard joint position limits — not exposed by mjlab.
+
+        mjlab only stores the *soft* limits (already scaled by the soft
+        limit factor) in ``entity.data.soft_joint_pos_limits`` with shape
+        ``(num_envs, num_joints, 2)``. There is no separate hard-limit
+        accessor.
+
+        Phase D-1 only migrates Newton + Genesis ``joint_pos_limits_mjlab``,
+        so this stub is never called from active code paths. MuJoCo's
+        ``joint_pos_limits`` reward function (in
+        ``mdp/rewards/mujoco/reward_terms.py``) reads
+        ``soft_joint_pos_limits`` directly and is unchanged.
+
+        Raises:
+            NotImplementedError: Always. See note above for the alternative.
+        """
+        raise NotImplementedError(
+            "MujocoRobotData does not expose hard joint position limits. "
+            "mjlab only stores soft limits via "
+            "``entity.data.soft_joint_pos_limits``. Use mjlab's "
+            "``joint_pos_limits`` reward function in "
+            "``mdp/rewards/mujoco/reward_terms.py`` instead."
+        )
