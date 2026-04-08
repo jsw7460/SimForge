@@ -63,13 +63,6 @@ _PRESET_REGISTRY: dict[tuple[str, str], str] = {
     ("g1_29dof", "genesis"): "rlworld.rl.configs.presets.g1_29dof.genesis.mlp",
     ("g1_29dof", "newton"):  "rlworld.rl.configs.presets.g1_29dof.newton.mlp",
     ("g1_29dof", "mujoco"):  "rlworld.rl.configs.presets.g1_29dof.mujoco.mlp",
-    # G1 12-DOF
-    ("g1_12dof", "genesis"): "rlworld.rl.configs.presets.g1_12dof.genesis.mlp",
-    ("g1_12dof", "newton"):  "rlworld.rl.configs.presets.g1_12dof.newton.mlp",
-    # Go1
-    ("go1", "genesis"): "rlworld.rl.configs.presets.go1.genesis.mlp",
-    ("go1", "newton"):  "rlworld.rl.configs.presets.go1.newton.mlp",
-    ("go1", "mujoco"):  "rlworld.rl.configs.presets.go1.mujoco.mlp",
 }
 
 
@@ -83,14 +76,8 @@ def _detect_robot_key(metadata: dict) -> str:
 
     if "go2" in task_name:
         return "go2"
-    elif "go1" in task_name:
-        return "go1"
     elif "g1" in task_name:
-        num_dofs = len(action_cfg.get("actuated_dof_names", []))
-        if num_actions >= 29 or num_dofs >= 29 or "29" in task_name:
-            return "g1_29dof"
-        else:
-            return "g1_12dof"
+        return "g1_29dof"
 
     # Fallback: check dof_names length
     dof_names = action_cfg.get("actuated_dof_names", [])
