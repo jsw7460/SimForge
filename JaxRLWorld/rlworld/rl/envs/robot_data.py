@@ -58,3 +58,16 @@ class RobotData(Protocol):
     def joint_vel(self) -> Tensor:
         """Actuated joint velocities. Shape (num_envs, num_joints)."""
         ...
+
+    @property
+    def joint_torque(self) -> Tensor:
+        """Most-recently-applied actuator torques on actuated joints.
+
+        Returned in the same joint order as ``joint_pos`` and ``joint_vel``.
+        Shape ``(num_envs, num_joints)``.
+
+        Implementations should expose the torques actually applied by the
+        physics solver in the previous step (i.e. after PD-controller and
+        actuator-network processing), not the raw policy actions.
+        """
+        ...

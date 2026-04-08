@@ -79,3 +79,16 @@ class GenesisRobotData:
     @property
     def joint_vel(self) -> Tensor:
         return self._entity.get_dofs_velocity(self._actuated_dof_ids)
+
+    @property
+    def joint_torque(self) -> Tensor:
+        """Most-recently-applied actuator torques on actuated joints.
+
+        Uses Genesis's ``get_dofs_control_force`` indexed by the actuated
+        DOF set. The legacy reward used the unindexed version (all DOFs
+        including the floating-base 6 DOFs); these are identical in value
+        because base DOFs contribute zero control force, but the indexed
+        form matches the RobotData protocol contract (actuated joints
+        only, in canonical order).
+        """
+        return self._entity.get_dofs_control_force(self._actuated_dof_ids)

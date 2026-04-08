@@ -221,9 +221,17 @@ def penalize_nonflat_by_gravity(env: GenesisEnv):
 
 
 def penalize_torques(env: GenesisEnv, entity_name: str = "robot"):
-    entity = env.scene_manager[entity_name]
-    torque = entity.get_dofs_control_force()
-    return - torch.sum(torch.square(torque), dim=-1)
+    """Delegates to ``common.penalize_torques`` (which reads RobotData.joint_torque).
+
+    The legacy implementation called ``entity.get_dofs_control_force()``
+    with no indexing argument, returning ALL DOFs (including the 6
+    floating-base DOFs). The new RobotData.joint_torque indexes by
+    ``actuated_dof_ids``, excluding the base DOFs. These are
+    bit-identical in value because the floating-base DOFs are
+    unactuated and contribute zero control force.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_torques as _common_penalize_torques
+    return _common_penalize_torques(env, entity_name=entity_name)
 
 
 def penalize_dof_vel(env: GenesisEnv, entity_name: str = "robot"):

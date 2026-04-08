@@ -342,13 +342,18 @@ def penalize_impact_force(
 
 
 def penalize_torques(env: "NewtonEnv") -> torch.Tensor:
-    """Penalize joint torques."""
-    mjw_data = env.scene_manager.solver.mjw_data
+    """Penalize joint torques.
 
-    # exclude base DOF
-    qfrc_actuator = wp.to_torch(mjw_data.qfrc_actuator)[:, 6:]
-
-    return -torch.sum(torch.square(qfrc_actuator), dim=-1)
+    Delegates to ``common.penalize_torques`` which reads
+    ``RobotData.joint_torque``. The Newton implementation of
+    ``joint_torque`` reads the same ``solver.mjw_data.qfrc_actuator``
+    that the legacy code accessed, indexed by ``newton_qd_indices``
+    (which select the actuated DOFs and exclude the floating-base 6 DOFs).
+    Since ``-sum(square(...))`` is permutation-invariant, the result is
+    bit-identical to the legacy ``[:, 6:]`` slice.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_torques as _common_penalize_torques
+    return _common_penalize_torques(env)
 
 
 def penalize_ang_vel_xy(env: "NewtonEnv") -> torch.Tensor:
