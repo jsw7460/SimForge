@@ -8,6 +8,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_inverse
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
+    VariablePostureTracker,
     get_leg_xy_signs,
     penalize_angular_momentum_l2,
     penalize_body_ang_vel_xy,
@@ -348,7 +349,16 @@ def lin_vel_z_penalty(env: "MujocoEnv") -> torch.Tensor:
 
 
 class variable_posture:
-    """Penalize deviation from default pose with speed-dependent tolerance."""
+    """Thin wrapper around ``common.VariablePostureTracker``.
+
+    Bit-identical to the legacy MuJoCo implementation: pre-resolves the
+    asset_cfg joint subset at construction time, slices
+    ``robot.data.default_joint_pos`` by ``joint_ids`` for the default
+    pose tensor, and provides a per-step closure that returns
+    ``robot.data.joint_pos[:, joint_ids]``. The closure binds
+    ``asset_cfg.name`` and ``joint_ids`` so subsequent calls do not need
+    to re-resolve them.
+    """
 
     __name__ = "variable_posture"
 
@@ -362,67 +372,36 @@ class variable_posture:
         walking_threshold: float = 0.05,
         running_threshold: float = 1.5,
     ):
-        self._env = env
-        self._asset_cfg = asset_cfg
-        self._walking_threshold = walking_threshold
-        self._running_threshold = running_threshold
-
         robot = env.scene_manager.get_entity(asset_cfg.name)
         default_joint_pos = robot.data.default_joint_pos
         assert default_joint_pos is not None
-        self.default_joint_pos = default_joint_pos
 
         _, joint_names = robot.find_joints(asset_cfg.joint_names)
+        joint_ids = asset_cfg.joint_ids
+        entity_name = asset_cfg.name
 
-        _, _, std_standing_vals = string_utils.resolve_matching_names_values(
-            data=std_standing,
-            list_of_strings=joint_names,
-        )
-        self.std_standing = torch.tensor(
-            std_standing_vals, device=env.device, dtype=torch.float32
-        )
+        sliced_default = default_joint_pos[:, joint_ids]
 
-        _, _, std_walking_vals = string_utils.resolve_matching_names_values(
-            data=std_walking,
-            list_of_strings=joint_names,
-        )
-        self.std_walking = torch.tensor(
-            std_walking_vals, device=env.device, dtype=torch.float32
-        )
+        def _get_current(e, _name=entity_name, _ids=joint_ids):
+            return e.scene_manager.get_entity(_name).data.joint_pos[:, _ids]
 
-        _, _, std_running_vals = string_utils.resolve_matching_names_values(
-            data=std_running,
-            list_of_strings=joint_names,
-        )
-        self.std_running = torch.tensor(
-            std_running_vals, device=env.device, dtype=torch.float32
+        self._impl = VariablePostureTracker(
+            env=env,
+            joint_names=joint_names,
+            std_standing=std_standing,
+            std_walking=std_walking,
+            std_running=std_running,
+            get_current_joint_pos=_get_current,
+            default_joint_pos=sliced_default,
+            walking_threshold=walking_threshold,
+            running_threshold=running_threshold,
         )
 
     def __call__(self, env: "MujocoEnv", **kwargs) -> torch.Tensor:
-        robot = env.scene_manager.get_entity(self._asset_cfg.name)
-        command = env.command_manager.get_commands_tensor()
+        return self._impl(env)
 
-        linear_speed = torch.norm(command[:, :2], dim=1)
-        angular_speed = torch.abs(command[:, 2])
-        total_speed = linear_speed + angular_speed
-
-        standing_mask = (total_speed < self._walking_threshold).float()
-        walking_mask = (
-            (total_speed >= self._walking_threshold) & (total_speed < self._running_threshold)
-        ).float()
-        running_mask = (total_speed >= self._running_threshold).float()
-
-        std = (
-            self.std_standing * standing_mask.unsqueeze(1)
-            + self.std_walking * walking_mask.unsqueeze(1)
-            + self.std_running * running_mask.unsqueeze(1)
-        )
-
-        current_joint_pos = robot.data.joint_pos[:, self._asset_cfg.joint_ids]
-        desired_joint_pos = self.default_joint_pos[:, self._asset_cfg.joint_ids]
-        error_squared = torch.square(current_joint_pos - desired_joint_pos)
-
-        return torch.exp(-torch.mean(error_squared / (std ** 2), dim=1))
+    def reset(self, env_ids: torch.Tensor) -> None:
+        self._impl.reset(env_ids)
 
 
 class feet_swing_height:

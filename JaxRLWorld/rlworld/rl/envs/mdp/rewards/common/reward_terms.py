@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.utils import string as string_utils
 from rlworld.rl.utils.quat_utils import (
     quat_from_angle_axis_wxyz,
     quat_mul_wxyz,
@@ -641,6 +642,122 @@ class FeetSwingHeightTracker:
         # "current_foot_height": Newton legacy — re-seed peak with current z.
         foot_heights = self._foot_heights(self._env)
         self.peak_heights[env_ids] = foot_heights[env_ids]
+
+
+class VariablePostureTracker:
+    """Stateful penalty: speed-dependent posture tracking with per-joint std.
+
+    Matches mjlab's ``variable_posture`` exactly. The reward is
+
+        exp(-mean((q - q_default)² / std²))
+
+    where ``std`` switches between three per-joint vectors based on the
+    current commanded velocity magnitude:
+
+      - ``std_standing`` when ``total_speed < walking_threshold``
+      - ``std_walking`` when ``walking_threshold <= total_speed < running_threshold``
+      - ``std_running`` when ``total_speed >= running_threshold``
+
+    The three legacy implementations (Newton, Genesis, MuJoCo) all share
+    this math but resolve joint state differently — Newton/Genesis use
+    ``env.act_manager.actuated_joint_names`` plus ``env.robot_data.joint_pos``
+    and a 1-D ``act_manager.offset``, while MuJoCo uses
+    ``robot.find_joints(asset_cfg.joint_names)`` plus a sliced
+    ``robot.data.joint_pos[:, joint_ids]`` and a 2-D
+    ``robot.data.default_joint_pos[:, joint_ids]``. To accommodate both
+    without leaking sim-specific code into common, the caller passes the
+    pre-resolved joint name list, a callable that returns the current
+    joint position tensor on each step, and the default joint position
+    tensor (1-D or 2-D, both broadcast correctly).
+
+    Args:
+        env: Any environment with a ``command_manager`` exposing
+            ``lin_vel_x``, ``lin_vel_y``, ``ang_vel`` columns.
+        joint_names: Resolved per-joint name list, in the same order as
+            the tensors returned by ``get_current_joint_pos``. Used to
+            expand the std-dict regex patterns.
+        std_standing: Mapping of joint-name regex → std value (standing
+            regime).
+        std_walking: Same, walking regime.
+        std_running: Same, running regime.
+        get_current_joint_pos: Callable taking ``env`` and returning the
+            current joint position tensor of shape ``(num_envs, N)``,
+            where ``N == len(joint_names)``.
+        default_joint_pos: Default-pose tensor of shape ``(N,)`` or
+            ``(num_envs, N)``. Subtracted from current to form the error.
+        walking_threshold: Speed below this is "standing".
+        running_threshold: Speed at or above this is "running".
+    """
+
+    __name__ = "VariablePostureTracker"
+
+    def __init__(
+        self,
+        env: World,
+        joint_names: "list[str]",
+        std_standing: "dict[str, float]",
+        std_walking: "dict[str, float]",
+        std_running: "dict[str, float]",
+        get_current_joint_pos,
+        default_joint_pos: torch.Tensor,
+        walking_threshold: float = 0.5,
+        running_threshold: float = 1.5,
+    ) -> None:
+        self._env = env
+        self._walking_threshold = walking_threshold
+        self._running_threshold = running_threshold
+        self._get_current_joint_pos = get_current_joint_pos
+        self._default_joint_pos = default_joint_pos
+
+        names = list(joint_names)
+        _, _, std_standing_vals = string_utils.resolve_matching_names_values(
+            std_standing, names
+        )
+        _, _, std_walking_vals = string_utils.resolve_matching_names_values(
+            std_walking, names
+        )
+        _, _, std_running_vals = string_utils.resolve_matching_names_values(
+            std_running, names
+        )
+        self.std_standing = torch.tensor(
+            std_standing_vals, device=env.device, dtype=torch.float32
+        )
+        self.std_walking = torch.tensor(
+            std_walking_vals, device=env.device, dtype=torch.float32
+        )
+        self.std_running = torch.tensor(
+            std_running_vals, device=env.device, dtype=torch.float32
+        )
+
+    def __call__(self, env: World) -> torch.Tensor:
+        cmd = torch.stack(
+            [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y,
+             env.command_manager.ang_vel],
+            dim=1,
+        )
+        linear_speed = torch.norm(cmd[:, :2], dim=1)
+        angular_speed = torch.abs(cmd[:, 2])
+        total_speed = linear_speed + angular_speed
+
+        standing_mask = (total_speed < self._walking_threshold).float()
+        walking_mask = (
+            (total_speed >= self._walking_threshold)
+            & (total_speed < self._running_threshold)
+        ).float()
+        running_mask = (total_speed >= self._running_threshold).float()
+
+        std = (
+            self.std_standing * standing_mask.unsqueeze(1)
+            + self.std_walking * walking_mask.unsqueeze(1)
+            + self.std_running * running_mask.unsqueeze(1)
+        )
+
+        current = self._get_current_joint_pos(env)
+        error_squared = torch.square(current - self._default_joint_pos)
+        return torch.exp(-torch.mean(error_squared / (std ** 2), dim=1))
+
+    def reset(self, env_ids: torch.Tensor) -> None:
+        pass
 
 
 def penalize_joint_pos_limits_l1(

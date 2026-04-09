@@ -13,6 +13,7 @@ from genesis.utils.geom import transform_by_quat, inv_quat
 from rlworld.rl.envs.mdp.observations.genesis import proprioception
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
+    VariablePostureTracker,
     penalize_body_ang_vel_xy,
     penalize_contact_force_count,
     penalize_feet_clearance,
@@ -21,7 +22,6 @@ from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     penalize_soft_landing,
     raw_action_rate_l2,
 )
-from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
@@ -153,18 +153,12 @@ def flat_orientation_mjlab(
 # ============================================================
 
 class variable_posture:
-    """Penalize deviation from default pose with speed-dependent tolerance.
+    """Thin wrapper around ``common.VariablePostureTracker``.
 
-    Matches mjlab.tasks.velocity.mdp.variable_posture exactly.
-
-    Uses per-joint standard deviations to control how much each joint can deviate
-    from default pose. Smaller std = stricter (less deviation allowed), larger
-    std = more forgiving. The reward is: exp(-mean(error² / std²))
-
-    Three speed regimes (based on linear + angular command velocity):
-      - std_standing (speed < walking_threshold): Tight tolerance for holding pose.
-      - std_walking (walking_threshold <= speed < running_threshold): Moderate.
-      - std_running (speed >= running_threshold): Loose tolerance for large motion.
+    Bit-identical to the legacy Genesis implementation. The legacy code
+    read ``env.act_manager._actuated_joint_names`` (private name), but
+    the public ``actuated_joint_names`` property exposes the same list
+    so we use that here.
     """
 
     __name__ = "variable_posture"
@@ -178,70 +172,23 @@ class variable_posture:
         walking_threshold: float = 0.5,
         running_threshold: float = 1.5,
     ):
-        self.walking_threshold = walking_threshold
-        self.running_threshold = running_threshold
-
-        joint_names = env.act_manager._actuated_joint_names
-
-        # Resolve std values per joint using regex matching
-        _, _, std_standing_values = string_utils.resolve_matching_names_values(
-            std_standing, joint_names
+        self._impl = VariablePostureTracker(
+            env=env,
+            joint_names=list(env.act_manager.actuated_joint_names),
+            std_standing=std_standing,
+            std_walking=std_walking,
+            std_running=std_running,
+            get_current_joint_pos=lambda e: e.robot_data.joint_pos,
+            default_joint_pos=env.act_manager.offset,
+            walking_threshold=walking_threshold,
+            running_threshold=running_threshold,
         )
-        self.std_standing = torch.tensor(
-            std_standing_values, device=env.device, dtype=torch.float32
-        )
-
-        _, _, std_walking_values = string_utils.resolve_matching_names_values(
-            std_walking, joint_names
-        )
-        self.std_walking = torch.tensor(
-            std_walking_values, device=env.device, dtype=torch.float32
-        )
-
-        _, _, std_running_values = string_utils.resolve_matching_names_values(
-            std_running, joint_names
-        )
-        self.std_running = torch.tensor(
-            std_running_values, device=env.device, dtype=torch.float32
-        )
-
-        # Default joint positions
-        self.default_joint_pos = env.act_manager.offset
 
     def __call__(self, env: "GenesisEnv") -> torch.Tensor:
-        # Get command velocities
-        command = torch.stack([
-            env.command_manager.lin_vel_x,
-            env.command_manager.lin_vel_y,
-            env.command_manager.ang_vel,
-        ], dim=1)
-
-        linear_speed = torch.norm(command[:, :2], dim=1)
-        angular_speed = torch.abs(command[:, 2])
-        total_speed = linear_speed + angular_speed
-
-        # Speed regime masks
-        standing_mask = (total_speed < self.walking_threshold).float()
-        walking_mask = (
-            (total_speed >= self.walking_threshold) & (total_speed < self.running_threshold)
-        ).float()
-        running_mask = (total_speed >= self.running_threshold).float()
-
-        # Select std based on speed regime
-        std = (
-            self.std_standing * standing_mask.unsqueeze(1)
-            + self.std_walking * walking_mask.unsqueeze(1)
-            + self.std_running * running_mask.unsqueeze(1)
-        )
-
-        # Compute pose error
-        current_joint_pos = env.robot_data.joint_pos
-        error_squared = torch.square(current_joint_pos - self.default_joint_pos)
-
-        return torch.exp(-torch.mean(error_squared / (std ** 2), dim=1))
+        return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
-        pass
+        self._impl.reset(env_ids)
 
 
 # ============================================================
