@@ -150,6 +150,52 @@ class RobotData(Protocol):
         """
         ...
 
+    # ── Per-name body / site reads ───────────────────────────────────
+    #
+    # Concrete-name accessors for reward terms that need a small,
+    # ordered subset of bodies (e.g. quadruped feet). The returned
+    # tensor has the same column order as ``names``. Bodies/sites are
+    # both supported because mjlab uses sites for foot reference points
+    # while Newton/Genesis use bodies/links.
+
+    def body_pos_w(self, names: "list[str]") -> Tensor:
+        """World-frame positions of the named bodies, ordered by ``names``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(names), 3)``.
+        """
+        ...
+
+    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+        """World-frame linear velocities of the named bodies, ordered by ``names``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(names), 3)``.
+        """
+        ...
+
+    def site_pos_w(self, names: "list[str]") -> Tensor:
+        """World-frame positions of the named sites, ordered by ``names``.
+
+        Sites are MuJoCo-only coordinate markers. Newton and Genesis
+        implementations raise ``NotImplementedError``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(names), 3)``.
+        """
+        ...
+
+    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+        """World-frame linear velocities of the named sites, ordered by ``names``.
+
+        Sites are MuJoCo-only coordinate markers. Newton and Genesis
+        implementations raise ``NotImplementedError``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(names), 3)``.
+        """
+        ...
+
     # ── Aggregate quantities ─────────────────────────────────────────
 
     def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:

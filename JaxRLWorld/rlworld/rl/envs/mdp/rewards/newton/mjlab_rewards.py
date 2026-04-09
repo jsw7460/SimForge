@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-import warp as wp
 
 from rlworld.rl.envs.mdp.observations.newton.body_utils import (
     get_bodies_height_with_contact,
@@ -19,7 +18,17 @@ from rlworld.rl.envs.mdp.observations.newton.state import (
     _quat_rotate_inverse,
     base_quat,
 )
-from rlworld.rl.envs.utils.newton.body_cache import get_cache
+from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    FeetSwingHeightTracker,
+    penalize_angular_momentum_l2,
+    penalize_body_ang_vel_xy,
+    penalize_contact_force_count,
+    penalize_feet_clearance,
+    penalize_feet_slip,
+    penalize_joint_pos_limits_l1,
+    penalize_soft_landing,
+    raw_action_rate_l2,
+)
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
@@ -145,10 +154,7 @@ def body_ang_vel_penalty_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        penalize_body_ang_vel_xy as _common_fn,
-    )
-    return _common_fn(env, body_name=body_name)
+    return penalize_body_ang_vel_xy(env, body_name=body_name)
 
 
 # ============================================================
@@ -208,48 +214,20 @@ def feet_clearance_mjlab(
     target_height: float,
     command_threshold: float = 0.01,
 ) -> torch.Tensor:
-    """Penalize deviation from target clearance height, weighted by foot velocity.
+    """Thin redirect to ``common.penalize_feet_clearance``.
 
-    Matches mjlab.tasks.velocity.mdp.feet_clearance exactly.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Foot body name pattern(s).
-        target_height: Target foot clearance height.
-        command_threshold: Minimum command velocity to activate penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Bit-identical to the legacy direct-access path: the common helper
+    reads ``RobotData.body_pos_w/body_lin_vel_w`` which on Newton both
+    pull from the same ``state.body_q/body_qd`` views the legacy code
+    used. ``feet_bodies`` is forwarded as the ``body_names`` list.
     """
-    cache = get_cache(env)
-    state = env.scene_manager.state
-
-    result = get_bodies_height_with_contact(env, feet_bodies)
-    body_indices = result.body_indices
-
-    foot_z = result.data  # (num_envs, num_feet)
-
-    body_qd = wp.to_torch(state.body_qd).view(env.num_envs, cache.bodies_per_env, 6)
-    foot_vel = body_qd[:, body_indices, :3]  # (num_envs, num_feet, 3)
-    foot_vel_xy = foot_vel[:, :, :2]  # (num_envs, num_feet, 2)
-    vel_norm = torch.norm(foot_vel_xy, dim=-1)  # (num_envs, num_feet)
-
-    delta = torch.abs(foot_z - target_height)
-    cost = torch.sum(delta * vel_norm, dim=1)
-
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
-
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-
-    active = (total_command > command_threshold).float()
-
-    return -cost * active
+    names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+    return penalize_feet_clearance(
+        env,
+        target_height=target_height,
+        command_threshold=command_threshold,
+        body_names=names,
+    )
 
 
 # ============================================================
@@ -261,45 +239,19 @@ def feet_slip_mjlab(
     feet_bodies: str | list[str],
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
-    """Penalize foot sliding (xy velocity while in contact).
+    """Thin redirect to ``common.penalize_feet_slip``.
 
-    Matches mjlab.tasks.velocity.mdp.feet_slip exactly.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Foot body name pattern(s).
-        command_threshold: Minimum command velocity to activate penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Bit-identical: the common helper passes ``order=feet_bodies`` to the
+    contact manager, which reorders ``is_contact("foot_contact")`` by
+    name — equivalent to the legacy ``contact_indices`` cache lookup.
     """
-    cache = get_cache(env)
-    state = env.scene_manager.state
-
-    result = get_bodies_height_with_contact(env, feet_bodies)
-    body_indices = result.body_indices
-    contact_indices = result.contact_indices
-
-    body_qd = wp.to_torch(state.body_qd).view(env.num_envs, cache.bodies_per_env, 6)
-    foot_vel_xy = body_qd[:, body_indices, :2]  # (num_envs, num_feet, 2)
-    vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)  # (num_envs, num_feet)
-
-    is_contact = env.contact_manager.is_contact("foot_contact")[:, contact_indices]  # (num_envs, num_feet)
-
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
-
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-
-    active = (total_command > command_threshold).float()
-
-    cost = torch.sum(vel_xy_norm_sq * is_contact.float(), dim=1) * active
-    return -cost
+    names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+    return penalize_feet_slip(
+        env,
+        contact_group="foot_contact",
+        command_threshold=command_threshold,
+        body_names=names,
+    )
 
 
 # ============================================================
@@ -311,41 +263,21 @@ def soft_landing_mjlab(
     feet_bodies: str | list[str],
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
-    """Penalize high impact forces at landing.
+    """Thin redirect to ``common.penalize_soft_landing``.
 
-    Matches mjlab.tasks.velocity.mdp.soft_landing exactly.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Foot body name pattern(s).
-        command_threshold: Minimum command velocity to activate penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Bit-identical: the cost is summed over feet so reordering does not
+    affect the result. We pass ``contact_order=feet_bodies`` only to
+    keep the call-site explicit about which group elements are intended;
+    the legacy code's ``contact_indices`` slicing reorders the same
+    columns before the sum.
     """
-    result = get_bodies_height_with_contact(env, feet_bodies)
-    contact_indices = result.contact_indices
-
-    contact_force = env.contact_manager.contact_force("foot_contact")[:, contact_indices]  # (num_envs, num_feet, 3)
-    forces = torch.norm(contact_force, dim=-1)  # (num_envs, num_feet)
-
-    first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, contact_indices]
-
-    landing_impact = forces * first_contact.float()
-    cost = torch.sum(landing_impact, dim=1)
-
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
-
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-
-    active = (total_command > command_threshold).float()
-    return -cost * active
+    names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+    return penalize_soft_landing(
+        env,
+        contact_group="foot_contact",
+        command_threshold=command_threshold,
+        contact_order=names,
+    )
 
 
 # ============================================================
@@ -372,10 +304,7 @@ def joint_pos_limits_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        penalize_joint_pos_limits_l1 as _common_fn,
-    )
-    return _common_fn(env, soft_limit_factor=soft_limit_factor)
+    return penalize_joint_pos_limits_l1(env, soft_limit_factor=soft_limit_factor)
 
 
 # ============================================================
@@ -388,7 +317,6 @@ def raw_action_rate_l2_mjlab(env: "NewtonEnv") -> torch.Tensor:
     Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
     pure-Python ``act_manager`` arithmetic, no scene-state involved.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import raw_action_rate_l2
     return raw_action_rate_l2(env)
 
 def processed_action_rate_l2_mjlab(env: "NewtonEnv") -> torch.Tensor:
@@ -504,11 +432,11 @@ class variable_posture:
 # ============================================================
 
 class feet_swing_height_mjlab:
-    """Penalize deviation from target swing height, evaluated at landing.
+    """Thin wrapper around ``common.FeetSwingHeightTracker`` (Newton legacy reset).
 
-    Tracks peak foot height during swing phase and evaluates error at first contact.
-
-    Matches mjlab.tasks.velocity.mdp.feet_swing_height exactly.
+    Preserves bit-identity by setting ``reset_mode="current_foot_height"``,
+    which re-seeds peak heights to the current foot z on episode reset
+    (Newton's original behavior — different from Genesis/MuJoCo).
     """
 
     __name__ = "feet_swing_height_mjlab"
@@ -520,68 +448,35 @@ class feet_swing_height_mjlab:
         target_height: float,
         command_threshold: float = 0.05,
     ):
-        self.env = env
-        self.feet_bodies = feet_bodies
-        self.target_height = target_height
-        self.command_threshold = command_threshold
-
-        result = get_bodies_height_with_contact(env, feet_bodies)
-        self.num_feet = len(result.body_indices)
-        self.contact_indices = result.contact_indices
-
-        self.peak_heights = torch.zeros(
-            (env.num_envs, self.num_feet), device=env.device, dtype=torch.float32
+        names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+        self._impl = FeetSwingHeightTracker(
+            env=env,
+            contact_group="foot_contact",
+            target_height=target_height,
+            command_threshold=command_threshold,
+            body_names=names,
+            use_squared_error=True,
+            reset_mode="current_foot_height",
         )
 
     def __call__(self, env: "NewtonEnv") -> torch.Tensor:
-        result = get_bodies_height_with_contact(env, self.feet_bodies)
-        foot_heights = result.data
-
-        contact_found = env.contact_manager.is_contact("foot_contact")[:, self.contact_indices]
-        in_air = ~contact_found
-
-        self.peak_heights = torch.where(
-            in_air,
-            torch.maximum(self.peak_heights, foot_heights),
-            self.peak_heights,
-        )
-
-        first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, self.contact_indices]
-
-        lin_vel_x = env.command_manager.lin_vel_x
-        lin_vel_y = env.command_manager.lin_vel_y
-        ang_vel = env.command_manager.ang_vel
-
-        linear_norm = torch.norm(
-            torch.stack([lin_vel_x, lin_vel_y], dim=1), dim=1
-        )
-        angular_norm = torch.abs(ang_vel)
-        total_command = linear_norm + angular_norm
-
-        active = (total_command > self.command_threshold).float()
-
-        # mjlab uses squared error
-        error = self.peak_heights / self.target_height - 1.0
-        cost = torch.sum(torch.square(error) * first_contact.float(), dim=1) * active
-
-        self.peak_heights = torch.where(
-            first_contact,
-            torch.zeros_like(self.peak_heights),
-            self.peak_heights,
-        )
-        return -cost
+        return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
-        result = get_bodies_height_with_contact(self.env, self.feet_bodies)
-        self.peak_heights[env_ids] = result.data[env_ids]
+        self._impl.reset(env_ids)
 
 
 # ============================================================
 # feet_swing_height (alias for backward compatibility)
 # ============================================================
 
-class feet_swing_height(feet_swing_height_mjlab):
-    """Alias for feet_swing_height_mjlab for backward compatibility."""
+class feet_swing_height:
+    """Walk-These-Ways variant: absolute (not squared) error.
+
+    Identical state machinery to ``feet_swing_height_mjlab`` but
+    ``use_squared_error=False``. Kept distinct because the cross-sim
+    comparison test scripts reference both classes.
+    """
 
     __name__ = "feet_swing_height"
 
@@ -592,46 +487,22 @@ class feet_swing_height(feet_swing_height_mjlab):
         target_height: float,
         command_threshold: float = 0.05,
     ):
-        super().__init__(env, feet_bodies, target_height, command_threshold)
+        names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+        self._impl = FeetSwingHeightTracker(
+            env=env,
+            contact_group="foot_contact",
+            target_height=target_height,
+            command_threshold=command_threshold,
+            body_names=names,
+            use_squared_error=False,
+            reset_mode="current_foot_height",
+        )
 
     def __call__(self, env: "NewtonEnv") -> torch.Tensor:
-        # Original uses abs(error), not squared
-        result = get_bodies_height_with_contact(env, self.feet_bodies)
-        foot_heights = result.data
+        return self._impl(env)
 
-        contact_found = env.contact_manager.is_contact("foot_contact")[:, self.contact_indices]
-        in_air = ~contact_found
-
-        self.peak_heights = torch.where(
-            in_air,
-            torch.maximum(self.peak_heights, foot_heights),
-            self.peak_heights,
-        )
-
-        first_contact = env.contact_manager.compute_first_contact("foot_contact")[:, self.contact_indices]
-
-        lin_vel_x = env.command_manager.lin_vel_x
-        lin_vel_y = env.command_manager.lin_vel_y
-        ang_vel = env.command_manager.ang_vel
-
-        linear_norm = torch.norm(
-            torch.stack([lin_vel_x, lin_vel_y], dim=1), dim=1
-        )
-        angular_norm = torch.abs(ang_vel)
-        total_command = linear_norm + angular_norm
-
-        active = (total_command > self.command_threshold).float()
-
-        error = self.peak_heights / self.target_height - 1.0
-        cost = torch.sum(torch.abs(error) * first_contact.float(), dim=1) * active
-
-        self.peak_heights = torch.where(
-            first_contact,
-            torch.zeros_like(self.peak_heights),
-            self.peak_heights,
-        )
-
-        return -cost
+    def reset(self, env_ids: torch.Tensor) -> None:
+        self._impl.reset(env_ids)
 
 
 # ============================================================
@@ -650,7 +521,4 @@ def angular_momentum_penalty(
     helpers (``_quat_rotate_inverse`` / ``_quat_rotate``) that this
     function previously called inline.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        penalize_angular_momentum_l2 as _common_fn,
-    )
-    return _common_fn(env)
+    return penalize_angular_momentum_l2(env)

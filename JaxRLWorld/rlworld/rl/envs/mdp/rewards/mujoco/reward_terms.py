@@ -6,7 +6,19 @@ import torch
 
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_inverse
+from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    FeetSwingHeightTracker,
+    get_leg_xy_signs,
+    penalize_angular_momentum_l2,
+    penalize_body_ang_vel_xy,
+    penalize_contact_force_count,
+    penalize_feet_clearance,
+    penalize_feet_slip,
+    penalize_soft_landing,
+    raw_action_rate_l2 as _common_raw_action_rate_l2,
+)
 from rlworld.rl.utils import string as string_utils
+from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.mujoco import MujocoEnv
@@ -109,10 +121,7 @@ def raw_action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
     Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
     pure-Python ``act_manager`` arithmetic, no scene-state involved.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        raw_action_rate_l2 as _common_fn,
-    )
-    return _common_fn(env)
+    return _common_raw_action_rate_l2(env)
 
 
 def joint_pos_limits(
@@ -195,11 +204,8 @@ def body_angular_velocity_penalty(
         return -torch.sum(torch.square(ang_vel_xy), dim=1)
 
     # Active path: a concrete body was specified. Delegate to common.
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        penalize_body_ang_vel_xy as _common_fn,
-    )
     body_name = asset_cfg.body_names[0]
-    return _common_fn(env, body_name=body_name, entity_name=asset_cfg.name)
+    return penalize_body_ang_vel_xy(env, body_name=body_name, entity_name=asset_cfg.name)
 
 
 def angular_momentum_penalty(
@@ -213,10 +219,7 @@ def angular_momentum_penalty(
     in turn calls ``env.scene_manager.get_sensor(sensor_name)`` —
     bit-identical to the legacy direct sensor read.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        penalize_angular_momentum_l2 as _common_fn,
-    )
-    return _common_fn(env, sensor_name=sensor_name)
+    return penalize_angular_momentum_l2(env, sensor_name=sensor_name)
 
 
 def self_collision_cost(
@@ -224,21 +227,17 @@ def self_collision_cost(
     contact_group: str = "body_ground_contact",
     force_threshold: float = 10.0,
 ) -> torch.Tensor:
-    """Penalize self-collisions based on contact force magnitude.
+    """Thin redirect to ``common.penalize_contact_force_count``.
 
-    Uses force_history if available (substep-aware), otherwise falls back
-    to instantaneous force.
+    Bit-identical to the legacy implementation: the common helper uses
+    ``contact_manager.contact_force_history`` first (mjlab returns the
+    substep history when registered with ``history_length > 0``), then
+    falls back to instantaneous ``contact_force`` — exactly the legacy
+    branching.
     """
-    history = env.contact_manager.contact_force_history(contact_group)
-    if history is not None:
-        # [B, N, H, 3] → [B, N, H] → any substep > threshold → [B, N]
-        force_mag = torch.norm(history, dim=-1)
-        hit = (force_mag > force_threshold).any(dim=2)  # [B, N]
-        return -hit.float().sum(dim=-1)
-
-    forces = env.contact_manager.contact_force(contact_group)
-    force_mag = torch.norm(forces, dim=-1)  # [B, N]
-    return -(force_mag > force_threshold).float().sum(dim=-1)
+    return penalize_contact_force_count(
+        env, contact_group=contact_group, force_threshold=force_threshold
+    )
 
 
 def wtw_collision(
@@ -246,20 +245,10 @@ def wtw_collision(
     contact_group: str = "body_ground_contact",
     force_threshold: float = 0.1,
 ) -> torch.Tensor:
-    """WTW collision: count non-foot bodies with contact force > threshold.
-
-    Uses force_history if available (substep-aware), otherwise falls back
-    to instantaneous force.
-    """
-    history = env.contact_manager.contact_force_history(contact_group)
-    if history is not None:
-        force_mag = torch.norm(history, dim=-1)  # [B, N, H]
-        hit = (force_mag > force_threshold).any(dim=2)  # [B, N]
-        return -hit.float().sum(dim=-1)
-
-    forces = env.contact_manager.contact_force(contact_group)
-    force_mag = torch.norm(forces, dim=-1)  # [B, N]
-    return -(force_mag > force_threshold).float().sum(dim=-1)
+    """Thin redirect to ``common.penalize_contact_force_count``."""
+    return penalize_contact_force_count(
+        env, contact_group=contact_group, force_threshold=force_threshold
+    )
 
 
 def feet_air_time(
@@ -290,23 +279,21 @@ def feet_clearance(
     command_threshold: float = 0.01,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """Penalize deviation from target clearance height, weighted by foot velocity."""
-    robot = env.scene_manager.get_entity(asset_cfg.name)
+    """Thin redirect to ``common.penalize_feet_clearance``.
 
-    foot_z = robot.data.site_pos_w[:, asset_cfg.site_ids, 2]
-    foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
-    vel_norm = torch.norm(foot_vel_xy, dim=-1)
-
-    delta = torch.abs(foot_z - target_height)
-    cost = torch.sum(delta * vel_norm, dim=1)
-
-    command = env.command_manager.get_commands_tensor()
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-    active = (total_command > command_threshold).float()
-
-    return -cost * active
+    Bit-identical: ``RobotData.site_pos_w/site_lin_vel_w`` for MuJoCo
+    call ``entity.find_sites`` and read the same ``data.site_pos_w /
+    data.site_lin_vel_w`` arrays the legacy code accessed via
+    ``asset_cfg.site_ids``. The site name list is taken straight from
+    ``asset_cfg.site_names`` to preserve the same column ordering.
+    """
+    return penalize_feet_clearance(
+        env,
+        target_height=target_height,
+        command_threshold=command_threshold,
+        site_names=list(asset_cfg.site_names),
+        entity_name=asset_cfg.name,
+    )
 
 
 def feet_slip(
@@ -315,21 +302,20 @@ def feet_slip(
     command_threshold: float = 0.01,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """Penalize foot sliding (xy velocity while in contact)."""
-    robot = env.scene_manager.get_entity(asset_cfg.name)
-    command = env.command_manager.get_commands_tensor()
+    """Thin redirect to ``common.penalize_feet_slip``.
 
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-    active = (total_command > command_threshold).float()
-
-    in_contact = env.contact_manager.is_contact(contact_group).float()
-    foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
-    vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
-
-    cost = torch.sum(vel_xy_norm_sq * in_contact, dim=1) * active
-    return -cost
+    Bit-identical: site velocities pulled via ``RobotData.site_lin_vel_w``
+    (which uses the same ``data.site_lin_vel_w`` array indexed by the
+    same site_ids), and contact tensor reads the natural group order
+    (``contact_order=None``) — matching the legacy MuJoCo path.
+    """
+    return penalize_feet_slip(
+        env,
+        contact_group=contact_group,
+        command_threshold=command_threshold,
+        site_names=list(asset_cfg.site_names),
+        entity_name=asset_cfg.name,
+    )
 
 
 def soft_landing(
@@ -337,22 +323,16 @@ def soft_landing(
     contact_group: str = "feet_ground_contact",
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
-    """Penalize high impact forces at landing to encourage soft footfalls."""
-    forces = env.contact_manager.contact_force(contact_group)
-    force_magnitude = torch.norm(forces, dim=-1)
+    """Thin redirect to ``common.penalize_soft_landing``.
 
-    first_contact = env.contact_manager.compute_first_contact(contact_group)
-
-    landing_impact = force_magnitude * first_contact.float()
-    cost = torch.sum(landing_impact, dim=1)
-
-    command = env.command_manager.get_commands_tensor()
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-    active = (total_command > command_threshold).float()
-
-    return -cost * active
+    Bit-identical: legacy code summed forces over the natural group
+    order; the common helper does the same when ``contact_order=None``.
+    """
+    return penalize_soft_landing(
+        env,
+        contact_group=contact_group,
+        command_threshold=command_threshold,
+    )
 
 
 def alive_bonus(env: "MujocoEnv") -> torch.Tensor:
@@ -446,7 +426,14 @@ class variable_posture:
 
 
 class feet_swing_height:
-    """Penalize deviation from target swing height, evaluated at landing."""
+    """Thin wrapper around ``common.FeetSwingHeightTracker`` (MuJoCo legacy).
+
+    Preserves bit-identity by setting ``reset_mode="none"`` — the
+    original MuJoCo class had no ``reset`` method, so peak heights
+    persisted across episode resets and were only zeroed naturally on
+    landing. ``contact_order=None`` because legacy MuJoCo relies on the
+    natural contact-group order matching site order.
+    """
 
     __name__ = "feet_swing_height"
 
@@ -458,46 +445,19 @@ class feet_swing_height:
         command_threshold: float = 0.01,
         asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
     ):
-        self._contact_group = contact_group
-        self._target_height = target_height
-        self._command_threshold = command_threshold
-        self._asset_cfg = asset_cfg
-
-        num_sites = len(asset_cfg.site_names)
-        self.peak_heights = torch.zeros(
-            (env.num_envs, num_sites), device=env.device, dtype=torch.float32
+        self._impl = FeetSwingHeightTracker(
+            env=env,
+            contact_group=contact_group,
+            target_height=target_height,
+            command_threshold=command_threshold,
+            site_names=list(asset_cfg.site_names),
+            entity_name=asset_cfg.name,
+            use_squared_error=True,
+            reset_mode="none",
         )
 
     def __call__(self, env: "MujocoEnv", **kwargs) -> torch.Tensor:
-        robot = env.scene_manager.get_entity(self._asset_cfg.name)
-        command = env.command_manager.get_commands_tensor()
-
-        foot_heights = robot.data.site_pos_w[:, self._asset_cfg.site_ids, 2]
-        in_air = ~env.contact_manager.is_contact(self._contact_group)
-
-        self.peak_heights = torch.where(
-            in_air,
-            torch.maximum(self.peak_heights, foot_heights),
-            self.peak_heights,
-        )
-
-        first_contact = env.contact_manager.compute_first_contact(self._contact_group)
-
-        linear_norm = torch.norm(command[:, :2], dim=1)
-        angular_norm = torch.abs(command[:, 2])
-        total_command = linear_norm + angular_norm
-        active = (total_command > self._command_threshold).float()
-
-        error = self.peak_heights / self._target_height - 1.0
-        cost = torch.sum(torch.square(error) * first_contact.float(), dim=1) * active
-
-        self.peak_heights = torch.where(
-            first_contact,
-            torch.zeros_like(self.peak_heights),
-            self.peak_heights,
-        )
-
-        return -cost
+        return self._impl(env)
 
 
 class posture:
@@ -615,8 +575,6 @@ def wtw_raibert_heuristic(
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """WTW: penalize footstep placement error vs Raibert heuristic."""
-    from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
-
     feet_names = env.gait_manager.foot_names
 
     # Get foot positions in gait_manager.foot_names order
@@ -645,7 +603,6 @@ def wtw_raibert_heuristic(
             quat_conjugate_wxyz(base_quat), cur_footsteps_translated[:, i, :]
         )
 
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import get_leg_xy_signs
     stance_width = env.command_manager.stance_width
     stance_length = env.command_manager.stance_length
 

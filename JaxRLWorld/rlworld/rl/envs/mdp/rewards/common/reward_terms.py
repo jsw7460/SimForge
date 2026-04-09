@@ -9,6 +9,12 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.utils.quat_utils import (
+    quat_from_angle_axis_wxyz,
+    quat_mul_wxyz,
+    quat_rotate_inverse_wxyz,
+)
+
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
@@ -184,12 +190,6 @@ def penalize_orientation_control(env: World, entity_name: str = "robot") -> torc
     Constructs desired body quaternion from body_pitch and body_roll commands,
     computes desired projected gravity, and penalizes xy-deviation from actual.
     """
-    from rlworld.rl.utils.quat_utils import (
-        quat_from_angle_axis_wxyz,
-        quat_mul_wxyz,
-        quat_rotate_inverse_wxyz,
-    )
-
     body_pitch = env.command_manager.body_pitch
     body_roll = env.command_manager.body_roll
     device = body_pitch.device
@@ -344,6 +344,303 @@ def penalize_body_ang_vel_xy(
     body_idx = rd.find_body_index(body_name)
     ang_vel = rd.body_ang_vel_w(body_idx)
     return -torch.sum(torch.square(ang_vel[:, :2]), dim=1)
+
+
+# ── Feet rewards (mjlab-style) ───────────────────────────────────────────
+#
+# These functions accept either ``body_names`` or ``site_names`` (XOR) so
+# that Newton/Genesis can pass body/link names while MuJoCo passes site
+# names. The contact-aware variants take an explicit ``contact_group`` and
+# (optionally) ``contact_order`` for reordering the contact-manager output
+# to align with the foot ordering. ``contact_order`` defaults to
+# ``body_names`` when bodies are used; for sites it defaults to ``None``
+# (rely on the contact group's natural ordering, which mjlab presets are
+# expected to align with the site list).
+
+
+def _command_active(env: World, command_threshold: float) -> torch.Tensor:
+    """Return a (num_envs,) float mask for command magnitude > threshold."""
+    cmd = torch.stack(
+        [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y,
+         env.command_manager.ang_vel],
+        dim=1,
+    )
+    linear_norm = torch.norm(cmd[:, :2], dim=1)
+    angular_norm = torch.abs(cmd[:, 2])
+    total = linear_norm + angular_norm
+    return (total > command_threshold).float()
+
+
+def _foot_pos_vel(
+    env: World,
+    body_names: "list[str] | None",
+    site_names: "list[str] | None",
+    entity_name: str,
+) -> "tuple[torch.Tensor, torch.Tensor]":
+    """Return (foot_pos_w, foot_lin_vel_w) for either body or site names."""
+    if (body_names is None) == (site_names is None):
+        raise ValueError(
+            "Pass exactly one of body_names or site_names "
+            "(got body_names=%r, site_names=%r)" % (body_names, site_names)
+        )
+    rd = env.get_robot_data(entity_name)
+    if body_names is not None:
+        return rd.body_pos_w(body_names), rd.body_lin_vel_w(body_names)
+    return rd.site_pos_w(site_names), rd.site_lin_vel_w(site_names)
+
+
+def penalize_feet_clearance(
+    env: World,
+    target_height: float,
+    command_threshold: float = 0.01,
+    body_names: "list[str] | None" = None,
+    site_names: "list[str] | None" = None,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """Penalize deviation from target foot clearance, weighted by foot xy speed.
+
+    Matches mjlab's ``feet_clearance`` reward exactly. Active only when
+    the commanded velocity magnitude exceeds ``command_threshold``.
+
+    Args:
+        env: Any environment with a RobotData implementation.
+        target_height: Target foot clearance during swing.
+        command_threshold: Minimum command magnitude to activate.
+        body_names: Foot body / link names (Newton, Genesis).
+        site_names: Foot site names (MuJoCo).
+        entity_name: Entity to query.
+    """
+    foot_pos, foot_vel = _foot_pos_vel(env, body_names, site_names, entity_name)
+    foot_z = foot_pos[..., 2]
+    vel_norm = torch.norm(foot_vel[..., :2], dim=-1)
+    delta = torch.abs(foot_z - target_height)
+    cost = torch.sum(delta * vel_norm, dim=1)
+    return -cost * _command_active(env, command_threshold)
+
+
+def penalize_feet_slip(
+    env: World,
+    contact_group: str,
+    command_threshold: float = 0.05,
+    body_names: "list[str] | None" = None,
+    site_names: "list[str] | None" = None,
+    contact_order: "list[str] | None" = None,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """Penalize foot xy speed while in contact with the ground.
+
+    Matches mjlab's ``feet_slip`` reward exactly. The contact tensor and
+    foot velocity tensor are aligned column-wise via ``contact_order``;
+    if ``contact_order`` is not given it defaults to ``body_names``
+    (Newton/Genesis case). For sites the caller must ensure the contact
+    group's natural order matches ``site_names``.
+
+    Args:
+        env: Any environment with a RobotData + contact_manager.
+        contact_group: Name of the registered contact group.
+        command_threshold: Minimum command magnitude to activate.
+        body_names: Foot body / link names (Newton, Genesis).
+        site_names: Foot site names (MuJoCo).
+        contact_order: Optional explicit contact reorder list.
+        entity_name: Entity to query.
+    """
+    _, foot_vel = _foot_pos_vel(env, body_names, site_names, entity_name)
+    vel_xy_norm_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
+
+    if contact_order is None and body_names is not None:
+        contact_order = list(body_names)
+    is_contact = env.contact_manager.is_contact(contact_group, order=contact_order)
+
+    cost = torch.sum(vel_xy_norm_sq * is_contact.float(), dim=1)
+    return -cost * _command_active(env, command_threshold)
+
+
+def penalize_contact_force_count(
+    env: World,
+    contact_group: str,
+    force_threshold: float = 0.1,
+) -> torch.Tensor:
+    """Count tracked bodies whose contact-force magnitude exceeds a threshold.
+
+    Returns the negated count (penalty). When the backend supports
+    substep history (mjlab when ``history_length > 0``), the threshold
+    check runs across all substeps and a body counts as a hit if **any**
+    substep crossed the threshold. Otherwise we fall back to the
+    instantaneous ``contact_force`` array.
+
+    This unifies three legacy functions across simulators:
+
+    - mjlab ``self_collision_cost`` (history-aware)
+    - mjlab ``wtw_collision`` (history-aware)
+    - Newton/Genesis ``wtw_collision`` (instantaneous only — those
+      backends always return ``None`` from ``contact_force_history``)
+
+    The math is identical: ``-sum((force_mag > threshold).float())`` over
+    the N tracked bodies of the contact group.
+
+    Args:
+        env: Any environment with a contact_manager.
+        contact_group: Name of the registered contact group.
+        force_threshold: Force magnitude (Newtons) above which a body
+            counts as one hit.
+
+    Returns:
+        Tensor of shape ``(num_envs,)`` — negative hit count.
+    """
+    history = env.contact_manager.contact_force_history(contact_group)
+    if history is not None:
+        # (B, N, H, 3) → (B, N, H) → (B, N) via any-substep-over-threshold
+        force_mag = torch.norm(history, dim=-1)
+        hit = (force_mag > force_threshold).any(dim=2)
+        return -hit.float().sum(dim=-1)
+
+    forces = env.contact_manager.contact_force(contact_group)
+    force_mag = torch.norm(forces, dim=-1)  # (B, N)
+    return -(force_mag > force_threshold).float().sum(dim=-1)
+
+
+def penalize_soft_landing(
+    env: World,
+    contact_group: str,
+    command_threshold: float = 0.05,
+    contact_order: "list[str] | None" = None,
+) -> torch.Tensor:
+    """Penalize impact force at first foot contact (sum over feet).
+
+    Matches mjlab's ``soft_landing`` reward exactly. Because the cost is
+    summed over feet, the order does not affect the result; the
+    ``contact_order`` parameter is preserved for symmetry with the other
+    feet rewards but is rarely needed.
+    """
+    forces = env.contact_manager.contact_force(contact_group, order=contact_order)
+    fmag = torch.norm(forces, dim=-1)
+    first = env.contact_manager.compute_first_contact(
+        contact_group, order=contact_order
+    )
+    cost = torch.sum(fmag * first.float(), dim=1)
+    return -cost * _command_active(env, command_threshold)
+
+
+class FeetSwingHeightTracker:
+    """Stateful penalty: tracks per-foot peak height during swing, evaluates at landing.
+
+    Matches mjlab's ``feet_swing_height`` reward exactly. The error is
+    ``peak_h / target_h - 1``; ``use_squared_error`` toggles between
+    squared (mjlab default) and absolute (used by an older Walk-These-
+    Ways variant). Per-env peak heights are reset on landing and on
+    explicit episode reset.
+
+    Args:
+        env: Any environment with a RobotData + contact_manager.
+        contact_group: Name of the registered contact group.
+        target_height: Target swing peak height.
+        command_threshold: Minimum command magnitude to activate.
+        body_names: Foot body / link names (Newton, Genesis).
+        site_names: Foot site names (MuJoCo).
+        contact_order: Optional explicit contact reorder list. Defaults
+            to ``body_names`` when bodies are used.
+        entity_name: Entity to query.
+        use_squared_error: ``True`` for ``error**2`` (mjlab); ``False``
+            for ``abs(error)`` (older WTW variant).
+        reset_mode: Per-env reset behavior. ``"zero"`` (Genesis legacy),
+            ``"current_foot_height"`` (Newton legacy), or ``"none"``
+            (MuJoCo legacy — peaks persist across episode resets).
+    """
+
+    __name__ = "FeetSwingHeightTracker"
+
+    def __init__(
+        self,
+        env: World,
+        contact_group: str,
+        target_height: float,
+        command_threshold: float = 0.05,
+        body_names: "list[str] | None" = None,
+        site_names: "list[str] | None" = None,
+        contact_order: "list[str] | None" = None,
+        entity_name: str = "robot",
+        use_squared_error: bool = True,
+        reset_mode: str = "zero",
+    ) -> None:
+        if (body_names is None) == (site_names is None):
+            raise ValueError(
+                "Pass exactly one of body_names or site_names "
+                "(got body_names=%r, site_names=%r)" % (body_names, site_names)
+            )
+        self._env = env
+        self._contact_group = contact_group
+        self._target_height = target_height
+        self._command_threshold = command_threshold
+        self._body_names = list(body_names) if body_names is not None else None
+        self._site_names = list(site_names) if site_names is not None else None
+        self._entity_name = entity_name
+        self._use_squared_error = use_squared_error
+        if reset_mode not in ("zero", "current_foot_height", "none"):
+            raise ValueError(
+                f"reset_mode must be one of 'zero', 'current_foot_height', "
+                f"'none' (got {reset_mode!r})"
+            )
+        self._reset_mode = reset_mode
+
+        if contact_order is None and self._body_names is not None:
+            contact_order = list(self._body_names)
+        self._contact_order = (
+            list(contact_order) if contact_order is not None else None
+        )
+
+        num_feet = len(self._body_names if self._body_names is not None else self._site_names)
+        self.peak_heights = torch.zeros(
+            (env.num_envs, num_feet), device=env.device, dtype=torch.float32
+        )
+
+    def _foot_heights(self, env: World) -> torch.Tensor:
+        rd = env.get_robot_data(self._entity_name)
+        if self._body_names is not None:
+            return rd.body_pos_w(self._body_names)[..., 2]
+        return rd.site_pos_w(self._site_names)[..., 2]
+
+    def __call__(self, env: World) -> torch.Tensor:
+        foot_heights = self._foot_heights(env)
+        is_contact = env.contact_manager.is_contact(
+            self._contact_group, order=self._contact_order
+        )
+        in_air = ~is_contact
+
+        self.peak_heights = torch.where(
+            in_air,
+            torch.maximum(self.peak_heights, foot_heights),
+            self.peak_heights,
+        )
+
+        first_contact = env.contact_manager.compute_first_contact(
+            self._contact_group, order=self._contact_order
+        )
+
+        active = _command_active(env, self._command_threshold)
+        error = self.peak_heights / self._target_height - 1.0
+        if self._use_squared_error:
+            err_term = torch.square(error)
+        else:
+            err_term = torch.abs(error)
+        cost = torch.sum(err_term * first_contact.float(), dim=1) * active
+
+        # Reset peaks for feet that just landed.
+        self.peak_heights = torch.where(
+            first_contact,
+            torch.zeros_like(self.peak_heights),
+            self.peak_heights,
+        )
+        return -cost
+
+    def reset(self, env_ids: torch.Tensor) -> None:
+        if self._reset_mode == "none" or self.peak_heights is None:
+            return
+        if self._reset_mode == "zero":
+            self.peak_heights[env_ids] = 0.0
+            return
+        # "current_foot_height": Newton legacy — re-seed peak with current z.
+        foot_heights = self._foot_heights(self._env)
+        self.peak_heights[env_ids] = foot_heights[env_ids]
 
 
 def penalize_joint_pos_limits_l1(

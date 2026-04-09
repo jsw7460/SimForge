@@ -242,6 +242,53 @@ class NewtonRobotData:
         return self._body_qd_view()[:, :, 3:6]
 
     # ------------------------------------------------------------------
+    # Per-name body/site reads
+    # ------------------------------------------------------------------
+
+    def _resolve_body_indices(self, names: "list[str]") -> "list[int]":
+        """Resolve a list of body names to per-env body indices.
+
+        Uses the singleton ``NewtonBodyCache``. Names should be the
+        Newton-prefixed body names (e.g. ``"go2_description/FL_foot"``)
+        and must each match exactly one body. Returned indices preserve
+        the input order so the resulting tensor columns line up with
+        ``names``.
+        """
+        from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
+        cache = get_cache(self._env)
+        out: list[int] = []
+        for name in names:
+            indices = cache.get_body_indices(name)
+            if not indices:
+                raise ValueError(
+                    f"Body name {name!r} not found in Newton model. "
+                    f"Available bodies: {cache.body_names}"
+                )
+            out.append(indices[0])
+        return out
+
+    def body_pos_w(self, names: "list[str]") -> Tensor:
+        idxs = self._resolve_body_indices(list(names))
+        return self.body_pos_w_all[:, idxs, :]
+
+    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+        idxs = self._resolve_body_indices(list(names))
+        return self.body_lin_vel_w_all[:, idxs, :]
+
+    def site_pos_w(self, names: "list[str]") -> Tensor:
+        raise NotImplementedError(
+            "NewtonRobotData does not implement site_pos_w. Newton has "
+            "no equivalent of MuJoCo sites — use body_pos_w with body names."
+        )
+
+    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+        raise NotImplementedError(
+            "NewtonRobotData does not implement site_lin_vel_w. Newton has "
+            "no equivalent of MuJoCo sites — use body_lin_vel_w with body names."
+        )
+
+    # ------------------------------------------------------------------
     # Aggregate quantities
     # ------------------------------------------------------------------
 

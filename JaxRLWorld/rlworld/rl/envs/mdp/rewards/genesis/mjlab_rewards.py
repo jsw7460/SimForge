@@ -11,7 +11,16 @@ import torch
 
 from genesis.utils.geom import transform_by_quat, inv_quat
 from rlworld.rl.envs.mdp.observations.genesis import proprioception
-from rlworld.rl.utils import entity_utils as eu
+from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    FeetSwingHeightTracker,
+    penalize_body_ang_vel_xy,
+    penalize_contact_force_count,
+    penalize_feet_clearance,
+    penalize_feet_slip,
+    penalize_joint_pos_limits_l1,
+    penalize_soft_landing,
+    raw_action_rate_l2,
+)
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
@@ -261,10 +270,7 @@ def body_ang_vel_penalty_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        penalize_body_ang_vel_xy as _common_fn,
-    )
-    return _common_fn(env, body_name=body_name, entity_name=entity_name)
+    return penalize_body_ang_vel_xy(env, body_name=body_name, entity_name=entity_name)
 
 
 # ============================================================
@@ -324,52 +330,20 @@ def feet_clearance_mjlab(
     command_threshold: float = 0.01,
     entity_name: str = "robot",
 ) -> torch.Tensor:
-    """Penalize deviation from target clearance height, weighted by foot velocity.
+    """Thin redirect to ``common.penalize_feet_clearance``.
 
-    Matches mjlab.tasks.velocity.mdp.feet_clearance exactly.
-
-    Args:
-        env: Genesis environment.
-        feet_links: Foot link name pattern(s).
-        target_height: Target foot clearance height.
-        command_threshold: Minimum command velocity to activate penalty.
-        entity_name: Name of the robot entity.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Bit-identical: ``RobotData.body_pos_w/body_lin_vel_w`` for Genesis
+    call ``entity.get_links_pos/get_links_vel`` with the same
+    ``links_idx_local`` the legacy code resolved via ``eu.find_links``.
     """
-    entity = env.scene_manager[entity_name]
-
-    if isinstance(feet_links, str):
-        feet_links = [feet_links]
-
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
-
-    # Get foot positions and velocities
-    foot_pos = entity.get_links_pos(links_idx_local=links_idx_local)  # (num_envs, num_feet, 3)
-    foot_vel = entity.get_links_vel(links_idx_local=links_idx_local)  # (num_envs, num_feet, 3)
-
-    foot_z = foot_pos[:, :, 2]  # (num_envs, num_feet)
-    foot_vel_xy = foot_vel[:, :, :2]  # (num_envs, num_feet, 2)
-    vel_norm = torch.norm(foot_vel_xy, dim=-1)  # (num_envs, num_feet)
-
-    # Height error weighted by velocity
-    delta = torch.abs(foot_z - target_height)
-    cost = torch.sum(delta * vel_norm, dim=1)
-
-    # Scale by command magnitude
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
-
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-
-    active = (total_command > command_threshold).float()
-    return -cost * active
+    names = [feet_links] if isinstance(feet_links, str) else list(feet_links)
+    return penalize_feet_clearance(
+        env,
+        target_height=target_height,
+        command_threshold=command_threshold,
+        body_names=names,
+        entity_name=entity_name,
+    )
 
 
 # ============================================================
@@ -377,7 +351,11 @@ def feet_clearance_mjlab(
 # ============================================================
 
 class feet_swing_height_mjlab:
-    """Penalize deviation from target swing height, evaluated at landing."""
+    """Thin wrapper around ``common.FeetSwingHeightTracker`` (Genesis legacy reset).
+
+    Preserves bit-identity by setting ``reset_mode="zero"`` (Genesis's
+    original behavior).
+    """
 
     __name__ = "feet_swing_height_mjlab"
 
@@ -390,87 +368,23 @@ class feet_swing_height_mjlab:
         entity_name: str = "robot",
         contact_group: str = "feet_ground_contact",
     ):
-        self.target_height = target_height
-        self.command_threshold = command_threshold
-        self.entity_name = entity_name
-        self.contact_group = contact_group
-
-        if isinstance(feet_links, str):
-            feet_links = [feet_links]
-        self.feet_links = feet_links
-
-        # Lazy initialization - will be set on first call
-        self._initialized = False
-        self.links_idx_local = None
-        self.num_feet = None
-        self.peak_heights = None
-
-    def _lazy_init(self, env: "GenesisEnv") -> None:
-        """Initialize indices on first call when contact_manager is ready."""
-        entity = env.scene_manager[self.entity_name]
-        self.links_idx_local, _ = eu.find_links(
-            entity, list(self.feet_links), global_ids=False, preserve_order=True
+        names = [feet_links] if isinstance(feet_links, str) else list(feet_links)
+        self._impl = FeetSwingHeightTracker(
+            env=env,
+            contact_group=contact_group,
+            target_height=target_height,
+            command_threshold=command_threshold,
+            body_names=names,
+            entity_name=entity_name,
+            use_squared_error=True,
+            reset_mode="zero",
         )
-        self.num_feet = len(self.links_idx_local)
-        self.peak_heights = torch.zeros(
-            (env.num_envs, self.num_feet), device=env.device, dtype=torch.float32
-        )
-        self._initialized = True
 
     def __call__(self, env: "GenesisEnv") -> torch.Tensor:
-        if not self._initialized:
-            self._lazy_init(env)
-
-        entity = env.scene_manager[self.entity_name]
-
-        # Get foot heights
-        foot_pos = entity.get_links_pos(links_idx_local=self.links_idx_local)
-        foot_heights = foot_pos[:, :, 2]
-
-        # Get contact states (order=feet_links to match foot_heights column order)
-        feet_order = list(self.feet_links)
-        is_contact = env.contact_manager.is_contact(self.contact_group, order=feet_order)
-        in_air = ~is_contact
-
-        # Update peak heights during swing
-        self.peak_heights = torch.where(
-            in_air,
-            torch.maximum(self.peak_heights, foot_heights),
-            self.peak_heights,
-        )
-
-        # Detect first contact
-        first_contact = env.contact_manager.compute_first_contact(self.contact_group, order=feet_order)
-
-        # Get command velocity
-        command = torch.stack([
-            env.command_manager.lin_vel_x,
-            env.command_manager.lin_vel_y,
-            env.command_manager.ang_vel,
-        ], dim=1)
-
-        linear_norm = torch.norm(command[:, :2], dim=1)
-        angular_norm = torch.abs(command[:, 2])
-        total_command = linear_norm + angular_norm
-
-        active = (total_command > self.command_threshold).float()
-
-        # Compute cost at landing (squared error like mjlab)
-        error = self.peak_heights / self.target_height - 1.0
-        cost = torch.sum(torch.square(error) * first_contact.float(), dim=1) * active
-
-        # Reset peak heights after landing
-        self.peak_heights = torch.where(
-            first_contact,
-            torch.zeros_like(self.peak_heights),
-            self.peak_heights,
-        )
-
-        return -cost
+        return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
-        if self.peak_heights is not None:
-            self.peak_heights[env_ids] = 0.0
+        self._impl.reset(env_ids)
 
 
 # ============================================================
@@ -484,50 +398,20 @@ def feet_slip_mjlab(
     entity_name: str = "robot",
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    """Penalize foot sliding (xy velocity while in contact).
+    """Thin redirect to ``common.penalize_feet_slip``.
 
-    Matches mjlab.tasks.velocity.mdp.feet_slip exactly.
-
-    Args:
-        env: Genesis environment.
-        feet_links: Foot link name pattern(s).
-        command_threshold: Minimum command velocity to activate penalty.
-        entity_name: Name of the robot entity.
-        contact_group: Name of the contact group to use.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Bit-identical: the legacy code already passed ``order=feet_links``
+    to ``contact_manager.is_contact``, which is exactly what the common
+    helper does (defaulting ``contact_order`` to ``body_names``).
     """
-    entity = env.scene_manager[entity_name]
-
-    if isinstance(feet_links, str):
-        feet_links = [feet_links]
-
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
-
-    # Get foot velocities
-    foot_vel = entity.get_links_vel(links_idx_local=links_idx_local)  # (num_envs, num_feet, 3)
-    foot_vel_xy = foot_vel[:, :, :2]  # (num_envs, num_feet, 2)
-    vel_xy_norm_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)  # (num_envs, num_feet)
-
-    # Get contact states
-    is_contact = env.contact_manager.is_contact(contact_group, order=feet_links)  # (num_envs, num_feet)
-
-    # Command scaling
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
-
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-
-    active = (total_command > command_threshold).float()
-
-    cost = torch.sum(vel_xy_norm_sq * is_contact.float(), dim=1) * active
-    return -cost
+    names = [feet_links] if isinstance(feet_links, str) else list(feet_links)
+    return penalize_feet_slip(
+        env,
+        contact_group=contact_group,
+        command_threshold=command_threshold,
+        body_names=names,
+        entity_name=entity_name,
+    )
 
 
 # ============================================================
@@ -539,42 +423,16 @@ def soft_landing_mjlab(
     command_threshold: float = 0.05,
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    """Penalize high impact forces at landing.
+    """Thin redirect to ``common.penalize_soft_landing``.
 
-    Matches mjlab.tasks.velocity.mdp.soft_landing exactly.
-
-    Args:
-        env: Genesis environment.
-        command_threshold: Minimum command velocity to activate penalty.
-        contact_group: Name of the contact group to use.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Bit-identical: legacy code summed forces over the natural group
+    order; the common helper does the same when ``contact_order=None``.
     """
-    # Get contact force magnitudes
-    forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, num_feet, 3)
-    forces = torch.norm(forces_3d, dim=-1)  # (num_envs, num_feet)
-
-    # Detect first contact
-    first_contact = env.contact_manager.compute_first_contact(contact_group)
-
-    # Landing impact
-    landing_impact = forces * first_contact.float()
-    cost = torch.sum(landing_impact, dim=1)
-
-    # Command scaling
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
-
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-
-    active = (total_command > command_threshold).float()
-    return -cost * active
+    return penalize_soft_landing(
+        env,
+        contact_group=contact_group,
+        command_threshold=command_threshold,
+    )
 
 
 # ============================================================
@@ -603,10 +461,9 @@ def joint_pos_limits_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        penalize_joint_pos_limits_l1 as _common_fn,
+    return penalize_joint_pos_limits_l1(
+        env, soft_limit_factor=soft_limit_factor, entity_name=entity_name
     )
-    return _common_fn(env, soft_limit_factor=soft_limit_factor, entity_name=entity_name)
 
 
 # ============================================================
@@ -619,7 +476,6 @@ def raw_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:
     Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
     pure-Python ``act_manager`` arithmetic, no scene-state involved.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import raw_action_rate_l2
     return raw_action_rate_l2(env)
 
 def processed_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:

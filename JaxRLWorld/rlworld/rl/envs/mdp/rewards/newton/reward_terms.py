@@ -9,8 +9,17 @@ from rlworld.rl.envs.mdp.observations.newton.body_utils import (
 )
 from rlworld.rl.envs.mdp.observations.newton.proprioception import projected_gravity
 from rlworld.rl.envs.mdp.observations.newton.state import base_ang_vel
+from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    action_rate_l2,
+    base_height_penalty as _common_base_height_penalty,
+    get_leg_xy_signs,
+    penalize_contact_force_count,
+    penalize_lin_vel_z,
+    similar_to_default as _common_sim_to_def,
+)
 from rlworld.rl.envs.utils.newton.body_cache import get_cache
 from rlworld.rl.utils import string as string_utils
+from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
 
 def tracking_lin_vel(env: "NewtonEnv", sigma: float = 0.25) -> torch.Tensor:
@@ -48,7 +57,6 @@ def lin_vel_z(env: "NewtonEnv") -> torch.Tensor:
     common uses wxyz indexing, but the actual float operations are identical
     → bit-identical for Newton.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_lin_vel_z
     return penalize_lin_vel_z(env)
 
 
@@ -59,7 +67,6 @@ def base_height_penalty(env: "NewtonEnv") -> torch.Tensor:
     base z from the same root position accessor (no quaternion rotation
     involved) and compute ``-(z - command_manager.base_height)²``.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import base_height_penalty as _common_base_height_penalty
     return _common_base_height_penalty(env)
 
 
@@ -72,7 +79,6 @@ def action_rate(env: "NewtonEnv") -> torch.Tensor:
     is bit-identical to the original Newton implementation: both compute
     ``-sum(square(prev - cur))``.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import action_rate_l2
     return action_rate_l2(env)
 
 
@@ -83,7 +89,6 @@ def similar_to_default(env: "NewtonEnv") -> torch.Tensor:
     ``-sum(abs(joint_pos - act_manager.offset))`` from the same actuated
     joint indices.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import similar_to_default as _common_sim_to_def
     return _common_sim_to_def(env)
 
 
@@ -230,8 +235,6 @@ def penalize_impact_force(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    from rlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_height_with_contact
-
     result = get_bodies_height_with_contact(env, feet_bodies)
 
     # Get contact force magnitude for each foot
@@ -409,8 +412,6 @@ def wtw_feet_clearance_cmd_linear(
 
 def wtw_raibert_heuristic(env: "NewtonLocomotionEnv") -> torch.Tensor:
     """WTW: penalize footstep placement error vs Raibert heuristic."""
-    from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
-
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_pos(env, feet_bodies)
     foot_positions = result.data  # (num_envs, num_feet, 3)
@@ -426,8 +427,6 @@ def wtw_raibert_heuristic(env: "NewtonLocomotionEnv") -> torch.Tensor:
         footsteps_in_body[:, i, :] = quat_apply_yaw_wxyz(
             quat_conjugate_wxyz(base_quat), cur_footsteps_translated[:, i, :]
         )
-
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import get_leg_xy_signs
 
     feet_names = env.gait_manager.foot_names
     stance_width = env.command_manager.stance_width
@@ -464,13 +463,14 @@ def wtw_collision(
     contact_group: str = "body_ground_contact",
     force_threshold: float = 0.1,
 ) -> torch.Tensor:
-    """WTW collision: count non-foot bodies with contact force > threshold.
+    """Thin redirect to ``common.penalize_contact_force_count``.
 
-    Uses contact_manager instead of raw contacts.rigid_contact_force
-    (which is always zero in Newton without SensorContact).
+    Bit-identical: Newton's contact_manager has no substep history, so
+    the common helper falls through to the same instantaneous
+    ``contact_force`` read this function used previously.
     """
-    force = env.contact_manager.contact_force(contact_group)  # (num_envs, N, 3)
-    force_mag = torch.norm(force, dim=-1)  # (num_envs, N)
-    return -torch.sum((force_mag > force_threshold).float(), dim=-1)
+    return penalize_contact_force_count(
+        env, contact_group=contact_group, force_threshold=force_threshold
+    )
 
 

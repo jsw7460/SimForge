@@ -178,6 +178,26 @@ class MujocoRobotData:
         return self._entity.data.body_link_ang_vel_w
 
     # ------------------------------------------------------------------
+    # Per-name body/site reads
+    # ------------------------------------------------------------------
+
+    def body_pos_w(self, names: "list[str]") -> Tensor:
+        body_ids, _ = self._entity.find_bodies(list(names), preserve_order=True)
+        return self._entity.data.body_link_pos_w[:, body_ids, :]
+
+    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+        body_ids, _ = self._entity.find_bodies(list(names), preserve_order=True)
+        return self._entity.data.body_link_lin_vel_w[:, body_ids, :]
+
+    def site_pos_w(self, names: "list[str]") -> Tensor:
+        site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
+        return self._entity.data.site_pos_w[:, site_ids, :]
+
+    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+        site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
+        return self._entity.data.site_lin_vel_w[:, site_ids, :]
+
+    # ------------------------------------------------------------------
     # Aggregate quantities
     # ------------------------------------------------------------------
 

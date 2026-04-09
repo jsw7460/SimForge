@@ -146,6 +146,34 @@ class GenesisRobotData:
         return self._entity.get_links_ang()
 
     # ------------------------------------------------------------------
+    # Per-name body/site reads
+    # ------------------------------------------------------------------
+
+    def _resolve_link_indices(self, names: "list[str]") -> "list[int]":
+        """Resolve link names to local link indices, preserving input order."""
+        return [self._entity.get_link(name=n).idx_local for n in names]
+
+    def body_pos_w(self, names: "list[str]") -> Tensor:
+        idxs = self._resolve_link_indices(list(names))
+        return self._entity.get_links_pos(links_idx_local=idxs)
+
+    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+        idxs = self._resolve_link_indices(list(names))
+        return self._entity.get_links_vel(links_idx_local=idxs)
+
+    def site_pos_w(self, names: "list[str]") -> Tensor:
+        raise NotImplementedError(
+            "GenesisRobotData does not implement site_pos_w. Genesis has "
+            "no equivalent of MuJoCo sites — use body_pos_w with link names."
+        )
+
+    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+        raise NotImplementedError(
+            "GenesisRobotData does not implement site_lin_vel_w. Genesis has "
+            "no equivalent of MuJoCo sites — use body_lin_vel_w with link names."
+        )
+
+    # ------------------------------------------------------------------
     # Aggregate quantities
     # ------------------------------------------------------------------
 

@@ -6,9 +6,18 @@ import torch
 
 from genesis import inv_quat, transform_by_quat
 from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
+from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    action_rate_l2,
+    base_height_penalty as _common_base_height_penalty,
+    get_leg_xy_signs,
+    penalize_contact_force_count,
+    penalize_lin_vel_z,
+    similar_to_default as _common_sim_to_def,
+)
 from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils import entity_utils as eu
 from rlworld.rl.utils import string as string_utils
+from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv, GenesisLocomotionEnv
@@ -45,7 +54,6 @@ def lin_vel_z(env: GenesisEnv) -> torch.Tensor:
     operator-order roundoff), well below any RL training noise floor. The
     user has explicitly accepted this tolerance.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_lin_vel_z
     return penalize_lin_vel_z(env)
 
 
@@ -57,7 +65,6 @@ def base_height(env: GenesisEnv) -> torch.Tensor:
     base position via the same Genesis ``entity.get_pos()`` accessor (no
     quaternion rotation), then compute ``-(z - command_manager.base_height)²``.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import base_height_penalty as _common_base_height_penalty
     return _common_base_height_penalty(env)
 
 
@@ -70,7 +77,6 @@ def action_rate(env: GenesisEnv) -> torch.Tensor:
     while common computes ``square(prev - cur)`` — these are bitwise equal in
     IEEE754 because squaring removes the sign.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import action_rate_l2
     return action_rate_l2(env)
 
 
@@ -82,7 +88,6 @@ def similar_to_default(env: GenesisEnv) -> torch.Tensor:
     actuated joint positions via the same actuated_dof_ids and compute
     ``-sum(abs(joint_pos - offset))``.
     """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import similar_to_default as _common_sim_to_def
     return _common_sim_to_def(env)
 
 
@@ -139,10 +144,15 @@ def wtw_collision(
     contact_group: str = "body_ground_contact",
     force_threshold: float = 0.1,
 ) -> torch.Tensor:
-    """WTW collision: count non-foot bodies with contact force > threshold."""
-    force = env.contact_manager.contact_force(contact_group)  # (num_envs, N, 3)
-    force_mag = torch.norm(force, dim=-1)  # (num_envs, N)
-    return -torch.sum((force_mag > force_threshold).float(), dim=-1)
+    """Thin redirect to ``common.penalize_contact_force_count``.
+
+    Bit-identical: Genesis's contact_manager has no substep history, so
+    the common helper falls through to the same instantaneous
+    ``contact_force`` read this function used previously.
+    """
+    return penalize_contact_force_count(
+        env, contact_group=contact_group, force_threshold=force_threshold
+    )
 
 
 def penalize_ang_vel_xy(
@@ -433,8 +443,6 @@ def wtw_raibert_heuristic(
     Computes desired foot positions in body frame using commanded velocity,
     stance dimensions, and gait phase, then penalizes deviation.
     """
-    from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
-
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
@@ -453,8 +461,6 @@ def wtw_raibert_heuristic(
         )
 
     # Nominal positions from stance commands, order-independent via leg parsing
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import get_leg_xy_signs
-
     stance_width = env.command_manager.stance_width
     stance_length = env.command_manager.stance_length
 
