@@ -191,11 +191,22 @@ class NewtonSceneManager(BaseManager):
         """Current state (state_0)."""
         return self.state_0
 
-    def find_body_names(self, body_names: list[str]):
+    def find_body_names(
+        self, body_names: list[str], entity_name: str = "robot"
+    ) -> list[str]:
+        """Resolve regex body-name patterns to concrete body names.
+
+        Cross-sim signature matches Genesis and mjlab. Newton currently
+        supports a single robot, so ``entity_name`` is accepted for API
+        symmetry but the lookup is always against the model-wide body
+        label list.
+        """
         num_bodies_per_env = len(self.model.body_label) // self.env.num_envs
         bodies_key = self.model.body_label[:num_bodies_per_env]
 
-        _, names = string_utils.resolve_matching_names(body_names, bodies_key, preserve_order=True)
+        _, names = string_utils.resolve_matching_names(
+            body_names, bodies_key, preserve_order=True
+        )
         return names
 
     def _prefix_names(

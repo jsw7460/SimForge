@@ -285,5 +285,7 @@ class SceneManager(BaseManager):
         """Get current height map"""
         return self.local_height_map
 
-    def reset(self, env_indices: torch.Tensor | None = None) -> None:
+    def reset(self, env_ids: torch.Tensor | None = None) -> None:
+        # Genesis manages scene state internally; nothing to do here
+        # for partial reset. Kept for cross-sim API symmetry.
         pass
