@@ -62,15 +62,16 @@ def reset_root_state_uniform(
     if len(env_ids) == 0:
         return
 
-    from rlworld.rl.envs.newton.robot_data import NewtonRobotData
+    from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
 
     scene_manager = env.scene_manager
     accessor = scene_manager.robot_state
+    writer = scene_manager.robot_state_writer
     state = scene_manager.state_0
 
     n = len(env_ids)
     device = env.device
-    mask = NewtonRobotData.env_ids_to_mask(env_ids, scene_manager.model.world_count, device)
+    mask = NewtonRobotStateWriter.env_ids_to_mask(env_ids, scene_manager.model.world_count, device)
 
     # Sample pose perturbations
     keys = ["x", "y", "z", "roll", "pitch", "yaw"]
@@ -111,11 +112,11 @@ def reset_root_state_uniform(
     # Also zero out joint velocities (non-root DOFs)
     dof_vel = accessor.dof_velocities(state).clone()
     dof_vel[env_ids, :] = 0.0
-    accessor.set_dof_velocities(state, dof_vel, mask=mask)
+    writer.set_dof_velocities(state, dof_vel, mask=mask)
 
     # Set root state and evaluate FK
-    accessor.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
-    accessor.eval_fk(state, mask=mask)
+    writer.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
+    writer.eval_fk(state, mask=mask)
 
 
 def randomize_friction(
@@ -174,11 +175,12 @@ def push_robot(
     if len(env_ids) == 0:
         return
 
-    from rlworld.rl.envs.newton.robot_data import NewtonRobotData
+    from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
 
     accessor = env.scene_manager.robot_state
+    writer = env.scene_manager.robot_state_writer
     state = env.scene_manager.state_0
-    mask = NewtonRobotData.env_ids_to_mask(env_ids, env.scene_manager.model.world_count, env.device)
+    mask = NewtonRobotStateWriter.env_ids_to_mask(env_ids, env.scene_manager.model.world_count, env.device)
 
     n_envs = len(env_ids)
     device = env.device
@@ -202,10 +204,10 @@ def push_robot(
     if "yaw" in velocity_range:
         ang_vel[env_ids, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["yaw"])
 
-    # Write back via accessor (only velocities, no transforms change)
+    # Write back via writer (only velocities, no transforms change)
     pos = accessor.root_pos_w(state)
     quat_xyzw = accessor.root_quat_xyzw(state)
-    accessor.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
+    writer.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
 
 
 def randomize_body_com_offset(

@@ -74,6 +74,16 @@ class NewtonEnv(World):
         # Newton currently supports single entity only
         return self._robot_data
 
+    def get_robot_state_writer(self, entity_name: str = "robot"):
+        """Return the write-API companion to ``get_robot_data``.
+
+        Used by event terms / reset functions to mutate joint and root
+        state via ``NewtonRobotStateWriter`` (see
+        ``rlworld/rl/envs/newton/robot_state_writer.py``). Newton
+        currently supports a single entity only.
+        """
+        return self._robot_state_writer
+
     def _build_scene(self) -> None:
         """Create Newton scene and visualization manager."""
         SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
@@ -156,7 +166,11 @@ class NewtonEnv(World):
         self.contact_manager.register_sensors()
 
         from rlworld.rl.envs.newton.robot_data import NewtonRobotData
+        from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
         self._robot_data = NewtonRobotData(self, self.scene_manager.robot_view)
+        self._robot_state_writer = NewtonRobotStateWriter(
+            self, self.scene_manager.robot_view
+        )
 
     def _post_setup(self) -> None:
         """Capture CUDA graph for Newton performance."""

@@ -550,6 +550,15 @@ class NewtonSceneManager(BaseManager):
         """Alias for robot_data (backward compat)."""
         return self.robot_data
 
+    @property
+    def robot_state_writer(self):
+        """NewtonRobotStateWriter from the environment (single instance).
+
+        Mutation companion to ``robot_data`` — used by event terms and
+        reset functions for joint/root writes and FK evaluation.
+        """
+        return self.env._robot_state_writer
+
     def _set_kinematic_trees(self) -> None:
         """Build kinematic trees for entities with URDF."""
         for entity_name, entity_info in self.entities.items():
@@ -773,10 +782,10 @@ class NewtonSceneManager(BaseManager):
         if env_ids is None or len(env_ids) == 0:
             return
 
-        from rlworld.rl.envs.newton.robot_data import NewtonRobotData
+        from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
 
         view = self.robot_view
-        mask = NewtonRobotData.env_ids_to_mask(env_ids, self.model.world_count, self.env.device)
+        mask = NewtonRobotStateWriter.env_ids_to_mask(env_ids, self.model.world_count, self.env.device)
 
         # Copy model defaults into state for the reset environments
         view.set_dof_positions(self.state_0, view.get_dof_positions(self.model), mask=mask)
