@@ -43,6 +43,36 @@ class SimInitializer(ABC):
         """Cleanup resources (no-op by default)."""
         pass
 
+    def create_play_scene(self, env: Any):
+        """Build the viser ``PlayScene`` for this simulator's interactive viewer.
+
+        Subclasses that support the interactive viewer override this to
+        return a ``PlayScene`` instance (typically ``BridgePlayScene``
+        wrapping a sim-specific ``SimulatorBridge``, or a backend-native
+        scene like ``MujocoPlayScene``). The default raises so callers
+        get a clear error for unsupported simulators (ManiSkill,
+        Gymnasium).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support the interactive "
+            f"viser viewer. Use evaluator.evaluate() instead of "
+            f"evaluator.play()."
+        )
+
+    def try_stop_mid_episode_recording(
+        self, env: Any, target_steps: int
+    ) -> bool:
+        """Optionally stop recording before episode ends, return whether stopped.
+
+        Hook for backends whose recording API records as the env steps
+        (e.g. Genesis writes a video file frame-by-frame). Such backends
+        need to call ``stop_recording`` after a fixed number of env
+        steps rather than at episode end. Default: never stops mid-episode.
+        Returns ``True`` if recording was stopped on this call so the
+        caller can clear its ``record_steps`` counter.
+        """
+        return False
+
     @property
     def supports_success_tracking(self) -> bool:
         return False

@@ -58,6 +58,20 @@ class GenesisInitializer(SimInitializer):
             return env_class(**kwargs)
         raise NotImplementedError(f"Undefined env class name {env_class_name}")
 
+    def create_play_scene(self, env: Any):
+        from rlworld.rl.vis.viser.bridges import GenesisBridge
+        from rlworld.rl.vis.viser.play_scene import BridgePlayScene
+        return BridgePlayScene(GenesisBridge(env.scene_manager))
+
+    def try_stop_mid_episode_recording(self, env: Any, target_steps: int) -> bool:
+        # Genesis writes the video file frame-by-frame, so we have to
+        # call stop_recording before the episode actually ends if the
+        # caller asked for a fixed number of recorded steps.
+        if env.env_step_counter >= target_steps - 1:
+            self.stop_recording(env)
+            return True
+        return False
+
     def start_recording(self, env: Any) -> None:
         env.vis_manager.start_recording()
         print_info("Video recording started")

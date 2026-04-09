@@ -63,6 +63,10 @@ class MujocoInitializer(SimInitializer):
             kw["gait_cfg"] = gait_cfg
         return env_class(**kw)
 
+    def create_play_scene(self, env: Any):
+        from rlworld.rl.vis.viser.play_scene import MujocoPlayScene
+        return MujocoPlayScene(env.scene_manager)
+
     def cleanup(self, env: Any) -> None:
         if hasattr(env, 'visualization_manager'):
             print_info("Closing Mjlab viewer...")

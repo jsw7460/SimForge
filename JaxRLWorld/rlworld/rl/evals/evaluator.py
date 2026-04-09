@@ -457,23 +457,8 @@ class PolicyEvaluator:
         viewer.run()
 
     def _create_play_scene(self):
-        """Create the appropriate PlayScene for this simulator."""
-        from rlworld.rl.vis.viser.play_scene import BridgePlayScene, MujocoPlayScene
-
-        if self.sim_type == "MujocoEnv":
-            return MujocoPlayScene(self.env.scene_manager)
-
-        # Newton / Genesis: use SimulatorBridge + ViserScene.
-        if self.sim_type == "Newton":
-            from rlworld.rl.vis.viser.bridges import NewtonBridge
-            bridge = NewtonBridge(self.env.scene_manager)
-        elif self.sim_type == "Genesis":
-            from rlworld.rl.vis.viser.bridges import GenesisBridge
-            bridge = GenesisBridge(self.env.scene_manager)
-        else:
-            raise ValueError(f"No play scene for simulator type: {self.sim_type}")
-
-        return BridgePlayScene(bridge)
+        """Delegate to the active simulator initializer."""
+        return self._init.create_play_scene(self.env)
 
     def evaluate(self):
         """Run evaluation."""
@@ -573,12 +558,14 @@ class PolicyEvaluator:
                     suffix=f"({current_step} steps)"
                 )
 
-            # Handle mid-episode recording stop for Genesis
-            if (self.record_steps is not None
-                and self.sim_type == 'Genesis'
-                and self.env.env_step_counter >= self.record_steps - 1):
-                self._init.stop_recording(self.env)
-                self.record_steps = None
+            # Optional mid-episode recording stop (Genesis writes
+            # frame-by-frame and needs an early stop). Other backends
+            # return False here and the counter stays untouched.
+            if self.record_steps is not None:
+                if self._init.try_stop_mid_episode_recording(
+                    self.env, self.record_steps
+                ):
+                    self.record_steps = None
 
         print()  # New line after progress bar
         eval_stats = self._extract_evaluation_stats()

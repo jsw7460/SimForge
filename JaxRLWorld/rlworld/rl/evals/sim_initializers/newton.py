@@ -62,6 +62,11 @@ class NewtonInitializer(SimInitializer):
             kw["gait_cfg"] = gait_cfg
         return env_class(**kw)
 
+    def create_play_scene(self, env: Any):
+        from rlworld.rl.vis.viser.bridges import NewtonBridge
+        from rlworld.rl.vis.viser.play_scene import BridgePlayScene
+        return BridgePlayScene(NewtonBridge(env.scene_manager))
+
     def start_recording(self, env: Any) -> None:
         # Newton ViewerFile records automatically
         print_info("Newton recording active")
