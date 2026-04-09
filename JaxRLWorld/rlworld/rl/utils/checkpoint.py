@@ -31,10 +31,29 @@ def load_checkpoint_metadata(checkpoint_path: str) -> dict:
 def load_config_from_checkpoint(metadata: dict) -> "ConfigsForRun":
     """Reconstruct config from checkpoint by re-running the preset.
 
-    Uses ``preset_module`` to re-instantiate the full config (with all nested
-    objects properly created).  The config YAML is **not** merged back — it
-    exists only for logging.  This follows the IsaacLab pattern: the preset
-    is the single source of truth for config structure.
+    Resolution order (most specific → least specific):
+
+    1. **Class + kwargs** (preferred, set automatically by
+       ``Go2FlatConfig.build()`` / ``G1FlatConfig.build()``): if the
+       checkpoint has both ``preset_class_name`` and ``preset_kwargs``,
+       reconstruct via ``getattr(module, class_name)(**kwargs).build()``.
+
+    2. **Module-level get_config()** (legacy entry-point convention):
+       fall through to ``preset_mod.get_config()`` for older checkpoints
+       whose ``preset_module`` already pointed at a wrapper module like
+       ``presets.go2_flat.mlp``.
+
+    3. **Convention-based fallback**: locate a buildable ``*Config``
+       class inside ``preset_module`` (e.g. ``Go2FlatConfig`` inside
+       ``presets.go2_flat.base``) and instantiate it with
+       ``sim_type=<config.sim_type>`` from the checkpoint metadata. This
+       covers the gap created in Phase A, when the unified
+       ``Go2FlatConfig`` started writing ``preset_module = base`` (the
+       dataclass module) but no ``get_config()`` lived there. Existing
+       Phase-A-era checkpoints reload via this path.
+
+    Raises ``AttributeError`` only when none of the three paths can
+    rebuild the config.
     """
     import importlib
 
@@ -48,7 +67,54 @@ def load_config_from_checkpoint(metadata: dict) -> "ConfigsForRun":
         )
 
     preset_mod = importlib.import_module(preset_module_path)
-    return preset_mod.get_config()
+
+    # Path 1: explicit class + kwargs
+    preset_class_name = config_dict.get("preset_class_name")
+    if preset_class_name is not None:
+        cls = getattr(preset_mod, preset_class_name, None)
+        if cls is None:
+            raise AttributeError(
+                f"Checkpoint references preset class {preset_class_name!r} "
+                f"in module {preset_module_path!r}, but the class is no "
+                f"longer defined there."
+            )
+        preset_kwargs = config_dict.get("preset_kwargs") or {}
+        return cls(**preset_kwargs).build()
+
+    # Path 2: legacy module-level get_config()
+    if hasattr(preset_mod, "get_config"):
+        return preset_mod.get_config()
+
+    # Path 3: convention-based fallback for Phase-A-era checkpoints.
+    # Locate a buildable *Config class inside the module.
+    sim_type = config_dict.get("sim_type")
+    candidate_cls = None
+    for attr_name in dir(preset_mod):
+        if attr_name.startswith("_") or not attr_name.endswith("Config"):
+            continue
+        obj = getattr(preset_mod, attr_name)
+        if isinstance(obj, type) and hasattr(obj, "build"):
+            candidate_cls = obj
+            break
+
+    if candidate_cls is None:
+        raise AttributeError(
+            f"Cannot reconstruct config from checkpoint: module "
+            f"{preset_module_path!r} has neither preset_class_name in "
+            f"the checkpoint nor a get_config() function nor a buildable "
+            f"*Config class."
+        )
+
+    try:
+        if sim_type is not None:
+            return candidate_cls(sim_type=sim_type).build()
+        return candidate_cls().build()
+    except TypeError as e:
+        raise AttributeError(
+            f"Found candidate class {candidate_cls.__name__} in "
+            f"{preset_module_path!r} but could not instantiate it with "
+            f"sim_type={sim_type!r}: {e}"
+        ) from e
 
 
 def load_runner(

@@ -150,7 +150,36 @@ class Go2FlatConfig:
 
         cfgs = builders.CONFIGS_FOR_RUN_CLS(**kwargs)
         cfgs.preset_module = type(self).__module__
+        cfgs.preset_class_name = type(self).__name__
+        cfgs.preset_kwargs = self._get_preset_kwargs()
         return cfgs
+
+    def _get_preset_kwargs(self) -> Dict[str, Any]:
+        """Constructor kwargs needed to reconstruct this config at eval time.
+
+        Eval reads ``preset_module`` + ``preset_class_name`` + this dict
+        from the checkpoint and rebuilds via ``Cls(**kwargs).build()``.
+        Only fields whose value differs from the dataclass default are
+        included so the dict stays small and forward-compatible.
+        """
+        from dataclasses import fields, MISSING
+        kwargs: Dict[str, Any] = {}
+        for f in fields(self):
+            if f.name == "robot":
+                # Nested dataclass — keep at default; eval rebuilds default.
+                continue
+            value = getattr(self, f.name)
+            if f.default is not MISSING:
+                default = f.default
+            elif f.default_factory is not MISSING:  # type: ignore[misc]
+                default = f.default_factory()  # type: ignore[misc]
+            else:
+                # Required field with no default — always include.
+                kwargs[f.name] = value
+                continue
+            if value != default:
+                kwargs[f.name] = value
+        return kwargs
 
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""

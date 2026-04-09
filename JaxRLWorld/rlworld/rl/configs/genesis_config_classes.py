@@ -117,6 +117,8 @@ class GenesisConfigsForRun(BaseConfig):
     """Complete configuration for Genesis training runs."""
     sim_type: str = "genesis"
     preset_module: str | None = None  # "rlworld.rl.configs.presets.go2_flat.mlp"
+    preset_class_name: str | None = None
+    preset_kwargs: Dict[str, Any] | None = None
     env: EnvConfig = field(default_factory=EnvConfig)
     scene: SceneConfig = field(default_factory=SceneConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)

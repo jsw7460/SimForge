@@ -69,6 +69,8 @@ class NewtonConfigsForRun(BaseConfig):
     """Complete configuration for Newton training runs."""
     sim_type: str = "newton"
     preset_module: str | None = None
+    preset_class_name: str | None = None
+    preset_kwargs: Dict[str, Any] | None = None
     env: NewtonEnvConfig = field(default_factory=NewtonEnvConfig)
     scene: NewtonSceneConfig = field(default_factory=NewtonSceneConfig)
     observation: NewtonObservationConfig = field(default_factory=NewtonObservationConfig)

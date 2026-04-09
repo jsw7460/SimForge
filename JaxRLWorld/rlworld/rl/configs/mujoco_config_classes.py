@@ -96,6 +96,8 @@ class MujocoConfigsForRun(BaseConfig):
     """Complete configuration for MuJoCo/mjlab training runs."""
     sim_type: str = "mujoco"
     preset_module: str | None = None
+    preset_class_name: str | None = None
+    preset_kwargs: Dict[str, Any] | None = None
     env: MujocoEnvConfig = field(default_factory=MujocoEnvConfig)
     scene: MujocoSceneConfig = field(default_factory=MujocoSceneConfig)
     observation: MujocoObservationConfig = field(default_factory=MujocoObservationConfig)
