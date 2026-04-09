@@ -74,3 +74,35 @@ class RobotData(Protocol):
         which only stores soft limits) may raise ``NotImplementedError``.
         """
         ...
+
+    # ── Body-level reads (named bodies / links) ──────────────────────
+
+    def find_body_index(self, body_name: str) -> int:
+        """Resolve a body/link name to its sim-internal integer index.
+
+        Each simulator stores bodies in its own indexing space:
+        - Newton: index into ``body_cache`` (per-env body slot)
+        - Genesis: ``link.idx_local``
+        - mjlab: index returned by ``entity.find_bodies([name])``
+
+        Args:
+            body_name: Exact body name (no regex). For Newton this may
+                include the entity prefix (e.g. ``"g1_29dof/torso_link"``).
+                For Genesis and mjlab this is typically the bare body name.
+
+        Returns:
+            Integer index suitable for passing to ``body_*_w`` accessors.
+        """
+        ...
+
+    def body_ang_vel_w(self, body_index: int) -> Tensor:
+        """World-frame angular velocity of a single body.
+
+        Args:
+            body_index: Index returned by :meth:`find_body_index`.
+
+        Returns:
+            Tensor of shape ``(num_envs, 3)`` — angular velocity in
+            world frame, x/y/z order.
+        """
+        ...

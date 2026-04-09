@@ -172,16 +172,30 @@ def body_angular_velocity_penalty(
     env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """Penalize excessive body angular velocities."""
-    robot = env.scene_manager.get_entity(asset_cfg.name)
+    """Penalize excessive body angular velocities (xy only).
 
-    if asset_cfg.body_ids is not None and not isinstance(asset_cfg.body_ids, slice):
-        ang_vel = robot.data.body_link_ang_vel_w[:, asset_cfg.body_ids[0], :]
-    else:
+    Thin wrapper that translates the mjlab ``asset_cfg`` parameter
+    convention into the sim-agnostic ``body_name`` convention used by
+    ``common.penalize_body_ang_vel_xy``. When ``asset_cfg.body_ids`` is
+    a concrete index list (the active-preset path), we extract the
+    first body name from ``asset_cfg.body_names`` and delegate. The
+    legacy fallback path that uses ``robot.data.root_link_ang_vel_w``
+    when ``body_ids is None`` is preserved here as a direct accessor
+    call to keep mjlab's API surface intact.
+    """
+    if asset_cfg.body_ids is None or isinstance(asset_cfg.body_ids, slice):
+        # Legacy fallback: penalize root angular velocity directly.
+        robot = env.scene_manager.get_entity(asset_cfg.name)
         ang_vel = robot.data.root_link_ang_vel_w
+        ang_vel_xy = ang_vel[:, :2]
+        return -torch.sum(torch.square(ang_vel_xy), dim=1)
 
-    ang_vel_xy = ang_vel[:, :2]
-    return -torch.sum(torch.square(ang_vel_xy), dim=1)
+    # Active path: a concrete body was specified. Delegate to common.
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        penalize_body_ang_vel_xy as _common_fn,
+    )
+    body_name = asset_cfg.body_names[0]
+    return _common_fn(env, body_name=body_name, entity_name=asset_cfg.name)
 
 
 def angular_momentum_penalty(

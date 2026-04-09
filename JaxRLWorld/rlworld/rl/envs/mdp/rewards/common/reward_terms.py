@@ -258,6 +258,39 @@ def base_height_penalty(env: World, entity_name: str = "robot") -> torch.Tensor:
     return -torch.square(height_z - env.command_manager.base_height)
 
 
+def penalize_body_ang_vel_xy(
+    env: World,
+    body_name: str,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """Penalize roll/pitch angular velocity of a single body (sim-agnostic).
+
+    Reads world-frame angular velocity for the named body via
+    ``RobotData.find_body_index`` and ``RobotData.body_ang_vel_w``, then
+    returns ``-sum(square(ang_vel[:, :2]))``. The yaw component (index 2)
+    is intentionally NOT penalized — only roll/pitch are.
+
+    Matches the behavior of mjlab's ``body_angular_velocity_penalty``
+    exactly, which the legacy sim-specific implementations also matched.
+
+    Args:
+        env: Any environment whose RobotData implements the body-level
+            accessors (Newton, Genesis, MuJoCo).
+        body_name: Name of the body. Format depends on the simulator's
+            naming convention (Newton uses prefixed names like
+            ``"g1_29dof/torso_link"``, Genesis and mjlab use bare names
+            like ``"torso_link"``).
+        entity_name: Name of the entity. Default ``"robot"``.
+
+    Returns:
+        Tensor of shape ``(num_envs,)``.
+    """
+    rd = env.get_robot_data(entity_name)
+    body_idx = rd.find_body_index(body_name)
+    ang_vel = rd.body_ang_vel_w(body_idx)
+    return -torch.sum(torch.square(ang_vel[:, :2]), dim=1)
+
+
 def penalize_joint_pos_limits_l1(
     env: World,
     soft_limit_factor: float = 1.0,

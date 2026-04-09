@@ -155,6 +155,40 @@ class NewtonRobotData:
         return lower_all[qd_indices], upper_all[qd_indices]
 
     # ------------------------------------------------------------------
+    # Body-level reads
+    # ------------------------------------------------------------------
+
+    def find_body_index(self, body_name: str) -> int:
+        """Resolve a body name to its per-env body index in Newton.
+
+        Uses the singleton ``NewtonBodyCache`` which builds a name→index
+        map at first access. For Newton, body names typically include the
+        entity prefix (e.g. ``"g1_29dof/torso_link"``).
+        """
+        from rlworld.rl.envs.utils.newton.body_cache import get_cache
+        cache = get_cache(self._env)
+        indices = cache.get_body_indices(body_name)
+        if not indices:
+            raise ValueError(
+                f"Body name {body_name!r} not found in Newton model. "
+                f"Available bodies: {cache.body_names}"
+            )
+        return indices[0]
+
+    def body_ang_vel_w(self, body_index: int) -> Tensor:
+        """World-frame angular velocity of a single body.
+
+        Reads ``state.body_qd`` (shape flattened across worlds), reshapes
+        to ``(num_envs, bodies_per_env, 6)``, and indexes the (3:6) slice
+        which holds angular velocity in world frame.
+        """
+        from rlworld.rl.envs.utils.newton.body_cache import get_cache
+        cache = get_cache(self._env)
+        state = self._env.scene_manager.state
+        body_qd = wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
+        return body_qd[:, body_index, 3:6]
+
+    # ------------------------------------------------------------------
     # Write helpers (used by event terms, scene reset)
     # ------------------------------------------------------------------
 

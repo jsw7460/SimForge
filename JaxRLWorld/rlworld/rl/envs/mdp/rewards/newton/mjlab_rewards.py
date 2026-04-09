@@ -131,7 +131,12 @@ def body_ang_vel_penalty_mjlab(
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
 
-    Matches mjlab.tasks.velocity.mdp.body_angular_velocity_penalty exactly.
+    Delegates to ``common.penalize_body_ang_vel_xy``. The Newton
+    implementation of ``RobotData.find_body_index`` calls the same
+    ``body_cache.get_body_indices(body_name)`` that the legacy code
+    used, and ``RobotData.body_ang_vel_w`` reads the same
+    ``state.body_qd[:, body_idx, 3:6]`` slice — so the result is
+    bit-identical to the legacy direct-access path.
 
     Args:
         env: Newton environment.
@@ -140,18 +145,10 @@ def body_ang_vel_penalty_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    cache = get_cache(env)
-    state = env.scene_manager.state
-
-    body_indices = cache.get_body_indices(body_name)
-    body_idx = body_indices[0]
-
-    body_qd = wp.to_torch(state.body_qd).view(env.num_envs, cache.bodies_per_env, 6)
-    ang_vel_w = body_qd[:, body_idx, 3:6]  # (num_envs, 3)
-
-    ang_vel_xy = ang_vel_w[:, :2]
-
-    return -torch.sum(torch.square(ang_vel_xy), dim=1)
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        penalize_body_ang_vel_xy as _common_fn,
+    )
+    return _common_fn(env, body_name=body_name)
 
 
 # ============================================================

@@ -95,3 +95,23 @@ class GenesisRobotData:
         lower, upper = self._entity.get_dofs_limit(dofs_idx_local=self._actuated_dof_ids)
         # Genesis returns shape (1, N); squeeze to (N,)
         return lower.squeeze(0), upper.squeeze(0)
+
+    # ------------------------------------------------------------------
+    # Body-level reads
+    # ------------------------------------------------------------------
+
+    def find_body_index(self, body_name: str) -> int:
+        """Resolve a link name to Genesis's local link index."""
+        link = self._entity.get_link(name=body_name)
+        return link.idx_local
+
+    def body_ang_vel_w(self, body_index: int) -> Tensor:
+        """World-frame angular velocity of a single link.
+
+        Calls ``entity.get_links_ang(links_idx_local=[idx])`` which
+        returns shape ``(num_envs, 1, 3)``; we squeeze the singleton
+        link dimension so the result matches the protocol shape
+        ``(num_envs, 3)``.
+        """
+        ang = self._entity.get_links_ang(links_idx_local=[body_index])
+        return ang.squeeze(1)

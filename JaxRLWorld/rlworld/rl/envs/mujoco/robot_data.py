@@ -111,3 +111,30 @@ class MujocoRobotData:
             "``joint_pos_limits`` reward function in "
             "``mdp/rewards/mujoco/reward_terms.py`` instead."
         )
+
+    # ------------------------------------------------------------------
+    # Body-level reads
+    # ------------------------------------------------------------------
+
+    def find_body_index(self, body_name: str) -> int:
+        """Resolve a body name to mjlab's body index.
+
+        Calls ``entity.find_bodies([body_name])`` which returns a tuple
+        ``(body_ids: list[int], body_names: list[str])``. We return the
+        first index. mjlab's name→index map is precomputed at scene
+        compile time, so this lookup is cheap.
+        """
+        body_ids, _ = self._entity.find_bodies([body_name], preserve_order=True)
+        if not body_ids:
+            raise ValueError(
+                f"Body name {body_name!r} not found in mjlab entity"
+            )
+        return body_ids[0]
+
+    def body_ang_vel_w(self, body_index: int) -> Tensor:
+        """World-frame angular velocity of a single body.
+
+        Reads mjlab's pre-computed ``entity.data.body_link_ang_vel_w``
+        which already has shape ``(num_envs, num_bodies, 3)``.
+        """
+        return self._entity.data.body_link_ang_vel_w[:, body_index, :]

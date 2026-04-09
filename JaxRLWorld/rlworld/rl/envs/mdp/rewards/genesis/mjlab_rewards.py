@@ -246,7 +246,12 @@ def body_ang_vel_penalty_mjlab(
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
 
-    Matches mjlab.tasks.velocity.mdp.body_angular_velocity_penalty exactly.
+    Delegates to ``common.penalize_body_ang_vel_xy``. The Genesis
+    implementation of ``RobotData.find_body_index`` calls the same
+    ``entity.get_link(name).idx_local`` that the legacy code used, and
+    ``RobotData.body_ang_vel_w`` calls the same
+    ``entity.get_links_ang(links_idx_local=[idx]).squeeze(1)`` — so the
+    result is bit-identical to the legacy direct-access path.
 
     Args:
         env: Genesis environment.
@@ -256,16 +261,10 @@ def body_ang_vel_penalty_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    entity = env.scene_manager[entity_name]
-    link = entity.get_link(name=body_name)
-
-    # Get angular velocity in world frame
-    ang_vel_w = entity.get_links_ang(links_idx_local=[link.idx_local])  # (num_envs, 1, 3)
-    ang_vel_w = ang_vel_w.squeeze(1)  # (num_envs, 3)
-
-    # Penalize xy angular velocity (don't penalize z/yaw)
-    ang_vel_xy = ang_vel_w[:, :2]
-    return -torch.sum(torch.square(ang_vel_xy), dim=1)
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        penalize_body_ang_vel_xy as _common_fn,
+    )
+    return _common_fn(env, body_name=body_name, entity_name=entity_name)
 
 
 # ============================================================
