@@ -46,12 +46,12 @@ def _build_common_obs():
         base_lin_vel,
         base_ang_vel,
         base_height,
+        command,
         projected_gravity,
         dof_pos,
         dof_vel,
         prev_processed_actions,
     )
-    from rlworld.rl.envs.mdp.observations.genesis.exteroception import command
 
     actor_terms = [
         ObservationTermConfig(func=base_ang_vel, scale=0.25, noise=Unoise(-0.2, 0.2)),

@@ -37,12 +37,12 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
     base_lin_vel,
+    command as command_obs,
     dof_pos,
     dof_vel,
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
 
 
 # ── Per-simulator constants ──────────────────────────────────────────

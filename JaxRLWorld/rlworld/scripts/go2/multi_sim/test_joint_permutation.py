@@ -58,9 +58,8 @@ def check(name: str, condition: bool, detail: str = ""):
 def _build_common_obs_terms():
     from rlworld.rl.configs.observations import ObservationTermConfig
     from rlworld.rl.envs.mdp.observations.common.proprioception import (
-        base_ang_vel, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
+        base_ang_vel, command, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
     )
-    from rlworld.rl.envs.mdp.observations.genesis.exteroception import command
 
     return [
         ObservationTermConfig(func=base_ang_vel, scale=1.0),

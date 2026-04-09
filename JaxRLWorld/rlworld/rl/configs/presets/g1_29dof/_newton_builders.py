@@ -43,13 +43,18 @@ from rlworld.rl.envs.mdp.events import newton_event_terms as newton_ef
 from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
+    base_height,
+    base_quat,
+    command as command_obs,
     dof_pos,
     dof_vel,
+    foot_air_time,
+    foot_contact_forces,
+    foot_contact_indicator,
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
-from rlworld.rl.envs.mdp.observations.newton import state
+from rlworld.rl.envs.mdp.observations.newton import state  # state.feet_height (sim-specific)
 from rlworld.rl.envs.mdp.reset import newton_reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
@@ -183,19 +188,29 @@ def build_observation(cfg: "G1FlatConfig") -> NewtonObservationConfig:
         dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
-        base_height_obs = ObservationTermConfig(func=state.base_height, scale=1.0)
-        base_quat_obs = ObservationTermConfig(func=state.base_quat, scale=1.0)
+        base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
+        base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
         foot_height_obs = ObservationTermConfig(
             func=state.feet_height, scale=1.0, params={"feet_bodies": feet_bodies}
         )
         foot_air_time_obs = ObservationTermConfig(
-            func=state.feet_air_time, scale=1.0, params={"feet_bodies": feet_bodies}
+            func=foot_air_time,
+            scale=1.0,
+            params={
+                "contact_group": "foot_contact",
+                "body_names": feet_bodies,
+                "use_last": True,
+            },
         )
         foot_contact_obs = ObservationTermConfig(
-            func=state.feet_contact_indicator, scale=1.0, params={"feet_bodies": feet_bodies}
+            func=foot_contact_indicator,
+            scale=1.0,
+            params={"contact_group": "foot_contact", "body_names": feet_bodies},
         )
         foot_contact_forces_obs = ObservationTermConfig(
-            func=state.feet_contact_force_3d, scale=0.01, params={"feet_bodies": feet_bodies}
+            func=foot_contact_forces,
+            scale=0.01,
+            params={"contact_group": "foot_contact", "body_names": feet_bodies},
         )
 
     @dataclass

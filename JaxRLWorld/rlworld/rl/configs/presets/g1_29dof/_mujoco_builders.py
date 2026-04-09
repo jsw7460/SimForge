@@ -44,19 +44,21 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg,
 )
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
-from rlworld.rl.envs.mdp.observations.genesis.exteroception import command as command_obs
-from rlworld.rl.envs.mdp.observations.mujoco.proprioception import (
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
     base_quat,
+    command as command_obs,
     dof_pos,
     dof_vel,
     foot_air_time,
-    foot_contact,
     foot_contact_forces,
-    foot_height,
+    foot_contact_indicator as foot_contact,
     projected_gravity,
     raw_actions,
+)
+from rlworld.rl.envs.mdp.observations.mujoco.proprioception import (
+    foot_height,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
