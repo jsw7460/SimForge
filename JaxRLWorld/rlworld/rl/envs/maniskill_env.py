@@ -7,7 +7,7 @@ import torch
 
 import genesis as gs
 from rlworld.rl.envs import World
-from rlworld.rl.envs.managers.genesis.scene import KinematicTree
+from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.configs import EnvConfig, SceneConfig, ObservationConfig, ActionConfig, RewardConfig, CommandConfig
 
 
