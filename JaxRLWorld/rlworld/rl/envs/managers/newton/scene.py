@@ -13,7 +13,7 @@ import newton
 from newton.selection import ArticulationView
 from newton.sensors import SensorContact
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
-from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
+from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
@@ -561,11 +561,14 @@ class NewtonSceneManager(BaseManager):
 
     def _set_kinematic_trees(self) -> None:
         """Build kinematic trees for entities with URDF."""
-        for entity_name, entity_info in self.entities.items():
-            cfg = entity_info["config"]
+        def _resolve(name: str):
+            cfg = self.entities[name]["config"]
             urdf_path = getattr(cfg, "urdf_path", None)
-            if urdf_path is not None:
-                self.trees[entity_name] = KinematicTree(urdf_path=urdf_path)
+            if urdf_path is None:
+                return None
+            return ("urdf", urdf_path)
+
+        self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
 
     def _request_sensor_state_attributes(self) -> None:
         """Request extended state attributes needed by sensors."""

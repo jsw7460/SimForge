@@ -8,13 +8,13 @@ import genesis as gs
 from genesis.engine.entities import RigidEntity
 from genesis.engine.sensors.base_sensor import Sensor
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
-from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg, GenesisEntityCfg, GroundPlaneCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
+from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.utils import entity_utils
 from rlworld.rl.utils import string as string_utils
 
@@ -148,11 +148,16 @@ class SceneManager(BaseManager):
         self.env.vis_manager.inject_custom_context()
 
     def _set_kinematic_tree(self):
-        for entity_name in self.entities:
-            cfg = self.config.entities.get(entity_name)
-            if cfg is None or isinstance(cfg, GroundPlaneCfg) or cfg.urdf_path is None:
-                continue
-            self.trees[entity_name] = KinematicTree(cfg.urdf_path)
+        def _resolve(name: str):
+            cfg = self.config.entities.get(name)
+            if cfg is None or isinstance(cfg, GroundPlaneCfg):
+                return None
+            urdf_path = getattr(cfg, "urdf_path", None)
+            if urdf_path is None:
+                return None
+            return ("urdf", urdf_path)
+
+        self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
 
     def _create_scene(self) -> None:
         """Initialize scene with basic settings"""

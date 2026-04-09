@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -12,6 +10,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg, MujocoEntityCfg, GroundPlaneCfg,
 )
 from rlworld.rl.envs.managers.base import BaseManager
+from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -413,29 +412,13 @@ class MujocoSceneManager(BaseManager):
 
     def _set_kinematic_tree(self) -> None:
         """Build kinematic trees for all entities from their MjSpec XML."""
-        for entity_name, entity in self._scene.entities.items():
+        def _resolve(name: str):
+            entity = self._scene.entities[name]
             try:
-                # Get the XML representation from entity's spec
                 xml_content = entity.spec.to_xml()
+            except Exception:
+                # Some entity types (e.g. terrain) may not expose a spec.
+                return None
+            return ("mjcf_xml", xml_content)
 
-                # Write to a temporary file for KinematicTree to parse
-                with tempfile.NamedTemporaryFile(
-                    mode='w', suffix='.xml', delete=False
-                ) as tmp_file:
-                    tmp_file.write(xml_content)
-                    tmp_path = Path(tmp_file.name)
-
-                try:
-                    # Create KinematicTree from MJCF
-                    tree = KinematicTree(mjcf_path=str(tmp_path))
-                    self.trees[entity_name] = tree
-                finally:
-                    # Clean up temp file
-                    tmp_path.unlink(missing_ok=True)
-
-            except Exception as e:
-                # Log warning but don't fail - tree is optional
-                import warnings
-                warnings.warn(
-                    f"Could not build kinematic tree for entity '{entity_name}': {e}"
-                )
+        self.trees = build_kinematic_trees(self._scene.entities.keys(), _resolve)
