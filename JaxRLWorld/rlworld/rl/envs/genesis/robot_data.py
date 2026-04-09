@@ -108,10 +108,63 @@ class GenesisRobotData:
     def body_ang_vel_w(self, body_index: int) -> Tensor:
         """World-frame angular velocity of a single link.
 
-        Calls ``entity.get_links_ang(links_idx_local=[idx])`` which
-        returns shape ``(num_envs, 1, 3)``; we squeeze the singleton
-        link dimension so the result matches the protocol shape
-        ``(num_envs, 3)``.
+        Thin wrapper around :attr:`body_ang_vel_w_all` that selects one
+        body from the batched view. Kept for backward compatibility with
+        Phase D-2 callers.
         """
-        ang = self._entity.get_links_ang(links_idx_local=[body_index])
-        return ang.squeeze(1)
+        return self.body_ang_vel_w_all[:, body_index, :]
+
+    # ------------------------------------------------------------------
+    # Batched per-body reads
+    # ------------------------------------------------------------------
+
+    @property
+    def body_pos_w_all(self) -> Tensor:
+        """World-frame positions of all links. Shape ``(num_envs, num_links, 3)``."""
+        return self._entity.get_links_pos()
+
+    @property
+    def body_quat_w_all(self) -> Tensor:
+        """World-frame orientations of all links, wxyz. Shape ``(num_envs, num_links, 4)``.
+
+        Genesis uses wxyz natively — no reordering needed.
+        """
+        return self._entity.get_links_quat()
+
+    @property
+    def body_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all links. Shape ``(num_envs, num_links, 3)``.
+
+        Uses Genesis's default reference point (link origin for
+        ``RigidEntity``).
+        """
+        return self._entity.get_links_vel()
+
+    @property
+    def body_ang_vel_w_all(self) -> Tensor:
+        """World-frame angular velocities of all links. Shape ``(num_envs, num_links, 3)``."""
+        return self._entity.get_links_ang()
+
+    # ------------------------------------------------------------------
+    # Aggregate quantities
+    # ------------------------------------------------------------------
+
+    def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:
+        """Whole-body angular momentum — not implemented for Genesis.
+
+        Genesis does not expose a batched per-link inertia tensor (only
+        scalar mass via ``get_links_inertial_mass``), and there is no
+        active reward in JaxRLWorld that uses Genesis angular momentum.
+        Implementing this would require either reading the static
+        ``link.inertial_i`` per link and rotating to the body frame
+        manually, or adding a Genesis sensor abstraction. Defer until a
+        consumer actually needs it.
+        """
+        raise NotImplementedError(
+            "GenesisRobotData.angular_momentum_w is not implemented. "
+            "Genesis has no batched per-link inertia accessor and no "
+            "JaxRLWorld preset currently uses angular_momentum_penalty "
+            "with Genesis. If you need this, either implement the manual "
+            "I @ omega path using static link.inertial_i values or add a "
+            "Genesis sensor wrapper."
+        )

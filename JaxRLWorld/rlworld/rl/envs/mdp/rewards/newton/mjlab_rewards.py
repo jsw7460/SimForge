@@ -643,36 +643,14 @@ def angular_momentum_penalty(
 ) -> torch.Tensor:
     """Penalize whole-body angular momentum.
 
-    Computes L = I @ omega for each body in body frame,
-    transforms to world frame, and sums.
-
-    Matches mjlab.tasks.velocity.mdp.angular_momentum_penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Delegates to ``common.penalize_angular_momentum_l2``. Bit-identical
+    to the legacy implementation: ``RobotData.angular_momentum_w`` for
+    Newton uses the same ``model.body_inertia`` warp array, the same
+    ``state.body_q/qd`` reshape, and the same xyzw quaternion rotation
+    helpers (``_quat_rotate_inverse`` / ``_quat_rotate``) that this
+    function previously called inline.
     """
-    model = env.scene_manager.model
-    state = env.scene_manager.state
-    cache = get_cache(env)
-
-    body_inertia = wp.to_torch(model.body_inertia).view(
-        env.num_envs, cache.bodies_per_env, 3, 3
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        penalize_angular_momentum_l2 as _common_fn,
     )
-    body_qd = wp.to_torch(state.body_qd).view(
-        env.num_envs, cache.bodies_per_env, 6
-    )
-    body_q = wp.to_torch(state.body_q).view(
-        env.num_envs, cache.bodies_per_env, 7
-    )
-
-    ang_vel_world = body_qd[:, :, 3:6]
-    body_quat = body_q[:, :, 3:7]
-
-    ang_vel_body = _quat_rotate_inverse(body_quat, ang_vel_world)
-    ang_momentum_body = torch.einsum('nbij,nbj->nbi', body_inertia, ang_vel_body)
-    ang_momentum_world = _quat_rotate(body_quat, ang_momentum_body)
-
-    total_ang_momentum = torch.sum(ang_momentum_world, dim=1)
-    ang_momentum_magnitude_sq = torch.sum(torch.square(total_ang_momentum), dim=-1)
-
-    return -ang_momentum_magnitude_sq
+    return _common_fn(env)

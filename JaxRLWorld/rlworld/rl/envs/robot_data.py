@@ -106,3 +106,74 @@ class RobotData(Protocol):
             world frame, x/y/z order.
         """
         ...
+
+    # ── Batched per-body reads (all bodies at once) ──────────────────
+    #
+    # These return data for *all* bodies in the entity's body list,
+    # in the entity's native body indexing order. Use them as building
+    # blocks for reward functions that operate over many bodies (feet
+    # rewards, angular momentum, contact reasoning, ...).
+
+    @property
+    def body_pos_w_all(self) -> Tensor:
+        """World-frame positions of all bodies.
+
+        Returns:
+            Tensor of shape ``(num_envs, num_bodies, 3)``.
+        """
+        ...
+
+    @property
+    def body_quat_w_all(self) -> Tensor:
+        """World-frame orientations of all bodies, **wxyz** convention.
+
+        Returns:
+            Tensor of shape ``(num_envs, num_bodies, 4)``.
+        """
+        ...
+
+    @property
+    def body_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all bodies.
+
+        Returns:
+            Tensor of shape ``(num_envs, num_bodies, 3)``.
+        """
+        ...
+
+    @property
+    def body_ang_vel_w_all(self) -> Tensor:
+        """World-frame angular velocities of all bodies.
+
+        Returns:
+            Tensor of shape ``(num_envs, num_bodies, 3)``.
+        """
+        ...
+
+    # ── Aggregate quantities ─────────────────────────────────────────
+
+    def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:
+        """Whole-body angular momentum about a reference point in world frame.
+
+        Implementation strategy varies by simulator and is intentionally
+        sim-specific (no default impl):
+
+        - Newton computes manually via ``sum_i I_i @ omega_i`` over all
+          bodies. ``sensor_name`` is ignored.
+        - mjlab reads MuJoCo's built-in ``subtreeangmom`` sensor data.
+          ``sensor_name`` selects which sensor (e.g.
+          ``"robot/root_angmom"``).
+        - Genesis does not currently implement this; raises
+          ``NotImplementedError``.
+
+        Args:
+            sensor_name: Sensor identifier for sims that read pre-computed
+                angular momentum (mjlab). Ignored by sims that compute
+                manually. Default ``None`` — sims that need a name must
+                raise a clear error if not supplied.
+
+        Returns:
+            Tensor of shape ``(num_envs, 3)`` — angular momentum in
+            world frame.
+        """
+        ...

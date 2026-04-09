@@ -206,11 +206,17 @@ def angular_momentum_penalty(
     env: "MujocoEnv",
     sensor_name: str,
 ) -> torch.Tensor:
-    """Penalize whole-body angular momentum to encourage natural arm swing."""
-    angmom_sensor = env.scene_manager.get_sensor(sensor_name)
-    angmom = angmom_sensor.data
-    angmom_magnitude_sq = torch.sum(torch.square(angmom), dim=-1)
-    return -angmom_magnitude_sq
+    """Penalize whole-body angular momentum to encourage natural arm swing.
+
+    Delegates to ``common.penalize_angular_momentum_l2`` which calls
+    ``RobotData.angular_momentum_w(sensor_name)``. For mjlab this
+    in turn calls ``env.scene_manager.get_sensor(sensor_name)`` —
+    bit-identical to the legacy direct sensor read.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        penalize_angular_momentum_l2 as _common_fn,
+    )
+    return _common_fn(env, sensor_name=sensor_name)
 
 
 def self_collision_cost(

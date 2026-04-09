@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch import Tensor
 
+from typing import Any
+
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
@@ -31,12 +33,17 @@ class MujocoRobotData:
         joint_ids: Tensor,
         num_envs: int,
         device: torch.device,
+        env: "Any | None" = None,
     ) -> None:
         self._entity = entity
         self._joint_ids = joint_ids
         self._gravity_vec: Tensor | None = None
         self._num_envs = num_envs
         self._device = device
+        # Optional reference to the parent env, used by methods that need
+        # access to scene-level objects (e.g. angular_momentum_w which
+        # reads an mjlab subtreeangmom sensor via env.scene_manager).
+        self._env = env
 
     def _get_gravity_vec(self) -> Tensor:
         """Lazily create gravity vector matching current batch size."""
@@ -134,7 +141,81 @@ class MujocoRobotData:
     def body_ang_vel_w(self, body_index: int) -> Tensor:
         """World-frame angular velocity of a single body.
 
-        Reads mjlab's pre-computed ``entity.data.body_link_ang_vel_w``
-        which already has shape ``(num_envs, num_bodies, 3)``.
+        Thin wrapper around :attr:`body_ang_vel_w_all` that selects one
+        body from the batched view. Kept for backward compatibility with
+        Phase D-2 callers.
         """
-        return self._entity.data.body_link_ang_vel_w[:, body_index, :]
+        return self.body_ang_vel_w_all[:, body_index, :]
+
+    # ------------------------------------------------------------------
+    # Batched per-body reads
+    # ------------------------------------------------------------------
+
+    @property
+    def body_pos_w_all(self) -> Tensor:
+        """World-frame positions of all bodies. Shape ``(num_envs, num_bodies, 3)``.
+
+        Reads mjlab's pre-computed ``entity.data.body_link_pos_w``.
+        """
+        return self._entity.data.body_link_pos_w
+
+    @property
+    def body_quat_w_all(self) -> Tensor:
+        """World-frame orientations of all bodies, wxyz. Shape ``(num_envs, num_bodies, 4)``.
+
+        mjlab uses wxyz natively — no reordering needed.
+        """
+        return self._entity.data.body_link_quat_w
+
+    @property
+    def body_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
+        return self._entity.data.body_link_lin_vel_w
+
+    @property
+    def body_ang_vel_w_all(self) -> Tensor:
+        """World-frame angular velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
+        return self._entity.data.body_link_ang_vel_w
+
+    # ------------------------------------------------------------------
+    # Aggregate quantities
+    # ------------------------------------------------------------------
+
+    def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:
+        """Whole-body angular momentum read from an mjlab subtreeangmom sensor.
+
+        mjlab supports MuJoCo's built-in ``subtreeangmom`` sensor which
+        computes the angular momentum of a subtree about a body's
+        reference frame. The sensor is registered in the robot XML
+        (e.g. ``<subtreeangmom name="root_angmom" body="pelvis"/>``)
+        and looked up at runtime via ``env.scene_manager.get_sensor``.
+
+        Args:
+            sensor_name: Full sensor identifier in
+                ``"<entity>/<sensor>"`` form (e.g.
+                ``"robot/root_angmom"``). Required — there is no
+                automatic default for now.
+
+        Returns:
+            Tensor of shape ``(num_envs, 3)`` — angular momentum in
+            world frame.
+
+        Raises:
+            ValueError: If ``sensor_name`` is None or the parent env was
+                not provided to this RobotData instance.
+        """
+        if sensor_name is None:
+            raise ValueError(
+                "MujocoRobotData.angular_momentum_w requires sensor_name. "
+                "Pass the full mjlab sensor identifier (e.g. "
+                '"robot/root_angmom").'
+            )
+        if self._env is None:
+            raise RuntimeError(
+                "MujocoRobotData.angular_momentum_w needs access to the "
+                "parent env (for env.scene_manager.get_sensor) but no env "
+                "reference was provided to the RobotData constructor. "
+                "Update MujocoEnv._build_sim_managers to pass env=self."
+            )
+        sensor = self._env.scene_manager.get_sensor(sensor_name)
+        return sensor.data

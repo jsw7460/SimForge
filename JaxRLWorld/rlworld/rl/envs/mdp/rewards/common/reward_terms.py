@@ -258,6 +258,44 @@ def base_height_penalty(env: World, entity_name: str = "robot") -> torch.Tensor:
     return -torch.square(height_z - env.command_manager.base_height)
 
 
+def penalize_angular_momentum_l2(
+    env: World,
+    sensor_name: str | None = None,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """Penalize whole-body angular momentum (L2 squared, sim-agnostic).
+
+    Reads ``RobotData.angular_momentum_w(sensor_name)`` and returns
+    ``-sum(square(...))``. Each simulator implements
+    ``angular_momentum_w`` differently:
+
+    - Newton: manual ``sum_i I_i @ omega_i`` over all bodies
+      (``sensor_name`` ignored).
+    - mjlab: reads MuJoCo's built-in ``subtreeangmom`` sensor data,
+      identified by ``sensor_name``.
+    - Genesis: not implemented (raises NotImplementedError).
+
+    The two implementations are NOT bit-identical to each other —
+    they compute physically related but mathematically distinct
+    quantities (manual sum-of-body-momenta vs subtree angular momentum
+    via the composite mass matrix). Each was already in use by its own
+    sim's preset before this migration; the unification preserves
+    those values exactly within each sim.
+
+    Args:
+        env: Any environment whose RobotData implements
+            ``angular_momentum_w``.
+        sensor_name: Sensor identifier for sims that need one (mjlab).
+            Required for mjlab; ignored by Newton.
+        entity_name: Name of the entity to query. Default ``"robot"``.
+
+    Returns:
+        Tensor of shape ``(num_envs,)``.
+    """
+    angmom = env.get_robot_data(entity_name).angular_momentum_w(sensor_name=sensor_name)
+    return -torch.sum(torch.square(angmom), dim=-1)
+
+
 def raw_action_rate_l2(env: World) -> torch.Tensor:
     """Penalize the rate of change of raw actions (L2 squared, sim-agnostic).
 

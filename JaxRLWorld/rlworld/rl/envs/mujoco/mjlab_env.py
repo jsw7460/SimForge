@@ -165,6 +165,7 @@ class MujocoEnv(World):
             joint_ids=indexing.sim_indices,
             num_envs=self.num_envs,
             device=self.device,
+            env=self,
         )
 
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")

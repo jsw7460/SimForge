@@ -178,15 +178,117 @@ class NewtonRobotData:
     def body_ang_vel_w(self, body_index: int) -> Tensor:
         """World-frame angular velocity of a single body.
 
-        Reads ``state.body_qd`` (shape flattened across worlds), reshapes
-        to ``(num_envs, bodies_per_env, 6)``, and indexes the (3:6) slice
-        which holds angular velocity in world frame.
+        Thin wrapper around :attr:`body_ang_vel_w_all` that selects one
+        body from the batched view. Kept for backward compatibility with
+        Phase D-2 callers.
+        """
+        return self.body_ang_vel_w_all[:, body_index, :]
+
+    # ------------------------------------------------------------------
+    # Batched per-body reads
+    # ------------------------------------------------------------------
+
+    def _body_q_view(self) -> Tensor:
+        """Helper: state.body_q reshaped to (num_envs, bodies_per_env, 7).
+
+        Newton stores body_q as a flat ``wp.array[wp.transform]`` across
+        all worlds. The standard JaxRLWorld setup replicates the same
+        body layout per world, so a simple ``view(...)`` is correct.
+        Each transform is ``(pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w)``
+        — note Newton's native quaternion is **xyzw**.
         """
         from rlworld.rl.envs.utils.newton.body_cache import get_cache
         cache = get_cache(self._env)
         state = self._env.scene_manager.state
-        body_qd = wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
-        return body_qd[:, body_index, 3:6]
+        return wp.to_torch(state.body_q).view(self._env.num_envs, cache.bodies_per_env, 7)
+
+    def _body_qd_view(self) -> Tensor:
+        """Helper: state.body_qd reshaped to (num_envs, bodies_per_env, 6).
+
+        Newton stores body_qd as flat ``wp.array[wp.spatial_vector]``.
+        Each spatial_vector is ``(lin.x, lin.y, lin.z, ang.x, ang.y, ang.z)``
+        — linear velocity first, then angular, both world frame.
+        """
+        from rlworld.rl.envs.utils.newton.body_cache import get_cache
+        cache = get_cache(self._env)
+        state = self._env.scene_manager.state
+        return wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
+
+    @property
+    def body_pos_w_all(self) -> Tensor:
+        """World-frame positions of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
+        return self._body_q_view()[:, :, 0:3]
+
+    @property
+    def body_quat_w_all(self) -> Tensor:
+        """World-frame orientations of all bodies, wxyz. Shape ``(num_envs, num_bodies, 4)``.
+
+        Newton stores quaternions as xyzw natively (positions 3..7 of
+        the transform). We reorder to wxyz canonical via index gather.
+        """
+        body_q = self._body_q_view()
+        quat_xyzw = body_q[:, :, 3:7]
+        # xyzw -> wxyz
+        return quat_xyzw[..., [3, 0, 1, 2]]
+
+    @property
+    def body_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
+        return self._body_qd_view()[:, :, 0:3]
+
+    @property
+    def body_ang_vel_w_all(self) -> Tensor:
+        """World-frame angular velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
+        return self._body_qd_view()[:, :, 3:6]
+
+    # ------------------------------------------------------------------
+    # Aggregate quantities
+    # ------------------------------------------------------------------
+
+    def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:
+        """Whole-body angular momentum (world frame) via manual ``sum_i I_i @ omega_i``.
+
+        Reads ``model.body_inertia`` (per-body 3x3 in body-local frame)
+        and the current state's per-body world quaternion + angular
+        velocity. For each body:
+
+            omega_body = quat_inverse_rotate(quat_world, omega_world)
+            L_body = I_body @ omega_body
+            L_world = quat_rotate(quat_world, L_body)
+
+        then sums L_world across all bodies.
+
+        The body-frame quat rotation uses Newton's native xyzw helper to
+        be bit-identical to the legacy ``angular_momentum_penalty`` reward
+        in ``mdp/rewards/newton/mjlab_rewards.py``. ``sensor_name`` is
+        ignored (Newton has no built-in angular momentum sensor).
+        """
+        from rlworld.rl.envs.mdp.observations.newton.state import (
+            _quat_rotate_inverse,
+            _quat_rotate,
+        )
+        from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
+        cache = get_cache(self._env)
+        num_envs = self._env.num_envs
+
+        # Reshape model.body_inertia (flat) -> (num_envs, bodies_per_env, 3, 3)
+        body_inertia = wp.to_torch(self._env.scene_manager.model.body_inertia).view(
+            num_envs, cache.bodies_per_env, 3, 3
+        )
+
+        # Body quat (xyzw, native Newton order) and ang vel from the state.
+        body_q = self._body_q_view()
+        body_qd = self._body_qd_view()
+        body_quat_xyzw = body_q[:, :, 3:7]
+        ang_vel_world = body_qd[:, :, 3:6]
+
+        # I @ omega in body frame, then rotate back to world.
+        ang_vel_body = _quat_rotate_inverse(body_quat_xyzw, ang_vel_world)
+        ang_momentum_body = torch.einsum("nbij,nbj->nbi", body_inertia, ang_vel_body)
+        ang_momentum_world = _quat_rotate(body_quat_xyzw, ang_momentum_body)
+
+        return torch.sum(ang_momentum_world, dim=1)  # (num_envs, 3)
 
     # ------------------------------------------------------------------
     # Write helpers (used by event terms, scene reset)
