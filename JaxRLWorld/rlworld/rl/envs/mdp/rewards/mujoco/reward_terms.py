@@ -104,11 +104,15 @@ def action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
 
 
 def raw_action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
-    """Penalize the rate of change of the actions using L2 squared kernel."""
-    return -torch.sum(
-        torch.square(env.act_manager.raw_actions - env.act_manager.prev_raw_actions),
-        dim=1
+    """Penalize the rate of change of raw actions (L2 squared).
+
+    Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
+    pure-Python ``act_manager`` arithmetic, no scene-state involved.
+    """
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+        raw_action_rate_l2 as _common_fn,
     )
+    return _common_fn(env)
 
 
 def joint_pos_limits(

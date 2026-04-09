@@ -258,6 +258,23 @@ def base_height_penalty(env: World, entity_name: str = "robot") -> torch.Tensor:
     return -torch.square(height_z - env.command_manager.base_height)
 
 
+def raw_action_rate_l2(env: World) -> torch.Tensor:
+    """Penalize the rate of change of raw actions (L2 squared, sim-agnostic).
+
+    Reads ``env.act_manager.raw_actions`` and ``prev_raw_actions``, both
+    pure act_manager state with no scene-state dependency. The result is
+    bit-identical across all simulators because it touches no
+    physics/RobotData state.
+
+    Returns:
+        Tensor of shape ``(num_envs,)`` — negative L2-squared difference.
+    """
+    return -torch.sum(
+        torch.square(env.act_manager.raw_actions - env.act_manager.prev_raw_actions),
+        dim=1,
+    )
+
+
 def penalize_body_ang_vel_xy(
     env: World,
     body_name: str,

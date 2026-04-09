@@ -1,15 +1,14 @@
 import torch
 import warp as wp
 
-from genesis import quat_to_xyz
 from rlworld.rl.envs import NewtonEnv, NewtonLocomotionEnv
 from rlworld.rl.envs.mdp.observations.newton import state, proprioception
 from rlworld.rl.envs.mdp.observations.newton.body_utils import (
     get_bodies_height_with_contact,
+    get_bodies_pos,
 )
-from rlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_pos, get_bodies_quat
 from rlworld.rl.envs.mdp.observations.newton.proprioception import projected_gravity
-from rlworld.rl.envs.mdp.observations.newton.state import base_ang_vel, _quat_rotate_inverse
+from rlworld.rl.envs.mdp.observations.newton.state import base_ang_vel
 from rlworld.rl.envs.utils.newton.body_cache import get_cache
 from rlworld.rl.utils import string as string_utils
 
@@ -122,103 +121,6 @@ def reward_feet_air_time(
     is_moving = torch.norm(command_vel, dim=-1) > command_threshold
 
     return reward * is_moving * (env.termination_manager.episode_length_buf > 5)
-
-
-def penalize_feet_swing_height(
-    env: "NewtonLocomotionEnv",
-    max_height: float = 0.08,
-    profile: str = "sine",
-    foot_offset: float = 0.0,
-) -> torch.Tensor:
-    """Penalize feet height error during actual swing (not in contact).
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-        foot_offset: Distance from link origin to foot bottom (meters).
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-    feet_bodies = env.gait_manager.foot_names
-    result = get_bodies_height_with_contact(env, feet_bodies)
-
-    feet_height = result.data - foot_offset
-    target_height = env.gait_manager.get_target_foot_height(max_height, profile)
-
-    is_contact = env.contact_manager.is_contact("foot_contact")[:, result.contact_indices]
-    is_swing = ~is_contact
-
-    height_error = torch.square(feet_height - target_height) * is_swing.float()
-
-    return -torch.sum(height_error, dim=-1)
-
-
-def penalize_feet_swing_height_gait(
-    env: "NewtonLocomotionEnv",
-    max_height: float = 0.08,
-    profile: str = "sine",
-    foot_offset: float = 0.0,
-    penalty_offset: float = 0.0
-) -> torch.Tensor:
-    """Penalize feet height error during commanded swing phase.
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-        foot_offset: Distance from link origin to foot bottom (meters).
-        penalty_offset: Will be added to the final penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-    feet_bodies = env.gait_manager.foot_names
-    result = get_bodies_height_with_contact(env, feet_bodies)
-
-    feet_height = result.data - foot_offset
-    target_height = env.gait_manager.get_target_foot_height(max_height, profile)
-    swing_mask = env.gait_manager.get_swing_mask()
-
-    height_error = torch.square(feet_height - target_height) * swing_mask.float()
-
-    return -torch.sum(height_error, dim=-1) + penalty_offset
-
-
-def reward_feet_swing_height_gait_exp(
-    env: "NewtonLocomotionEnv",
-    max_height: float = 0.08,
-    profile: str = "sine",
-    foot_offset: float = 0.0,
-    sigma: float = 0.01,
-) -> torch.Tensor:
-    """Reward feet height tracking during commanded swing phase (Gaussian kernel).
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-        foot_offset: Distance from link origin to foot bottom (meters).
-        sigma: Gaussian kernel width (smaller = stricter).
-
-    Returns:
-        Reward tensor of shape (num_envs,).
-    """
-    feet_bodies = env.gait_manager.foot_names
-    result = get_bodies_height_with_contact(env, feet_bodies)
-
-    feet_height = result.data - foot_offset
-    target_height = env.gait_manager.get_target_foot_height(max_height, profile)
-    swing_mask = env.gait_manager.get_swing_mask()
-
-    height_error_sq = torch.square(feet_height - target_height)
-
-    # Per-foot Gaussian reward, averaged over swing feet
-    per_foot_reward = torch.exp(-height_error_sq / sigma) * swing_mask.float()
-    swing_count = swing_mask.float().sum(dim=-1).clamp(min=1)
-
-    return per_foot_reward.sum(dim=-1) / swing_count
 
 
 def reward_feet_height_exp(
@@ -368,22 +270,6 @@ def penalize_nonflat_by_gravity(env: "NewtonEnv") -> torch.Tensor:
     return -torch.sum(torch.square(proj_gravity[:, :2]), dim=-1)
 
 
-def reward_flat_by_gravity_exp(env: "NewtonEnv", sigma: float = 0.1) -> torch.Tensor:
-    """Reward flat orientation using projected gravity (Gaussian kernel)."""
-    proj_gravity = projected_gravity(env)  # (num_envs, 3)
-
-    error_sq = torch.sum(torch.square(proj_gravity[:, :2]), dim=-1)
-    return torch.exp(-error_sq / sigma)
-
-
-def penalize_nonflat_by_gravity_exp(env: "NewtonEnv") -> torch.Tensor:
-    """Penalize non-flat orientation using projected gravity."""
-
-    proj_gravity = projected_gravity(env)  # (num_envs, 3)
-
-    return torch.exp(-torch.sum(torch.square(proj_gravity[:, :2]), dim=-1))
-
-
 def penalize_hip_deviation(
     env: "NewtonEnv",
     hip_joints: str | tuple[str, ...],
@@ -399,135 +285,6 @@ def penalize_hip_deviation(
     nominal = env.act_manager.offset[:, indices]
 
     return -torch.sum(torch.square(dof - nominal), dim=-1)
-
-def penalize_joint_deviation_l1(
-    env: "NewtonEnv",
-    joints: str | tuple[str, ...],
-    penalty_offset: float = 0.0
-):
-    """Penalize joint positions that deviate from the default one (L1 norm).
-
-        Args:
-            env: Genesis environment.
-            joints: Joint name(s) or regex pattern(s).
-            penalty_offset: Penalty offset.
-
-        Returns:
-            Penalty tensor of shape (num_envs,).
-    """
-    actuated_joint_names = env.act_manager._actuated_joint_names
-
-    indices_in_actuated, _ = string_utils.resolve_matching_names(
-        joints, actuated_joint_names
-    )
-
-    dof_pos = proprioception.dof_pos(env)
-    default_pos = env.act_manager.offset
-
-    deviation = dof_pos[:, indices_in_actuated] - default_pos[:, indices_in_actuated]
-    return -torch.sum(torch.abs(deviation), dim=-1) + penalty_offset
-
-
-def penalize_dof_vel(env: "NewtonEnv") -> torch.Tensor:
-    """Penalize joint velocities.
-
-    Delegates to ``common.penalize_dof_vel``. Bit-identical: same data path
-    (actuated joint velocities), same formula ``-sum(square(joint_vel))``.
-    """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_dof_vel as _common_pen_dof_vel
-    return _common_pen_dof_vel(env)
-
-
-def penalize_dof_pos_limits(env: "NewtonEnv", soft_joint_pos_limit_factor: float = 1.0) -> torch.Tensor:
-    """Penalize joint positions exceeding limits."""
-    model = env.scene_manager.model
-    num_worlds = model.num_worlds
-    dofs_per_world = model.joint_dof_count // num_worlds
-
-    dof_pos = proprioception.dof_pos(env)  # (num_envs, num_actuated)
-
-    # Limits are indexed by qd (velocity DOF)
-    lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
-    upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
-
-    lower = lower_all[env.act_manager.actuated_qd_indices] * soft_joint_pos_limit_factor
-    upper = upper_all[env.act_manager.actuated_qd_indices] * soft_joint_pos_limit_factor
-
-    # Violation amounts
-    out_of_limits = -(dof_pos - lower).clamp(max=0.0)  # below lower
-    out_of_limits += (dof_pos - upper).clamp(min=0.0)  # above upper
-
-    return -torch.sum(out_of_limits, dim=-1)
-
-
-def reward_gait_pattern(env: "NewtonLocomotionEnv") -> torch.Tensor:
-    """Reward for matching desired gait pattern.
-
-    Encourages feet to follow the gait phase:
-    - Swing phase: foot should NOT be in contact
-    - Stance phase: foot SHOULD be in contact
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-
-    Returns:
-        Reward tensor [num_envs], range [0, 1].
-    """
-    feet_bodies = env.gait_manager.foot_names
-
-    result = get_bodies_height_with_contact(env, feet_bodies)
-
-    is_contact = env.contact_manager.is_contact("foot_contact")[:, result.contact_indices]
-    swing_mask = env.gait_manager.get_swing_mask()
-
-    correct_swing = ~is_contact & swing_mask
-    correct_stance = is_contact & ~swing_mask
-
-    num_correct = torch.sum(correct_swing.float() + correct_stance.float(), dim=-1)
-    num_feet = swing_mask.shape[-1]
-
-    return num_correct / num_feet
-
-
-def reward_alive(env: "NewtonEnv") -> torch.Tensor:
-    """Constant alive reward. Delegates to ``common.reward_alive`` (bit-identical)."""
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import reward_alive as _common_reward_alive
-    return _common_reward_alive(env)
-
-
-def penalize_base_acc(
-    env: "NewtonEnv",
-    base_body: str = "base",
-    penalize_offset: float = 0.0
-) -> torch.Tensor:
-    """Penalize base body acceleration.
-
-    NOTE: Requires body_qdd to be requested via model.request_state_attributes("body_qdd").
-          This is automatically done when IMU sensor is configured.
-
-    Args:
-        env: Newton environment.
-        base_body: Name of the base body.
-        penalize_offset: Will be added to the final penalty.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-    state = env.scene_manager.state
-
-    if state.body_qdd is None:
-        raise RuntimeError(
-            "body_qdd not available. Add IMU sensor or call "
-            "model.request_state_attributes('body_qdd') before finalize."
-        )
-
-    cache = get_cache(env)
-    body_indices = cache.get_body_indices(base_body)
-
-    body_qdd = wp.to_torch(state.body_qdd).reshape(env.num_envs, cache.bodies_per_env, 6)
-    base_acc = body_qdd[:, body_indices[0], :3]  # (num_envs, 3) [Linear acc]
-
-    return -torch.sum(torch.square(base_acc), dim=-1) + penalize_offset
 
 
 def penalize_feet_slip(
@@ -569,23 +326,6 @@ def penalize_feet_slip(
     # Skip first episode step
     penalty = penalty * (env.termination_manager.episode_length_buf > 1).float()
     return -penalty + penalty_offset
-
-
-def penalize_feet_stance_height(
-    env: "NewtonLocomotionEnv",
-    threshold: float = 0.02,
-) -> torch.Tensor:
-    """Penalize feet height during commanded stance phase."""
-    feet_bodies = env.gait_manager.foot_names
-    result = get_bodies_height_with_contact(env, feet_bodies)
-
-    feet_height = result.data
-    stance_mask = ~env.gait_manager.get_swing_mask()
-
-    height_violation = (feet_height - threshold).clamp(min=0.0)
-    penalty = torch.square(height_violation) * stance_mask.float()
-
-    return -torch.sum(penalty, dim=-1)
 
 
 # ── Walk-These-Ways reward terms (Newton) ────────────────────────────────
@@ -734,140 +474,3 @@ def wtw_collision(
     return -torch.sum((force_mag > force_threshold).float(), dim=-1)
 
 
-def penalize_feet_yaw_mean_deviation(
-    env: "NewtonEnv",
-    feet_bodies: str | list[str],
-) -> torch.Tensor:
-    """Penalize deviation between base yaw and mean feet yaw.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Body name pattern(s) for feet.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-
-    result = get_bodies_quat(env, feet_bodies)
-
-    feet_quat_xyzw = result.data  # (num_envs, num_feet, 4)
-    feet_quat_wxyz = feet_quat_xyzw[..., [3, 0, 1, 2]]
-    feet_yaw = quat_to_xyz(feet_quat_wxyz, rpy=True, degrees=False)[..., 2]  # (num_envs, num_feet)
-
-    mean = feet_yaw.mean(-1) + torch.pi * (torch.abs(feet_yaw[:, 1] - feet_yaw[:, 0]) > torch.pi).float()
-
-    base_quat_xyzw = state.base_quat(env)
-    base_quat_wxyz = base_quat_xyzw[..., [3, 0, 1, 2]]
-    base_yaw = quat_to_xyz(base_quat_wxyz, rpy=True, degrees=False)[:, 2]
-
-    error = (base_yaw - mean + torch.pi) % (2 * torch.pi) - torch.pi
-    return -torch.square(error)
-
-
-def penalize_feet_yaw_difference(
-    env: "NewtonEnv",
-    feet_bodies: tuple[str, str],
-) -> torch.Tensor:
-    """Penalize yaw difference between two feet.
-
-    For bipedal robots - encourages feet to point in the same direction.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Exactly 2 foot body names.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-
-    if len(feet_bodies) != 2:
-        raise ValueError("feet_bodies must have exactly 2 elements")
-
-    result = get_bodies_quat(env, list(feet_bodies))
-    feet_quat_xyzw = result.data  # (num_envs, 2, 4)
-    feet_quat_wxyz = feet_quat_xyzw[..., [3, 0, 1, 2]]
-
-    feet_yaw = quat_to_xyz(feet_quat_wxyz, rpy=True, degrees=False)[..., 2]  # (num_envs, 2)
-
-    yaw0 = feet_yaw[:, 0]
-    yaw1 = feet_yaw[:, 1]
-
-    # Wrapped difference
-    yaw_diff = (yaw0 - yaw1 + torch.pi) % (2 * torch.pi) - torch.pi
-
-    return -torch.square(yaw_diff)
-
-
-def penalize_feet_distance(
-    env: "NewtonEnv",
-    feet_bodies: tuple[str, str] | list[str],
-    feet_distance_ref: float,
-) -> torch.Tensor:
-    """Penalize feet lateral distance deviating from target.
-
-    Measures left-right distance between feet relative to robot's heading,
-    ignoring forward-backward separation.
-
-    Args:
-        env: Newton environment.
-        feet_bodies: Exactly 2 foot body names.
-        feet_distance_ref: Target lateral distance (meters).
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-    result = get_bodies_pos(env, list(feet_bodies))
-    feet_pos_world = result.data  # (num_envs, 2, 3)
-
-    base_quat = state.base_quat(env)  # (num_envs, 4)
-
-    # Transform to body frame
-    feet_pos_body = _quat_rotate_inverse(
-        base_quat.unsqueeze(1),  # (num_envs, 1, 4)
-        feet_pos_world  # (num_envs, 2, 3)
-    )  # (num_envs, 2, 3)
-
-    # Lateral distance = y-component difference in body frame
-    lateral_distance = torch.abs(feet_pos_body[:, 1, 1] - feet_pos_body[:, 0, 1])
-
-    return -torch.clamp(feet_distance_ref - lateral_distance, min=0.0, max=0.1)
-
-
-def penalize_swing_height_by_velocity(
-    env: "NewtonLocomotionEnv",
-    max_height: float = 0.1,
-    profile: str = "sine",
-) -> torch.Tensor:
-    """Penalize feet height error weighted by horizontal velocity during swing.
-
-    Feet moving fast horizontally should maintain target height.
-    Feet moving slow (stance-like) receive less penalty.
-
-    Args:
-        env: Newton locomotion environment with gait_manager.
-        max_height: Peak foot height during swing (meters).
-        profile: Height profile ("sine" or "cosine").
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-    cache = get_cache(env)
-    state = env.scene_manager.state
-
-    feet_bodies = env.gait_manager.foot_names
-    result = get_bodies_height_with_contact(env, feet_bodies)
-
-    # Feet height and target
-    feet_height = result.data  # (num_envs, num_feet)
-    target_height = env.gait_manager.get_target_foot_height(max_height, profile)
-
-    # Feet xy velocity magnitude
-    body_qd = wp.to_torch(state.body_qd).reshape(env.num_envs, cache.bodies_per_env, 6)
-    feet_vel_xy = body_qd[:, result.body_indices, :2]  # (num_envs, num_feet, 2)
-    vel_norm = torch.sqrt(torch.sum(torch.square(feet_vel_xy), dim=-1))  # (num_envs, num_feet)
-
-    # Height error weighted by velocity
-    height_error = torch.abs(feet_height - target_height)
-    penalty = height_error * vel_norm
-
-    return -torch.sum(penalty, dim=-1)

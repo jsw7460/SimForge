@@ -4,8 +4,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from genesis import inv_quat, transform_by_quat, transform_quat_by_quat, quat_to_xyz
-from genesis.engine.entities import RigidEntity
+from genesis import inv_quat, transform_by_quat
 from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
 from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils import entity_utils as eu
@@ -60,42 +59,6 @@ def base_height(env: GenesisEnv) -> torch.Tensor:
     """
     from rlworld.rl.envs.mdp.rewards.common.reward_terms import base_height_penalty as _common_base_height_penalty
     return _common_base_height_penalty(env)
-
-
-def adaptive_base_height(env: GenesisEnv) -> torch.Tensor:
-    """Penalty for deviating from target base height above terrain
-           Returns negative squared error from desired base height above local terrain"""
-
-    base_pos = state.base_pos(env)
-
-    # Get terrain height at robot's current x, y position
-    terrain: RigidEntity = env.scene_manager["base_entity"]
-    terrain_geom = terrain.geoms[0]
-    height_field = terrain_geom.metadata["height_field"]
-    terrain_morph = terrain.morph
-
-    # Convert to tensor if needed
-    if not isinstance(height_field, torch.Tensor):
-        height_field = torch.tensor(height_field, dtype=torch.float32, device=env.device)
-
-    # Convert robot positions to heightfield indices
-    horizontal_scale = terrain_morph.horizontal_scale
-    vertical_scale = terrain_morph.vertical_scale
-
-    indices_x = (base_pos[:, 0] / horizontal_scale).long()
-    indices_y = (base_pos[:, 1] / horizontal_scale).long()
-
-    # Clamp to valid range
-    indices_x = torch.clamp(indices_x, 0, height_field.shape[0] - 1)
-    indices_y = torch.clamp(indices_y, 0, height_field.shape[1] - 1)
-
-    # Get terrain height at robot position
-    terrain_heights = height_field[indices_x, indices_y] * vertical_scale
-
-    # Calculate height above terrain
-    height_above_terrain = base_pos[:, 2] - terrain_heights
-    # Penalize deviation from desired height above terrain
-    return -torch.square(height_above_terrain - env.command_manager.base_height)
 
 
 def action_rate(env: GenesisEnv) -> torch.Tensor:
@@ -226,79 +189,7 @@ def penalize_torques(env: GenesisEnv, entity_name: str = "robot"):
     return - torch.sum(torch.square(torque), dim=-1)
 
 
-def penalize_dof_vel(env: GenesisEnv, entity_name: str = "robot"):
-    """Penalize joint velocities.
-
-    Delegates to ``common.penalize_dof_vel``. Bit-identical: same data path
-    (actuated joint velocities via the same actuated_dof_ids), same formula
-    ``-sum(square(joint_vel))``.
-    """
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import penalize_dof_vel as _common_pen_dof_vel
-    return _common_pen_dof_vel(env, entity_name=entity_name)
-
-def penalize_dof_acc(env: GenesisEnv, entity_name: str = "robot"):
-    """Todo"""
-
-
-def penalize_base_acc(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base"):
-    entity = env.scene_manager[entity_name]
-    base_idx_local = entity.get_link(base_name).idx_local
-    base_acc = entity.get_links_acc(base_idx_local).squeeze(1)
-    return - torch.sum(torch.square(base_acc), dim=-1)
-
-
-def penalize_dof_pos_limits(env: GenesisEnv):
-    """Todo"""
-
-
-def penalize_dof_vel_limits(env: GenesisEnv):
-    """Todo"""
-
-
-def penalize_torque_limits(env: GenesisEnv, entity_name: str = "robot", soft_torque_limit: float = 1.0):
-    """Maybe not required: Genesis internally clips torque limits."""
-
-
-def penalize_power(env: GenesisEnv, entity_name: str = "robot"):
-    entity = env.scene_manager[entity_name]
-    torque = entity.get_dofs_control_force(env.act_manager.actuated_dof_ids)
-    velocity = entity.get_dofs_velocity(env.act_manager.actuated_dof_ids)
-
-    return -torch.sum((torque * velocity).clip(min=0.0), dim=-1)
-
-
 @EnvStepCache()
-def feet_rpy(
-    env: GenesisEnv,
-    feet_links: tuple[str, ...],
-    entity_name: str = "robot"
-):
-    entity = env.scene_manager[entity_name]
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
-
-    # Get feet quaternions (world frame)
-    feet_quat_world = entity.get_links_quat(links_idx_local=links_idx_local)  # [n_envs, n_feet, 4]
-
-    # Get base quaternion
-    base_quat = state.base_quat(env)  # [n_envs, 4]
-    inv_base_quat = inv_quat(base_quat)  # [n_envs, 4]
-
-    # Transform to body frame (vectorized!)
-    # Broadcasting: [n_envs, 1, 4] * [n_envs, n_feet, 4] -> [n_envs, n_feet, 4]
-    feet_quat_body = transform_quat_by_quat(
-        inv_base_quat.unsqueeze(1),  # [n_envs, 1, 4]
-        feet_quat_world  # [n_envs, n_feet, 4]
-    )  # [n_envs, n_feet, 4]
-
-    # Convert to RPY in body frame
-    feet_rpy_body = quat_to_xyz(
-        feet_quat_body,
-        rpy=True,
-        degrees=False
-    )
-
-    return feet_rpy_body
-
 
 def penalize_feet_slip(
     env: GenesisEnv,
@@ -336,137 +227,6 @@ def penalize_feet_slip(
     # Skip first episode step if needed
     penalty = penalty * (env.termination_manager.episode_length_buf > 1).float()
     return -penalty
-
-
-def penalize_feet_roll(
-    env: GenesisEnv,
-    feet_links: tuple[str, ...],
-    entity_name: str = "robot"
-) -> torch.Tensor:
-    """
-    Penalize roll angle of feet in body frame.
-    Encourages feet to stay flat relative to robot's orientation.
-    """
-    feet_rpy_body_frame = feet_rpy(env, feet_links, entity_name)
-
-    # Penalize roll component
-    feet_roll = feet_rpy_body_frame[..., 0]  # [n_envs, n_feet]
-    return -torch.sum(torch.square(feet_roll), dim=-1)
-
-
-def penalize_feet_yaw_difference(
-    env: GenesisEnv,
-    feet_links: tuple[str, str],
-    entity_name: str = "robot"
-) -> torch.Tensor:
-    """
-    This is for humanoid bipedal robot.
-    Penalize yaw difference between two feet.
-
-    Args:
-        env: Locomotion environment
-        feet_links: Exactly 2 foot link names (e.g., ("FL_foot", "FR_foot"))
-        entity_name: Name of the robot entity
-
-    Returns:
-        Penalty values for each environment (shape: [n_envs])
-    """
-
-    feet_rpy_body = feet_rpy(env, feet_links, entity_name)  # [num_envs, 2, 3]
-    feet_yaw = feet_rpy_body[..., 2]  # [num_envs, 2]
-
-    if feet_yaw.shape[-1] != 2:
-        raise ValueError("Feet yaw difference between two feet")
-
-    yaw0 = feet_yaw[:, 0]  # [num_envs]
-    yaw1 = feet_yaw[:, 1]  # [num_envs]
-
-    # Wrapped difference
-    yaw_diff = (yaw0 - yaw1 + torch.pi) % (2 * torch.pi) - torch.pi
-
-    return -torch.square(yaw_diff)
-
-
-def penalize_feet_yaw_mean_deviation(env, feet_links: tuple[str, ...], entity_name="robot"):
-    # This is calculated in world frame
-    entity = env.scene_manager[entity_name]
-    links_idx, _ = eu.find_links(entity, list(feet_links), global_ids=False)
-
-    feet_quat = entity.get_links_quat(links_idx_local=links_idx)
-    feet_yaw = quat_to_xyz(feet_quat, rpy=True, degrees=False)[..., 2]
-
-    mean = feet_yaw.mean(-1) + torch.pi * (torch.abs(feet_yaw[:, 1] - feet_yaw[:, 0]) > torch.pi).float()
-    base_yaw = quat_to_xyz(state.base_quat(env), rpy=True, degrees=False)[:, 2]
-    error = (base_yaw - mean + torch.pi) % (2 * torch.pi) - torch.pi
-
-    return -torch.square(error)
-
-
-def penalize_feet_distance(
-    env: GenesisEnv,
-    feet_links: tuple[str, str],
-    feet_distance_ref: float,
-    entity_name: str = "robot"
-) -> torch.Tensor:
-    """
-    Reward feet maintaining target lateral distance in body frame.
-
-    Measures left-right distance between feet relative to robot's heading,
-    ignoring forward-backward separation.
-    """
-    entity = env.scene_manager[entity_name]
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
-
-    # Get feet positions and transform to body frame
-    feet_pos_world = entity.get_links_pos(links_idx_local=links_idx_local)
-    base_quat = state.base_quat(env)
-
-    # Transform: [num_envs, 2, 3] with broadcasting
-    feet_pos_body = transform_by_quat(
-        feet_pos_world,
-        inv_quat(base_quat).unsqueeze(1)
-    )
-
-    # Lateral distance = y-component difference in body frame
-    lateral_distance = torch.abs(feet_pos_body[:, 1, 1] - feet_pos_body[:, 0, 1])
-
-    # Reward proximity to target distance
-    return - torch.clamp(feet_distance_ref - lateral_distance, min=0.0, max=0.1)
-
-
-def reward_gait_pattern(
-    env: GenesisLocomotionEnv,
-    entity_name: str = "robot"
-) -> torch.Tensor:
-    """Reward for matching desired gait pattern.
-
-    Encourages feet to follow the gait phase:
-    - Swing phase: foot should NOT be in contact
-    - Stance phase: foot SHOULD be in contact
-
-    Args:
-        env: Locomotion environment with gait_manager.
-        entity_name: Name of the robot entity.
-
-    Returns:
-        Reward tensor [num_envs], range [0, 1].
-    """
-    feet_links = tuple(env.gait_manager.foot_names)
-
-    # Get contact state and desired gait phase
-    is_contact = state.contact_indicator(env, entity_name=entity_name, links=feet_links).bool()
-    swing_mask = env.gait_manager.get_swing_mask()  # [num_envs, num_feet]
-
-    # Check correctness for both swing and stance
-    correct_swing = ~is_contact & swing_mask  # Should be airborne
-    correct_stance = is_contact & ~swing_mask  # Should be grounded
-
-    # Count correct feet
-    num_correct = torch.sum(correct_swing.float() + correct_stance.float(), dim=-1)
-
-    # Normalize to [0, 1]
-    num_feet = swing_mask.shape[-1]
-    return num_correct / num_feet
 
 
 def reward_feet_air_time(
@@ -546,40 +306,6 @@ def penalize_impact_force(
     return -torch.sum(forces * first_contact.float(), dim=-1)
 
 
-def reward_alive(env: GenesisEnv) -> torch.Tensor:
-    """Constant alive reward. Delegates to ``common.reward_alive`` (bit-identical)."""
-    from rlworld.rl.envs.mdp.rewards.common.reward_terms import reward_alive as _common_reward_alive
-    return _common_reward_alive(env)
-
-
-def penalize_joint_deviation_l1(
-    env: GenesisEnv,
-    joints: str | list[str],
-) -> torch.Tensor:
-    """Penalize joint positions that deviate from the default one (L1 norm).
-
-    Args:
-        env: Genesis environment.
-        joints: Joint name(s) or regex pattern(s).
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
-    """
-    actuated_joint_names = env.act_manager._actuated_joint_names
-
-    indices_in_actuated, _ = string_utils.resolve_matching_names(
-        joints, actuated_joint_names
-    )
-
-    dof_pos = proprioception.dof_pos(env)
-    default_pos = env.act_manager.offset
-
-    deviation = dof_pos[:, indices_in_actuated] - default_pos[:, indices_in_actuated]
-
-    return -torch.sum(torch.abs(deviation), dim=-1)
-
-
-
 def penalize_hip_deviation(
     env: GenesisEnv,
     hip_joints: str | tuple[str, ...]
@@ -602,40 +328,6 @@ def penalize_hip_deviation(
     nominal_pos = env.act_manager.offset[:, indices]
 
     return -torch.sum(torch.square(dof_pos - nominal_pos), dim=-1)
-
-
-def penalize_hip_deviation_huber(
-    env: GenesisEnv,
-    hip_joints: str | tuple[str, ...],
-    threshold: float = 0.3,
-) -> torch.Tensor:
-    """
-    Penalize hip joint angles deviating from nominal pose (Huber loss).
-
-    Below threshold: gentle quadratic penalty
-    Above threshold: linear penalty
-
-    Args:
-        env: GenesisEnv instance
-        hip_joints: Joint name pattern (supports regex) or tuple of names
-        threshold: Deviation threshold for switching from quadratic to linear
-    """
-    indices, _ = string_utils.resolve_matching_names(
-        hip_joints,
-        env.act_manager._actuated_joint_names
-    )
-
-    dof_pos = proprioception.dof_pos(env)[:, indices]
-    nominal_pos = env.act_manager.offset[:, indices]
-
-    error = torch.abs(dof_pos - nominal_pos)
-    penalty = torch.where(
-        error < threshold,
-        0.5 * torch.square(error) / threshold,
-        error - 0.5 * threshold
-    )
-
-    return -torch.sum(penalty, dim=-1)
 
 
 # ── Walk-These-Ways reward terms (Genesis) ───────────────────────────────

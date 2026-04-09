@@ -614,20 +614,13 @@ def joint_pos_limits_mjlab(
 # ============================================================
 
 def raw_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:
-    """Penalize the rate of change of raw actions using L2 squared kernel.
+    """Penalize the rate of change of raw actions (L2 squared).
 
-    Matches mjlab.envs.mdp.action_rate_l2 exactly.
-
-    Args:
-        env: Newton environment.
-
-    Returns:
-        Penalty tensor of shape (num_envs,).
+    Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
+    pure-Python ``act_manager`` arithmetic, no scene-state involved.
     """
-    return -torch.sum(
-        torch.square(env.act_manager.raw_actions - env.act_manager.prev_raw_actions),
-        dim=1
-    )
+    from rlworld.rl.envs.mdp.rewards.common.reward_terms import raw_action_rate_l2
+    return raw_action_rate_l2(env)
 
 def processed_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:
     """Penalize the rate of change of processed actions using L2 squared kernel.
