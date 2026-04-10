@@ -16,7 +16,6 @@ from rlworld.rl.envs.mdp.observations.newton.body_utils import (
 from rlworld.rl.envs.mdp.observations.newton.state import (
     _quat_rotate,
     _quat_rotate_inverse,
-    base_quat,
 )
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
