@@ -43,25 +43,21 @@ from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
 # uses a 2x faster physics step than Newton/Genesis (400 Hz vs 200 Hz).
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005,  "substeps": 2, "decimation": 4},
-    "genesis": {"dt": 0.005,  "substeps": 2, "decimation": 4},
-    "mujoco":  {"dt": 0.0025, "substeps": 1, "decimation": 8},
+    "newton":  {"dt": 0.005, "substeps": 2, "decimation": 4},
+    "genesis": {"dt": 0.005, "substeps": 2, "decimation": 4},
+    "mujoco":  {"dt": 0.005, "substeps": 2, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
     "newton":  "G1_29dof_Newton",
-    "genesis": "mlp_ppo_g1_29dof",
+    "genesis": "G1_29dof_Genesis",
     "mujoco":  "G1_29Dof_Mujoco",
 }
 
-# Per-sim runner overrides preserve the existing (drifted) behavior so
-# we don't accidentally change training. Genesis uses
-# ``init_at_random_ep_len=False`` and a longer ``save_interval``; the
-# others use True and 250.
 _SIM_RUNNER_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "newton":  {"init_at_random_ep_len": True,  "save_interval": 250},
-    "genesis": {"init_at_random_ep_len": False, "save_interval": 1000},
-    "mujoco":  {"init_at_random_ep_len": True,  "save_interval": 250},
+    "newton":  {"init_at_random_ep_len": True,  "save_interval": 1000},
+    "genesis": {"init_at_random_ep_len": True, "save_interval": 1000},
+    "mujoco":  {"init_at_random_ep_len": True,  "save_interval": 1000},
 }
 
 

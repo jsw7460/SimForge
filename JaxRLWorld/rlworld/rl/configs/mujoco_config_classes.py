@@ -37,6 +37,7 @@ class MujocoSceneConfig(BaseConfig):
     The scene manager converts these to mjlab objects internally.
     """
     physics_dt: float = 0.002
+    substeps: int = 1
     num_envs: int = 4096
     env_spacing: float = 2.0
     robot_entity_name: str = "robot"

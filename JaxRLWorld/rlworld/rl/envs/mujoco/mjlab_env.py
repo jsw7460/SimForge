@@ -130,6 +130,7 @@ class MujocoEnv(World):
                 num_envs=self.scene_cfg.num_envs,
                 env_spacing=self.scene_cfg.env_spacing,
                 physics_dt=self.scene_cfg.physics_dt,
+                substeps=getattr(self.scene_cfg, "substeps", 1),
                 entities=getattr(self.scene_cfg, "entities", None),
                 sensors=getattr(self.scene_cfg, "sensors", ()),
                 terrain_type=getattr(self.scene_cfg, "terrain_type", "plane"),
@@ -147,8 +148,12 @@ class MujocoEnv(World):
         )
         self.scene_manager.build_scene()
 
-        # Update physics_dt from simulation
-        self.physics_dt = self.scene_manager.physics_dt
+        # physics_dt stays at the config-level dt (before substep
+        # division), matching Newton's convention. The MuJoCo solver's
+        # actual timestep is dt/substeps, but that's internal to the
+        # scene manager — the env and reward/obs code only sees the
+        # config-level dt × decimation = control_dt.
+        self.physics_dt = self.scene_cfg.physics_dt
         self.control_dt = self.physics_dt * self.decimation
 
     def _build_sim_managers(self) -> None:
@@ -242,9 +247,22 @@ class MujocoEnv(World):
         self.act_manager.apply_actions(processed_actions)
 
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
-        """Reset with mjlab-specific write + forward."""
+        """Reset with mjlab-specific write to sim."""
         super()._reset_idx(env_ids)
 
         if len(env_ids) > 0:
             self.scene_manager.write_data_to_sim()
-            self.scene_manager.forward()
+            # forward() for reset envs is now handled by the
+            # consolidated _post_reset_forward() hook which runs
+            # sim.forward() for ALL envs (reset + non-reset).
+
+    def _post_reset_forward(self) -> None:
+        """Refresh all MuJoCo derived quantities for every environment.
+
+        mjlab's native env calls ``sim.forward()`` once after resets
+        to recompute xpos, xquat, site positions, cvel, and sensor
+        data from the current qpos/qvel — covering both freshly-reset
+        envs and non-reset envs whose kinematics were last updated
+        inside the decimation loop's ``scene.update(dt)`` call.
+        """
+        self.scene_manager.forward()

@@ -351,6 +351,12 @@ class World(ABC):
         self._reset_idx(reset_env_ids)
         self._invalidate_cache()
 
+        # Post-reset forward pass — refresh derived quantities (xpos,
+        # xquat, site positions, sensor data, ...) so the upcoming
+        # observation sees fresh kinematics. Override in backends that
+        # need an explicit FK pass (mjlab: sim.forward()).
+        self._post_reset_forward()
+
         # Advance managers
         self._advance_managers()
         self._update_num_step_calls()
@@ -385,6 +391,22 @@ class World(ABC):
 
     def _pre_termination_hook(self) -> None:
         """Override in subclass for pre-termination logic."""
+        pass
+
+    def _post_reset_forward(self) -> None:
+        """Refresh derived quantities after resets, before observations.
+
+        MuJoCo (mjlab) overrides this to call ``sim.forward()`` which
+        recomputes all derived quantities (xpos, xquat, site positions,
+        sensor data) from the current qpos/qvel. This ensures the
+        observation computed in ``_advance_managers`` sees fresh
+        kinematics for ALL environments — not just the ones that were
+        reset.
+
+        Newton and Genesis do not need this hook because their FK is
+        either evaluated explicitly after writes (Newton ``eval_fk``)
+        or handled internally by ``scene.step()`` (Genesis).
+        """
         pass
 
     def _advance_managers(self) -> None:

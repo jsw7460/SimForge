@@ -51,9 +51,9 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 # uses a 2x faster physics step than Newton/Genesis (400 Hz vs 200 Hz).
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005,  "substeps": 2, "decimation": 4},
-    "genesis": {"dt": 0.005,  "substeps": 2, "decimation": 4},
-    "mujoco":  {"dt": 0.0025, "substeps": 1, "decimation": 8},
+    "newton":  {"dt": 0.005, "substeps": 2, "decimation": 4},
+    "genesis": {"dt": 0.005, "substeps": 2, "decimation": 4},
+    "mujoco":  {"dt": 0.005, "substeps": 2, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
@@ -69,12 +69,9 @@ def _get_sim_builders(sim_type: str):
     Lazy imports avoid loading Newton/Genesis/MuJoCo dependencies that
     aren't installed in every environment.
     """
-    if sim_type == "newton":
-        from . import _newton_builders as mod
-    elif sim_type == "genesis":
-        from . import _genesis_builders as mod
-    elif sim_type == "mujoco":
-        from . import _mujoco_builders as mod
+    if sim_type == "newton":    from . import _newton_builders as mod
+    elif sim_type == "genesis": from . import _genesis_builders as mod
+    elif sim_type == "mujoco":  from . import _mujoco_builders as mod
     else:
         raise ValueError(
             f"Unknown sim_type: {sim_type!r}. "

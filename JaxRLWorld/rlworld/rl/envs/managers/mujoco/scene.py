@@ -32,6 +32,7 @@ class MujocoSceneManagerConfig:
     num_envs: int = 4096
     env_spacing: float = 2.0
     physics_dt: float = 0.002
+    substeps: int = 1
 
     # Entities — unified EntityCfg dict (auto-converted to mjlab)
     entities: dict[str, EntityCfg | GroundPlaneCfg] | None = None
@@ -178,11 +179,12 @@ class MujocoSceneManager(BaseManager):
         if self.config.mjlab_sim_cfg is not None:
             sim_cfg = self.config.mjlab_sim_cfg
         else:
+            substep_dt = self.config.physics_dt / self.config.substeps
             sim_cfg = SimulationCfg(
                 nconmax=self.config.nconmax,
                 njmax=self.config.njmax,
                 mujoco=MujocoCfg(
-                    timestep=self.config.physics_dt,
+                    timestep=substep_dt,
                     iterations=self.config.solver_iterations,
                     ls_iterations=self.config.solver_ls_iterations,
                     ccd_iterations=self.config.ccd_iterations,
@@ -190,7 +192,7 @@ class MujocoSceneManager(BaseManager):
                 contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
             )
 
-        # Update physics dt
+        # Update physics dt (the per-substep dt used by MuJoCo internally)
         self._physics_dt = sim_cfg.mujoco.timestep
 
         # Create simulation
@@ -367,8 +369,16 @@ class MujocoSceneManager(BaseManager):
         )
 
     def step(self) -> None:
-        """Execute a single physics step."""
-        self._sim.step()
+        """Advance physics by one control sub-interval.
+
+        When ``substeps > 1``, executes multiple ``sim.step()`` calls
+        at ``physics_dt / substeps`` each — matching Newton's internal
+        substep loop. The outer ``_step_physics`` decimation loop
+        calls this method ``decimation`` times per action, so the total
+        physics time per action is ``physics_dt × decimation``.
+        """
+        for _ in range(self.config.substeps):
+            self._sim.step()
 
     def forward(self) -> None:
         """Compute forward kinematics."""
