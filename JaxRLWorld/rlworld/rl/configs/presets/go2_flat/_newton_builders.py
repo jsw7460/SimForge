@@ -277,10 +277,15 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
 def build_event(cfg: "Go2FlatConfig") -> EventConfig:
     r = cfg.robot
     from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
-    from rlworld.rl.envs.mdp.events.newton_event_terms import (
-        push_robot as _push_robot_fn,
+    from rlworld.rl.envs.mdp.events.common_event_terms import (
+        push_by_setting_velocity as _push_fn,
         reset_root_state_uniform as _reset_root_fn,
     )
+
+    # Newton stores initial quat in xyzw; convert to wxyz for common API.
+    _iq = _initial_quat()  # wp.quat (xyzw: x, y, z, w)
+    _iq_tuple = tuple(float(v) for v in _iq)  # (x, y, z, w)
+    _default_quat_wxyz = (_iq_tuple[3], _iq_tuple[0], _iq_tuple[1], _iq_tuple[2])
 
     @dataclass
     class _EventsCfg(EventConfig):
@@ -295,6 +300,8 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
                     "yaw": (-3.14, 3.14),
                 },
                 "velocity_range": {},
+                "default_pos": (0.0, 0.0, r.base_init_height),
+                "default_quat_wxyz": _default_quat_wxyz,
             },
         )
         reset_dof_pos = EventTermConfig(
@@ -323,7 +330,7 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
             params={"friction_range": (0.0, 0.05)},
         )
         push_robot = EventTermConfig(
-            func=_push_robot_fn,
+            func=_push_fn,
             mode="interval",
             interval_range_s=(2.0, 20.0),
             params={

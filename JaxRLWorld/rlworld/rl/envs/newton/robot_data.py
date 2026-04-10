@@ -106,16 +106,22 @@ class NewtonRobotData:
         return self.root_quat_wxyz(self._state)
 
     @property
+    def root_link_lin_vel_w(self) -> Tensor:
+        return self.root_lin_vel_w(self._state)
+
+    @property
+    def root_link_ang_vel_w(self) -> Tensor:
+        return self.root_ang_vel_w(self._state)
+
+    @property
     def root_link_lin_vel_b(self) -> Tensor:
         quat_wxyz = self.root_quat_wxyz(self._state)
-        lin_vel_w = self.root_lin_vel_w(self._state)
-        return quat_rotate_inverse_wxyz(quat_wxyz, lin_vel_w)
+        return quat_rotate_inverse_wxyz(quat_wxyz, self.root_link_lin_vel_w)
 
     @property
     def root_link_ang_vel_b(self) -> Tensor:
         quat_wxyz = self.root_quat_wxyz(self._state)
-        ang_vel_w = self.root_ang_vel_w(self._state)
-        return quat_rotate_inverse_wxyz(quat_wxyz, ang_vel_w)
+        return quat_rotate_inverse_wxyz(quat_wxyz, self.root_link_ang_vel_w)
 
     @property
     def projected_gravity_b(self) -> Tensor:

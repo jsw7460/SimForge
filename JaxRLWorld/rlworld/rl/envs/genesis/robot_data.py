@@ -51,16 +51,20 @@ class GenesisRobotData:
         return self._entity.get_quat()  # already wxyz
 
     @property
+    def root_link_lin_vel_w(self) -> Tensor:
+        return self._entity.get_vel()
+
+    @property
+    def root_link_ang_vel_w(self) -> Tensor:
+        return self._entity.get_ang()
+
+    @property
     def root_link_lin_vel_b(self) -> Tensor:
-        quat = self.root_link_quat_w
-        vel_w = self._entity.get_vel()
-        return quat_rotate_inverse_wxyz(quat, vel_w)
+        return quat_rotate_inverse_wxyz(self.root_link_quat_w, self.root_link_lin_vel_w)
 
     @property
     def root_link_ang_vel_b(self) -> Tensor:
-        quat = self.root_link_quat_w
-        ang_w = self._entity.get_ang()
-        return quat_rotate_inverse_wxyz(quat, ang_w)
+        return quat_rotate_inverse_wxyz(self.root_link_quat_w, self.root_link_ang_vel_w)
 
     @property
     def projected_gravity_b(self) -> Tensor:

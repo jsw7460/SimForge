@@ -105,6 +105,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConfi
     """Build scene config with mjlab SceneCfg and SimulationCfg."""
     r = cfg.robot
     physics_dt = timing["dt"]
+    substeps = timing.get("substeps", 1)
 
     # Contact sensor for feet-ground contact
     feet_ground_cfg = ContactSensorCfg(
@@ -157,6 +158,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConfi
 
     return MujocoSceneConfig(
         physics_dt=physics_dt,
+        substeps=substeps,
         num_envs=cfg.num_envs,
         env_spacing=2.0,
         robot_entity_name="robot",
@@ -385,6 +387,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
 
 
 def build_event(cfg: "G1FlatConfig") -> EventConfig:
+    from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
     from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
     from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
 
@@ -392,7 +395,7 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
     class _EventsCfg(EventConfig):
         # Reset events
         reset_root = EventTermConfig(
-            func=ef.reset_root_state_uniform,
+            func=common_ef.reset_root_state_uniform,
             mode="reset",
             params={
                 "pose_range": {
@@ -402,6 +405,7 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
                     "yaw": (-3.14, 3.14),
                 },
                 "velocity_range": {},
+                "default_pos": (0.0, 0.0, cfg.robot.base_init_height),
             },
         )
         reset_joints = EventTermConfig(
@@ -416,7 +420,7 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
 
         # Interval events
         push_robot = EventTermConfig(
-            func=ef.push_by_setting_velocity,
+            func=common_ef.push_by_setting_velocity,
             mode="interval",
             interval_range_s=(1.0, 3.0),
             params={

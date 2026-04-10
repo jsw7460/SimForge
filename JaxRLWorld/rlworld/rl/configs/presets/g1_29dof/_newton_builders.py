@@ -39,6 +39,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 from rlworld.rl.envs.mdp.events import newton_event_terms as newton_ef
 from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
@@ -375,7 +376,7 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
     class _EventsCfg(EventConfig):
         # Reset events
         reset_root = EventTermConfig(
-            func=newton_ef.reset_root_state_uniform,
+            func=common_ef.reset_root_state_uniform,
             mode="reset",
             params={
                 "pose_range": {
@@ -385,6 +386,7 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
                     "yaw": (-3.14, 3.14),
                 },
                 "velocity_range": {},
+                "default_pos": (0.0, 0.0, r.base_init_height),
             },
         )
         reset_dof_pos = EventTermConfig(
@@ -398,7 +400,7 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
 
         # Interval events
         push_robot = EventTermConfig(
-            func=newton_ef.push_robot,
+            func=common_ef.push_by_setting_velocity,
             mode="interval",
             interval_range_s=(1.0, 3.0),
             params={

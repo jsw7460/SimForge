@@ -51,6 +51,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 from rlworld.rl.envs.mdp.events import event_terms as ef
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.reset import reset_terms as initf
@@ -283,7 +284,7 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
     @dataclass
     class _EventsCfg(EventConfig):
         reset_root = EventTermConfig(
-            func=ef.reset_root_state_uniform,
+            func=common_ef.reset_root_state_uniform,
             mode="reset",
             params={
                 "pose_range": {
@@ -293,6 +294,7 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
                     "yaw": (-3.14, 3.14),
                 },
                 "velocity_range": {},
+                "default_pos": (1.5, 1.5, cfg.robot.base_init_height),
             },
         )
 
@@ -320,7 +322,7 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
         )
         # Interval terms
         push_robot = EventTermConfig(
-            func=ef.push_by_setting_velocity,
+            func=common_ef.push_by_setting_velocity,
             mode="interval",
             interval_range_s=(2.0, 20.0),
             params={

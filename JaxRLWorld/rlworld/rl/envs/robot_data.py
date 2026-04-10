@@ -33,6 +33,16 @@ class RobotData(Protocol):
         ...
 
     @property
+    def root_link_lin_vel_w(self) -> Tensor:
+        """Root link linear velocity in **world** frame. Shape (num_envs, 3)."""
+        ...
+
+    @property
+    def root_link_ang_vel_w(self) -> Tensor:
+        """Root link angular velocity in **world** frame. Shape (num_envs, 3)."""
+        ...
+
+    @property
     def root_link_lin_vel_b(self) -> Tensor:
         """Root link linear velocity in body frame. Shape (num_envs, 3)."""
         ...

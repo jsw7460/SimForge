@@ -66,6 +66,14 @@ class MujocoRobotData:
         return self._entity.data.root_link_quat_w
 
     @property
+    def root_link_lin_vel_w(self) -> Tensor:
+        return self._entity.data.root_link_lin_vel_w
+
+    @property
+    def root_link_ang_vel_w(self) -> Tensor:
+        return self._entity.data.root_link_ang_vel_w
+
+    @property
     def root_link_lin_vel_b(self) -> Tensor:
         return self._entity.data.root_link_lin_vel_b
 
