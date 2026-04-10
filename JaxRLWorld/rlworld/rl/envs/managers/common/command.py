@@ -84,8 +84,50 @@ class CommandManager(BaseManager):
         for term in self._terms.values():
             term.compute(dt)
 
+    def set_commands(
+        self, env_ids: torch.Tensor, **kwargs: torch.Tensor
+    ) -> None:
+        """Override commands by term name for the given environments.
+
+        Disables auto-resampling for the injected envs until
+        :meth:`release_commands` or episode reset. Useful for
+        teleoperation or external controllers::
+
+            env.command_manager.set_commands(
+                env_ids=torch.tensor([0]),
+                velocity=torch.tensor([[0.5, 0.0, 0.3]]),
+            )
+
+        Args:
+            env_ids: Environment indices to override.
+            **kwargs: ``term_name=values`` pairs. Each ``values``
+                tensor has shape ``(len(env_ids), term_command_dim)``.
+        """
+        for name, values in kwargs.items():
+            self._terms[name].set_command(env_ids, values)
+
+    def release_commands(
+        self, env_ids: torch.Tensor, *term_names: str
+    ) -> None:
+        """Release external control and return to auto-resampling.
+
+        If no ``term_names`` are given, releases ALL terms for the
+        specified envs. Otherwise only the listed terms are released.
+        """
+        targets = (
+            [self._terms[n] for n in term_names]
+            if term_names
+            else list(self._terms.values())
+        )
+        for term in targets:
+            term.release_command(env_ids)
+
     def reset(self, env_ids: torch.Tensor) -> None:
-        """Force resample all terms for the given environments."""
+        """Force resample all terms for the given environments.
+
+        Also clears any external-control state set by
+        :meth:`set_commands`.
+        """
         for term in self._terms.values():
             term.reset(env_ids)
 

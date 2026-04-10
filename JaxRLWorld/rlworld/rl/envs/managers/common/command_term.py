@@ -58,6 +58,9 @@ class CommandTerm(ABC):
         self.num_envs = env.num_envs
         self.device = env.device
         self.time_left = torch.zeros(self.num_envs, device=self.device)
+        self._externally_controlled = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
 
     @property
     @abstractmethod
@@ -83,8 +86,39 @@ class CommandTerm(ABC):
             self._resample_command(resample_ids)
         self._update_command()
 
+    def set_command(self, env_ids: torch.Tensor, values: torch.Tensor) -> None:
+        """Override command for specified environments.
+
+        Disables automatic resampling for those envs until
+        :meth:`release_command` or :meth:`reset` is called. The
+        ``_update_command()`` post-processing (heading P-control,
+        standing-env zeroing, etc.) is also skipped for externally
+        controlled envs.
+
+        Args:
+            env_ids: Environment indices to override.
+            values: Command tensor of shape ``(len(env_ids), command_dim)``.
+        """
+        self._command[env_ids] = values
+        self.time_left[env_ids] = float("inf")
+        self._externally_controlled[env_ids] = True
+
+    def release_command(self, env_ids: torch.Tensor) -> None:
+        """Release external control and return to auto-resampling.
+
+        Sets ``time_left`` to zero so the next ``compute()`` call
+        immediately resamples fresh commands for the released envs.
+        """
+        self._externally_controlled[env_ids] = False
+        self.time_left[env_ids] = 0.0
+
     def reset(self, env_ids: torch.Tensor) -> None:
-        """Force resample for the given environments."""
+        """Force resample for the given environments.
+
+        Also clears external-control state so that envs resume normal
+        auto-resampling after an episode reset.
+        """
+        self._externally_controlled[env_ids] = False
         self.time_left[env_ids] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.resampling_time_range)
         self._resample_command(env_ids)
 
@@ -159,9 +193,12 @@ class VelocityCommandTerm(CommandTerm):
             self.heading_target[env_ids] = torch.empty(n, device=self.device).uniform_(*self.cfg.heading_range)
 
     def _update_command(self) -> None:
+        # Skip all post-processing for externally controlled envs.
+        auto_mask = ~self._externally_controlled
+
         # Heading P-control: overwrite ang_vel for heading envs
         if self.cfg.heading_command:
-            heading_ids = self.is_heading_env.nonzero(as_tuple=False).flatten()
+            heading_ids = (self.is_heading_env & auto_mask).nonzero(as_tuple=False).flatten()
             if len(heading_ids) > 0:
                 heading_w = self._env.heading_w
                 heading_error = _wrap_to_pi(self.heading_target - heading_w)
@@ -173,7 +210,7 @@ class VelocityCommandTerm(CommandTerm):
 
         # Standing envs: zero all commands
         if self.cfg.rel_standing_envs > 0.0:
-            standing_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
+            standing_ids = (self.is_standing_env & auto_mask).nonzero(as_tuple=False).flatten()
             if len(standing_ids) > 0:
                 self._command[standing_ids] = 0.0
 
