@@ -105,6 +105,16 @@ class MujocoEnv(World):
         # Fallback before cache is built (e.g. during setup)
         return self.scene_manager.get_entity(entity_name).data
 
+    def get_robot_state_writer(self, entity_name: str = "robot"):
+        """Return the write-API companion to ``get_robot_data``.
+
+        Mirrors NewtonEnv / GenesisEnv: callers can use a single
+        cross-sim accessor to mutate joint and root state via the
+        ``RobotStateWriterProtocol`` shape (see
+        ``managers/common/robot_state_writer_protocol.py``).
+        """
+        return self._robot_state_writer_cache[entity_name]
+
     def _build_scene(self) -> None:
         """Create MuJoCo/mjlab scene via ManagerRegistry."""
         # Sync num_envs (eval env may override env_cfg.num_envs)
@@ -157,7 +167,9 @@ class MujocoEnv(World):
 
         # Build MujocoRobotData using ArticulationIndexing
         from rlworld.rl.envs.mujoco.robot_data import MujocoRobotData
+        from rlworld.rl.envs.mujoco.robot_state_writer import MujocoRobotStateWriter
         self._robot_data_cache = {}
+        self._robot_state_writer_cache = {}
         entity = self.scene_manager.robot
         indexing = self.act_manager.indexing
         self._robot_data_cache["robot"] = MujocoRobotData(
@@ -166,6 +178,11 @@ class MujocoEnv(World):
             num_envs=self.num_envs,
             device=self.device,
             env=self,
+        )
+        self._robot_state_writer_cache["robot"] = MujocoRobotStateWriter(
+            env=self,
+            entity=entity,
+            joint_ids=indexing.sim_indices,
         )
 
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")

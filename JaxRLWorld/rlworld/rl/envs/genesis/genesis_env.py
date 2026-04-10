@@ -68,6 +68,16 @@ class GenesisEnv(World):
     def get_robot_data(self, entity_name: str = "robot"):
         return self._robot_data_cache[entity_name]
 
+    def get_robot_state_writer(self, entity_name: str = "robot"):
+        """Return the write-API companion to ``get_robot_data``.
+
+        Mirrors NewtonEnv / MujocoEnv: callers can use a single
+        cross-sim accessor to mutate joint and root state via the
+        ``RobotStateWriterProtocol`` shape (see
+        ``managers/common/robot_state_writer_protocol.py``).
+        """
+        return self._robot_state_writer_cache[entity_name]
+
     @property
     def scene(self) -> gs.Scene:
         return self.scene_manager.scene
@@ -160,7 +170,9 @@ class GenesisEnv(World):
                 self.contact_manager.register_sensor(sensor_cfg)
 
         from rlworld.rl.envs.genesis.robot_data import GenesisRobotData
+        from rlworld.rl.envs.genesis.robot_state_writer import GenesisRobotStateWriter
         self._robot_data_cache = {}
+        self._robot_state_writer_cache = {}
         indexing = self.act_manager.indexing
         for name, entity in self.scene_manager.entities.items():
             self._robot_data_cache[name] = GenesisRobotData(
@@ -168,6 +180,11 @@ class GenesisEnv(World):
                 actuated_dof_ids=indexing.sim_indices,
                 num_envs=self.num_envs,
                 device=self.device,
+            )
+            self._robot_state_writer_cache[name] = GenesisRobotStateWriter(
+                env=self,
+                entity=entity,
+                actuated_dof_ids=indexing.sim_indices,
             )
 
     def _step_physics(self) -> None:

@@ -56,22 +56,18 @@ def reset_root_state_uniform(
 ) -> None:
     """Reset root state with uniform random perturbations (Newton).
 
-    Uses RobotStateAccessor (ArticulationView) for state access.
-    Newton joint_q uses xyzw quaternion convention.
+    Writes the perturbed root pose / velocity through the unified
+    ``RobotStateWriterProtocol`` so the call shape matches Genesis and
+    mjlab. Newton joint_q is xyzw natively but the writer accepts wxyz
+    and converts internally.
     """
     if len(env_ids) == 0:
         return
 
-    from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
-
-    scene_manager = env.scene_manager
-    accessor = scene_manager.robot_state
-    writer = scene_manager.robot_state_writer
-    state = scene_manager.state_0
+    writer = env.get_robot_state_writer()
 
     n = len(env_ids)
     device = env.device
-    mask = NewtonRobotStateWriter.env_ids_to_mask(env_ids, scene_manager.model.world_count, device)
 
     # Sample pose perturbations
     keys = ["x", "y", "z", "roll", "pitch", "yaw"]
@@ -80,43 +76,43 @@ def reset_root_state_uniform(
     pose_samples = _sample_uniform(ranges[:, 0], ranges[:, 1], (n, 6), device)
 
     # Default position/orientation from entity init_state config
-    entity_cfg = scene_manager.config.entities["robot"]
+    entity_cfg = env.scene_manager.config.entities["robot"]
     init_state = entity_cfg.init_state
     default_pos = torch.tensor(init_state.pos, device=device)
-    default_rot = torch.tensor(init_state.rot, device=device)
+    default_rot = torch.tensor(init_state.rot, device=device)  # xyzw (Newton native)
 
-    # Position: default + perturbation
-    pos = accessor.root_pos_w(state).clone()
-    pos[env_ids] = default_pos.unsqueeze(0) + pose_samples[:, 0:3]
+    # Position: default + perturbation (subset shape (n, 3))
+    pos = default_pos.unsqueeze(0).expand(n, -1) + pose_samples[:, 0:3]
 
-    # Orientation: default quat * delta quat (xyzw)
-    quat_xyzw = accessor.root_quat_xyzw(state).clone()
-    default_quat = default_rot.unsqueeze(0).expand(n, -1)
-    delta_quat = _quat_from_euler_xyz_xyzw(
+    # Orientation: default quat * delta quat in xyzw, then flip to wxyz
+    default_quat_xyzw = default_rot.unsqueeze(0).expand(n, -1)
+    delta_quat_xyzw = _quat_from_euler_xyz_xyzw(
         pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
     )
-    quat_xyzw[env_ids] = _quat_mul_xyzw(default_quat, delta_quat)
+    quat_xyzw = _quat_mul_xyzw(default_quat_xyzw, delta_quat_xyzw)
+    quat_wxyz = quat_xyzw[..., [3, 0, 1, 2]]
 
-    # Velocity: zero out first to avoid stale values from previous episode
-    lin_vel = accessor.root_lin_vel_w(state).clone()
-    ang_vel = accessor.root_ang_vel_w(state).clone()
-    lin_vel[env_ids] = 0.0
-    ang_vel[env_ids] = 0.0
+    # Velocity: zero baseline + optional perturbation (subset shape (n, 3))
+    lin_vel = torch.zeros((n, 3), device=device)
+    ang_vel = torch.zeros((n, 3), device=device)
     if velocity_range:
         vel_range_list = [velocity_range.get(key, (0.0, 0.0)) for key in keys]
         vel_ranges = torch.tensor(vel_range_list, device=device)
         vel_samples = _sample_uniform(vel_ranges[:, 0], vel_ranges[:, 1], (n, 6), device)
-        lin_vel[env_ids] += vel_samples[:, 0:3]
-        ang_vel[env_ids] += vel_samples[:, 3:6]
+        lin_vel = vel_samples[:, 0:3]
+        ang_vel = vel_samples[:, 3:6]
 
-    # Also zero out joint velocities (non-root DOFs)
-    dof_vel = accessor.dof_velocities(state).clone()
-    dof_vel[env_ids, :] = 0.0
-    writer.set_dof_velocities(state, dof_vel, mask=mask)
+    # Zero all joint DOFs (the writer expects shape ``(n, joint_dof_count)``;
+    # take a subset of the current full state to get the right width).
+    accessor = env.scene_manager.robot_state
+    state = env.scene_manager.state_0
+    dof_vel_subset = torch.zeros_like(accessor.dof_velocities(state)[env_ids])
+    writer.set_dof_velocities(dof_vel_subset, env_ids=env_ids)
 
-    # Set root state and evaluate FK
-    writer.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
-    writer.eval_fk(state, mask=mask)
+    # Set root pose + velocity, then re-FK
+    writer.set_root_pose(pos, quat_wxyz, env_ids=env_ids)
+    writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
+    writer.eval_fk(env_ids=env_ids)
 
 
 def randomize_friction(
@@ -166,48 +162,41 @@ def push_robot(
 ) -> None:
     """Push robot by adding velocity perturbation.
 
-    Args:
-        env: Newton environment instance.
-        env_ids: Environment indices to apply push.
-        velocity_range: Dict with keys 'x', 'y', 'z', 'roll', 'pitch', 'yaw'
-                       and tuple (min, max) values.
+    Reads the current root velocity for the affected envs, adds the
+    sampled perturbation, and writes the result back through the
+    unified ``RobotStateWriterProtocol``.
     """
     if len(env_ids) == 0:
         return
 
-    from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
-
     accessor = env.scene_manager.robot_state
-    writer = env.scene_manager.robot_state_writer
+    writer = env.get_robot_state_writer()
     state = env.scene_manager.state_0
-    mask = NewtonRobotStateWriter.env_ids_to_mask(env_ids, env.scene_manager.model.world_count, env.device)
 
     n_envs = len(env_ids)
     device = env.device
 
-    lin_vel = accessor.root_lin_vel_w(state).clone()
-    ang_vel = accessor.root_ang_vel_w(state).clone()
+    # Read current root velocity for the affected envs (subset).
+    lin_vel = accessor.root_lin_vel_w(state)[env_ids].clone()
+    ang_vel = accessor.root_ang_vel_w(state)[env_ids].clone()
 
     # Linear velocity perturbation
     if "x" in velocity_range:
-        lin_vel[env_ids, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["x"])
+        lin_vel[:, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["x"])
     if "y" in velocity_range:
-        lin_vel[env_ids, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["y"])
+        lin_vel[:, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["y"])
     if "z" in velocity_range:
-        lin_vel[env_ids, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["z"])
+        lin_vel[:, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["z"])
 
     # Angular velocity perturbation
     if "roll" in velocity_range:
-        ang_vel[env_ids, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["roll"])
+        ang_vel[:, 0] += torch.empty(n_envs, device=device).uniform_(*velocity_range["roll"])
     if "pitch" in velocity_range:
-        ang_vel[env_ids, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["pitch"])
+        ang_vel[:, 1] += torch.empty(n_envs, device=device).uniform_(*velocity_range["pitch"])
     if "yaw" in velocity_range:
-        ang_vel[env_ids, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["yaw"])
+        ang_vel[:, 2] += torch.empty(n_envs, device=device).uniform_(*velocity_range["yaw"])
 
-    # Write back via writer (only velocities, no transforms change)
-    pos = accessor.root_pos_w(state)
-    quat_xyzw = accessor.root_quat_xyzw(state)
-    writer.set_root_state(state, pos, quat_xyzw, lin_vel, ang_vel, mask=mask)
+    writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
 
 
 def randomize_body_com_offset(

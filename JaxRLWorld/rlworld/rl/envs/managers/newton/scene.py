@@ -792,14 +792,23 @@ class NewtonSceneManager(BaseManager):
 
         Supports partial reset: only the given *env_ids* are overwritten while
         the remaining environments keep their current state.
+
+        This bypasses the ``RobotStateWriterProtocol`` because the model
+        defaults live as warp arrays inside ``view.get_dof_*(model)`` and
+        we want to feed them straight into ``view.set_dof_*(state)``
+        without a torch round-trip.
         """
         if env_ids is None or len(env_ids) == 0:
             return
 
-        from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
-
         view = self.robot_view
-        mask = NewtonRobotStateWriter.env_ids_to_mask(env_ids, self.model.world_count, self.env.device)
+
+        # Build warp mask inline (avoid torch round-trip).
+        mask_torch = torch.zeros(
+            self.model.world_count, dtype=torch.bool, device=self.env.device
+        )
+        mask_torch[env_ids] = True
+        mask = wp.from_torch(mask_torch)
 
         # Copy model defaults into state for the reset environments
         view.set_dof_positions(self.state_0, view.get_dof_positions(self.model), mask=mask)
