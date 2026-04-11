@@ -10,12 +10,14 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils.quat_utils import quat_to_euler_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 
+@EnvStepCache()
 def base_lin_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Base linear velocity in body frame.
 
@@ -25,6 +27,7 @@ def base_lin_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
     return env.get_robot_data(entity_name).root_link_lin_vel_b
 
 
+@EnvStepCache()
 def base_ang_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Base angular velocity in body frame.
 
@@ -34,6 +37,7 @@ def base_ang_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
     return env.get_robot_data(entity_name).root_link_ang_vel_b
 
 
+@EnvStepCache()
 def projected_gravity(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Gravity vector projected into the body frame.
 
@@ -43,6 +47,7 @@ def projected_gravity(env: World, entity_name: str = "robot") -> torch.Tensor:
     return env.get_robot_data(entity_name).projected_gravity_b
 
 
+@EnvStepCache()
 def base_quat(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Base quaternion in world frame, **wxyz** convention.
 
@@ -59,6 +64,7 @@ def base_quat(env: World, entity_name: str = "robot") -> torch.Tensor:
     return env.get_robot_data(entity_name).root_link_quat_w
 
 
+@EnvStepCache()
 def base_euler(
     env: World, entity_name: str = "robot", degrees: bool = False
 ) -> torch.Tensor:
@@ -91,6 +97,7 @@ def _actuated_joint_ids(env: World) -> torch.Tensor | None:
     return None
 
 
+@EnvStepCache()
 def dof_pos(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Actuated joint positions in act_manager order.
 
@@ -104,6 +111,7 @@ def dof_pos(env: World, entity_name: str = "robot") -> torch.Tensor:
     return pos
 
 
+@EnvStepCache()
 def dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Actuated joint velocities in act_manager order.
 
@@ -117,6 +125,7 @@ def dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
     return vel
 
 
+@EnvStepCache()
 def dof_pos_nominal_difference(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Joint positions relative to nominal (default) positions, in act_manager order.
 
@@ -126,6 +135,31 @@ def dof_pos_nominal_difference(env: World, entity_name: str = "robot") -> torch.
     return dof_pos(env, entity_name) - env.act_manager.offset
 
 
+@EnvStepCache()
+def foot_height(
+    env: World,
+    body_names: "tuple[str, ...] | None" = None,
+    site_names: "tuple[str, ...] | None" = None,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """Z-coordinate of each foot above the world origin.
+
+    Accepts **either** ``body_names`` (Newton/Genesis) **or**
+    ``site_names`` (MuJoCo) — exactly one must be provided.
+    Pass as **tuples** (not lists) for ``EnvStepCache`` hashability.
+
+    Returns:
+        Tensor of shape ``(num_envs, num_feet)``.
+    """
+    rd = env.get_robot_data(entity_name)
+    if body_names is not None:
+        return rd.body_pos_w(list(body_names))[:, :, 2]
+    elif site_names is not None:
+        return rd.site_pos_w(list(site_names))[:, :, 2]
+    raise ValueError("foot_height requires body_names or site_names")
+
+
+@EnvStepCache()
 def base_height(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Base height (z-coordinate) above world origin.
 
@@ -135,6 +169,7 @@ def base_height(env: World, entity_name: str = "robot") -> torch.Tensor:
     return env.get_robot_data(entity_name).root_link_pos_w[:, 2:3]
 
 
+@EnvStepCache()
 def prev_processed_actions(env: World) -> torch.Tensor:
     """Current step's processed actions (used as observation input).
 
@@ -146,12 +181,14 @@ def prev_processed_actions(env: World) -> torch.Tensor:
     """
     return env.act_manager.processed_actions.clone()
 
-def prev_raw_actions(env: World, entity_name: str = "robot") -> torch.Tensor:
-    """Current step's processed actions (used as observation input)."""
 
+@EnvStepCache()
+def prev_raw_actions(env: World, entity_name: str = "robot") -> torch.Tensor:
+    """Previous step's raw actions."""
     return env.act_manager.prev_raw_actions
 
 
+@EnvStepCache()
 def raw_actions(env: World) -> torch.Tensor:
     """Current step's raw (unprocessed) actions.
 
@@ -161,6 +198,7 @@ def raw_actions(env: World) -> torch.Tensor:
     return env.act_manager.raw_actions
 
 
+@EnvStepCache()
 def last_processed_actions(env: World) -> torch.Tensor:
     """Previous step's processed actions.
 
@@ -173,6 +211,7 @@ def last_processed_actions(env: World) -> torch.Tensor:
     return env.act_manager.prev_processed_actions.clone()
 
 
+@EnvStepCache()
 def clock_inputs(env: World) -> torch.Tensor:
     """Gait clock signals from GaitManager.
 
@@ -185,6 +224,7 @@ def clock_inputs(env: World) -> torch.Tensor:
     return env.gait_manager.clock_inputs
 
 
+@EnvStepCache()
 def all_commands(env: World) -> torch.Tensor:
     """All command terms concatenated.
 
@@ -206,10 +246,11 @@ command = all_commands
 # ── Contact-based observations ───────────────────────────────────────
 
 
+@EnvStepCache()
 def foot_air_time(
     env: World,
     contact_group: str = "feet_ground_contact",
-    body_names: "list[str] | None" = None,
+    body_names: "tuple[str, ...] | None" = None,
     use_last: bool = False,
 ) -> torch.Tensor:
     """Per-foot air-time observation.
@@ -220,7 +261,7 @@ def foot_air_time(
         body_names: Optional ordered subset of body names to read; when
             given, the helper passes ``order=body_names`` to the contact
             manager so the result columns line up with the caller's
-            foot ordering.
+            foot ordering. Pass as **tuple** for cache hashability.
         use_last: If True, return the last completed air-time interval
             (frozen at landing) instead of the live current air-time
             counter. The legacy Newton presets used the "last" variant;
@@ -229,28 +270,32 @@ def foot_air_time(
     Returns:
         Tensor of shape ``(num_envs, num_feet)``.
     """
+    order = list(body_names) if body_names is not None else None
     if use_last:
-        return env.contact_manager.last_air_time(contact_group, order=body_names)
-    return env.contact_manager.current_air_time(contact_group, order=body_names)
+        return env.contact_manager.last_air_time(contact_group, order=order)
+    return env.contact_manager.current_air_time(contact_group, order=order)
 
 
+@EnvStepCache()
 def foot_contact_indicator(
     env: World,
     contact_group: str = "feet_ground_contact",
-    body_names: "list[str] | None" = None,
+    body_names: "tuple[str, ...] | None" = None,
 ) -> torch.Tensor:
     """Binary per-foot contact indicator (1.0 = in contact).
 
     Returns:
         Tensor of shape ``(num_envs, num_feet)``.
     """
-    return env.contact_manager.is_contact(contact_group, order=body_names).float()
+    order = list(body_names) if body_names is not None else None
+    return env.contact_manager.is_contact(contact_group, order=order).float()
 
 
+@EnvStepCache()
 def foot_contact_forces(
     env: World,
     contact_group: str = "feet_ground_contact",
-    body_names: "list[str] | None" = None,
+    body_names: "tuple[str, ...] | None" = None,
 ) -> torch.Tensor:
     """Per-foot 3-D contact force, log-scaled and flattened.
 
@@ -261,6 +306,7 @@ def foot_contact_forces(
     Returns:
         Tensor of shape ``(num_envs, num_feet * 3)``.
     """
-    forces_3d = env.contact_manager.contact_force(contact_group, order=body_names)
+    order = list(body_names) if body_names is not None else None
+    forces_3d = env.contact_manager.contact_force(contact_group, order=order)
     flat = forces_3d.flatten(start_dim=1)
     return torch.sign(flat) * torch.log1p(torch.abs(flat))

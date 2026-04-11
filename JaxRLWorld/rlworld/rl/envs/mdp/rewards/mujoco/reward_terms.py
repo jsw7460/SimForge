@@ -5,16 +5,19 @@ from typing import TYPE_CHECKING, Dict
 import torch
 
 from mjlab.managers.scene_entity_config import SceneEntityCfg
-from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_inverse
+from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_inverse  # used by flat_orientation
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     VariablePostureTracker,
+    action_rate_l2 as _common_action_rate_l2,
+    flat_orientation as _common_flat_orientation,
     get_leg_xy_signs,
     penalize_angular_momentum_l2,
     penalize_body_ang_vel_xy,
     penalize_contact_force_count,
     penalize_feet_clearance,
     penalize_feet_slip,
+    penalize_lin_vel_z,
     penalize_soft_landing,
     raw_action_rate_l2 as _common_raw_action_rate_l2,
 )
@@ -22,7 +25,7 @@ from rlworld.rl.utils import string as string_utils
 from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mujoco import MujocoEnv
+    from rlworld.rl.envs.mujoco import MujocoEnv, MujocoLocomotionEnv
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
@@ -109,11 +112,11 @@ def joint_acc_l2(
 
 
 def action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
-    """Penalize the rate of change of the actions using L2 squared kernel."""
-    return -torch.sum(
-        torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions),
-        dim=1
-    )
+    """Penalize the rate of change of the actions using L2 squared kernel.
+
+    Delegates to ``common.action_rate_l2``. Bit-identical: ``(a-b)² == (b-a)²``.
+    """
+    return _common_action_rate_l2(env)
 
 
 def raw_action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
@@ -149,9 +152,12 @@ def flat_orientation_l2(
     env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """Penalize non-flat base orientation."""
-    robot = env.scene_manager.get_entity(asset_cfg.name)
-    return -torch.sum(torch.square(robot.data.projected_gravity_b[:, :2]), dim=1)
+    """Penalize non-flat base orientation.
+
+    Delegates to ``common.flat_orientation(std=None)`` which computes
+    the same ``-sum(projected_gravity_xy²)`` penalty.
+    """
+    return _common_flat_orientation(env, entity_name=asset_cfg.name)
 
 
 def flat_orientation(
@@ -342,10 +348,11 @@ def alive_bonus(env: "MujocoEnv") -> torch.Tensor:
 
 
 def lin_vel_z_penalty(env: "MujocoEnv") -> torch.Tensor:
-    """Penalize vertical velocity to discourage bouncing."""
-    robot = env.scene_manager.get_entity("robot")
-    base_lin_vel = robot.data.root_link_lin_vel_b
-    return -torch.square(base_lin_vel[:, 2])
+    """Penalize vertical velocity to discourage bouncing.
+
+    Delegates to ``common.penalize_lin_vel_z``.
+    """
+    return penalize_lin_vel_z(env)
 
 
 class variable_posture:
@@ -497,7 +504,7 @@ def wtw_feet_slip(
 
 
 def wtw_tracking_contacts_shaped_force(
-    env: "MujocoEnv",
+    env: "MujocoLocomotionEnv",
     contact_group: str = "feet_ground_contact",
     gait_force_sigma: float = 100.0,
 ) -> torch.Tensor:
@@ -512,7 +519,7 @@ def wtw_tracking_contacts_shaped_force(
 
 
 def wtw_tracking_contacts_shaped_vel(
-    env: "MujocoEnv",
+    env: "MujocoLocomotionEnv",
     gait_vel_sigma: float = 10.0,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
@@ -528,7 +535,7 @@ def wtw_tracking_contacts_shaped_vel(
 
 
 def wtw_feet_clearance_cmd_linear(
-    env: "MujocoEnv",
+    env: "MujocoLocomotionEnv",
     foot_radius: float = 0.02,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
@@ -550,7 +557,7 @@ def wtw_feet_clearance_cmd_linear(
 
 
 def wtw_raibert_heuristic(
-    env: "MujocoEnv",
+    env: "MujocoLocomotionEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
     """WTW: penalize footstep placement error vs Raibert heuristic."""

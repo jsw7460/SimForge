@@ -87,11 +87,6 @@ def prev_processed_actions(env: "NewtonEnv") -> torch.Tensor:
 
 
 @EnvStepCache()
-def dof_pos_nominal_difference(env: "NewtonEnv") -> torch.Tensor:
-    return dof_pos(env) - env.act_manager.offset
-
-
-@EnvStepCache()
 def relative_bodies_pos(
     env: "NewtonEnv",
     bodies: str | list[str],

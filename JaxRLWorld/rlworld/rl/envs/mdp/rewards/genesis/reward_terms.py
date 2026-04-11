@@ -1,142 +1,28 @@
+"""Genesis-specific reward terms.
+
+Only contains functions that depend on Genesis-specific APIs
+(``entity.get_links_vel()``, ``entity.get_contacts()``, etc.)
+and cannot be expressed through the common ``RobotData`` /
+``contact_manager`` interface.
+
+General-purpose rewards live in ``common/reward_terms.py``; mjlab-style
+delegates live in ``genesis/mjlab_rewards.py``.
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import torch
 
-from genesis import inv_quat, transform_by_quat
-from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
-    action_rate_l2,
-    base_height_penalty as _common_base_height_penalty,
     get_leg_xy_signs,
     penalize_contact_force_count,
-    penalize_lin_vel_z,
-    similar_to_default as _common_sim_to_def,
 )
-from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils import entity_utils as eu
-from rlworld.rl.utils import string as string_utils
 from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv, GenesisLocomotionEnv
-
-
-def tracking_lin_vel(env: GenesisEnv) -> torch.Tensor:
-    """Reward for tracking commanded linear velocity in xy plane
-       Returns exponential of negative squared error between commanded and actual velocity"""
-    target_lin_vel = torch.stack([env.command_manager.lin_vel_x, env.command_manager.lin_vel_y], dim=1)
-    base_lin_vel = state.base_lin_vel(env)
-    lin_vel_error = torch.sum(
-        torch.square(target_lin_vel - base_lin_vel[:, :2]), dim=1
-    )
-    return torch.exp(-lin_vel_error / env.reward_cfg.tracking_sigma)
-
-
-def tracking_ang_vel(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base") -> torch.Tensor:
-    """Reward for tracking commanded angular velocity (yaw)
-       Returns exponential of negative squared error between commanded and actual yaw rate"""
-
-    base_ang_vel = proprioception.imu_ang_vel(env, entity_name, base_name)
-    ang_vel_error = torch.square(env.command_manager.ang_vel - base_ang_vel[:, 2])
-    return torch.exp(-ang_vel_error / env.reward_cfg.tracking_sigma)
-
-
-def lin_vel_z(env: GenesisEnv) -> torch.Tensor:
-    """Penalty for vertical movement
-       Returns negative squared vertical velocity to discourage unwanted up/down motion
-
-    Delegates to ``common.penalize_lin_vel_z``. NOTE: For Genesis this is
-    NOT bit-identical to the original — the original used Genesis library's
-    native ``transform_by_quat`` while common uses Python
-    ``quat_rotate_inverse_wxyz``. The numerical difference is ~1e-7 (IEEE754
-    operator-order roundoff), well below any RL training noise floor. The
-    user has explicitly accepted this tolerance.
-    """
-    return penalize_lin_vel_z(env)
-
-
-def base_height(env: GenesisEnv) -> torch.Tensor:
-    """Penalty for deviating from target base height
-       Returns negative squared error from desired base height
-
-    Delegates to ``common.base_height_penalty``. Bit-identical: both read
-    base position via the same Genesis ``entity.get_pos()`` accessor (no
-    quaternion rotation), then compute ``-(z - command_manager.base_height)²``.
-    """
-    return _common_base_height_penalty(env)
-
-
-def action_rate(env: GenesisEnv) -> torch.Tensor:
-    """Penalty for sudden joint action changes
-       Returns negative squared difference between consecutive joint actions
-
-    Delegates to the simulator-agnostic ``common.action_rate_l2``. The body
-    is bit-identical: the original Genesis impl computed ``square(cur - prev)``
-    while common computes ``square(prev - cur)`` — these are bitwise equal in
-    IEEE754 because squaring removes the sign.
-    """
-    return action_rate_l2(env)
-
-
-def similar_to_default(env: GenesisEnv) -> torch.Tensor:
-    """Penalty for deviating from default joint positions
-       Returns negative absolute difference from default pose
-
-    Delegates to ``common.similar_to_default``. Bit-identical: both read
-    actuated joint positions via the same actuated_dof_ids and compute
-    ``-sum(abs(joint_pos - offset))``.
-    """
-    return _common_sim_to_def(env)
-
-
-def penalize_invalid_contact(
-    env: GenesisEnv,
-    contact_allowed_links: list[str],
-    entity_name: str = "robot",
-    exclude_self_contact: bool = True,
-):
-    entity = env.scene_manager[entity_name]
-
-    # Get allowed link indices (global)
-    allowed_ids, _ = eu.find_links(entity, contact_allowed_links, global_ids=True)
-    allowed_ids_tensor = torch.tensor(allowed_ids, dtype=torch.int32, device=env.device)
-
-    # Get all robot link indices
-    all_robot_link_ids = torch.arange(
-        entity.link_start,
-        entity.link_end,
-        dtype=torch.int32,
-        device=env.device
-    )
-
-    # Get contact information
-    contact_info = entity.get_contacts(exclude_self_contact=exclude_self_contact)
-
-    valid_mask = contact_info["valid_mask"]
-    link_a = contact_info["link_a"]
-    link_b = contact_info["link_b"]
-
-    # Check if links are robot links
-    is_robot_link_a = torch.isin(link_a, all_robot_link_ids)
-    is_robot_link_b = torch.isin(link_b, all_robot_link_ids)
-
-    # Check if links are in allowed list
-    link_a_allowed = torch.isin(link_a, allowed_ids_tensor)
-    link_b_allowed = torch.isin(link_b, allowed_ids_tensor)
-
-    # Invalid contact: valid AND robot link involved AND NOT allowed
-    invalid_contact_a = valid_mask & is_robot_link_a & ~link_a_allowed
-    invalid_contact_b = valid_mask & is_robot_link_b & ~link_b_allowed
-
-    # Apply masks to contact forces
-    contact_force_a = contact_info["force_a"] * invalid_contact_a.unsqueeze(-1)
-    contact_force_b = contact_info["force_b"] * invalid_contact_b.unsqueeze(-1)
-
-    # Count contacts over 1N threshold
-    return - (torch.sum(torch.norm(contact_force_a, dim=-1) > 1.0, dim=-1)
-           + torch.sum(torch.norm(contact_force_b, dim=-1) > 1.0, dim=-1))
 
 
 def wtw_collision(
@@ -144,200 +30,10 @@ def wtw_collision(
     contact_group: str = "body_ground_contact",
     force_threshold: float = 0.1,
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_contact_force_count``.
-
-    Bit-identical: Genesis's contact_manager has no substep history, so
-    the common helper falls through to the same instantaneous
-    ``contact_force`` read this function used previously.
-    """
+    """Thin redirect to ``common.penalize_contact_force_count``."""
     return penalize_contact_force_count(
         env, contact_group=contact_group, force_threshold=force_threshold
     )
-
-
-def penalize_ang_vel_xy(
-    env: GenesisEnv,
-    entity_name: str = "robot",
-    base_name: str = "base"
-) -> torch.Tensor:
-    """
-    Penalize roll and pitch angular velocities in the body frame.
-
-    Discourages the robot from tilting or rolling while allowing yaw rotation.
-    Returns negative squared magnitude of xy angular velocities.
-
-    Args:
-        env: Locomotion environment
-        entity_name: Name of the robot entity
-        base_name: Name of the base link
-
-    Returns:
-        Penalty values for each environment (shape: [n_envs])
-    """
-    entity = env.scene_manager[entity_name]
-    base_link = entity.get_link(base_name)
-
-    # Transform angular velocity from world frame to body frame
-    world_ang_vel = base_link.get_ang()
-    base_quat = state.base_quat(env)
-    body_ang_vel = transform_by_quat(world_ang_vel, inv_quat(base_quat))
-
-    # Penalize roll (x) and pitch (y) rotations, allow yaw (z)
-    roll_pitch_vel_squared = torch.sum(torch.square(body_ang_vel[:, :2]), dim=-1)
-
-    return -roll_pitch_vel_squared
-
-
-def penalize_nonflat_by_gravity(env: GenesisEnv):
-    projected_gravity = proprioception.projected_gravity(env)
-    return - torch.sum(torch.square(projected_gravity[:, :2]), dim=-1)
-
-
-def penalize_torques(env: GenesisEnv, entity_name: str = "robot"):
-    entity = env.scene_manager[entity_name]
-    torque = entity.get_dofs_control_force()
-    return - torch.sum(torch.square(torque), dim=-1)
-
-
-@EnvStepCache()
-
-def penalize_feet_slip(
-    env: GenesisEnv,
-    feet_links: tuple[str, ...],
-    entity_name: str = "robot"
-) -> torch.Tensor:
-    """
-    Penalize foot velocities when feet are in contact with ground.
-
-    Args:
-        env: Locomotion environment
-        feet_links: Names of foot links
-        entity_name: Name of the robot entity
-
-    Returns:
-        Penalty values for each environment (shape: [n_envs])
-    """
-    entity = env.scene_manager[entity_name]
-
-    # Get foot link indices and velocities
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
-    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local)  # [num_envs, num_feet, 3]
-
-    # Get contact indicator
-    contact_indicator = state.contact_indicator(
-        env, entity_name=entity_name, links=feet_links
-    )  # [num_envs, num_feet]
-
-    # Calculate squared velocity magnitude for each foot (xy only)
-    vel_magnitude_sq = torch.sum(torch.square(feet_vel[..., :2]), dim=-1)  # [num_envs, num_feet]
-
-    # Apply contact mask and sum over all feet
-    penalty = torch.sum(vel_magnitude_sq * contact_indicator, dim=-1)  # [num_envs]
-
-    # Skip first episode step if needed
-    penalty = penalty * (env.termination_manager.episode_length_buf > 1).float()
-    return -penalty
-
-
-def reward_feet_air_time(
-    env: GenesisEnv,
-    threshold: float = 0.1,
-    command_threshold: float = 0.1,
-    contact_group: str = "feet_ground_contact",
-) -> torch.Tensor:
-    """Reward for taking long steps.
-
-    Encourages the robot to lift its feet off the ground for at least
-    `threshold` seconds before landing. Only active when moving.
-
-    Args:
-        env: Locomotion environment with ContactManager.
-        threshold: Minimum air time (seconds) to receive reward.
-        command_threshold: Minimum command velocity magnitude to activate reward.
-        contact_group: Name of the contact group to use.
-
-    Returns:
-        Reward tensor of shape (num_envs,).
-    """
-    first_contact = env.contact_manager.compute_first_contact(contact_group)
-    last_air_time = env.contact_manager.last_air_time(contact_group)
-
-    reward = torch.sum((last_air_time - threshold) * first_contact, dim=-1)
-
-    command_vel = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y
-    ], dim=-1)
-    is_moving = torch.norm(command_vel, dim=-1) > command_threshold
-
-    return reward * is_moving
-
-
-def reward_feet_height_exp(
-    env: GenesisEnv,
-    feet_links: str | list[str],
-    target_height: float = 0.08,
-    sigma: float = 0.01,
-    entity_name: str = "robot",
-    contact_group: str = "feet_ground_contact",
-) -> torch.Tensor:
-    """Reward feet reaching target height during swing (exponential kernel)."""
-    entity = env.scene_manager[entity_name]
-
-    if isinstance(feet_links, str):
-        feet_links = [feet_links]
-
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
-    feet_pos = entity.get_links_pos(links_idx_local=links_idx_local)
-    feet_height = feet_pos[..., 2]  # z pos
-
-    is_contact = env.contact_manager.is_contact(contact_group)
-    is_swing = ~is_contact
-
-    # Exponential reward for being close to target height
-    height_error = torch.square(feet_height - target_height)
-    height_reward = torch.exp(-height_error / sigma)
-
-    # Only count during swing
-    reward = torch.sum(height_reward * is_swing.float(), dim=-1)
-
-    return reward
-
-
-def penalize_impact_force(
-    env: GenesisEnv,
-    contact_group: str = "feet_ground_contact",
-) -> torch.Tensor:
-    """Penalize contact force at the moment of landing."""
-    forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, num_links, 3)
-    forces = torch.norm(forces_3d, dim=-1)  # (num_envs, num_links)
-    first_contact = env.contact_manager.compute_first_contact(contact_group)
-
-    return -torch.sum(forces * first_contact.float(), dim=-1)
-
-
-def penalize_hip_deviation(
-    env: GenesisEnv,
-    hip_joints: str | tuple[str, ...]
-) -> torch.Tensor:
-    """
-    Penalize hip joint angles deviating from nominal pose.
-
-    Args:
-        env: GenesisEnv instance
-        hip_joints: Joint name pattern (supports regex) or tuple of names
-        entity_name: Name of the robot entity
-    """
-    # Find indices within actuated joints
-    indices, _ = string_utils.resolve_matching_names(
-        hip_joints,
-        env.act_manager._actuated_joint_names
-    )
-
-    dof_pos = proprioception.dof_pos(env)[:, indices]
-    nominal_pos = env.act_manager.offset[:, indices]
-
-    return -torch.sum(torch.square(dof_pos - nominal_pos), dim=-1)
 
 
 # ── Walk-These-Ways reward terms (Genesis) ───────────────────────────────
@@ -347,18 +43,14 @@ def wtw_feet_slip(
     entity_name: str = "robot",
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact.
-
-    Uses contact OR prev_contact (2-step filtering), matching WTW exactly.
-    """
+    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
     feet_vel = entity.get_links_vel(links_idx_local=links_idx_local, ref="link_com")
 
-    # Contact: current OR previous step
     contact = env.contact_manager.is_contact(contact_group, order=feet_links)
-    prev_contact = env.contact_manager.prev_is_contact(contact_group)
+    prev_contact = env.contact_manager.prev_is_contact(contact_group, order=feet_links)
     contact_filt = contact | prev_contact
 
     vel_sq = torch.sum(torch.square(feet_vel[..., :2]), dim=-1)
@@ -370,12 +62,9 @@ def wtw_tracking_contacts_shaped_force(
     gait_force_sigma: float = 100.0,
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    """WTW: penalize foot contact force when foot should be in swing.
-
-    reward = mean_over_feet[ -(1 - desired_contact) * (1 - exp(-force² / σ)) ]
-    """
-    foot_forces_3d = env.contact_manager.contact_force(contact_group)  # (num_envs, num_feet, 3)
-    foot_forces = torch.norm(foot_forces_3d, dim=-1)  # (num_envs, num_feet)
+    """WTW: penalize foot contact force when foot should be in swing."""
+    foot_forces_3d = env.contact_manager.contact_force(contact_group)
+    foot_forces = torch.norm(foot_forces_3d, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
 
@@ -388,10 +77,7 @@ def wtw_tracking_contacts_shaped_vel(
     gait_vel_sigma: float = 10.0,
     entity_name: str = "robot",
 ) -> torch.Tensor:
-    """WTW: penalize foot velocity when foot should be in stance.
-
-    reward = mean_over_feet[ -(desired_contact) * (1 - exp(-vel² / σ)) ]
-    """
+    """WTW: penalize foot velocity when foot should be in stance."""
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
@@ -409,18 +95,13 @@ def wtw_feet_clearance_cmd_linear(
     foot_radius: float = 0.02,
     entity_name: str = "robot",
 ) -> torch.Tensor:
-    """WTW: penalize foot height error during swing, scaled by commanded footswing height.
-
-    target_height = footswing_height_cmd * phase_triangle + foot_radius
-    penalty = (target - actual)² * (1 - desired_contact)
-    """
+    """WTW: penalize foot height error during swing."""
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
     feet_pos = entity.get_links_pos(links_idx_local=links_idx_local)
     foot_height = feet_pos[..., 2]
 
-    # Triangle wave from foot phases: peaks at mid-swing (phase=0.75)
     foot_phases = env.gait_manager.foot_phases
     phases = 1.0 - torch.abs(
         1.0 - torch.clip((foot_phases * 2.0) - 1.0, 0.0, 1.0) * 2.0
@@ -438,11 +119,7 @@ def wtw_raibert_heuristic(
     env: GenesisLocomotionEnv,
     entity_name: str = "robot",
 ) -> torch.Tensor:
-    """WTW: penalize footstep placement error vs Raibert heuristic.
-
-    Computes desired foot positions in body frame using commanded velocity,
-    stance dimensions, and gait phase, then penalizes deviation.
-    """
+    """WTW: penalize footstep placement error vs Raibert heuristic."""
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
@@ -460,7 +137,6 @@ def wtw_raibert_heuristic(
             quat_conjugate_wxyz(base_quat), cur_footsteps_translated[:, i, :]
         )
 
-    # Nominal positions from stance commands, order-independent via leg parsing
     stance_width = env.command_manager.stance_width
     stance_length = env.command_manager.stance_length
 
@@ -471,7 +147,6 @@ def wtw_raibert_heuristic(
     desired_xs = (stance_length.unsqueeze(1) / 2) * x_signs.unsqueeze(0)
     desired_ys = (stance_width.unsqueeze(1) / 2) * y_signs.unsqueeze(0)
 
-    # Raibert offsets based on velocity and gait phase
     foot_phases = env.gait_manager.foot_phases
     phases = torch.abs(1.0 - (foot_phases * 2.0)) * 1.0 - 0.5
     freq = env.command_manager.gait_freq
@@ -480,7 +155,6 @@ def wtw_raibert_heuristic(
     y_vel_des = yaw_vel * stance_length.unsqueeze(1) / 2
 
     desired_xs_offset = phases * x_vel * (0.5 / freq.unsqueeze(1))
-    # y offset flips for rear legs (x_sign < 0)
     desired_ys_offset = phases * y_vel_des * (0.5 / freq.unsqueeze(1))
     desired_ys_offset = desired_ys_offset * x_signs.unsqueeze(0)
 
