@@ -45,8 +45,8 @@ if __name__ == '__main__':
         }
 
     evaluator = PolicyEvaluator(
-        # policy_path="outputs/models/2026-04-07/10-33-32/checkpoint_latest/",
-        wandb_run_path="jsw7460/RLArchitecture/20pc9saf",
+        # policy_path="outputs/models/2026-04-10/21-53-13/checkpoint_latest/",
+        wandb_run_path="jsw7460/RLArchitecture/iot05829",
         num_evals=1,
         seed=42,
         record_video=args.record_video,

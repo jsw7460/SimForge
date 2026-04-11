@@ -12,7 +12,7 @@ from .base import G1FlatConfig
 # stay grouped under the same names as before the unification.
 _DEFAULT_RUN_NAMES = {
     "newton":  "G1_29Dof_Newton_MLP",
-    "genesis": "mlp_ppo_g1_29dof",
+    "genesis": "G1_29Dof_Genesis_MLP",
     "mujoco":  "G1_29Dof_Mujoco_MLP",
 }
 

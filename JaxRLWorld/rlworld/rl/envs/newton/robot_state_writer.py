@@ -35,6 +35,9 @@ class NewtonRobotStateWriter:
     def __init__(self, env: "NewtonEnv", view: "ArticulationView") -> None:
         self._env = env
         self._view = view
+        # Cache actuated joint index mappings for splice operations
+        self._q_indices = env.act_manager.actuated_q_indices
+        self._qd_indices = env.act_manager.actuated_qd_indices
 
     # ------------------------------------------------------------------
     # Joint writes
@@ -43,9 +46,14 @@ class NewtonRobotStateWriter:
     def set_dof_positions(
         self, values: Tensor, env_ids: "Tensor | None" = None
     ) -> None:
-        """Write joint coordinate positions for the actuated DOFs."""
+        """Write actuated joint positions.
+
+        ``values`` has shape ``(N, num_actuated)`` — the writer reads
+        the full joint_q tensor, splices actuated values into the
+        correct coordinate indices, and writes the merged tensor back.
+        """
         full = self._build_full_dof_tensor(
-            values, env_ids, self._view.get_dof_positions
+            values, env_ids, self._view.get_dof_positions, self._q_indices
         )
         wp_arr = wp.from_torch(full.unsqueeze(1).contiguous(), dtype=wp.float32)
         self._view.set_dof_positions(self._state, wp_arr, mask=self._mask(env_ids))
@@ -53,9 +61,13 @@ class NewtonRobotStateWriter:
     def set_dof_velocities(
         self, values: Tensor, env_ids: "Tensor | None" = None
     ) -> None:
-        """Write joint coordinate velocities for the actuated DOFs."""
+        """Write actuated joint velocities.
+
+        Same splice logic as :meth:`set_dof_positions` but for the
+        velocity (joint_qd) tensor using ``actuated_qd_indices``.
+        """
         full = self._build_full_dof_tensor(
-            values, env_ids, self._view.get_dof_velocities
+            values, env_ids, self._view.get_dof_velocities, self._qd_indices
         )
         wp_arr = wp.from_torch(full.unsqueeze(1).contiguous(), dtype=wp.float32)
         self._view.set_dof_velocities(self._state, wp_arr, mask=self._mask(env_ids))
@@ -126,12 +138,26 @@ class NewtonRobotStateWriter:
         values: Tensor,
         env_ids: "Tensor | None",
         getter,
+        actuated_indices: "Tensor | None" = None,
     ) -> Tensor:
-        """Read current full DOF tensor, splice in subset, return full."""
-        if env_ids is None:
-            return values
+        """Read current full DOF tensor, splice actuated values in, return full.
+
+        When ``actuated_indices`` is provided, ``values`` has shape
+        ``(N, num_actuated)`` and gets written into the columns
+        specified by ``actuated_indices`` within the ``(num_envs,
+        full_dof_count)`` tensor.
+        """
         current = wp.to_torch(getter(self._state)).squeeze(1).clone()
-        current[env_ids] = values
+        if actuated_indices is not None:
+            if env_ids is not None:
+                current[env_ids.unsqueeze(1), actuated_indices.unsqueeze(0)] = values
+            else:
+                current[:, actuated_indices] = values
+        else:
+            if env_ids is not None:
+                current[env_ids] = values
+            else:
+                current[:] = values
         return current
 
     def _splice_root(

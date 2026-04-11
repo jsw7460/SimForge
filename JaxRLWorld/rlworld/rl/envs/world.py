@@ -12,6 +12,7 @@ from gymnasium import spaces
 from rlworld.rl.envs.lifecycle import LifecycleEvent, LifecycleManager
 
 if TYPE_CHECKING:
+    from rlworld.rl.envs.managers.common.robot_state_writer_protocol import RobotStateWriterProtocol
     from rlworld.rl.envs.robot_data import RobotData
 
 
@@ -26,7 +27,26 @@ class World(ABC):
     device: torch.device
     seed: int
 
-    # Timing
+    # ── Timing ──────────────────────────────────────────────────────
+    #
+    # Three numbers define the simulation/control timing:
+    #
+    #   physics_dt   – timestep of one physics substep (seconds).
+    #                  e.g. 0.005 s = 200 Hz physics.
+    #
+    #   decimation   – how many times action is repeated (physics steps
+    #                  per control step).  e.g. decimation=4 means the
+    #                  same action is applied for 4 physics steps before
+    #                  the policy is queried again.
+    #
+    #   control_dt   – wall-clock time per policy step = physics_dt × decimation.
+    #                  e.g. 0.005 × 4 = 0.02 s = 50 Hz control.
+    #
+    # For MuJoCo there is an additional `substeps` factor inside the
+    # scene manager: each physics_dt is subdivided into `substeps`
+    # MuJoCo mj_step calls.  The MuJoCo solver timestep is then
+    # physics_dt / substeps (e.g. 0.005 / 2 = 0.0025 s).
+    # Newton and Genesis handle substeps internally.
     physics_dt: float
     decimation: int
     control_dt: float
@@ -43,8 +63,25 @@ class World(ABC):
 
     def __init__(self):
         super().__init__()
+
+        # ── EnvStepCache generation counter ─────────────────────────
+        #
+        # Observation/reward functions decorated with @EnvStepCache()
+        # cache their return value and re-use it as long as
+        # _cache_generation hasn't changed.  This avoids redundant
+        # RobotData reads when the same quantity (e.g. dof_pos) is
+        # needed by both the observation builder and a reward function
+        # within the same step.
+        #
+        # _invalidate_cache() increments this counter, which makes
+        # all cached values stale on the next access.  It is called
+        # twice per step():
+        #   1. After _step_physics()  – physics state changed
+        #   2. After _reset_idx()     – reset envs have new state
         self._cache_generation = 0
+
         self._env_step_counter = 0
+        self._profile_step = False
         self.lifecycle = LifecycleManager()
 
     def _init_buffers(self) -> None:
@@ -59,7 +96,7 @@ class World(ABC):
         self.extras = {}
 
     def _invalidate_cache(self) -> None:
-        """Invalidate observation cache."""
+        """Bump the cache generation so all @EnvStepCache values are recomputed."""
         self._cache_generation += 1
 
     def _update_num_step_calls(self) -> None:
@@ -115,6 +152,18 @@ class World(ABC):
 
         Returns:
             An object satisfying the ``RobotData`` protocol.
+        """
+        pass
+
+    @abstractmethod
+    def get_robot_state_writer(self, entity_name: str = "robot") -> "RobotStateWriterProtocol":
+        """Get the RobotStateWriter interface for a named entity.
+
+        Args:
+            entity_name: Name of the entity in the scene (default: "robot").
+
+        Returns:
+            An object satisfying the ``RobotStateWriterProtocol``.
         """
         pass
 
@@ -296,6 +345,13 @@ class World(ABC):
     def step(self, actions: torch.Tensor) -> Tuple[
         Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Execute one environment step."""
+        if self._profile_step:
+            return self._step_profiled(actions)
+        return self._step_impl(actions)
+
+    def _step_impl(self, actions: torch.Tensor) -> Tuple[
+        Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """Execute one environment step (no profiling)."""
         # Process and apply actions
         processed_actions = self.act_manager.process_actions(actions)
         self._apply_actions(processed_actions)
@@ -371,6 +427,114 @@ class World(ABC):
             **self.obs_manager.extras,
             **self.termination_manager.extras,
         }
+
+        return self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras
+
+    def _step_profiled(self, actions: torch.Tensor) -> Tuple[
+        Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """Same as _step_impl but with per-section timing."""
+        import time
+
+        torch.cuda.synchronize() if "cuda" in str(self.device) else None
+        timings: Dict[str, float] = {}
+
+        def _tick():
+            if "cuda" in str(self.device):
+                torch.cuda.synchronize()
+            return time.perf_counter()
+
+        t0 = _tick()
+        processed_actions = self.act_manager.process_actions(actions)
+        self._apply_actions(processed_actions)
+        timings["apply_actions"] = _tick() - t0
+
+        t0 = _tick()
+        self._step_physics()
+        timings["step_physics"] = _tick() - t0
+
+        self._invalidate_cache()
+
+        t0 = _tick()
+        self.contact_manager.advance()
+        timings["contact_advance"] = _tick() - t0
+
+        t0 = _tick()
+        if hasattr(self, 'event_manager') and self.event_manager is not None:
+            if "interval" in self.event_manager.available_modes:
+                self.event_manager.apply(mode="interval", dt=self.control_dt)
+        timings["interval_events"] = _tick() - t0
+
+        t0 = _tick()
+        self._pre_reward_hook()
+        timings["pre_reward_hook"] = _tick() - t0
+
+        t0 = _tick()
+        self.rew_buf[:] = 0.0
+        self.reward_manager.set_rewards(
+            reward_buffer=self.rew_buf,
+            episode_sums=self.episode_sums,
+            reward_buffer_per_type=self.rew_buf_per_type
+        )
+        timings["rewards"] = _tick() - t0
+
+        t0 = _tick()
+        self._pre_termination_hook()
+        terminated, truncated = self.termination_manager.check_termination()
+        reset_buf = terminated | truncated
+        reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
+        timings["termination"] = _tick() - t0
+
+        t0 = _tick()
+        final_observation = None
+        final_info = None
+        if len(reset_env_ids) > 0:
+            self.obs_manager.process_observations(update_history=True)
+            final_observation = {
+                key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()
+            }
+            final_info = {
+                "episode_reward_sums": deepcopy(self.episode_sums),
+            }
+        timings["terminal_obs"] = _tick() - t0
+
+        t0 = _tick()
+        self.command_manager.compute(self.control_dt)
+        timings["commands"] = _tick() - t0
+
+        t0 = _tick()
+        self._reset_idx(reset_env_ids)
+        timings["reset_idx"] = _tick() - t0
+
+        self._invalidate_cache()
+
+        t0 = _tick()
+        self._post_reset_forward()
+        timings["post_reset_fwd"] = _tick() - t0
+
+        t0 = _tick()
+        self._advance_managers()
+        timings["advance_managers"] = _tick() - t0
+
+        self._update_num_step_calls()
+
+        # Build extras
+        self.extras = {
+            "final_observation": final_observation,
+            "final_info": final_info,
+            "terminal_env_ids": reset_env_ids if len(reset_env_ids) > 0 else None,
+            "rewards_per_type": self.rew_buf_per_type,
+            "episode_reward_sums": deepcopy(self.episode_sums),
+            **self.obs_manager.extras,
+            **self.termination_manager.extras,
+        }
+
+        # Print every 100 steps
+        if self._env_step_counter % 100 == 0:
+            total = sum(timings.values())
+            print(f"\n[Step {self._env_step_counter}] step() profile (total={total*1000:.1f}ms):")
+            for name, dt in sorted(timings.items(), key=lambda x: -x[1]):
+                pct = dt / total * 100 if total > 0 else 0
+                print(f"  {name:20s} {dt*1000:7.2f}ms  ({pct:5.1f}%)")
 
         return self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras
 

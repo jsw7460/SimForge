@@ -75,7 +75,6 @@ class SceneManager(BaseManager):
         }
 
     def find_body_names(self, body_names: list[str], entity_name: str = "robot"):
-
         _, names = entity_utils.find_links(self.entities[entity_name], body_names, preserve_order=True)
         return names
 

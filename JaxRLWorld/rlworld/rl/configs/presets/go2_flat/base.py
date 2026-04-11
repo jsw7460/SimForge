@@ -46,10 +46,6 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 
 
 # ── Per-simulator constants ──────────────────────────────────────────
-#
-# Same effective control rate (50 Hz) across all three sims, but MuJoCo
-# uses a 2x faster physics step than Newton/Genesis (400 Hz vs 200 Hz).
-
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
     "newton":  {"dt": 0.005, "substeps": 2, "decimation": 4},
     "genesis": {"dt": 0.005, "substeps": 2, "decimation": 4},

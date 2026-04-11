@@ -60,21 +60,21 @@ def main():
         extra_overrides=overrides,
     )
 
-    # ====== Friction
-    env = evaluator.env
-    # terrain = env.scene_manager.scene.terrain
-    # geom_ids = terrain.indexing.geom_ids
-    # env.scene_manager.model.geom_friction[:, geom_ids, 0] = 0.01
-
-    robot = env.scene_manager.scene["robot"]
-
-    # entity-local idx → global geom id convert
-    foot_geom_names = ("FR_foot_collision", "FL_foot_collision", "RR_foot_collision", "RL_foot_collision")
-    local_ids, _ = robot.find_geoms(foot_geom_names)
-    foot_geom_ids = robot.indexing.geom_ids[local_ids]
-
-    env.scene_manager.model.geom_friction[:, foot_geom_ids, 0] = 0.3
-    # ===== Friction
+    # # ====== Friction
+    # env = evaluator.env
+    # # terrain = env.scene_manager.scene.terrain
+    # # geom_ids = terrain.indexing.geom_ids
+    # # env.scene_manager.model.geom_friction[:, geom_ids, 0] = 0.01
+    #
+    # robot = env.scene_manager.scene["robot"]
+    #
+    # # entity-local idx → global geom id convert
+    # foot_geom_names = ("FR_foot_collision", "FL_foot_collision", "RR_foot_collision", "RL_foot_collision")
+    # local_ids, _ = robot.find_geoms(foot_geom_names)
+    # foot_geom_ids = robot.indexing.geom_ids[local_ids]
+    #
+    # env.scene_manager.model.geom_friction[:, foot_geom_ids, 0] = 0.3
+    # # ===== Friction
 
     if args.eval:
         stats = evaluator.evaluate()
