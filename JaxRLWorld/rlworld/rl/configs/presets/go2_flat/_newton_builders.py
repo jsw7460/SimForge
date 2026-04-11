@@ -46,7 +46,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
-from rlworld.rl.envs.mdp.reset import newton_reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
@@ -276,11 +275,8 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
 
 def build_event(cfg: "Go2FlatConfig") -> EventConfig:
     r = cfg.robot
+    from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
     from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
-    from rlworld.rl.envs.mdp.events.common_event_terms import (
-        push_by_setting_velocity as _push_fn,
-        reset_root_state_uniform as _reset_root_fn,
-    )
 
     # Newton stores initial quat in xyzw; convert to wxyz for common API.
     _iq = _initial_quat()  # wp.quat (xyzw: x, y, z, w)
@@ -290,7 +286,7 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
     @dataclass
     class _EventsCfg(EventConfig):
         reset_root = EventTermConfig(
-            func=_reset_root_fn,
+            func=common_ef.reset_root_state_uniform,
             mode="reset",
             params={
                 "pose_range": {
@@ -305,8 +301,11 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
             },
         )
         reset_dof_pos = EventTermConfig(
-            func=initf.initialize_dof_pos_with_noise,
-            params={"position_noise_range": (math.pi / 360, math.pi / 120)},
+            func=common_ef.reset_joints_by_offset,
+            params={
+                "position_range": (math.pi / 360, math.pi / 120),
+                "velocity_range": (0.0, 0.0),
+            },
             mode="reset",
         )
         # Domain randomization (disabled during eval)
@@ -330,7 +329,7 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
             params={"friction_range": (0.0, 0.05)},
         )
         push_robot = EventTermConfig(
-            func=_push_fn,
+            func=common_ef.push_by_setting_velocity,
             mode="interval",
             interval_range_s=(2.0, 20.0),
             params={

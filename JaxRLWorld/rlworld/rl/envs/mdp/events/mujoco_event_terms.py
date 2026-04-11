@@ -1,3 +1,8 @@
+"""MuJoCo-specific event terms.
+
+General-purpose reset / push functions live in ``common_event_terms.py``;
+domain-randomization functions that wrap mjlab's ``dr`` module remain here.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -32,226 +37,6 @@ class EntityCfg:
     body_names: tuple[str, ...] | None = None
     geom_names: tuple[str, ...] | None = None
     site_names: tuple[str, ...] | None = None
-
-
-def _resolve_entity_cfg(env: "MujocoEnv", cfg: EntityCfg) -> EntityCfg:
-    """Resolve named components to IDs."""
-    entity = env.scene_manager.get_entity(cfg.name)
-
-    # mjlab find_* methods return (indices, names) tuples
-    if cfg.joint_names is not None:
-        cfg.joint_ids, _ = entity.find_joints(cfg.joint_names)
-    if cfg.body_names is not None:
-        cfg.body_ids, _ = entity.find_bodies(cfg.body_names)
-    if cfg.geom_names is not None:
-        cfg.geom_ids, _ = entity.find_geoms(cfg.geom_names)
-    if cfg.site_names is not None:
-        cfg.site_ids, _ = entity.find_sites(cfg.site_names)
-
-    return cfg
-
-
-# =============================================================================
-# Sampling utilities
-# =============================================================================
-
-def _sample_uniform(
-    lower: torch.Tensor,
-    upper: torch.Tensor,
-    shape: tuple,
-    device: torch.device,
-) -> torch.Tensor:
-    """Sample from uniform distribution."""
-    return (upper - lower) * torch.rand(shape, device=device) + lower
-
-
-# =============================================================================
-# Reset events
-# =============================================================================
-
-def reset_scene_to_default(
-    env: "MujocoEnv",
-    env_ids: torch.Tensor | None = None,
-) -> None:
-    """Reset all entities in the scene to their default states."""
-    if env_ids is None:
-        env_ids = torch.arange(env.num_envs, device=env.device)
-
-    scene = env.scene_manager.scene
-    for entity in scene.entities.values():
-        from mjlab.entity import Entity
-        if not isinstance(entity, Entity):
-            continue
-
-        # Reset root/mocap pose
-        if entity.is_fixed_base and entity.is_mocap:
-            default_root_state = entity.data.default_root_state[env_ids].clone()
-            mocap_pose = torch.zeros((len(env_ids), 7), device=env.device)
-            mocap_pose[:, 0:3] = default_root_state[:, 0:3] + scene.env_origins[env_ids]
-            mocap_pose[:, 3:7] = default_root_state[:, 3:7]
-            entity.write_mocap_pose_to_sim(mocap_pose, env_ids=env_ids)
-        elif not entity.is_fixed_base:
-            default_root_state = entity.data.default_root_state[env_ids].clone()
-            default_root_state[:, 0:3] += scene.env_origins[env_ids]
-            entity.write_root_state_to_sim(default_root_state, env_ids=env_ids)
-
-        # Reset joint state
-        if entity.is_articulated:
-            default_joint_pos = entity.data.default_joint_pos[env_ids].clone()
-            default_joint_vel = entity.data.default_joint_vel[env_ids].clone()
-            entity.write_joint_state_to_sim(
-                default_joint_pos, default_joint_vel, env_ids=env_ids
-            )
-
-
-def reset_root_state_uniform(
-    env: "MujocoEnv",
-    env_ids: torch.Tensor | None,
-    pose_range: dict[str, tuple[float, float]],
-    velocity_range: dict[str, tuple[float, float]] | None = None,
-    entity_cfg: EntityCfg | None = None,
-) -> None:
-    """Reset root state with uniform random perturbations."""
-    from mjlab.utils.lab_api.math import quat_from_euler_xyz, quat_mul
-
-    if env_ids is None:
-        env_ids = torch.arange(env.num_envs, device=env.device)
-
-    entity_cfg = entity_cfg or EntityCfg()
-    entity = env.scene_manager.get_entity(entity_cfg.name)
-    scene = env.scene_manager.scene
-
-    # Sample pose perturbations
-    keys = ["x", "y", "z", "roll", "pitch", "yaw"]
-    range_list = [pose_range.get(key, (0.0, 0.0)) for key in keys]
-    ranges = torch.tensor(range_list, device=env.device)
-    pose_samples = _sample_uniform(
-        ranges[:, 0], ranges[:, 1], (len(env_ids), 6), env.device
-    )
-
-    default_root_state = entity.data.default_root_state[env_ids].clone()
-
-    # Position
-    positions = (
-        default_root_state[:, 0:3]
-        + pose_samples[:, 0:3]
-        + scene.env_origins[env_ids]
-    )
-
-    # Orientation
-    orientations_delta = quat_from_euler_xyz(
-        pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
-    )
-    orientations = quat_mul(default_root_state[:, 3:7], orientations_delta)
-
-    if entity.is_fixed_base:
-        if not entity.is_mocap:
-            raise ValueError(f"Cannot reset root state for fixed-base non-mocap entity.")
-        entity.write_mocap_pose_to_sim(
-            torch.cat([positions, orientations], dim=-1), env_ids=env_ids
-        )
-        return
-
-    # Floating-base: also reset velocities
-    velocity_range = velocity_range or {}
-    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in keys]
-    ranges = torch.tensor(range_list, device=env.device)
-    vel_samples = _sample_uniform(
-        ranges[:, 0], ranges[:, 1], (len(env_ids), 6), env.device
-    )
-    velocities = default_root_state[:, 7:13] + vel_samples
-
-    entity.write_root_link_pose_to_sim(
-        torch.cat([positions, orientations], dim=-1), env_ids=env_ids
-    )
-    entity.write_root_link_velocity_to_sim(velocities, env_ids=env_ids)
-
-
-def reset_joints_by_offset(
-    env: "MujocoEnv",
-    env_ids: torch.Tensor | None,
-    position_range: tuple[float, float],
-    velocity_range: tuple[float, float],
-    entity_cfg: EntityCfg | None = None,
-) -> None:
-    """Reset joint positions and velocities with uniform offsets."""
-    if env_ids is None:
-        env_ids = torch.arange(env.num_envs, device=env.device)
-
-    entity_cfg = entity_cfg or EntityCfg()
-    entity_cfg = _resolve_entity_cfg(env, entity_cfg)
-    entity = env.scene_manager.get_entity(entity_cfg.name)
-
-    joint_ids = entity_cfg.joint_ids
-
-    # Get defaults
-    default_joint_pos = entity.data.default_joint_pos[env_ids]
-    default_joint_vel = entity.data.default_joint_vel[env_ids]
-    soft_joint_pos_limits = entity.data.soft_joint_pos_limits
-
-    # Select joints
-    if isinstance(joint_ids, slice):
-        joint_pos = default_joint_pos.clone()
-        joint_vel = default_joint_vel.clone()
-        limits = soft_joint_pos_limits[env_ids] if soft_joint_pos_limits is not None else None
-    else:
-        joint_pos = default_joint_pos[:, joint_ids].clone()
-        joint_vel = default_joint_vel[:, joint_ids].clone()
-        limits = soft_joint_pos_limits[env_ids][:, joint_ids] if soft_joint_pos_limits is not None else None
-
-    # Add noise
-    joint_pos += _sample_uniform(
-        torch.tensor(position_range[0], device=env.device),
-        torch.tensor(position_range[1], device=env.device),
-        joint_pos.shape,
-        env.device,
-    )
-    joint_vel += _sample_uniform(
-        torch.tensor(velocity_range[0], device=env.device),
-        torch.tensor(velocity_range[1], device=env.device),
-        joint_vel.shape,
-        env.device,
-    )
-
-    # Clamp to limits
-    if limits is not None:
-        joint_pos = joint_pos.clamp_(limits[..., 0], limits[..., 1])
-
-    # Convert joint_ids for write
-    if isinstance(joint_ids, list):
-        joint_ids_tensor = torch.tensor(joint_ids, device=env.device)
-    else:
-        joint_ids_tensor = None
-
-    entity.write_joint_state_to_sim(
-        joint_pos, joint_vel, env_ids=env_ids, joint_ids=joint_ids_tensor
-    )
-
-
-# =============================================================================
-# Interval events (disturbances)
-# =============================================================================
-
-def push_by_setting_velocity(
-    env: "MujocoEnv",
-    env_ids: torch.Tensor,
-    velocity_range: dict[str, tuple[float, float]],
-    entity_cfg: EntityCfg | None = None,
-) -> None:
-    """Apply push disturbance by setting root velocity."""
-    entity_cfg = entity_cfg or EntityCfg()
-    entity = env.scene_manager.get_entity(entity_cfg.name)
-
-    vel_w = entity.data.root_link_vel_w[env_ids].clone()
-
-    keys = ["x", "y", "z", "roll", "pitch", "yaw"]
-    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in keys]
-    ranges = torch.tensor(range_list, device=env.device)
-
-    vel_w += _sample_uniform(
-        ranges[:, 0], ranges[:, 1], vel_w.shape, env.device
-    )
-    entity.write_root_link_velocity_to_sim(vel_w, env_ids=env_ids)
 
 
 # =============================================================================
@@ -302,7 +87,7 @@ def _to_scene_entity_cfg(entity_cfg: EntityCfg):
 # Domain randomization events
 # =============================================================================
 
-def randomize_geom_friction(
+def randomize_friction(
     env: "MujocoEnv",
     env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
@@ -311,7 +96,12 @@ def randomize_geom_friction(
     axes: list[int] | None = None,
     shared_random: bool = False,
 ) -> None:
-    """Randomize geom friction via mjlab's dr.geom_friction."""
+    """Randomize geom friction via mjlab's dr.geom_friction.
+
+    Named ``randomize_friction`` for cross-sim naming consistency with
+    Newton (``dr.newton.randomize_friction``) and Genesis
+    (``dr.genesis.randomize_friction``).
+    """
     from mjlab.envs.mdp.dr import geom_friction
 
     entity_cfg = entity_cfg or EntityCfg()
@@ -324,6 +114,10 @@ def randomize_geom_friction(
         axes=axes,
         shared_random=shared_random,
     )
+
+
+# Backward-compatible alias
+randomize_geom_friction = randomize_friction
 
 
 def randomize_body_com_offset(

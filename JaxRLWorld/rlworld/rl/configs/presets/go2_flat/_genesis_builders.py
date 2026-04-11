@@ -52,9 +52,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
-from rlworld.rl.envs.mdp.events import event_terms as ef
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
-from rlworld.rl.envs.mdp.reset import reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
@@ -140,8 +138,8 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> SceneConfig:
                         ),
                     ),
                 ),
-                convexify=False,
-                visualize_contact=True,
+                convexify=True,
+                visualize_contact=False,
             ),
         },
         sensors=[
@@ -166,6 +164,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> SceneConfig:
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
             constraint_solver=gs.constraint_solver.Newton,
+            constraint_timeconst=0.02,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
@@ -299,9 +298,12 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
         )
 
         reset_dof_pos = EventTermConfig(
-            func=initf.initialize_dof_pos_with_noise,
+            func=common_ef.reset_joints_by_offset,
             mode="reset",
-            params={"position_noise_range": (math.pi / 360, math.pi / 120)},
+            params={
+                "position_range": (math.pi / 360, math.pi / 120),
+                "velocity_range": (0.0, 0.0),
+            },
         )
 
         # Domain randomization (disabled during eval)

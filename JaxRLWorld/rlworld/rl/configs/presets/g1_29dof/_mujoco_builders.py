@@ -57,9 +57,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.observations.mujoco.proprioception import (
-    foot_height,
-)
+from rlworld.rl.envs.mdp.observations.common.proprioception import foot_height
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
@@ -409,12 +407,11 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
             },
         )
         reset_joints = EventTermConfig(
-            func=ef.reset_joints_by_offset,
+            func=common_ef.reset_joints_by_offset,
             mode="reset",
             params={
                 "position_range": (0.0, 0.0),
                 "velocity_range": (0.0, 0.0),
-                "entity_cfg": EntityCfg(name="robot", joint_names=(".*",)),
             },
         )
 

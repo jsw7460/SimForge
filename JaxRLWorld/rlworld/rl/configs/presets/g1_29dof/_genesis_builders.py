@@ -44,7 +44,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
-from rlworld.rl.envs.mdp.events import event_terms as genesis_ef
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -56,11 +55,10 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     foot_air_time,
     foot_contact_forces,
     foot_contact_indicator,
+    foot_height,
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.observations.genesis import state  # state.feet_height (sim-specific)
-from rlworld.rl.envs.mdp.reset import reset_terms as initf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
@@ -192,7 +190,7 @@ def build_observation(cfg: "G1FlatConfig") -> ObservationConfig:
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
         foot_height_obs = ObservationTermConfig(
-            func=state.feet_height, scale=1.0, params={"links": feet_links}
+            func=foot_height, scale=1.0, params={"body_names": tuple(feet_links)}
         )
         foot_air_time_obs = ObservationTermConfig(func=foot_air_time, scale=1.0)
         foot_contact_obs = ObservationTermConfig(func=foot_contact_indicator, scale=1.0)
@@ -364,11 +362,11 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
             },
         )
         reset_dof_pos = EventTermConfig(
-            func=initf.initialize_dof_pos_with_noise,
+            func=common_ef.reset_joints_by_offset,
             mode="reset",
             params={
-                "position_noise_range": (0.0, 0.0),
-                "velocity_noise_range": (0.0, 0.0),
+                "position_range": (0.0, 0.0),
+                "velocity_range": (0.0, 0.0),
             },
         )
 

@@ -340,12 +340,11 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
             },
         )
         reset_joints = EventTermConfig(
-            func=ef.reset_joints_by_offset,
+            func=common_ef.reset_joints_by_offset,
             mode="reset",
             params={
                 "position_range": (math.pi / 360, math.pi / 120),
                 "velocity_range": (0.0, 0.0),
-                "entity_cfg": EntityCfg(name="robot", joint_names=(".*",)),
             },
         )
 
@@ -368,7 +367,7 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
 
         # Domain randomization (disabled during eval)
         randomize_friction = EventTermConfig(
-            func=ef.randomize_geom_friction,
+            func=ef.randomize_friction,
             mode="reset_dr",
             params={
                 "ranges": (0.3, 1.2),

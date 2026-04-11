@@ -176,3 +176,65 @@ def reset_root_state_uniform(
     writer.set_root_pose(pos, quat_wxyz, env_ids=env_ids)
     writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
+
+
+# ── Reset joint state ──────────────────────────────────────────────
+
+
+def reset_joints_by_offset(
+    env: "World",
+    env_ids: torch.Tensor,
+    position_range: tuple[float, float],
+    velocity_range: tuple[float, float] = (0.0, 0.0),
+    entity_name: str = "robot",
+) -> None:
+    """Reset actuated joint positions/velocities with uniform noise.
+
+    Uses ``act_manager.offset`` as the default joint positions (the
+    canonical cross-sim source for default DOF values) and
+    ``joint_pos_limits`` from ``RobotData`` for clamping.
+
+    Works identically across Newton, Genesis, and MuJoCo.
+
+    Args:
+        env: Any environment satisfying the RobotData + Writer APIs.
+        env_ids: Environments to reset.
+        position_range: ``(min, max)`` uniform noise added to defaults.
+        velocity_range: ``(min, max)`` uniform noise for velocities.
+            Defaults to ``(0.0, 0.0)`` (zero velocity).
+        entity_name: Entity to reset.
+    """
+    if len(env_ids) == 0:
+        return
+
+    writer = env.get_robot_state_writer(entity_name)
+    device = env.device
+    n = len(env_ids)
+
+    # Default joint positions from action manager offset.
+    # offset shape: (num_envs, num_actuated) — slice by env_ids.
+    default_pos = env.act_manager.offset[env_ids].clone()
+    num_joints = default_pos.shape[-1]
+
+    # Ensure default_pos is always 2-D (n, num_joints) even for 1 env.
+    if default_pos.dim() == 1:
+        default_pos = default_pos.unsqueeze(0)
+
+    # Add position noise
+    if position_range != (0.0, 0.0):
+        noise = torch.empty(n, num_joints, device=device).uniform_(
+            position_range[0], position_range[1],
+        )
+        default_pos = default_pos + noise
+
+    # Joint velocities
+    if velocity_range == (0.0, 0.0):
+        joint_vel = torch.zeros(n, num_joints, device=device)
+    else:
+        joint_vel = torch.empty(n, num_joints, device=device).uniform_(
+            velocity_range[0], velocity_range[1],
+        )
+
+    writer.set_dof_positions(default_pos, env_ids=env_ids)
+    writer.set_dof_velocities(joint_vel, env_ids=env_ids)
+    writer.eval_fk(env_ids=env_ids)
