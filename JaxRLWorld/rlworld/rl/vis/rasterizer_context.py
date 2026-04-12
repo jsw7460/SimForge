@@ -71,9 +71,9 @@ class RLWorldRasterizerContext(RasterizerContext):
                 config=config
             )
 
-    def update(self, force_render: bool = False) -> dict:
+    def update(self, force_render: bool = False):
         """Update context and render 3D overlays."""
-        buffer_updates = super().update(force_render)
+        super().update(force_render)
 
         # Collect state from environment
         if self._env is not None:
@@ -83,8 +83,6 @@ class RLWorldRasterizerContext(RasterizerContext):
         for overlay in self._overlays_3d.values():
             if overlay.enabled:
                 overlay.update(self._visualization_state)
-
-        return buffer_updates
 
     def _update_visualization_state(self) -> None:
         """Collect visualization data from environment."""
@@ -222,9 +220,7 @@ def inject_into_scene(
     new_context.seg_node_map = old_context.seg_node_map
     new_context.seg_color_map = old_context.seg_color_map
 
-    # Copy rendering state
-    new_context.buffer = old_context.buffer
-    new_context._external_node_buffer = old_context._external_node_buffer
+    # Copy rendering state (buffer management moved to JIT renderer in Genesis v0.4.6)
     new_context.rendered_envs_idx = old_context.rendered_envs_idx
 
     # Copy flags
