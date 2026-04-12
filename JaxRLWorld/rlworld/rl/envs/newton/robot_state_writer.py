@@ -1,20 +1,28 @@
-"""NewtonRobotStateWriter — write API for Newton entity state.
+"""NewtonRobotStateWriter — zero-copy write API for Newton entity state.
 
-Implements :class:`RobotStateWriterProtocol` against Newton's
-``ArticulationView`` + warp double-buffered ``State``. The protocol
-hides Newton-specific quirks from callers:
+Implements :class:`RobotStateWriterProtocol` using **zero-copy torch
+views** of Newton's warp state arrays.  ``wp.to_torch()`` returns a
+tensor that shares the underlying GPU memory with the warp array, so
+writing to the torch view directly mutates the simulator state — no
+conversion overhead.
 
-- Quaternions are accepted in **wxyz** (protocol convention) and
-  converted to Newton's native **xyzw** layout internally.
-- ``env_ids`` is a torch tensor; the writer builds the corresponding
-  warp boolean mask.
-- The active state (``scene_manager.state``, which is ``state_0``)
-  is grabbed automatically — callers do not pass an explicit state.
-- ``values`` for joint / root writes is the **subset** for the given
-  ``env_ids``; the writer reads the current full tensor and splices
-  the subset into it before calling warp's masked API. When
-  ``env_ids`` is ``None`` the caller passes a full ``(num_envs, ...)``
-  tensor and no read-modify-write is needed.
+The views are created once at construction time and reused on every
+call.  This mirrors the pattern used by Newton's own RL examples
+(``newton/solvers/kamino/examples/rl/simulation.py``).
+
+Conventions
+-----------
+
+**wxyz quaternion.** ``set_root_pose`` accepts wxyz and converts to
+Newton's native xyzw before writing.
+
+**Actuated-only values.** ``set_dof_positions`` / ``set_dof_velocities``
+accept tensors of shape ``(N, num_actuated)`` and write them to the
+correct generalized-coordinate indices via ``actuated_q_indices`` /
+``actuated_qd_indices``.
+
+**eval_fk.** Must be called after joint/root writes to recompute
+body transforms (``body_q``) from the updated ``joint_q``.
 """
 from __future__ import annotations
 
@@ -30,14 +38,30 @@ if TYPE_CHECKING:
 
 
 class NewtonRobotStateWriter:
-    """Write-side companion to :class:`NewtonRobotData`."""
+    """Write-side companion to :class:`NewtonRobotData`.
+
+    Uses zero-copy torch views of ``state.joint_q`` and
+    ``state.joint_qd`` for maximum write performance.
+    """
 
     def __init__(self, env: "NewtonEnv", view: "ArticulationView") -> None:
         self._env = env
         self._view = view
-        # Cache actuated joint index mappings for splice operations
+
+        # Actuated joint index mappings
         self._q_indices = env.act_manager.actuated_q_indices
         self._qd_indices = env.act_manager.actuated_qd_indices
+
+        # Zero-copy torch views of the warp state arrays.
+        # These share GPU memory — torch writes update warp directly.
+        model = env.scene_manager.model
+        num_worlds = model.world_count
+        coords_per_world = model.joint_coord_count // num_worlds
+        dofs_per_world = model.joint_dof_count // num_worlds
+        state = env.scene_manager.state
+
+        self._joint_q = wp.to_torch(state.joint_q).reshape(num_worlds, coords_per_world)
+        self._joint_qd = wp.to_torch(state.joint_qd).reshape(num_worlds, dofs_per_world)
 
     # ------------------------------------------------------------------
     # Joint writes
@@ -46,31 +70,20 @@ class NewtonRobotStateWriter:
     def set_dof_positions(
         self, values: Tensor, env_ids: "Tensor | None" = None
     ) -> None:
-        """Write actuated joint positions.
-
-        ``values`` has shape ``(N, num_actuated)`` — the writer reads
-        the full joint_q tensor, splices actuated values into the
-        correct coordinate indices, and writes the merged tensor back.
-        """
-        full = self._build_full_dof_tensor(
-            values, env_ids, self._view.get_dof_positions, self._q_indices
-        )
-        wp_arr = wp.from_torch(full.unsqueeze(1).contiguous(), dtype=wp.float32)
-        self._view.set_dof_positions(self._state, wp_arr, mask=self._mask(env_ids))
+        """Write actuated joint positions via zero-copy view."""
+        if env_ids is not None:
+            self._joint_q[env_ids.unsqueeze(1), self._q_indices.unsqueeze(0)] = values
+        else:
+            self._joint_q[:, self._q_indices] = values
 
     def set_dof_velocities(
         self, values: Tensor, env_ids: "Tensor | None" = None
     ) -> None:
-        """Write actuated joint velocities.
-
-        Same splice logic as :meth:`set_dof_positions` but for the
-        velocity (joint_qd) tensor using ``actuated_qd_indices``.
-        """
-        full = self._build_full_dof_tensor(
-            values, env_ids, self._view.get_dof_velocities, self._qd_indices
-        )
-        wp_arr = wp.from_torch(full.unsqueeze(1).contiguous(), dtype=wp.float32)
-        self._view.set_dof_velocities(self._state, wp_arr, mask=self._mask(env_ids))
+        """Write actuated joint velocities via zero-copy view."""
+        if env_ids is not None:
+            self._joint_qd[env_ids.unsqueeze(1), self._qd_indices.unsqueeze(0)] = values
+        else:
+            self._joint_qd[:, self._qd_indices] = values
 
     # ------------------------------------------------------------------
     # Root writes
@@ -82,20 +95,11 @@ class NewtonRobotStateWriter:
         quat_wxyz: Tensor,
         env_ids: "Tensor | None" = None,
     ) -> None:
-        """Write root link position + orientation (wxyz)."""
-        # wxyz → xyzw (Newton native)
+        """Write root link position + orientation (wxyz → xyzw)."""
         quat_xyzw = quat_wxyz[..., [1, 2, 3, 0]]
-
-        full_pos = self._splice_root(
-            pos, env_ids, self._read_root_pos
-        )
-        full_quat = self._splice_root(
-            quat_xyzw, env_ids, self._read_root_quat_xyzw
-        )
-
-        transform = torch.cat([full_pos, full_quat], dim=-1)
-        wp_t = wp.from_torch(transform.unsqueeze(1).contiguous(), dtype=wp.transform)
-        self._view.set_root_transforms(self._state, wp_t, mask=self._mask(env_ids))
+        rows = env_ids if env_ids is not None else slice(None)
+        self._joint_q[rows, 0:3] = pos
+        self._joint_q[rows, 3:7] = quat_xyzw
 
     def set_root_velocity(
         self,
@@ -104,16 +108,9 @@ class NewtonRobotStateWriter:
         env_ids: "Tensor | None" = None,
     ) -> None:
         """Write root link linear + angular velocity."""
-        full_lin = self._splice_root(
-            lin_vel, env_ids, self._read_root_lin_vel
-        )
-        full_ang = self._splice_root(
-            ang_vel, env_ids, self._read_root_ang_vel
-        )
-
-        vel = torch.cat([full_lin, full_ang], dim=-1)
-        wp_v = wp.from_torch(vel.unsqueeze(1).contiguous(), dtype=wp.spatial_vector)
-        self._view.set_root_velocities(self._state, wp_v, mask=self._mask(env_ids))
+        rows = env_ids if env_ids is not None else slice(None)
+        self._joint_qd[rows, 0:3] = lin_vel
+        self._joint_qd[rows, 3:6] = ang_vel
 
     # ------------------------------------------------------------------
     # FK
@@ -121,80 +118,11 @@ class NewtonRobotStateWriter:
 
     def eval_fk(self, env_ids: "Tensor | None" = None) -> None:
         """Re-evaluate forward kinematics for the selected environments."""
-        self._view.eval_fk(self._state, mask=self._mask(env_ids))
+        self._view.eval_fk(self._env.scene_manager.state, mask=self._mask(env_ids))
 
     # ==================================================================
     # Internals
     # ==================================================================
-
-    @property
-    def _state(self):
-        return self._env.scene_manager.state
-
-    # -- value helpers --------------------------------------------------
-
-    def _build_full_dof_tensor(
-        self,
-        values: Tensor,
-        env_ids: "Tensor | None",
-        getter,
-        actuated_indices: "Tensor | None" = None,
-    ) -> Tensor:
-        """Read current full DOF tensor, splice actuated values in, return full.
-
-        When ``actuated_indices`` is provided, ``values`` has shape
-        ``(N, num_actuated)`` and gets written into the columns
-        specified by ``actuated_indices`` within the ``(num_envs,
-        full_dof_count)`` tensor.
-        """
-        current = wp.to_torch(getter(self._state)).squeeze(1).clone()
-        if actuated_indices is not None:
-            if env_ids is not None:
-                current[env_ids.unsqueeze(1), actuated_indices.unsqueeze(0)] = values
-            else:
-                current[:, actuated_indices] = values
-        else:
-            if env_ids is not None:
-                current[env_ids] = values
-            else:
-                current[:] = values
-        return current
-
-    def _splice_root(
-        self,
-        values: Tensor,
-        env_ids: "Tensor | None",
-        reader,
-    ) -> Tensor:
-        if env_ids is None:
-            return values
-        current = reader().clone()
-        current[env_ids] = values
-        return current
-
-    # -- root readers (used only by the splice path) --------------------
-
-    def _root_transform_floats(self) -> Tensor:
-        wp_arr = self._view.get_root_transforms(self._state)
-        return wp.to_torch(wp_arr).reshape(-1, 7)
-
-    def _root_velocity_floats(self) -> Tensor:
-        wp_arr = self._view.get_root_velocities(self._state)
-        return wp.to_torch(wp_arr).reshape(-1, 6)
-
-    def _read_root_pos(self) -> Tensor:
-        return self._root_transform_floats()[:, 0:3]
-
-    def _read_root_quat_xyzw(self) -> Tensor:
-        return self._root_transform_floats()[:, 3:7]
-
-    def _read_root_lin_vel(self) -> Tensor:
-        return self._root_velocity_floats()[:, 0:3]
-
-    def _read_root_ang_vel(self) -> Tensor:
-        return self._root_velocity_floats()[:, 3:6]
-
-    # -- mask -----------------------------------------------------------
 
     def _mask(self, env_ids: "Tensor | None"):
         if env_ids is None:
