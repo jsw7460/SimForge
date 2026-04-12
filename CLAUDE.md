@@ -2,21 +2,19 @@
 
 ## Language
 - 대화: 한국어, 코드/커밋/주석: 영어
-- 파일 수정 시 답변 마지막에는 수정된 파일의 이름과 경로를 반드시 보고
+
+## Response Format
+- MUST: 파일을 수정했으면 답변 마지막에 수정된 파일 경로 목록을 보고
 
 ## Code Style
-
-### Imports
-- **import는 파일 상단에.** 함수 내부 import 금지. 유일한 예외: 순환 참조(circular import).
-
-### Error Handling
-- **silent fallback 금지.** 실패하면 즉시 crash. `except: pass`나 빈 fallback 절대 안됨.
+- NEVER: 함수 내부에서 import 하지 말 것. 유일한 예외: 순환 참조(circular import)
+- NEVER: silent fallback. 실패하면 즉시 crash. `except: pass`나 빈 fallback 금지
+- MUST: top-level import를 제거하기 전에 grep으로 re-export 여부 확인
 
 ## Architecture Principles
-
-### 리팩토링 시 주의사항
-- **원본 동작에 없던 기능 추가 금지.** 예: Newton/Genesis에 없던 joint limit clamping을 common 버전에 추가하면 안됨. 원본과 동일한 동작만.
-- **3개 sim 전부 확인.** cross-sim 변경 시 Newton, Genesis, MuJoCo 모두에서 shape/API 호환성 확인.
+- NEVER: 원본 동작에 없던 기능 추가. 리팩토링은 동작 보존이 원칙
+- MUST: dead code 제거 전 grep으로 caller 전수 조사 (legacy preset 포함)
+- 시뮬레이터를 다루다가 헷갈리는 부분은 Genesis/, Newton/, Mjlab/ 폴더를 들어가서 직접 탐색하고 이해한 다음 구현
 
 ## Git / Workflow
 - 커밋 메시지는 descriptive하게, 미래 참조에 유용하도록
