@@ -13,6 +13,9 @@ def get_wandb_checkpoint(
 ) -> tuple[str, bool]:
     """Download a checkpoint artifact from a wandb run.
 
+    Uses the artifact's digest to detect stale caches — if the remote
+    artifact has been updated, the local cache is replaced automatically.
+
     Args:
         wandb_run_path: Run path in the form "entity/project/run_id".
         iteration: Specific iteration to download. None means latest (highest iteration).
@@ -51,16 +54,30 @@ def get_wandb_checkpoint(
     if cache_dir is None:
         cache_dir = os.path.join("wandb_checkpoints", run_id)
     download_root = os.path.join(cache_dir, selected["name"])
+    digest_file = os.path.join(download_root, ".wandb_digest")
 
-    # Check cache
-    if os.path.isdir(download_root) and os.listdir(download_root):
-        print(f"Using cached checkpoint: {download_root}")
-        return download_root, True
-
-    # Download
+    # Fetch remote digest for staleness check
     api = wandb.Api()
     artifact = api.artifact(selected["full_name"])
+    remote_digest = artifact.digest
+
+    # Check cache with digest comparison
+    if os.path.isdir(download_root) and os.path.isfile(digest_file):
+        with open(digest_file, "r") as f:
+            cached_digest = f.read().strip()
+        if cached_digest == remote_digest:
+            print(f"Using cached checkpoint: {download_root}")
+            return download_root, True
+        else:
+            print(f"Cache stale (digest changed), re-downloading...")
+
+    # Download (or re-download if stale)
     artifact.download(root=download_root)
+
+    # Save digest for future cache checks
+    with open(digest_file, "w") as f:
+        f.write(remote_digest)
+
     print(f"Downloaded checkpoint to: {download_root}")
     return download_root, False
 
