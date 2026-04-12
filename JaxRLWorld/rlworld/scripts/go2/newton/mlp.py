@@ -6,8 +6,6 @@ def main():
     cfgs_for_run = get_config(sim="newton").with_cli_overrides()
     runner = BaseRunner.create_with_env(cfgs_for_run)
 
-    runner.env._profile_step = True
-
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
