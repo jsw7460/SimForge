@@ -8,7 +8,6 @@ identical.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -16,7 +15,6 @@ import genesis as gs
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs.common_config_classes import (
-    EventConfig,
     RewardConfig,
     TerminationsConfig,
     VisualizationConfig,
@@ -51,7 +49,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
-from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
@@ -91,7 +88,7 @@ def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> EnvConfig:
 
     return EnvConfig(
         env_name="GenesisLocomotionEnv",
-        task_name="Go2_Locomotion",
+        task_name="Go2 Velocity Tracking",
         num_envs=cfg.num_envs,
         seed=cfg.seed,
         decimation=timing["decimation"],
@@ -279,67 +276,31 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_event(cfg: "Go2FlatConfig") -> EventConfig:
-    @dataclass
-    class _EventsCfg(EventConfig):
-        reset_root = EventTermConfig(
-            func=common_ef.reset_root_state_uniform,
-            mode="reset",
-            params={
-                "pose_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (0.0, 0.0),
-                    "yaw": (-3.14, 3.14),
-                },
-                "velocity_range": {},
-                "default_pos": (1.5, 1.5, cfg.robot.base_init_height),
-            },
-        )
+def customize_reset_root_params(cfg: "Go2FlatConfig", params: Dict[str, Any]) -> None:
+    """Genesis hook: spawn at (1.5, 1.5) for scene layout reasons."""
+    h = cfg.robot.base_init_height
+    params["default_pos"] = (1.5, 1.5, h)
 
-        reset_dof_pos = EventTermConfig(
-            func=common_ef.reset_joints_by_offset,
-            mode="reset",
-            params={
-                "position_range": (math.pi / 360, math.pi / 120),
-                "velocity_range": (0.0, 0.0),
-            },
-        )
 
-        # Domain randomization (disabled during eval)
-        randomize_base_mass = EventTermConfig(
+def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
+    """Genesis-specific domain randomization terms."""
+    return {
+        "randomize_base_mass": EventTermConfig(
             func=genesis_dr.randomize_body_mass,
             mode="reset_dr",
             params={"mass_ratio_range": (0.8, 1.2)},
-        )
-        randomize_friction = EventTermConfig(
+        ),
+        "randomize_friction": EventTermConfig(
             func=genesis_dr.randomize_friction,
             mode="reset_dr",
             params={"friction_range": (0.3, 1.2)},
-        )
-        randomize_joint_friction = EventTermConfig(
+        ),
+        "randomize_joint_friction": EventTermConfig(
             func=genesis_dr.randomize_joint_friction,
             mode="reset_dr",
             params={"friction_range": (0.0, 0.05)},
-        )
-        # Interval terms
-        push_robot = EventTermConfig(
-            func=common_ef.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=(2.0, 20.0),
-            params={
-                "velocity_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (-0.4, 0.4),
-                    "roll": (-0.52, 0.52),
-                    "pitch": (-0.52, 0.52),
-                    "yaw": (-0.78, 0.78),
-                },
-            },
-        )
-
-    return _EventsCfg()
+        ),
+    }
 
 
 def build_curriculum(cfg: "Go2FlatConfig") -> CurriculumConfig:

@@ -21,7 +21,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
-from rlworld.rl.configs import EventConfig, RewardConfig
+from rlworld.rl.configs import RewardConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.mujoco_config_classes import (
@@ -310,8 +310,8 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_event(cfg: "Go2FlatConfig") -> EventConfig:
-    from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
+def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
+    """MuJoCo-specific domain randomization terms."""
     from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
     from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
 
@@ -322,51 +322,8 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
         "RL_foot_collision",
     )
 
-    @dataclass
-    class _EventsCfg(EventConfig):
-        # Reset events
-        reset_root = EventTermConfig(
-            func=common_ef.reset_root_state_uniform,
-            mode="reset",
-            params={
-                "pose_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (0.00, 0.00),
-                    "yaw": (-3.14, 3.14),
-                },
-                "velocity_range": {},
-                "default_pos": (0.0, 0.0, cfg.robot.base_init_height),
-            },
-        )
-        reset_joints = EventTermConfig(
-            func=common_ef.reset_joints_by_offset,
-            mode="reset",
-            params={
-                "position_range": (math.pi / 360, math.pi / 120),
-                "velocity_range": (0.0, 0.0),
-            },
-        )
-
-        # Interval events
-        push_robot = EventTermConfig(
-            func=common_ef.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=(2.0, 20.0),
-            params={
-                "velocity_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (-0.4, 0.4),
-                    "roll": (-0.52, 0.52),
-                    "pitch": (-0.52, 0.52),
-                    "yaw": (-0.78, 0.78),
-                },
-            },
-        )
-
-        # Domain randomization (disabled during eval)
-        randomize_friction = EventTermConfig(
+    return {
+        "randomize_friction": EventTermConfig(
             func=ef.randomize_friction,
             mode="reset_dr",
             params={
@@ -375,8 +332,8 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
                 "shared_random": True,
                 "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
             },
-        )
-        randomize_base_mass = EventTermConfig(
+        ),
+        "randomize_base_mass": EventTermConfig(
             func=ef.randomize_body_mass,
             mode="reset_dr",
             params={
@@ -384,14 +341,10 @@ def build_event(cfg: "Go2FlatConfig") -> EventConfig:
                 "operation": "scale",
                 "entity_cfg": EntityCfg(name="robot", body_names=("base",)),
             },
-        )
-        randomize_joint_friction = EventTermConfig(
+        ),
+        "randomize_joint_friction": EventTermConfig(
             func=ef.randomize_joint_friction,
             mode="reset_dr",
-            params={
-                "ranges": (0.0, 0.05),
-                "operation": "abs",
-            },
-        )
-
-    return _EventsCfg()
+            params={"ranges": (0.0, 0.05), "operation": "abs"},
+        ),
+    }

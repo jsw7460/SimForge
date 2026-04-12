@@ -29,12 +29,16 @@ from typing import Any, Dict
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
     CommandConfig,
+    EventConfig,
     NNConfig,
     PPOPolicyConfig,
     RunnerConfig,
 )
+from rlworld.rl.configs.events import EventTermConfig
+from rlworld.rl.configs.presets._sim_builder_protocol import G1SimBuilderProtocol
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
+from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 
 
 # ── Per-simulator constants ──────────────────────────────────────────
@@ -55,14 +59,18 @@ _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
 }
 
 _SIM_RUNNER_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "newton":  {"init_at_random_ep_len": True,  "save_interval": 1000},
-    "genesis": {"init_at_random_ep_len": True, "save_interval": 1000},
-    "mujoco":  {"init_at_random_ep_len": True,  "save_interval": 1000},
+    "newton":  {"init_at_random_ep_len": False,  "save_interval": 1000},
+    "genesis": {"init_at_random_ep_len": False, "save_interval": 1000},
+    "mujoco":  {"init_at_random_ep_len": False,  "save_interval": 1000},
 }
 
 
-def _get_sim_builders(sim_type: str):
-    """Lazy-import the simulator-specific builders module."""
+def _get_sim_builders(sim_type: str) -> G1SimBuilderProtocol:
+    """Lazy-import the simulator-specific builders module.
+
+    The returned module must satisfy :class:`G1SimBuilderProtocol` —
+    see ``presets/_sim_builder_protocol.py`` for the full contract.
+    """
     if sim_type == "newton":
         from . import _newton_builders as mod
     elif sim_type == "genesis":
@@ -74,7 +82,7 @@ def _get_sim_builders(sim_type: str):
             f"Unknown sim_type: {sim_type!r}. "
             f"Expected one of {sorted(_SIM_TIMINGS)}."
         )
-    return mod
+    return mod  # type: ignore[return-value]
 
 
 # ── Unified config ───────────────────────────────────────────────────
@@ -106,6 +114,12 @@ class G1FlatConfig:
     lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
     ang_vel_range: tuple[float, float] = (-0.5, 0.5)
 
+    # Common event parameters (shared across all 3 sims; sim builders
+    # may override reset_root via ``customize_reset_root_params`` hook).
+    reset_pose_z_range: tuple[float, float] = (0.01, 0.05)
+    reset_joint_position_noise: tuple[float, float] = (0.0, 0.0)
+    push_interval_range_s: tuple[float, float] = (1.0, 3.0)
+
     # Algorithm
     algorithm_name: str = "PPO"
     max_iterations: int = 30000
@@ -129,7 +143,7 @@ class G1FlatConfig:
             action=builders.build_action(self),
             reward=builders.build_reward(self),
             command=self._build_command_config(),
-            event=builders.build_event(self),
+            event=self._build_event_config(),
             algorithm=self._build_algorithm_config(),
             nn=self._build_nn_config(),
             runner=self._build_runner_config(),
@@ -178,6 +192,69 @@ class G1FlatConfig:
         return self.build().recursive_to_dict()
 
     # ── Shared build methods (variants may override) ──────────────────
+
+    def _build_common_event_terms(self) -> Dict[str, EventTermConfig]:
+        """Build the simulator-agnostic reset/interval event terms.
+
+        Sim builders may register a ``customize_reset_root_params(cfg,
+        params)`` hook to mutate the reset_root params dict in place.
+        """
+        builders = _get_sim_builders(self.sim_type)
+
+        reset_root_params: Dict[str, Any] = {
+            "pose_range": {
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": self.reset_pose_z_range,
+                "yaw": (-3.14, 3.14),
+            },
+            "velocity_range": {},
+            "default_pos": (0.0, 0.0, self.robot.base_init_height),
+        }
+        if hasattr(builders, "customize_reset_root_params"):
+            builders.customize_reset_root_params(self, reset_root_params)
+
+        return {
+            "reset_root": EventTermConfig(
+                func=common_ef.reset_root_state_uniform,
+                mode="reset",
+                params=reset_root_params,
+            ),
+            "reset_dof_pos": EventTermConfig(
+                func=common_ef.reset_joints_by_offset,
+                mode="reset",
+                params={
+                    "position_range": self.reset_joint_position_noise,
+                    "velocity_range": (0.0, 0.0),
+                },
+            ),
+            "push_robot": EventTermConfig(
+                func=common_ef.push_by_setting_velocity,
+                mode="interval",
+                interval_range_s=self.push_interval_range_s,
+                params={
+                    "velocity_range": {
+                        "x": (-0.5, 0.5),
+                        "y": (-0.5, 0.5),
+                        "z": (-0.4, 0.4),
+                        "roll": (-0.52, 0.52),
+                        "pitch": (-0.52, 0.52),
+                        "yaw": (-0.78, 0.78),
+                    },
+                },
+            ),
+        }
+
+    def _build_event_config(self) -> EventConfig:
+        """Build full event config = common reset/interval + sim-specific DR."""
+        builders = _get_sim_builders(self.sim_type)
+        common_terms = self._build_common_event_terms()
+        dr_terms = builders.build_dr_terms(self)
+
+        cfg = EventConfig()
+        for name, term in {**common_terms, **dr_terms}.items():
+            setattr(cfg, name, term)
+        return cfg
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(

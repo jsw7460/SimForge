@@ -8,14 +8,13 @@ identical.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
-from rlworld.rl.configs import RewardConfig, EventConfig
+from rlworld.rl.configs import RewardConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.newton_config_classes import (
@@ -273,75 +272,38 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_event(cfg: "Go2FlatConfig") -> EventConfig:
-    r = cfg.robot
-    from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
+def customize_reset_root_params(cfg: "Go2FlatConfig", params: Dict[str, Any]) -> None:
+    """Newton hook: inject wxyz default quat (Newton native is xyzw)."""
+    _iq = _initial_quat()
+    _iq_tuple = tuple(float(v) for v in _iq)  # (x, y, z, w)
+    params["default_quat_wxyz"] = (
+        _iq_tuple[3], _iq_tuple[0], _iq_tuple[1], _iq_tuple[2],
+    )
+
+
+def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
+    """Newton-specific domain randomization terms."""
     from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 
-    # Newton stores initial quat in xyzw; convert to wxyz for common API.
-    _iq = _initial_quat()  # wp.quat (xyzw: x, y, z, w)
-    _iq_tuple = tuple(float(v) for v in _iq)  # (x, y, z, w)
-    _default_quat_wxyz = (_iq_tuple[3], _iq_tuple[0], _iq_tuple[1], _iq_tuple[2])
-
-    @dataclass
-    class _EventsCfg(EventConfig):
-        reset_root = EventTermConfig(
-            func=common_ef.reset_root_state_uniform,
-            mode="reset",
-            params={
-                "pose_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (0.0, 0.0),
-                    "yaw": (-3.14, 3.14),
-                },
-                "velocity_range": {},
-                "default_pos": (0.0, 0.0, r.base_init_height),
-                "default_quat_wxyz": _default_quat_wxyz,
-            },
-        )
-        reset_dof_pos = EventTermConfig(
-            func=common_ef.reset_joints_by_offset,
-            params={
-                "position_range": (math.pi / 360, math.pi / 120),
-                "velocity_range": (0.0, 0.0),
-            },
-            mode="reset",
-        )
-        # Domain randomization (disabled during eval)
-        randomize_body_mass = EventTermConfig(
+    r = cfg.robot
+    return {
+        "randomize_body_mass": EventTermConfig(
             func=newton_dr.randomize_body_mass,
+            mode="reset_dr",
             params={
                 "mass_range": (0.8, 1.2),
                 "operation": "scale",
                 "body_patterns": r.prefixed("base"),
             },
-            mode="reset_dr",
-        )
-        randomize_friction = EventTermConfig(
+        ),
+        "randomize_friction": EventTermConfig(
             func=newton_dr.randomize_friction,
             mode="reset_dr",
             params={"friction_range": (0.3, 1.2)},
-        )
-        randomize_joint_friction = EventTermConfig(
+        ),
+        "randomize_joint_friction": EventTermConfig(
             func=newton_dr.randomize_joint_friction,
             mode="reset_dr",
             params={"friction_range": (0.0, 0.05)},
-        )
-        push_robot = EventTermConfig(
-            func=common_ef.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=(2.0, 20.0),
-            params={
-                "velocity_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (-0.4, 0.4),
-                    "roll": (-0.52, 0.52),
-                    "pitch": (-0.52, 0.52),
-                    "yaw": (-0.78, 0.78),
-                },
-            },
-        )
-
-    return _EventsCfg()
+        ),
+    }

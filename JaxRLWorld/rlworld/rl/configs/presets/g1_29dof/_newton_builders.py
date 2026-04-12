@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import warp as wp
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
-from rlworld.rl.configs import EventConfig, RewardConfig
+from rlworld.rl.configs import RewardConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -39,7 +39,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
-from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -367,54 +366,11 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_event(cfg: "G1FlatConfig") -> EventConfig:
+def build_dr_terms(cfg: "G1FlatConfig") -> Dict[str, EventTermConfig]:
+    """Newton-specific domain randomization terms."""
     r = cfg.robot
-
-    @dataclass
-    class _EventsCfg(EventConfig):
-        # Reset events
-        reset_root = EventTermConfig(
-            func=common_ef.reset_root_state_uniform,
-            mode="reset",
-            params={
-                "pose_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (0.01, 0.05),
-                    "yaw": (-3.14, 3.14),
-                },
-                "velocity_range": {},
-                "default_pos": (0.0, 0.0, r.base_init_height),
-            },
-        )
-        reset_dof_pos = EventTermConfig(
-            func=common_ef.reset_joints_by_offset,
-            mode="reset",
-            params={
-                "position_range": (0.0, 0.0),
-                "velocity_range": (0.0, 0.0),
-            },
-        )
-
-        # Interval events
-        push_robot = EventTermConfig(
-            func=common_ef.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=(1.0, 3.0),
-            params={
-                "velocity_range": {
-                    "x": (-0.5, 0.5),
-                    "y": (-0.5, 0.5),
-                    "z": (-0.4, 0.4),
-                    "roll": (-0.52, 0.52),
-                    "pitch": (-0.52, 0.52),
-                    "yaw": (-0.78, 0.78),
-                },
-            },
-        )
-
-        # Domain randomization (disabled during eval)
-        randomize_body_com = EventTermConfig(
+    return {
+        "randomize_body_com": EventTermConfig(
             func=newton_dr.randomize_body_com_offset,
             mode="reset_dr",
             params={
@@ -425,11 +381,10 @@ def build_event(cfg: "G1FlatConfig") -> EventConfig:
                 },
                 "body_patterns": (r.prefixed("torso_link"),),
             },
-        )
-        randomize_joint_friction = EventTermConfig(
+        ),
+        "randomize_joint_friction": EventTermConfig(
             func=newton_dr.randomize_joint_friction,
             mode="reset_dr",
             params={"friction_range": (0.0, 0.05)},
-        )
-
-    return _EventsCfg()
+        ),
+    }
