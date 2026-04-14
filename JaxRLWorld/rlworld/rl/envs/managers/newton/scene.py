@@ -760,8 +760,21 @@ class NewtonSceneManager(BaseManager):
         self._update_sensors()
 
     def _step(self):
+        # When substeps is odd AND the physics loop is wrapped in a
+        # CUDA graph, a plain ``state_0, state_1 = state_1, state_0``
+        # swap on every substep would leave the two state references
+        # crossed (relative to the capture) on exit — the graph was
+        # recorded against specific memory addresses, so replay would
+        # read/write the wrong state. Newton's own example
+        # ``newton/examples/robot/example_robot_policy.py:326-342``
+        # handles this by copying state on the final odd iteration
+        # instead of swapping. We mirror that here.
+        need_state_copy = (
+            self.graph is not None and self.config.substeps % 2 == 1
+        )
+        last_idx = self.config.substeps - 1
 
-        for _ in range(self.config.substeps):
+        for i in range(self.config.substeps):
             self.contacts = self.model.collide(
                 self.state_0,
                 contacts=self.contacts,
@@ -770,8 +783,13 @@ class NewtonSceneManager(BaseManager):
             self.state_0.clear_forces()
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
 
-            # Swap states
-            self.state_0, self.state_1 = self.state_1, self.state_0
+            if need_state_copy and i == last_idx:
+                # Copy state_1 → state_0 so the final result lives in
+                # the same buffer the graph capture started with.
+                self.state_0.assign(self.state_1)
+            else:
+                # Swap states (reference rebind, no memory copy).
+                self.state_0, self.state_1 = self.state_1, self.state_0
 
     def _update_sensors(self) -> None:
         """Update all sensors after physics step."""

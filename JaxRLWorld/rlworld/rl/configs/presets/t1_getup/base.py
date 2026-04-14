@@ -55,8 +55,8 @@ from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 # 50 Hz control (decimation 4 × dt 0.005 s = 0.02 s).
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005, "substeps": 2, "decimation": 4},
-    "genesis": {"dt": 0.005, "substeps": 2, "decimation": 4},
+    "newton":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
     "mujoco":  {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
@@ -367,13 +367,13 @@ class T1GetupConfig:
                 actor_kwargs={
                     "activation": "elu",
                     "ortho_init": True,
-                    "output_gain": 0.01,
+                    "output_gain": 1.0,
                     "hidden_dims": [512, 256, 128],
                 },
                 critic_kwargs={
                     "activation": "elu",
                     "ortho_init": True,
-                    "output_gain": 0.01,
+                    "output_gain": 1.0,
                     "hidden_dims": [512, 256, 128],
                 },
                 init_noise_std=1.0,
