@@ -186,6 +186,14 @@ class T1Config(RobotConfig):
     trunk_body_name: str = "Trunk"
     waist_body_name: str = "Waist"
 
+    # Collision-geom name regexes used by the 3-axis geom-friction DR
+    # (slide applies to every collision geom, spin/roll apply only to
+    # the foot collision geoms). These patterns must match both mjlab's
+    # booster_t1 xml (``{left,right}_foot[1-4]_collision``) and the
+    # equivalent collision shapes on the URDF path.
+    all_collision_geom_pattern: str = r".*_collision"
+    foot_collision_geom_pattern: str = r"^(left|right)_foot\d+_collision$"
+
     @property
     def prefixed_foot_names(self) -> tuple[str, ...]:
         return self.prefixed_list(self.foot_names)

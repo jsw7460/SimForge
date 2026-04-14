@@ -69,6 +69,119 @@ def randomize_friction(
     env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
 
 
+# Axis-index → Newton attribute name. Mirrors MuJoCo's ``geom_friction``
+# vec3 layout ``(slide, torsional, rolling)`` — Newton stores the three
+# axes as separate per-shape float arrays and its MuJoCo solver bridge
+# packs them back into ``geom_friction[world, geom]`` on notify.
+_FRICTION_AXIS_ATTR = {
+    0: "shape_material_mu",
+    1: "shape_material_mu_torsional",
+    2: "shape_material_mu_rolling",
+}
+
+
+def randomize_geom_friction_axis(
+    env: "NewtonEnv",
+    env_ids: torch.Tensor,
+    ranges: tuple[float, float],
+    axes: list[int] = (0,),
+    operation: str = "abs",
+    distribution: str = "uniform",
+    shape_patterns: str | list[str] | None = None,
+) -> None:
+    """Randomize per-axis geom friction (slide / torsional / rolling).
+
+    Mirrors mjlab's ``dr.geom_friction`` with its ``axes`` parameter —
+    used by mjlab_playground's getup task to independently randomize
+    each of the three MuJoCo friction components:
+
+        axis 0 = slide       (uniform 0.3..1.5     over all collision geoms)
+        axis 1 = torsional   (log_uniform 1e-4..2e-2 over foot geoms)
+        axis 2 = rolling     (log_uniform 1e-5..5e-3 over foot geoms)
+
+    Newton exposes the three axes as separate float arrays on the
+    model (``shape_material_mu``/``_torsional``/``_rolling``), and its
+    MuJoCo solver bridge syncs all three on ``notify_model_changed``
+    (``SHAPE_PROPERTIES``). This function therefore produces behaviour
+    bit-compatible with mjlab when the Newton env is using the MuJoCo
+    backend solver.
+
+    Args:
+        env: Newton environment instance.
+        env_ids: Environment indices to randomize.
+        ranges: ``(lo, hi)`` value range. Interpretation follows
+            ``operation`` ("abs" replaces, "scale" multiplies cached
+            default, "add" offsets cached default).
+        axes: Which friction axes to randomize. Any subset of
+            ``[0, 1, 2]``. Default ``[0]`` (slide only) matches mjlab.
+        operation: ``"abs"`` | ``"scale"`` | ``"add"``.
+        distribution: ``"uniform"`` | ``"log_uniform"`` | ``"gaussian"``.
+        shape_patterns: Optional regex pattern(s) filtering which
+            shapes of the robot entity are touched. ``None`` randomizes
+            *all* robot shapes (matches mjlab's default when ``geom_names``
+            is unset). Patterns are matched against
+            ``robot_view.shape_names`` if the view exposes it; otherwise
+            this argument is ignored and all shapes are randomized.
+    """
+    if len(env_ids) == 0:
+        return
+
+    view = env.scene_manager.robot_view
+    model = env.scene_manager.model
+
+    # Resolve shape filter indices once for the whole call. The
+    # robot_view exposes shape names on recent Newton builds; if the
+    # attribute is missing we fall back to touching every shape (this
+    # matches the legacy ``randomize_friction`` behaviour above).
+    shape_idx: list[int] | None = None
+    if shape_patterns is not None:
+        names = getattr(view, "shape_names", None)
+        if names is not None:
+            from ._utils import resolve_patterns
+            shape_idx = resolve_patterns(shape_patterns, list(names))
+
+    for axis in axes:
+        if axis not in _FRICTION_AXIS_ATTR:
+            raise ValueError(
+                f"Unknown friction axis {axis}. "
+                f"Valid: {sorted(_FRICTION_AXIS_ATTR)}."
+            )
+        attr = _FRICTION_AXIS_ATTR[axis]
+        values = wp.to_torch(view.get_attribute(attr, model))
+
+        if shape_idx is None:
+            full_shape = (len(env_ids), values.shape[1], values.shape[-1])
+            sampled = sample(full_shape, *ranges, env.device, distribution)
+            if operation == "abs":
+                values[env_ids] = sampled
+            else:
+                defaults = _defaults.get_or_cache(
+                    f"geom_friction_axis_{axis}", values.clone()
+                )
+                values[env_ids] = apply_operation(
+                    defaults[env_ids], sampled, operation
+                )
+        else:
+            shape_idx_t = torch.as_tensor(shape_idx, device=env.device)
+            sub = values[env_ids][:, :, shape_idx_t]
+            sampled = sample(sub.shape, *ranges, env.device, distribution)
+            if operation == "abs":
+                sub_new = sampled
+            else:
+                defaults = _defaults.get_or_cache(
+                    f"geom_friction_axis_{axis}", values.clone()
+                )
+                default_sub = defaults[env_ids][:, :, shape_idx_t]
+                sub_new = apply_operation(default_sub, sampled, operation)
+            values[env_ids[:, None, None], torch.arange(
+                values.shape[1], device=env.device
+            )[None, :, None], shape_idx_t[None, None, :]] = sub_new
+
+        view.set_attribute(attr, model, values)
+
+    env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
+
+
 # ------------------------------------------------------------------ #
 #  Body mass                                                          #
 # ------------------------------------------------------------------ #

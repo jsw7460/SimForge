@@ -304,11 +304,31 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
 
 
 def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
-    """MuJoCo domain randomization — minimal set for the MVP skeleton."""
+    """MuJoCo domain randomization — mjlab_playground-faithful.
+
+    Three-axis geom friction randomization matches
+    ``getup/config/t1/env_cfgs.py::booster_t1_getup_env_cfg``:
+
+    * slide (axis 0): uniform ``0.3..1.5`` over every collision geom
+    * spin  (axis 1): log_uniform ``1e-4..2e-2`` over foot geoms only
+    * roll  (axis 2): log_uniform ``1e-5..5e-3`` over foot geoms only
+
+    MuJoCo's solver natively uses the 3-vector ``geom_friction`` so
+    this is applied via mjlab's ``dr.geom_friction`` under the hood.
+    """
     from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
     from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
 
     r = cfg.robot
+    # mjlab's asset_zoo T1 has collision geoms named
+    # ``{left,right}_foot{1..4}_collision``; list them explicitly
+    # because mjlab's geom_names filter is glob-ish (tuple of exact
+    # names), not regex.
+    foot_geom_names = tuple(
+        f"{side}_foot{i}_collision"
+        for side in ("left", "right")
+        for i in range(1, 5)
+    )
     return {
         "randomize_encoder_bias": EventTermConfig(
             func=common_ef.randomize_encoder_bias,
@@ -328,9 +348,42 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "entity_cfg": EntityCfg(name="robot", body_names=(r.trunk_body_name,)),
             },
         ),
-        "randomize_joint_friction": EventTermConfig(
-            func=ef.randomize_joint_friction,
-            mode="reset_dr",
-            params={"ranges": (0.0, 0.05), "operation": "abs"},
+        "geom_friction_slide": EventTermConfig(
+            func=ef.randomize_friction,
+            mode="startup",
+            params={
+                "ranges": (0.3, 1.5),
+                "operation": "abs",
+                "axes": [0],
+                "distribution": "uniform",
+                "entity_cfg": EntityCfg(
+                    name="robot", geom_names=(r.all_collision_geom_pattern,)
+                ),
+                "shared_random": True,
+            },
+        ),
+        "foot_friction_spin": EventTermConfig(
+            func=ef.randomize_friction,
+            mode="startup",
+            params={
+                "ranges": (1e-4, 2e-2),
+                "operation": "abs",
+                "axes": [1],
+                "distribution": "log_uniform",
+                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
+                "shared_random": True,
+            },
+        ),
+        "foot_friction_roll": EventTermConfig(
+            func=ef.randomize_friction,
+            mode="startup",
+            params={
+                "ranges": (1e-5, 5e-3),
+                "operation": "abs",
+                "axes": [2],
+                "distribution": "log_uniform",
+                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
+                "shared_random": True,
+            },
         ),
     }

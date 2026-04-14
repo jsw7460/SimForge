@@ -95,12 +95,16 @@ def randomize_friction(
     entity_cfg: EntityCfg | None = None,
     axes: list[int] | None = None,
     shared_random: bool = False,
+    distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
 ) -> None:
     """Randomize geom friction via mjlab's dr.geom_friction.
 
     Named ``randomize_friction`` for cross-sim naming consistency with
     Newton (``dr.newton.randomize_friction``) and Genesis
-    (``dr.genesis.randomize_friction``).
+    (``dr.genesis.randomize_friction``). Supports per-axis randomization
+    (``axes=[0]``/``[1]``/``[2]`` for slide/spin/roll) and alternative
+    distributions (``"log_uniform"`` for the spin/roll axes where
+    mjlab_playground's getup task samples over a 200x range).
     """
     from mjlab.envs.mdp.dr import geom_friction
 
@@ -113,6 +117,7 @@ def randomize_friction(
         operation=operation,
         axes=axes,
         shared_random=shared_random,
+        distribution=distribution,
     )
 
 

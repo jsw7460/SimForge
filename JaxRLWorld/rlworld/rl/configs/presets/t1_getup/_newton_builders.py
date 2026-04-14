@@ -291,10 +291,19 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
 
 
 def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
-    """Newton domain randomization — minimal set for the MVP skeleton.
+    """Newton domain randomization — mjlab_playground-faithful.
 
-    Phase K tuning can widen to match mjlab_playground getup DR
-    (friction split, encoder bias, wider body-com ranges).
+    Three-axis geom friction randomization matches mjlab's T1 getup:
+
+    * slide (axis 0): uniform ``0.3..1.5`` over every collision shape
+    * spin  (axis 1): log_uniform ``1e-4..2e-2`` over foot shapes only
+    * roll  (axis 2): log_uniform ``1e-5..5e-3`` over foot shapes only
+
+    Newton stores the three axes as separate ``shape_material_mu*``
+    arrays and its MuJoCo solver bridge syncs all three on
+    ``notify_model_changed(SHAPE_PROPERTIES)``, so the behaviour is
+    bit-compatible with mjlab once the Newton env runs on the
+    ``solver_type="mujoco"`` backend (which T1 getup does).
     """
     r = cfg.robot
     return {
@@ -315,9 +324,37 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "body_patterns": (r.prefixed(r.trunk_body_name),),
             },
         ),
-        "randomize_joint_friction": EventTermConfig(
-            func=newton_dr.randomize_joint_friction,
+        "geom_friction_slide": EventTermConfig(
+            func=newton_dr.randomize_geom_friction_axis,
             mode="reset_dr",
-            params={"friction_range": (0.0, 0.05)},
+            params={
+                "ranges": (0.3, 1.5),
+                "axes": [0],
+                "operation": "abs",
+                "distribution": "uniform",
+                "shape_patterns": r.all_collision_geom_pattern,
+            },
+        ),
+        "foot_friction_spin": EventTermConfig(
+            func=newton_dr.randomize_geom_friction_axis,
+            mode="reset_dr",
+            params={
+                "ranges": (1e-4, 2e-2),
+                "axes": [1],
+                "operation": "abs",
+                "distribution": "log_uniform",
+                "shape_patterns": r.foot_collision_geom_pattern,
+            },
+        ),
+        "foot_friction_roll": EventTermConfig(
+            func=newton_dr.randomize_geom_friction_axis,
+            mode="reset_dr",
+            params={
+                "ranges": (1e-5, 5e-3),
+                "axes": [2],
+                "operation": "abs",
+                "distribution": "log_uniform",
+                "shape_patterns": r.foot_collision_geom_pattern,
+            },
         ),
     }

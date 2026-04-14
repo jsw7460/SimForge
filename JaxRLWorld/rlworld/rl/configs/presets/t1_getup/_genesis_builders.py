@@ -281,7 +281,24 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
 
 
 def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
-    """Genesis domain randomization — minimal set for the MVP skeleton."""
+    """Genesis domain randomization.
+
+    **Known gap vs mjlab_playground**: Genesis's contact solver uses a
+    scalar (isotropic) friction cone per-geom, not MuJoCo's 3-vector
+    ``(slide, spin, roll)``. The Genesis MJCF parser in
+    ``genesis/utils/mjcf.py:607`` takes only ``mj_geom.friction[0]``
+    and discards spin/roll, and the underlying ``GeomsInfo.friction``
+    field is a single float per geom. As a result, the 3-axis geom
+    friction DR that the MuJoCo and Newton backends use cannot be
+    reproduced here without patching the Genesis engine itself.
+
+    We fall back to the closest approximation: a scalar friction
+    randomization over the same range as mjlab's slide axis
+    (``0.3..1.5``) via Genesis's existing ``set_friction_ratio`` path.
+    The ``mul`` operation keeps the base friction from the URDF intact
+    and multiplies by a sampled ratio — identical semantics to
+    ``randomize_friction`` used by the other Genesis presets.
+    """
     r = cfg.robot
     return {
         "randomize_encoder_bias": EventTermConfig(
@@ -301,10 +318,12 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "link_names": (r.trunk_body_name,),
             },
         ),
-        "randomize_joint_friction": EventTermConfig(
-            func=genesis_dr.randomize_joint_friction,
+        # Scalar slide-friction approximation — see docstring for the
+        # reason we cannot match mjlab's 3-axis randomization here.
+        "randomize_friction_scalar": EventTermConfig(
+            func=genesis_dr.randomize_friction,
             mode="reset_dr",
-            params={"friction_range": (0.0, 0.05)},
+            params={"friction_range": (0.3, 1.5)},
         ),
     }
 
