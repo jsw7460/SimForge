@@ -87,7 +87,7 @@ def randomize_geom_friction_axis(
     axes: list[int] = (0,),
     operation: str = "abs",
     distribution: str = "uniform",
-    shape_patterns: str | list[str] | None = None,
+    body_patterns: str | list[str] | None = None,
 ) -> None:
     """Randomize per-axis geom friction (slide / torsional / rolling).
 
@@ -106,6 +106,15 @@ def randomize_geom_friction_axis(
     bit-compatible with mjlab when the Newton env is using the MuJoCo
     backend solver.
 
+    **Filtering**: Newton's URDF loader drops geom names (all shapes
+    come out as ``shape_0``, ``shape_1``, ...), so mjlab's geom-name
+    regex filter is unusable here. Instead we filter by *body name*
+    — the body index → shape indices mapping lives on
+    ``model.body_shapes`` (a dict) and body labels survive the URDF
+    load. Pass e.g. ``body_patterns=r"T1/(left|right)_foot_link"`` to
+    target only the foot shapes. This matches the pattern SysID uses
+    in ``sysid/param_terms/newton.py::apply_contact_friction``.
+
     Args:
         env: Newton environment instance.
         env_ids: Environment indices to randomize.
@@ -116,12 +125,11 @@ def randomize_geom_friction_axis(
             ``[0, 1, 2]``. Default ``[0]`` (slide only) matches mjlab.
         operation: ``"abs"`` | ``"scale"`` | ``"add"``.
         distribution: ``"uniform"`` | ``"log_uniform"`` | ``"gaussian"``.
-        shape_patterns: Optional regex pattern(s) filtering which
-            shapes of the robot entity are touched. ``None`` randomizes
-            *all* robot shapes (matches mjlab's default when ``geom_names``
-            is unset). Patterns are matched against
-            ``robot_view.shape_names`` if the view exposes it; otherwise
-            this argument is ignored and all shapes are randomized.
+        body_patterns: Optional regex pattern(s) matched against body
+            labels via :class:`NewtonBodyCache`. ``None`` randomizes
+            every shape on the robot view (the legacy
+            ``randomize_friction`` behaviour). When given, only the
+            shapes attached to the matched bodies are touched.
     """
     if len(env_ids) == 0:
         return
@@ -129,16 +137,29 @@ def randomize_geom_friction_axis(
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
 
-    # Resolve shape filter indices once for the whole call. The
-    # robot_view exposes shape names on recent Newton builds; if the
-    # attribute is missing we fall back to touching every shape (this
-    # matches the legacy ``randomize_friction`` behaviour above).
+    # Resolve body_patterns → shape indices (per-env-local) once for
+    # the whole call. We use ``model.body_shapes`` — same path that
+    # ``sysid.param_terms.newton.apply_contact_friction`` uses and
+    # that SysID has validated against Newton's URDF-loaded T1.
     shape_idx: list[int] | None = None
-    if shape_patterns is not None:
-        names = getattr(view, "shape_names", None)
-        if names is not None:
-            from ._utils import resolve_patterns
-            shape_idx = resolve_patterns(shape_patterns, list(names))
+    if body_patterns is not None:
+        from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
+        cache = get_cache(env)
+        body_indices = cache.get_body_indices(body_patterns)
+        if hasattr(body_indices, "tolist"):
+            body_indices = body_indices.tolist()
+        collected: list[int] = []
+        for bi in body_indices:
+            for si in model.body_shapes[int(bi)]:
+                collected.append(int(si))
+        if not collected:
+            raise ValueError(
+                f"body_patterns={body_patterns!r} matched bodies "
+                f"{body_indices} but none of them have collision "
+                f"shapes on model.body_shapes."
+            )
+        shape_idx = collected
 
     for axis in axes:
         if axis not in _FRICTION_AXIS_ATTR:
@@ -162,7 +183,9 @@ def randomize_geom_friction_axis(
                     defaults[env_ids], sampled, operation
                 )
         else:
-            shape_idx_t = torch.as_tensor(shape_idx, device=env.device)
+            shape_idx_t = torch.as_tensor(
+                shape_idx, device=env.device, dtype=torch.long
+            )
             sub = values[env_ids][:, :, shape_idx_t]
             sampled = sample(sub.shape, *ranges, env.device, distribution)
             if operation == "abs":

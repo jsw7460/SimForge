@@ -186,13 +186,36 @@ class T1Config(RobotConfig):
     trunk_body_name: str = "Trunk"
     waist_body_name: str = "Waist"
 
-    # Collision-geom name regexes used by the 3-axis geom-friction DR
-    # (slide applies to every collision geom, spin/roll apply only to
-    # the foot collision geoms). These patterns must match both mjlab's
-    # booster_t1 xml (``{left,right}_foot[1-4]_collision``) and the
-    # equivalent collision shapes on the URDF path.
-    all_collision_geom_pattern: str = r".*_collision"
-    foot_collision_geom_pattern: str = r"^(left|right)_foot\d+_collision$"
+    # Regex patterns used by the 3-axis geom-friction DR.
+    #
+    # MuJoCo path (mjlab asset_zoo ``booster_t1`` XML) keeps explicit
+    # geom names like ``left_foot1_collision``, so mjlab's
+    # ``dr.geom_friction`` filters by geom name directly — see
+    # ``foot_geom_names_mjlab`` below for the exact names the builder
+    # passes to mjlab's asset_cfg.
+    #
+    # Newton path loads the same robot from URDF, and Newton's URDF
+    # loader drops collision-geom names (every shape becomes
+    # ``shape_N``). So the Newton builder filters by *body name*
+    # instead, using ``model.body_shapes`` to resolve the attached
+    # shape indices — this is the same path SysID's
+    # ``apply_contact_friction`` uses.
+    foot_body_pattern_newton: str = r"T1/(left|right)_foot_link"
+
+    @property
+    def foot_geom_names_mjlab(self) -> tuple[str, ...]:
+        """mjlab asset_zoo collision geom names for the feet.
+
+        Matches the ``_foot_regex`` in ``Mjlab/.../booster_t1/
+        t1_constants.py`` (``^(left|right)_foot\\d+_collision$``),
+        expanded into the explicit name tuple that mjlab's
+        ``SceneEntityCfg.geom_names`` filter expects.
+        """
+        return tuple(
+            f"{side}_foot{i}_collision"
+            for side in ("left", "right")
+            for i in range(1, 5)
+        )
 
     @property
     def prefixed_foot_names(self) -> tuple[str, ...]:

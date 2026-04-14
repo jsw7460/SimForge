@@ -324,6 +324,11 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "body_patterns": (r.prefixed(r.trunk_body_name),),
             },
         ),
+        # Slide: randomize across all robot shapes (body_patterns=None).
+        # Matches mjlab's ``geom_names=(".*_collision",)`` which in
+        # practice covers every collision geom on the robot — Newton's
+        # URDF-loaded shapes don't have per-geom names, so we simply
+        # skip the filter (touching every robot shape) instead.
         "geom_friction_slide": EventTermConfig(
             func=newton_dr.randomize_geom_friction_axis,
             mode="reset_dr",
@@ -332,9 +337,14 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "axes": [0],
                 "operation": "abs",
                 "distribution": "uniform",
-                "shape_patterns": r.all_collision_geom_pattern,
+                "body_patterns": None,
             },
         ),
+        # Spin/roll: filter by foot body name so only the foot shapes
+        # pick up the log-uniform low-range friction. Body-name
+        # filtering is needed because Newton's URDF loader drops geom
+        # names; ``model.body_shapes[foot_body_idx]`` resolves to the
+        # shape indices attached to the foot links.
         "foot_friction_spin": EventTermConfig(
             func=newton_dr.randomize_geom_friction_axis,
             mode="reset_dr",
@@ -343,7 +353,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "axes": [1],
                 "operation": "abs",
                 "distribution": "log_uniform",
-                "shape_patterns": r.foot_collision_geom_pattern,
+                "body_patterns": r.foot_body_pattern_newton,
             },
         ),
         "foot_friction_roll": EventTermConfig(
@@ -354,7 +364,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "axes": [2],
                 "operation": "abs",
                 "distribution": "log_uniform",
-                "shape_patterns": r.foot_collision_geom_pattern,
+                "body_patterns": r.foot_body_pattern_newton,
             },
         ),
     }

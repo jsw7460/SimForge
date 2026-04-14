@@ -320,15 +320,9 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
     from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
 
     r = cfg.robot
-    # mjlab's asset_zoo T1 has collision geoms named
-    # ``{left,right}_foot{1..4}_collision``; list them explicitly
-    # because mjlab's geom_names filter is glob-ish (tuple of exact
-    # names), not regex.
-    foot_geom_names = tuple(
-        f"{side}_foot{i}_collision"
-        for side in ("left", "right")
-        for i in range(1, 5)
-    )
+    # mjlab asset_zoo T1 has explicit collision geom names that survive
+    # the MJCF load; T1Config exposes the foot names via a property.
+    foot_geom_names = r.foot_geom_names_mjlab
     return {
         "randomize_encoder_bias": EventTermConfig(
             func=common_ef.randomize_encoder_bias,
@@ -348,6 +342,11 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "entity_cfg": EntityCfg(name="robot", body_names=(r.trunk_body_name,)),
             },
         ),
+        # Slide randomization: mjlab's ``geom_names=(".*_collision",)``
+        # selector matches every collision geom on the robot. Pass
+        # None (unset) for geom_names so mjlab's default asset_cfg
+        # covers the full entity — equivalent to the regex and cheaper
+        # to resolve than a regex list.
         "geom_friction_slide": EventTermConfig(
             func=ef.randomize_friction,
             mode="startup",
@@ -356,9 +355,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                 "operation": "abs",
                 "axes": [0],
                 "distribution": "uniform",
-                "entity_cfg": EntityCfg(
-                    name="robot", geom_names=(r.all_collision_geom_pattern,)
-                ),
+                "entity_cfg": EntityCfg(name="robot"),
                 "shared_random": True,
             },
         ),
