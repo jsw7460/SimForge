@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
@@ -75,6 +75,17 @@ class ActionManagerBaseConfig:
     offset: dict[str, float] | None = None
     settle_steps: int = 0
 
+    # New term-based action path. When ``action_terms`` is a non-empty
+    # dict, the action manager builds each ``ActionTerm`` from the
+    # config and routes ``process_actions`` / ``apply_actions``
+    # through them. When ``action_terms`` is ``None`` or empty, the
+    # legacy monolithic path is used: scale/clip/offset above are
+    # applied directly in ``process_actions`` and the term system is
+    # inactive. This dual path exists so existing go2/g1 presets
+    # keep working unchanged while new tasks (T1 getup, etc.) can
+    # declare explicit terms.
+    action_terms: "dict[str, Any] | None" = None
+
 
 class ActionManagerBase(BaseManager):
     """Base class for action managers across all simulators.
@@ -131,6 +142,37 @@ class ActionManagerBase(BaseManager):
         self._actuators: list[tuple] = []
         self._has_explicit_actuators = False
         self._build_actuators_from_entity()
+
+        # ── Term-based action system (optional) ──────────────────
+        # If the preset supplied an ``action_terms`` dict, instantiate
+        # each :class:`ActionTerm` and route process/apply through
+        # them. Otherwise the legacy monolithic path is used (same as
+        # before). See ``rlworld/rl/envs/mdp/actions/`` for the term
+        # definitions.
+        self._terms: "dict[str, Any]" = {}
+        self._has_action_terms: bool = False
+        if config.action_terms:
+            for term_name, term_cfg in config.action_terms.items():
+                term_class = term_cfg.class_type
+                if term_class is None:
+                    raise ValueError(
+                        f"ActionTermCfg for {term_name!r} has no "
+                        f"class_type set — cannot instantiate."
+                    )
+                self._terms[term_name] = term_class(term_cfg, env=self.env, manager=self)
+            self._has_action_terms = len(self._terms) > 0
+            # Sanity: total joint ids covered by all terms must equal
+            # the action dim (single-term case trivially passes; multi
+            # term requires the preset to cover every actuated joint
+            # with disjoint slices).
+            covered = sum(term.action_dim for term in self._terms.values())
+            if covered != self._total_action_dim:
+                raise ValueError(
+                    f"ActionTerm joint coverage mismatch: terms cover "
+                    f"{covered} joints but action_dim is "
+                    f"{self._total_action_dim}. All actuated joints "
+                    f"must be covered exactly once by the term set."
+                )
 
     # ------------------------------------------------------------------
     # Indexing
@@ -471,18 +513,39 @@ class ActionManagerBase(BaseManager):
     # ------------------------------------------------------------------
 
     def apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions.
+        """Apply processed actions to the simulator.
 
-        If explicit actuator models are active, each actuator group
-        extracts its joint subset from the processed actions, computes
-        torques, and scatters them into a full-size force tensor.
-        Joints covered by implicit actuators receive position targets.
+        When terms are active, each term's
+        :meth:`ActionTerm.compute_target_positions` returns the
+        absolute joint position target for its joint subset. We
+        scatter those into a full-action-dim target tensor and feed
+        the result into the actuator-compute path (torque
+        computation) or the direct position-target path, unchanged
+        from the legacy behaviour.
+
+        Without terms, ``processed_actions`` is used as the target
+        directly — that's the legacy monolithic path that Go2/G1
+        presets still rely on.
 
         Args:
             processed_actions: Tensor of shape (num_envs, num_actuated).
+                Passed in by ``World.step`` as the return value of
+                :meth:`process_actions`; only actually used on the
+                legacy path.
         """
+        if self._has_action_terms:
+            # Build the full-action-dim target from each term.
+            target = torch.zeros_like(processed_actions)
+            for term in self._terms.values():
+                term_target = term.compute_target_positions()
+                target[:, term.joint_ids] = term_target
+        else:
+            # Legacy path: ``processed_actions`` is already the
+            # absolute target.
+            target = processed_actions
+
         if not self._has_explicit_actuators:
-            self._apply_position(processed_actions)
+            self._apply_position(target)
             return
 
         # Get current joint state once (shared by all actuator groups)
@@ -490,11 +553,11 @@ class ActionManagerBase(BaseManager):
         joint_vel = self._get_joint_vel()
 
         # Build full-size force tensor; scatter each group's torques
-        full_torques = torch.zeros_like(processed_actions)
+        full_torques = torch.zeros_like(target)
 
         for actuator, joint_idx in self._actuators:
             # Extract this group's subset
-            target_subset = processed_actions[:, joint_idx]
+            target_subset = target[:, joint_idx]
             pos_subset = joint_pos[:, joint_idx]
             vel_subset = joint_vel[:, joint_idx]
 
@@ -508,27 +571,42 @@ class ActionManagerBase(BaseManager):
         self._apply_force(full_torques)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
-        """Process raw actions: clip -> scale -> offset -> (optional settle).
+        """Process raw actions: dispatch to term system or legacy path.
 
-        Settle behavior: when ``config.settle_steps > 0``, per-env mask
-        ``episode_length_buf < settle_steps`` overrides the processed
-        action with the current joint position, causing the PD
-        controller to hold the robot in place for the first few steps
-        after a reset. This gives fall-recovery tasks time to
-        physically settle after impact before the policy's commands
-        take effect. ``raw_action_history`` is left intact so that
-        policy-gradient / entropy signals see the true action; only
-        ``processed_action_history[0]`` (and the returned tensor) is
-        masked. At ``settle_steps = 0`` (the default) this branch is
-        skipped and the behavior is identical to the pre-settle code.
+        Two code paths:
+
+        1. **Term-based path** (``config.action_terms`` non-empty):
+           the raw action is sliced by each term's ``joint_ids`` and
+           each term's ``process_actions`` is called. The per-term
+           processed outputs are scattered back into a full-action-dim
+           tensor and stored in ``_processed_action_history[0]``.
+           Final target computation (absolute vs relative vs
+           settle-relative) happens later in :meth:`apply_actions`.
+
+        2. **Legacy path** (``config.action_terms`` is None/empty):
+           ``clip → scale → offset → optional settle-mask`` exactly
+           as before the term system was introduced. Preserved for
+           existing presets (Go2 flat, G1 flat, rod_stand, …) that
+           declare ``scale``/``clip``/``offset`` directly on
+           ``Newton/Genesis/MujocoActionConfig``.
 
         Args:
-            actions: Raw action tensor of shape (num_envs, total_action_dim).
+            actions: Raw action tensor of shape ``(num_envs, total_action_dim)``.
 
         Returns:
-            Processed action tensor of shape (num_envs, total_action_dim).
+            Processed action tensor of shape ``(num_envs, total_action_dim)``.
         """
         self._raw_action_history[0] = actions.clone()
+
+        if self._has_action_terms:
+            full_processed = torch.zeros_like(actions)
+            for term in self._terms.values():
+                slice_actions = actions[:, term.joint_ids]
+                term.process_actions(slice_actions)
+                full_processed[:, term.joint_ids] = term.processed_actions
+            self._processed_action_history[0] = full_processed
+            return full_processed
+
         clipped = torch.clip(actions, self._clip_low, self._clip_high)
         processed = clipped * self._scale + self._offset
 
@@ -543,7 +621,7 @@ class ActionManagerBase(BaseManager):
         return processed
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
-        """Reset action buffers and actuator state for specified environments."""
+        """Reset action buffers, actuator state, and per-term state."""
         if env_ids is None:
             return
         for buf in self._raw_action_history:
@@ -552,6 +630,8 @@ class ActionManagerBase(BaseManager):
             buf[env_ids] = 0.0
         for actuator, _ in self._actuators:
             actuator.reset(env_ids)
+        for term in self._terms.values():
+            term.reset(env_ids)
 
     def advance(self) -> None:
         """Advance action history by one step (shift towards older)."""

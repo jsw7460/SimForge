@@ -102,6 +102,8 @@ class MujocoActionConfig(BaseConfig):
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
     offset: dict[str, float] = field(default_factory=dict)
     settle_steps: int = 0
+    # Optional term-based action system (see rlworld/rl/envs/mdp/actions/).
+    action_terms: "dict[str, Any] | None" = None
 
 
 @dataclass

@@ -72,6 +72,11 @@ class NewtonActionConfig(BaseConfig):
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
     offset: dict[str, float] = field(default_factory=dict)
     settle_steps: int = 0
+    # Optional term-based action system (see rlworld/rl/envs/mdp/actions/).
+    # When provided, ``scale``/``clip``/``offset`` above are ignored and
+    # each term is instantiated by the action manager. Used by tasks
+    # that need relative / settle-relative / composite actions.
+    action_terms: "dict[str, Any] | None" = None
 
 
 @dataclass

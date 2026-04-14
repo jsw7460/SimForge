@@ -156,6 +156,7 @@ class NewtonEnv(World):
                 clip=self.act_cfg.clip_actions,
                 offset=self.act_cfg.offset,
                 settle_steps=self.act_cfg.settle_steps,
+                action_terms=self.act_cfg.action_terms,
             )
         )
 
