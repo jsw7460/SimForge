@@ -112,6 +112,20 @@ def dof_pos(env: World, entity_name: str = "robot") -> torch.Tensor:
 
 
 @EnvStepCache()
+def dof_pos_biased(env: World, entity_name: str = "robot") -> torch.Tensor:
+    """Actuated joint positions plus per-env encoder bias.
+
+    Same as :func:`dof_pos` but adds ``env.act_manager.encoder_bias``
+    to simulate a static, per-episode joint encoder miscalibration
+    (mirrors mjlab's ``biased=True`` observation flag used by the
+    getup task). Register this in place of :func:`dof_pos` in the
+    actor observation group when ``randomize_encoder_bias`` is
+    active; the critic typically keeps the unbiased ``dof_pos``.
+    """
+    return dof_pos(env, entity_name) + env.act_manager.encoder_bias
+
+
+@EnvStepCache()
 def dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Actuated joint velocities in act_manager order.
 

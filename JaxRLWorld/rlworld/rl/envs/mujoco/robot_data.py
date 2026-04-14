@@ -127,6 +127,23 @@ class MujocoRobotData:
             "``mdp/rewards/mujoco/reward_terms.py`` instead."
         )
 
+    @property
+    def soft_joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+        """Soft joint position limits (mjlab-scaled) in actuated order.
+
+        Reads ``entity.data.soft_joint_pos_limits`` which mjlab exposes
+        as ``(num_envs, num_joints, 2)``. We take the first env's slice
+        (limits are shared across envs in the common case) and index
+        by ``_joint_ids`` to align with the action manager's joint
+        ordering.
+
+        Returns:
+            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
+        """
+        limits = self._entity.data.soft_joint_pos_limits
+        sliced = limits[0, self._joint_ids]
+        return sliced[:, 0], sliced[:, 1]
+
     # ------------------------------------------------------------------
     # Body-level reads
     # ------------------------------------------------------------------

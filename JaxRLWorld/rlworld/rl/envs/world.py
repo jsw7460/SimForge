@@ -324,6 +324,18 @@ class World(ABC):
             config=self.event_cfg,
         )
 
+        # Curriculum manager (must come after reward+termination managers
+        # because curriculum terms resolve references into them at init).
+        # ``self.curriculum_cfg`` is always a valid CurriculumManagerConfig
+        # instance — the three ConfigsForRun dataclasses default it to an
+        # empty config via ``_default_curriculum_cfg``, so presets that
+        # don't register any curriculum terms still get a no-op manager.
+        from rlworld.rl.envs.managers.common.curriculum import CurriculumManager
+        self.curriculum_manager = CurriculumManager(
+            env=self,
+            config=self.curriculum_cfg,
+        )
+
     def _post_setup(self) -> None:
         """Simulator-specific finalization after all managers are created.
 
@@ -419,7 +431,6 @@ class World(ABC):
             **self.obs_manager.extras,
             **self.termination_manager.extras,
         }
-
         return self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras
 
     def _apply_actions(self, processed_actions: torch.Tensor) -> None:
@@ -481,6 +492,39 @@ class World(ABC):
         self.obs_manager.reset(env_ids)
         self.contact_manager.reset(env_ids)
         self.reward_manager.reset(env_ids)
+
+        # Curriculum: apply stage updates (reads env.env_step_counter)
+        # and forward reset to any stateful curriculum terms. Runs at
+        # every episode-reset boundary, matching mjlab's cadence. The
+        # manager is always constructed (empty terms dict is a no-op),
+        # so no guard needed.
+        self.curriculum_manager.compute(env_ids=env_ids)
+        self.curriculum_manager.reset(env_ids)
+
+        # Forward curriculum state into ``rew_buf_per_type`` with a
+        # ``Curriculum/`` prefix so the existing
+        # ``RewardStatisticsCollector → wandb`` logging path picks it
+        # up automatically. Each field is broadcast across envs
+        # because the curriculum is a global (non-per-env) schedule.
+        # Non-finite values (e.g. ``float("inf")`` when an energy
+        # threshold curriculum hasn't fired its first stage yet) are
+        # skipped — they would otherwise propagate through the reward
+        # statistics aggregation (mean of inf * weight) and surface as
+        # NaN in wandb.
+        import math
+        for term_name, field_dict in self.curriculum_manager.state.items():
+            for field_name, value in field_dict.items():
+                if not isinstance(value, (int, float)):
+                    continue
+                if not math.isfinite(value):
+                    continue
+                key = f"Curriculum/{term_name}/{field_name}"
+                self.rew_buf_per_type[key] = torch.full(
+                    (self.num_envs,),
+                    float(value),
+                    device=self.device,
+                    dtype=torch.float32,
+                )
 
         # Reset episode sums
         keys = list(self.episode_sums.keys())

@@ -5,6 +5,7 @@ from rlworld.rl.envs.mujoco.mjlab_env import MujocoEnv
 from rlworld.rl.envs.managers import GaitManager
 from rlworld.rl.envs.genesis.locomotion_env import _gait_config_to_manager_config
 from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
+from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
 from rlworld.rl.configs.common_config_classes import VisualizationConfig
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,
@@ -37,6 +38,7 @@ class MujocoLocomotionEnv(MujocoEnv):
         command_cfg: CommandConfig,
         event_cfg: EventConfig,
         gait_cfg: GaitConfig,
+        curriculum_cfg: CurriculumManagerConfig,
     ):
         self._gait_cfg = gait_cfg
         super().__init__(
@@ -49,6 +51,7 @@ class MujocoLocomotionEnv(MujocoEnv):
             reward_cfg=reward_cfg,
             command_cfg=command_cfg,
             event_cfg=event_cfg,
+            curriculum_cfg=curriculum_cfg,
         )
 
     def _post_setup(self):

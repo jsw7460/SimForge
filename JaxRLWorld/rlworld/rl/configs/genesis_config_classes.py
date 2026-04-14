@@ -17,6 +17,13 @@ from .sensors import SensorConfig
 
 if TYPE_CHECKING:
     from rlworld.rl.configs.robots.base import RobotConfig
+    from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+
+
+def _default_curriculum_cfg() -> "CurriculumManagerConfig":
+    """Lazy default to avoid importing CurriculumManagerConfig at module load."""
+    from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+    return CurriculumManagerConfig()
 
 
 @dataclass
@@ -97,19 +104,7 @@ class ActionConfig(BaseConfig):
     action_scale: float | dict[str, float] = 0.4
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-100.0, 100.0)
     offset: dict[str, float] = field(default_factory=dict)
-
-
-@dataclass
-class CurriculumConfig(BaseConfig):
-    """Curriculum configuration."""
-    enable: bool = False
-    initial_level: int = 0
-    max_level: int = 3
-    success_threshold: float = 0.8
-    min_steps_per_level: int = 50000
-    eval_window_size: int = 2
-    curriculum_components: Dict[str, Dict[int, Any]] = field(default_factory=dict)
-    criterion: Dict[str, float] = field(default_factory=dict)
+    settle_steps: int = 0
 
 
 @dataclass
@@ -121,7 +116,6 @@ class GenesisConfigsForRun(BaseConfig):
     preset_kwargs: Dict[str, Any] | None = None
     env: EnvConfig = field(default_factory=EnvConfig)
     scene: SceneConfig = field(default_factory=SceneConfig)
-    curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     observation: ObservationConfig = field(default_factory=ObservationConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     action: ActionConfig = field(default_factory=ActionConfig)
@@ -129,6 +123,9 @@ class GenesisConfigsForRun(BaseConfig):
     command: CommandConfig = field(default_factory=CommandConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gait: "GaitConfig | None" = None
+    curriculum: "CurriculumManagerConfig" = field(
+        default_factory=lambda: _default_curriculum_cfg()
+    )
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)
@@ -150,7 +147,6 @@ class GenesisConfigsForRun(BaseConfig):
 
         env = _get_or_convert("env", EnvConfig, EnvConfig)
         scene = _get_or_convert("scene", SceneConfig, SceneConfig)
-        curriculum = _get_or_convert("curriculum", CurriculumConfig, CurriculumConfig)
         observation = _get_or_convert("observation", ObservationConfig, ObservationConfig)
         visualization = _get_or_convert("visualization", VisualizationConfig, VisualizationConfig)
         action = _get_or_convert("action", ActionConfig, ActionConfig)
@@ -176,7 +172,6 @@ class GenesisConfigsForRun(BaseConfig):
         return cls(
             env=env,
             scene=scene,
-            curriculum=curriculum,
             visualization=visualization,
             observation=observation,
             action=action,

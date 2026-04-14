@@ -56,6 +56,7 @@ class NewtonInitializer(SimInitializer):
             reward_cfg=eval_cfgs.reward,
             command_cfg=eval_cfgs.command,
             event_cfg=eval_cfgs.event,
+            curriculum_cfg=eval_cfgs.curriculum,
         )
         gait_cfg = getattr(eval_cfgs, "gait", None)
         if gait_cfg is not None:

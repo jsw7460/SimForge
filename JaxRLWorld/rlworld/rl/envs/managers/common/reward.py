@@ -39,6 +39,22 @@ class RewardManager(BaseManager):
             if isinstance(func, type):
                 self._instances[name] = func(env=self.env, **reward_term.params)
 
+    def get_term_cfg(self, name: str) -> RewardTermConfig:
+        """Return the live RewardTermConfig for a registered term.
+
+        Used by the curriculum manager to mutate a reward term's
+        ``weight`` or ``params`` based on training progress. The
+        returned object is the same instance that
+        :meth:`_compute_weighted_reward` reads from, so in-place
+        modifications take effect on the next reward computation.
+        """
+        if name not in self.reward_terms:
+            raise KeyError(
+                f"Reward term {name!r} not found. "
+                f"Available: {list(self.reward_terms)}"
+            )
+        return self.reward_terms[name]
+
     def set_rewards(
         self,
         reward_buffer: torch.Tensor,

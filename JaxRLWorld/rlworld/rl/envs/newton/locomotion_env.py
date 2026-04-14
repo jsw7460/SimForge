@@ -12,6 +12,7 @@ from rlworld.rl.configs.newton_config_classes import (
     VisualizationConfig
 )
 from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
+from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
 
 if TYPE_CHECKING:
     pass
@@ -37,6 +38,7 @@ class NewtonLocomotionEnv(NewtonEnv):
         command_cfg: CommandConfig,
         event_cfg: EventConfig,
         gait_cfg: GaitConfig,
+        curriculum_cfg: CurriculumManagerConfig,
     ):
         self._gait_cfg = gait_cfg
         super().__init__(
@@ -49,6 +51,7 @@ class NewtonLocomotionEnv(NewtonEnv):
             reward_cfg=reward_cfg,
             command_cfg=command_cfg,
             event_cfg=event_cfg,
+            curriculum_cfg=curriculum_cfg,
         )
 
     def _post_setup(self):

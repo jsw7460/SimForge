@@ -13,8 +13,17 @@ from .common_config_classes import (
     VisualizationConfig,
 )
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+    from rlworld.rl.envs.mdp.configs import (
+        CurriculumManagerConfig,
+        TerminationTermConfig,
+    )
     from rlworld.rl.configs.observations import ObservationTermConfig
+
+
+def _default_curriculum_cfg() -> "CurriculumManagerConfig":
+    """Lazy default to avoid importing CurriculumManagerConfig at module load."""
+    from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+    return CurriculumManagerConfig()
 
 
 @dataclass
@@ -55,8 +64,10 @@ class MujocoSceneConfig(BaseConfig):
     solver_iterations: int = 10
     solver_ls_iterations: int = 20
     ccd_iterations: int = 50
-    nconmax: int = 35
-    njmax: int = 1500
+    nconmax: int | None = 35
+    njmax: int | None = 1500
+    impratio: float = 1.0
+    cone: Literal["pyramidal", "elliptic"] = "pyramidal"
     contact_sensor_maxmatch: int = 64
 
     # Preset info for auto-resolving non-serializable mjlab objects at eval time
@@ -90,6 +101,7 @@ class MujocoActionConfig(BaseConfig):
     action_scale: float | dict[str, float] = 0.25
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
     offset: dict[str, float] = field(default_factory=dict)
+    settle_steps: int = 0
 
 
 @dataclass
@@ -108,6 +120,9 @@ class MujocoConfigsForRun(BaseConfig):
     command: CommandConfig = field(default_factory=CommandConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gait: "GaitConfig | None" = None
+    curriculum: "CurriculumManagerConfig" = field(
+        default_factory=lambda: _default_curriculum_cfg()
+    )
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)

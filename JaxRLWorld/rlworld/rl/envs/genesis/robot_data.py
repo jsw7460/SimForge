@@ -100,6 +100,18 @@ class GenesisRobotData:
         # Genesis returns shape (1, N); squeeze to (N,)
         return lower.squeeze(0), upper.squeeze(0)
 
+    @property
+    def soft_joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+        """Soft joint position limits (hard * 0.9) in actuated order.
+
+        Genesis only stores hard limits via ``get_dofs_limit``; the
+        soft flavour is hard × 0.9 to match mjlab's default
+        ``soft_joint_pos_limit_factor=0.9``. Returns a tuple of
+        ``(num_joints,)`` tensors.
+        """
+        lo, hi = self.joint_pos_limits
+        return lo * 0.9, hi * 0.9
+
     # ------------------------------------------------------------------
     # Body-level reads
     # ------------------------------------------------------------------

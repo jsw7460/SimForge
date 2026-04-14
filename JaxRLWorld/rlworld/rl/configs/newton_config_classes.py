@@ -16,9 +16,18 @@ from .common_config_classes import (
 if TYPE_CHECKING:
     from rlworld.rl.configs.scene import NewtonEntityConfig
     from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
-    from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+    from rlworld.rl.envs.mdp.configs import (
+        CurriculumManagerConfig,
+        TerminationTermConfig,
+    )
     from rlworld.rl.configs.observations import ObservationTermConfig
     from rlworld.rl.configs.robots.base import RobotConfig
+
+
+def _default_curriculum_cfg() -> "CurriculumManagerConfig":
+    """Lazy default to avoid importing CurriculumManagerConfig at module load."""
+    from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+    return CurriculumManagerConfig()
 
 
 @dataclass
@@ -62,6 +71,7 @@ class NewtonActionConfig(BaseConfig):
     action_scale: float | Dict[str, float] = 0.25
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
     offset: dict[str, float] = field(default_factory=dict)
+    settle_steps: int = 0
 
 
 @dataclass
@@ -80,6 +90,9 @@ class NewtonConfigsForRun(BaseConfig):
     command: CommandConfig = field(default_factory=CommandConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gait: "GaitConfig | None" = None
+    curriculum: "CurriculumManagerConfig" = field(
+        default_factory=lambda: _default_curriculum_cfg()
+    )
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)

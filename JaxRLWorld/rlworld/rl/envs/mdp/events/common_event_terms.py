@@ -238,3 +238,207 @@ def reset_joints_by_offset(
     writer.set_dof_positions(default_pos, env_ids=env_ids)
     writer.set_dof_velocities(joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
+
+
+# ── Encoder bias DR (cross-sim) ─────────────────────────────────────
+
+
+def randomize_encoder_bias(
+    env: "World",
+    env_ids: torch.Tensor,
+    bias_range: tuple[float, float] = (-0.015, 0.015),
+) -> None:
+    """Sample a per-env per-joint encoder bias.
+
+    Mirrors mjlab's ``dr.encoder_bias`` — writes a uniform random bias
+    in ``bias_range`` into ``env.act_manager._encoder_bias`` so the
+    biased observation (:func:`dof_pos_biased`) reflects a static
+    calibration offset for each episode. Typically registered with
+    mode ``"reset_dr"`` so the bias is resampled on each env reset.
+
+    Works uniformly on Newton/Genesis/MuJoCo because it only touches
+    the cross-sim ``act_manager`` state.
+    """
+    if len(env_ids) == 0:
+        return
+    device = env.device
+    n = len(env_ids)
+    num_joints = env.act_manager.offset.shape[-1]
+    lo, hi = bias_range
+    bias = torch.empty((n, num_joints), device=device).uniform_(lo, hi)
+    env.act_manager.set_encoder_bias(bias, env_ids=env_ids)
+
+
+# ── Getup: mixed fallen / standing reset ────────────────────────────
+
+
+def _sample_uniform_quaternion_wxyz(
+    n: int, device: torch.device
+) -> torch.Tensor:
+    """Uniformly sample unit quaternions on the 3-sphere (Shoemake 1992).
+
+    Returns a ``(n, 4)`` tensor in **wxyz** convention (scalar first).
+    This is the standard uniform distribution over ``SO(3)``.
+    """
+    u1 = torch.rand(n, device=device)
+    u2 = torch.rand(n, device=device)
+    u3 = torch.rand(n, device=device)
+    two_pi = 2.0 * torch.pi
+    s1 = torch.sqrt(1.0 - u1)
+    s2 = torch.sqrt(u1)
+    w = s1 * torch.sin(two_pi * u2)
+    x = s1 * torch.cos(two_pi * u2)
+    y = s2 * torch.sin(two_pi * u3)
+    z = s2 * torch.cos(two_pi * u3)
+    return torch.stack([w, x, y, z], dim=1)
+
+
+def reset_fallen_or_standing(
+    env: "World",
+    env_ids: torch.Tensor,
+    fallen_prob: float = 0.6,
+    fall_height: float = 0.8,
+    fall_velocity_range: tuple[float, float] = (-0.5, 0.5),
+    fall_joint_noise_range: "tuple[float, float] | str" = "soft_limit",
+    standing_z_offset: float = 0.02,
+    default_pos: tuple[float, ...] = (0.0, 0.0, 0.665),
+    default_quat_wxyz: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0),
+    entity_name: str = "robot",
+) -> None:
+    """Reset robots to a mix of fallen (random orientation) and standing poses.
+
+    Inspired by mjlab_playground getup ``reset_fallen_or_standing``. A
+    per-env Bernoulli draw with probability ``fallen_prob`` decides
+    which branch each environment takes:
+
+    - **Fallen** (``fallen_prob`` of envs):
+        * root z = ``fall_height`` (dropped from above)
+        * root orientation = uniform random quaternion on S³
+          (Shoemake sampling — truly isotropic over SO(3))
+        * joint positions = ``act_manager.offset`` + uniform noise in
+          ``fall_joint_noise_range`` (additive, per-joint). This is a
+          simplification of mjlab which samples uniformly over the
+          full soft joint limit range; sampling from an absolute
+          range avoids a cross-sim abstraction for hard/soft limits
+          (MuJoCo's RobotData does not expose hard limits directly).
+          The skeleton MVP uses ±0.8 rad which gives a visibly fallen
+          pose for humanoids without risking extreme self-penetration;
+          Phase K tuning can widen to full soft limits via a new
+          ``rd.soft_joint_pos_limits`` accessor if needed.
+        * root linear + angular velocity and joint velocity uniformly
+          sampled in ``fall_velocity_range``
+
+    - **Standing** (``1 - fallen_prob`` of envs):
+        * root pose = ``default_pos + (0, 0, standing_z_offset)``
+          and ``default_quat_wxyz``
+        * joint positions = ``act_manager.offset``
+        * all velocities = 0
+
+    The two branches are computed on the full ``env_ids`` tensor and
+    merged via a boolean mask, so the writer only needs one call per
+    quantity (position/velocity/orientation). Works identically across
+    Newton, Genesis, and MuJoCo through the shared RobotStateWriter +
+    RobotData interface.
+
+    Args:
+        env: Any environment with RobotData + Writer APIs.
+        env_ids: Environments to reset.
+        fallen_prob: Probability (per env) of selecting the fallen
+            branch. mjlab default: ``0.6``.
+        fall_height: World-z height at which fallen robots are dropped.
+        fall_velocity_range: ``(min, max)`` uniform bounds applied to
+            every root linear/angular vel component and joint vel in
+            the fallen branch.
+        fall_joint_noise_range: ``(min, max)`` uniform noise added to
+            default joint positions in the fallen branch. Not clipped
+            to joint limits — the simulator will clamp on apply.
+        standing_z_offset: Small z offset applied to standing pose so
+            the robot does not spawn intersecting the ground plane.
+        default_pos: Standing-branch root ``(x, y, z)``.
+        default_quat_wxyz: Standing-branch root quaternion (wxyz).
+        entity_name: Entity to reset.
+    """
+    if len(env_ids) == 0:
+        return
+
+    writer = env.get_robot_state_writer(entity_name)
+    device = env.device
+    n = len(env_ids)
+
+    # Auto-detect mjlab multi-env offsets (same convention as
+    # ``reset_root_state_uniform``).
+    _scene = getattr(env.scene_manager, "scene", None)
+    env_origins = getattr(_scene, "env_origins", None)
+
+    # Per-env branch mask.
+    is_fallen = torch.rand(n, device=device) < fallen_prob
+    is_fallen_3 = is_fallen.unsqueeze(-1)  # for broadcasting to (n, 3)
+
+    # ── Root pose ─────────────────────────────────────────────────
+    default_pos_t = torch.tensor(
+        default_pos, device=device, dtype=torch.float32
+    ).unsqueeze(0).expand(n, -1)
+    standing_pos = default_pos_t.clone()
+    standing_pos[:, 2] = standing_pos[:, 2] + standing_z_offset
+
+    fallen_pos = torch.zeros_like(standing_pos)
+    fallen_pos[:, 2] = fall_height
+
+    pos = torch.where(is_fallen_3, fallen_pos, standing_pos)
+    if env_origins is not None:
+        pos = pos + env_origins[env_ids]
+
+    default_quat_t = torch.tensor(
+        default_quat_wxyz, device=device, dtype=torch.float32
+    ).unsqueeze(0).expand(n, -1)
+    random_quat = _sample_uniform_quaternion_wxyz(n, device)
+    quat_wxyz = torch.where(is_fallen.unsqueeze(-1), random_quat, default_quat_t)
+
+    # ── Root velocity ─────────────────────────────────────────────
+    lo, hi = fall_velocity_range
+    fallen_lin_vel = torch.empty((n, 3), device=device).uniform_(lo, hi)
+    fallen_ang_vel = torch.empty((n, 3), device=device).uniform_(lo, hi)
+    zero_vel = torch.zeros((n, 3), device=device)
+    lin_vel = torch.where(is_fallen_3, fallen_lin_vel, zero_vel)
+    ang_vel = torch.where(is_fallen_3, fallen_ang_vel, zero_vel)
+
+    # ── Joint state ───────────────────────────────────────────────
+    default_joint_pos = env.act_manager.offset[env_ids].clone()
+    if default_joint_pos.dim() == 1:
+        default_joint_pos = default_joint_pos.unsqueeze(0)
+    num_joints = default_joint_pos.shape[-1]
+
+    if fall_joint_noise_range == "soft_limit":
+        # mjlab_playground-faithful path: sample uniform over the
+        # full soft joint limit range so fallen poses span the whole
+        # reachable configuration space. Requires
+        # ``rd.soft_joint_pos_limits`` (all 3 sims implement it).
+        rd = env.get_robot_data(entity_name)
+        jp_lo, jp_hi = rd.soft_joint_pos_limits
+        u = torch.rand((n, num_joints), device=device)
+        fallen_joint_pos = jp_lo + u * (jp_hi - jp_lo)
+    else:
+        # Additive-noise path (simpler fallback, keeps fallen pose
+        # close to the default — useful for robots whose soft limits
+        # haven't been validated).
+        jn_lo, jn_hi = fall_joint_noise_range
+        joint_noise = torch.empty(
+            (n, num_joints), device=device
+        ).uniform_(jn_lo, jn_hi)
+        fallen_joint_pos = default_joint_pos + joint_noise
+
+    is_fallen_j = is_fallen.unsqueeze(-1).expand(-1, num_joints)
+    joint_pos = torch.where(is_fallen_j, fallen_joint_pos, default_joint_pos)
+
+    fallen_joint_vel = torch.empty(
+        (n, num_joints), device=device
+    ).uniform_(lo, hi)
+    zero_joint_vel = torch.zeros((n, num_joints), device=device)
+    joint_vel = torch.where(is_fallen_j, fallen_joint_vel, zero_joint_vel)
+
+    # ── Write ─────────────────────────────────────────────────────
+    writer.set_root_pose(pos, quat_wxyz, env_ids=env_ids)
+    writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
+    writer.set_dof_positions(joint_pos, env_ids=env_ids)
+    writer.set_dof_velocities(joint_vel, env_ids=env_ids)
+    writer.eval_fk(env_ids=env_ids)

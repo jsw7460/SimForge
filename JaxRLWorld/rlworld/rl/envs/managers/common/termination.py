@@ -44,6 +44,21 @@ class TerminationManager(BaseManager):
     def max_episode_length(self) -> int:
         return math.ceil(self._episode_length_s / self.env.control_dt)
 
+    def get_term_cfg(self, name: str) -> TerminationTermConfig:
+        """Return the live TerminationTermConfig for a registered term.
+
+        Used by the curriculum manager to mutate a termination term's
+        ``params`` dict based on training progress. The returned object
+        is the same instance that :meth:`check_termination` reads from,
+        so in-place modifications take effect on the next check.
+        """
+        if name not in self._all_terms:
+            raise KeyError(
+                f"Termination term {name!r} not found. "
+                f"Available: {list(self._all_terms)}"
+            )
+        return self._all_terms[name]
+
     def advance(self) -> None:
         self.episode_length_buf += 1
 

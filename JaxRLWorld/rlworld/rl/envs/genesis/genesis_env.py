@@ -5,6 +5,7 @@ from rlworld.rl.configs import (
     EnvConfig, SceneConfig, ObservationConfig, VisualizationConfig,
     ActionConfig, RewardConfig, CommandConfig, EventConfig
 )
+from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
 from rlworld.rl.envs.managers import (
     VisualizationManagerConfig, VisualizationManager,
 )
@@ -28,6 +29,7 @@ class GenesisEnv(World):
         reward_cfg: RewardConfig,
         command_cfg: CommandConfig,
         event_cfg: EventConfig,
+        curriculum_cfg: CurriculumManagerConfig,
     ):
         set_seed(env_cfg.seed)
         super().__init__()
@@ -45,6 +47,7 @@ class GenesisEnv(World):
         self.reward_cfg = reward_cfg
         self.command_cfg = command_cfg
         self.event_cfg = event_cfg
+        self.curriculum_cfg = curriculum_cfg
 
         # Timing
         self.physics_dt = scene_cfg.sim_options.dt
@@ -159,6 +162,7 @@ class GenesisEnv(World):
                 clip=self.act_cfg.clip_actions,
                 scale=self.act_cfg.action_scale,
                 offset=self.act_cfg.offset,
+                settle_steps=self.act_cfg.settle_steps,
             )
         )
 

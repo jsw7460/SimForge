@@ -160,6 +160,19 @@ class NewtonRobotData:
         qd_indices = self._env.act_manager.indexing.newton_qd_indices
         return lower_all[qd_indices], upper_all[qd_indices]
 
+    @property
+    def soft_joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+        """Soft joint position limits (hard * 0.9).
+
+        Newton only stores hard limits; the soft flavour is hard ×
+        ``soft_limit_factor`` where the factor is hardcoded to 0.9 to
+        match mjlab's default ``soft_joint_pos_limit_factor=0.9``.
+        Returned as a tuple of ``(num_joints,)`` tensors in actuated
+        order, same shape as :attr:`joint_pos_limits`.
+        """
+        lo, hi = self.joint_pos_limits
+        return lo * 0.9, hi * 0.9
+
     # ------------------------------------------------------------------
     # Body-level reads
     # ------------------------------------------------------------------

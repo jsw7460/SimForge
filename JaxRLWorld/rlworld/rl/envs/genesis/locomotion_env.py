@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from rlworld.rl.envs import GenesisEnv
 from rlworld.rl.envs.managers import GaitManagerConfig, GaitManager
+from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
 from rlworld.rl.configs import (
     EnvConfig,
     SceneConfig,
@@ -55,6 +56,7 @@ class GenesisLocomotionEnv(GenesisEnv):
         command_cfg: CommandConfig,
         event_cfg: EventConfig,
         gait_cfg: GaitConfig,
+        curriculum_cfg: CurriculumManagerConfig,
     ):
         self._gait_cfg = gait_cfg
         super().__init__(
@@ -67,6 +69,7 @@ class GenesisLocomotionEnv(GenesisEnv):
             reward_cfg=reward_cfg,
             command_cfg=command_cfg,
             event_cfg=event_cfg,
+            curriculum_cfg=curriculum_cfg,
         )
 
     def _post_setup(self):

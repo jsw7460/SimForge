@@ -15,7 +15,6 @@ from rlworld.rl.algorithms.base import RLAlgorithm, ActInput
 from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.envs import World, EpisodeStatsCollector
-# from rlworld.rl.envs.curriculum import Go2Curriculum
 from rlworld.rl.runners.iteration_data import IterationData, EpisodeStats
 from rlworld.rl.utils import setup_log_dir
 from rlworld.rl.utils.dynamics_dataset import DynamicsDataset
@@ -64,6 +63,7 @@ class BaseRunner(ABC):
                 reward_cfg=cfgs.reward,
                 command_cfg=cfgs.command,
                 event_cfg=cfgs.event,
+                curriculum_cfg=cfgs.curriculum,
             )
             gait_cfg = getattr(cfgs, "gait", None)
             if gait_cfg is not None:
@@ -187,9 +187,6 @@ class BaseRunner(ABC):
                 cfg=self.cfgs.recursive_to_dict()
             )
             self.wandb_url = self.wandb_logger.wandb_url
-
-        # Initialize curriculum manager
-        # self.curriculum_manager = Go2Curriculum(runner=self, curriculum_cfg=self.cfgs.curriculum)
 
         # Training parameters
         self.save_interval = self.runner_cfg.save_interval
@@ -555,10 +552,6 @@ class BaseRunner(ABC):
         critic_obs = torch_to_jax(obs["critic"])
         action_jax = self.alg.act(self.alg.ActInput(actor_obs, critic_obs), deterministic)
         return jax_to_torch(action_jax, self.device)
-
-    # def update_curriculum(self, training_data: Dict[str, Any]):
-    #     """Update curriculum difficulty based on training data."""
-    #     self.curriculum_manager.update_difficulty(training_data)
 
     @classmethod
     @abstractmethod

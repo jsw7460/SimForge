@@ -55,6 +55,13 @@ class ActionManagerBaseConfig:
             - dict[str, float]: per-joint scale via regex
         offset: Dictionary mapping joint name regex patterns to offset values.
             If None, offset is zero for all joints.
+        settle_steps: Number of steps at the start of each episode during
+            which the processed action is overridden to hold the current
+            joint position (target = current joint_pos). Used by fall-
+            recovery tasks so the robot can physically settle after a
+            drop/impact before the policy's output takes effect. ``0``
+            disables settling (default — no behavior change for
+            existing presets).
     """
 
     actuated_dof_names: list[str] = field(default_factory=list)
@@ -66,6 +73,7 @@ class ActionManagerBaseConfig:
     ) = (-1.0, 1.0)
     scale: float | dict[str, float] = 1.0
     offset: dict[str, float] | None = None
+    settle_steps: int = 0
 
 
 class ActionManagerBase(BaseManager):
@@ -95,6 +103,20 @@ class ActionManagerBase(BaseManager):
         )
         self._raw_action_history = [_z() for _ in range(self._action_history_len)]
         self._processed_action_history = [_z() for _ in range(self._action_history_len)]
+
+        # Last applied torque (written in ``apply_actions`` when explicit
+        # actuator models are active, otherwise remains zero). Exposed via
+        # the ``applied_torque`` property for reward/termination terms that
+        # need the mechanical power, e.g. getup's energy termination.
+        self._applied_torque = _z()
+
+        # Per-env per-joint encoder bias, shape ``(num_envs, action_dim)``.
+        # Written by ``randomize_encoder_bias`` (a startup / reset-DR
+        # event term) and read by the biased ``dof_pos_biased``
+        # observation so the policy sees a calibration-offset version
+        # of the joint state. Zero-initialized so this is a no-op until
+        # a DR term writes to it.
+        self._encoder_bias = _z()
 
         # Initialize offset first (needed for joint_limit clip computation)
         self._offset = self._initialize_offsets()
@@ -270,6 +292,39 @@ class ActionManagerBase(BaseManager):
     @property
     def offset(self) -> torch.Tensor:
         return self._offset
+
+    @property
+    def applied_torque(self) -> torch.Tensor:
+        """Torques computed by explicit actuator models in the last step.
+
+        Shape ``(num_envs, total_action_dim)`` in canonical actuated-joint
+        order. Only populated when the action config attaches explicit
+        actuator models (e.g. ``DelayedPDActuatorCfg``); otherwise stays
+        at zeros because the simulator computes PD torques internally and
+        they are not routed through Python.
+        """
+        return self._applied_torque
+
+    @property
+    def encoder_bias(self) -> torch.Tensor:
+        """Per-env per-joint encoder bias, shape ``(num_envs, action_dim)``.
+
+        Written by ``randomize_encoder_bias`` (typically at startup /
+        reset-DR) and read by the biased observation so the policy
+        sees a calibration-offset version of the joint state. Zero
+        when no DR term has written to it.
+        """
+        return self._encoder_bias
+
+    def set_encoder_bias(self, bias: torch.Tensor, env_ids: torch.Tensor | None = None) -> None:
+        """Write the encoder bias tensor for the given envs (or all).
+
+        Used by the ``randomize_encoder_bias`` event term.
+        """
+        if env_ids is None:
+            self._encoder_bias.copy_(bias)
+        else:
+            self._encoder_bias[env_ids] = bias
 
     @property
     def actuated_joint_names(self) -> list[str]:
@@ -449,10 +504,23 @@ class ActionManagerBase(BaseManager):
             # Scatter back into full array
             full_torques[:, joint_idx] = torques
 
+        self._applied_torque = full_torques
         self._apply_force(full_torques)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
-        """Process raw actions: clip -> scale -> offset.
+        """Process raw actions: clip -> scale -> offset -> (optional settle).
+
+        Settle behavior: when ``config.settle_steps > 0``, per-env mask
+        ``episode_length_buf < settle_steps`` overrides the processed
+        action with the current joint position, causing the PD
+        controller to hold the robot in place for the first few steps
+        after a reset. This gives fall-recovery tasks time to
+        physically settle after impact before the policy's commands
+        take effect. ``raw_action_history`` is left intact so that
+        policy-gradient / entropy signals see the true action; only
+        ``processed_action_history[0]`` (and the returned tensor) is
+        masked. At ``settle_steps = 0`` (the default) this branch is
+        skipped and the behavior is identical to the pre-settle code.
 
         Args:
             actions: Raw action tensor of shape (num_envs, total_action_dim).
@@ -462,8 +530,17 @@ class ActionManagerBase(BaseManager):
         """
         self._raw_action_history[0] = actions.clone()
         clipped = torch.clip(actions, self._clip_low, self._clip_high)
-        self._processed_action_history[0] = clipped * self._scale + self._offset
-        return self._processed_action_history[0]
+        processed = clipped * self._scale + self._offset
+
+        if self.config.settle_steps > 0:
+            in_settle = (
+                self.env.episode_length_buf < self.config.settle_steps
+            ).unsqueeze(-1).float()
+            current_pos = self._get_joint_pos()
+            processed = in_settle * current_pos + (1.0 - in_settle) * processed
+
+        self._processed_action_history[0] = processed
+        return processed
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         """Reset action buffers and actuator state for specified environments."""

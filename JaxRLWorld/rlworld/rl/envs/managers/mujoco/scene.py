@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
@@ -47,8 +47,10 @@ class MujocoSceneManagerConfig:
     solver_iterations: int = 10
     solver_ls_iterations: int = 20
     ccd_iterations: int = 50
-    nconmax: int = 35
-    njmax: int = 1500
+    nconmax: int | None = 35
+    njmax: int | None = 1500
+    impratio: float = 1.0
+    cone: Literal["pyramidal", "elliptic"] = "pyramidal"
     contact_sensor_maxmatch: int = 64
 
     # Legacy — set by mjlab_env for backward compat
@@ -188,6 +190,8 @@ class MujocoSceneManager(BaseManager):
                     iterations=self.config.solver_iterations,
                     ls_iterations=self.config.solver_ls_iterations,
                     ccd_iterations=self.config.ccd_iterations,
+                    impratio=self.config.impratio,
+                    cone=self.config.cone,
                 ),
                 contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
             )

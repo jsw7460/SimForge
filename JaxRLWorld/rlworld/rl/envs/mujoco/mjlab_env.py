@@ -8,6 +8,7 @@ from __future__ import annotations
 import torch
 
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
+from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
 from rlworld.rl.configs.common_config_classes import VisualizationConfig
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,
@@ -61,6 +62,7 @@ class MujocoEnv(World):
         reward_cfg: RewardConfig,
         command_cfg: CommandConfig,
         event_cfg: EventConfig,
+        curriculum_cfg: CurriculumManagerConfig,
     ):
         set_seed(env_cfg.seed)
         super().__init__()
@@ -78,6 +80,7 @@ class MujocoEnv(World):
         self.reward_cfg = reward_cfg
         self.command_cfg = command_cfg
         self.event_cfg = event_cfg
+        self.curriculum_cfg = curriculum_cfg
 
         # Timing (will be updated after scene is built)
         self.decimation = env_cfg.decimation
@@ -139,6 +142,8 @@ class MujocoEnv(World):
                 ccd_iterations=getattr(self.scene_cfg, "ccd_iterations", 50),
                 nconmax=getattr(self.scene_cfg, "nconmax", 35),
                 njmax=getattr(self.scene_cfg, "njmax", 1500),
+                impratio=getattr(self.scene_cfg, "impratio", 1.0),
+                cone=getattr(self.scene_cfg, "cone", "pyramidal"),
                 contact_sensor_maxmatch=getattr(self.scene_cfg, "contact_sensor_maxmatch", 64),
                 # Legacy fallbacks
                 mjlab_scene_cfg=getattr(self.scene_cfg, "mjlab_scene_cfg", None),
@@ -167,6 +172,7 @@ class MujocoEnv(World):
                 scale=self.act_cfg.action_scale,
                 clip=self.act_cfg.clip_actions,
                 offset=self.act_cfg.offset,
+                settle_steps=self.act_cfg.settle_steps,
             )
         )
 

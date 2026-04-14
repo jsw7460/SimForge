@@ -3,6 +3,7 @@ import warp as wp
 from warp.torch import device_to_torch
 
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
+from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
 from rlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
     NewtonSceneConfig,
@@ -33,6 +34,7 @@ class NewtonEnv(World):
         reward_cfg: RewardConfig,
         command_cfg: CommandConfig,
         event_cfg: EventConfig,
+        curriculum_cfg: CurriculumManagerConfig,
     ):
         set_seed(env_cfg.seed)
         super().__init__()
@@ -50,6 +52,7 @@ class NewtonEnv(World):
         self.reward_cfg = reward_cfg
         self.command_cfg = command_cfg
         self.event_cfg = event_cfg
+        self.curriculum_cfg = curriculum_cfg
 
         # Timing
         self.physics_dt = scene_cfg.dt
@@ -152,6 +155,7 @@ class NewtonEnv(World):
                 scale=self.act_cfg.action_scale,
                 clip=self.act_cfg.clip_actions,
                 offset=self.act_cfg.offset,
+                settle_steps=self.act_cfg.settle_steps,
             )
         )
 
