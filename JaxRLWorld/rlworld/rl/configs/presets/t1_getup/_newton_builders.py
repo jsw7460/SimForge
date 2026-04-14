@@ -45,14 +45,12 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
-from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
     base_lin_vel,
     base_quat,
     dof_pos,
-    dof_pos_biased,
     dof_vel,
     projected_gravity,
     raw_actions,
@@ -175,12 +173,15 @@ def build_observation(cfg: "T1GetupConfig") -> NewtonObservationConfig:
         projected_gravity_obs = ObservationTermConfig(
             func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
         )
-        # Biased dof_pos: adds per-env encoder bias written by the
-        # randomize_encoder_bias DR term so the policy learns robust
-        # behaviour under sensor miscalibration (mjlab_playground
-        # observation with ``biased=True``).
+        # mjlab_playground uses a biased dof_pos observation paired with a
+        # ``-encoder_bias`` correction in its relative action. Since our
+        # relative action (SettleRelative) does NOT subtract the bias,
+        # keeping a biased observation here would create an asymmetry
+        # that the policy would have to learn to compensate for. The
+        # cleanest choice is to drop encoder_bias entirely on both
+        # sides — see build_dr_terms (no randomize_encoder_bias term).
         dof_pos_obs = ObservationTermConfig(
-            func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01)
+            func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
         )
         dof_vel_obs = ObservationTermConfig(
             func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
@@ -215,13 +216,36 @@ def build_observation(cfg: "T1GetupConfig") -> NewtonObservationConfig:
 
 
 def build_action(cfg: "T1GetupConfig") -> NewtonActionConfig:
+    """Settle-relative joint position action (mjlab_playground T1 getup).
+
+    Uses the new ActionTerm system: a single
+    :class:`SettleRelativeJointPositionAction` spanning every
+    actuated joint. Target = ``current_joint_pos + raw * scale``,
+    with a forced hold at ``current_joint_pos`` for the first
+    ``settle_steps`` control steps after each reset. This mirrors
+    mjlab_playground's ``SettleRelativeJointPositionActionCfg`` used
+    for fall-recovery tasks. Legacy ``scale``/``clip``/``offset``
+    fields are intentionally left at their defaults because
+    ``action_terms`` takes precedence once non-empty.
+    """
+    from rlworld.rl.envs.mdp.actions import (
+        SettleRelativeJointPositionAction,
+        SettleRelativeJointPositionActionCfg,
+    )
+
     r = cfg.robot
     return NewtonActionConfig(
         actuated_dof_names=r.prefixed_actuated_dof_patterns,
-        action_scale=r.prefixed_action_scale,
         clip_actions=(-100.0, 100.0),
-        offset=r.get_prefixed_action_offset(),
-        settle_steps=cfg.settle_steps,
+        action_terms={
+            "body": SettleRelativeJointPositionActionCfg(
+                class_type=SettleRelativeJointPositionAction,
+                joint_names=list(r.prefixed_actuated_dof_patterns),
+                scale=r.prefixed_action_scale,
+                clip=(-100.0, 100.0),
+                settle_steps=cfg.settle_steps,
+            ),
+        },
     )
 
 
@@ -307,11 +331,12 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
     """
     r = cfg.robot
     return {
-        "randomize_encoder_bias": EventTermConfig(
-            func=common_ef.randomize_encoder_bias,
-            mode="reset_dr",
-            params={"bias_range": (-0.015, 0.015)},
-        ),
+        # Encoder bias DR intentionally omitted: our action path does
+        # not subtract ``encoder_bias`` from the target (unlike
+        # mjlab_playground's SettleRelativeJointPositionAction), so
+        # applying a biased observation would desynchronize the
+        # policy's action from the physical state. See build_observation
+        # for the matching decision to use unbiased dof_pos.
         "randomize_body_com": EventTermConfig(
             func=newton_dr.randomize_body_com_offset,
             mode="reset_dr",

@@ -51,14 +51,12 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg,
 )
 from rlworld.rl.envs.mdp.configs import TerminationTermConfig
-from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
     base_lin_vel,
     base_quat,
     dof_pos,
-    dof_pos_biased,
     dof_vel,
     projected_gravity,
     raw_actions,
@@ -191,9 +189,9 @@ def build_observation(cfg: "T1GetupConfig") -> MujocoObservationConfig:
         projected_gravity_obs = ObservationTermConfig(
             func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
         )
-        # Biased dof_pos (see _newton_builders for rationale).
+        # Unbiased dof_pos (see _newton_builders for rationale).
         dof_pos_obs = ObservationTermConfig(
-            func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01)
+            func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
         )
         dof_vel_obs = ObservationTermConfig(
             func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
@@ -228,14 +226,29 @@ def build_observation(cfg: "T1GetupConfig") -> MujocoObservationConfig:
 
 
 def build_action(cfg: "T1GetupConfig") -> MujocoActionConfig:
+    """Settle-relative joint position action (mjlab_playground T1 getup).
+
+    See ``_newton_builders.build_action`` for the rationale.
+    """
+    from rlworld.rl.envs.mdp.actions import (
+        SettleRelativeJointPositionAction,
+        SettleRelativeJointPositionActionCfg,
+    )
+
     r = cfg.robot
     return MujocoActionConfig(
         entity_name="robot",
         actuated_dof_names=r.actuated_dof_patterns,
-        action_scale=T1_ACTION_SCALE,
         clip_actions=(-100.0, 100.0),
-        offset=r.get_action_offset(),
-        settle_steps=cfg.settle_steps,
+        action_terms={
+            "body": SettleRelativeJointPositionActionCfg(
+                class_type=SettleRelativeJointPositionAction,
+                joint_names=list(r.actuated_dof_patterns),
+                scale=T1_ACTION_SCALE,
+                clip=(-100.0, 100.0),
+                settle_steps=cfg.settle_steps,
+            ),
+        },
     )
 
 
@@ -324,11 +337,8 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
     # the MJCF load; T1Config exposes the foot names via a property.
     foot_geom_names = r.foot_geom_names_mjlab
     return {
-        "randomize_encoder_bias": EventTermConfig(
-            func=common_ef.randomize_encoder_bias,
-            mode="reset_dr",
-            params={"bias_range": (-0.015, 0.015)},
-        ),
+        # Encoder bias DR intentionally omitted — see _newton_builders
+        # for the rationale (unbiased obs + unbiased action = symmetric).
         "randomize_body_com": EventTermConfig(
             func=ef.randomize_body_com_offset,
             mode="reset_dr",
