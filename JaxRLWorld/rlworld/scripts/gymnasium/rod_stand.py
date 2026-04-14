@@ -471,7 +471,6 @@ def main():
         "scene": DEFAULT_SCENE_CONFIG,
         "observation": DEFAULT_OBS_CONFIG,
         "action": DEFAULT_ACT_CONFIG,
-        "curriculum": DEFAULT_CURRICULUM_CONFIG,
         "reward": DEFAULT_REWARD_CONFIG,
         "command": DEFAULT_COMMAND_CONFIG,
         "algorithm": DEFAULT_ALGORITHM_CONFIG,

@@ -28,6 +28,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_height,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
+from rlworld.rl.envs.mdp.rewards.common import wtw as rf_wtw
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_mujoco
 from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 
@@ -103,11 +104,11 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
                 params={"gait_vel_sigma": 10.0, "asset_cfg": foot_asset_cfg},
             )
             body_height_cmd = RewardTermConfig(
-                func=rf_common.reward_body_height_cmd, weight=10.0,
+                func=rf_wtw.reward_body_height_cmd, weight=10.0,
                 params={"base_height_target": 0.30},
             )
             orientation_control = RewardTermConfig(
-                func=rf_common.penalize_orientation_control, weight=5.0,
+                func=rf_wtw.penalize_orientation_control, weight=5.0,
             )
             raibert_heuristic = RewardTermConfig(
                 func=rf_mujoco.wtw_raibert_heuristic, weight=10.0,
@@ -122,10 +123,10 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
                 params={"contact_group": "feet_ground_contact", "asset_cfg": foot_asset_cfg},
             )
             action_smoothness_1 = RewardTermConfig(
-                func=rf_common.penalize_action_smoothness_1, weight=0.1,
+                func=rf_wtw.penalize_action_smoothness_1, weight=0.1,
             )
             action_smoothness_2 = RewardTermConfig(
-                func=rf_common.penalize_action_smoothness_2, weight=0.1,
+                func=rf_wtw.penalize_action_smoothness_2, weight=0.1,
             )
             dof_vel = RewardTermConfig(
                 func=rf_common.penalize_dof_vel, weight=1e-4,

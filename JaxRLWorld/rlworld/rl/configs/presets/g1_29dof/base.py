@@ -149,11 +149,6 @@ class G1FlatConfig:
             runner=self._build_runner_config(),
         )
 
-        # Genesis is the only sim with a curriculum field; the others
-        # don't accept it as a kwarg.
-        if hasattr(builders, "build_curriculum"):
-            kwargs["curriculum"] = builders.build_curriculum(self)
-
         cfgs = builders.CONFIGS_FOR_RUN_CLS(**kwargs)
         cfgs.preset_module = type(self).__module__
         cfgs.preset_class_name = type(self).__name__

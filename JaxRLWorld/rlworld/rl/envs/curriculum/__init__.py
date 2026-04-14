@@ -1,1 +1,0 @@
-from .curriculum_manager import Go2Curriculum, MarvelCurriculum

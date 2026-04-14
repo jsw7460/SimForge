@@ -17,7 +17,6 @@ from .genesis_config_classes import (
     SceneConfig,
     ObservationConfig,
     ActionConfig,
-    CurriculumConfig,
     GenesisConfigsForRun,
 )
 from .newton_config_classes import (

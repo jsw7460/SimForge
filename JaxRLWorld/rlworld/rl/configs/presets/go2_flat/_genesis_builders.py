@@ -22,7 +22,6 @@ from rlworld.rl.configs.common_config_classes import (
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.genesis_config_classes import (
     ActionConfig,
-    CurriculumConfig,
     EnvConfig,
     GenesisConfigsForRun,
     GenesisContactSensorCfg,
@@ -303,18 +302,3 @@ def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
     }
 
 
-def build_curriculum(cfg: "Go2FlatConfig") -> CurriculumConfig:
-    """Genesis-only: dead curriculum (enable=False) preserved for compat."""
-    return CurriculumConfig(
-        enable=False,
-        initial_level=0,
-        max_level=3,
-        success_threshold=0.8,
-        min_steps_per_level=50000,
-        eval_window_size=2,
-        curriculum_components={},
-        criterion={
-            "tracking_lin_vel_xy": -100,
-            "mean_return": -100,
-        },
-    )

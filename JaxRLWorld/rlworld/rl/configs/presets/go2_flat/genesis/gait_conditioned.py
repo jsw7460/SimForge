@@ -38,6 +38,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_height,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
+from rlworld.rl.envs.mdp.rewards.common import wtw as rf_wtw
 from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
 from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 
@@ -115,11 +116,11 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
 
             # ── Body commands (common) ──
             body_height_cmd = RewardTermConfig(
-                func=rf_common.reward_body_height_cmd, weight=10.0,
+                func=rf_wtw.reward_body_height_cmd, weight=10.0,
                 params={"base_height_target": 0.30},
             )
             orientation_control = RewardTermConfig(
-                func=rf_common.penalize_orientation_control, weight=5.0,
+                func=rf_wtw.penalize_orientation_control, weight=5.0,
             )
 
             # ── Footstep placement (Genesis-specific) ──
@@ -135,10 +136,10 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
                 func=rf_genesis.wtw_feet_slip, weight=0.04,
             )
             action_smoothness_1 = RewardTermConfig(
-                func=rf_common.penalize_action_smoothness_1, weight=0.1,
+                func=rf_wtw.penalize_action_smoothness_1, weight=0.1,
             )
             action_smoothness_2 = RewardTermConfig(
-                func=rf_common.penalize_action_smoothness_2, weight=0.1,
+                func=rf_wtw.penalize_action_smoothness_2, weight=0.1,
             )
             dof_vel = RewardTermConfig(
                 func=rf_common.penalize_dof_vel, weight=1e-4,

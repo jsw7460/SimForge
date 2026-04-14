@@ -21,9 +21,6 @@ guard at the call site so they can be omitted when not needed):
     sim-specific overrides.  Example: Newton converts its native
     xyzw initial quat into wxyz, Genesis Go2 shifts the spawn
     position by ``(1.5, 1.5)`` for scene layout reasons.
-
-* ``build_curriculum(cfg) -> CurriculumConfig``
-    Genesis-only curriculum config.  Newton and MuJoCo omit this.
 """
 from __future__ import annotations
 
