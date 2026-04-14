@@ -88,17 +88,22 @@ class GenesisRobotData:
     def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
         """Hard joint position limits in canonical actuated order.
 
-        Calls Genesis's ``entity.get_dofs_limit(actuated_dof_ids)`` which
-        returns ``(lower, upper)`` each of shape ``(1, num_joints)``. We
-        squeeze the leading dim so the result matches the protocol shape
-        ``(num_joints,)`` consistent with Newton's implementation.
+        Calls Genesis's ``entity.get_dofs_limit(actuated_dof_ids)``. Per
+        the Genesis docstring, the return shape is *either*
+        ``(n_dofs,)`` or ``(n_envs, n_dofs)`` depending on whether the
+        scene is batched. We normalise both cases to the 1-D
+        ``(n_dofs,)`` shape the RobotData protocol promises — for the
+        batched case we take the first env's row since joint limits are
+        constant across envs in all current Genesis configs.
 
         Returns:
             ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
         """
         lower, upper = self._entity.get_dofs_limit(dofs_idx_local=self._actuated_dof_ids)
-        # Genesis returns shape (1, N); squeeze to (N,)
-        return lower.squeeze(0), upper.squeeze(0)
+        if lower.ndim == 2:
+            lower = lower[0]
+            upper = upper[0]
+        return lower, upper
 
     @property
     def soft_joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
