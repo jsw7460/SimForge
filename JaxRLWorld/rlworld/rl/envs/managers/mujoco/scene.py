@@ -192,6 +192,7 @@ class MujocoSceneManager(BaseManager):
                     ccd_iterations=self.config.ccd_iterations,
                     impratio=self.config.impratio,
                     cone=self.config.cone,
+                    disableflags=("nativeccd",)
                 ),
                 contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
             )
