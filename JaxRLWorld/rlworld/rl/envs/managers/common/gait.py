@@ -202,21 +202,6 @@ class GaitManager(BaseManager):
                     f"Use the same foot_names for both GaitConfig and QuadrupedOffsets."
                 )
 
-        # ── Validate contact_manager group order matches foot_names ──
-        import warnings
-        cm = self.env.contact_manager
-        for group_name in cm.group_names():
-            tracked = tuple(cm.tracked_names(group_name))
-            if len(tracked) == self.num_feet and set(tracked) == set(self.foot_names):
-                if tracked != self.foot_names:
-                    warnings.warn(
-                        f"Contact group '{group_name}' tracked_names {list(tracked)} "
-                        f"has same elements as gait foot_names {list(self.foot_names)} "
-                        f"but in different order. Reward functions that use both "
-                        f"contact and gait data may have misaligned indices.",
-                        stacklevel=2,
-                    )
-
         # ── Fixed-mode precomputation ──
         if config.offset_mode == "fixed":
             self._fixed_offsets = torch.tensor(
@@ -248,6 +233,78 @@ class GaitManager(BaseManager):
         self.foot_phases[env_ids] = 0.0
         self.clock_inputs[env_ids] = 0.0
         self.desired_contact_states[env_ids] = 0.0
+
+    # ────────────────────────────────────────────
+    # Order-aware accessors
+    # ────────────────────────────────────────────
+    #
+    # Mirror ``ContactManager.is_contact(group, order=...)``: each
+    # per-foot tensor can be fetched in an arbitrary foot ordering by
+    # passing ``order`` as a list of names matching ``self.foot_names``.
+    # The default (``order=None``) returns the tensor in the natural
+    # ``self.foot_names`` order — same as reading the attribute
+    # directly. The reindex tensor is cached per requested order.
+
+    _gait_reindex_cache: dict[tuple[str, ...], torch.Tensor]
+
+    def _get_reindex(self, order: list[str] | tuple[str, ...]) -> torch.Tensor:
+        if not hasattr(self, "_gait_reindex_cache"):
+            self._gait_reindex_cache = {}
+        key = tuple(order)
+        if key in self._gait_reindex_cache:
+            return self._gait_reindex_cache[key]
+        if len(order) != self.num_feet:
+            raise ValueError(
+                f"order has {len(order)} elements but gait_manager tracks "
+                f"{self.num_feet} feet ({list(self.foot_names)})."
+            )
+        missing = set(order) - set(self.foot_names)
+        if missing:
+            raise ValueError(
+                f"order contains foot names not in gait_manager.foot_names "
+                f"{list(self.foot_names)}: {sorted(missing)}."
+            )
+        idx = torch.tensor(
+            [self.foot_names.index(name) for name in order],
+            dtype=torch.long, device=self.device,
+        )
+        self._gait_reindex_cache[key] = idx
+        return idx
+
+    def _apply_order(
+        self, tensor: torch.Tensor, order: list[str] | tuple[str, ...] | None
+    ) -> torch.Tensor:
+        if order is None:
+            return tensor
+        return tensor[:, self._get_reindex(order)]
+
+    def get_desired_contact_states(
+        self, order: list[str] | tuple[str, ...] | None = None
+    ) -> torch.Tensor:
+        """Per-foot desired contact in [0, 1]. Shape ``(num_envs, num_feet)``.
+
+        ``order`` is a list of names from ``self.foot_names``; if given,
+        the returned tensor's per-foot column is reordered accordingly.
+        """
+        return self._apply_order(self.desired_contact_states, order)
+
+    def get_foot_phases(
+        self, order: list[str] | tuple[str, ...] | None = None
+    ) -> torch.Tensor:
+        """Per-foot raw phase in [0, 1). Shape ``(num_envs, num_feet)``.
+
+        ``order`` reorders the per-foot column the same way as
+        :meth:`get_desired_contact_states`.
+        """
+        return self._apply_order(self.foot_phases, order)
+
+    def get_clock_inputs(
+        self, order: list[str] | tuple[str, ...] | None = None
+    ) -> torch.Tensor:
+        """Per-foot sin-of-phase clock used by observations.
+        Shape ``(num_envs, num_feet)``.
+        """
+        return self._apply_order(self.clock_inputs, order)
 
     # ────────────────────────────────────────────
     # Public queries
