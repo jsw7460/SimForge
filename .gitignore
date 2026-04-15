@@ -18,11 +18,20 @@
 /PhysDyn/
 /mjlab_sim2real/
 /unitree_rl_mjlab/
+/SysID/
+/third_party/
 
 # --- Root-level files not needed ---
 setup.py
 main.py
 g1_policy_scripted.pt
+
+# --- Root-level debug / scratch scripts (not tracked) ---
+/active_explore_patched.py
+/check_theta.py
+/isolate_apply.py
+/reproduce_scene_entity_cfg_bug.py
+/test_preserve_order.py
 
 # --- Python ---
 __pycache__/
