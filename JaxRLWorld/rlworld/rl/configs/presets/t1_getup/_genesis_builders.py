@@ -31,7 +31,6 @@ from rlworld.rl.configs.genesis_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.t1 import T1_ACTION_SCALE
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
@@ -224,7 +223,7 @@ def build_action(cfg: "T1GetupConfig") -> ActionConfig:
             "body": SettleRelativeJointPositionActionCfg(
                 class_type=SettleRelativeJointPositionAction,
                 joint_names=list(r.actuated_dof_patterns),
-                scale=T1_ACTION_SCALE,
+                scale=cfg.action_scale,
                 clip=(-100.0, 100.0),
                 settle_steps=cfg.settle_steps,
             ),

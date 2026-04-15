@@ -123,6 +123,12 @@ class T1GetupConfig:
     # after a drop/impact before the policy's commands take effect.
     settle_steps: int = 50
 
+    # Uniform per-step action scale. mjlab_playground T1 getup uses a
+    # single scalar 0.6 across every joint (getup_env_cfg.py:89), NOT
+    # the locomotion-convention ``0.25 * effort / stiffness`` per-joint
+    # dict. Keeping this in sync across Newton / Genesis / MuJoCo.
+    action_scale: float = 0.6
+
     # Getup reward parameters.
     orientation_std: float = 0.707  # ≈ exp(-2 * err)
     # mjlab_playground T1: _TORSO_HEIGHT=0.67, _WAIST_HEIGHT=0.55
@@ -176,7 +182,7 @@ class T1GetupConfig:
 
     # Algorithm.
     algorithm_name: str = "PPO"
-    max_iterations: int = 3000
+    max_iterations: int = 10000
 
     # Run name (None → auto from sim_type).
     run_name: str | None = None
@@ -378,7 +384,7 @@ class T1GetupConfig:
                 },
                 init_noise_std=1.0,
                 distribution_type="gaussian",
-                std_type="scalar",
+                std_type="state_independent",
             ),
         )
 

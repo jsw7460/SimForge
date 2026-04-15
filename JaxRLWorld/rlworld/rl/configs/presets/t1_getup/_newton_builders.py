@@ -143,6 +143,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 ),
                 body_label_prefix=r.name,
                 sites={"imu_site_base": r.base_link_name},
+                enable_self_collisions=True
             ),
         },
         sensors=[
@@ -241,7 +242,7 @@ def build_action(cfg: "T1GetupConfig") -> NewtonActionConfig:
             "body": SettleRelativeJointPositionActionCfg(
                 class_type=SettleRelativeJointPositionAction,
                 joint_names=list(r.prefixed_actuated_dof_patterns),
-                scale=r.prefixed_action_scale,
+                scale=cfg.action_scale,
                 clip=(-100.0, 100.0),
                 settle_steps=cfg.settle_steps,
             ),
