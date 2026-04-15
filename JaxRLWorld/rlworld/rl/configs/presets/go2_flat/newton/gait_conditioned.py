@@ -132,7 +132,7 @@ class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
             )
             collision = RewardTermConfig(
                 func=rf_newton.wtw_collision, weight=5.0,
-                params={"contact_group": "body_ground_contact", "force_threshold": 1.0},
+                params={"contact_group": "body_ground_contact", "force_threshold": 10.0},
             )
 
         return _WTWRewardsCfg()

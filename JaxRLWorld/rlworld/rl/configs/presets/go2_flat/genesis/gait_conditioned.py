@@ -154,28 +154,12 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
             # ── Collision ──
             collision = RewardTermConfig(
                 func=rf_genesis.wtw_collision, weight=5.0,
-                params={"contact_group": "body_ground_contact", "force_threshold": 1.0},
+                params={"contact_group": "body_ground_contact", "force_threshold": 10.0},
             )
 
         return _WTWRewardsCfg()
 
     def _build_observation_config(self) -> ObservationConfig:
-        # WTW observation order:
-        #   gravity(3), commands(14)*scale, dof_pos(12), dof_vel(12),
-        #   actions(12), last_actions(12), clock_inputs(4) = 69
-        #
-        # Command scales from WTW obs_scales:
-        #   velocity: [lin_vel=2.0, lin_vel=2.0, ang_vel=0.25]
-        #   gait: [freq=1.0, phase=1.0, offset=1.0, bound=1.0, duration=1.0,
-        #          footswing=0.15, body_height=2.0, pitch=0.3, roll=0.3,
-        #          stance_width=1.0, stance_length=1.0]
-        #
-        # Since commands have per-column scales, we apply scale=1.0 here
-        # and handle per-column scaling inside the command observation or
-        # via the commands_scale vector in the WTW training pipeline.
-        # For now, scale=1.0 (raw commands) — matching WTW's approach
-        # where commands_scale is applied during obs construction.
-
         @dataclass
         class _ActorObsCfg(ObservationGroupConfig):
             projected_gravity = ObservationTermConfig(
