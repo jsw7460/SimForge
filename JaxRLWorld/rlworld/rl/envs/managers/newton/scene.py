@@ -181,6 +181,19 @@ class NewtonSceneManager(BaseManager):
         # Internal
         self.substep_dt = config.dt / config.substeps
 
+        # CUDA graph populated by ``capture()`` once the physics loop
+        # is captured. Kept as an attribute from init so ``_step`` can
+        # reference ``self.graph`` during the initial capture pass
+        # without hitting AttributeError. ``use_cuda_graph`` mirrors
+        # Newton's example convention (see
+        # ``newton/examples/robot/example_robot_policy.py``) —
+        # JaxRLWorld's NewtonSceneManager always captures in
+        # ``_post_setup``, so the flag is effectively always True, but
+        # exposing it lets ``_step``'s ``need_state_copy`` guard match
+        # the Newton reference implementation line-for-line.
+        self.use_cuda_graph = True
+        self.graph = None
+
     @property
     def robot(self) -> Any:
         """For compatibility - returns model in Newton."""
@@ -452,6 +465,7 @@ class NewtonSceneManager(BaseManager):
                 impratio=100,
                 iterations=100,
                 ls_iterations=50,
+                # ccd_iterations=350,
                 use_mujoco_contacts=True,
             )
         else:
@@ -469,7 +483,6 @@ class NewtonSceneManager(BaseManager):
         # Create collision pipeline
         self.collision_pipeline = newton.CollisionPipeline(self.model)
         self.contacts = self.collision_pipeline.contacts()
-        # self.contacts = self.model.contacts()
 
         # Update entity tracking with replicated info
         for entity_name in self.entities:
@@ -768,10 +781,9 @@ class NewtonSceneManager(BaseManager):
         # read/write the wrong state. Newton's own example
         # ``newton/examples/robot/example_robot_policy.py:326-342``
         # handles this by copying state on the final odd iteration
-        # instead of swapping. We mirror that here.
-        need_state_copy = (
-            self.graph is not None and self.config.substeps % 2 == 1
-        )
+        # instead of swapping. We mirror that here line-for-line
+        # against Newton's reference.
+        need_state_copy = self.use_cuda_graph and self.config.substeps % 2 == 1
         last_idx = self.config.substeps - 1
 
         for i in range(self.config.substeps):
