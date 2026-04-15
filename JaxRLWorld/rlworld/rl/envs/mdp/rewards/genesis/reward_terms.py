@@ -98,7 +98,7 @@ def wtw_feet_clearance_cmd_linear(
     """WTW: penalize foot height error during swing."""
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
     feet_pos = entity.get_links_pos(links_idx_local=links_idx_local)
     foot_height = feet_pos[..., 2]
 
