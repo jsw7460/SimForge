@@ -4,7 +4,10 @@ from rlworld.rl.evals import PolicyEvaluator
 
 import newton
 from newton import ShapeFlags
-from consysid.sysid.param_terms.newton import apply_contact_friction
+from consysid.sysid.param_terms.newton import (
+    apply_contact_friction,
+    apply_joint_friction,
+)
 import numpy as np
 import torch
 
@@ -32,8 +35,8 @@ if __name__ == '__main__':
         }
 
     evaluator = PolicyEvaluator(
-        # policy_path="./outputs/models/2026-04-10/21-53-35/checkpoint_latest/",
-        wandb_run_path="jsw7460/RLArchitecture/hsmqf9gk",
+        # policy_path="./outputs/models/2026-04-14/21-56-39/checkpoint_latest/",
+        wandb_run_path="jsw7460/RLArchitecture/2rg9mo51",
         seed=42,
         num_evals=100000000,
         record_video=args.record_video,
@@ -41,13 +44,35 @@ if __name__ == '__main__':
         video_dir=None,
         extra_overrides=overrides,
     )
-
-    # friction 적용
+    #
+    # # ============================== DEBUG ==============================
+    # # Direct Newton model write via the same SysID apply functions, so the
+    # # visual behaviour matches exactly what Stage 1 sees during CMA-ES.
     # env = evaluator.env
     # num_envs = env.num_envs
-    # values = np.full((num_envs, 1), 0.3, dtype=np.float32)  # foot+ground friction = 0.05
     # env_ids = torch.arange(num_envs, device=env.device)
-    # apply_contact_friction(env, values, env_ids, body_pattern=".*foot$")
+    #
+    # # Foot contact friction: (B, 1).
+    # foot_mu = np.full((num_envs, 1), 0.3, dtype=np.float32)
+    # apply_contact_friction(env, foot_mu, env_ids, body_pattern=".*foot$")
+    #
+    # # Leg-joint Coulomb friction: (B, 12). The default regex targets
+    # # every joint whose name ends in "_joint" which on Go2 is exactly
+    # # the 12 actuated leg joints (floating_base is skipped).
+    # joint_tau = np.full((num_envs, 12), 0.8, dtype=np.float32)
+    # apply_joint_friction(
+    #     env, joint_tau, env_ids,
+    #     joint_patterns=(r".*_joint$",),
+    # )
+    #
+    # # Sanity read-back from the robot_view so we know the write landed.
+    # import warp as wp
+    # view = env.scene_manager.robot_view
+    # jf_back = wp.to_torch(view.get_attribute("joint_friction", env.scene_manager.model))
+    # print(f"[DEBUG] joint_friction view shape = {tuple(jf_back.shape)}")
+    # print(f"[DEBUG] joint_friction[env0] = {jf_back[0, 0].tolist()}")
+    # print(f"[DEBUG] joint_dof_names      = {view.joint_dof_names}")
+    # # ============================== /DEBUG =============================
 
     if args.eval:
         evaluator.evaluate()

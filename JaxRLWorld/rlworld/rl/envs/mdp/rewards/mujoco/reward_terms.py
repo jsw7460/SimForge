@@ -144,7 +144,6 @@ def joint_pos_limits(
 
     out_of_limits = -(joint_pos - soft_joint_pos_limits[:, joint_ids, 0]).clip(max=0.0)
     out_of_limits += (joint_pos - soft_joint_pos_limits[:, joint_ids, 1]).clip(min=0.0)
-
     return -torch.sum(out_of_limits, dim=1)
 
 
@@ -500,6 +499,7 @@ def wtw_feet_slip(
 
     foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
     vel_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
+    import ipdb; ipdb.set_trace()
     return -torch.sum(contact_filt * vel_sq, dim=-1)
 
 

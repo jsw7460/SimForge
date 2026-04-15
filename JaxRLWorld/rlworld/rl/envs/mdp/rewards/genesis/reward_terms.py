@@ -46,7 +46,7 @@ def wtw_feet_slip(
     """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
     feet_vel = entity.get_links_vel(links_idx_local=links_idx_local, ref="link_com")
 
     contact = env.contact_manager.is_contact(contact_group, order=feet_links)
@@ -80,7 +80,7 @@ def wtw_tracking_contacts_shaped_vel(
     """WTW: penalize foot velocity when foot should be in stance."""
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[entity_name]
-    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False)
+    links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
     feet_vel = entity.get_links_vel(links_idx_local=links_idx_local)
 
     foot_vel_norm = torch.norm(feet_vel, dim=-1)

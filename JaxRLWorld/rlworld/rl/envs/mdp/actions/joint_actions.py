@@ -284,4 +284,5 @@ class SettleRelativeJointPositionAction(RelativeJointPositionAction):
                 self._env.episode_length_buf < settle_steps
             ).unsqueeze(-1)
             target = torch.where(in_settle, current_pos, target)
+
         return target
