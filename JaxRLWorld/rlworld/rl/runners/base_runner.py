@@ -311,6 +311,31 @@ class BaseRunner(ABC):
         if self.wandb_logger:
             self.wandb_logger.log_iteration(data=data, step=self.total_timesteps)
 
+            # Curriculum state: logged as its own ``Curriculum/`` wandb
+            # namespace separate from the reward breakdown so that
+            # physically-scaled values (e.g. ``energy_threshold`` in
+            # Watts) don't get averaged alongside unit-less reward
+            # terms. Only finite scalar fields are logged — infinite
+            # placeholders (``float("inf")`` before the first stage
+            # fires) are skipped so wandb plots cleanly.
+            curriculum_manager = getattr(self.env, "curriculum_manager", None)
+            if curriculum_manager is not None and curriculum_manager.state:
+                import math as _math
+                import wandb as _wandb
+
+                curr_log: dict[str, float] = {}
+                for term_name, field_dict in curriculum_manager.state.items():
+                    if not isinstance(field_dict, dict):
+                        continue
+                    for field_name, value in field_dict.items():
+                        if not isinstance(value, (int, float)):
+                            continue
+                        if not _math.isfinite(value):
+                            continue
+                        curr_log[f"Curriculum/{term_name}/{field_name}"] = float(value)
+                if curr_log:
+                    _wandb.log(curr_log, step=self.total_timesteps)
+
     def _build_episode_stats(self) -> EpisodeStats:
         """Build EpisodeStats from reward_statistics, including per-sim stats if MultiSim."""
         stats = self.reward_statistics.snapshot()
