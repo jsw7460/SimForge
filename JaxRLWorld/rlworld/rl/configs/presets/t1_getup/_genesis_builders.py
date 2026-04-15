@@ -147,10 +147,11 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> SceneConfig:
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
             constraint_solver=gs.constraint_solver.Newton,
+            constraint_timeconst=0.02,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
-            max_collision_pairs=30,
+            max_collision_pairs=100,
             batch_dofs_info=True,
         ),
         robot_cfg=r,
@@ -280,7 +281,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
         self_collision_cost = RewardTermConfig(
             func=rf_genesis.wtw_collision,
             weight=cfg.self_collision_weight,
-            params={"contact_group": "self_collision", "force_threshold": 1.0},
+            params={"contact_group": "self_collision", "force_threshold": 10.0},
         )
         # Logging-only metric (weight=0).
         getup_success = RewardTermConfig(
