@@ -128,7 +128,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConf
         ),
         secondary=ContactMatch(mode="body", pattern="terrain"),
         fields=("found", "force"),
-        reduce="none",
+        reduce="netforce",
         num_slots=1,
         track_air_time=False,
         history_length=timing["decimation"],
