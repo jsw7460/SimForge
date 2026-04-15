@@ -52,9 +52,9 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 
 # ── Per-simulator constants ──────────────────────────────────────────
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005, "substeps": 2, "decimation": 4},
-    "genesis": {"dt": 0.005, "substeps": 2, "decimation": 4},
-    "mujoco":  {"dt": 0.005, "substeps": 2, "decimation": 4},
+    "newton":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "mujoco":  {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {

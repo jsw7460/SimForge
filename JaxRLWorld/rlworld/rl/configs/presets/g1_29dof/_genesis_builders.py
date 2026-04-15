@@ -154,6 +154,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> SceneConfig:
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
             constraint_solver=gs.constraint_solver.Newton,
+            constraint_timeconst=0.02,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
@@ -283,7 +284,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
         self_collision_cost = RewardTermConfig(
             func=rf_genesis.wtw_collision,
             weight=1.0,
-            params={"contact_group": "self_collision", "force_threshold": 1.0},
+            params={"contact_group": "self_collision", "force_threshold": 10.0},
         )
 
         # Penalties

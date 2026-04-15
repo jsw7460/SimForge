@@ -115,6 +115,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                     rot=(quat[0], quat[1], quat[2], quat[3]),
                 ),
                 floating=True,
+                enable_self_collisions=True,
                 collapse_fixed_joints=True,
                 links_to_keep=[
                     "go2_description/FL_foot_joint",

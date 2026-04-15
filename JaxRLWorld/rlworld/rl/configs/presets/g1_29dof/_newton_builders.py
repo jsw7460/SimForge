@@ -117,7 +117,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConfi
             "robot": NewtonEntityCfg(
                 urdf_path=r.urdf_path,
                 init_state=InitialStateCfg(
-                    pos=(0.0, 0.0, r.base_init_height),
+                    pos=(0.0, 0.0, r.base_init_height + 0.05),
                     rot=(quat[0], quat[1], quat[2], quat[3]),
                     joint_pos=r.default_joint_angles,
                 ),
