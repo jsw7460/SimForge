@@ -485,21 +485,75 @@ class posture:
 
 # ── Walk-These-Ways reward terms (MuJoCo) ────────────────────────────────
 
+def _contact_order_matching_gait(env: "MujocoLocomotionEnv", contact_group: str) -> list[str]:
+    """Permute a contact group's tracked_names so column ``i`` is the
+    same foot as column ``i`` of ``env.gait_manager.foot_names``.
+
+    Matches each gait foot name to the unique contact tracked name that
+    contains it as a substring (e.g. ``"FR_foot"`` ↔
+    ``"FR_foot_collision"``). Raises if the match is missing or
+    ambiguous so any future naming drift surfaces immediately.
+    """
+    gait_order = list(env.gait_manager.foot_names)
+    tracked = list(env.contact_manager.tracked_names(contact_group))
+    out: list[str] = []
+    for g in gait_order:
+        candidates = [t for t in tracked if g in t]
+        if len(candidates) != 1:
+            raise ValueError(
+                f"Cannot map gait foot {g!r} to contact group "
+                f"{contact_group!r}: candidates {candidates}, "
+                f"tracked {tracked}."
+            )
+        out.append(candidates[0])
+    return out
+
+
+def _site_ids_matching_gait(env: "MujocoLocomotionEnv", asset_cfg: SceneEntityCfg) -> list[int]:
+    """Permute ``asset_cfg.site_ids`` so column ``i`` is the same foot
+    as column ``i`` of ``env.gait_manager.foot_names``. Matches site
+    names to gait foot names by substring (either direction), so
+    ``("FR","FL","RR","RL")`` matches ``("FR_foot","FL_foot","RR_foot","RL_foot")``.
+
+    Independent of the preset's ``preserve_order`` setting: even if
+    SceneEntityCfg.resolve() reordered ``site_ids`` away from the
+    user-supplied tuple, this helper maps it back to gait order.
+    """
+    gait_order = list(env.gait_manager.foot_names)
+    site_pairs = list(zip(asset_cfg.site_names, asset_cfg.site_ids))
+    out: list[int] = []
+    for g in gait_order:
+        candidates = [i for sn, i in site_pairs if sn in g or g in sn]
+        if len(candidates) != 1:
+            raise ValueError(
+                f"Cannot map gait foot {g!r} to asset_cfg sites "
+                f"{site_pairs}: candidates {candidates}."
+            )
+        out.append(candidates[0])
+    return out
+
+
 def wtw_feet_slip(
-    env: "MujocoEnv",
+    env: "MujocoLocomotionEnv",
     contact_group: str = "feet_ground_contact",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
-    robot = env.scene_manager.get_entity(asset_cfg.name)
+    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact.
 
-    in_contact = env.contact_manager.is_contact(contact_group)
-    prev_contact = env.contact_manager.prev_is_contact(contact_group)
+    Both contact and site arrays are read in ``gait_manager.foot_names``
+    order so the elementwise multiply pairs each foot's contact state
+    with its own velocity.
+    """
+    robot = env.scene_manager.get_entity(asset_cfg.name)
+    contact_order = _contact_order_matching_gait(env, contact_group)
+    site_ids = _site_ids_matching_gait(env, asset_cfg)
+
+    in_contact = env.contact_manager.is_contact(contact_group, order=contact_order)
+    prev_contact = env.contact_manager.prev_is_contact(contact_group, order=contact_order)
     contact_filt = (in_contact | prev_contact).float()
 
-    foot_vel_xy = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]
+    foot_vel_xy = robot.data.site_lin_vel_w[:, site_ids, :2]
     vel_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
-    import ipdb; ipdb.set_trace()
     return -torch.sum(contact_filt * vel_sq, dim=-1)
 
 
@@ -508,12 +562,17 @@ def wtw_tracking_contacts_shaped_force(
     contact_group: str = "feet_ground_contact",
     gait_force_sigma: float = 100.0,
 ) -> torch.Tensor:
-    """WTW: penalize foot contact force when foot should be in swing."""
-    forces = env.contact_manager.contact_force(contact_group)
+    """WTW: penalize foot contact force when foot should be in swing.
+
+    Contact forces are reordered to ``gait_manager.foot_names`` so that
+    column ``i`` of ``foot_forces`` is the same foot as column ``i`` of
+    ``desired_contact_states``.
+    """
+    contact_order = _contact_order_matching_gait(env, contact_group)
+    forces = env.contact_manager.contact_force(contact_group, order=contact_order)
     foot_forces = torch.norm(forces, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
-
     reward = -(1.0 - desired_contact) * (1.0 - torch.exp(-foot_forces ** 2 / gait_force_sigma))
     return reward.mean(dim=-1)
 
@@ -523,9 +582,14 @@ def wtw_tracking_contacts_shaped_vel(
     gait_vel_sigma: float = 10.0,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """WTW: penalize foot velocity when foot should be in stance."""
+    """WTW: penalize foot velocity when foot should be in stance.
+
+    Site velocities are reordered to ``gait_manager.foot_names`` so the
+    elementwise multiply with ``desired_contact_states`` lines up.
+    """
     robot = env.scene_manager.get_entity(asset_cfg.name)
-    foot_vel = robot.data.site_lin_vel_w[:, asset_cfg.site_ids, :]
+    site_ids = _site_ids_matching_gait(env, asset_cfg)
+    foot_vel = robot.data.site_lin_vel_w[:, site_ids, :]
     foot_vel_norm = torch.norm(foot_vel, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
@@ -539,9 +603,15 @@ def wtw_feet_clearance_cmd_linear(
     foot_radius: float = 0.02,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-    """WTW: penalize foot height error during swing, scaled by commanded footswing height."""
+    """WTW: penalize foot height error during swing, scaled by commanded footswing height.
+
+    Site heights are reordered to ``gait_manager.foot_names`` so the
+    elementwise math against ``foot_phases`` / ``desired_contact_states``
+    lines up.
+    """
     robot = env.scene_manager.get_entity(asset_cfg.name)
-    foot_height = robot.data.site_pos_w[:, asset_cfg.site_ids, 2]
+    site_ids = _site_ids_matching_gait(env, asset_cfg)
+    foot_height = robot.data.site_pos_w[:, site_ids, 2]
 
     foot_phases = env.gait_manager.foot_phases
     phases = 1.0 - torch.abs(

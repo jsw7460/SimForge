@@ -79,8 +79,19 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
         )
 
     def _build_reward_config(self) -> RewardConfig:
+        # site_names is resolved by mjlab via find_sites(...,
+        # preserve_order=...). With preserve_order=False the result
+        # follows go2.xml's site declaration order (FL, FR, RL, RR),
+        # not the tuple below. Reward functions that touch site_ids
+        # alongside gait_manager state would then silently pair the
+        # wrong legs. Use preserve_order=True so the resolved
+        # ``site_names`` / ``site_ids`` honour this tuple, and the
+        # per-reward _gait_aligned_site_indices helper still reorders
+        # to gait_manager order regardless.
         site_names = ("FR", "FL", "RR", "RL")
-        foot_asset_cfg = SceneEntityCfg(name="robot", site_names=site_names, preserve_order=False)
+        foot_asset_cfg = SceneEntityCfg(
+            name="robot", site_names=site_names, preserve_order=False,
+        )
 
         @dataclass
         class _WTWRewardsCfg(RewardConfig):
@@ -139,7 +150,7 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
             )
             collision = RewardTermConfig(
                 func=rf_mujoco.wtw_collision, weight=5.0,
-                params={"contact_group": "body_ground_contact", "force_threshold": 1.0},
+                params={"contact_group": "body_ground_contact", "force_threshold": 10.0},
             )
 
         return _WTWRewardsCfg()
