@@ -123,7 +123,6 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
             "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
                 mjcf_path=r.mjcf_path,
-                # urdf_path=r.urdf_path,
                 init_state=InitialStateCfg(
                     pos=(0.0, 0.0, r.base_init_height),
                     rot=(quat[0], quat[1], quat[2], quat[3]),
@@ -133,7 +132,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 collapse_fixed_joints=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        IdealPDActuatorCfg(
+                        ImplicitActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
