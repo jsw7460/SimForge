@@ -91,7 +91,7 @@ class MujocoSceneManager(BaseManager):
         self.trees: dict[str, KinematicTree] = {}
 
         # Timing
-        self._physics_dt: float = 0.002  # Default, updated from sim config
+        self._physics_dt: float | None = None  # updated from sim config
 
     @property
     def scene(self) -> "Scene":

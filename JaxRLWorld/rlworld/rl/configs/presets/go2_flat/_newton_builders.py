@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg
 from rlworld.rl.configs import RewardConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.events import EventTermConfig
@@ -113,6 +113,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 init_state=InitialStateCfg(
                     pos=(0.0, 0.0, r.base_init_height),
                     rot=(quat[0], quat[1], quat[2], quat[3]),
+                    joint_pos=r.default_joint_angles,
                 ),
                 floating=True,
                 enable_self_collisions=True,
@@ -125,23 +126,23 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 ],
                 articulation=ArticulationCfg(
                     actuators=(
-                        DelayedPDActuatorCfg(
+                        ImplicitActuatorCfg(
                             target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
                             stiffness=STIFFNESS_HIP,
                             damping=DAMPING_HIP,
                             effort_limit=EFFORT_HIP,
                             armature=ARMATURE_HIP,
-                            min_delay=1,
-                            max_delay=3,
+                            # min_delay=1,
+                            # max_delay=3,
                         ),
-                        DelayedPDActuatorCfg(
+                        ImplicitActuatorCfg(
                             target_names_expr=(".*_calf_joint",),
                             stiffness=STIFFNESS_KNEE,
                             damping=DAMPING_KNEE,
                             effort_limit=EFFORT_KNEE,
                             armature=ARMATURE_KNEE,
-                            min_delay=1,
-                            max_delay=3,
+                            # min_delay=1,
+                            # max_delay=3,
                         ),
                     ),
                 ),
