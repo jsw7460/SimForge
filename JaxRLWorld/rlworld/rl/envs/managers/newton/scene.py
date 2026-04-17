@@ -41,7 +41,18 @@ def apply_joint_params_by_pattern(
     kd_map: Dict[str, float] | None = None,
     armature_map: Dict[str, float] | None = None,
 ) -> None:
-    """Apply joint parameters (target gains, armature) using regex pattern matching."""
+    """Apply joint parameters (target gains, armature) using regex pattern matching.
+
+    Uses ``re.fullmatch`` rather than ``re.match`` so a pattern like
+    ``T1/.*Waist`` only fires on joint labels that *end* with
+    ``Waist``, not any label whose XPath *contains* a ``Waist`` body
+    segment. This matters for MJCF-loaded entities whose joint labels
+    are hierarchical (e.g. ``T1/worldbody/Trunk/Waist/Hip_Pitch_Left/
+    Left_Hip_Pitch``); with ``re.match`` a bare ``.*Waist`` pattern
+    would silently claim every leg joint under the Waist subtree.
+    Flat URDF labels behave identically under both functions because
+    existing patterns already end in a specific suffix.
+    """
     if ke_map is None and kd_map is None and armature_map is None:
         return
 
@@ -63,21 +74,21 @@ def apply_joint_params_by_pattern(
 
         # Apply ke
         for pattern, value in ke_map.items():
-            if re.match(pattern, joint_name):
+            if re.fullmatch(pattern, joint_name):
                 for d in range(dof_count):
                     builder.joint_target_ke[dof_start + d] = value
                 break
 
         # Apply kd
         for pattern, value in kd_map.items():
-            if re.match(pattern, joint_name):
+            if re.fullmatch(pattern, joint_name):
                 for d in range(dof_count):
                     builder.joint_target_kd[dof_start + d] = value
                 break
 
         # Apply armature
         for pattern, value in armature_map.items():
-            if re.match(pattern, joint_name):
+            if re.fullmatch(pattern, joint_name):
                 for d in range(dof_count):
                     builder.joint_armature[dof_start + d] = value
 
@@ -267,10 +278,14 @@ class NewtonSceneManager(BaseManager):
             builder.add_ground_plane(cfg=shape_cfg)
         elif cfg.usd_path:
             self._load_usd_entity(builder, cfg)
+        elif cfg.mjcf_path:
+            self._load_mjcf_entity(builder, cfg)
         elif cfg.urdf_path:
             self._load_urdf_entity(builder, cfg)
         else:
-            raise ValueError(f"Entity '{entity_name}' has no urdf_path or usd_path")
+            raise ValueError(
+                f"Entity '{entity_name}' has no mjcf_path, urdf_path, or usd_path"
+            )
 
         self._entity_builders[entity_name] = builder
         self.entities[entity_name] = {
@@ -281,15 +296,12 @@ class NewtonSceneManager(BaseManager):
 
     def _load_urdf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
         """Load URDF entity from unified config."""
-        # Shape config (Newton-specific)
         shape_cfg = getattr(cfg, "shape_cfg", None)
         if shape_cfg is not None:
             builder.default_shape_cfg = shape_cfg
 
-        # Load URDF
         xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*cfg.init_state.rot))
         ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
-
         builder.add_urdf(
             cfg.urdf_path,
             xform=xform,
@@ -298,13 +310,71 @@ class NewtonSceneManager(BaseManager):
             collapse_fixed_joints=False,
             ignore_inertial_definitions=ignore_inertial,
         )
-        builder.collapse_fixed_joints(joints_to_keep=cfg.links_to_keep)
+        self._apply_entity_post_load(builder, cfg)
 
-        # Apply gains and armature from articulation actuators.
-        # Implicit actuators → set ke/kd so Newton's internal PD drives them.
-        # Explicit actuators (IdealPD, Delayed, etc.) → set ke=0, kd=0 so
-        #   Newton's internal PD is disabled; only our external torques apply.
-        #   Armature is still set (it's a physical property, not a control gain).
+    def _load_mjcf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Load MJCF (MuJoCo XML) entity via ``ModelBuilder.add_mjcf``.
+
+        Parallels :meth:`_load_urdf_entity`: the only format-specific
+        work is the ``add_mjcf`` call (with ``parse_sites=True`` so
+        MJCF ``<site>`` tags are preserved as first-class shapes);
+        everything after that — collapsing fixed joints, applying
+        actuator gains and armature, mesh approximation, site
+        creation — is shared with the URDF loader via
+        :meth:`_apply_entity_post_load`.
+
+        The MJCF source is expected to contain an ``<actuator>``
+        block; Newton's MJCF loader reads that block to set each
+        DOF's ``joint_target_mode``, which ``SolverMuJoCo`` in turn
+        uses to decide whether to create a MuJoCo actuator per DOF.
+        MJCFs that ship without ``<actuator>`` (e.g. mjlab's
+        booster_t1 ``t1.xml``, which wires actuators via runtime
+        Python) leave every mode at ``NONE`` and produce ``nu=0``;
+        use a robot asset that includes ``<actuator>`` instead.
+        """
+        shape_cfg = getattr(cfg, "shape_cfg", None)
+        if shape_cfg is not None:
+            builder.default_shape_cfg = shape_cfg
+
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*cfg.init_state.rot))
+        ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
+        builder.add_mjcf(
+            cfg.mjcf_path,
+            xform=xform,
+            floating=cfg.floating,
+            enable_self_collisions=cfg.enable_self_collisions,
+            collapse_fixed_joints=False,
+            ignore_inertial_definitions=ignore_inertial,
+            parse_sites=True,
+            ignore_names=["floor", "ground"],
+        )
+        self._apply_entity_post_load(builder, cfg)
+
+    def _apply_entity_post_load(
+        self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg,
+    ) -> None:
+        """Shared post-load work for URDF and MJCF entities.
+
+        Runs after the format-specific ``add_urdf`` / ``add_mjcf``
+        call, in this order:
+
+        1. ``collapse_fixed_joints(joints_to_keep=cfg.links_to_keep)``
+           so fixed-joint merging respects user-requested link
+           retention (e.g. foot frames needed for sensors).
+        2. Actuator gain and armature pattern application.
+           Implicit actuators (``ImplicitActuatorCfg``) set
+           ``ke``/``kd`` so Newton's internal PD drives the joint;
+           explicit actuators (IdealPD, Delayed, …) zero those so
+           only the external torque loop is active. Armature is
+           always set since it is a physical property.
+        3. Mesh approximation via
+           ``builder.approximate_meshes(cfg.mesh_approximation)``.
+        4. Optional IMU / sensor ``sites`` declared on
+           ``NewtonEntityCfg.sites``.
+        """
+        if cfg.collapse_fixed_joints:
+            builder.collapse_fixed_joints(joints_to_keep=cfg.links_to_keep)
+
         prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
@@ -320,13 +390,11 @@ class NewtonSceneManager(BaseManager):
             is_explicit = not isinstance(act_cfg, ImplicitActuatorCfg)
 
             if is_explicit:
-                # Explicit actuator: zero out solver PD gains for all target joints
                 for pattern in act_cfg.target_names_expr:
                     key = f"{prefix}/{pattern}" if prefix else pattern
                     ke_map[key] = 0.0
                     kd_map[key] = 0.0
             else:
-                # Implicit actuator: set solver PD gains
                 if isinstance(act_cfg.stiffness, dict):
                     ke_map.update(_prefixed(act_cfg.stiffness))
                 elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
@@ -339,7 +407,6 @@ class NewtonSceneManager(BaseManager):
                     for pattern in act_cfg.target_names_expr:
                         kd_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.damping
 
-            # Armature is always set (physical property)
             if isinstance(act_cfg.armature, dict):
                 armature_map.update(_prefixed(act_cfg.armature))
             elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
@@ -351,11 +418,9 @@ class NewtonSceneManager(BaseManager):
                 builder, ke_map=ke_map or None, kd_map=kd_map or None, armature_map=armature_map or None,
             )
 
-        # Mesh approximation
         mesh_approx = getattr(cfg, "mesh_approximation", "bounding_box")
         builder.approximate_meshes(mesh_approx)
 
-        # Sites (Newton-specific)
         sites = getattr(cfg, "sites", None)
         if sites:
             self._create_sites_from_dict(builder, sites, prefix)
@@ -423,9 +488,20 @@ class NewtonSceneManager(BaseManager):
 
     @staticmethod
     def _find_body_by_name(builder: newton.ModelBuilder, body_name: str) -> int | None:
-        """Find body index by name in the builder."""
+        """Find body index by name in the builder.
+
+        ``body_name`` is treated as a **regex** via ``re.fullmatch``.
+        Exact literal names keep working because every plain string
+        is itself a valid regex (e.g. ``"T1/Trunk"`` fullmatch against
+        ``"T1/Trunk"`` succeeds). Regex patterns like ``"T1/.*Trunk"``
+        transparently handle both flat URDF labels (``T1/Trunk``) and
+        hierarchical MJCF labels (``T1/worldbody/Trunk``).
+
+        Returns the first matching body index, or ``None`` if no body
+        matches.
+        """
         for i, name in enumerate(builder.body_label):
-            if name == body_name:
+            if re.fullmatch(body_name, name):
                 return i
         return None
 
@@ -515,33 +591,89 @@ class NewtonSceneManager(BaseManager):
         self._set_kinematic_trees()
 
     def _validate_mujoco_actuators(self) -> None:
-        """Validate MuJoCo actuator parameters after solver creation."""
+        """Validate MuJoCo actuator parameters after solver creation.
+
+        Two actuator families are supported:
+
+        * **Affine-bias** (``biastype == mjBIAS_AFFINE``): created by
+          Newton's URDF loader and by MJCF ``<position>`` /
+          ``<velocity>`` tags. Stores position gain ``kp`` in
+          ``gainprm[0]`` and the matching ``-kp`` / ``-kd`` in
+          ``biasprm[1:3]``. For these we sanity-check that
+          ``gainprm[0] == -biasprm[1]`` so the position gain and
+          bias are internally consistent.
+
+        * **No-bias** (``biastype == mjBIAS_NONE``): created by MJCF
+          ``<motor>`` tags (direct torque actuators). ``gainprm[0]``
+          holds the gear ratio (typically 1.0) and ``biasprm`` is
+          zero. For these the position/velocity gain checks do not
+          apply — JaxRLWorld drives these joints via the external
+          torque loop regardless — and the consistency assertion
+          would spuriously fire if we reused the affine logic.
+        """
         if self.config.solver_type != "mujoco":
             return
 
         mj_model = self.solver.mj_model
+        num_actuators = mj_model.nu
+        if num_actuators == 0:
+            print("✓ MuJoCo actuators validated: 0 actuators (no external control)")
+            return
+
+        import mujoco  # noqa: PLC0415 — lazy to avoid mjwarp import at module load
+
         gainprm = mj_model.actuator_gainprm
         biasprm = mj_model.actuator_biasprm
+        biastype = mj_model.actuator_biastype
 
-        num_actuators = mj_model.nu
+        affine_mask = biastype == int(mujoco.mjtBias.mjBIAS_AFFINE)
+        motor_mask = biastype == int(mujoco.mjtBias.mjBIAS_NONE)
 
-        # New structure: single actuator per joint with P+D combined
-        ke = gainprm[:, 0]  # position gain
-        kd = -biasprm[:, 2]  # velocity damping (stored as negative)
-        ke_bias = -biasprm[:, 1]  # should equal ke
+        # Per-actuator ke / kd. Meaning depends on biastype — for
+        # motor-type actuators gainprm[0] is the gear ratio, not a
+        # position gain, and biasprm is zero.
+        ke = gainprm[:, 0]
+        kd = -biasprm[:, 2]
+        ke_bias = -biasprm[:, 1]
 
-        # When explicit actuators set ke/kd=0, gains are intentionally zero.
-        # Only validate that gains are non-negative and gain/bias are consistent.
-        assert (ke >= 0).all(), f"Negative position gains: {ke}"
-        assert (kd >= 0).all(), f"Negative velocity gains: {kd}"
-        assert np.allclose(ke, ke_bias), f"Position gain/bias mismatch"
+        # Gains are always non-negative regardless of actuator type.
+        assert (ke >= 0).all(), f"Negative actuator gains: {ke}"
 
-        num_zero = (ke == 0).sum()
-        print(f"✓ MuJoCo actuators validated: {num_actuators} joints")
-        print(f"  ke range: [{ke.min():.2f}, {ke.max():.2f}]")
-        print(f"  kd range: [{kd.min():.2f}, {kd.max():.2f}]")
-        if num_zero > 0:
-            print(f"  ({num_zero} joints with ke=0: explicit actuator mode)")
+        if affine_mask.any():
+            assert (kd[affine_mask] >= 0).all(), (
+                f"Negative velocity gains on affine actuators: {kd[affine_mask]}"
+            )
+            assert np.allclose(ke[affine_mask], ke_bias[affine_mask]), (
+                "Position gain/bias mismatch on affine actuators"
+            )
+
+        num_affine = int(affine_mask.sum())
+        num_motor = int(motor_mask.sum())
+        num_other = num_actuators - num_affine - num_motor
+        print(
+            f"✓ MuJoCo actuators validated: {num_actuators} total "
+            f"({num_affine} affine, {num_motor} motor, {num_other} other)"
+        )
+        if num_affine > 0:
+            num_zero_affine = int((ke[affine_mask] == 0).sum())
+            print(
+                f"  affine ke range: [{ke[affine_mask].min():.2f}, "
+                f"{ke[affine_mask].max():.2f}]"
+            )
+            print(
+                f"  affine kd range: [{kd[affine_mask].min():.2f}, "
+                f"{kd[affine_mask].max():.2f}]"
+            )
+            if num_zero_affine > 0:
+                print(
+                    f"  ({num_zero_affine} affine joints with ke=0: "
+                    f"explicit actuator mode)"
+                )
+        if num_motor > 0:
+            print(
+                f"  motor gear range: [{ke[motor_mask].min():.2f}, "
+                f"{ke[motor_mask].max():.2f}]"
+            )
 
     def _build_robot_view(self) -> None:
         """Create an ArticulationView for each non-ground-plane entity.
@@ -584,13 +716,16 @@ class NewtonSceneManager(BaseManager):
         return self.env._robot_state_writer
 
     def _set_kinematic_trees(self) -> None:
-        """Build kinematic trees for entities with URDF."""
+        """Build kinematic trees for entities with URDF or MJCF source."""
         def _resolve(name: str):
             cfg = self.entities[name]["config"]
+            mjcf_path = getattr(cfg, "mjcf_path", None)
+            if mjcf_path:
+                return ("mjcf_path", mjcf_path)
             urdf_path = getattr(cfg, "urdf_path", None)
-            if urdf_path is None:
-                return None
-            return ("urdf", urdf_path)
+            if urdf_path:
+                return ("urdf", urdf_path)
+            return None
 
         self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
 

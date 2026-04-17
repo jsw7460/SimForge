@@ -90,6 +90,12 @@ class EntityCfg:
     usd_path: str | None = None
     """Path to USD file (Newton only)."""
 
+    mjcf_path: str | None = None
+    """Path to MJCF (MuJoCo XML) file. Newton loads this via
+    ``ModelBuilder.add_mjcf`` and preserves ``<site>`` declarations as
+    first-class reference points on the shape arrays. Takes precedence
+    over ``urdf_path`` when both are set (Newton backend)."""
+
     # -- State ----------------------------------------------------------------
     init_state: InitialStateCfg = field(default_factory=InitialStateCfg)
 

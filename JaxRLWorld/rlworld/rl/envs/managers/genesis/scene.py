@@ -96,20 +96,36 @@ class SceneManager(BaseManager):
                 morph = gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
                 entity = self.scene.add_entity(morph=morph)
             else:
-                morph_kwargs = {"file": cfg.urdf_path, "fixed": not cfg.floating}
-                if cfg.links_to_keep:
-                    morph_kwargs["links_to_keep"] = cfg.links_to_keep
-
                 # GenesisEntityCfg-specific fields
                 if isinstance(cfg, GenesisEntityCfg):
-                    morph_kwargs["convexify"] = cfg.convexify
+                    convexify = cfg.convexify
                     surface = cfg.surface
                     visualize = cfg.visualize_contact
                 else:
+                    convexify = False
                     surface = None
                     visualize = False
 
-                morph = gs.morphs.URDF(**morph_kwargs)
+                mjcf_path = getattr(cfg, "mjcf_path", None)
+                if mjcf_path:
+                    mjcf_kwargs = {
+                        "file": mjcf_path,
+                        "convexify": convexify,
+                        "batch_fixed_verts": True,
+                    }
+                    if cfg.init_state.pos != (0.0, 0.0, 0.0):
+                        mjcf_kwargs["pos"] = cfg.init_state.pos
+                    morph = gs.morphs.MJCF(**mjcf_kwargs)
+                else:
+                    urdf_kwargs = {
+                        "file": cfg.urdf_path,
+                        "fixed": not cfg.floating,
+                        "convexify": convexify,
+                    }
+                    if cfg.links_to_keep:
+                        urdf_kwargs["links_to_keep"] = cfg.links_to_keep
+                    morph = gs.morphs.URDF(**urdf_kwargs)
+
                 entity = self.scene.add_entity(
                     morph=morph, surface=surface, visualize_contact=visualize,
                 )
@@ -151,10 +167,13 @@ class SceneManager(BaseManager):
             cfg = self.config.entities.get(name)
             if cfg is None or isinstance(cfg, GroundPlaneCfg):
                 return None
+            mjcf_path = getattr(cfg, "mjcf_path", None)
+            if mjcf_path:
+                return ("mjcf_path", mjcf_path)
             urdf_path = getattr(cfg, "urdf_path", None)
-            if urdf_path is None:
-                return None
-            return ("urdf", urdf_path)
+            if urdf_path:
+                return ("urdf", urdf_path)
+            return None
 
         self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
 
