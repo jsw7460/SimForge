@@ -63,6 +63,16 @@ class RobotData(Protocol):
         ...
 
     @property
+    def default_joint_pos(self) -> Tensor:
+        """Default (home) joint positions in canonical actuated order.
+
+        Shape ``(num_joints,)`` — single-env, broadcast by caller.
+        Resolved once at env init from the preset's
+        ``init_state.joint_pos`` regex→float dict.
+        """
+        ...
+
+    @property
     def joint_pos(self) -> Tensor:
         """Actuated joint positions. Shape (num_envs, num_joints)."""
         ...

@@ -26,12 +26,14 @@ class GenesisRobotData:
         actuated_dof_ids: Tensor | list[int],
         num_envs: int,
         device: torch.device,
+        default_joint_pos: Tensor | None = None,
     ) -> None:
         self._entity = entity
         self._actuated_dof_ids = actuated_dof_ids
         self._gravity_vec: Tensor | None = None
         self._num_envs = num_envs
         self._device = device
+        self._default_joint_pos = default_joint_pos
 
     def _get_gravity_vec(self) -> Tensor:
         if self._gravity_vec is None:
@@ -75,6 +77,10 @@ class GenesisRobotData:
     def heading_w(self) -> Tensor:
         euler = quat_to_euler_wxyz(self.root_link_quat_w)
         return euler[:, 2]
+
+    @property
+    def default_joint_pos(self) -> Tensor:
+        return self._default_joint_pos
 
     @property
     def joint_pos(self) -> Tensor:

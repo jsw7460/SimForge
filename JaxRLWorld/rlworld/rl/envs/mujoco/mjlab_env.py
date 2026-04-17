@@ -190,6 +190,7 @@ class MujocoEnv(World):
             num_envs=self.num_envs,
             device=self.device,
             env=self,
+            default_joint_pos=self._resolve_default_joint_pos(),
         )
         self._robot_state_writer_cache["robot"] = MujocoRobotStateWriter(
             env=self,

@@ -179,12 +179,14 @@ class GenesisEnv(World):
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
         indexing = self.act_manager.indexing
+        _default_jp = self._resolve_default_joint_pos()
         for name, entity in self.scene_manager.entities.items():
             self._robot_data_cache[name] = GenesisRobotData(
                 entity=entity,
                 actuated_dof_ids=indexing.sim_indices,
                 num_envs=self.num_envs,
                 device=self.device,
+                default_joint_pos=_default_jp,
             )
             self._robot_state_writer_cache[name] = GenesisRobotStateWriter(
                 env=self,

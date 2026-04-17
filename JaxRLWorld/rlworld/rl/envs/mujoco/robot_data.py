@@ -34,16 +34,15 @@ class MujocoRobotData:
         num_envs: int,
         device: torch.device,
         env: "Any | None" = None,
+        default_joint_pos: Tensor | None = None,
     ) -> None:
         self._entity = entity
         self._joint_ids = joint_ids
         self._gravity_vec: Tensor | None = None
         self._num_envs = num_envs
         self._device = device
-        # Optional reference to the parent env, used by methods that need
-        # access to scene-level objects (e.g. angular_momentum_w which
-        # reads an mjlab subtreeangmom sensor via env.scene_manager).
         self._env = env
+        self._default_joint_pos = default_joint_pos
 
     def _get_gravity_vec(self) -> Tensor:
         """Lazily create gravity vector matching current batch size."""
@@ -90,6 +89,10 @@ class MujocoRobotData:
     def heading_w(self) -> Tensor:
         euler = quat_to_euler_wxyz(self.root_link_quat_w)
         return euler[:, 2]
+
+    @property
+    def default_joint_pos(self) -> Tensor:
+        return self._default_joint_pos
 
     @property
     def joint_pos(self) -> Tensor:

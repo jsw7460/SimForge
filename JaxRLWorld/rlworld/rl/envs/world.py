@@ -154,6 +154,37 @@ class World(ABC):
         """
         pass
 
+    def _resolve_default_joint_pos(self) -> "torch.Tensor":
+        """Resolve ``init_state.joint_pos`` dict into a per-joint tensor.
+
+        Uses ``act_manager.actuated_joint_names`` for regex matching,
+        so the returned tensor is in canonical actuated-joint order
+        and can be stored directly on ``RobotData.default_joint_pos``.
+
+        Called once per env init — not per reset.
+        """
+        from rlworld.rl.utils import string as _su
+
+        all_names = list(self.act_manager.actuated_joint_names)
+        base = torch.zeros(len(all_names), device=self.device, dtype=torch.float32)
+
+        # Find the robot entity config's init_state.joint_pos dict.
+        robot_cfg = None
+        for cfg in self.scene_manager.config.entities.values():
+            joint_pos = getattr(getattr(cfg, "init_state", None), "joint_pos", None)
+            if joint_pos and isinstance(joint_pos, dict):
+                robot_cfg = joint_pos
+                break
+
+        if robot_cfg:
+            matched_idx, _, matched_vals = _su.resolve_matching_names_values(
+                robot_cfg, all_names
+            )
+            for idx, val in zip(matched_idx, matched_vals):
+                base[idx] = val
+
+        return base
+
     @abstractmethod
     def get_robot_state_writer(self, entity_name: str = "robot") -> "RobotStateWriterProtocol":
         """Get the RobotStateWriter interface for a named entity.

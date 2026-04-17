@@ -172,7 +172,11 @@ class NewtonEnv(World):
 
         from rlworld.rl.envs.newton.robot_data import NewtonRobotData
         from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
-        self._robot_data = NewtonRobotData(self, self.scene_manager.robot_view)
+        self._robot_data = NewtonRobotData(
+            self,
+            self.scene_manager.robot_view,
+            default_joint_pos=self._resolve_default_joint_pos(),
+        )
         self._robot_state_writer = NewtonRobotStateWriter(
             self, self.scene_manager.robot_view
         )

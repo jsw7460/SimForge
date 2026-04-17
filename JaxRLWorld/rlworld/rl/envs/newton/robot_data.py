@@ -27,10 +27,16 @@ if TYPE_CHECKING:
 class NewtonRobotData:
     """RobotData implementation + state write API for Newton environments."""
 
-    def __init__(self, env: "NewtonEnv", view: "ArticulationView") -> None:
+    def __init__(
+        self,
+        env: "NewtonEnv",
+        view: "ArticulationView",
+        default_joint_pos: Tensor | None = None,
+    ) -> None:
         self._env = env
         self._view = view
         self._gravity_vec: Tensor | None = None
+        self._default_joint_pos = default_joint_pos
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -130,6 +136,10 @@ class NewtonRobotData:
     @property
     def heading_w(self) -> Tensor:
         return quat_to_euler_wxyz(self.root_link_quat_w)[:, 2]
+
+    @property
+    def default_joint_pos(self) -> Tensor:
+        return self._default_joint_pos
 
     @property
     def joint_pos(self) -> Tensor:
