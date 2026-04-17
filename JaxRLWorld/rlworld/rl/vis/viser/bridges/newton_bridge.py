@@ -147,11 +147,18 @@ class NewtonBridge:
         return body_vel[:2].astype(np.float32)
 
     def _is_ground_body(self, body_id: int) -> bool:
-        """Check if a body is a ground/world plane by its label."""
+        """Check if a body is a ground/world plane by its label.
+
+        Only the *leaf* segment of the label is tested so that MJCF
+        hierarchical labels like ``T1/worldbody/Trunk`` are NOT
+        misclassified as ground bodies (the ``worldbody`` prefix is
+        just an XPath segment, not the body's own name).
+        """
         if body_id >= len(self._model.body_label):
             return False
-        label = self._model.body_label[body_id].lower()
-        return "ground" in label or "world" in label or "plane" in label
+        # Use the last path segment as the body's own name.
+        leaf = self._model.body_label[body_id].rsplit("/", 1)[-1].lower()
+        return "ground" in leaf or "plane" in leaf
 
     def _find_tracked_body(self) -> int | None:
         """Find the robot base body index (first non-ground body)."""
