@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
 from rlworld.rl.configs import RewardConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -51,6 +51,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_lin_vel,
     base_quat,
     dof_pos,
+    dof_pos_nominal_difference,
     dof_vel,
     projected_gravity,
     raw_actions,
@@ -121,7 +122,8 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
         entities={
             "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
-                urdf_path=r.urdf_path,
+                mjcf_path=r.mjcf_path,
+                # urdf_path=r.urdf_path,
                 init_state=InitialStateCfg(
                     pos=(0.0, 0.0, r.base_init_height),
                     rot=(quat[0], quat[1], quat[2], quat[3]),
@@ -131,18 +133,23 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 collapse_fixed_joints=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        DelayedPDActuatorCfg(
+                        IdealPDActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
-                            min_delay=0,
-                            max_delay=2,
+                            # min_delay=0,
+                            # max_delay=2,
                         ),
                     ),
                 ),
                 body_label_prefix=r.name,
-                sites={"imu_site_base": r.base_link_name},
+                # ``.*`` prefix wraps the bare body name as a regex so
+                # Newton's ``_find_body_by_name`` (fullmatch) resolves
+                # correctly under both flat URDF labels
+                # (``T1/Trunk``) and hierarchical MJCF labels
+                # (``T1/worldbody/Trunk``).
+                sites={"imu_site_base": f".*{r.base_link_name}"},
                 enable_self_collisions=True
             ),
         },
@@ -184,6 +191,9 @@ def build_observation(cfg: "T1GetupConfig") -> NewtonObservationConfig:
         dof_pos_obs = ObservationTermConfig(
             func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
         )
+        dof_pos_diff_obs = ObservationTermConfig(
+            func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
+        )
         dof_vel_obs = ObservationTermConfig(
             func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
         )
@@ -200,6 +210,9 @@ def build_observation(cfg: "T1GetupConfig") -> NewtonObservationConfig:
         )
         dof_pos_obs = ObservationTermConfig(
             func=dof_pos, scale=1.0
+        )
+        dof_pos_diff_obs = ObservationTermConfig(
+            func=dof_pos_nominal_difference, scale=1.0
         )
         dof_vel_obs = ObservationTermConfig(
             func=dof_vel, scale=1.0
@@ -260,12 +273,15 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
             weight=cfg.orientation_weight,
             params={"std": cfg.orientation_std},
         )
+        # ``.*`` wraps the bare body name as a regex so lookup
+        # fullmatches both the flat URDF label (``T1/Trunk``) and the
+        # hierarchical MJCF XPath label (``T1/worldbody/Trunk``).
         trunk_height = RewardTermConfig(
             func=rf_getup.height_to_target,
             weight=cfg.trunk_height_weight,
             params={
                 "desired_height": cfg.trunk_desired_height,
-                "body_name": r.prefixed(r.trunk_body_name),
+                "body_name": r.prefixed(f".*{r.trunk_body_name}"),
             },
         )
         waist_height = RewardTermConfig(
@@ -273,7 +289,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
             weight=cfg.waist_height_weight,
             params={
                 "desired_height": cfg.waist_desired_height,
-                "body_name": r.prefixed(r.waist_body_name),
+                "body_name": r.prefixed(f".*{r.waist_body_name}"),
             },
         )
         gated_posture = RewardTermConfig(
@@ -308,7 +324,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
             weight=0.0,
             params={
                 "desired_height": cfg.trunk_desired_height,
-                "body_name": r.prefixed(r.trunk_body_name),
+                "body_name": r.prefixed(f".*{r.trunk_body_name}"),
             },
         )
 
@@ -347,7 +363,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
-                "body_patterns": (r.prefixed(r.trunk_body_name),),
+                "body_patterns": (r.prefixed(f".*{r.trunk_body_name}"),),
             },
         ),
         # Slide: randomize across all robot shapes (body_patterns=None).

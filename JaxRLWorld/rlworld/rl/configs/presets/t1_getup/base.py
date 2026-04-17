@@ -121,7 +121,7 @@ class T1GetupConfig:
     # Action settling: hold joint position for the first 50 control
     # steps (= 1 s at 50 Hz) after each reset so the robot can settle
     # after a drop/impact before the policy's commands take effect.
-    settle_steps: int = 50
+    settle_steps: int = 30
 
     # Uniform per-step action scale. mjlab_playground T1 getup uses a
     # single scalar 0.6 across every joint (getup_env_cfg.py:89), NOT
@@ -264,6 +264,7 @@ class T1GetupConfig:
             "standing_z_offset": self.standing_z_offset,
             "default_pos": (0.0, 0.0, self.robot.base_init_height),
             "default_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
+            "default_joint_pos_dict": self.robot.default_joint_angles,
         }
         if hasattr(builders, "customize_reset_root_params"):
             builders.customize_reset_root_params(self, reset_root_params)

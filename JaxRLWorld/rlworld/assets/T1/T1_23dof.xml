@@ -1,6 +1,10 @@
 <mujoco model="T1">
   <compiler angle="radian" meshdir="meshes/" autolimits="true"/>
 
+  <default>
+    <joint damping="0.01" armature="0.01"/>
+  </default>
+
   <asset>
     <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
     <texture name="texplane" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 0.15 0.2" width="512" height="512" mark="cross" markrgb=".8 .8 .8"/>
@@ -212,4 +216,11 @@
     <framequat name="orientation" objtype="site" noise="0.001" objname="imu" />
     <gyro name="angular-velocity" site="imu" noise="0.005" />
   </sensor>
+
+  <contact>
+    <exclude body1="Hip_Yaw_Right" body2="Waist"/>
+    <exclude body1="Hip_Yaw_Left" body2="Waist"/>
+    <exclude body1="AR2" body2="Trunk"/>
+    <exclude body1="AL2" body2="Trunk"/>
+  </contact>
 </mujoco>

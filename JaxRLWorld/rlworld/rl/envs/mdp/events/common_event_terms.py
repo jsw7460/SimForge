@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.utils import string as _su
 from rlworld.rl.utils.quat_utils import quat_from_angle_axis_wxyz, quat_mul_wxyz
 
 if TYPE_CHECKING:
@@ -303,6 +304,7 @@ def reset_fallen_or_standing(
     standing_z_offset: float = 0.02,
     default_pos: tuple[float, ...] = (0.0, 0.0, 0.665),
     default_quat_wxyz: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0),
+    default_joint_pos_dict: "dict[str, float] | None" = None,
     entity_name: str = "robot",
 ) -> None:
     """Reset robots to a mix of fallen (random orientation) and standing poses.
@@ -331,7 +333,9 @@ def reset_fallen_or_standing(
     - **Standing** (``1 - fallen_prob`` of envs):
         * root pose = ``default_pos + (0, 0, standing_z_offset)``
           and ``default_quat_wxyz``
-        * joint positions = ``act_manager.offset``
+        * joint positions = ``default_joint_pos_dict`` (regex→float
+          dict resolved against actuated joint names) when provided,
+          otherwise ``act_manager.offset``
         * all velocities = 0
 
     The two branches are computed on the full ``env_ids`` tensor and
@@ -356,6 +360,13 @@ def reset_fallen_or_standing(
             the robot does not spawn intersecting the ground plane.
         default_pos: Standing-branch root ``(x, y, z)``.
         default_quat_wxyz: Standing-branch root quaternion (wxyz).
+        default_joint_pos_dict: Regex→float dict of default joint
+            angles (same format as ``RobotConfig.default_joint_angles``).
+            Resolved against ``act_manager.actuated_joint_names`` at
+            call time. When ``None``, falls back to
+            ``act_manager.offset`` (correct for absolute-action
+            presets but **all-zero** for relative-action presets that
+            force ``use_zero_offset=True``).
         entity_name: Entity to reset.
     """
     if len(env_ids) == 0:
@@ -403,9 +414,18 @@ def reset_fallen_or_standing(
     ang_vel = torch.where(is_fallen_3, fallen_ang_vel, zero_vel)
 
     # ── Joint state ───────────────────────────────────────────────
-    default_joint_pos = env.act_manager.offset[env_ids].clone()
-    if default_joint_pos.dim() == 1:
-        default_joint_pos = default_joint_pos.unsqueeze(0)
+    # Build default joint positions from the explicit dict when
+    # provided, falling back to act_manager.offset for backward
+    # compatibility. Relative-action presets (getup) zero the
+    # action offset, so relying on it produces an all-zero home
+    # pose instead of the real standing configuration.
+    if default_joint_pos_dict is not None:
+        rd = env.get_robot_data(entity_name)
+        default_joint_pos = rd.default_joint_pos.unsqueeze(0).expand(n, -1).clone()
+    else:
+        default_joint_pos = env.act_manager.offset[env_ids].clone()
+        if default_joint_pos.dim() == 1:
+            default_joint_pos = default_joint_pos.unsqueeze(0)
     num_joints = default_joint_pos.shape[-1]
 
     if fall_joint_noise_range == "soft_limit":

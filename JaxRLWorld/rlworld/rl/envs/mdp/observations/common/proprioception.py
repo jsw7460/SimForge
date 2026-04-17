@@ -143,10 +143,19 @@ def dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
 def dof_pos_nominal_difference(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Joint positions relative to nominal (default) positions, in act_manager order.
 
+    Mirrors mjlab's ``joint_pos_rel(biased=False)``:
+    ``current_joint_pos - default_joint_pos``. Uses
+    ``RobotData.default_joint_pos`` which is resolved once at env
+    init from ``init_state.joint_pos``, so it is correct for both
+    absolute-action presets (where ``act_manager.offset`` equals the
+    default) and relative-action presets (where ``act_manager.offset``
+    is zeroed by ``use_zero_offset=True``).
+
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    return dof_pos(env, entity_name) - env.act_manager.offset
+    rd = env.get_robot_data(entity_name)
+    return rd.joint_pos - rd.default_joint_pos.unsqueeze(0)
 
 
 @EnvStepCache()

@@ -119,8 +119,9 @@ class GatedPostureTracker:
     Per-joint std is supplied as a dict of regex → float pairs, resolved
     against ``act_manager.actuated_joint_names`` at construction time
     (same idiom as :class:`VariablePostureTracker`). The default-pose
-    tensor comes from ``act_manager.offset`` so Newton/Genesis/MuJoCo
-    all share the same source of truth.
+    tensor comes from ``RobotData.default_joint_pos`` (resolved once
+    at env init from ``init_state.joint_pos``) so it is correct for
+    both absolute and relative action presets.
 
     Args:
         env: Any environment with ``get_robot_data`` and ``act_manager``.
@@ -160,7 +161,7 @@ class GatedPostureTracker:
         gate = (orient_err < self._gate_threshold).float()
 
         current = rd.joint_pos
-        default = env.act_manager.offset
+        default = rd.default_joint_pos.unsqueeze(0)
         err_sq = torch.square((current - default) / self._std)
         return gate * torch.exp(-torch.mean(err_sq, dim=1))
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import genesis as gs
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     RewardConfig,
@@ -46,6 +46,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_lin_vel,
     base_quat,
     dof_pos,
+    dof_pos_nominal_difference,
     dof_vel,
     projected_gravity,
     raw_actions,
@@ -106,7 +107,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> SceneConfig:
         entities={
             "base_entity": GroundPlaneCfg(),
             "robot": GenesisEntityCfg(
-                urdf_path=r.urdf_path,
+                mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
                     pos=(0, 0, r.base_init_height),
                     joint_pos=r.default_joint_angles,
@@ -114,13 +115,13 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> SceneConfig:
                 floating=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        DelayedPDActuatorCfg(
+                        IdealPDActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
-                            min_delay=0,
-                            max_delay=2,
+                            # min_delay=0,
+                            # max_delay=2,
                         ),
                     ),
                 ),
@@ -171,6 +172,9 @@ def build_observation(cfg: "T1GetupConfig") -> ObservationConfig:
         dof_pos_obs = ObservationTermConfig(
             func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
         )
+        dof_pos_diff_obs = ObservationTermConfig(
+            func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
+        )
         dof_vel_obs = ObservationTermConfig(
             func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
         )
@@ -187,6 +191,9 @@ def build_observation(cfg: "T1GetupConfig") -> ObservationConfig:
         )
         dof_pos_obs = ObservationTermConfig(
             func=dof_pos, scale=1.0
+        )
+        dof_pos_diff_obs = ObservationTermConfig(
+            func=dof_pos_nominal_difference, scale=1.0
         )
         dof_vel_obs = ObservationTermConfig(
             func=dof_vel, scale=1.0

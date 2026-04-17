@@ -79,12 +79,20 @@ ACTION_SCALE_ANKLE               = 0.25 * EFFORT_ANKLE               / STIFFNESS
 # Knee:                 {Left,Right}_Knee_Pitch
 # Ankle:                {Left,Right}_Ankle_{Pitch,Roll}
 
-_NECK_PATTERNS               = (r"AAHead_yaw", r"Head_pitch")
+#
+# Patterns are fullmatch'd (via ``re.fullmatch``) against fully-
+# qualified joint/body labels on each backend. Newton's URDF parser
+# produces flat labels (``T1/Waist``); Newton's MJCF parser produces
+# hierarchical XPath labels (``T1/worldbody/Trunk/Waist/Waist``).
+# Every pattern therefore starts with ``.*`` so the ``.*`` can absorb
+# the intermediate XPath segments on MJCF and harmlessly match the
+# empty string on URDF.
+_NECK_PATTERNS               = (r".*AAHead_yaw", r".*Head_pitch")
 _ARM_PATTERNS                = (
     r".*_Shoulder_Pitch", r".*_Shoulder_Roll",
     r".*_Elbow_Pitch",    r".*_Elbow_Yaw",
 )
-_WAIST_HIP_ROLL_YAW_PATTERNS = (r"Waist", r".*_Hip_Roll", r".*_Hip_Yaw")
+_WAIST_HIP_ROLL_YAW_PATTERNS = (r".*Waist", r".*_Hip_Roll", r".*_Hip_Yaw")
 _HIP_PITCH_PATTERNS          = (r".*_Hip_Pitch",)
 _KNEE_PATTERNS               = (r".*_Knee_Pitch",)
 _ANKLE_PATTERNS              = (r".*_Ankle_Pitch", r".*_Ankle_Roll")
@@ -126,20 +134,36 @@ class T1Config(RobotConfig):
     # matching the mjlab T1 XML. T1_locomotion.urdf has the upper-body
     # joints fixed and only exposes the 12 leg DOFs — unusable for the
     # full-body getup task.
-    urdf_path: str | None = "./JaxRLWorld/rlworld/assets/T1/T1_serial.urdf"
+    urdf_path: str | None = "./JaxRLWorld/rlworld/assets/T1/T1_23dof.urdf"
+
+    # Newton uses T1_serial.xml (deprecated) because Newton's MJCF
+    # parser doesn't fully support menagerie-style features
+    # (childclass, nested defaults, position actuator defaults).
+    # Genesis uses menagerie t1.xml (no ground, clean class defaults).
+    # MuJoCo uses mjlab asset_zoo (spec_fn).
+    mjcf_path: str | None = (
+        # "./JaxRLWorld/rlworld/assets/T1_deprecated/T1_serial.xml"
+        "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
+    )
+
+    # Menagerie T1 MJCF for Genesis (no inline ground plane, clean
+    # class defaults). Newton can't use this due to parser limitations.
+    mjcf_path_genesis: str | None = (
+        "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
+    )
 
     # From HOME_KEYFRAME in mjlab t1_constants.py.
     base_init_height: float = 0.665
     base_link_name: str = "Trunk"
 
     default_joint_angles: Dict[str, float] = field(default_factory=lambda: {
-        "Left_Shoulder_Roll":  -1.4,
-        "Left_Elbow_Yaw":      -0.4,
-        "Right_Shoulder_Roll":  1.4,
-        "Right_Elbow_Yaw":      0.4,
-        r".*_Hip_Pitch":       -0.2,
-        r".*_Knee_Pitch":       0.4,
-        r".*_Ankle_Pitch":     -0.2,
+        r".*Left_Shoulder_Roll":  -1.4,
+        r".*Left_Elbow_Yaw":      -0.4,
+        r".*Right_Shoulder_Roll":  1.4,
+        r".*Right_Elbow_Yaw":      0.4,
+        r".*_Hip_Pitch":           -0.2,
+        r".*_Knee_Pitch":           0.4,
+        r".*_Ankle_Pitch":         -0.2,
     })
 
     actuated_dof_patterns: List[str] = field(default_factory=lambda: [
@@ -200,7 +224,11 @@ class T1Config(RobotConfig):
     # instead, using ``model.body_shapes`` to resolve the attached
     # shape indices — this is the same path SysID's
     # ``apply_contact_friction`` uses.
-    foot_body_pattern_newton: str = r"T1/(left|right)_foot_link"
+    # Newton-side foot-body regex. The ``.*`` prefix lets a single
+    # pattern fullmatch both URDF labels (``T1/left_foot_link``) and
+    # MJCF XPath labels (``T1/worldbody/Trunk/Waist/.../left_foot_link``)
+    # so the same preset works with either loader.
+    foot_body_pattern_newton: str = r"T1/.*(left|right)_foot_link"
 
     @property
     def foot_geom_names_mjlab(self) -> tuple[str, ...]:
