@@ -260,6 +260,24 @@ class SceneManager(BaseManager):
                 elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
                     entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 
+                # Effort limit — symmetric force range [-limit, +limit]. Applied
+                # to both implicit and explicit actuators so Genesis enforces the
+                # same motor saturation as Newton/Mjlab. For explicit actuators
+                # this is redundant with the Python-side _clip_effort in
+                # IdealPDActuator but keeps cross-sim behavior identical when
+                # URDF-declared limits differ from cfg.
+                if act_cfg.effort_limit is not None and act_cfg.effort_limit > 0:
+                    limit = float(act_cfg.effort_limit)
+                    entity.set_dofs_force_range(
+                        [-limit] * num_dofs, [limit] * num_dofs, dof_ids,
+                    )
+
+                # Friction loss — static joint friction [N*m]. Scalar only.
+                if act_cfg.frictionloss > 0:
+                    entity.set_dofs_frictionloss(
+                        [float(act_cfg.frictionloss)] * num_dofs, dof_ids,
+                    )
+
     def build_articulation_indexing(
         self, actuated_dof_names: list[str], entity_name: str = "robot",
     ):
