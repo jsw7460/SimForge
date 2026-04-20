@@ -104,18 +104,31 @@ class G1MujocoConfig(RobotConfig):
         ".*right_shoulder_pitch_joint": 0.2,
     })
 
-    # Leading ``.*`` so Newton MJCF's XPath-hierarchical joint labels
-    # (e.g. ``g1_29dof/worldbody/pelvis/.../left_hip_pitch_joint``) are
-    # absorbed by the ``.*`` when ``re.fullmatch`` runs against the
-    # entity-prefixed pattern (``g1_29dof/.*left_(?!...).*``). On Newton
-    # URDF's flat labels (``g1_29dof/left_hip_pitch_joint``) the ``.*``
-    # harmlessly matches the empty string, so both loaders work with
-    # a single pattern set. Same design as T1Config (t1.py:82-98).
+    # Anchor the pattern at the last XPath segment with ``[^/]*_joint``
+    # so each actuated joint matches exactly one group and no group
+    # accidentally absorbs joints under its own body subtree.
+    #
+    # ``(?:.*/)?`` optionally consumes parent XPath segments, so a
+    # single pattern works for both Newton loaders:
+    #
+    #   URDF flat label ``g1_29dof/left_hip_pitch_joint``
+    #     → prefix ``g1_29dof/`` + empty ``(?:.*/)?`` + ``left_hip_pitch_joint``
+    #
+    #   MJCF XPath label
+    #   ``g1_29dof/worldbody/pelvis/left_hip_pitch_link/left_hip_pitch_joint``
+    #     → prefix ``g1_29dof/`` + ``worldbody/pelvis/left_hip_pitch_link/``
+    #       + ``left_hip_pitch_joint``
+    #
+    # A naïve ``.*left_(?!...).*`` (like T1Config's design) would
+    # overmatch on G1 because MJCF places ``waist_yaw_link``,
+    # ``waist_roll_link``, ``torso_link`` in the ancestor chain of every
+    # arm joint, so ``.*waist_.*`` would end up fullmatching every arm
+    # joint too. The slash-bounded last-segment anchor prevents that.
     actuated_dof_patterns: List[str] = field(
         default_factory=lambda: [
-            r".*left_(?!hand_palm_joint).*",
-            r".*right_(?!hand_palm_joint).*",
-            r".*waist_(?!support_joint).*"
+            r"(?:.*/)?left_(?!hand_palm_joint)[^/]*_joint",
+            r"(?:.*/)?right_(?!hand_palm_joint)[^/]*_joint",
+            r"(?:.*/)?waist_(?!support_joint)[^/]*_joint",
         ]
     )
 
