@@ -332,7 +332,14 @@ def build_dr_terms(cfg: "G1TrackingConfig") -> Dict[str, EventTermConfig]:
                     1: (-0.05, 0.05),
                     2: (-0.05, 0.05),
                 },
-                "body_patterns": (r.prefixed("torso_link"),),
+                # Use the XPath-aware regex form (matches both the flat
+                # ``g1_29dof/torso_link`` label from Newton's URDF loader
+                # and the hierarchical ``g1_29dof/.../torso_link`` label
+                # from the MJCF loader). ``body_cache.get_body_indices``
+                # runs ``re.match``, so ``(?:.*/)?`` absorbs intermediate
+                # XPath segments and ``$`` anchors the body-name end to
+                # prevent overmatching nested subtrees.
+                "body_patterns": (f"{r.name}/(?:.*/)?torso_link$",),
             },
         ),
         "randomize_joint_friction": EventTermConfig(
