@@ -286,9 +286,8 @@ class World(ABC):
         self._post_setup()
 
         # Phase 4 — Startup events
-        if hasattr(self, "event_manager") and self.event_manager is not None:
-            if "startup" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="startup")
+        if "startup" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="startup")
 
         self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
 
@@ -511,11 +510,11 @@ class World(ABC):
             return
 
         # State initialization via event manager
-        if hasattr(self, 'event_manager') and self.event_manager is not None:
-            if "reset" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="reset", env_ids=env_ids)
-            if "reset_dr" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="reset_dr", env_ids=env_ids)
+        self.event_manager.reset(env_ids)
+        if "reset" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="reset", env_ids=env_ids)
+        if "reset_dr" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="reset_dr", env_ids=env_ids)
 
         self.termination_manager.reset(env_ids)
         self.command_manager.reset(env_ids)

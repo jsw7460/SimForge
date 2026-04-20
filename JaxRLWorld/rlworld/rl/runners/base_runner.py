@@ -336,6 +336,20 @@ class BaseRunner(ABC):
                 if curr_log:
                     _wandb.log(curr_log, step=self.total_timesteps)
 
+            # Per-term termination-cause ratios, aggregated over the
+            # iteration window by the termination manager's internal
+            # accumulator. ``consume_episode_stats`` returns keys of the
+            # form ``Episode_Termination/<name>`` and clears the window
+            # so successive iterations report disjoint episodes.
+            # Duck-typed so MultiSimWorld's proxy (which implements the
+            # same method) works transparently.
+            term_mgr = getattr(self.env, "termination_manager", None)
+            if term_mgr is not None and hasattr(term_mgr, "consume_episode_stats"):
+                term_log = term_mgr.consume_episode_stats()
+                if term_log:
+                    import wandb as _wandb
+                    _wandb.log(term_log, step=self.total_timesteps)
+
     def _build_episode_stats(self) -> EpisodeStats:
         """Build EpisodeStats from reward_statistics, including per-sim stats if MultiSim."""
         stats = self.reward_statistics.snapshot()
@@ -554,17 +568,38 @@ class BaseRunner(ABC):
         raise NotImplementedError
 
     def _compute_action_distribution_stats(self, actions: np.ndarray) -> Dict[str, Any]:
-        """Compute action distribution statistics from raw actions."""
-        actions_flat = actions.reshape(-1, actions.shape[-1])
+        """Compute action distribution statistics from raw actions.
 
-        return {
-            "mean": actions_flat.mean(axis=0),
-            "std": actions_flat.std(axis=0),
-            "min": actions_flat.min(axis=0),
-            "max": actions_flat.max(axis=0),
-            "raw": actions_flat,
-            "correlation": np.corrcoef(actions_flat.T),
-        }
+        Gated by ``runner_cfg.logging.action_dist`` (scalar per-dim
+        ``mean/std/min/max``) and ``runner_cfg.logging.action_histogram``
+        (raw-action array used by the logger to build
+        ``wandb.Histogram`` per dim). When both are off the method
+        returns an empty dict and callers pass it through unchanged —
+        the logger's existing ``if data.action_distribution:`` guard
+        naturally skips the entire ``ActionDist/*`` block.
+
+        The two flags are independent because scalars are cheap
+        (~100 floats) while histograms copy the full
+        ``(num_steps * num_envs, action_dim)`` array into wandb and
+        dominate the per-iteration logging cost.
+        """
+        logging_cfg = getattr(self.runner_cfg, "logging", None)
+        want_scalars = bool(getattr(logging_cfg, "action_dist", False))
+        want_hist = bool(getattr(logging_cfg, "action_histogram", False))
+
+        if not (want_scalars or want_hist):
+            return {}
+
+        actions_flat = actions.reshape(-1, actions.shape[-1])
+        stats: Dict[str, Any] = {}
+        if want_scalars:
+            stats["mean"] = actions_flat.mean(axis=0)
+            stats["std"] = actions_flat.std(axis=0)
+            stats["min"] = actions_flat.min(axis=0)
+            stats["max"] = actions_flat.max(axis=0)
+        if want_hist:
+            stats["raw"] = actions_flat
+        return stats
 
     def act(
         self,

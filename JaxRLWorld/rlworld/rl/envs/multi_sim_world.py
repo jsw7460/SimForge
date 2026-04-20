@@ -187,6 +187,26 @@ class _TerminationManagerProxy:
             merged.update(env.termination_manager.extras)
         return merged
 
+    def consume_episode_stats(self) -> dict:
+        """Merge per-sim episode-termination ratios into a flat dict.
+
+        Each sub-env's termination manager returns keys of the form
+        ``Episode_Termination/<name>``. When multiple sims register the
+        same term, we average the ratios (each sim contributes an
+        independent reset window of comparable size). Sims with no
+        resets in this window simply don't contribute. The runner
+        consumes this once per iteration and forwards to wandb.
+        """
+        collected: dict[str, list[float]] = {}
+        for env in self._envs:
+            mgr = env.termination_manager
+            if not hasattr(mgr, "consume_episode_stats"):
+                continue
+            sim_log = mgr.consume_episode_stats()
+            for k, v in sim_log.items():
+                collected.setdefault(k, []).append(v)
+        return {k: sum(vs) / len(vs) for k, vs in collected.items()}
+
 
 class _ObsManagerProxy:
     """Proxy that concatenates observations across sub-environments."""

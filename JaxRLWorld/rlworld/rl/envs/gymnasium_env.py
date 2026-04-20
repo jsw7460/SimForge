@@ -421,6 +421,10 @@ class GymnasiumEnv(World):
 
         # self.mj_model.opt.timestep = 0.001
 
+
+    def get_robot_state_writer(self, entity_name: str = "robot") -> "RobotStateWriterProtocol":
+        pass
+
     @property
     def reset_buf(self) -> torch.Tensor:
         return self._reset_buf

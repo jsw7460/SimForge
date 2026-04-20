@@ -209,6 +209,32 @@ class NNConfig(BaseConfig):
 
 
 @dataclass
+class LoggingConfig(BaseConfig):
+    """Fine-grained wandb/tensorboard output toggles.
+
+    Central hub for per-category logging verbosity. Disable noisy
+    blocks without touching runner/logger plumbing. Adding a new knob
+    here + a corresponding guard in the runner/logger is the intended
+    extension path (see ``action_dist`` / ``action_histogram`` below
+    for the template).
+
+    All flags default to ``False`` — callers opt in to extra logging
+    rather than opting out. This keeps wandb dashboards quiet by
+    default and makes new runs self-documenting about what is being
+    tracked.
+    """
+    # Per-dim action statistics — ``ActionDist/{mean,std,min,max}/dim_*``.
+    # Noisy for high-dim action spaces (e.g. 23-DoF humanoid → 92 scalar
+    # keys per iteration).
+    action_dist: bool = False
+    # ``wandb.Histogram`` per action dimension. Requires ``action_dist``
+    # data collection to run (or independently collects raw actions);
+    # separate from the scalar toggle because histograms are an order
+    # of magnitude more expensive both to compute and to store.
+    action_histogram: bool = False
+
+
+@dataclass
 class RunnerConfig(BaseConfig):
     """Runner configuration (shared)."""
     checkpoint: int = -1
@@ -224,6 +250,9 @@ class RunnerConfig(BaseConfig):
     output_dir: str = "auto"
     upload_checkpoint: bool = False
     delete_local_after_upload: bool = False
+
+    # Fine-grained wandb logging toggles. See :class:`LoggingConfig`.
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
     # In-training evaluation
     eval_interval: int = 50  # 0 = disabled
