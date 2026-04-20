@@ -195,14 +195,17 @@ class MotionCommand(CommandTerm):
         # Resolve the actuated-joint order expected by this sim's
         # RobotStateWriter. ``env.act_manager.actuated_joint_names`` is
         # the single canonical list (same contract for Newton, Genesis,
-        # Mjlab). Strip the sim-specific entity prefix so the names line
-        # up with the NPZ's bare-name joint list from
-        # ``mujoco_replayer``.
+        # Mjlab), but each backend formats the name differently:
+        #
+        #   Newton URDF:   "g1_29dof/left_hip_pitch_joint"
+        #   Newton MJCF:   "g1_29dof/worldbody/pelvis/.../left_hip_pitch_joint"
+        #   Genesis/Mjlab: "left_hip_pitch_joint" (bare)
+        #
+        # Taking the final ``/``-delimited segment gives the bare joint
+        # name for all three formats, matching what the preprocessing
+        # pipeline stored in the NPZ's ``joint_names`` field.
         actuated = list(env.act_manager.actuated_joint_names)
-        if prefix and all(n.startswith(prefix) for n in actuated):
-            bare_joint_names = tuple(n[len(prefix):] for n in actuated)
-        else:
-            bare_joint_names = tuple(actuated)
+        bare_joint_names = tuple(n.rsplit("/", 1)[-1] for n in actuated)
 
         self.motion = MotionLoader(
             cfg.motion_file,
