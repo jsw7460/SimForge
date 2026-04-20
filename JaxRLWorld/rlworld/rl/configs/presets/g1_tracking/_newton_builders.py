@@ -134,15 +134,7 @@ def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> NewtonSceneC
         entities={
             "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
-                # URDF path (not MJCF): G1 locomotion preset already
-                # uses URDF on Newton and the Newton scene manager's
-                # downstream body-label-based lookups (sites, contact
-                # sensors with ``"*"`` wildcards) are known to work with
-                # whatever flat ``g1_29dof/<body>`` layout the URDF
-                # loader produces. The menagerie MJCF path via Newton's
-                # MJCF parser produces a different body_label layout
-                # that didn't match ``"*"`` in SensorContact.
-                urdf_path=r.urdf_path,
+                mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
                     pos=(0.0, 0.0, r.base_init_height),
                     rot=(quat[0], quat[1], quat[2], quat[3]),
