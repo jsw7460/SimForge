@@ -266,7 +266,18 @@ class SceneManager(BaseManager):
                 # this is redundant with the Python-side _clip_effort in
                 # IdealPDActuator but keeps cross-sim behavior identical when
                 # URDF-declared limits differ from cfg.
-                if act_cfg.effort_limit is not None and act_cfg.effort_limit > 0:
+                if isinstance(act_cfg.effort_limit, dict):
+                    sub_ids, sub_names = entity_utils.find_dofs(
+                        entity=entity, name_keys=list(act_cfg.effort_limit.keys())
+                    )
+                    if sub_ids:
+                        _, _, vals = string_utils.resolve_matching_names_values(
+                            act_cfg.effort_limit, sub_names
+                        )
+                        neg = [-float(v) for v in vals]
+                        pos = [float(v) for v in vals]
+                        entity.set_dofs_force_range(neg, pos, sub_ids)
+                elif act_cfg.effort_limit is not None and act_cfg.effort_limit > 0:
                     limit = float(act_cfg.effort_limit)
                     entity.set_dofs_force_range(
                         [-limit] * num_dofs, [limit] * num_dofs, dof_ids,

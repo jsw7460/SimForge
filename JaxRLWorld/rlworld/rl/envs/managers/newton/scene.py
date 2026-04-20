@@ -5,11 +5,13 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Dict
 
+import ipdb
 import numpy as np
 import torch
 import warp as wp
 
 import newton
+from newton import ShapeFlags
 from newton.selection import ArticulationView
 from newton.sensors import SensorContact
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
@@ -40,8 +42,10 @@ def apply_joint_params_by_pattern(
     ke_map: Dict[str, float] | None = None,
     kd_map: Dict[str, float] | None = None,
     armature_map: Dict[str, float] | None = None,
+    effort_limit_map: Dict[str, float] | None = None,
 ) -> None:
-    """Apply joint parameters (target gains, armature) using regex pattern matching.
+    """Apply joint parameters (target gains, armature, effort limit) using
+    regex pattern matching.
 
     Uses ``re.fullmatch`` rather than ``re.match`` so a pattern like
     ``T1/.*Waist`` only fires on joint labels that *end* with
@@ -52,13 +56,21 @@ def apply_joint_params_by_pattern(
     would silently claim every leg joint under the Waist subtree.
     Flat URDF labels behave identically under both functions because
     existing patterns already end in a specific suffix.
+
+    ``effort_limit_map`` overrides ``builder.joint_effort_limit`` per DOF;
+    ``SolverMuJoCo`` later turns this into ``joint.actfrcrange`` on each
+    hinge (always ``actfrclimited=True``). Use this to relax the tight
+    XML-declared ``actuatorfrcrange`` when the scene-file values disagree
+    with the motor spec that training actually assumes (e.g. menagerie
+    T1's 15/20 Nm ankle vs booster_t1's 50 Nm).
     """
-    if ke_map is None and kd_map is None and armature_map is None:
+    if ke_map is None and kd_map is None and armature_map is None and effort_limit_map is None:
         return
 
     ke_map = ke_map or {}
     kd_map = kd_map or {}
     armature_map = armature_map or {}
+    effort_limit_map = effort_limit_map or {}
     num_joints = len(builder.joint_label)
 
     for joint_idx, joint_name in enumerate(builder.joint_label):
@@ -91,6 +103,70 @@ def apply_joint_params_by_pattern(
             if re.fullmatch(pattern, joint_name):
                 for d in range(dof_count):
                     builder.joint_armature[dof_start + d] = value
+
+        # Apply effort limit (overrides XML-declared actuatorfrcrange)
+        for pattern, value in effort_limit_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_effort_limit[dof_start + d] = value
+                break
+
+
+def _state_assign_full(
+    dst: newton.State,
+    src: newton.State,
+    namespaces: tuple[str, ...] = ("mujoco",),
+) -> None:
+    """Assign ``src`` into ``dst`` including attribute-namespace arrays.
+
+    Newton's :meth:`State.assign` iterates ``self.__dict__`` and copies
+    top-level ``wp.array`` attributes, but descendants inside
+    ``AttributeNamespace`` objects (e.g. ``state.mujoco.qfrc_actuator``)
+    are skipped because the namespace itself is not a ``wp.array`` —
+    the outer loop treats it as a non-array and ``continue``\s. This
+    helper performs the standard ``dst.assign(src)`` then manually
+    descends into each listed namespace and copies its ``wp.array``
+    children.
+
+    Callers rely on this when the ``need_state_copy`` branch of a
+    substep loop fires (odd substeps under CUDA graph capture) so
+    consumers reading ``state.mujoco.qfrc_actuator`` via
+    :attr:`NewtonRobotData.applied_torque` don't see stale zeros.
+    Remove (replace with plain ``dst.assign(src)``) once Newton's
+    ``State.assign`` recurses into namespaces upstream.
+    """
+    dst.assign(src)
+    for ns in namespaces:
+        ns_dst = getattr(dst, ns, None)
+        ns_src = getattr(src, ns, None)
+        if ns_dst is None or ns_src is None:
+            continue
+        for attr in vars(ns_src):
+            s = getattr(ns_src, attr, None)
+            d = getattr(ns_dst, attr, None)
+            if isinstance(s, wp.array) and isinstance(d, wp.array):
+                d.assign(s)
+
+
+def _force_collision_shape_priority(builder: newton.ModelBuilder, priority: int = 1) -> None:
+    """Set ``geom_priority`` on every COLLIDE_SHAPES shape in this builder.
+
+    Works around a Newton MJCF parser bug where XML ``priority`` attributes
+    on ``<geom>`` elements are lost for most shapes when visuals are also
+    parsed. We bypass the parser by mutating the custom_attribute values
+    dict directly; Newton exposes no public per-shape setter for
+    post-load custom attributes. Visual-only shapes
+    (``COLLIDE_SHAPES`` flag cleared) are skipped because they don't
+    participate in contact pairs.
+    """
+    attr = builder.custom_attributes.get("mujoco:geom_priority")
+    if attr is None:
+        return
+    if attr.values is None:
+        attr.values = {}
+    for shape_idx in range(len(builder.shape_flags)):
+        if builder.shape_flags[shape_idx] & ShapeFlags.COLLIDE_SHAPES:
+            attr.values[shape_idx] = priority
 
 
 @dataclass
@@ -379,6 +455,7 @@ class NewtonSceneManager(BaseManager):
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
+        effort_limit_map: dict[str, float] = {}
 
         def _prefixed(d: dict[str, float]) -> dict[str, float]:
             """Add body_label_prefix to regex keys."""
@@ -413,11 +490,35 @@ class NewtonSceneManager(BaseManager):
                 for pattern in act_cfg.target_names_expr:
                     armature_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.armature
 
-        if ke_map or kd_map or armature_map:
+            # Effort limit — overrides XML's actuatorfrcrange (which becomes
+            # joint.actfrcrange in Newton's MuJoCo solver).
+            if isinstance(act_cfg.effort_limit, dict):
+                effort_limit_map.update(_prefixed(act_cfg.effort_limit))
+            elif isinstance(act_cfg.effort_limit, (int, float)) and act_cfg.effort_limit > 0:
+                for pattern in act_cfg.target_names_expr:
+                    effort_limit_map[f"{prefix}/{pattern}" if prefix else pattern] = float(act_cfg.effort_limit)
+
+        if ke_map or kd_map or armature_map or effort_limit_map:
             apply_joint_params_by_pattern(
-                builder, ke_map=ke_map or None, kd_map=kd_map or None, armature_map=armature_map or None,
+                builder,
+                ke_map=ke_map or None,
+                kd_map=kd_map or None,
+                armature_map=armature_map or None,
+                effort_limit_map=effort_limit_map or None,
             )
 
+        # Workaround: force ``geom_priority=1`` on every collision shape of this
+        # entity. Newton's MJCF parser loses the XML-declared ``priority``
+        # attribute on most geoms when ``parse_visuals=True`` (only ~4/12
+        # collision geoms end up with the intended value). Since priority gates
+        # MuJoCo's friction combine rule (higher-priority geom's value wins;
+        # otherwise element-wise MAX with ground/terrain), losing it here makes
+        # per-robot friction DR silently ineffective — randomized foot μ gets
+        # max()ed with the fixed ground μ and the policy never sees the
+        # variation. We patch the builder's custom_attribute values dict
+        # directly because Newton exposes no per-shape setter for this. Remove
+        # once the upstream parser bug is fixed.
+        _force_collision_shape_priority(builder)
         mesh_approx = getattr(cfg, "mesh_approximation", "bounding_box")
         builder.approximate_meshes(mesh_approx)
 
@@ -450,6 +551,7 @@ class NewtonSceneManager(BaseManager):
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
+        effort_limit_map: dict[str, float] = {}
 
         for act_cfg in cfg.articulation.actuators:
             for pattern in act_cfg.target_names_expr:
@@ -460,10 +562,16 @@ class NewtonSceneManager(BaseManager):
                     kd_map[key] = act_cfg.damping
                 if act_cfg.armature > 0:
                     armature_map[key] = act_cfg.armature
+                if isinstance(act_cfg.effort_limit, (int, float)) and act_cfg.effort_limit > 0:
+                    effort_limit_map[key] = float(act_cfg.effort_limit)
 
-        if ke_map or kd_map or armature_map:
+        if ke_map or kd_map or armature_map or effort_limit_map:
             apply_joint_params_by_pattern(
-                builder, ke_map=ke_map or None, kd_map=kd_map or None, armature_map=armature_map or None,
+                builder,
+                ke_map=ke_map or None,
+                kd_map=kd_map or None,
+                armature_map=armature_map or None,
+                effort_limit_map=effort_limit_map or None,
             )
 
         # Sites
@@ -730,7 +838,18 @@ class NewtonSceneManager(BaseManager):
         self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
 
     def _request_sensor_state_attributes(self) -> None:
-        """Request extended state attributes needed by sensors."""
+        """Request extended state attributes needed by sensors and data-API.
+
+        Always requests ``mujoco:qfrc_actuator`` when using the MuJoCo
+        solver so :attr:`NewtonRobotData.applied_torque` is readable
+        uniformly (energy-based termination, actuator-torque rewards).
+        The allocation is a single ``wp.array`` the size of
+        ``joint_dof_count`` per state, so the cost is negligible even
+        when nothing reads it.
+        """
+        if self.config.solver_type == "mujoco":
+            self.model.request_state_attributes("mujoco:qfrc_actuator")
+
         if not self.config.sensors:
             return
 
@@ -933,7 +1052,11 @@ class NewtonSceneManager(BaseManager):
             if need_state_copy and i == last_idx:
                 # Copy state_1 → state_0 so the final result lives in
                 # the same buffer the graph capture started with.
-                self.state_0.assign(self.state_1)
+                # Uses ``_state_assign_full`` (not bare ``assign``) so
+                # extended attributes under namespaces like
+                # ``state.mujoco.qfrc_actuator`` also propagate —
+                # Newton's built-in assign skips them.
+                _state_assign_full(self.state_0, self.state_1)
             else:
                 # Swap states (reference rebind, no memory copy).
                 self.state_0, self.state_1 = self.state_1, self.state_0

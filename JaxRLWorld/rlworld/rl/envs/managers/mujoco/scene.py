@@ -247,36 +247,42 @@ class MujocoSceneManager(BaseManager):
                 )
 
             # Convert actuator configs → mjlab actuator configs.
-            # When stiffness/damping/armature are dicts, we expand into one
-            # mjlab actuator per regex key so each gets the correct value.
+            # When stiffness/damping/armature/effort_limit are dicts, we expand
+            # into one mjlab actuator per regex key so each gets the correct
+            # per-pattern value. mjlab's Builtin*ActuatorCfg only accepts scalar
+            # effort_limit, so dict expansion here is mandatory.
+            def _pick(value, pattern, fallback):
+                """Resolve scalar-or-dict to a single scalar for one pattern."""
+                if isinstance(value, dict):
+                    return value.get(pattern, fallback)
+                if isinstance(value, (int, float)):
+                    return value
+                return fallback
+
             mjlab_actuators = []
             for act_cfg in cfg.articulation.actuators:
                 if isinstance(act_cfg, ImplicitActuatorCfg):
                     if isinstance(act_cfg.stiffness, dict):
                         # Expand: one BuiltinPositionActuator per gain key
-                        stiff_dict = act_cfg.stiffness
-                        damp_dict = act_cfg.damping if isinstance(act_cfg.damping, dict) else {}
-                        arm_dict = act_cfg.armature if isinstance(act_cfg.armature, dict) else {}
-                        for pattern, kp in stiff_dict.items():
-                            kd = damp_dict.get(pattern, 0.0)
-                            arm = arm_dict.get(pattern, 0.0)
+                        for pattern in act_cfg.stiffness.keys():
                             mjlab_actuators.append(BuiltinPositionActuatorCfg(
                                 target_names_expr=(pattern,),
-                                stiffness=kp,
-                                damping=kd,
-                                effort_limit=act_cfg.effort_limit,
-                                armature=arm,
+                                stiffness=_pick(act_cfg.stiffness, pattern, 0.0),
+                                damping=_pick(act_cfg.damping, pattern, 0.0),
+                                effort_limit=_pick(act_cfg.effort_limit, pattern, None),
+                                armature=_pick(act_cfg.armature, pattern, 0.0),
                                 frictionloss=act_cfg.frictionloss,
                             ))
                     else:
                         stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
                         damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
                         armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
+                        effort_limit = act_cfg.effort_limit if isinstance(act_cfg.effort_limit, (int, float)) else None
                         mjlab_actuators.append(BuiltinPositionActuatorCfg(
                             target_names_expr=act_cfg.target_names_expr,
                             stiffness=stiffness,
                             damping=damping,
-                            effort_limit=act_cfg.effort_limit,
+                            effort_limit=effort_limit,
                             armature=armature,
                             frictionloss=act_cfg.frictionloss,
                         ))
@@ -284,19 +290,19 @@ class MujocoSceneManager(BaseManager):
                     # Explicit actuator (IdealPD, LSTM, etc.) → motor mode
                     if isinstance(act_cfg.armature, dict):
                         # Expand: one BuiltinMotorActuator per armature key
-                        arm_dict = act_cfg.armature
-                        for pattern, arm in arm_dict.items():
+                        for pattern, arm in act_cfg.armature.items():
                             mjlab_actuators.append(BuiltinMotorActuatorCfg(
                                 target_names_expr=(pattern,),
-                                effort_limit=act_cfg.effort_limit or 1000.0,
+                                effort_limit=_pick(act_cfg.effort_limit, pattern, 1000.0),
                                 armature=arm,
                                 frictionloss=act_cfg.frictionloss,
                             ))
                     else:
                         armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
+                        effort_limit = act_cfg.effort_limit if isinstance(act_cfg.effort_limit, (int, float)) else 1000.0
                         mjlab_actuators.append(BuiltinMotorActuatorCfg(
                             target_names_expr=act_cfg.target_names_expr,
-                            effort_limit=act_cfg.effort_limit or 1000.0,
+                            effort_limit=effort_limit,
                             armature=armature,
                             frictionloss=act_cfg.frictionloss,
                         ))
@@ -317,7 +323,6 @@ class MujocoSceneManager(BaseManager):
             if isinstance(spec_fn, str):
                 from rlworld.rl.utils.resolve import resolve_callable
                 spec_fn = resolve_callable(spec_fn)
-
             mjlab_cfg = MjlabEntityCfg(
                 init_state=init_state,
                 spec_fn=spec_fn,
