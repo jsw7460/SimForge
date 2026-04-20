@@ -153,7 +153,12 @@ def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> NewtonSceneC
                     ),
                 ),
                 body_label_prefix=r.name,
-                sites={"imu_site_base": r.base_link_name},
+                # Newton stores the body label as ``<entity_name>/<body>``
+                # (e.g. ``g1_29dof/torso_link``) or even a hierarchical
+                # XPath under MJCF load; the ``.*`` prefix makes the
+                # fullmatch-based site lookup robust to both layouts,
+                # matching the regex convention used by the T1 presets.
+                sites={"imu_site_base": f".*{r.base_link_name}"},
                 enable_self_collisions=True,
             ),
         },
