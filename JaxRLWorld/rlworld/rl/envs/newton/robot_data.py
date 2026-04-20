@@ -152,6 +152,29 @@ class NewtonRobotData:
         return dof_vel[:, self._env.act_manager.indexing.newton_qd_indices]
 
     @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator torque in actuated order.
+
+        Reads ``state.mujoco.qfrc_actuator`` — the MuJoCo solver's
+        per-DOF actuator force after PD-law evaluation and
+        ``effort_limit`` clipping, transposed into Newton's DOF
+        frame by ``convert_qfrc_actuator_from_mj_kernel``. The flat
+        warp array is reshaped into ``(num_envs, dofs_per_world)`` and
+        indexed by ``newton_qd_indices`` so columns line up with
+        :attr:`joint_pos` / :attr:`joint_vel`.
+
+        Raises ``AttributeError`` if the scene was built without
+        requesting ``mujoco:qfrc_actuator`` (the scene manager requests
+        it automatically when ``solver_type == "mujoco"``).
+        """
+        state = self._state
+        model = self._env.scene_manager.model
+        dofs_per_world = model.joint_dof_count // model.world_count
+        qfrc_flat = wp.to_torch(state.mujoco.qfrc_actuator)
+        qfrc = qfrc_flat.view(model.world_count, dofs_per_world)
+        return qfrc[:, self._env.act_manager.indexing.newton_qd_indices]
+
+    @property
     def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
         """Hard joint position limits in canonical actuated order.
 

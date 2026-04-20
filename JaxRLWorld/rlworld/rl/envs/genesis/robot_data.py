@@ -91,6 +91,20 @@ class GenesisRobotData:
         return self._entity.get_dofs_velocity(self._actuated_dof_ids)
 
     @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator control force for actuated joints.
+
+        Calls Genesis's ``get_dofs_control_force`` which runs the PD-law
+        kernel (``kernel_get_dofs_control_force`` in
+        ``Genesis/.../rigid/abd/accessor.py``) and returns the torque
+        clipped to the joint's ``force_range`` — the analog of
+        MuJoCo's ``qfrc_actuator``. This is distinct from
+        ``get_dofs_force``, which returns the net joint-space force
+        including passive damping and gravity bias.
+        """
+        return self._entity.get_dofs_control_force(dofs_idx_local=self._actuated_dof_ids)
+
+    @property
     def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
         """Hard joint position limits in canonical actuated order.
 

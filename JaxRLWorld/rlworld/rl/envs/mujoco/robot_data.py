@@ -105,6 +105,17 @@ class MujocoRobotData:
         return self._entity.data.joint_vel[:, self._joint_ids]
 
     @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator torque in action manager order.
+
+        Reads mjlab's ``EntityData.qfrc_actuator`` which is the
+        MuJoCo ``qfrc_actuator`` field sliced to this entity's joint
+        DoFs — i.e. post-PD-law, post-actfrcrange clip. Re-indexed by
+        ``_joint_ids`` to match action manager ordering.
+        """
+        return self._entity.data.qfrc_actuator[:, self._joint_ids]
+
+    @property
     def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
         """Hard joint position limits — not exposed by mjlab.
 

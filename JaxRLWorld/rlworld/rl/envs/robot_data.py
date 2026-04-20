@@ -83,6 +83,23 @@ class RobotData(Protocol):
         ...
 
     @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator torque actually applied by the simulator last step.
+
+        Corresponds to MuJoCo's ``qfrc_actuator``: the output of each
+        actuator's PD law (or motor command), already clipped to the
+        joint's effort limit. Works uniformly for implicit (simulator
+        internal PD) and explicit (Python-computed) actuators — unlike
+        ``act_manager.applied_torque`` which only reflects Python-side
+        torques and is zero in pure-implicit mode.
+
+        Shape ``(num_envs, num_joints)`` in the same canonical actuated
+        order as :attr:`joint_pos` / :attr:`joint_vel`. Units: N·m for
+        revolute DOFs, N for prismatic DOFs.
+        """
+        ...
+
+    @property
     def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
         """Hard joint position limits in canonical actuated order.
 
