@@ -153,13 +153,7 @@ def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> NewtonSceneC
                     ),
                 ),
                 body_label_prefix=r.name,
-                # Pattern MUST include ``/`` so ``_create_sites_from_dict``'s
-                # ``_resolve`` skips auto-prefixing (which only fires for
-                # slash-less names). Then ``_find_body_by_name`` regex-
-                # fullmatches directly against builder.body_label —
-                # transparently handling flat ``g1_29dof/torso_link`` or
-                # hierarchical ``g1_29dof/worldbody/.../torso_link``.
-                sites={"imu_site_base": f".*/{r.base_link_name}"},
+                sites={"imu_site_base": r.base_link_name},
                 enable_self_collisions=True,
             ),
         },
@@ -332,14 +326,7 @@ def build_dr_terms(cfg: "G1TrackingConfig") -> Dict[str, EventTermConfig]:
                     1: (-0.05, 0.05),
                     2: (-0.05, 0.05),
                 },
-                # Use the XPath-aware regex form (matches both the flat
-                # ``g1_29dof/torso_link`` label from Newton's URDF loader
-                # and the hierarchical ``g1_29dof/.../torso_link`` label
-                # from the MJCF loader). ``body_cache.get_body_indices``
-                # runs ``re.match``, so ``(?:.*/)?`` absorbs intermediate
-                # XPath segments and ``$`` anchors the body-name end to
-                # prevent overmatching nested subtrees.
-                "body_patterns": (f"{r.name}/(?:.*/)?torso_link$",),
+                "body_patterns": (r.prefixed("torso_link"),),
             },
         ),
         "randomize_joint_friction": EventTermConfig(

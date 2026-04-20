@@ -16,6 +16,7 @@ from newton.selection import ArticulationView
 from newton.sensors import SensorContact
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
+from rlworld.rl.envs.utils.newton.label import flatten_xpath_label
 from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
@@ -599,17 +600,19 @@ class NewtonSceneManager(BaseManager):
         """Find body index by name in the builder.
 
         ``body_name`` is treated as a **regex** via ``re.fullmatch``.
-        Exact literal names keep working because every plain string
-        is itself a valid regex (e.g. ``"T1/Trunk"`` fullmatch against
-        ``"T1/Trunk"`` succeeds). Regex patterns like ``"T1/.*Trunk"``
-        transparently handle both flat URDF labels (``T1/Trunk``) and
-        hierarchical MJCF labels (``T1/worldbody/Trunk``).
+        Each candidate label from ``builder.body_label`` is flattened via
+        :func:`flatten_xpath_label` first so ``"T1/Trunk"``-style literal
+        patterns keep working identically on both Newton loaders — the
+        URDF loader already emits ``T1/Trunk`` and the MJCF loader's
+        XPath ``T1/worldbody/Trunk`` is collapsed to ``T1/Trunk`` before
+        matching. Regex patterns like ``"T1/.*Trunk"`` also keep working
+        because the flattened label ``T1/Trunk`` still fullmatches.
 
         Returns the first matching body index, or ``None`` if no body
         matches.
         """
         for i, name in enumerate(builder.body_label):
-            if re.fullmatch(body_name, name):
+            if re.fullmatch(body_name, flatten_xpath_label(name)):
                 return i
         return None
 
@@ -960,11 +963,17 @@ class NewtonSceneManager(BaseManager):
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-        # Get all joint names from model (single world)
+        # Get all joint names from model (single world) and canonicalize
+        # to flat ``{prefix}/{leaf}`` form. Without this, Newton's MJCF
+        # loader would hand us XPath labels like
+        # ``g1_29dof/worldbody/pelvis/.../left_hip_pitch_joint`` and every
+        # downstream regex / config pattern would have to absorb the
+        # middle segments explicitly. URDF labels are already flat so
+        # the canonicalization is a no-op there.
         joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
         if not joint_names_raw:
             raise ValueError("Newton model has no joint labels")
-        all_names = list(joint_names_raw)
+        all_names = [flatten_xpath_label(n) for n in joint_names_raw]
         num_worlds = self.model.world_count
         joints_per_world = len(all_names) // num_worlds
         all_names = all_names[:joints_per_world]

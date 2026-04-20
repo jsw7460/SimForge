@@ -65,11 +65,11 @@ ACTION_SCALE_ANKLE = 0.25 * EFFORT_ANKLE / STIFFNESS_ANKLE
 G1_ACTION_SCALE: Dict[str, float] = {
     r".*_hip_pitch_joint": ACTION_SCALE_7520_14,
     r".*_hip_yaw_joint": ACTION_SCALE_7520_14,
-    r".*waist_yaw_joint": ACTION_SCALE_7520_14,
+    r"waist_yaw_joint": ACTION_SCALE_7520_14,
     r".*_hip_roll_joint": ACTION_SCALE_7520_22,
     r".*_knee_joint": ACTION_SCALE_7520_22,
-    r".*waist_pitch_joint": ACTION_SCALE_WAIST,
-    r".*waist_roll_joint": ACTION_SCALE_WAIST,
+    r"waist_pitch_joint": ACTION_SCALE_WAIST,
+    r"waist_roll_joint": ACTION_SCALE_WAIST,
     r".*_ankle_pitch_joint": ACTION_SCALE_ANKLE,
     r".*_ankle_roll_joint": ACTION_SCALE_ANKLE,
     r".*_shoulder_pitch_joint": ACTION_SCALE_5020,
@@ -98,48 +98,28 @@ class G1MujocoConfig(RobotConfig):
         ".*_knee_joint": 0.669,
         ".*_ankle_pitch_joint": -0.363,
         ".*_elbow_joint": 0.6,
-        ".*left_shoulder_roll_joint": 0.2,
-        ".*left_shoulder_pitch_joint": 0.2,
-        ".*right_shoulder_roll_joint": -0.2,
-        ".*right_shoulder_pitch_joint": 0.2,
+        "left_shoulder_roll_joint": 0.2,
+        "left_shoulder_pitch_joint": 0.2,
+        "right_shoulder_roll_joint": -0.2,
+        "right_shoulder_pitch_joint": 0.2,
     })
 
-    # Anchor the pattern at the last XPath segment with ``[^/]*_joint``
-    # so each actuated joint matches exactly one group and no group
-    # accidentally absorbs joints under its own body subtree.
-    #
-    # ``(?:.*/)?`` optionally consumes parent XPath segments, so a
-    # single pattern works for both Newton loaders:
-    #
-    #   URDF flat label ``g1_29dof/left_hip_pitch_joint``
-    #     → prefix ``g1_29dof/`` + empty ``(?:.*/)?`` + ``left_hip_pitch_joint``
-    #
-    #   MJCF XPath label
-    #   ``g1_29dof/worldbody/pelvis/left_hip_pitch_link/left_hip_pitch_joint``
-    #     → prefix ``g1_29dof/`` + ``worldbody/pelvis/left_hip_pitch_link/``
-    #       + ``left_hip_pitch_joint``
-    #
-    # A naïve ``.*left_(?!...).*`` (like T1Config's design) would
-    # overmatch on G1 because MJCF places ``waist_yaw_link``,
-    # ``waist_roll_link``, ``torso_link`` in the ancestor chain of every
-    # arm joint, so ``.*waist_.*`` would end up fullmatching every arm
-    # joint too. The slash-bounded last-segment anchor prevents that.
     actuated_dof_patterns: List[str] = field(
         default_factory=lambda: [
-            r"(?:.*/)?left_(?!hand_palm_joint)[^/]*_joint",
-            r"(?:.*/)?right_(?!hand_palm_joint)[^/]*_joint",
-            r"(?:.*/)?waist_(?!support_joint)[^/]*_joint",
+            r"left_(?!hand_palm_joint).*",
+            r"right_(?!hand_palm_joint).*",
+            r"waist_(?!support_joint).*"
         ]
     )
 
     p_gains: Dict[str, float] = field(default_factory=lambda: {
         ".*_hip_pitch_joint": STIFFNESS_7520_14,
         ".*_hip_yaw_joint": STIFFNESS_7520_14,
-        ".*waist_yaw_joint": STIFFNESS_7520_14,
+        "waist_yaw_joint": STIFFNESS_7520_14,
         ".*_hip_roll_joint": STIFFNESS_7520_22,
         ".*_knee_joint": STIFFNESS_7520_22,
-        ".*waist_pitch_joint": STIFFNESS_WAIST,
-        ".*waist_roll_joint": STIFFNESS_WAIST,
+        "waist_pitch_joint": STIFFNESS_WAIST,
+        "waist_roll_joint": STIFFNESS_WAIST,
         ".*_ankle_pitch_joint": STIFFNESS_ANKLE,
         ".*_ankle_roll_joint": STIFFNESS_ANKLE,
         ".*_shoulder_pitch_joint": STIFFNESS_5020,
@@ -154,11 +134,11 @@ class G1MujocoConfig(RobotConfig):
     d_gains: Dict[str, float] = field(default_factory=lambda: {
         ".*_hip_pitch_joint": DAMPING_7520_14,
         ".*_hip_yaw_joint": DAMPING_7520_14,
-        ".*waist_yaw_joint": DAMPING_7520_14,
+        "waist_yaw_joint": DAMPING_7520_14,
         ".*_hip_roll_joint": DAMPING_7520_22,
         ".*_knee_joint": DAMPING_7520_22,
-        ".*waist_pitch_joint": DAMPING_WAIST,
-        ".*waist_roll_joint": DAMPING_WAIST,
+        "waist_pitch_joint": DAMPING_WAIST,
+        "waist_roll_joint": DAMPING_WAIST,
         ".*_ankle_pitch_joint": DAMPING_ANKLE,
         ".*_ankle_roll_joint": DAMPING_ANKLE,
         ".*_shoulder_pitch_joint": DAMPING_5020,
@@ -173,11 +153,11 @@ class G1MujocoConfig(RobotConfig):
     armature: Dict[str, float] = field(default_factory=lambda: {
         ".*_hip_pitch_joint": ARMATURE_7520_14,
         ".*_hip_yaw_joint": ARMATURE_7520_14,
-        ".*waist_yaw_joint": ARMATURE_7520_14,
+        "waist_yaw_joint": ARMATURE_7520_14,
         ".*_hip_roll_joint": ARMATURE_7520_22,
         ".*_knee_joint": ARMATURE_7520_22,
-        ".*waist_pitch_joint": ARMATURE_WAIST,
-        ".*waist_roll_joint": ARMATURE_WAIST,
+        "waist_pitch_joint": ARMATURE_WAIST,
+        "waist_roll_joint": ARMATURE_WAIST,
         ".*_ankle_pitch_joint": ARMATURE_ANKLE,
         ".*_ankle_roll_joint": ARMATURE_ANKLE,
         ".*_shoulder_pitch_joint": ARMATURE_5020,

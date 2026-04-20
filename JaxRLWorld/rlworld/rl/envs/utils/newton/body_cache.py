@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 
 import warp as wp
 
+from rlworld.rl.envs.utils.newton.label import flatten_xpath_label
+
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
 
@@ -19,7 +21,11 @@ class NewtonBodyCache:
 
         model = env.scene_manager.model
         self.bodies_per_env = len(model.body_label) // env.num_envs
-        self.body_names = model.body_label[:self.bodies_per_env]
+        # Canonicalize MJCF XPath labels to flat ``{prefix}/{leaf}``
+        # form so downstream pattern matching is URDF/MJCF-agnostic.
+        self.body_names = [
+            flatten_xpath_label(n) for n in model.body_label[:self.bodies_per_env]
+        ]
 
         # Cache original values for domain randomization
         body_mass = wp.to_torch(model.body_mass).reshape(env.num_envs, self.bodies_per_env)

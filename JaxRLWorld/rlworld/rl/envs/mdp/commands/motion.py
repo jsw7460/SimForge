@@ -156,38 +156,12 @@ class MotionCommand(CommandTerm):
         self._writer = env.get_robot_state_writer(cfg.entity_name)
 
         prefix = cfg.body_name_prefix
-
-        def _resolve_body_name(name: str) -> str:
-            """Build a sim-appropriate lookup string for ``find_body_index``.
-
-            Genesis/Mjlab (``prefix == ""``): return the bare name —
-            Genesis does a literal dict lookup and mjlab's ``find_bodies``
-            treats a plain name as a literal regex (``"torso_link"``
-            matches body ``torso_link``).
-
-            Newton (``prefix`` like ``"g1_29dof/"``): Newton's
-            ``body_cache.get_body_indices`` uses ``re.match``, and its
-            MJCF loader stores XPath-hierarchical labels such as
-            ``g1_29dof/worldbody/pelvis/waist_yaw_link/waist_roll_link/
-            torso_link``. Wrapping as
-            ``f"{prefix}(?:.*/)?{name}$"`` lets the optional ``(?:.*/)?``
-            absorb intermediate XPath segments while ``$`` anchors the
-            match to the end of the body-name segment so a sibling like
-            ``torso_link/left_shoulder_pitch_link`` does NOT also match.
-            On URDF-loaded Newton scenes the XPath middle is empty, so
-            ``(?:.*/)?`` matches empty and the regex still accepts the
-            flat ``g1_29dof/torso_link`` layout.
-            """
-            if not prefix:
-                return name
-            return f"{prefix}(?:.*/)?{name}$"
-
         self.robot_anchor_body_index = self._rd.find_body_index(
-            _resolve_body_name(cfg.anchor_body_name)
+            prefix + cfg.anchor_body_name
         )
         self.motion_anchor_body_index = cfg.body_names.index(cfg.anchor_body_name)
         self.body_indexes = torch.tensor(
-            [self._rd.find_body_index(_resolve_body_name(n)) for n in cfg.body_names],
+            [self._rd.find_body_index(prefix + n) for n in cfg.body_names],
             dtype=torch.long,
             device=self.device,
         )
@@ -195,17 +169,16 @@ class MotionCommand(CommandTerm):
         # Resolve the actuated-joint order expected by this sim's
         # RobotStateWriter. ``env.act_manager.actuated_joint_names`` is
         # the single canonical list (same contract for Newton, Genesis,
-        # Mjlab), but each backend formats the name differently:
-        #
-        #   Newton URDF:   "g1_29dof/left_hip_pitch_joint"
-        #   Newton MJCF:   "g1_29dof/worldbody/pelvis/.../left_hip_pitch_joint"
-        #   Genesis/Mjlab: "left_hip_pitch_joint" (bare)
-        #
-        # Taking the final ``/``-delimited segment gives the bare joint
-        # name for all three formats, matching what the preprocessing
-        # pipeline stored in the NPZ's ``joint_names`` field.
+        # Mjlab). Strip the sim-specific entity prefix so the names line
+        # up with the NPZ's bare-name joint list from
+        # ``mujoco_replayer``. Newton scene manager canonicalizes MJCF
+        # XPath labels to flat ``{prefix}/{leaf}`` form on build, so a
+        # simple prefix strip suffices across both Newton loaders.
         actuated = list(env.act_manager.actuated_joint_names)
-        bare_joint_names = tuple(n.rsplit("/", 1)[-1] for n in actuated)
+        if prefix and all(n.startswith(prefix) for n in actuated):
+            bare_joint_names = tuple(n[len(prefix):] for n in actuated)
+        else:
+            bare_joint_names = tuple(actuated)
 
         self.motion = MotionLoader(
             cfg.motion_file,
