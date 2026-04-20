@@ -49,6 +49,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_height,
     base_lin_vel,
     base_quat,
+    command as command_obs,
     dof_pos,
     dof_pos_nominal_difference,
     dof_vel,
@@ -192,6 +193,7 @@ def build_observation(cfg: "T1TrackingConfig") -> ObservationConfig:
             func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
         )
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+        command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
             func=motion_anchor_pos_b, scale=1.0, params=motion_params,
             noise=Unoise(-0.05, 0.05),
@@ -214,6 +216,7 @@ def build_observation(cfg: "T1TrackingConfig") -> ObservationConfig:
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
+        command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
             func=motion_anchor_pos_b, scale=1.0, params=motion_params,
         )
