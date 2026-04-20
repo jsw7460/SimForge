@@ -88,6 +88,7 @@ class G1MujocoConfig(RobotConfig):
 
     name: str = "g1_29dof"
     urdf_path: str | None = "./JaxRLWorld/rlworld/assets/g1_description/g1_29dof.urdf"
+    mjcf_path: str | None = "./JaxRLWorld/rlworld/assets/mujoco_menagerie/unitree_g1/g1.xml"
 
     base_init_height: float = 0.76
     base_link_name: str = "torso_link"

@@ -105,7 +105,7 @@ class EntityCfg:
     floating: bool = False
     """True for mobile robots with a free-floating base."""
 
-    enable_self_collisions: bool = False
+    enable_self_collisions: bool = True
     """Allow collisions between links of the same entity."""
 
     # -- Filtering ------------------------------------------------------------
