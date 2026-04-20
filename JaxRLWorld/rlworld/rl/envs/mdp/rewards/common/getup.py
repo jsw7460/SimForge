@@ -23,6 +23,44 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 
+def power_penalty(
+    env: "World",
+    skip_steps: int = 0,
+    entity_name: str = "robot",
+) -> torch.Tensor:
+    """Negative mechanical power ``-Σ|τ · q̇|`` for actuated joints.
+
+    Smooth analogue of :func:`energy_termination`. Combined with a
+    positive weight this yields a penalty proportional to instantaneous
+    mechanical power output, so the policy gets a continuous gradient
+    against energetic motion instead of a hard cut-off.
+
+    Torque and velocity are read via ``RobotData.applied_torque`` /
+    ``RobotData.joint_vel`` which work uniformly across implicit and
+    explicit actuator models on all three simulator backends.
+
+    ``skip_steps`` matches the old termination's guard: during the
+    first few control steps after each reset, landing impacts produce
+    transient high torques that would swamp the penalty — zero out the
+    contribution until that phase is over.
+
+    Args:
+        env: Any environment with ``get_robot_data``.
+        skip_steps: Post-reset control steps during which the penalty
+            is suppressed (typically ``act_manager.settle_steps``).
+        entity_name: Entity to query.
+
+    Returns:
+        Tensor of shape ``(num_envs,)``, always ``<= 0``.
+    """
+    rd = env.get_robot_data(entity_name)
+    power = torch.sum(torch.abs(rd.applied_torque * rd.joint_vel), dim=-1)
+    if skip_steps > 0:
+        mask = (env.episode_length_buf >= skip_steps).float()
+        power = power * mask
+    return -power
+
+
 def orientation_upright(
     env: "World",
     std: float = 0.707,

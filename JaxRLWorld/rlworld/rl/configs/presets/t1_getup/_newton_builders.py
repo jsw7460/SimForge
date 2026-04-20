@@ -88,15 +88,17 @@ def build_visualization(cfg: "T1GetupConfig") -> VisualizationConfig:
 def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
-        # NO roll_pitch_violation — the robot starts fallen by design.
         max_episode = TerminationTermConfig(max_episode_exceed)
-        energy = TerminationTermConfig(
-            common_tf.energy_termination,
-            {
-                "threshold": cfg.energy_threshold,
-                "skip_steps": cfg.settle_steps,
-            },
-        )
+        # Replaced by ``power_penalty`` reward term — see
+        # ``build_reward`` below and the ``power_penalty_weight``
+        # curriculum in ``base.py``.
+        # energy = TerminationTermConfig(
+        #     common_tf.energy_termination,
+        #     {
+        #         "threshold": cfg.energy_threshold,
+        #         "skip_steps": cfg.settle_steps,
+        #     },
+        # )
 
     return NewtonEnvConfig(
         num_envs=cfg.num_envs,
@@ -137,6 +139,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
+                            effort_limit=r.effort_limits,
                             # min_delay=0,
                             # max_delay=2,
                         ),
@@ -180,13 +183,6 @@ def build_observation(cfg: "T1GetupConfig") -> NewtonObservationConfig:
         projected_gravity_obs = ObservationTermConfig(
             func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
         )
-        # mjlab_playground uses a biased dof_pos observation paired with a
-        # ``-encoder_bias`` correction in its relative action. Since our
-        # relative action (SettleRelative) does NOT subtract the bias,
-        # keeping a biased observation here would create an asymmetry
-        # that the policy would have to learn to compensate for. The
-        # cleanest choice is to drop encoder_bias entirely on both
-        # sides — see build_dr_terms (no randomize_encoder_bias term).
         dof_pos_obs = ObservationTermConfig(
             func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
         )
@@ -311,20 +307,15 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
             func=rf_common.penalize_dof_vel,
             weight=cfg.joint_vel_l2_weight,
         )
+        # power_penalty = RewardTermConfig(
+        #     func=rf_getup.power_penalty,
+        #     weight=cfg.power_penalty_weight,
+        #     params={"skip_steps": cfg.settle_steps},
+        # )
         self_collision_cost = RewardTermConfig(
             func=rf_newton.wtw_collision,
             weight=cfg.self_collision_weight,
             params={"contact_group": "self_collision", "force_threshold": 10.0},
-        )
-        # Logging-only metric (weight=0 so it contributes 0 to the total
-        # reward but still gets written to ``rew_buf_per_type`` each step).
-        getup_success = RewardTermConfig(
-            func=rf_getup.GetupSuccessTracker,
-            weight=0.0,
-            params={
-                "desired_height": cfg.trunk_desired_height,
-                "body_name": r.prefixed(f".*{r.trunk_body_name}"),
-            },
         )
 
     return _RewardsCfg()
@@ -355,7 +346,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
         # for the matching decision to use unbiased dof_pos.
         "randomize_body_com": EventTermConfig(
             func=newton_dr.randomize_body_com_offset,
-            mode="reset_dr",
+            mode="startup",
             params={
                 "ranges": {
                     0: (-0.025, 0.025),
@@ -372,9 +363,9 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
         # skip the filter (touching every robot shape) instead.
         "geom_friction_slide": EventTermConfig(
             func=newton_dr.randomize_geom_friction_axis,
-            mode="reset_dr",
+            mode="startup",
             params={
-                "ranges": (0.3, 1.5),
+                "ranges": (0.8, 1.5),
                 "axes": [0],
                 "operation": "abs",
                 "distribution": "uniform",
@@ -388,7 +379,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
         # shape indices attached to the foot links.
         "foot_friction_spin": EventTermConfig(
             func=newton_dr.randomize_geom_friction_axis,
-            mode="reset_dr",
+            mode="startup",
             params={
                 "ranges": (1e-4, 2e-2),
                 "axes": [1],
@@ -399,7 +390,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
         ),
         "foot_friction_roll": EventTermConfig(
             func=newton_dr.randomize_geom_friction_axis,
-            mode="reset_dr",
+            mode="startup",
             params={
                 "ranges": (1e-5, 5e-3),
                 "axes": [2],

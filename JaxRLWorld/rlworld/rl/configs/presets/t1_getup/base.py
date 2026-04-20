@@ -141,11 +141,17 @@ class T1GetupConfig:
     orientation_weight: float = 1.0
     trunk_height_weight: float = 1.0
     waist_height_weight: float = 1.0
-    gated_posture_weight: float = 1.0
+    gated_posture_weight: float = 5.0
     joint_pos_limits_weight: float = 1.0
     action_rate_l2_weight: float = 0.01
     joint_vel_l2_weight: float = 0.0  # mjlab_playground initial value
     self_collision_weight: float = 0.1
+    # Mechanical power penalty weight. Replaces the earlier
+    # ``energy_termination`` (now commented out in the builders) — see
+    # :func:`rewards.common.getup.power_penalty`. Ramps up via the
+    # curriculum below so the policy first learns getup, then gets
+    # squeezed into lower-power solutions.
+    power_penalty_weight: float = 1e-4
 
     # Energy termination initial threshold. The termination curriculum
     # (see ``_build_curriculum_config``) overrides this value once the
@@ -248,12 +254,7 @@ class T1GetupConfig:
         return CommandConfig(terms={})
 
     def _build_event_config(self) -> EventConfig:
-        """Build full event config: fallen-or-standing reset + sim DR.
-
-        Unlike go2_flat / g1_29dof, there is no ``push_robot`` interval
-        event: external perturbations during a getup attempt would
-        make the task ill-defined.
-        """
+        """Build full event config: fallen-or-standing reset + sim DR."""
         builders = _get_sim_builders(self.sim_type)
 
         reset_root_params: Dict[str, Any] = {
@@ -327,21 +328,39 @@ class T1GetupConfig:
                     },
                 )
             )
-            energy_threshold: CurriculumTermConfig = field(
-                default_factory=lambda: CurriculumTermConfig(
-                    func=termination_curriculum,
-                    params={
-                        "termination_name": "energy",
-                        "stages": [
-                            {"step": 900 * 24,  "params": {"threshold": 3000.0}},
-                            {"step": 1200 * 24, "params": {"threshold": 2000.0}},
-                            {"step": 1500 * 24, "params": {"threshold": 1500.0}},
-                            {"step": 1700 * 24, "params": {"threshold": 1000.0}},
-                            {"step": 2200 * 24, "params": {"threshold":  700.0}},
-                        ],
-                    },
-                )
-            )
+            # Replaces the old energy_termination curriculum (commented
+            # out below). Ramps the power-penalty reward weight as
+            # training progresses
+            # power_penalty_weight: CurriculumTermConfig = field(
+            #     default_factory=lambda: CurriculumTermConfig(
+            #         func=reward_curriculum,
+            #         params={
+            #             "reward_name": "power_penalty",
+            #             "stages": [
+            #                 {"step": 0,         "weight": 0.0},
+            #                 {"step": 900 * 24,  "weight": 1e-4},
+            #                 {"step": 1200 * 24, "weight": 3e-4},
+            #                 {"step": 1500 * 24, "weight": 7e-4},
+            #                 {"step": 1700 * 24, "weight": 1e-3},
+            #             ],
+            #         },
+            #     )
+            # )
+            # energy_threshold: CurriculumTermConfig = field(
+            #     default_factory=lambda: CurriculumTermConfig(
+            #         func=termination_curriculum,
+            #         params={
+            #             "termination_name": "energy",
+            #             "stages": [
+            #                 {"step": 900 * 24,  "params": {"threshold": 3000.0}},
+            #                 {"step": 1200 * 24, "params": {"threshold": 2000.0}},
+            #                 {"step": 1500 * 24, "params": {"threshold": 1500.0}},
+            #                 {"step": 1700 * 24, "params": {"threshold": 1000.0}},
+            #                 {"step": 2200 * 24, "params": {"threshold":  700.0}},
+            #             ],
+            #         },
+            #     )
+            # )
 
         return _CurriculumCfg()
 
@@ -349,7 +368,7 @@ class T1GetupConfig:
         return PPOConfig(
             algorithm_name=self.algorithm_name,
             clip_param=0.2,
-            obs_normalization=False,  # matches mjlab_playground getup (off)
+            obs_normalization=True,
             use_early_stop=False,
             desired_kl=0.01,
             entropy_coef=0.01,

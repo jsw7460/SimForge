@@ -29,12 +29,13 @@ def energy_termination(
         power = sum(|applied_torque * joint_vel|)
         terminate = (power > threshold) & (episode_length_buf >= skip_steps)
 
-    ``applied_torque`` comes from ``act_manager.applied_torque`` which is
-    populated by explicit actuator models (``DelayedPDActuatorCfg`` etc.)
-    in :meth:`ActionManagerBase.apply_actions`. When the action config
-    uses implicit simulator-side PD (no explicit actuators), this
-    tensor stays at zero and the power computation returns 0 — the
-    termination never fires, which is the safe default.
+    ``applied_torque`` is read from :attr:`RobotData.applied_torque` —
+    the simulator's per-DOF ``qfrc_actuator`` after PD-law evaluation
+    and effort-limit clipping. Works uniformly for implicit (simulator
+    internal PD) and explicit (Python-computed) actuator modes. This
+    diverges from an older implementation that read
+    ``act_manager.applied_torque`` (which is zero in pure-implicit
+    mode and silently disabled the termination).
 
     The ``skip_steps`` argument suppresses the check during the initial
     settle / landing phase where large impact torques are expected and
@@ -43,21 +44,19 @@ def energy_termination(
     the settle hook.
 
     Args:
-        env: Any environment with ``act_manager`` + ``get_robot_data``.
+        env: Any environment with ``get_robot_data``.
         threshold: Maximum allowed mechanical power in watts. Set to
             ``float("inf")`` to disable the check (e.g. as the initial
             value of a curriculum schedule).
         skip_steps: Number of post-reset control steps during which the
             termination is suppressed.
-        entity_name: Entity to query for joint velocity.
+        entity_name: Entity to query for joint velocity / torque.
 
     Returns:
         TerminationResult indicating which envs exceeded the threshold.
     """
-    torque = env.act_manager.applied_torque
-    joint_vel = env.get_robot_data(entity_name).joint_vel
-    power = torch.sum(torch.abs(torque * joint_vel), dim=-1)
-
+    rd = env.get_robot_data(entity_name)
+    power = torch.sum(torch.abs(rd.applied_torque * rd.joint_vel), dim=-1)
     exceeded = power > threshold
     if skip_steps > 0:
         exceeded = exceeded & (env.episode_length_buf >= skip_steps)

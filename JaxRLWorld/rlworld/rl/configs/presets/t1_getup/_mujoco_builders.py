@@ -89,13 +89,16 @@ def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
     class _TerminationsCfg(TerminationsConfig):
         # NO bad_orientation — the robot starts fallen.
         time_out = TerminationTermConfig(tf.time_out)
-        energy = TerminationTermConfig(
-            common_tf.energy_termination,
-            {
-                "threshold": cfg.energy_threshold,
-                "skip_steps": cfg.settle_steps,
-            },
-        )
+        # Replaced by ``power_penalty`` reward term — see
+        # ``build_reward`` below and the ``power_penalty_weight``
+        # curriculum in ``base.py``.
+        # energy = TerminationTermConfig(
+        #     common_tf.energy_termination,
+        #     {
+        #         "threshold": cfg.energy_threshold,
+        #         "skip_steps": cfg.settle_steps,
+        #     },
+        # )
 
     return MujocoEnvConfig(
         num_envs=cfg.num_envs,
@@ -138,11 +141,12 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoSceneConf
         floating=True,
         articulation=ArticulationCfg(
             actuators=(
-                IdealPDActuatorCfg(
+                ImplicitActuatorCfg(
                     target_names_expr=(".*",),
                     stiffness=r.p_gains,
                     damping=r.d_gains,
                     armature=r.armature,
+                    effort_limit=r.effort_limits,
                     # min_delay=0,
                     # max_delay=2,
                 ),
@@ -304,19 +308,15 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
             func=rf_common.penalize_dof_vel,
             weight=cfg.joint_vel_l2_weight,
         )
+        # power_penalty = RewardTermConfig(
+        #     func=rf_getup.power_penalty,
+        #     weight=cfg.power_penalty_weight,
+        #     params={"skip_steps": cfg.settle_steps},
+        # )
         self_collision_cost = RewardTermConfig(
             func=rf.self_collision_cost,
             weight=cfg.self_collision_weight,
             params={"contact_group": "self_collision", "force_threshold": 10.0},
-        )
-        # Logging-only metric (weight=0).
-        getup_success = RewardTermConfig(
-            func=rf_getup.GetupSuccessTracker,
-            weight=0.0,
-            params={
-                "desired_height": cfg.trunk_desired_height,
-                "body_name": r.trunk_body_name,
-            },
         )
 
     return _RewardsCfg()
@@ -347,7 +347,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
         # for the rationale (unbiased obs + unbiased action = symmetric).
         "randomize_body_com": EventTermConfig(
             func=ef.randomize_body_com_offset,
-            mode="reset_dr",
+            mode="startup",
             params={
                 "ranges": {
                     0: (-0.025, 0.025),
@@ -367,7 +367,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
             func=ef.randomize_friction,
             mode="startup",
             params={
-                "ranges": (0.3, 1.5),
+                "ranges": (0.8, 1.5),
                 "operation": "abs",
                 "axes": [0],
                 "distribution": "uniform",
