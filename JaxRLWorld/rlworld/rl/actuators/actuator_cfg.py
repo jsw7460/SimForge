@@ -30,7 +30,10 @@ class ActuatorBaseCfg:
             patterns to per-joint values.
         damping: D-gain for PD-based actuators [N*m*s/rad].
             Same format as stiffness.
-        effort_limit: Maximum torque [N*m].  None means no limit.
+        effort_limit: Maximum torque [N*m].  Can be a single float (applied
+            to all joints matched by ``target_names_expr``) or a dict mapping
+            joint-name regex patterns to per-joint values.  ``None`` means no
+            limit.
         velocity_limit: Maximum joint velocity [rad/s].
             Used by velocity-dependent saturation models (e.g. DCMotor).
         armature: Reflected rotor inertia added to the joint [kg*m^2].
@@ -40,7 +43,7 @@ class ActuatorBaseCfg:
     target_names_expr: tuple[str, ...] = ()
     stiffness: float | dict[str, float] | None = None
     damping: float | dict[str, float] | None = None
-    effort_limit: float | None = None
+    effort_limit: float | dict[str, float] | None = None
     velocity_limit: float | None = None
     armature: float | dict[str, float] = 0.0
     frictionloss: float = 0.0

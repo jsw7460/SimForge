@@ -42,15 +42,10 @@ class ActuatorBase(ABC):
         self._device = device
         self._joint_names = joint_names or []
 
-        # Effort limit tensor
-        if cfg.effort_limit is not None:
-            self.effort_limit = torch.full(
-                (num_envs, num_joints), cfg.effort_limit, device=device
-            )
-        else:
-            self.effort_limit = torch.full(
-                (num_envs, num_joints), float("inf"), device=device
-            )
+        # Effort limit tensor — scalar, per-joint-regex dict, or None (no limit).
+        self.effort_limit = self._resolve_per_joint_param(
+            cfg.effort_limit, default=float("inf")
+        )
 
         # Output buffers
         self.computed_effort = torch.zeros(num_envs, num_joints, device=device)

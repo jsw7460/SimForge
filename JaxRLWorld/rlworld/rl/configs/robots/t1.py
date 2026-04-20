@@ -202,6 +202,19 @@ class T1Config(RobotConfig):
         "ankle":               ARMATURE_ANKLE,
     }))
 
+    # Per-joint motor saturation torques [N*m], matching mjlab's
+    # booster_t1 ElectricActuator spec. Newton uses this to override the
+    # tighter ``actuatorfrcrange`` values in the menagerie MJCF (e.g.
+    # ankle 15/20 Nm → 50 Nm) that otherwise prevent getup from training.
+    effort_limits: Dict[str, float] = field(default_factory=lambda: _pattern_dict({
+        "neck":               EFFORT_NECK,
+        "arm":                EFFORT_ARM,
+        "waist_hip_roll_yaw": EFFORT_WAIST_HIP_ROLL_YAW,
+        "hip_pitch":          EFFORT_HIP_PITCH,
+        "knee":                EFFORT_KNEE,
+        "ankle":               EFFORT_ANKLE,
+    }))
+
     foot_names: List[str] = field(
         default_factory=lambda: ["left_foot_link", "right_foot_link"]
     )
