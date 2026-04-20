@@ -156,12 +156,38 @@ class MotionCommand(CommandTerm):
         self._writer = env.get_robot_state_writer(cfg.entity_name)
 
         prefix = cfg.body_name_prefix
+
+        def _resolve_body_name(name: str) -> str:
+            """Build a sim-appropriate lookup string for ``find_body_index``.
+
+            Genesis/Mjlab (``prefix == ""``): return the bare name —
+            Genesis does a literal dict lookup and mjlab's ``find_bodies``
+            treats a plain name as a literal regex (``"torso_link"``
+            matches body ``torso_link``).
+
+            Newton (``prefix`` like ``"g1_29dof/"``): Newton's
+            ``body_cache.get_body_indices`` uses ``re.match``, and its
+            MJCF loader stores XPath-hierarchical labels such as
+            ``g1_29dof/worldbody/pelvis/waist_yaw_link/waist_roll_link/
+            torso_link``. Wrapping as
+            ``f"{prefix}(?:.*/)?{name}$"`` lets the optional ``(?:.*/)?``
+            absorb intermediate XPath segments while ``$`` anchors the
+            match to the end of the body-name segment so a sibling like
+            ``torso_link/left_shoulder_pitch_link`` does NOT also match.
+            On URDF-loaded Newton scenes the XPath middle is empty, so
+            ``(?:.*/)?`` matches empty and the regex still accepts the
+            flat ``g1_29dof/torso_link`` layout.
+            """
+            if not prefix:
+                return name
+            return f"{prefix}(?:.*/)?{name}$"
+
         self.robot_anchor_body_index = self._rd.find_body_index(
-            prefix + cfg.anchor_body_name
+            _resolve_body_name(cfg.anchor_body_name)
         )
         self.motion_anchor_body_index = cfg.body_names.index(cfg.anchor_body_name)
         self.body_indexes = torch.tensor(
-            [self._rd.find_body_index(prefix + n) for n in cfg.body_names],
+            [self._rd.find_body_index(_resolve_body_name(n)) for n in cfg.body_names],
             dtype=torch.long,
             device=self.device,
         )
