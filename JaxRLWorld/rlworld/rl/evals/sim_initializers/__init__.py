@@ -82,60 +82,58 @@ class SimInitializer(ABC):
         return ".mp4"
 
 
-# Registry: (robot_key, sim_type) -> module path for get_config()
-# robot_key is derived from checkpoint task_name (lowercased, keywords matched)
-_PRESET_REGISTRY: dict[tuple[str, str], str] = {
-    # Go2
-    ("go2", "genesis"):  "rlworld.rl.configs.presets.go2_flat.mlp",
-    ("go2", "newton"):   "rlworld.rl.configs.presets.go2_flat.mlp",
-    ("go2", "mujoco"):   "rlworld.rl.configs.presets.go2_flat.mlp",
-    # G1 29-DOF
-    ("g1_29dof", "genesis"): "rlworld.rl.configs.presets.g1_29dof.mlp",
-    ("g1_29dof", "newton"):  "rlworld.rl.configs.presets.g1_29dof.mlp",
-    ("g1_29dof", "mujoco"):  "rlworld.rl.configs.presets.g1_29dof.mlp",
-}
-
-
 def _detect_robot_key(metadata: dict) -> str:
-    """Detect robot key from checkpoint metadata for preset lookup."""
+    """Best-effort robot identifier from checkpoint metadata.
+
+    Purely for labelling (SysID tags trajectories with this key) — the
+    cross-sim config resolver does NOT use this; it resolves via the
+    ``preset_module`` / ``preset_class_name`` fields instead.
+    """
     config = metadata.get("config", {})
     task_name = config.get("env", {}).get("task_name", "").lower()
-    # Also check action dim as a heuristic
     action_cfg = config.get("action", {})
-    num_actions = action_cfg.get("num_joint_actions", 0)
 
     if "go2" in task_name:
         return "go2"
-    elif "g1" in task_name:
+    if "g1" in task_name:
         return "g1_29dof"
+    if "t1" in task_name:
+        return "t1"
 
-    # Fallback: check dof_names length
     dof_names = action_cfg.get("actuated_dof_names", [])
     if len(dof_names) == 12:
-        return "go2"  # Go2 has 12 DOFs
-    elif len(dof_names) == 29:
+        return "go2"
+    if len(dof_names) == 29:
         return "g1_29dof"
+    if len(dof_names) in (23, 24):
+        return "t1"
 
+    num_actions = action_cfg.get("num_joint_actions", 0)
     raise ValueError(
         f"Cannot detect robot from checkpoint (task_name={task_name!r}, "
-        f"num_actions={num_actions}). Please provide eval_cfgs manually."
+        f"num_actions={num_actions})."
     )
 
 
 def resolve_cross_sim_config(metadata: dict, target_sim: str):
     """Auto-resolve a ConfigsForRun for the target simulator.
 
-    Strategy:
-        1. Read ``preset_module`` from the checkpoint (e.g.
-           ``rlworld.rl.configs.presets.go2_flat.newton.gait_conditioned``).
-        2. Replace the simulator segment with *target_sim* (e.g.
-           ``...newton.gait_conditioned`` → ``...mujoco.gait_conditioned``).
-        3. Fall back to the legacy ``_PRESET_REGISTRY`` only when the
-           checkpoint has no ``preset_module`` or the derived module does
-           not exist.
+    Both resolution paths rely on metadata injected by
+    :meth:`PresetConfig.build`:
 
-    This ensures cross-sim eval always uses the **same preset variant**
-    (e.g. gait_conditioned, mlp) as training — only the simulator changes.
+    - ``preset_module``: fully-qualified module holding the preset class
+    - ``preset_class_name``: the class within that module
+    - ``preset_kwargs``: non-default constructor kwargs captured at build
+
+    Strategy:
+        1. **Path substitution** — for sim-specific subclasses whose
+           module path contains a simulator segment (e.g.
+           ``go2_flat.newton.gait_conditioned``). Swap the segment for
+           *target_sim* and call ``get_config()`` on the new module.
+        2. **Class reinstantiation** — for unified configs (single
+           class, ``sim_type`` field selects the backend). Import the
+           stored class, re-build with ``sim_type=target_sim`` and the
+           preserved ``preset_kwargs``.
 
     Args:
         metadata: Checkpoint metadata dict.
@@ -145,6 +143,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
         A ConfigsForRun object for the target simulator and robot.
     """
     import importlib
+    from dataclasses import fields, is_dataclass
 
     sim_key = target_sim.lower()
     if sim_key in ("mjlabenv", "mjlab"):
@@ -152,18 +151,16 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
 
     _SIM_NAMES = {"genesis", "newton", "mujoco"}
 
-    # --- Strategy 1: derive from checkpoint's preset_module ---
     config_dict = metadata.get("config", {})
     preset_module_path = config_dict.get("preset_module")
+    preset_class_name = config_dict.get("preset_class_name")
 
+    # --- Strategy 1: path substitution (sim-specific subclass) ---
     if preset_module_path is not None:
         parts = preset_module_path.split(".")
-        sim_idx = None
-        for i, part in enumerate(parts):
-            if part in _SIM_NAMES:
-                sim_idx = i
-                break
-
+        sim_idx = next(
+            (i for i, p in enumerate(parts) if p in _SIM_NAMES), None
+        )
         if sim_idx is not None:
             parts[sim_idx] = sim_key
             target_module_path = ".".join(parts)
@@ -171,25 +168,33 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
                 mod = importlib.import_module(target_module_path)
                 return mod.get_config()
             except ModuleNotFoundError:
-                pass  # fall through to registry
+                pass  # fall through
 
-    # --- Strategy 2: legacy registry fallback ---
-    robot_key = _detect_robot_key(metadata)
-    key = (robot_key, sim_key)
-    if key not in _PRESET_REGISTRY:
-        available = [
-            f"{r}/{s}" for (r, s) in _PRESET_REGISTRY if r == robot_key
-        ]
-        raise ValueError(
-            f"No preset found for robot={robot_key!r} on sim={sim_key!r}. "
-            f"Checkpoint preset_module={preset_module_path!r} could not be "
-            f"mapped to target sim. "
-            f"Available fallbacks for {robot_key}: {available}. "
-            f"Please provide eval_cfgs manually."
-        )
-    module_path = _PRESET_REGISTRY[key]
-    mod = importlib.import_module(module_path)
-    return mod.get_config(sim=sim_key)
+    # --- Strategy 2: unified-config reinstantiation ---
+    if preset_module_path and preset_class_name:
+        try:
+            mod = importlib.import_module(preset_module_path)
+            cls = getattr(mod, preset_class_name, None)
+        except ModuleNotFoundError:
+            cls = None
+        if cls is not None and is_dataclass(cls):
+            field_names = {f.name for f in fields(cls)}
+            if "sim_type" in field_names:
+                kwargs = {
+                    k: v for k, v in config_dict.get("preset_kwargs", {}).items()
+                    if k in field_names
+                }
+                kwargs["sim_type"] = sim_key
+                return cls(**kwargs).build()
+
+    raise ValueError(
+        f"Could not resolve cross-sim config for target_sim={sim_key!r}. "
+        f"Checkpoint preset_module={preset_module_path!r}, "
+        f"preset_class_name={preset_class_name!r}. "
+        "Checkpoint may predate the unified-config metadata fields "
+        "(preset_module / preset_class_name / preset_kwargs). Retrain or "
+        "pass eval_cfgs manually."
+    )
 
 
 def detect_sim_type(metadata: dict) -> str:
