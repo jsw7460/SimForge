@@ -119,7 +119,7 @@
   </link>
   <joint
     name="AAHead_yaw"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0.0056 0 0.2149"
       rpy="0 0 0" />
@@ -140,17 +140,17 @@
     name="Head_2">
     <inertial>
       <origin
-        xyz="0.011042 -0.00092871 0.080698"
+        xyz="0.006640 0.000764 0.072506"
         rpy="0 0 0" />
       <mass
-        value="0.70" />
+        value="0.781574" />
       <inertia
-        ixx="0.005927"
-        ixy="-0.000012"
-        ixz="0.000664"
-        iyy="0.005776"
-        iyz="-0.000033"
-        izz="0.001807" />
+        ixx="0.006825"
+        ixy="-0.000002"
+        ixz="0.000481"
+        iyy="0.005840"
+        iyz="0.000048"
+        izz="0.002900" />
     </inertial>
     <visual>
       <origin
@@ -158,7 +158,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Head_2.STL" />
+          filename="meshes/Head_2_ZED.STL" />
       </geometry>
       <material
         name="">
@@ -172,13 +172,13 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="meshes/Head_2.STL" />
+          filename="meshes/Head_2_ZED.STL" />
       </geometry>
     </collision>
   </link>
   <joint
     name="Head_pitch"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 0 0.033"
       rpy="0 0 0" />
@@ -228,7 +228,7 @@
   </link>
   <joint
     name="ALeft_Shoulder_Pitch"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 0.077 0.1845"
       rpy="0 0 0" />
@@ -286,7 +286,7 @@
   </link>
   <joint
     name="Left_Shoulder_Roll"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0.0025 0.068 -0.0135"
       rpy="0 0 0" />
@@ -345,7 +345,7 @@
   </link>
   <joint
     name="Left_Elbow_Pitch"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 0.044428 0"
       rpy="0 0 0" />
@@ -404,7 +404,7 @@
   </link>
   <joint
     name="Left_Elbow_Yaw"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 0.1215 0"
       rpy="0 0 0" />
@@ -455,7 +455,7 @@
   </link>
   <joint
     name="ARight_Shoulder_Pitch"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 -0.077 0.1845"
       rpy="0 0 0" />
@@ -513,7 +513,7 @@
   </link>
   <joint
     name="Right_Shoulder_Roll"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0.0025 -0.068 -0.0135"
       rpy="0 0 0" />
@@ -572,7 +572,7 @@
   </link>
   <joint
     name="Right_Elbow_Pitch"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 -0.044428 0"
       rpy="0 0 0" />
@@ -631,7 +631,7 @@
   </link>
   <joint
     name="Right_Elbow_Yaw"
-    type="fixed">
+    type="revolute">
     <origin
       xyz="0 -0.1215 0"
       rpy="0 0 0" />
