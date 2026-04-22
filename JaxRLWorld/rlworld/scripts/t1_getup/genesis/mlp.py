@@ -1,8 +1,4 @@
 """Train T1 fall-recovery (getup) policy in Genesis."""
-
-import ipdb
-import numpy as np
-
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from rlworld.rl.runners import BaseRunner
 

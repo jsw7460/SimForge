@@ -328,39 +328,6 @@ class T1GetupConfig:
                     },
                 )
             )
-            # Replaces the old energy_termination curriculum (commented
-            # out below). Ramps the power-penalty reward weight as
-            # training progresses
-            # power_penalty_weight: CurriculumTermConfig = field(
-            #     default_factory=lambda: CurriculumTermConfig(
-            #         func=reward_curriculum,
-            #         params={
-            #             "reward_name": "power_penalty",
-            #             "stages": [
-            #                 {"step": 0,         "weight": 0.0},
-            #                 {"step": 900 * 24,  "weight": 1e-4},
-            #                 {"step": 1200 * 24, "weight": 3e-4},
-            #                 {"step": 1500 * 24, "weight": 7e-4},
-            #                 {"step": 1700 * 24, "weight": 1e-3},
-            #             ],
-            #         },
-            #     )
-            # )
-            # energy_threshold: CurriculumTermConfig = field(
-            #     default_factory=lambda: CurriculumTermConfig(
-            #         func=termination_curriculum,
-            #         params={
-            #             "termination_name": "energy",
-            #             "stages": [
-            #                 {"step": 900 * 24,  "params": {"threshold": 3000.0}},
-            #                 {"step": 1200 * 24, "params": {"threshold": 2000.0}},
-            #                 {"step": 1500 * 24, "params": {"threshold": 1500.0}},
-            #                 {"step": 1700 * 24, "params": {"threshold": 1000.0}},
-            #                 {"step": 2200 * 24, "params": {"threshold":  700.0}},
-            #             ],
-            #         },
-            #     )
-            # )
 
         return _CurriculumCfg()
 

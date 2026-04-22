@@ -60,27 +60,27 @@ def main():
         extra_overrides=overrides,
     )
 
-    env = evaluator.env
-    robot = env.scene_manager.scene["robot"]
-
-    # Low foot-ground contact friction.
-    foot_geom_names = ("FR_foot_collision", "FL_foot_collision",
-                       "RR_foot_collision", "RL_foot_collision")
-    local_geom_ids, _ = robot.find_geoms(foot_geom_names)
-    foot_geom_ids = robot.indexing.geom_ids[local_geom_ids]
-    env.scene_manager.model.geom_friction[:, foot_geom_ids, 0] = 1.0
-
-    # High leg-joint Coulomb friction (dof_frictionloss, N·m).
-    # Go2 XML default is 0.2 N·m per joint; we set it higher here.
-    leg_joint_names = (
-        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-    )
-    local_joint_ids, _ = robot.find_joints(leg_joint_names)
-    dof_ids = robot.indexing.joint_v_adr[local_joint_ids]
-    env.scene_manager.model.dof_frictionloss[:, dof_ids] = 10010.8
+    # env = evaluator.env
+    # robot = env.scene_manager.scene["robot"]
+    #
+    # # Low foot-ground contact friction.
+    # foot_geom_names = ("FR_foot_collision", "FL_foot_collision",
+    #                    "RR_foot_collision", "RL_foot_collision")
+    # local_geom_ids, _ = robot.find_geoms(foot_geom_names)
+    # foot_geom_ids = robot.indexing.geom_ids[local_geom_ids]
+    # env.scene_manager.model.geom_friction[:, foot_geom_ids, 0] = 0.3
+    #
+    # # High leg-joint Coulomb friction (dof_frictionloss, N·m).
+    # # Go2 XML default is 0.2 N·m per joint; we set it higher here.
+    # leg_joint_names = (
+    #     "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+    #     "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+    #     "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+    #     "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+    # )
+    # local_joint_ids, _ = robot.find_joints(leg_joint_names)
+    # dof_ids = robot.indexing.joint_v_adr[local_joint_ids]
+    # env.scene_manager.model.dof_frictionloss[:, dof_ids] = 0.8
 
     if args.eval:
         stats = evaluator.evaluate()
