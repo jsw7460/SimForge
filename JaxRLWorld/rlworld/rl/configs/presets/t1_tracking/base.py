@@ -231,8 +231,7 @@ class T1TrackingConfig:
 
     # ── Shared build methods ──────────────────────────────────────────
     def _build_command_config(self, builders) -> CommandConfig:
-        """Single motion command; sim-specific prefix via the builder module."""
-        prefix = getattr(builders, "BODY_NAME_PREFIX", "")
+        """Single motion command."""
         return CommandConfig(
             terms={
                 "motion": MotionCommandCfg(
@@ -240,7 +239,6 @@ class T1TrackingConfig:
                     anchor_body_name=self.anchor_body_name,
                     body_names=self.body_names,
                     entity_name="robot",
-                    body_name_prefix=prefix,
                     pose_range=self.pose_range,
                     velocity_range=self.velocity_range,
                     joint_position_range=self.joint_position_range,

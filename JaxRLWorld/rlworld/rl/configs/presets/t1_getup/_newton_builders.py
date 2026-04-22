@@ -134,7 +134,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 collapse_fixed_joints=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        ImplicitActuatorCfg(
+                        IdealPDActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
@@ -146,12 +146,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                     ),
                 ),
                 body_label_prefix=r.name,
-                # ``.*`` prefix wraps the bare body name as a regex so
-                # Newton's ``_find_body_by_name`` (fullmatch) resolves
-                # correctly under both flat URDF labels
-                # (``T1/Trunk``) and hierarchical MJCF labels
-                # (``T1/worldbody/Trunk``).
-                sites={"imu_site_base": f".*{r.base_link_name}"},
+                sites={"imu_site_base": r.base_link_name},
                 enable_self_collisions=True
             ),
         },
@@ -244,12 +239,12 @@ def build_action(cfg: "T1GetupConfig") -> NewtonActionConfig:
 
     r = cfg.robot
     return NewtonActionConfig(
-        actuated_dof_names=r.prefixed_actuated_dof_patterns,
+        actuated_dof_names=r.actuated_dof_patterns,
         clip_actions=(-100.0, 100.0),
         action_terms={
             "body": SettleRelativeJointPositionActionCfg(
                 class_type=SettleRelativeJointPositionAction,
-                joint_names=list(r.prefixed_actuated_dof_patterns),
+                joint_names=list(r.actuated_dof_patterns),
                 scale=cfg.action_scale,
                 clip=(-100.0, 100.0),
                 settle_steps=cfg.settle_steps,
@@ -276,7 +271,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
             weight=cfg.trunk_height_weight,
             params={
                 "desired_height": cfg.trunk_desired_height,
-                "body_name": r.prefixed(f".*{r.trunk_body_name}"),
+                "body_name": f".*{r.trunk_body_name}",
             },
         )
         waist_height = RewardTermConfig(
@@ -284,7 +279,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
             weight=cfg.waist_height_weight,
             params={
                 "desired_height": cfg.waist_desired_height,
-                "body_name": r.prefixed(f".*{r.waist_body_name}"),
+                "body_name": f".*{r.waist_body_name}",
             },
         )
         gated_posture = RewardTermConfig(
@@ -353,7 +348,7 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
-                "body_patterns": (r.prefixed(f".*{r.trunk_body_name}"),),
+                "body_patterns": (f".*{r.trunk_body_name}",),
             },
         ),
         # Slide: randomize across all robot shapes (body_patterns=None).

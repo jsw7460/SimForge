@@ -68,7 +68,6 @@ if TYPE_CHECKING:
 
 CONFIGS_FOR_RUN_CLS = GenesisConfigsForRun
 OBSERVATION_CFG_CLS = ObservationConfig
-BODY_NAME_PREFIX = ""
 
 
 def build_visualization(cfg: "T1TrackingConfig") -> VisualizationConfig:

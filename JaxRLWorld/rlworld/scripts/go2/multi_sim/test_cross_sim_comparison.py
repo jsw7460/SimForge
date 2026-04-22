@@ -122,7 +122,7 @@ def _newton_reward_terms():
     from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_n
 
     robot = Go2Config()
-    feet = robot.prefixed_foot_names
+    feet = robot.foot_names
 
     return OrderedDict({
         "track_lin_vel": RewardTermConfig(

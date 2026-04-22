@@ -1,10 +1,7 @@
 """Newton-specific builders for G1 motion tracking task.
 
 Dispatched from :meth:`G1TrackingConfig.build` when
-``sim_type == "newton"``. Newton labels bodies with the entity name as
-a prefix (``"g1_29dof/..."``), so ``BODY_NAME_PREFIX`` is passed into
-MotionCommandCfg to resolve config body names against the sim's
-namespace.
+``sim_type == "newton"``.
 """
 from __future__ import annotations
 
@@ -69,10 +66,6 @@ if TYPE_CHECKING:
 
 CONFIGS_FOR_RUN_CLS = NewtonConfigsForRun
 OBSERVATION_CFG_CLS = NewtonObservationConfig
-
-# Newton resolves body names against ``<entity_name>/<body>`` labels.
-# G1MujocoConfig.name == "g1_29dof", hence the prefix below.
-BODY_NAME_PREFIX = "g1_29dof/"
 
 
 def _initial_quat() -> Any:
@@ -248,10 +241,10 @@ def build_action(cfg: "G1TrackingConfig") -> NewtonActionConfig:
     """
     r = cfg.robot
     return NewtonActionConfig(
-        actuated_dof_names=r.prefixed_actuated_dof_patterns,
-        action_scale=r.prefixed_action_scale,
+        actuated_dof_names=r.actuated_dof_patterns,
+        action_scale=r.action_scale,
         clip_actions=(-100.0, 100.0),
-        offset=r.get_prefixed_action_offset(),
+        offset=r.get_action_offset(),
     )
 
 
@@ -326,7 +319,7 @@ def build_dr_terms(cfg: "G1TrackingConfig") -> Dict[str, EventTermConfig]:
                     1: (-0.05, 0.05),
                     2: (-0.05, 0.05),
                 },
-                "body_patterns": (r.prefixed("torso_link"),),
+                "body_patterns": ("torso_link",),
             },
         ),
         "randomize_joint_friction": EventTermConfig(

@@ -98,10 +98,10 @@ class G1MujocoConfig(RobotConfig):
         ".*_knee_joint": 0.669,
         ".*_ankle_pitch_joint": -0.363,
         ".*_elbow_joint": 0.6,
-        "left_shoulder_roll_joint": 0.2,
-        "left_shoulder_pitch_joint": 0.2,
-        "right_shoulder_roll_joint": -0.2,
-        "right_shoulder_pitch_joint": 0.2,
+        ".*left_shoulder_roll_joint": 0.2,
+        ".*left_shoulder_pitch_joint": 0.2,
+        ".*right_shoulder_roll_joint": -0.2,
+        ".*right_shoulder_pitch_joint": 0.2,
     })
 
     actuated_dof_patterns: List[str] = field(
@@ -115,11 +115,11 @@ class G1MujocoConfig(RobotConfig):
     p_gains: Dict[str, float] = field(default_factory=lambda: {
         ".*_hip_pitch_joint": STIFFNESS_7520_14,
         ".*_hip_yaw_joint": STIFFNESS_7520_14,
-        "waist_yaw_joint": STIFFNESS_7520_14,
+        ".*waist_yaw_joint": STIFFNESS_7520_14,
         ".*_hip_roll_joint": STIFFNESS_7520_22,
         ".*_knee_joint": STIFFNESS_7520_22,
-        "waist_pitch_joint": STIFFNESS_WAIST,
-        "waist_roll_joint": STIFFNESS_WAIST,
+        ".*waist_pitch_joint": STIFFNESS_WAIST,
+        ".*waist_roll_joint": STIFFNESS_WAIST,
         ".*_ankle_pitch_joint": STIFFNESS_ANKLE,
         ".*_ankle_roll_joint": STIFFNESS_ANKLE,
         ".*_shoulder_pitch_joint": STIFFNESS_5020,
@@ -134,11 +134,11 @@ class G1MujocoConfig(RobotConfig):
     d_gains: Dict[str, float] = field(default_factory=lambda: {
         ".*_hip_pitch_joint": DAMPING_7520_14,
         ".*_hip_yaw_joint": DAMPING_7520_14,
-        "waist_yaw_joint": DAMPING_7520_14,
+        ".*waist_yaw_joint": DAMPING_7520_14,
         ".*_hip_roll_joint": DAMPING_7520_22,
         ".*_knee_joint": DAMPING_7520_22,
-        "waist_pitch_joint": DAMPING_WAIST,
-        "waist_roll_joint": DAMPING_WAIST,
+        ".*waist_pitch_joint": DAMPING_WAIST,
+        ".*waist_roll_joint": DAMPING_WAIST,
         ".*_ankle_pitch_joint": DAMPING_ANKLE,
         ".*_ankle_roll_joint": DAMPING_ANKLE,
         ".*_shoulder_pitch_joint": DAMPING_5020,
@@ -153,11 +153,11 @@ class G1MujocoConfig(RobotConfig):
     armature: Dict[str, float] = field(default_factory=lambda: {
         ".*_hip_pitch_joint": ARMATURE_7520_14,
         ".*_hip_yaw_joint": ARMATURE_7520_14,
-        "waist_yaw_joint": ARMATURE_7520_14,
+        ".*waist_yaw_joint": ARMATURE_7520_14,
         ".*_hip_roll_joint": ARMATURE_7520_22,
         ".*_knee_joint": ARMATURE_7520_22,
-        "waist_pitch_joint": ARMATURE_WAIST,
-        "waist_roll_joint": ARMATURE_WAIST,
+        ".*waist_pitch_joint": ARMATURE_WAIST,
+        ".*waist_roll_joint": ARMATURE_WAIST,
         ".*_ankle_pitch_joint": ARMATURE_ANKLE,
         ".*_ankle_roll_joint": ARMATURE_ANKLE,
         ".*_shoulder_pitch_joint": ARMATURE_5020,
@@ -174,9 +174,5 @@ class G1MujocoConfig(RobotConfig):
     )
 
     @property
-    def prefixed_foot_names(self) -> tuple[str, ...]:
-        return self.prefixed_list(self.foot_names)
-
-    @property
-    def prefixed_action_scale(self) -> Dict[str, float]:
-        return {f"{self.name}/{k}": v for k, v in G1_ACTION_SCALE.items()}
+    def action_scale(self) -> Dict[str, float]:
+        return dict(G1_ACTION_SCALE)

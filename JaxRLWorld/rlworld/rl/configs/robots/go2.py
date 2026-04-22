@@ -88,7 +88,3 @@ class Go2Config(RobotConfig):
     foot_names: List[str] = field(default_factory=lambda: [
         "FR_foot", "FL_foot", "RR_foot", "RL_foot"
     ])
-
-    @property
-    def prefixed_foot_names(self) -> tuple[str, ...]:
-        return self.prefixed_list(self.foot_names)

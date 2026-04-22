@@ -1,40 +1,34 @@
-"""Newton body/joint label canonicalization.
+"""Newton body/joint label canonicalization — leaf-name extraction.
 
-Newton's MJCF loader stores labels as full XPath hierarchies
-(``g1_29dof/worldbody/pelvis/left_hip_pitch_link/left_hip_pitch_joint``)
-while its URDF loader stores flat labels
-(``g1_29dof/left_hip_pitch_joint``). Downstream code (regex matching
-in :mod:`rlworld.rl.utils.string`, user-side joint / body pattern
-configs, DR body_patterns, site lookups, motion command body
-resolution) is dramatically simpler when both paths produce the same
-shape, so scene-manager-level canonicalization pays back many times
-over. Same insight IsaacLab's Newton integration relies on — their
-``ArticulationView.joint_dof_names`` / ``link_names`` only ever
-present flat names to user code.
+Newton's MJCF loader stores labels as XPath hierarchies
+(``g1_29dof/worldbody/pelvis/left_hip_pitch_link/left_hip_pitch_joint``);
+URDF loader stores ``{entity}/{name}`` (``g1_29dof/left_hip_pitch_joint``).
+We canonicalize both down to the bare leaf name
+(``left_hip_pitch_joint``) so every downstream consumer — builder-time
+site / PD-gain application, model-time ArticulationIndexing, body
+cache, DR / reset / contact lookups — sees the same name format that
+Newton's ``ArticulationView.link_names`` / ``joint_dof_names``
+already expose. This matches IsaacLab's Newton integration, which
+feeds bare names from ArticulationView directly into user-facing
+config.
 
-We canonicalize to ``"{entity_prefix}/{leaf_segment}"``: keep the
-first slash-delimited segment (the entity prefix such as
-``g1_29dof/``) and the last (the joint or body leaf name), dropping
-anything in between. This lets user-facing regex patterns stay as
-simple as they were under the URDF layout — ``left_.*`` instead of
-``(?:.*/)?left_(?!...).*$`` — and keeps the URDF flat path working
-unchanged (flattening a label that is already flat is a no-op).
+Prefix-based multi-robot namespacing is replaced by per-entity
+``ArticulationView`` instances that filter by ``body_label_prefix``
+at view-construction time, so joint / body name collisions between
+robots are resolved by which view you query, not by mangling the
+names themselves.
 """
 from __future__ import annotations
 
 
-def flatten_xpath_label(label: str) -> str:
-    """Collapse Newton MJCF XPath labels to ``{prefix}/{leaf}``.
+def leaf_name(label: str) -> str:
+    """Return the leaf segment of a slash-delimited Newton label.
 
-    Single-segment labels (e.g. the Newton-internal ``floating_base``)
-    are returned unchanged. Labels with two or more segments keep only
-    the first and the last, e.g.
+    Mirrors Newton ``ArticulationView.get_name_from_label`` (selection.py:374).
 
-        ``g1_29dof/worldbody/pelvis/left_hip_pitch_link/left_hip_pitch_joint``
-        → ``g1_29dof/left_hip_pitch_joint``
-        ``g1_29dof/left_hip_pitch_joint`` → unchanged (already flat)
+    Examples:
+        ``g1_29dof/worldbody/pelvis/.../left_hip_pitch_joint`` → ``left_hip_pitch_joint``
+        ``g1_29dof/left_hip_pitch_joint`` → ``left_hip_pitch_joint``
+        ``floating_base`` → ``floating_base``
     """
-    parts = label.split("/")
-    if len(parts) <= 1:
-        return label
-    return f"{parts[0]}/{parts[-1]}"
+    return label.rsplit("/", maxsplit=1)[-1]

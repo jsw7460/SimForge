@@ -3,9 +3,6 @@
 Dispatched from :meth:`T1TrackingConfig.build` when
 ``sim_type == "newton"``. Mirrors ``t1_getup/_newton_builders.py``
 structure but swaps in the motion-tracking MDP terms.
-
-Newton resolves body names with the entity prefix baked in, so
-``BODY_NAME_PREFIX = "T1/"`` is fed into MotionCommandCfg.
 """
 from __future__ import annotations
 
@@ -74,9 +71,6 @@ if TYPE_CHECKING:
 
 CONFIGS_FOR_RUN_CLS = NewtonConfigsForRun
 OBSERVATION_CFG_CLS = NewtonObservationConfig
-
-# Newton resolves body names against ``<entity_name>/<body>`` labels.
-BODY_NAME_PREFIX = "T1/"
 
 
 def _initial_quat() -> Any:
@@ -161,7 +155,7 @@ def build_scene(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> NewtonSceneC
                     ),
                 ),
                 body_label_prefix=r.name,
-                sites={"imu_site_base": f".*{r.base_link_name}"},
+                sites={"imu_site_base": r.base_link_name},
                 enable_self_collisions=True,
             ),
         },
@@ -268,12 +262,12 @@ def build_action(cfg: "T1TrackingConfig") -> NewtonActionConfig:
 
     r = cfg.robot
     return NewtonActionConfig(
-        actuated_dof_names=r.prefixed_actuated_dof_patterns,
+        actuated_dof_names=r.actuated_dof_patterns,
         clip_actions=(-100.0, 100.0),
         action_terms={
             "body": SettleRelativeJointPositionActionCfg(
                 class_type=SettleRelativeJointPositionAction,
-                joint_names=list(r.prefixed_actuated_dof_patterns),
+                joint_names=list(r.actuated_dof_patterns),
                 scale=cfg.action_scale,
                 clip=(-100.0, 100.0),
                 settle_steps=cfg.settle_steps,

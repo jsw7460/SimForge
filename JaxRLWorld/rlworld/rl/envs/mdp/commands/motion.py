@@ -155,35 +155,25 @@ class MotionCommand(CommandTerm):
         self._rd = env.get_robot_data(cfg.entity_name)
         self._writer = env.get_robot_state_writer(cfg.entity_name)
 
-        prefix = cfg.body_name_prefix
-        self.robot_anchor_body_index = self._rd.find_body_index(
-            prefix + cfg.anchor_body_name
-        )
+        self.robot_anchor_body_index = self._rd.find_body_index(cfg.anchor_body_name)
         self.motion_anchor_body_index = cfg.body_names.index(cfg.anchor_body_name)
         self.body_indexes = torch.tensor(
-            [self._rd.find_body_index(prefix + n) for n in cfg.body_names],
+            [self._rd.find_body_index(n) for n in cfg.body_names],
             dtype=torch.long,
             device=self.device,
         )
 
-        # Resolve the actuated-joint order expected by this sim's
-        # RobotStateWriter. ``env.act_manager.actuated_joint_names`` is
-        # the single canonical list (same contract for Newton, Genesis,
-        # Mjlab). Strip the sim-specific entity prefix so the names line
-        # up with the NPZ's bare-name joint list from
-        # ``mujoco_replayer``. Newton scene manager canonicalizes MJCF
-        # XPath labels to flat ``{prefix}/{leaf}`` form on build, so a
-        # simple prefix strip suffices across both Newton loaders.
-        actuated = list(env.act_manager.actuated_joint_names)
-        if prefix and all(n.startswith(prefix) for n in actuated):
-            bare_joint_names = tuple(n[len(prefix):] for n in actuated)
-        else:
-            bare_joint_names = tuple(actuated)
+        # ``env.act_manager.actuated_joint_names`` is the canonical
+        # actuated-joint order across Newton / Genesis / Mjlab. The
+        # Newton scene manager now canonicalises labels to bare leaf
+        # names (IsaacLab convention), so this list lines up directly
+        # with the NPZ's bare-name joint list from ``mujoco_replayer``.
+        joint_names = tuple(env.act_manager.actuated_joint_names)
 
         self.motion = MotionLoader(
             cfg.motion_file,
             cfg.body_names,
-            joint_names_cfg=bare_joint_names,
+            joint_names_cfg=joint_names,
             device=self.device,
         )
 
@@ -620,11 +610,6 @@ class MotionCommandCfg(CommandTermCfg):
     entity_name: str = "robot"
     """Scene entity name; passed to
     ``env.get_robot_data()`` / ``env.get_robot_state_writer()``."""
-
-    body_name_prefix: str = ""
-    """Prefix prepended to ``body_names`` / ``anchor_body_name`` when
-    resolving against the simulator's body namespace. Newton prepends the
-    entity prefix (e.g. ``"T1/"``); mjlab / Genesis use ``""``."""
 
     pose_range: dict[str, tuple[float, float]] = field(default_factory=dict)
     """Per-axis RSI ranges for root pose. Keys: ``x`` / ``y`` / ``z``

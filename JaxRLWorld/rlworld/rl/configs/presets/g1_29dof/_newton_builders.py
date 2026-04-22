@@ -167,7 +167,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConfi
 
 
 def build_observation(cfg: "G1FlatConfig") -> NewtonObservationConfig:
-    feet_bodies = tuple(cfg.robot.prefixed_foot_names)
+    feet_bodies = tuple(cfg.robot.foot_names)
 
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
@@ -222,10 +222,10 @@ def build_observation(cfg: "G1FlatConfig") -> NewtonObservationConfig:
 def build_action(cfg: "G1FlatConfig") -> NewtonActionConfig:
     r = cfg.robot
     return NewtonActionConfig(
-        actuated_dof_names=r.prefixed_actuated_dof_patterns,
-        action_scale=r.prefixed_action_scale,
+        actuated_dof_names=r.actuated_dof_patterns,
+        action_scale=r.action_scale,
         clip_actions=(-100.0, 100.0),
-        offset=r.get_prefixed_action_offset(),
+        offset=r.get_action_offset(),
     )
 
 
@@ -312,7 +312,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
         body_angular_velocity_penalty = RewardTermConfig(
             func=rf_mjlab.body_ang_vel_penalty_mjlab,
             weight=0.05,
-            params={"body_name": r.prefixed("torso_link")},
+            params={"body_name": "torso_link"},
         )
         angular_momentum_penalty = RewardTermConfig(
             func=rf_mjlab.angular_momentum_penalty,
@@ -332,7 +332,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
             func=rf_mjlab.feet_clearance_mjlab,
             weight=2.0,
             params={
-                "feet_bodies": r.prefixed_foot_names,
+                "feet_bodies": r.foot_names,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -341,7 +341,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
             func=rf_mjlab.feet_swing_height_mjlab,
             weight=0.25,
             params={
-                "feet_bodies": r.prefixed_foot_names,
+                "feet_bodies": r.foot_names,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -350,7 +350,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
             func=rf_mjlab.feet_slip_mjlab,
             weight=0.1,
             params={
-                "feet_bodies": r.prefixed_foot_names,
+                "feet_bodies": r.foot_names,
                 "command_threshold": 0.05,
             },
         )
@@ -358,7 +358,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
             func=rf_mjlab.soft_landing_mjlab,
             weight=1e-5,
             params={
-                "feet_bodies": r.prefixed_foot_names,
+                "feet_bodies": r.foot_names,
                 "command_threshold": 0.05,
             },
         )
@@ -379,7 +379,7 @@ def build_dr_terms(cfg: "G1FlatConfig") -> Dict[str, EventTermConfig]:
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
-                "body_patterns": (r.prefixed("torso_link"),),
+                "body_patterns": ("torso_link",),
             },
         ),
         "randomize_joint_friction": EventTermConfig(

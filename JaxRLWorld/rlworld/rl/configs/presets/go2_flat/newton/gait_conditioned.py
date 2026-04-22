@@ -70,11 +70,11 @@ class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
 
     def _build_gait_config(self) -> GaitConfig:
         return GaitConfig(
-            foot_names=self.robot.prefixed_foot_names,
+            foot_names=self.robot.foot_names,
             offset_mode="command",
             freq_command="gait_freq",
             duration_command="gait_duration",
-            foot_offset_provider=QuadrupedOffsets(foot_names=self.robot.prefixed_foot_names),
+            foot_offset_provider=QuadrupedOffsets(foot_names=self.robot.foot_names),
         )
 
     def _build_reward_config(self) -> RewardConfig:

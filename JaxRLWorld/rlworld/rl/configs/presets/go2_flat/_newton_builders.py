@@ -62,7 +62,7 @@ OBSERVATION_CFG_CLS = NewtonObservationConfig
 
 def get_foot_names(robot) -> tuple[str, ...]:
     """Newton uses prefixed foot names (e.g. ``go2_description/FL_foot``)."""
-    return robot.prefixed_foot_names
+    return robot.foot_names
 
 
 def _initial_quat() -> Any:
@@ -159,7 +159,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
             NewtonContactSensorConfig(
                 entity_name="robot",
                 sensor_name="foot_contact",
-                sensing_obj_bodies=list(r.prefixed_foot_names),
+                sensing_obj_bodies=list(r.foot_names),
             ),
             NewtonContactSensorConfig(
                 entity_name="robot",
@@ -177,16 +177,16 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
 def build_action(cfg: "Go2FlatConfig") -> NewtonActionConfig:
     r = cfg.robot
     return NewtonActionConfig(
-        actuated_dof_names=r.prefixed_actuated_dof_patterns,
+        actuated_dof_names=r.actuated_dof_patterns,
         action_scale=GO2_ACTION_SCALE,
         clip_actions=(-100.0, 100.0),
-        offset=r.get_prefixed_action_offset(),
+        offset=r.get_action_offset(),
     )
 
 
 def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
     r = cfg.robot
-    feet = list(r.prefixed_foot_names)
+    feet = list(r.foot_names)
 
     @dataclass
     class _RewardsCfg(RewardConfig):
@@ -295,7 +295,7 @@ def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
             params={
                 "mass_range": (0.8, 1.2),
                 "operation": "scale",
-                "body_patterns": r.prefixed("base"),
+                "body_patterns": "base",
             },
         ),
         "randomize_friction": EventTermConfig(

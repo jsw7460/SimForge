@@ -8,6 +8,7 @@ import warp as wp
 import newton
 from newton.sensors import SensorContact
 from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
+from rlworld.rl.envs.utils.newton.label import leaf_name
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -42,7 +43,11 @@ class NewtonContactManager(BaseContactManager):
             n_per_env = len(sensor.sensing_obj_idx) // world_count
             first_env_indices = sensor.sensing_obj_idx[:n_per_env]
 
-            names = [label_list[idx] for idx in first_env_indices]
+            # Canonicalise to bare leaf names so user patterns
+            # (``"FR_foot"``, ``".*_foot"``) resolve uniformly across
+            # URDF-flat labels (``"go2_description/FR_foot"``) and
+            # MJCF-XPath labels (``"g1_29dof/worldbody/.../torso_link"``).
+            names = [leaf_name(label_list[idx]) for idx in first_env_indices]
 
             self._group_sensors[sensor_name] = sensor
             self._register_group(sensor_name, names)

@@ -67,7 +67,6 @@ if TYPE_CHECKING:
 
 CONFIGS_FOR_RUN_CLS = MujocoConfigsForRun
 OBSERVATION_CFG_CLS = MujocoObservationConfig
-BODY_NAME_PREFIX = ""
 
 
 def build_visualization(cfg: "T1TrackingConfig") -> VisualizationConfig:

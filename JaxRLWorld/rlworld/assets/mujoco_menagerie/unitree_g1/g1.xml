@@ -1,4 +1,4 @@
-<mujoco model="g1_29dof_rev_1_0">
+<mujoco model="g1_29dof">
   <compiler angle="radian" meshdir="assets"/>
 
   <option integrator="implicitfast"/>

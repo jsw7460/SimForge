@@ -5,7 +5,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Dict
 
-import ipdb
 import numpy as np
 import torch
 import warp as wp
@@ -16,7 +15,7 @@ from newton.selection import ArticulationView
 from newton.sensors import SensorContact
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
-from rlworld.rl.envs.utils.newton.label import flatten_xpath_label
+from rlworld.rl.envs.utils.newton.label import leaf_name
 from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
@@ -74,7 +73,11 @@ def apply_joint_params_by_pattern(
     effort_limit_map = effort_limit_map or {}
     num_joints = len(builder.joint_label)
 
-    for joint_idx, joint_name in enumerate(builder.joint_label):
+    for joint_idx, joint_label_raw in enumerate(builder.joint_label):
+        # Canonicalize to bare leaf so regex patterns in ke_map etc. can
+        # use bare joint names (``waist_yaw_joint``, ``.*_hip_pitch_joint``)
+        # regardless of URDF-flat vs MJCF-XPath layout.
+        joint_name = leaf_name(joint_label_raw)
         if joint_idx < num_joints - 1:
             dof_count = builder.joint_qd_start[joint_idx + 1] - builder.joint_qd_start[joint_idx]
         else:
@@ -111,7 +114,6 @@ def apply_joint_params_by_pattern(
                 for d in range(dof_count):
                     builder.joint_effort_limit[dof_start + d] = value
                 break
-
 
 def _state_assign_full(
     dst: newton.State,
@@ -302,11 +304,16 @@ class NewtonSceneManager(BaseManager):
         symmetry but the lookup is always against the model-wide body
         label list.
         """
-        num_bodies_per_env = len(self.model.body_label) // self.env.num_envs
-        bodies_key = self.model.body_label[:num_bodies_per_env]
-
+        # Source body names from ArticulationView — bare leaf names,
+        # shared across worlds. Avoids per-Newton-loader XPath quirks.
+        view = self.articulation_views.get(entity_name, self.articulation_views.get("robot"))
+        if view is None:
+            raise ValueError(
+                f"No ArticulationView for entity {entity_name!r}; "
+                "did build_scene() run?"
+            )
         _, names = string_utils.resolve_matching_names(
-            body_names, bodies_key, preserve_order=True
+            body_names, list(view.link_names), preserve_order=True
         )
         return names
 
@@ -458,46 +465,44 @@ class NewtonSceneManager(BaseManager):
         armature_map: dict[str, float] = {}
         effort_limit_map: dict[str, float] = {}
 
-        def _prefixed(d: dict[str, float]) -> dict[str, float]:
-            """Add body_label_prefix to regex keys."""
-            if not prefix:
-                return d
-            return {f"{prefix}/{k}": v for k, v in d.items()}
+        # ``apply_joint_params_by_pattern`` canonicalises candidate
+        # joint labels via ``leaf_name()`` before regex-matching, so
+        # the maps here must hold *bare* patterns (IsaacLab convention):
+        # ``".*_hip_joint"`` not ``"<entity>/.*_hip_joint"``.
 
         for act_cfg in cfg.articulation.actuators:
             is_explicit = not isinstance(act_cfg, ImplicitActuatorCfg)
 
             if is_explicit:
                 for pattern in act_cfg.target_names_expr:
-                    key = f"{prefix}/{pattern}" if prefix else pattern
-                    ke_map[key] = 0.0
-                    kd_map[key] = 0.0
+                    ke_map[pattern] = 0.0
+                    kd_map[pattern] = 0.0
             else:
                 if isinstance(act_cfg.stiffness, dict):
-                    ke_map.update(_prefixed(act_cfg.stiffness))
+                    ke_map.update(act_cfg.stiffness)
                 elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
                     for pattern in act_cfg.target_names_expr:
-                        ke_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.stiffness
+                        ke_map[pattern] = act_cfg.stiffness
 
                 if isinstance(act_cfg.damping, dict):
-                    kd_map.update(_prefixed(act_cfg.damping))
+                    kd_map.update(act_cfg.damping)
                 elif act_cfg.damping is not None and act_cfg.damping > 0:
                     for pattern in act_cfg.target_names_expr:
-                        kd_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.damping
+                        kd_map[pattern] = act_cfg.damping
 
             if isinstance(act_cfg.armature, dict):
-                armature_map.update(_prefixed(act_cfg.armature))
+                armature_map.update(act_cfg.armature)
             elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
                 for pattern in act_cfg.target_names_expr:
-                    armature_map[f"{prefix}/{pattern}" if prefix else pattern] = act_cfg.armature
+                    armature_map[pattern] = act_cfg.armature
 
             # Effort limit — overrides XML's actuatorfrcrange (which becomes
             # joint.actfrcrange in Newton's MuJoCo solver).
             if isinstance(act_cfg.effort_limit, dict):
-                effort_limit_map.update(_prefixed(act_cfg.effort_limit))
+                effort_limit_map.update(act_cfg.effort_limit)
             elif isinstance(act_cfg.effort_limit, (int, float)) and act_cfg.effort_limit > 0:
                 for pattern in act_cfg.target_names_expr:
-                    effort_limit_map[f"{prefix}/{pattern}" if prefix else pattern] = float(act_cfg.effort_limit)
+                    effort_limit_map[pattern] = float(act_cfg.effort_limit)
 
         if ke_map or kd_map or armature_map or effort_limit_map:
             apply_joint_params_by_pattern(
@@ -507,7 +512,6 @@ class NewtonSceneManager(BaseManager):
                 armature_map=armature_map or None,
                 effort_limit_map=effort_limit_map or None,
             )
-
         # Workaround: force ``geom_priority=1`` on every collision shape of this
         # entity. Newton's MJCF parser loses the XML-declared ``priority``
         # attribute on most geoms when ``parse_visuals=True`` (only ~4/12
@@ -547,7 +551,9 @@ class NewtonSceneManager(BaseManager):
         if mesh_approx is not None:
             builder.approximate_meshes(mesh_approx)
 
-        # Apply gains from articulation actuators
+        # Apply gains from articulation actuators. Bare patterns only —
+        # ``apply_joint_params_by_pattern`` canonicalises candidate
+        # joint labels via ``leaf_name()``.
         prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
@@ -556,15 +562,14 @@ class NewtonSceneManager(BaseManager):
 
         for act_cfg in cfg.articulation.actuators:
             for pattern in act_cfg.target_names_expr:
-                key = f"{prefix}/{pattern}" if prefix else pattern
                 if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
-                    ke_map[key] = act_cfg.stiffness
+                    ke_map[pattern] = act_cfg.stiffness
                 if act_cfg.damping is not None and act_cfg.damping > 0:
-                    kd_map[key] = act_cfg.damping
+                    kd_map[pattern] = act_cfg.damping
                 if act_cfg.armature > 0:
-                    armature_map[key] = act_cfg.armature
+                    armature_map[pattern] = act_cfg.armature
                 if isinstance(act_cfg.effort_limit, (int, float)) and act_cfg.effort_limit > 0:
-                    effort_limit_map[key] = float(act_cfg.effort_limit)
+                    effort_limit_map[pattern] = float(act_cfg.effort_limit)
 
         if ke_map or kd_map or armature_map or effort_limit_map:
             apply_joint_params_by_pattern(
@@ -583,13 +588,16 @@ class NewtonSceneManager(BaseManager):
     def _create_sites_from_dict(
         self, builder: newton.ModelBuilder, sites: dict[str, str], prefix: str | None = None
     ) -> None:
-        """Create sensor sites from a {site_name: body_name} dict."""
+        """Create sensor sites from a {site_name: body_name} dict.
 
-        def _resolve(name: str) -> str:
-            return f"{prefix}/{name}" if prefix and "/" not in name else name
-
+        ``body_name`` is matched as a regex against the builder's body
+        leaf names (IsaacLab convention). ``prefix`` is unused here —
+        Newton's MJCF XPath labels are canonicalised via
+        :func:`leaf_name` inside :meth:`_find_body_by_name`, so callers
+        pass bare names (``"torso_link"``) or bare regex patterns.
+        """
         for site_name, body_name in sites.items():
-            body_idx = self._find_body_by_name(builder, _resolve(body_name))
+            body_idx = self._find_body_by_name(builder, body_name)
             if body_idx is not None:
                 builder.add_site(body_idx, label=site_name)
             else:
@@ -599,20 +607,18 @@ class NewtonSceneManager(BaseManager):
     def _find_body_by_name(builder: newton.ModelBuilder, body_name: str) -> int | None:
         """Find body index by name in the builder.
 
-        ``body_name`` is treated as a **regex** via ``re.fullmatch``.
-        Each candidate label from ``builder.body_label`` is flattened via
-        :func:`flatten_xpath_label` first so ``"T1/Trunk"``-style literal
-        patterns keep working identically on both Newton loaders — the
-        URDF loader already emits ``T1/Trunk`` and the MJCF loader's
-        XPath ``T1/worldbody/Trunk`` is collapsed to ``T1/Trunk`` before
-        matching. Regex patterns like ``"T1/.*Trunk"`` also keep working
-        because the flattened label ``T1/Trunk`` still fullmatches.
-
-        Returns the first matching body index, or ``None`` if no body
-        matches.
+        Runs at builder-time (before ``builder.finalize()``) so
+        ArticulationView is not yet available; we canonicalize the
+        candidate labels to their leaf segments here via
+        :func:`leaf_name` so downstream callers can pass bare body
+        names (``"torso_link"``) regardless of whether the loader
+        stored a flat ``g1_29dof/torso_link`` or a deep MJCF XPath
+        like ``g1_29dof/worldbody/pelvis/.../torso_link``. The
+        pattern itself is still ``re.fullmatch``'d so regex forms
+        (``".*Trunk"``) keep working unchanged.
         """
         for i, name in enumerate(builder.body_label):
-            if re.fullmatch(body_name, flatten_xpath_label(name)):
+            if re.fullmatch(body_name, leaf_name(name)):
                 return i
         return None
 
@@ -675,6 +681,11 @@ class NewtonSceneManager(BaseManager):
         for entity_name in self.entities:
             self.entities[entity_name]["model"] = self.model
 
+        # Build ArticulationView for each entity BEFORE sensor creation —
+        # contact sensors now source their body-name filters from the
+        # view (bare leaf names) instead of raw ``model.body_label``.
+        self._build_robot_view()
+
         # Create sensors
         self._create_sensors()
 
@@ -694,9 +705,6 @@ class NewtonSceneManager(BaseManager):
 
         # Validate actuator parameters
         self._validate_mujoco_actuators()
-
-        # Build ArticulationView for the primary robot entity
-        self._build_robot_view()
 
         # Build kinematic trees for URDF entities
         self._set_kinematic_trees()
@@ -791,6 +799,18 @@ class NewtonSceneManager(BaseManager):
 
         Uses each entity's body_label_prefix to select only that entity's
         articulation, excluding ground plane and other global shapes.
+
+        The view is built **without** ``exclude_joint_types``: keeping
+        the free (or fixed) root joint preserves alignment between the
+        view's DOF space and ``model.joint_q`` / ``joint_qd`` so
+        ``newton_q_indices`` / ``newton_qd_indices`` (computed off
+        ``model.joint_q_start`` — full model coord space) index both
+        ``view.get_dof_positions`` and the zero-copy
+        ``state.joint_q.reshape(num_worlds, coords_per_world)`` views
+        consistently. Free-joint DoFs are filtered out later via user
+        pattern matching (bare actuated regexes like
+        ``"FR_hip_joint"`` never fullmatch Newton's multi-DOF names
+        like ``"root_joint:0"``).
         """
         for entity_name, entity_info in self.entities.items():
             cfg = entity_info["config"]
@@ -799,7 +819,8 @@ class NewtonSceneManager(BaseManager):
             prefix = getattr(cfg, "body_label_prefix", None)
             pattern = f"{prefix}*" if prefix else "*"
             self.articulation_views[entity_name] = ArticulationView(
-                self.model, pattern=pattern
+                self.model,
+                pattern=pattern,
             )
 
     @property
@@ -895,7 +916,13 @@ class NewtonSceneManager(BaseManager):
             sensing_bodies = self._prefix_names(entity_name, config.sensing_obj_bodies)
             sensing_shapes = self._prefix_names(entity_name, config.sensing_obj_shapes)
 
-            # Apply exclude filter using fnmatch on first world's labels
+            # Apply exclude filter. Matching happens against world-0
+            # slice of ``model.body_label`` (full labels — both the
+            # entity prefix already injected by ``_prefix_names`` and
+            # any XPath segments produced by Newton's MJCF loader).
+            # ``sensing_bodies`` stays as a list of full labels so
+            # SensorContact's internal fnmatch resolves them directly
+            # against ``model.body_label``.
             if config.exclude_bodies and sensing_bodies is not None:
                 from fnmatch import fnmatch
                 all_labels = self.model.body_label
@@ -903,19 +930,15 @@ class NewtonSceneManager(BaseManager):
                 bodies_per_env = len(all_labels) // world_count
                 first_env_labels = all_labels[:bodies_per_env]
 
-                # Resolve sensing patterns via fnmatch (same as Newton internal)
                 patterns = [sensing_bodies] if isinstance(sensing_bodies, str) else sensing_bodies
                 matched_indices = [
                     idx for idx, label in enumerate(first_env_labels)
                     if any(fnmatch(label, p) for p in patterns)
                 ]
-
-                # Remove excluded
                 matched_indices = [
                     idx for idx in matched_indices
                     if not any(fnmatch(first_env_labels[idx], exc) for exc in config.exclude_bodies)
                 ]
-
                 sensing_bodies = [first_env_labels[idx] for idx in matched_indices]
 
             sensor = SensorContact(
@@ -963,25 +986,40 @@ class NewtonSceneManager(BaseManager):
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-        # Get all joint names from model (single world) and canonicalize
-        # to flat ``{prefix}/{leaf}`` form. Without this, Newton's MJCF
-        # loader would hand us XPath labels like
-        # ``g1_29dof/worldbody/pelvis/.../left_hip_pitch_joint`` and every
-        # downstream regex / config pattern would have to absorb the
-        # middle segments explicitly. URDF labels are already flat so
-        # the canonicalization is a no-op there.
-        joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
+        # Source joint names from ArticulationView, which already emits
+        # bare leaf names (``left_hip_pitch_joint``) with entity prefix
+        # and XPath ancestors stripped — IsaacLab convention.
+        view = self.articulation_views.get("robot")
+        if view is None:
+            raise ValueError(
+                "build_articulation_indexing called before _build_robot_view; "
+                "ArticulationView must be created before action-manager init."
+            )
+        # Use ``view.joint_names`` (one entry per JOINT) rather than
+        # ``view.joint_dof_names`` (one entry per DOF, with ``:N``
+        # suffixes for multi-DOF joints like free / spherical).
+        # ``flat_world0`` lookups resolve one entry per joint, so the
+        # DOF-level expansion would break the ``.index(n)`` below for
+        # free-joint entries like ``"floating_base:0"``. User actuator
+        # regexes match bare joint names (``"FR_hip_joint"``) so
+        # multi-DOF joints are filtered out naturally by ``fullmatch``.
+        all_names = list(view.joint_names)
+        # Raw Newton joint-label list over all worlds is still needed
+        # to recover q / qd indices into the flat model arrays.
+        joint_names_raw = (
+            getattr(self.model, "joint_label", None)
+            or getattr(self.model, "joint_key", None)
+        )
         if not joint_names_raw:
             raise ValueError("Newton model has no joint labels")
-        all_names = [flatten_xpath_label(n) for n in joint_names_raw]
         num_worlds = self.model.world_count
-        joints_per_world = len(all_names) // num_worlds
-        all_names = all_names[:joints_per_world]
+        joints_per_world = len(joint_names_raw) // num_worlds
+        flat_world0 = [leaf_name(n) for n in joint_names_raw[:joints_per_world]]
 
-        # Filter out floating_base
-        actuatable = [(i, name) for i, name in enumerate(all_names) if name != "floating_base"]
-        actuatable_names = [name for _, name in actuatable]
-        actuatable_indices = [i for i, _ in actuatable]
+        # Indices of actuatable joints within world-0 of the flat array.
+        # All of ``all_names`` entries must exist in ``flat_world0``.
+        actuatable_names = all_names
+        actuatable_indices = [flat_world0.index(n) for n in all_names]
 
         matched_indices, matched_names = string_utils.resolve_matching_names(
             actuated_dof_names, actuatable_names, preserve_order=True

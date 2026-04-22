@@ -141,7 +141,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoSceneConf
         floating=True,
         articulation=ArticulationCfg(
             actuators=(
-                ImplicitActuatorCfg(
+                IdealPDActuatorCfg(
                     target_names_expr=(".*",),
                     stiffness=r.p_gains,
                     damping=r.d_gains,

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import warp as wp
 
-from rlworld.rl.envs.utils.newton.label import flatten_xpath_label
+from rlworld.rl.envs.utils.newton.label import leaf_name
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -21,10 +21,16 @@ class NewtonBodyCache:
 
         model = env.scene_manager.model
         self.bodies_per_env = len(model.body_label) // env.num_envs
-        # Canonicalize MJCF XPath labels to flat ``{prefix}/{leaf}``
-        # form so downstream pattern matching is URDF/MJCF-agnostic.
+        # Store bare leaf names. ``body_q`` / ``body_mass`` indexing
+        # remains against the full ``model.body_label`` space (incl.
+        # ground plane etc.) since callers of ``get_body_indices``
+        # expect per-model body_q indices — so we can't substitute
+        # ``view.link_names`` wholesale (the view filters out ground
+        # / other globals and uses its own compacted index space).
+        # Leaf extraction is enough to match bare pattern inputs from
+        # user configs.
         self.body_names = [
-            flatten_xpath_label(n) for n in model.body_label[:self.bodies_per_env]
+            leaf_name(n) for n in model.body_label[:self.bodies_per_env]
         ]
 
         # Cache original values for domain randomization

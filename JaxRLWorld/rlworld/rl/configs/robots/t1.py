@@ -135,16 +135,7 @@ class T1Config(RobotConfig):
     # joints fixed and only exposes the 12 leg DOFs — unusable for the
     # full-body getup task.
     urdf_path: str | None = "./JaxRLWorld/rlworld/assets/T1/T1_23dof.urdf"
-
-    # Newton uses T1_serial.xml (deprecated) because Newton's MJCF
-    # parser doesn't fully support menagerie-style features
-    # (childclass, nested defaults, position actuator defaults).
-    # Genesis uses menagerie t1.xml (no ground, clean class defaults).
-    # MuJoCo uses mjlab asset_zoo (spec_fn).
-    mjcf_path: str | None = (
-        # "./JaxRLWorld/rlworld/assets/T1_deprecated/T1_serial.xml"
-        "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
-    )
+    mjcf_path: str | None = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
 
     # Menagerie T1 MJCF for Genesis (no inline ground plane, clean
     # class defaults). Newton can't use this due to parser limitations.
@@ -237,11 +228,11 @@ class T1Config(RobotConfig):
     # instead, using ``model.body_shapes`` to resolve the attached
     # shape indices — this is the same path SysID's
     # ``apply_contact_friction`` uses.
-    # Newton-side foot-body regex. The ``.*`` prefix lets a single
-    # pattern fullmatch both URDF labels (``T1/left_foot_link``) and
-    # MJCF XPath labels (``T1/worldbody/Trunk/Waist/.../left_foot_link``)
-    # so the same preset works with either loader.
-    foot_body_pattern_newton: str = r"T1/.*(left|right)_foot_link"
+    # Newton-side foot-body regex. The Newton scene manager canonicalises
+    # body labels to bare leaf names (IsaacLab convention), so this
+    # pattern matches e.g. ``left_foot_link`` / ``right_foot_link``
+    # directly, independent of the loader (URDF vs MJCF).
+    foot_body_pattern_newton: str = r"(left|right)_foot_link"
 
     @property
     def foot_geom_names_mjlab(self) -> tuple[str, ...]:
@@ -259,9 +250,5 @@ class T1Config(RobotConfig):
         )
 
     @property
-    def prefixed_foot_names(self) -> tuple[str, ...]:
-        return self.prefixed_list(self.foot_names)
-
-    @property
-    def prefixed_action_scale(self) -> Dict[str, float]:
-        return {f"{self.name}/{k}": v for k, v in T1_ACTION_SCALE.items()}
+    def action_scale(self) -> Dict[str, float]:
+        return dict(T1_ACTION_SCALE)

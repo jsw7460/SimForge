@@ -135,7 +135,7 @@ def _newton_reward_terms():
     from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_n
 
     robot = G1MujocoConfig()
-    feet = robot.prefixed_foot_names
+    feet = robot.foot_names
 
     return OrderedDict({
         # ── Common ──
@@ -178,7 +178,7 @@ def _newton_reward_terms():
         ),
         "body_ang_vel_penalty": RewardTermConfig(
             rf_n.body_ang_vel_penalty_mjlab, weight=0.05,
-            params={"body_name": robot.prefixed("torso_link")},
+            params={"body_name": "torso_link"},
         ),
         "joint_pos_limits": RewardTermConfig(
             rf_n.joint_pos_limits_mjlab, weight=1.0,

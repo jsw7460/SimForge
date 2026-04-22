@@ -445,3 +445,4 @@ def randomize_joint_friction(
     env.scene_manager.solver.notify_model_changed(
         SolverNotifyFlags.JOINT_DOF_PROPERTIES,
     )
+
