@@ -170,14 +170,106 @@ class MotionCommand(CommandTerm):
         # with the NPZ's bare-name joint list from ``mujoco_replayer``.
         joint_names = tuple(env.act_manager.actuated_joint_names)
 
-        self.motion = MotionLoader(
-            cfg.motion_file,
-            cfg.body_names,
-            joint_names_cfg=joint_names,
-            device=self.device,
+        # Load one or more motion clips. Single- and multi-motion paths
+        # share the same downstream code via pre-concatenated buffers
+        # indexed by per-env ``(motion_id, time_step)`` pairs. A length-1
+        # ``motion_files`` tuple is the single-clip case; length >= 2
+        # triggers multi-motion behaviour in ``_resample_command``.
+        if not cfg.motion_files:
+            raise ValueError(
+                "MotionCommandCfg.motion_files is empty — provide at least "
+                "one NPZ path (length-1 tuple for single-clip tracking)."
+            )
+        self.motions: list[MotionLoader] = [
+            MotionLoader(
+                p, cfg.body_names,
+                joint_names_cfg=joint_names,
+                device=self.device,
+            )
+            for p in cfg.motion_files
+        ]
+        self._n_motions = len(self.motions)
+        self._is_multi_motion = self._n_motions > 1
+        # Alias retained so single-motion code paths (adaptive sampling,
+        # command-buffer sizing, external readers of ``motion.fps``) keep
+        # working unchanged. In multi-motion mode adaptive sampling is
+        # disallowed, so the alias is only read where it is still correct.
+        self.motion = self.motions[0]
+
+        # All clips must agree on DoF count (J) and tracked-body count (B)
+        # because policy / reward tensors are sized for them at build time.
+        J = self.motions[0].joint_pos.shape[1]
+        B = self.motions[0].body_pos_w.shape[1]
+        for i, m in enumerate(self.motions[1:], start=1):
+            if m.joint_pos.shape[1] != J:
+                raise ValueError(
+                    f"motion_files[{i}] has {m.joint_pos.shape[1]} DoFs but "
+                    f"motion_files[0] has {J}; all clips must share actuator layout."
+                )
+            if m.body_pos_w.shape[1] != B:
+                raise ValueError(
+                    f"motion_files[{i}] has {m.body_pos_w.shape[1]} bodies but "
+                    f"motion_files[0] has {B}; all clips must share tracked-body set."
+                )
+
+        # Pre-concat per-frame buffers across motions so property access
+        # reduces to a single advanced-indexing op. Global index for env e
+        # is ``_motion_offsets[motion_ids[e]] + time_steps[e]``.
+        self._concat_joint_pos = torch.cat(
+            [m.joint_pos for m in self.motions], dim=0,
         )
+        self._concat_joint_vel = torch.cat(
+            [m.joint_vel for m in self.motions], dim=0,
+        )
+        self._concat_body_pos_w = torch.cat(
+            [m.body_pos_w for m in self.motions], dim=0,
+        )
+        self._concat_body_quat_w = torch.cat(
+            [m.body_quat_w for m in self.motions], dim=0,
+        )
+        self._concat_body_lin_vel_w = torch.cat(
+            [m.body_lin_vel_w for m in self.motions], dim=0,
+        )
+        self._concat_body_ang_vel_w = torch.cat(
+            [m.body_ang_vel_w for m in self.motions], dim=0,
+        )
+        self._motion_lengths = torch.tensor(
+            [m.time_step_total for m in self.motions],
+            dtype=torch.long, device=self.device,
+        )
+        # Cumulative offsets: offsets[0]=0, offsets[i]=sum(lengths[:i]).
+        self._motion_offsets = torch.cat(
+            [
+                torch.zeros(1, dtype=torch.long, device=self.device),
+                torch.cumsum(self._motion_lengths[:-1], dim=0),
+            ],
+            dim=0,
+        )
+        # Sampling weights over clips (uniform by default, auto-normalised).
+        if cfg.motion_weights is None:
+            w = torch.ones(
+                self._n_motions, device=self.device, dtype=torch.float32,
+            )
+        else:
+            if len(cfg.motion_weights) != self._n_motions:
+                raise ValueError(
+                    f"motion_weights has length {len(cfg.motion_weights)} but "
+                    f"motion_files has {self._n_motions} entries."
+                )
+            w = torch.tensor(
+                cfg.motion_weights,
+                device=self.device, dtype=torch.float32,
+            )
+        self._motion_weights = w / w.sum()
 
         self.time_steps = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device,
+        )
+        # Per-env motion assignment: which clip each env is currently
+        # tracking. Zero-initialised so single-motion configs (_n_motions
+        # == 1) have valid indices without any sampling. Multi-motion
+        # configs overwrite this in ``_resample_command``.
+        self.motion_ids = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device,
         )
         self.body_pos_relative_w = torch.zeros(
@@ -243,6 +335,8 @@ class MotionCommand(CommandTerm):
 
     # ------------------------------------------------------------------
     # Motion reference (world frame). env_origins offset applied for mjlab.
+    # All readers route through ``_global_indices`` so single- and multi-
+    # motion layouts share the same access path.
     # ------------------------------------------------------------------
     def _add_env_origins(self, pos: torch.Tensor, per_body: bool) -> torch.Tensor:
         if self._env_origins is None:
@@ -251,47 +345,60 @@ class MotionCommand(CommandTerm):
         return pos + (eo[:, None, :] if per_body else eo)
 
     @property
+    def _global_indices(self) -> torch.Tensor:
+        """Per-env flat index into the pre-concatenated motion buffers."""
+        return self._motion_offsets[self.motion_ids] + self.time_steps
+
+    @property
     def joint_pos(self) -> torch.Tensor:
-        return self.motion.joint_pos[self.time_steps]
+        return self._concat_joint_pos[self._global_indices]
 
     @property
     def joint_vel(self) -> torch.Tensor:
-        return self.motion.joint_vel[self.time_steps]
+        return self._concat_joint_vel[self._global_indices]
 
     @property
     def body_pos_w(self) -> torch.Tensor:
         return self._add_env_origins(
-            self.motion.body_pos_w[self.time_steps], per_body=True,
+            self._concat_body_pos_w[self._global_indices], per_body=True,
         )
 
     @property
     def body_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[self.time_steps]
+        return self._concat_body_quat_w[self._global_indices]
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.body_lin_vel_w[self.time_steps]
+        return self._concat_body_lin_vel_w[self._global_indices]
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.body_ang_vel_w[self.time_steps]
+        return self._concat_body_ang_vel_w[self._global_indices]
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
-        pos = self.motion.body_pos_w[self.time_steps, self.motion_anchor_body_index]
+        pos = self._concat_body_pos_w[
+            self._global_indices, self.motion_anchor_body_index
+        ]
         return self._add_env_origins(pos, per_body=False)
 
     @property
     def anchor_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[self.time_steps, self.motion_anchor_body_index]
+        return self._concat_body_quat_w[
+            self._global_indices, self.motion_anchor_body_index
+        ]
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
-        return self.motion.body_lin_vel_w[self.time_steps, self.motion_anchor_body_index]
+        return self._concat_body_lin_vel_w[
+            self._global_indices, self.motion_anchor_body_index
+        ]
 
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
-        return self.motion.body_ang_vel_w[self.time_steps, self.motion_anchor_body_index]
+        return self._concat_body_ang_vel_w[
+            self._global_indices, self.motion_anchor_body_index
+        ]
 
     # ------------------------------------------------------------------
     # Live robot state via RobotData protocol.
@@ -477,17 +584,50 @@ class MotionCommand(CommandTerm):
         self._writer.set_root_velocity(root_lin_vel, root_ang_vel, env_ids=env_ids)
         self._writer.eval_fk(env_ids=env_ids)
 
-    def _resample_command(self, env_ids: torch.Tensor) -> None:
-        # 1. Sample a new motion frame per env.
-        if self.cfg.sampling_mode == "start":
-            self.time_steps[env_ids] = 0
-        elif self.cfg.sampling_mode == "uniform":
-            self._uniform_sampling(env_ids)
-        else:
-            assert self.cfg.sampling_mode == "adaptive", (
-                f"Unknown sampling_mode: {self.cfg.sampling_mode!r}"
+    def _resample_command(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        keep_motion_id: bool = False,
+    ) -> None:
+        # 0. In multi-motion mode, pick a new clip for each env unless the
+        # caller wants to preserve the current assignment (as mid-episode
+        # rollover does — see ``_update_command``).
+        if self._is_multi_motion and not keep_motion_id:
+            sampled = torch.multinomial(
+                self._motion_weights, len(env_ids), replacement=True,
             )
+            self.motion_ids[env_ids] = sampled
+
+        # 1. Sample a new motion frame within each env's current clip.
+        mode = self.cfg.sampling_mode
+        if mode == "start":
+            self.time_steps[env_ids] = 0
+        elif mode == "uniform":
+            if self._is_multi_motion:
+                # Per-env clip length; uniform within each env's clip.
+                per_env_T = self._motion_lengths[self.motion_ids[env_ids]]
+                self.time_steps[env_ids] = (
+                    torch.rand(len(env_ids), device=self.device)
+                    * per_env_T.float()
+                ).long()
+                # Keep the same scalar metric schema as single-motion uniform
+                # so downstream loggers don't need to branch on clip count.
+                self.metrics["sampling_entropy"][:] = 1.0
+                self.metrics["sampling_top1_prob"][:] = 1.0 / max(self.bin_count, 1)
+                self.metrics["sampling_top1_bin"][:] = 0.5
+            else:
+                self._uniform_sampling(env_ids)
+        elif mode == "adaptive":
+            if self._is_multi_motion:
+                raise NotImplementedError(
+                    "sampling_mode='adaptive' is not yet supported with "
+                    "multi-motion tracking (motion_files). Use 'uniform' "
+                    "or 'start' — or add a per-motion bin scheme."
+                )
             self._adaptive_sampling(env_ids)
+        else:
+            raise ValueError(f"Unknown sampling_mode: {mode!r}")
 
         # 2. Reference root state at sampled frame. The root follows
         # the body_names[0] convention used by mjlab: the first listed
@@ -553,9 +693,19 @@ class MotionCommand(CommandTerm):
     # ------------------------------------------------------------------
     def _update_command(self) -> None:
         self.time_steps += 1
-        rollover = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+        # Per-env rollover: each env rolls over when its cursor passes the
+        # length of its assigned motion. Single-motion configs reduce to
+        # the original ``time_steps >= motion.time_step_total`` check.
+        per_env_T = self._motion_lengths[self.motion_ids]
+        rollover = torch.where(self.time_steps >= per_env_T)[0]
         if rollover.numel() > 0:
-            self._resample_command(rollover)
+            # ``keep_motion_id=True`` implements the episode-level design:
+            # mid-episode rollover rewinds the cursor + re-writes the
+            # reference initial state but keeps each env on its currently-
+            # assigned clip. A new clip is picked only when the episode
+            # itself resets (which routes through ``CommandTerm.reset`` and
+            # calls ``_resample_command`` with the default ``False``).
+            self._resample_command(rollover, keep_motion_id=True)
 
         self.update_relative_body_poses()
 
@@ -574,8 +724,24 @@ class MotionCommand(CommandTerm):
         super().reset(env_ids)
         self.update_relative_body_poses()
 
-    def reset_to_frame(self, env_ids: torch.Tensor, frame: int) -> None:
-        """Deterministic reset to an exact motion frame (no RSI)."""
+    def reset_to_frame(
+        self,
+        env_ids: torch.Tensor,
+        frame: int,
+        motion_id: int = 0,
+    ) -> None:
+        """Deterministic reset to an exact ``(motion, frame)`` pair — no RSI.
+
+        ``motion_id`` defaults to 0, which is the only valid value for
+        single-motion configs. Multi-motion configs can pick any clip
+        index in ``[0, len(motions))``.
+        """
+        if motion_id < 0 or motion_id >= self._n_motions:
+            raise IndexError(
+                f"motion_id {motion_id} out of range for "
+                f"{self._n_motions} loaded motion(s)."
+            )
+        self.motion_ids[env_ids] = int(motion_id)
         self.time_steps[env_ids] = int(frame)
         self._write_reference_state_to_sim(
             env_ids,
@@ -593,8 +759,18 @@ class MotionCommand(CommandTerm):
 class MotionCommandCfg(CommandTermCfg):
     """Configuration for :class:`MotionCommand`."""
 
-    motion_file: str
-    """NPZ path. Produced by ``rlworld.tools.motion.csv_to_npz``."""
+    motion_files: tuple[str, ...]
+    """NPZ paths to track (produced by ``rlworld.tools.motion.csv_to_npz``
+    or ``booster_to_npz``). Length-1 tuple for single-clip tracking; length
+    >= 2 for multi-clip. All clips must share DoF count and tracked-body
+    set. Each episode reset samples one clip per env (per
+    ``motion_weights``, uniform by default); the sampled clip stays fixed
+    for the rest of the episode — motion-end rollover mid-episode rewinds
+    the cursor but keeps the clip."""
+
+    motion_weights: "tuple[float, ...] | None" = None
+    """Per-clip sampling weights over ``motion_files`` (auto-normalised).
+    Length must match ``motion_files``. Defaults to uniform."""
 
     anchor_body_name: str
     """Body whose world pose defines the anchor frame. Must appear in

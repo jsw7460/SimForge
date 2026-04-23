@@ -23,7 +23,7 @@ Usage::
     from rlworld.rl.configs.presets.t1_tracking.base import T1TrackingConfig
     cfgs = T1TrackingConfig(
         sim_type="newton",
-        motion_file="/tmp/t1_walk.npz",
+        motion_files=("/tmp/t1_walk.npz",),
     ).build()
 """
 from __future__ import annotations
@@ -89,8 +89,27 @@ class T1TrackingConfig:
     episode_length_s: float = 10.0
     seed: int = 42
 
-    # Motion source (required at runtime — set via CLI override).
-    motion_file: str = ""
+    # Motion source: one or more NPZ clips produced by booster_to_npz /
+    # csv_to_npz. Each episode reset samples one clip per env (per
+    # ``motion_weights``, uniform by default) and keeps it for the rest
+    # of the episode. For single-clip experiments use a length-1 tuple.
+    #
+    # Default targets multi-motion tracking over the nine Booster T1 soccer
+    # clips our ``booster_to_npz`` adapter can convert end to end
+    # (``kick_ball1`` / ``walking2`` use a different recording schema and
+    # need a separate adapter path — intentionally omitted here).
+    motion_files: tuple[str, ...] = (
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/goal_kick.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/jogging.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball2.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball3.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/pass_ball1.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/powerful_kick.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/running.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/soccer_drill_run.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/walking1.npz",
+    )
+    motion_weights: "tuple[float, ...] | None" = None
 
     # Body list tracked by rewards / observations / terminations.
     # Must exist in both the NPZ's ``body_names`` (bare names, from the
@@ -115,8 +134,12 @@ class T1TrackingConfig:
         "right_hand_link",
     )
 
-    # Sampling mode.
-    sampling_mode: Literal["adaptive", "uniform", "start"] = "adaptive"
+    # Sampling mode. Default is ``"uniform"`` to be compatible with the
+    # multi-motion ``motion_files`` default above — ``MotionCommand``
+    # deliberately disallows ``"adaptive"`` in multi-motion mode (the
+    # failure-weighted bins are defined per single clip, not across clips).
+    # Override to ``"adaptive"`` when running a single-clip experiment.
+    sampling_mode: Literal["adaptive", "uniform", "start"] = "uniform"
 
     # RSI ranges (Mjlab defaults for humanoid locomotion tracking).
     pose_range: Dict[str, tuple[float, float]] = field(
@@ -179,10 +202,11 @@ class T1TrackingConfig:
 
     # ── Build entry point ─────────────────────────────────────────────
     def build(self):
-        if not self.motion_file:
+        if not self.motion_files:
             raise ValueError(
-                "T1TrackingConfig.motion_file is empty. Pass --motion-file on the "
-                "command line or set it on the config before calling build()."
+                "T1TrackingConfig.motion_files is empty. Provide at least "
+                "one NPZ path via the preset default, CLI override, or a "
+                "subclass before calling build()."
             )
         builders = _get_sim_builders(self.sim_type)
         timing = _SIM_TIMINGS[self.sim_type]
@@ -231,11 +255,13 @@ class T1TrackingConfig:
 
     # ── Shared build methods ──────────────────────────────────────────
     def _build_command_config(self, builders) -> CommandConfig:
-        """Single motion command."""
+        """Motion command — tracks the clips in ``motion_files`` (length-1
+        tuple for single-clip, length >= 2 for multi-motion)."""
         return CommandConfig(
             terms={
                 "motion": MotionCommandCfg(
-                    motion_file=self.motion_file,
+                    motion_files=self.motion_files,
+                    motion_weights=self.motion_weights,
                     anchor_body_name=self.anchor_body_name,
                     body_names=self.body_names,
                     entity_name="robot",

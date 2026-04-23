@@ -24,7 +24,7 @@ Usage::
     from rlworld.rl.configs.presets.g1_tracking.base import G1TrackingConfig
     cfgs = G1TrackingConfig(
         sim_type="newton",
-        motion_file="/tmp/g1_walk.npz",
+        motion_files=("/tmp/g1_walk.npz",),
     ).build()
 """
 from __future__ import annotations
@@ -86,8 +86,13 @@ class G1TrackingConfig:
     episode_length_s: float = 10.0
     seed: int = 42
 
-    # Motion file (required; set via CLI ``--motion-file``).
-    motion_file: str = "JaxRLWorld/rlworld/assets/motions/gangnam_style/G1_gangnam_style_V01.npz"
+    # Motion source: tuple of NPZ paths (length-1 for single-clip, length
+    # >= 2 for multi-motion). Each episode reset samples one clip per env
+    # (uniform by default) and keeps it for the rest of the episode.
+    motion_files: tuple[str, ...] = (
+        "JaxRLWorld/rlworld/assets/motions/gangnam_style/G1_gangnam_style_V01.npz",
+    )
+    motion_weights: "tuple[float, ...] | None" = None
 
     # ── Body list (Mjlab G1 tracking config/g1/env_cfgs.py) ───────────
     # Anchor body is the shared torso link; the first entry of body_names
@@ -172,10 +177,11 @@ class G1TrackingConfig:
     run_name: str | None = None
 
     def build(self):
-        if not self.motion_file:
+        if not self.motion_files:
             raise ValueError(
-                "G1TrackingConfig.motion_file is empty. Pass --motion-file on the "
-                "command line or set it on the config before calling build()."
+                "G1TrackingConfig.motion_files is empty. Provide at least "
+                "one NPZ path via the preset default, CLI override, or a "
+                "subclass before calling build()."
             )
         builders = _get_sim_builders(self.sim_type)
         timing = _SIM_TIMINGS[self.sim_type]
@@ -226,7 +232,8 @@ class G1TrackingConfig:
         return CommandConfig(
             terms={
                 "motion": MotionCommandCfg(
-                    motion_file=self.motion_file,
+                    motion_files=self.motion_files,
+                    motion_weights=self.motion_weights,
                     anchor_body_name=self.anchor_body_name,
                     body_names=self.body_names,
                     entity_name="robot",
