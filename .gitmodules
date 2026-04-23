@@ -1,9 +1,12 @@
 [submodule "Mjlab"]
 	path = Mjlab
 	url = git@github.com:jsw7460/mjlab.git
+	branch = main
 [submodule "Newton"]
 	path = Newton
 	url = git@github.com:jsw7460/newton.git
+	branch = sangwooshin/local-integration
 [submodule "Genesis"]
 	path = Genesis
-	url = https://github.com/Genesis-Embodied-AI/Genesis.git
+	url = git@github.com:jsw7460/Genesis.git
+	branch = main
