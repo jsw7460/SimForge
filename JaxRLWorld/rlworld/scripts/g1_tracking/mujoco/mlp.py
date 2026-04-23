@@ -2,8 +2,10 @@
 
 Usage:
     jaxpy JaxRLWorld/rlworld/scripts/g1_tracking/mujoco/mlp.py \\
-        env.num_envs=64 runner.max_iterations=5 \\
-        command.terms.motion.motion_file=/path/to/motion.npz
+        env.num_envs=4096 runner.max_iterations=10000
+
+Motion source is set in ``G1TrackingConfig.motion_files`` (tuple of NPZ
+paths — length-1 for single-clip, length >= 2 for multi-motion).
 """
 from rlworld.rl.configs.presets.g1_tracking.base import G1TrackingConfig
 from rlworld.rl.runners import BaseRunner
