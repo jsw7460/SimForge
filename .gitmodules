@@ -1,3 +1,9 @@
 [submodule "Mjlab"]
 	path = Mjlab
 	url = git@github.com:jsw7460/mjlab.git
+[submodule "Newton"]
+	path = Newton
+	url = git@github.com:jsw7460/newton.git
+[submodule "Genesis"]
+	path = Genesis
+	url = https://github.com/Genesis-Embodied-AI/Genesis.git
