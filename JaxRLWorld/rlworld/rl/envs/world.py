@@ -547,6 +547,7 @@ class World(ABC):
         """Reset all environments."""
         all_env_ids = torch.arange(self.num_envs, device=self.device)
         self._reset_idx(all_env_ids)
+        self._post_reset_forward()
         self.obs_manager.advance()
 
         self.extras = {

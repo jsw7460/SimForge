@@ -105,9 +105,6 @@ def dof_pos(env: World, entity_name: str = "robot") -> torch.Tensor:
         Tensor of shape (num_envs, num_joints).
     """
     pos = env.get_robot_data(entity_name).joint_pos
-    joint_ids = _actuated_joint_ids(env)
-    if joint_ids is not None:
-        return pos[:, joint_ids]
     return pos
 
 
@@ -133,9 +130,6 @@ def dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
         Tensor of shape (num_envs, num_joints).
     """
     vel = env.get_robot_data(entity_name).joint_vel
-    joint_ids = _actuated_joint_ids(env)
-    if joint_ids is not None:
-        return vel[:, joint_ids]
     return vel
 
 
