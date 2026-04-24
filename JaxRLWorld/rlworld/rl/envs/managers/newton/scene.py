@@ -16,6 +16,7 @@ from newton.sensors import SensorContact
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
+from rlworld.rl.configs.newton_config_classes import SolverMuJoCoCfg
 from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
@@ -233,6 +234,7 @@ class NewtonSceneManagerConfig:
 
     # Solver
     solver_type: Literal["xpbd", "mujoco"] = "mujoco"  # "xpbd" or "mujoco"
+    solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
 
 
 class NewtonSceneManager(BaseManager):
@@ -677,17 +679,27 @@ class NewtonSceneManager(BaseManager):
         if self.config.solver_type == "xpbd":
             self.solver = newton.solvers.SolverXPBD(self.model)
         elif self.config.solver_type == "mujoco":
+            scfg = self.config.solver_cfg
             self.solver = newton.solvers.SolverMuJoCo(
                 self.model,
-                solver="newton",
-                ls_parallel=True,
-                njmax=1500,
-                nconmax=150,
-                impratio=1.0,
-                iterations=10,
-                ls_iterations=20,
-                # ccd_iterations=350,
-                use_mujoco_contacts=True,
+                solver=scfg.solver,
+                integrator=scfg.integrator,
+                cone=scfg.cone,
+                iterations=scfg.iterations,
+                ls_iterations=scfg.ls_iterations,
+                njmax=scfg.njmax,
+                nconmax=scfg.nconmax,
+                impratio=scfg.impratio,
+                tolerance=scfg.tolerance,
+                ls_tolerance=scfg.ls_tolerance,
+                ccd_tolerance=scfg.ccd_tolerance,
+                ccd_iterations=scfg.ccd_iterations,
+                sdf_iterations=scfg.sdf_iterations,
+                ls_parallel=scfg.ls_parallel,
+                use_mujoco_contacts=scfg.use_mujoco_contacts,
+                use_mujoco_cpu=scfg.use_mujoco_cpu,
+                enable_multiccd=scfg.enable_multiccd,
+                disable_contacts=scfg.disable_contacts,
             )
         else:
             raise ValueError(f"Unsupported solver type: {self.config.solver_type}")

@@ -25,6 +25,7 @@ from .newton_config_classes import (
     NewtonObservationConfig,
     NewtonActionConfig,
     NewtonConfigsForRun,
+    SolverMuJoCoCfg,
 )
 from .mujoco_config_classes import (
     MujocoEnvConfig,

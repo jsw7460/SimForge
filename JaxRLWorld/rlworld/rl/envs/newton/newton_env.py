@@ -103,6 +103,7 @@ class NewtonEnv(World):
                 substeps=self.scene_cfg.substeps,
                 gravity=self.scene_cfg.gravity,
                 solver_type=self.scene_cfg.solver_type,
+                solver_cfg=self.scene_cfg.solver_cfg,
                 env_spacing=self.scene_cfg.env_spacing,
             )
         )

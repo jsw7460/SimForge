@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Literal, Dict, Any, Union, TYPE_CHECKING
+from typing import Literal, Dict, Any, Optional, Union, TYPE_CHECKING
 
 from rlworld.rl.configs.scene import GroundPlaneCfg
 from .algorithms import AlgorithmConfig, get_algorithm_config_class
@@ -43,6 +43,53 @@ class NewtonEnvConfig(BaseConfig):
 
 
 @dataclass
+class SolverMuJoCoCfg(BaseConfig):
+    """Configuration for ``newton.solvers.SolverMuJoCo``.
+
+    Fields mirror ``SolverMuJoCo.__init__`` 1:1. Any field set to ``None``
+    defers to Newton's documented 3-tier priority: ctor arg > the model's
+    ``mujoco.<option>`` custom attribute > MuJoCo's built-in default.
+
+    Defaults below follow Newton's canonical humanoid-locomotion recipe
+    from ``newton/examples/robot/example_robot_g1.py`` (elliptic friction
+    cone, implicitfast integrator, 100 / 50 iterations, impratio=100),
+    which is what the repository's locomotion-style presets actually want.
+    """
+
+    # Core algorithm choices
+    solver: Optional[Literal["newton", "cg"]] = "newton"
+    integrator: Optional[Literal["implicitfast", "euler", "rk4"]] = "implicitfast"
+    cone: Optional[Literal["pyramidal", "elliptic"]] = "elliptic"
+
+    # Iteration budgets
+    iterations: Optional[int] = 100
+    ls_iterations: Optional[int] = 50
+
+    # Contact / constraint buffer sizes
+    njmax: Optional[int] = 1500
+    nconmax: Optional[int] = 150
+
+    # Friction cone tuning
+    impratio: Optional[float] = 100.0
+
+    # Solver tolerances (None → MuJoCo defaults: 1e-8 / 0.01 / 1e-6)
+    tolerance: Optional[float] = None
+    ls_tolerance: Optional[float] = None
+    ccd_tolerance: Optional[float] = None
+
+    # Advanced iteration caps (None → MuJoCo defaults: 35 / 10)
+    ccd_iterations: Optional[int] = None
+    sdf_iterations: Optional[int] = None
+
+    # Mode flags
+    ls_parallel: bool = True
+    use_mujoco_contacts: bool = True
+    use_mujoco_cpu: bool = False
+    enable_multiccd: bool = False
+    disable_contacts: bool = False
+
+
+@dataclass
 class NewtonSceneConfig(BaseConfig):
     """Newton scene configuration."""
     _EXCLUDE_FROM_SERIALIZATION = ("robot_cfg",)
@@ -51,6 +98,7 @@ class NewtonSceneConfig(BaseConfig):
     substeps: int = 4
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
     solver_type: Literal["mujoco"] = "mujoco"  # Currently, only support mujoco solver
+    solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
     entities: dict[str, Union["NewtonEntityConfig", "GroundPlaneCfg"]] = field(default_factory=list)
     sensors: list["NewtonSensorConfig"] | None = None
     add_ground: bool = True
