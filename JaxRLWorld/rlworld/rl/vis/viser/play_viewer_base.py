@@ -62,6 +62,8 @@ class ViewerAction(Enum):
     SPEED_DOWN = "speed_down"
     PREV_ENV = "prev_env"
     NEXT_ENV = "next_env"
+    SET_MOTION_CLIP = "set_motion_clip"   # payload: int (clip index)
+    SET_MOTION_LOCK = "set_motion_lock"   # payload: bool (locked)
 
 
 class PlayViewerBase(ABC):
@@ -141,6 +143,89 @@ class PlayViewerBase(ABC):
 
     def request_reset_speed(self) -> None:
         self._actions.append((ViewerAction.RESET_SPEED, None))
+
+    def request_set_motion_clip(self, clip_id: int) -> None:
+        self._actions.append((ViewerAction.SET_MOTION_CLIP, int(clip_id)))
+
+    def request_set_motion_lock(self, locked: bool) -> None:
+        self._actions.append((ViewerAction.SET_MOTION_LOCK, bool(locked)))
+
+    # ── Motion-command bridge ──────────────────────────────────────
+    def _get_motion_command(self):
+        """Return the env's 'motion' CommandTerm if present, else ``None``.
+
+        Non-tracking tasks (g1_29dof locomotion, t1_getup, go2_flat, ...)
+        don't register a 'motion' term, so this cleanly returns ``None``
+        and the motion picker code paths become no-ops without branching
+        at every call site.
+        """
+        terms = getattr(self.env.command_manager, "_terms", None)
+        if not terms or "motion" not in terms:
+            return None
+        return terms["motion"]
+
+    # Tracking-specific termination terms that interrupt a clip mid-
+    # playback. With the motion lock ON these would keep resetting the
+    # episode (which also re-teleports and picks a new random clip,
+    # desyncing the viser dropdown), so we suspend them while locked
+    # and restore them when the lock is released.
+    _LOCK_SUSPENDED_TERMS: tuple[str, ...] = (
+        "bad_anchor_pos_z_only",
+        "bad_anchor_ori",
+        "bad_motion_body_pos_z_only",
+    )
+
+    def _set_motion_clip(self, clip_id: int) -> None:
+        motion_cmd = self._get_motion_command()
+        if motion_cmd is None:
+            return
+        before = int(motion_cmd.motion_ids[0].item())
+        motion_cmd.set_motion_clip(clip_id)
+        after = int(motion_cmd.motion_ids[0].item())
+        # Diagnostic: prints to the eval server's stdout so we can tell
+        # whether a dropdown selection is actually reaching the env or
+        # the viser callback is not firing.
+        print(
+            f"[PlayViewer] motion clip: env0 motion_ids {before} -> {after} "
+            f"(requested {clip_id})"
+        )
+
+    def _set_motion_lock(self, locked: bool) -> None:
+        motion_cmd = self._get_motion_command()
+        if motion_cmd is None:
+            return
+        # Lock ON == suppress rollover teleport.
+        motion_cmd.cfg.rollover_teleport = not bool(locked)
+
+        term_mgr = getattr(self.env, "termination_manager", None)
+        if term_mgr is None:
+            return
+        all_terms = getattr(term_mgr, "_all_terms", None)
+        resolved = getattr(term_mgr, "_resolved_fns", None)
+        if all_terms is None or resolved is None:
+            return
+
+        # Lazy per-viewer cache for suspended (cfg, fn) pairs.
+        if not hasattr(self, "_suspended_term_cache"):
+            self._suspended_term_cache: dict = {}
+
+        for name in self._LOCK_SUSPENDED_TERMS:
+            if locked:
+                if name in all_terms and name not in self._suspended_term_cache:
+                    self._suspended_term_cache[name] = (
+                        all_terms.pop(name),
+                        resolved.pop(name),
+                    )
+            else:
+                if name in self._suspended_term_cache:
+                    cfg, fn = self._suspended_term_cache.pop(name)
+                    all_terms[name] = cfg
+                    resolved[name] = fn
+        print(
+            f"[PlayViewer] motion lock {'ON' if locked else 'OFF'}: "
+            f"rollover_teleport={motion_cmd.cfg.rollover_teleport}, "
+            f"suspended_terms={sorted(self._suspended_term_cache)}"
+        )
 
     # Speed controls.
 
@@ -249,7 +334,7 @@ class PlayViewerBase(ABC):
     def _process_actions(self) -> None:
         """Drain action queue. Runs on the main loop thread."""
         while self._actions:
-            action, _payload = self._actions.popleft()
+            action, payload = self._actions.popleft()
             if action == ViewerAction.RESET:
                 self.reset_environment()
             elif action == ViewerAction.TOGGLE_PAUSE:
@@ -262,6 +347,10 @@ class PlayViewerBase(ABC):
                 self.increase_speed()
             elif action == ViewerAction.SPEED_DOWN:
                 self.decrease_speed()
+            elif action == ViewerAction.SET_MOTION_CLIP:
+                self._set_motion_clip(int(payload))
+            elif action == ViewerAction.SET_MOTION_LOCK:
+                self._set_motion_lock(bool(payload))
 
     def tick(self) -> bool:
         """Advance one tick. Returns True when a render frame was produced."""

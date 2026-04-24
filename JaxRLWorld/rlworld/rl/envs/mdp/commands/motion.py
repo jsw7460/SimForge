@@ -699,13 +699,18 @@ class MotionCommand(CommandTerm):
         per_env_T = self._motion_lengths[self.motion_ids]
         rollover = torch.where(self.time_steps >= per_env_T)[0]
         if rollover.numel() > 0:
-            # ``keep_motion_id=True`` implements the episode-level design:
-            # mid-episode rollover rewinds the cursor + re-writes the
-            # reference initial state but keeps each env on its currently-
-            # assigned clip. A new clip is picked only when the episode
-            # itself resets (which routes through ``CommandTerm.reset`` and
-            # calls ``_resample_command`` with the default ``False``).
-            self._resample_command(rollover, keep_motion_id=True)
+            if self.cfg.rollover_teleport:
+                # Training path: ``keep_motion_id=True`` rewinds the cursor
+                # via ``_resample_command`` (new start frame + RSI + sim
+                # state write), preserving the assigned clip. A new clip
+                # is picked only when the episode itself resets.
+                self._resample_command(rollover, keep_motion_id=True)
+            else:
+                # Interactive-eval path: loop the clip without teleporting
+                # the robot. Cursor rewinds to frame 0, reference state is
+                # NOT written into sim — the robot keeps its current pose
+                # and the reference catches up via the tracking reward.
+                self.time_steps[rollover] = 0
 
         self.update_relative_body_poses()
 
@@ -722,6 +727,36 @@ class MotionCommand(CommandTerm):
     # ------------------------------------------------------------------
     def reset(self, env_ids: torch.Tensor) -> None:
         super().reset(env_ids)
+        self.update_relative_body_poses()
+
+    def set_motion_clip(
+        self,
+        motion_id: int,
+        *,
+        env_ids: "torch.Tensor | None" = None,
+        rewind: bool = True,
+    ) -> None:
+        """Assign a specific clip to one or more envs — used by interactive
+        viewers (viser motion picker) to switch the tracked clip at runtime.
+
+        Unlike :meth:`reset_to_frame` this does NOT write reference state
+        into the sim: combined with ``rollover_teleport=False`` this means
+        the clip switch is seamless — the robot keeps its current pose and
+        the new clip's reference starts driving rewards from the next step.
+        """
+        if motion_id < 0 or motion_id >= self._n_motions:
+            raise IndexError(
+                f"motion_id {motion_id} out of range for "
+                f"{self._n_motions} loaded motion(s)."
+            )
+        if env_ids is None:
+            self.motion_ids[:] = int(motion_id)
+            if rewind:
+                self.time_steps[:] = 0
+        else:
+            self.motion_ids[env_ids] = int(motion_id)
+            if rewind:
+                self.time_steps[env_ids] = 0
         self.update_relative_body_poses()
 
     def reset_to_frame(
@@ -811,6 +846,23 @@ class MotionCommandCfg(CommandTermCfg):
     - ``"uniform"``: uniform over ``[0, motion_length)``
     - ``"start"``: always frame 0 (for deterministic playback / eval)
     """
+
+    rollover_teleport: bool = True
+    """Whether mid-episode motion rollover teleports the robot.
+
+    When ``True`` (default, training behaviour) the cursor rewinds via
+    ``_resample_command`` — a fresh start frame is sampled, RSI is
+    applied, and the full reference state is written into the sim.
+    This is what the current training setup relies on.
+
+    When ``False`` (intended for interactive eval) the cursor simply
+    rewinds to frame 0 of the same clip without touching sim state.
+    The robot keeps its current physical pose and the reference loops
+    continuously — short clips no longer cause the "teleport every
+    1.28s" artifact that makes visualisation look broken. Termination
+    terms like ``bad_anchor_pos_z_only`` should usually be disabled in
+    this mode; otherwise the episode would still reset on large
+    mid-clip divergences and re-teleport via the normal reset path."""
 
     # Motion rollover drives resampling; disable the base class's
     # timer-based resample by setting a huge interval.

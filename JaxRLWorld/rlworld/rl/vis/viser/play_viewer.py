@@ -93,6 +93,9 @@ class ViserPlayViewer(PlayViewerBase):
         self._play_scene.setup_gui(tabs)
         self._play_scene.set_on_env_switch(self._on_env_switch)
         self._setup_overlays(tabs)
+        # Motion picker (only renders when the env exposes a 'motion' command
+        # term — i.e. tracking presets; no-op on locomotion / getup / ...).
+        self._build_motion_controls(tabs)
 
         self._update_status_display()
         print(
@@ -129,6 +132,71 @@ class ViserPlayViewer(PlayViewerBase):
                         self.request_reset_speed()
                     else:
                         self.request_speed_up()
+
+    def _build_motion_controls(self, tabs: Any) -> None:
+        """Add a Motion tab exposing clip selection + rollover-lock toggle.
+
+        Shown only for tracking envs (where the command manager has a
+        ``"motion"`` term). The tab is skipped entirely on locomotion /
+        getup presets so we don't pollute their GUIs with dead controls.
+        """
+        motion_cmd = self._get_motion_command()
+        if motion_cmd is None:
+            return
+
+        # Lock defaults ON for interactive eval — otherwise short clips
+        # (e.g. walking1 at 1.28s vs a 10s episode) teleport ~8x per
+        # episode which ruins visualization. Using the same ``_set_motion_lock``
+        # path the checkbox uses also suspends the tracking-termination
+        # terms, so the episode stays alive while the clip loops. Flip
+        # at runtime via the "Lock motion" checkbox below.
+        self._set_motion_lock(True)
+
+        from pathlib import Path
+        clip_names = [Path(p).stem for p in motion_cmd.cfg.motion_files]
+        n_clips = motion_cmd._n_motions
+        # Reflect whichever clip env 0 is currently tracking so the
+        # dropdown's initial value matches sim state.
+        try:
+            current_idx = int(motion_cmd.motion_ids[0].item())
+        except Exception:
+            current_idx = 0
+        current_idx = max(0, min(current_idx, n_clips - 1))
+
+        with tabs.add_tab("Motion", icon=viser.Icon.PLAYER_PLAY):
+            with self._server.gui.add_folder("Playback"):
+                lock_cb = self._server.gui.add_checkbox(
+                    "Lock motion (loop without teleport)",
+                    initial_value=True,
+                    hint=(
+                        "When ON, motion-end rollover rewinds the clip "
+                        "cursor without re-writing sim state, so short "
+                        "clips loop smoothly instead of teleporting the "
+                        "robot every cycle."
+                    ),
+                )
+
+                @lock_cb.on_update
+                def _on_lock(event) -> None:
+                    self.request_set_motion_lock(event.target.value)
+
+                if n_clips > 1:
+                    dropdown = self._server.gui.add_dropdown(
+                        "Clip",
+                        options=clip_names,
+                        initial_value=clip_names[current_idx],
+                        hint=(
+                            "Switch the clip being tracked by every env. "
+                            "Takes effect next step; the robot holds its "
+                            "current pose and starts following the new "
+                            "reference from frame 0."
+                        ),
+                    )
+
+                    @dropdown.on_update
+                    def _on_clip(event) -> None:
+                        idx = clip_names.index(event.target.value)
+                        self.request_set_motion_clip(idx)
 
     def _setup_overlays(self, tabs: Any) -> None:
         self._term_overlays = ViserTermOverlays(
