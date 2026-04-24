@@ -134,7 +134,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 collapse_fixed_joints=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        IdealPDActuatorCfg(
+                        ImplicitActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
