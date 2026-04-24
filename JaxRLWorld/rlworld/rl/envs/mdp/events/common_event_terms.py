@@ -240,7 +240,6 @@ def reset_joints_by_offset(
     writer.set_dof_velocities(joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
 
-
 # ── Encoder bias DR (cross-sim) ─────────────────────────────────────
 
 
