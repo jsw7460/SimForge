@@ -404,28 +404,35 @@ class MultiSimWorld:
 
         result: Dict[str, List[Tuple[int, int]]] = {}
 
-        for group_name, terms in env.obs_manager.config.obs_group.items():
+        # ``ObservationManager`` dropped the old ``config.obs_group`` dict
+        # in favor of named-attribute groups discovered at init time and
+        # cached in ``_group_terms: {group_name: {term_name: cfg}}``.
+        # ``_group_term_indices`` is keyed by the same ``term_name`` (not
+        # the underlying callable's ``__name__``), so we filter joint-
+        # indexed terms by function name but look up the flat-vector
+        # slice by term name.
+        for group_name, terms_dict in env.obs_manager._group_terms.items():
             slices = []
             term_indices = env.obs_manager._group_term_indices.get(group_name, {})
 
-            for term_idx, obs_term in enumerate(terms):
-                func_name = getattr(obs_term.func, "__name__", f"term_{term_idx}")
-
-                if func_name in _JOINT_INDEXED_OBS_NAMES:
-                    if func_name in term_indices:
-                        start, end = term_indices[func_name]
-                        # Verify dimension matches num_actions
-                        term_dim = end - start
-                        if term_dim == num_actions:
-                            slices.append((start, end))
-                        # If history is used, dim = num_actions * history_length
-                        elif term_dim % num_actions == 0:
-                            history_len = term_dim // num_actions
-                            for h in range(history_len):
-                                slices.append((
-                                    start + h * num_actions,
-                                    start + (h + 1) * num_actions,
-                                ))
+            for term_name, obs_term in terms_dict.items():
+                func_name = getattr(obs_term.func, "__name__", term_name)
+                if func_name not in _JOINT_INDEXED_OBS_NAMES:
+                    continue
+                if term_name not in term_indices:
+                    continue
+                start, end = term_indices[term_name]
+                term_dim = end - start
+                if term_dim == num_actions:
+                    slices.append((start, end))
+                elif term_dim % num_actions == 0:
+                    # History buffer flattened into this term's slice.
+                    history_len = term_dim // num_actions
+                    for h in range(history_len):
+                        slices.append((
+                            start + h * num_actions,
+                            start + (h + 1) * num_actions,
+                        ))
 
             result[group_name] = slices
 
