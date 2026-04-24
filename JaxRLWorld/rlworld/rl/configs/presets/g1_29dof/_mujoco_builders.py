@@ -145,6 +145,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConfi
                     stiffness=r.p_gains,
                     damping=r.d_gains,
                     armature=r.armature,
+                    frictionloss=0.3,
                     min_delay=0,
                     max_delay=2,
                 ),

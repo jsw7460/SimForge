@@ -115,9 +115,10 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConfi
         entities={
             "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
-                urdf_path=r.urdf_path,
+                # urdf_path=r.urdf_path,
+                mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
-                    pos=(0.0, 0.0, r.base_init_height + 0.05),
+                    pos=(0.0, 0.0, r.base_init_height),
                     rot=(quat[0], quat[1], quat[2], quat[3]),
                     joint_pos=r.default_joint_angles,
                 ),
@@ -130,6 +131,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConfi
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
+                            frictionloss=0.3,
                             min_delay=0,
                             max_delay=2,
                         ),
