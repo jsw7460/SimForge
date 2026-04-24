@@ -15,7 +15,7 @@ from newton.selection import ArticulationView
 from newton.sensors import SensorContact
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
-from rlworld.rl.envs.utils.newton.label import leaf_name
+from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
@@ -43,6 +43,7 @@ def apply_joint_params_by_pattern(
     kd_map: Dict[str, float] | None = None,
     armature_map: Dict[str, float] | None = None,
     effort_limit_map: Dict[str, float] | None = None,
+    friction_map: Dict[str, float] | None = None,
 ) -> None:
     """Apply joint parameters (target gains, armature, effort limit) using
     regex pattern matching.
@@ -64,13 +65,20 @@ def apply_joint_params_by_pattern(
     with the motor spec that training actually assumes (e.g. menagerie
     T1's 15/20 Nm ankle vs booster_t1's 50 Nm).
     """
-    if ke_map is None and kd_map is None and armature_map is None and effort_limit_map is None:
+    if (
+        ke_map is None
+        and kd_map is None
+        and armature_map is None
+        and effort_limit_map is None
+        and friction_map is None
+    ):
         return
 
     ke_map = ke_map or {}
     kd_map = kd_map or {}
     armature_map = armature_map or {}
     effort_limit_map = effort_limit_map or {}
+    friction_map = friction_map or {}
     num_joints = len(builder.joint_label)
 
     for joint_idx, joint_label_raw in enumerate(builder.joint_label):
@@ -113,6 +121,13 @@ def apply_joint_params_by_pattern(
             if re.fullmatch(pattern, joint_name):
                 for d in range(dof_count):
                     builder.joint_effort_limit[dof_start + d] = value
+                break
+
+        # Apply joint frictionloss (MuJoCo dof_frictionloss equivalent)
+        for pattern, value in friction_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_friction[dof_start + d] = value
                 break
 
 def _state_assign_full(
@@ -464,6 +479,7 @@ class NewtonSceneManager(BaseManager):
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
         effort_limit_map: dict[str, float] = {}
+        friction_map: dict[str, float] = {}
 
         # ``apply_joint_params_by_pattern`` canonicalises candidate
         # joint labels via ``leaf_name()`` before regex-matching, so
@@ -504,13 +520,21 @@ class NewtonSceneManager(BaseManager):
                 for pattern in act_cfg.target_names_expr:
                     effort_limit_map[pattern] = float(act_cfg.effort_limit)
 
-        if ke_map or kd_map or armature_map or effort_limit_map:
+            # Frictionloss — overrides XML-declared joint frictionloss.
+            # Mirrors MuJoCo's dof_frictionloss / Genesis' set_dofs_frictionloss
+            # so the three sims share one authoritative value at build time.
+            if isinstance(act_cfg.frictionloss, (int, float)) and act_cfg.frictionloss > 0:
+                for pattern in act_cfg.target_names_expr:
+                    friction_map[pattern] = float(act_cfg.frictionloss)
+
+        if ke_map or kd_map or armature_map or effort_limit_map or friction_map:
             apply_joint_params_by_pattern(
                 builder,
                 ke_map=ke_map or None,
                 kd_map=kd_map or None,
                 armature_map=armature_map or None,
                 effort_limit_map=effort_limit_map or None,
+                friction_map=friction_map or None,
             )
         # Workaround: force ``geom_priority=1`` on every collision shape of this
         # entity. Newton's MJCF parser loses the XML-declared ``priority``
@@ -559,6 +583,7 @@ class NewtonSceneManager(BaseManager):
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
         effort_limit_map: dict[str, float] = {}
+        friction_map: dict[str, float] = {}
 
         for act_cfg in cfg.articulation.actuators:
             for pattern in act_cfg.target_names_expr:
@@ -570,14 +595,17 @@ class NewtonSceneManager(BaseManager):
                     armature_map[pattern] = act_cfg.armature
                 if isinstance(act_cfg.effort_limit, (int, float)) and act_cfg.effort_limit > 0:
                     effort_limit_map[pattern] = float(act_cfg.effort_limit)
+                if isinstance(act_cfg.frictionloss, (int, float)) and act_cfg.frictionloss > 0:
+                    friction_map[pattern] = float(act_cfg.frictionloss)
 
-        if ke_map or kd_map or armature_map or effort_limit_map:
+        if ke_map or kd_map or armature_map or effort_limit_map or friction_map:
             apply_joint_params_by_pattern(
                 builder,
                 ke_map=ke_map or None,
                 kd_map=kd_map or None,
                 armature_map=armature_map or None,
                 effort_limit_map=effort_limit_map or None,
+                friction_map=friction_map or None,
             )
 
         # Sites
@@ -655,9 +683,9 @@ class NewtonSceneManager(BaseManager):
                 ls_parallel=True,
                 njmax=1500,
                 nconmax=150,
-                impratio=100,
-                iterations=100,
-                ls_iterations=50,
+                impratio=1.0,
+                iterations=10,
+                ls_iterations=20,
                 # ccd_iterations=350,
                 use_mujoco_contacts=True,
             )
@@ -913,8 +941,23 @@ class NewtonSceneManager(BaseManager):
 
         elif isinstance(config, NewtonContactSensorConfig):
             entity_name = config.entity_name
-            sensing_bodies = self._prefix_names(entity_name, config.sensing_obj_bodies)
+            # Widen bare leaf-name body patterns (e.g. ``"left_ankle_roll_link"``)
+            # to ``*/<name>`` BEFORE prefix injection, so SensorContact's
+            # internal fnmatch hits both URDF flat labels
+            # (``<entity>/<name>``) and MJCF XPath labels
+            # (``<entity>/<ancestor>/.../<name>``). Order matters:
+            # ``_prefix_names`` skips patterns that already contain ``/``,
+            # so widening first keeps bare-name configs (like
+            # ``r.foot_names = ["left_ankle_roll_link"]``) working on both
+            # loaders, while pre-scoped or glob / regex patterns pass
+            # through unchanged.
+            sensing_bodies = self._prefix_names(
+                entity_name, as_leaf_globs(config.sensing_obj_bodies)
+            )
             sensing_shapes = self._prefix_names(entity_name, config.sensing_obj_shapes)
+            counterpart_bodies = self._prefix_names(
+                entity_name, as_leaf_globs(config.counterpart_bodies)
+            )
 
             # Apply exclude filter. Matching happens against world-0
             # slice of ``model.body_label`` (full labels — both the
@@ -945,7 +988,7 @@ class NewtonSceneManager(BaseManager):
                 self.model,
                 sensing_obj_bodies=sensing_bodies,
                 sensing_obj_shapes=sensing_shapes,
-                counterpart_bodies=self._prefix_names(entity_name, config.counterpart_bodies),
+                counterpart_bodies=counterpart_bodies,
                 counterpart_shapes=config.counterpart_shapes,
                 measure_total=config.include_total,
             )
