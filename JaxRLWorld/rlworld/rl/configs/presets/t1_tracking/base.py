@@ -193,6 +193,18 @@ class T1TrackingConfig:
     action_scale: float = 0.25
     settle_steps: int = 0
 
+    # ── Policy architecture (SpaceTimeTransformer) ────────────────────
+    # When future_offsets is non-empty the motion command exposes a
+    # sparse preview of upcoming reference frames to the policy, and the
+    # tracking preset swaps in the SpaceTimeTransformer actor/critic.
+    # Set to an empty tuple to fall back to the MLP pipeline.
+    future_offsets: tuple[int, ...] = (1, 2, 4, 8, 16)
+    ref_feature_dim: int = 9
+    transformer_embed_dim: int = 64
+    transformer_num_heads: int = 4
+    transformer_num_layers: int = 4
+    transformer_dim_feedforward: int = 128
+
     # Algorithm.
     algorithm_name: str = "PPO"
     max_iterations: int = 30000
@@ -273,6 +285,7 @@ class T1TrackingConfig:
                     adaptive_uniform_ratio=self.adaptive_uniform_ratio,
                     adaptive_alpha=self.adaptive_alpha,
                     sampling_mode=self.sampling_mode,
+                    future_offsets=self.future_offsets,
                 ),
             },
         )
@@ -288,7 +301,7 @@ class T1TrackingConfig:
         return PPOConfig(
             algorithm_name=self.algorithm_name,
             clip_param=0.2,
-            obs_normalization=True,
+            obs_normalization=False,
             use_early_stop=False,
             desired_kl=0.01,
             entropy_coef=0.005,
@@ -299,7 +312,11 @@ class T1TrackingConfig:
             estimator_learning_rate=5e-4,
             max_grad_norm=1.0,
             num_learning_epochs=5,
-            num_mini_batches=4,
+            # 4 is fine again now that the encoder uses gradient
+            # checkpointing — activation memory stays under budget even at
+            # num_envs=4096 with the factorized attention layer stack.
+            num_mini_batches=8,
+            num_steps_per_env=8,
             schedule="adaptive",
             use_clipped_value_loss=True,
             value_loss_coef=1.0,
@@ -307,6 +324,28 @@ class T1TrackingConfig:
         )
 
     def _build_nn_config(self) -> NNConfig:
+        if self.future_offsets:
+            transformer_kwargs = {
+                "tracked_body_names": self.body_names,
+                "future_offsets": self.future_offsets,
+                "ref_feature_dim": self.ref_feature_dim,
+                "embed_dim": self.transformer_embed_dim,
+                "num_heads": self.transformer_num_heads,
+                "num_layers": self.transformer_num_layers,
+                "dim_feedforward": self.transformer_dim_feedforward,
+                "use_kinematic_mask": True,
+            }
+            return NNConfig(
+                policy=PPOPolicyConfig(
+                    actor_class_name="SpaceTimeTransformerActor",
+                    critic_class_name="SpaceTimeTransformerCritic",
+                    actor_kwargs=transformer_kwargs,
+                    critic_kwargs=transformer_kwargs,
+                    init_noise_std=1.0,
+                    distribution_type="gaussian",
+                    std_type="state_independent",
+                ),
+            )
         return NNConfig(
             policy=PPOPolicyConfig(
                 actor_class_name="MLPActor",

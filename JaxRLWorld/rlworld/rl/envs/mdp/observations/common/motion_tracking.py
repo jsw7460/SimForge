@@ -81,3 +81,20 @@ def robot_body_ori_b(env: "World", command_name: str) -> torch.Tensor:
     )
     mat = matrix_from_quat_wxyz(ori_b)
     return mat[..., :2].reshape(mat.shape[0], -1)
+
+
+def motion_future_reference_window(
+    env: "World", command_name: str,
+) -> torch.Tensor:
+    """Future motion reference window, flattened for the obs pipeline.
+
+    Returns shape ``(num_envs, T * B * 9)`` where ``T`` is the length of
+    ``MotionCommandCfg.future_offsets``, ``B`` is the tracked-body count,
+    and 9 = rel_pos(3) + rel_quat_6d(6) per (t, b) token. The
+    ``SpaceTimeTransformer`` actor reshapes this back into the
+    ``(T, B, 9)`` grid it expects. Returns an empty ``(num_envs, 0)``
+    tensor when ``future_offsets`` is empty.
+    """
+    cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
+    features = cmd.future_body_features_in_anchor_frame()
+    return features.reshape(env.num_envs, -1)

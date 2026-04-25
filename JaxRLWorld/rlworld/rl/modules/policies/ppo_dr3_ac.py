@@ -43,7 +43,7 @@ class PPODR3ActorCritic(PPOActorCritic):
             num_actor_obs: Actor observation dimension
             num_critic_obs: Critic observation dimension
             num_actions: Action dimension
-            actor_class_name: Name of actor class ("MLPActor", "BodyTransformerActor", etc.)
+            actor_class_name: Name of actor class ("MLPActor", "SpaceTimeTransformerActor", etc.)
             init_noise_std: Initial action standard deviation
             std_type: "state_dependent", "state_independent", or "fixed"
             distribution_type: "gaussian" or "squashed_gaussian"

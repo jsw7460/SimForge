@@ -129,6 +129,7 @@ class ObservationGroupConfig(BaseConfig):
 class PolicyConfig(BaseConfig):
     """Base policy network configuration — common to all algorithms."""
     actor_class_name: str = "MLPActor"
+    critic_class_name: str = "MLPCritic"
     actor_kwargs: Dict[str, Any] = field(default_factory=lambda: {
         "activation": "elu",
         "ortho_init": True,

@@ -40,6 +40,7 @@ class ABAActor(BaseActor):
         # Decoder params
         activation: str = "elu",
         action_hidden_dim: int | None = None,
+        actuated_joint_names: "list[str] | None" = None,
         *,
         key: jax.Array,
         **kwargs,
@@ -71,6 +72,7 @@ class ABAActor(BaseActor):
             hidden_dim=hidden_dim,
             activation=activation,
             action_hidden_dim=action_hidden_dim,
+            actuated_joint_names=actuated_joint_names,
             key=key_dec,
         )
 

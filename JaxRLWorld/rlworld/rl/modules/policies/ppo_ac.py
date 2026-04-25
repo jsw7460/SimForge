@@ -5,6 +5,9 @@ import jax
 import jax.numpy as jnp
 
 from rlworld.rl.modules.architectures.mlp import MLPCritic
+from rlworld.rl.modules.architectures.space_time_transformer.critic import (
+    SpaceTimeTransformerCritic,
+)
 from rlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
 from rlworld.rl.modules.normalization import EmpiricalNormalization
 from .base_ac import BaseActorCritic
@@ -127,10 +130,12 @@ class PPOActorCritic(BaseActorCritic):
         num_critic_obs: int,
         num_actions: int,
         actor_class_name: str = "MLPActor",
+        critic_class_name: str = "MLPCritic",
         init_noise_std: float = 1.0,
         std_type: str = "state_dependent",
         distribution_type: str = "gaussian",
         kinematic_tree: Union["KinematicTree", None] = None,
+        actuated_joint_names: "list[str] | None" = None,
         obs_normalization: bool = False,
         *,
         key: jax.Array,
@@ -141,7 +146,7 @@ class PPOActorCritic(BaseActorCritic):
             num_actor_obs: Actor observation dimension
             num_critic_obs: Critic observation dimension
             num_actions: Action dimension
-            actor_class_name: Name of actor class ("MLPActor", "BodyTransformerActor", etc.)
+            actor_class_name: Name of actor class ("MLPActor", "SpaceTimeTransformerActor", etc.)
             init_noise_std: Initial action standard deviation
             std_type: "state_dependent", "state_independent", or "fixed"
             distribution_type: "gaussian" or "squashed_gaussian"
@@ -162,7 +167,15 @@ class PPOActorCritic(BaseActorCritic):
         key_actor, key_critic, key_std = jax.random.split(key, 3)
 
         # Build networks
-        self._build_networks(actor_class_name, kinematic_tree, key_actor, key_critic, **kwargs)
+        self._build_networks(
+            actor_class_name,
+            critic_class_name,
+            kinematic_tree,
+            actuated_joint_names,
+            key_actor,
+            key_critic,
+            **kwargs,
+        )
 
         # Initialize std
         self._initialize_std(key_std)
@@ -181,22 +194,41 @@ class PPOActorCritic(BaseActorCritic):
     def _build_networks(
         self,
         actor_class_name: str,
+        critic_class_name: str,
         kinematic_tree: "KinematicTree | None",
+        actuated_joint_names: "list[str] | None",
         key_actor: jax.Array,
         key_critic: jax.Array,
         **kwargs,
     ):
         """Build actor and critic networks."""
-        # Build critic (always MLP)
         critic_kwargs = kwargs["critic_kwargs"]
-        self.critic = MLPCritic(
-            num_obs=self.critic_obs_dim,
-            hidden_dims=critic_kwargs["hidden_dims"],
-            activation=critic_kwargs["activation"],
-            use_layer_norm=critic_kwargs.get("use_layer_norm", False),
-            ortho_init=critic_kwargs["ortho_init"],
-            key=key_critic,
-        )
+        if critic_class_name == "MLPCritic":
+            self.critic = MLPCritic(
+                num_obs=self.critic_obs_dim,
+                hidden_dims=critic_kwargs["hidden_dims"],
+                activation=critic_kwargs["activation"],
+                use_layer_norm=critic_kwargs.get("use_layer_norm", False),
+                ortho_init=critic_kwargs["ortho_init"],
+                key=key_critic,
+            )
+        elif critic_class_name == "SpaceTimeTransformerCritic":
+            if kinematic_tree is None:
+                raise ValueError(
+                    "SpaceTimeTransformerCritic requires kinematic_tree."
+                )
+            stc_kwargs = {
+                k: v for k, v in critic_kwargs.items()
+                if k not in ("num_obs", "key", "kinematic_tree")
+            }
+            self.critic = SpaceTimeTransformerCritic(
+                kinematic_tree=kinematic_tree,
+                num_obs=self.critic_obs_dim,
+                key=key_critic,
+                **stc_kwargs,
+            )
+        else:
+            raise ValueError(f"Unknown critic_class_name: {critic_class_name!r}")
 
         # Build actor using common logic
         actor_kwargs = kwargs.get("actor_kwargs", {})
@@ -206,6 +238,7 @@ class PPOActorCritic(BaseActorCritic):
             num_actions=self.num_actions,
             actor_kwargs=actor_kwargs,
             kinematic_tree=kinematic_tree,
+            actuated_joint_names=actuated_joint_names,
             key=key_actor,
         )
 

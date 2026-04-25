@@ -8,7 +8,7 @@ _ACTOR_MODULES = [
     "rlworld.rl.modules.architectures.mlp.actor",
     "rlworld.rl.modules.architectures.aba.actor",
     # "rlworld.rl.modules.architectures.rodrigues.actor",
-    "rlworld.rl.modules.architectures.body_transformer.actor",
+    "rlworld.rl.modules.architectures.space_time_transformer.actor",
     # "rlworld.rl.modules.architectures.crba.actor",
     "rlworld.rl.modules.architectures.gnn.actor"
 ]

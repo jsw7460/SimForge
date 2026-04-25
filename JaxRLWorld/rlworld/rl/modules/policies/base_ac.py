@@ -41,6 +41,7 @@ class BaseActorCritic(eqx.Module):
         num_actions: int,
         actor_kwargs: dict[str, Any],
         kinematic_tree: "KinematicTree | None" = None,
+        actuated_joint_names: "list[str] | None" = None,
         *,
         key: jax.Array,
     ) -> BaseActor:
@@ -64,6 +65,7 @@ class BaseActorCritic(eqx.Module):
                 "kinematic_tree": kinematic_tree,
                 "num_obs": actor_obs_dim,
                 "num_actions": num_actions,
+                "actuated_joint_names": actuated_joint_names,
                 "key": key,
             })
 

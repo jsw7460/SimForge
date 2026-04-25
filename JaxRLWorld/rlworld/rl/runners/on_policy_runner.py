@@ -140,15 +140,23 @@ class OnPolicyRunner(BaseRunner):
         else:
             kinematic_tree = None
 
+        actuated_joint_names = (
+            list(self.env.act_manager.actuated_joint_names)
+            if hasattr(self.env, "act_manager")
+            else None
+        )
+
         self.actor_critic = PPOActorCritic(
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
             actor_class_name=policy_cfg.actor_class_name,
+            critic_class_name=policy_cfg.critic_class_name,
             init_noise_std=policy_cfg.init_noise_std,
             std_type=policy_cfg.std_type,
             distribution_type=policy_cfg.distribution_type,
             kinematic_tree=kinematic_tree,
+            actuated_joint_names=actuated_joint_names,
             key=key,
             actor_kwargs=policy_cfg.actor_kwargs,
             critic_kwargs=policy_cfg.critic_kwargs,

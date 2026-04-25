@@ -23,11 +23,13 @@ import torch
 
 from rlworld.rl.envs.managers.common.command_term import CommandTerm, CommandTermCfg
 from rlworld.rl.utils.quat_utils import (
+    matrix_from_quat_wxyz,
     quat_from_euler_xyz_wxyz,
     quat_inv_wxyz,
     quat_mul_wxyz,
     quat_error_magnitude_wxyz,
     quat_rotate_wxyz,
+    subtract_frame_transforms_wxyz,
     yaw_quat_wxyz,
 )
 
@@ -442,6 +444,72 @@ class MotionCommand(CommandTerm):
     @property
     def robot_anchor_ang_vel_w(self) -> torch.Tensor:
         return self._rd.body_ang_vel_w_all[:, self.robot_anchor_body_index]
+
+    # ------------------------------------------------------------------
+    # Future reference window in current robot anchor frame.
+    # ------------------------------------------------------------------
+    def future_body_features_in_anchor_frame(self) -> torch.Tensor:
+        """Per-body reference pose at each future offset, in robot anchor frame.
+
+        For each offset ``f`` in ``cfg.future_offsets`` and each tracked body
+        ``b`` in ``cfg.body_names``, returns a 9-D feature
+        ``[rel_pos (3), rel_quat_6d (6)]`` where the motion reference body
+        pose at future frame ``time_steps + f`` is expressed in the *current*
+        robot anchor frame. This is the factorized transformer's time-axis
+        input (OmniH2O convention).
+
+        Motion cursor clamps to the final frame (no wrap) when
+        ``time_steps + f`` exceeds the per-env clip length.
+
+        Returns shape ``(num_envs, T, B, 9)`` with ``T = len(future_offsets)``
+        and ``B = len(cfg.body_names)``. When ``future_offsets`` is empty,
+        returns a zero-length tensor ``(num_envs, 0, B, 9)``.
+        """
+        num_bodies = len(self.cfg.body_names)
+        offsets = self.cfg.future_offsets
+        if not offsets:
+            return torch.zeros(
+                self.num_envs, 0, num_bodies, 9, device=self.device,
+            )
+
+        offsets_t = torch.tensor(
+            offsets, device=self.device, dtype=torch.long,
+        )
+        T = int(offsets_t.shape[0])
+
+        per_env_T = self._motion_lengths[self.motion_ids]
+        motion_offsets_per_env = self._motion_offsets[self.motion_ids]
+
+        # (N, T) future time step per (env, offset), clamped to [0, len-1].
+        future_ts = self.time_steps.unsqueeze(1) + offsets_t.unsqueeze(0)
+        future_ts = torch.minimum(future_ts, (per_env_T - 1).unsqueeze(1))
+        future_ts = torch.clamp(future_ts, min=0)
+
+        future_global = (
+            motion_offsets_per_env.unsqueeze(1) + future_ts
+        ).reshape(-1)
+
+        body_pos = self._concat_body_pos_w[future_global].reshape(
+            self.num_envs, T, num_bodies, 3,
+        )
+        body_quat = self._concat_body_quat_w[future_global].reshape(
+            self.num_envs, T, num_bodies, 4,
+        )
+        if self._env_origins is not None:
+            body_pos = body_pos + self._env_origins[:, None, None, :]
+
+        robot_pos = self._rd.body_pos_w_all[:, self.robot_anchor_body_index]
+        robot_quat = self._rd.body_quat_w_all[:, self.robot_anchor_body_index]
+        robot_pos_exp = robot_pos[:, None, None, :].expand(-1, T, num_bodies, 3)
+        robot_quat_exp = robot_quat[:, None, None, :].expand(-1, T, num_bodies, 4)
+
+        rel_pos, rel_quat = subtract_frame_transforms_wxyz(
+            robot_pos_exp, robot_quat_exp, body_pos, body_quat,
+        )
+        mat = matrix_from_quat_wxyz(rel_quat)
+        quat_6d = mat[..., :2].reshape(self.num_envs, T, num_bodies, 6)
+
+        return torch.cat([rel_pos, quat_6d], dim=-1)
 
     # ------------------------------------------------------------------
     # Anchor-aligned (yaw-only) relative body poses.
@@ -863,6 +931,14 @@ class MotionCommandCfg(CommandTermCfg):
     terms like ``bad_anchor_pos_z_only`` should usually be disabled in
     this mode; otherwise the episode would still reset on large
     mid-clip divergences and re-teleport via the normal reset path."""
+
+    future_offsets: tuple[int, ...] = ()
+    """Future-frame offsets (in motion frames) exposed to the policy via
+    :meth:`MotionCommand.future_body_features_in_anchor_frame` and the
+    ``motion_future_reference_window`` observation term. Empty tuple (the
+    default) disables the future-window observation entirely — use a
+    non-empty tuple, e.g. ``(1, 2, 4, 8, 12, 16)``, to feed a sparse
+    preview of upcoming reference frames to a time-axis transformer."""
 
     # Motion rollover drives resampling; disable the base class's
     # timer-based resample by setting a huge interval.

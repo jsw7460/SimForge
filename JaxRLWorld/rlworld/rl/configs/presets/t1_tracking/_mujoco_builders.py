@@ -41,6 +41,7 @@ from rlworld.rl.envs.mdp.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
+    motion_future_reference_window,
     robot_body_ori_b,
     robot_body_pos_b,
 )
@@ -204,6 +205,11 @@ def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
             func=motion_anchor_ori_b, scale=1.0, params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
+        # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
+        # obs by assuming future window is the trailing segment.
+        motion_future_window = ObservationTermConfig(
+            func=motion_future_reference_window, scale=1.0, params=motion_params,
+        )
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
@@ -230,6 +236,10 @@ def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
         )
         robot_body_ori = ObservationTermConfig(
             func=robot_body_ori_b, scale=1.0, params=motion_params,
+        )
+        # Must be LAST: see _ActorObsCfg.motion_future_window.
+        motion_future_window = ObservationTermConfig(
+            func=motion_future_reference_window, scale=1.0, params=motion_params,
         )
 
     @dataclass
