@@ -5,7 +5,7 @@
 [submodule "Newton"]
 	path = Newton
 	url = git@github.com:jsw7460/newton.git
-	branch = sangwooshin/local-integration
+	branch = main
 [submodule "Genesis"]
 	path = Genesis
 	url = git@github.com:jsw7460/Genesis.git
