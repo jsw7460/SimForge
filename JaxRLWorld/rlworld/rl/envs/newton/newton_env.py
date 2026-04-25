@@ -1,6 +1,5 @@
 import torch
 import warp as wp
-from warp.torch import device_to_torch
 
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
 from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
@@ -41,7 +40,7 @@ class NewtonEnv(World):
 
         self.seed = env_cfg.seed
         self.num_envs = num_envs
-        self.device = device_to_torch(wp.get_device())
+        self.device = wp.device_to_torch(wp.get_device())
 
         # Store high-level configs
         self.env_cfg = env_cfg
