@@ -48,7 +48,7 @@ class Go2Config(RobotConfig):
     name: str = "go2_description"
     urdf_path: str = "Genesis/genesis/assets/urdf/go2/urdf/go2.urdf"
 
-    base_init_height: float = 0.278 + 0.025
+    base_init_height: float = 0.278
     base_link_name: str = "base"
 
     default_joint_angles: Dict[str, float] = field(default_factory=lambda: {
