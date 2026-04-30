@@ -207,9 +207,9 @@ def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
             noise=Unoise(-0.05, 0.05),
         )
         # Multi-clip disambiguation. See newton builder for rationale.
-        # motion_clip_id = ObservationTermConfig(
-        #     func=motion_clip_id_onehot, scale=1.0, params=motion_params,
-        # )
+        motion_clip_id = ObservationTermConfig(
+            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        )
         # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
         # obs by assuming future window is the trailing segment.
         motion_future_window = ObservationTermConfig(
@@ -243,9 +243,9 @@ def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
             func=robot_body_ori_b, scale=1.0, params=motion_params,
         )
         # Same multi-clip identifier as the actor.
-        # motion_clip_id = ObservationTermConfig(
-        #     func=motion_clip_id_onehot, scale=1.0, params=motion_params,
-        # )
+        motion_clip_id = ObservationTermConfig(
+            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        )
         # Must be LAST: see _ActorObsCfg.motion_future_window.
         motion_future_window = ObservationTermConfig(
             func=motion_future_reference_window, scale=1.0, params=motion_params,
