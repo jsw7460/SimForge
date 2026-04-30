@@ -16,8 +16,7 @@ class NewtonInitializer(SimInitializer):
 
     def init_device(self) -> torch.device:
         import warp as wp
-        from warp.torch import device_to_torch
-        return device_to_torch(wp.get_device())
+        return wp.device_to_torch(wp.get_device())
 
     def prepare_configs(
         self,
