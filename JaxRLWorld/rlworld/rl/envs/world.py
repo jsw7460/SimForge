@@ -420,7 +420,18 @@ class World(ABC):
         reset_buf = terminated | truncated
         reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
 
-        # Handle terminal observations
+        # Handle terminal observations.
+        #
+        # ``process_observations(update_history=True)`` appends the terminal
+        # frame into every term's circular buffer so that history-based obs
+        # in ``final_observation`` include it (matters for PPO truncated
+        # bootstrap V(s_T) on history-based tasks). We immediately
+        # ``rollback_last_history_append`` to rewind the write head so the
+        # later per-step ``_advance_managers`` is the only append that
+        # actually counts — otherwise the same step would advance history
+        # by two frames. ``_reset_idx`` clears history for terminated envs
+        # downstream, so the rollback only matters for the non-terminated
+        # ones.
         final_observation = None
         final_info = None
         if len(reset_env_ids) > 0:
@@ -428,6 +439,7 @@ class World(ABC):
             final_observation = {
                 key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()
             }
+            self.obs_manager.rollback_last_history_append()
             final_info = {
                 "episode_reward_sums": deepcopy(self.episode_sums),
             }
@@ -461,13 +473,6 @@ class World(ABC):
             **self.termination_manager.extras,
         }
         return self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras
-
-    def _apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions. Override in subclass if needed."""
-        if hasattr(self.act_manager, 'apply_actions'):
-            self.act_manager.apply_actions(processed_actions)
-        elif hasattr(self.act_manager, 'apply_dofs_position'):
-            self.act_manager.apply_dofs_position(processed_actions)
 
     def _pre_reward_hook(self) -> None:
         """Override in subclass for logic that must run before reward computation.

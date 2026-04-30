@@ -69,3 +69,17 @@ class CircularBuffer:
             self._buffer.zero_()
         else:
             self._buffer[batch_ids] = 0.0
+
+    def rollback_last(self) -> None:
+        """Undo the most recent ``append`` by moving the write head back by one.
+
+        The slot data itself is left untouched: the next ``append`` overwrites
+        it. Intended for transient terminal-observation captures where the
+        appended frame must be visible exactly once for the capture and then
+        forgotten so the regular per-step append doesn't double-count.
+
+        No-op when the buffer has not been initialised yet.
+        """
+        if self._buffer is None:
+            return
+        self._current_idx = (self._current_idx - 1) % self.max_length

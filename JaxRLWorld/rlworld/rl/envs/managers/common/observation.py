@@ -124,6 +124,18 @@ class ObservationManager(BaseManager):
             for term_name, buffer in history_buffers.items():
                 buffer.reset(batch_ids=env_ids)
 
+    def rollback_last_history_append(self) -> None:
+        """Undo the most recent history append on every term's circular buffer.
+
+        Used by ``World.step`` after capturing the terminal observation: the
+        capture appends the terminal frame into history (so terminal
+        observations include it), then this rollback rewinds the write head so
+        the subsequent per-step ``advance()`` is the only append that counts.
+        """
+        for group_buffers in self._group_obs_term_history_buffer.values():
+            for buf in group_buffers.values():
+                buf.rollback_last()
+
     def extract_term(
         self,
         group_name: str,
