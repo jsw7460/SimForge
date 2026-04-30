@@ -387,12 +387,10 @@ class World(ABC):
         Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Execute one environment step."""
         # Process and apply actions
-        processed_actions = self.act_manager.process_actions(actions)
-        self._apply_actions(processed_actions)
+        self.act_manager.process_actions(actions)
 
         # Step physics (simulator-specific)
         self._step_physics()
-
         self._invalidate_cache()
 
         # Update contact info
@@ -434,9 +432,6 @@ class World(ABC):
                 "episode_reward_sums": deepcopy(self.episode_sums),
             }
 
-        # Advance commands (timer-based resampling + per-step post-processing)
-        self.command_manager.compute(self.control_dt)
-
         # Reset terminated environments
         self._reset_idx(reset_env_ids)
         self._invalidate_cache()
@@ -447,8 +442,12 @@ class World(ABC):
         # need an explicit FK pass (mjlab: sim.forward()).
         self._post_reset_forward()
 
+        # Advance commands (timer-based resampling + per-step post-processing)
+        self.command_manager.compute(self.control_dt)
+
         # Advance managers
         self._advance_managers()
+
         self._update_num_step_calls()
 
         # Build extras
@@ -548,6 +547,8 @@ class World(ABC):
         all_env_ids = torch.arange(self.num_envs, device=self.device)
         self._reset_idx(all_env_ids)
         self._post_reset_forward()
+        self.command_manager.compute(dt=0.0)
+        self._invalidate_cache()
         self.obs_manager.advance()
 
         self.extras = {
