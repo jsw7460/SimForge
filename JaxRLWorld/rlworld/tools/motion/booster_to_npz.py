@@ -73,6 +73,14 @@ def _resample_pose_trajectory(
     without re-parsing a CSV. Used to downsample Booster's 500 Hz recording
     to the tracker's 50 Hz control frequency while producing dt-consistent
     velocities from the downsampled pose path.
+
+    Booster recordings open with a brief settling transient (~50-200 ms)
+    where the robot transitions from its controller's home pose to the
+    motion's actual first frame. Once resampled to 50 Hz that transient
+    becomes a 1-3 frame jump producing >30 rad/s joint velocities — i.e.
+    nonsense. We trim leading frames where ``max(|dof_vel|)`` exceeds
+    ``LEAD_VEL_THRESH``, with a small ``EPS_FRAMES`` lookahead so a single
+    fast tracking frame doesn't keep the trim going indefinitely.
     """
     input_dt = 1.0 / float(input_fps)
     output_dt = 1.0 / float(output_fps)
@@ -94,6 +102,39 @@ def _resample_pose_trajectory(
     base_lin_vel = np.gradient(base_pos_o, output_dt, axis=0).astype(np.float32)
     dof_vel = np.gradient(dof_pos_o, output_dt, axis=0).astype(np.float32)
     base_ang_vel = _so3_derivative(base_quat_o, output_dt).astype(np.float32)
+
+    # Trim leading high-velocity transient. Threshold chosen empirically:
+    # human walking caps any individual joint at ~6 rad/s, kicks at ~10
+    # rad/s. >15 rad/s on any joint at the very start of a clip is almost
+    # certainly the recording's settling transient, not real motion.
+    LEAD_VEL_THRESH = 15.0  # rad/s
+    EPS_FRAMES = 3
+    n_out = dof_pos_o.shape[0]
+    stable_start = 0
+    for t in range(n_out):
+        max_v = float(np.max(np.abs(dof_vel[t])))
+        if max_v >= LEAD_VEL_THRESH:
+            stable_start = t + 1
+            continue
+        # Look ahead to confirm we've actually settled, not just passed
+        # through a single low-velocity frame.
+        end = min(t + EPS_FRAMES, n_out)
+        max_lookahead = float(np.max(np.abs(dof_vel[t:end])))
+        if max_lookahead < LEAD_VEL_THRESH:
+            stable_start = t
+            break
+    if stable_start > 0:
+        print(
+            f"[booster_to_npz]   trimmed {stable_start} leading "
+            f"high-velocity frames (>{LEAD_VEL_THRESH:.0f} rad/s settle "
+            f"transient)"
+        )
+        base_pos_o = base_pos_o[stable_start:]
+        base_quat_o = base_quat_o[stable_start:]
+        dof_pos_o = dof_pos_o[stable_start:]
+        base_lin_vel = base_lin_vel[stable_start:]
+        dof_vel = dof_vel[stable_start:]
+        base_ang_vel = base_ang_vel[stable_start:]
 
     return InterpolatedMotion(
         base_pos=base_pos_o,

@@ -7,6 +7,21 @@ velocity) by writing qpos / qvel and calling ``mj_forward`` frame by frame.
 Uses only the ``mujoco`` Python package — no mjlab, no Genesis, no Newton.
 The resulting arrays are sim-agnostic and can be consumed by MotionCommand
 on any of the three JaxRLWorld simulators.
+
+Frame convention note: MuJoCo's free joint qvel is mixed-frame. Empirical
+test (mj_objectVelocity flag=0 cross-check):
+
+    qvel[0:3] linear  -> WORLD frame
+    qvel[3:6] angular -> LOCAL (body) frame
+
+The official docs are inconsistent on this, but tests confirm the above.
+The motion preprocessor stores world-frame angular velocity (axis-angle
+of relative quaternion in world frame), so we must rotate it into the
+body's local frame before writing to qvel. Without this conversion the
+forward-kinematics chain double-rotates the base angular velocity, which
+gets amplified by ``omega cross r`` for distant bodies and produces
+nonsense per-body velocities (e.g. T1 hand velocity 12 m/s for a clip
+where the trunk barely moves).
 """
 from __future__ import annotations
 
@@ -16,6 +31,26 @@ import numpy as np
 import mujoco
 
 from rlworld.tools.motion.motion_loader import InterpolatedMotion
+
+
+def _quat_rotate_inverse_wxyz_np(q: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Rotate ``v`` by the inverse of unit quaternion ``q`` (wxyz).
+
+    For a unit quaternion ``q``, the inverse equals the conjugate
+    ``(w, -x, -y, -z)``. Using Rodrigues-style identity
+    ``R(q) v = v + 2 qxyz x (qxyz x v + qw v)``.
+
+    Args:
+        q: ``(4,)`` unit quaternion in wxyz layout.
+        v: ``(3,)`` vector.
+
+    Returns:
+        ``(3,)`` vector ``R(q)^T @ v``.
+    """
+    w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+    cqxyz = np.array([-x, -y, -z], dtype=np.float64)
+    t = 2.0 * np.cross(cqxyz, v.astype(np.float64))
+    return (v.astype(np.float64) + w * t + np.cross(cqxyz, t)).astype(v.dtype)
 
 
 def _free_joint_info(model) -> "tuple[int, int]":
@@ -146,9 +181,16 @@ def replay_motion(
         data.qpos[free_qpos_adr : free_qpos_adr + 3] = motion.base_pos[t]
         data.qpos[free_qpos_adr + 3 : free_qpos_adr + 7] = motion.base_quat_wxyz[t]
         data.qpos[joint_qpos_adr] = motion.dof_pos[t]
-        # Free-joint qvel is (3 lin, 3 ang) in world frame.
+        # Free-joint qvel layout (verified empirically):
+        #   qvel[0:3] linear  in WORLD frame
+        #   qvel[3:6] angular in LOCAL (body) frame
+        # The motion stores world-frame angular velocity (from
+        # ``_so3_derivative``), so rotate into local before writing.
         data.qvel[free_qvel_adr : free_qvel_adr + 3] = motion.base_lin_vel[t]
-        data.qvel[free_qvel_adr + 3 : free_qvel_adr + 6] = motion.base_ang_vel[t]
+        ang_local = _quat_rotate_inverse_wxyz_np(
+            motion.base_quat_wxyz[t], motion.base_ang_vel[t],
+        )
+        data.qvel[free_qvel_adr + 3 : free_qvel_adr + 6] = ang_local
         data.qvel[joint_qvel_adr] = motion.dof_vel[t]
 
         mujoco.mj_forward(model, data)
@@ -166,6 +208,8 @@ def replay_motion(
             # mj_objectVelocity output: [ang_x, ang_y, ang_z, lin_x, lin_y, lin_z].
             out_body_ang_vel[t, bid] = vel_buf[:3]
             out_body_lin_vel[t, bid] = vel_buf[3:]
+
+        import warp as wp
 
     return {
         "joint_pos": out_joint_pos,
