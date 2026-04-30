@@ -41,6 +41,7 @@ from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
+    motion_clip_id_onehot,
     motion_future_reference_window,
     robot_body_ori_b,
     robot_body_pos_b,
@@ -211,6 +212,13 @@ def build_observation(cfg: "T1TrackingConfig") -> NewtonObservationConfig:
             func=motion_anchor_ori_b, scale=1.0, params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
+        # Multi-clip disambiguation: lets the policy condition on which
+        # motion clip this env is currently tracking. Lives in the proprio
+        # segment (before motion_future_window) so the tokenizer's
+        # per-body MLPs absorb it.
+        motion_clip_id = ObservationTermConfig(
+            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        )
         # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
         # obs by assuming future window is the trailing segment.
         motion_future_window = ObservationTermConfig(
@@ -244,6 +252,10 @@ def build_observation(cfg: "T1TrackingConfig") -> NewtonObservationConfig:
         robot_body_ori = ObservationTermConfig(
             func=robot_body_ori_b, scale=1.0, params=motion_params,
         )
+        # Same multi-clip identifier as the actor. See _ActorObsCfg.motion_clip_id.
+        motion_clip_id = ObservationTermConfig(
+            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        )
         # Must be LAST: see _ActorObsCfg.motion_future_window.
         motion_future_window = ObservationTermConfig(
             func=motion_future_reference_window, scale=1.0, params=motion_params,
@@ -258,31 +270,49 @@ def build_observation(cfg: "T1TrackingConfig") -> NewtonObservationConfig:
 
 
 def build_action(cfg: "T1TrackingConfig") -> NewtonActionConfig:
-    """Settle-relative joint position action; settle_steps=0 for tracking.
+    """Action term selection based on ``cfg.action_mode``.
 
-    Motion command writes the initial pose on reset; the policy's first
-    step therefore targets ``current_pos + action * scale`` where
-    ``current_pos`` is already the motion's reference pose, i.e. a pure
-    residual control scheme on top of the reference motion.
+    - ``"motion_residual"`` (default): target = motion[t] + alpha * tanh(raw)
+      Anchors the action on the reference motion, so raw=0 already
+      tracks. Strongly preferred for tracking — drastically lower
+      optimization burden than learning motion + corrections.
+    - ``"default_pose"`` (backup): target = scale * raw + default_pose.
+      Anchors on the robot's default standing pose. Ablation only.
     """
     from rlworld.rl.envs.mdp.actions import (
-        SettleRelativeJointPositionAction,
-        SettleRelativeJointPositionActionCfg,
+        JointPositionAction,
+        JointPositionActionCfg,
+        MotionResidualJointPositionAction,
+        MotionResidualJointPositionActionCfg,
     )
 
     r = cfg.robot
+    if cfg.action_mode == "motion_residual":
+        action_term = MotionResidualJointPositionActionCfg(
+            class_type=MotionResidualJointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            command_name="motion",
+            alpha=cfg.motion_residual_alpha,
+            clip=(-100.0, 100.0),
+        )
+    elif cfg.action_mode == "default_pose":
+        action_term = JointPositionActionCfg(
+            class_type=JointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            scale=cfg.action_scale,
+            offset=r.default_joint_angles,
+            clip=(-100.0, 100.0),
+        )
+    else:
+        raise ValueError(
+            f"Unknown action_mode: {cfg.action_mode!r}. "
+            f"Expected 'motion_residual' or 'default_pose'."
+        )
+
     return NewtonActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
         clip_actions=(-100.0, 100.0),
-        action_terms={
-            "body": SettleRelativeJointPositionActionCfg(
-                class_type=SettleRelativeJointPositionAction,
-                joint_names=list(r.actuated_dof_patterns),
-                scale=cfg.action_scale,
-                clip=(-100.0, 100.0),
-                settle_steps=cfg.settle_steps,
-            ),
-        },
+        action_terms={"body": action_term},
     )
 
 

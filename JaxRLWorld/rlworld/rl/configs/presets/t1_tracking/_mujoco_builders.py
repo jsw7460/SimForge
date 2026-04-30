@@ -14,7 +14,7 @@ from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
 )
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
-from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.actuators import ImplicitActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -41,6 +41,7 @@ from rlworld.rl.envs.mdp.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
+    motion_clip_id_onehot,
     motion_future_reference_window,
     robot_body_ori_b,
     robot_body_pos_b,
@@ -140,7 +141,7 @@ def build_scene(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> MujocoSceneC
         floating=True,
         articulation=ArticulationCfg(
             actuators=(
-                ImplicitActuatorCfg(
+                IdealPDActuatorCfg(
                     target_names_expr=(".*",),
                     stiffness=r.p_gains,
                     damping=r.d_gains,
@@ -205,6 +206,10 @@ def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
             func=motion_anchor_ori_b, scale=1.0, params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
+        # Multi-clip disambiguation. See newton builder for rationale.
+        # motion_clip_id = ObservationTermConfig(
+        #     func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        # )
         # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
         # obs by assuming future window is the trailing segment.
         motion_future_window = ObservationTermConfig(
@@ -237,6 +242,10 @@ def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
         robot_body_ori = ObservationTermConfig(
             func=robot_body_ori_b, scale=1.0, params=motion_params,
         )
+        # Same multi-clip identifier as the actor.
+        # motion_clip_id = ObservationTermConfig(
+        #     func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        # )
         # Must be LAST: see _ActorObsCfg.motion_future_window.
         motion_future_window = ObservationTermConfig(
             func=motion_future_reference_window, scale=1.0, params=motion_params,
@@ -251,25 +260,42 @@ def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
 
 
 def build_action(cfg: "T1TrackingConfig") -> MujocoActionConfig:
+    """Action term selection — see ``_newton_builders.build_action``."""
     from rlworld.rl.envs.mdp.actions import (
-        SettleRelativeJointPositionAction,
-        SettleRelativeJointPositionActionCfg,
+        JointPositionAction,
+        JointPositionActionCfg,
+        MotionResidualJointPositionAction,
+        MotionResidualJointPositionActionCfg,
     )
 
     r = cfg.robot
+    if cfg.action_mode == "motion_residual":
+        action_term = MotionResidualJointPositionActionCfg(
+            class_type=MotionResidualJointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            command_name="motion",
+            alpha=cfg.motion_residual_alpha,
+            clip=(-100.0, 100.0),
+        )
+    elif cfg.action_mode == "default_pose":
+        action_term = JointPositionActionCfg(
+            class_type=JointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            scale=cfg.action_scale,
+            offset=r.default_joint_angles,
+            clip=(-100.0, 100.0),
+        )
+    else:
+        raise ValueError(
+            f"Unknown action_mode: {cfg.action_mode!r}. "
+            f"Expected 'motion_residual' or 'default_pose'."
+        )
+
     return MujocoActionConfig(
         entity_name="robot",
         actuated_dof_names=r.actuated_dof_patterns,
         clip_actions=(-100.0, 100.0),
-        action_terms={
-            "body": SettleRelativeJointPositionActionCfg(
-                class_type=SettleRelativeJointPositionAction,
-                joint_names=list(r.actuated_dof_patterns),
-                scale=cfg.action_scale,
-                clip=(-100.0, 100.0),
-                settle_steps=cfg.settle_steps,
-            ),
-        },
+        action_terms={"body": action_term},
     )
 
 

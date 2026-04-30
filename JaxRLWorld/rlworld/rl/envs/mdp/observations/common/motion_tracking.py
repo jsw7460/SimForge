@@ -98,3 +98,22 @@ def motion_future_reference_window(
     cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
     features = cmd.future_body_features_in_anchor_frame()
     return features.reshape(env.num_envs, -1)
+
+
+def motion_clip_id_onehot(
+    env: "World", command_name: str,
+) -> torch.Tensor:
+    """One-hot motion clip identifier per env.
+
+    Returns shape ``(num_envs, n_motions)``. Each row is the one-hot of
+    that env's currently-assigned motion clip. For single-clip configs
+    this collapses to a constant column of 1s (harmless 1-dim feature).
+    For multi-motion configs it gives the policy an explicit signal to
+    disambiguate behaviors that share similar instantaneous obs across
+    clips — addresses the multi-clip averaging failure mode where a
+    network without a task identifier blends several reference motions.
+    """
+    cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
+    return torch.nn.functional.one_hot(
+        cmd.motion_ids, num_classes=cmd._n_motions,
+    ).float()

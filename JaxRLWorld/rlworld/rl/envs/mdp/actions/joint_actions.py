@@ -286,3 +286,98 @@ class SettleRelativeJointPositionAction(RelativeJointPositionAction):
             target = torch.where(in_settle, current_pos, target)
 
         return target
+
+
+# ── Motion-residual (Any2Track-style) ───────────────────────────────
+
+
+@dataclass
+class MotionResidualJointPositionActionCfg(JointActionCfg):
+    """Motion-anchored residual joint position action.
+
+    Used by motion tracking tasks. Target each step is the reference
+    motion's joint position plus a tanh-bounded, per-joint-scaled
+    correction the policy outputs:
+
+        target = motion_command.joint_pos + alpha * tanh(raw)
+
+    ``raw = 0`` (the PPO Gaussian's mean at init) reduces to perfect
+    motion playback, so the policy's bootstrapping baseline already
+    tracks the motion. The policy only needs to learn corrections
+    (balance, contact reaction, embodiment gap) on top, which is a
+    much smaller function than learning motion + corrections together.
+    Bounded ``tanh`` also prevents PD target spikes from outlier
+    action samples during early training.
+
+    Inspired by Any2Track [arXiv 2025] eq. (1):
+    ``q_d = q_tilde_{t+1} + alpha * tanh(pi(a_t | s_t))``.
+
+    The base ``scale`` and ``offset`` fields are unused — this term
+    overrides ``process_actions`` so motion + alpha * tanh(raw) is
+    the entire pipeline.
+
+    Attributes:
+        command_name: Name of the :class:`MotionCommand` term in the
+            env's :class:`CommandManager`. The term reads
+            ``env.command_manager.get_term(command_name).joint_pos``
+            as the residual anchor each step. Joint positions in the
+            command are assumed to be in the env's canonical
+            actuated-joint order (which :class:`MotionLoader` enforces).
+        alpha: Per-joint correction scale. ``float`` applies the same
+            value to every joint; ``dict[regex -> float]`` resolves
+            per-joint via the standard regex-on-name plumbing. Default
+            0.5 — i.e. each joint can deviate up to ±0.5 rad from the
+            motion reference per step.
+    """
+
+    command_name: str = "motion"
+    alpha: float | dict[str, float] = 0.5
+
+
+class MotionResidualJointPositionAction(JointAction):
+    """Motion-anchored residual joint position action.
+
+    target = motion_command.joint_pos[:, joint_ids] + alpha * tanh(raw)
+
+    ``compute_target_positions`` reads the motion command's joint
+    reference each control step and adds a per-joint, tanh-bounded
+    correction from the policy. The base ``scale`` and ``offset``
+    pipeline is bypassed; raw actions are stored unchanged in
+    ``processed_actions`` for logging compatibility but not used in
+    the target computation.
+    """
+
+    __name__ = "MotionResidualJointPositionAction"
+    _cfg: MotionResidualJointPositionActionCfg
+
+    def __init__(
+        self,
+        cfg: MotionResidualJointPositionActionCfg,
+        env: "World",
+        manager: "ActionManagerBase",
+        tanh_squash: bool = False
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        # Per-joint tanh scale (alpha). Replaces self._scale/_offset's role.
+        self._alpha = self._resolve_float_field(cfg.alpha, default=0.5)
+        self._tanh_squash = tanh_squash
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        """Clip then store. ``processed_actions = raw`` (no scale/offset)."""
+        if self._cfg.clip is not None:
+            lo, hi = self._cfg.clip
+            actions = torch.clamp(actions, lo, hi)
+        self._raw_actions[:] = actions
+        # Kept identical to raw so logging / diagnostics that read
+        # processed_actions still see something sensible. Not used in
+        # target computation.
+        self._processed_actions[:] = actions
+
+    def compute_target_positions(self) -> torch.Tensor:
+        cmd = self._env.command_manager.get_term(self._cfg.command_name)
+        motion_target = cmd.joint_pos[:, self._joint_ids]
+        if self._tanh_squash:
+            residual = self._alpha * torch.tanh(self._raw_actions)
+        else:
+            residual = self._alpha * self._raw_actions
+        return motion_target + residual

@@ -99,15 +99,15 @@ class T1TrackingConfig:
     # (``kick_ball1`` / ``walking2`` use a different recording schema and
     # need a separate adapter path — intentionally omitted here).
     motion_files: tuple[str, ...] = (
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/goal_kick.npz",
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/jogging.npz",
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball2.npz",
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball3.npz",
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/pass_ball1.npz",
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/powerful_kick.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/goal_kick.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/jogging.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball2.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball3.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/pass_ball1.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/powerful_kick.npz",
         "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/running.npz",
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/soccer_drill_run.npz",
-        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/walking1.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/soccer_drill_run.npz",
+        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/walking1.npz",
     )
     motion_weights: "tuple[float, ...] | None" = None
 
@@ -188,22 +188,31 @@ class T1TrackingConfig:
     bad_anchor_ori_threshold: float = 0.8       # ~46° projected-gravity mismatch
     bad_motion_body_pos_z_threshold: float = 0.25  # meters
 
-    # Action processing. settle_steps=0 disables the hold period so the
-    # policy can act on the motion-written initial pose immediately.
+    # ── Action mode ───────────────────────────────────────────────────
+    # ``"motion_residual"`` (default, Any2Track style): target =
+    # motion[t] + alpha * tanh(raw). raw=0 baseline tracks the motion,
+    # so the policy only learns corrections (balance, contact reaction,
+    # embodiment gap). Strongly preferred for motion tracking.
+    #
+    # ``"default_pose"`` (backup, Mjlab style): target = scale * raw +
+    # default_joint_angles. raw=0 baseline drives the robot to the
+    # default standing pose (motion-agnostic). Kept for ablation /
+    # comparison; in practice never beats motion_residual on tracking.
+    action_mode: Literal["motion_residual", "default_pose"] = "motion_residual"
+    motion_residual_alpha: float = 1.0
+    # Used only when action_mode == "default_pose".
     action_scale: float = 0.25
     settle_steps: int = 0
 
-    # ── Policy architecture (SpaceTimeTransformer) ────────────────────
-    # When future_offsets is non-empty the motion command exposes a
-    # sparse preview of upcoming reference frames to the policy, and the
-    # tracking preset swaps in the SpaceTimeTransformer actor/critic.
-    # Set to an empty tuple to fall back to the MLP pipeline.
-    future_offsets: tuple[int, ...] = (1, 2, 4, 8, 16)
+    # ── Future-motion observation window ──────────────────────────────
+    # Controls the ``motion_future_reference_window`` observation term
+    # *and* the ``MotionCommandCfg.future_offsets`` field. Default ``()``
+    # = no future preview (this MLP-baseline config has no architectural
+    # use for it). Subclasses such as
+    # :class:`T1TrackingTransformerConfig` override to a non-empty tuple
+    # so the SpaceTimeTransformer's time axis has real content.
+    future_offsets: tuple[int, ...] = (1, 2, 4)
     ref_feature_dim: int = 9
-    transformer_embed_dim: int = 64
-    transformer_num_heads: int = 4
-    transformer_num_layers: int = 4
-    transformer_dim_feedforward: int = 128
 
     # Algorithm.
     algorithm_name: str = "PPO"
@@ -301,22 +310,19 @@ class T1TrackingConfig:
         return PPOConfig(
             algorithm_name=self.algorithm_name,
             clip_param=0.2,
-            obs_normalization=False,
+            obs_normalization=True,
             use_early_stop=False,
             desired_kl=0.01,
-            entropy_coef=0.005,
+            entropy_coef=0.01,
             gamma=0.99,
             lam=0.95,
             actor_lr=1e-3,
             critic_lr=1e-3,
             estimator_learning_rate=5e-4,
             max_grad_norm=1.0,
-            num_learning_epochs=5,
-            # 4 is fine again now that the encoder uses gradient
-            # checkpointing — activation memory stays under budget even at
-            # num_envs=4096 with the factorized attention layer stack.
-            num_mini_batches=8,
-            num_steps_per_env=8,
+            num_learning_epochs=8,
+            num_mini_batches=4,
+            num_steps_per_env=24,
             schedule="adaptive",
             use_clipped_value_loss=True,
             value_loss_coef=1.0,
@@ -324,28 +330,8 @@ class T1TrackingConfig:
         )
 
     def _build_nn_config(self) -> NNConfig:
-        if self.future_offsets:
-            transformer_kwargs = {
-                "tracked_body_names": self.body_names,
-                "future_offsets": self.future_offsets,
-                "ref_feature_dim": self.ref_feature_dim,
-                "embed_dim": self.transformer_embed_dim,
-                "num_heads": self.transformer_num_heads,
-                "num_layers": self.transformer_num_layers,
-                "dim_feedforward": self.transformer_dim_feedforward,
-                "use_kinematic_mask": True,
-            }
-            return NNConfig(
-                policy=PPOPolicyConfig(
-                    actor_class_name="SpaceTimeTransformerActor",
-                    critic_class_name="SpaceTimeTransformerCritic",
-                    actor_kwargs=transformer_kwargs,
-                    critic_kwargs=transformer_kwargs,
-                    init_noise_std=1.0,
-                    distribution_type="gaussian",
-                    std_type="state_independent",
-                ),
-            )
+        # MLP baseline. Subclasses (e.g. ``T1TrackingTransformerConfig``)
+        # override this method to swap in a different actor/critic.
         return NNConfig(
             policy=PPOPolicyConfig(
                 actor_class_name="MLPActor",

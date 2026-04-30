@@ -41,6 +41,7 @@ from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
+    motion_clip_id_onehot,
     motion_future_reference_window,
     robot_body_ori_b,
     robot_body_pos_b,
@@ -202,6 +203,10 @@ def build_observation(cfg: "T1TrackingConfig") -> ObservationConfig:
             func=motion_anchor_ori_b, scale=1.0, params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
+        # Multi-clip disambiguation. See newton builder for rationale.
+        motion_clip_id = ObservationTermConfig(
+            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        )
         # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
         # obs by assuming future window is the trailing segment.
         motion_future_window = ObservationTermConfig(
@@ -234,6 +239,10 @@ def build_observation(cfg: "T1TrackingConfig") -> ObservationConfig:
         robot_body_ori = ObservationTermConfig(
             func=robot_body_ori_b, scale=1.0, params=motion_params,
         )
+        # Same multi-clip identifier as the actor.
+        motion_clip_id = ObservationTermConfig(
+            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
+        )
         # Must be LAST: see _ActorObsCfg.motion_future_window.
         motion_future_window = ObservationTermConfig(
             func=motion_future_reference_window, scale=1.0, params=motion_params,
@@ -248,24 +257,41 @@ def build_observation(cfg: "T1TrackingConfig") -> ObservationConfig:
 
 
 def build_action(cfg: "T1TrackingConfig") -> ActionConfig:
+    """Action term selection — see ``_newton_builders.build_action``."""
     from rlworld.rl.envs.mdp.actions import (
-        SettleRelativeJointPositionAction,
-        SettleRelativeJointPositionActionCfg,
+        JointPositionAction,
+        JointPositionActionCfg,
+        MotionResidualJointPositionAction,
+        MotionResidualJointPositionActionCfg,
     )
 
     r = cfg.robot
+    if cfg.action_mode == "motion_residual":
+        action_term = MotionResidualJointPositionActionCfg(
+            class_type=MotionResidualJointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            command_name="motion",
+            alpha=cfg.motion_residual_alpha,
+            clip=(-100.0, 100.0),
+        )
+    elif cfg.action_mode == "default_pose":
+        action_term = JointPositionActionCfg(
+            class_type=JointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            scale=cfg.action_scale,
+            offset=r.default_joint_angles,
+            clip=(-100.0, 100.0),
+        )
+    else:
+        raise ValueError(
+            f"Unknown action_mode: {cfg.action_mode!r}. "
+            f"Expected 'motion_residual' or 'default_pose'."
+        )
+
     return ActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
         clip_actions=(-100.0, 100.0),
-        action_terms={
-            "body": SettleRelativeJointPositionActionCfg(
-                class_type=SettleRelativeJointPositionAction,
-                joint_names=list(r.actuated_dof_patterns),
-                scale=cfg.action_scale,
-                clip=(-100.0, 100.0),
-                settle_steps=cfg.settle_steps,
-            ),
-        },
+        action_terms={"body": action_term},
     )
 
 
