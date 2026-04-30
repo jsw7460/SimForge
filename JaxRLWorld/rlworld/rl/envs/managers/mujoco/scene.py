@@ -431,13 +431,33 @@ class MujocoSceneManager(BaseManager):
         return matched_names
 
     def _set_kinematic_tree(self) -> None:
-        """Build kinematic trees for all entities from their MjSpec XML."""
+        """Build kinematic trees for all entities from their MjSpec XML.
+
+        Once the scene has been compiled, each entity's ``entity.spec``
+        is attached by reference to the parent world spec, so calling
+        ``to_xml()`` directly raises "cannot compile child spec if
+        attached by reference to a parent spec". Falling back to
+        ``spec.copy().to_xml()`` works around the compile guard but
+        returns an empty ``<worldbody/>`` (the body hierarchy lives in
+        the parent spec, not the copy).
+
+        Instead we re-invoke the original ``spec_fn`` callable that
+        was used to build the entity in the first place — for the
+        standard ``EntityCfg`` path this is e.g.
+        ``mujoco.MjSpec.from_file(...)``, which always returns a fresh
+        standalone spec with the full body tree intact. Entities that
+        don't carry a ``spec_fn`` (e.g. terrain primitives built
+        in-place by mjlab) are skipped.
+        """
         def _resolve(name: str):
             entity = self._scene.entities[name]
+            spec_fn = getattr(getattr(entity, "cfg", None), "spec_fn", None)
+            if spec_fn is None:
+                return None
             try:
-                xml_content = entity.spec.to_xml()
+                fresh_spec = spec_fn()
+                xml_content = fresh_spec.to_xml()
             except Exception:
-                # Some entity types (e.g. terrain) may not expose a spec.
                 return None
             return ("mjcf_xml", xml_content)
 
