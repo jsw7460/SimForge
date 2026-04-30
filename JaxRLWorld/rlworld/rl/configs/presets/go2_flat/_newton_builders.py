@@ -126,23 +126,23 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 ],
                 articulation=ArticulationCfg(
                     actuators=(
-                        ImplicitActuatorCfg(
+                        DelayedPDActuatorCfg(
                             target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
                             stiffness=STIFFNESS_HIP,
                             damping=DAMPING_HIP,
                             effort_limit=EFFORT_HIP,
                             armature=ARMATURE_HIP,
-                            # min_delay=1,
-                            # max_delay=3,
+                            min_delay=1,
+                            max_delay=3,
                         ),
-                        ImplicitActuatorCfg(
+                        DelayedPDActuatorCfg(
                             target_names_expr=(".*_calf_joint",),
                             stiffness=STIFFNESS_KNEE,
                             damping=DAMPING_KNEE,
                             effort_limit=EFFORT_KNEE,
                             armature=ARMATURE_KNEE,
-                            # min_delay=1,
-                            # max_delay=3,
+                            min_delay=1,
+                            max_delay=3,
                         ),
                     ),
                 ),

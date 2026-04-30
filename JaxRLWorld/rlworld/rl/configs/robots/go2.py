@@ -6,33 +6,33 @@ from rlworld.rl.configs.robots.utils import reflected_inertia_simple
 
 # Go2 motor specs (from mjlab_sim2real)
 # Ref: https://github.com/unitreerobotics/unitree_ros/blob/master/robots/go2_description/urdf/go2_description.urdf#L90
-ROTOR_INERTIA = 0.000111842
+ROTOR_INERTIA = 0.000111842   # kg·m^2
 
 # Gear ratios
 # Ref: https://www.unitree.com/cn/go1/motor
 HIP_GEAR_RATIO = 6.33
-KNEE_GEAR_RATIO = HIP_GEAR_RATIO * 1.92
+KNEE_GEAR_RATIO = HIP_GEAR_RATIO * 1.92   # ≈ 12.1536
 
-ARMATURE_HIP = reflected_inertia_simple(ROTOR_INERTIA, HIP_GEAR_RATIO)
-ARMATURE_KNEE = reflected_inertia_simple(ROTOR_INERTIA, KNEE_GEAR_RATIO)
+ARMATURE_HIP = reflected_inertia_simple(ROTOR_INERTIA, HIP_GEAR_RATIO)     # ≈ 0.004481  kg·m^2
+ARMATURE_KNEE = reflected_inertia_simple(ROTOR_INERTIA, KNEE_GEAR_RATIO)   # ≈ 0.016520  kg·m^2
 
 # PD gains derived from reflected inertia
-NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10Hz
+NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10Hz → ≈ 62.8319 rad/s
 DAMPING_RATIO = 2.0
 
-STIFFNESS_HIP = ARMATURE_HIP * NATURAL_FREQ**2
-DAMPING_HIP = 2 * DAMPING_RATIO * ARMATURE_HIP * NATURAL_FREQ
+STIFFNESS_HIP = ARMATURE_HIP * NATURAL_FREQ**2                        # ≈ 17.6918  N·m/rad
+DAMPING_HIP = 2 * DAMPING_RATIO * ARMATURE_HIP * NATURAL_FREQ         # ≈  1.1263  N·m·s/rad
 
-STIFFNESS_KNEE = ARMATURE_KNEE * NATURAL_FREQ**2
-DAMPING_KNEE = 2 * DAMPING_RATIO * ARMATURE_KNEE * NATURAL_FREQ
+STIFFNESS_KNEE = ARMATURE_KNEE * NATURAL_FREQ**2                      # ≈ 65.2191  N·m/rad
+DAMPING_KNEE = 2 * DAMPING_RATIO * ARMATURE_KNEE * NATURAL_FREQ       # ≈  4.1520  N·m·s/rad
 
 # Effort limits
-EFFORT_HIP = 23.7
-EFFORT_KNEE = 45.43
+EFFORT_HIP = 23.7    # N·m
+EFFORT_KNEE = 45.43  # N·m
 
 # Action scale: 0.25 * effort / stiffness
-ACTION_SCALE_HIP = 0.25 * EFFORT_HIP / STIFFNESS_HIP
-ACTION_SCALE_KNEE = 0.25 * EFFORT_KNEE / STIFFNESS_KNEE
+ACTION_SCALE_HIP = 0.25 * EFFORT_HIP / STIFFNESS_HIP      # ≈ 0.3349  rad
+ACTION_SCALE_KNEE = 0.25 * EFFORT_KNEE / STIFFNESS_KNEE   # ≈ 0.1741  rad
 
 GO2_ACTION_SCALE: Dict[str, float] = {
     r".*_hip_joint": ACTION_SCALE_HIP,
