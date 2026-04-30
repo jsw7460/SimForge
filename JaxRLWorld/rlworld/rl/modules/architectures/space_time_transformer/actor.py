@@ -57,10 +57,12 @@ def _resolve_body_indices(
 class SpaceTimeTransformerActor(BaseActor):
     tokenizer: SpaceTimeTokenizer
     encoder: SpaceTimeTransformerEncoder
+    bottleneck: eqx.nn.Linear
     decoder: ParentLinkToJointActionDecoder
 
     num_obs: int = eqx.field(static=True)
     num_actions: int = eqx.field(static=True)
+    bottleneck_dim: int = eqx.field(static=True)
 
     def __init__(
         self,
@@ -76,6 +78,7 @@ class SpaceTimeTransformerActor(BaseActor):
         num_layers: int = 3,
         dim_feedforward: int = 256,
         dropout: float = 0.0,
+        bottleneck_dim: int = 32,
         tokenizer_hidden_dim: int | None = None,
         decoder_hidden_dim: int | None = None,
         decoder_activation: str = "elu",
@@ -86,6 +89,7 @@ class SpaceTimeTransformerActor(BaseActor):
     ):
         self.num_obs = num_obs
         self.num_actions = num_actions
+        self.bottleneck_dim = bottleneck_dim
 
         tracked_body_indices = _resolve_body_indices(
             kinematic_tree, tracked_body_names,
@@ -101,7 +105,7 @@ class SpaceTimeTransformerActor(BaseActor):
                 f"future_offsets / tracked_body_names match the MotionCommand config."
             )
 
-        key_tok, key_enc, key_dec = jax.random.split(key, 3)
+        key_tok, key_enc, key_bn, key_dec = jax.random.split(key, 4)
 
         self.tokenizer = SpaceTimeTokenizer(
             num_bodies_all=kinematic_tree.num_bodies,
@@ -127,12 +131,19 @@ class SpaceTimeTransformerActor(BaseActor):
             key=key_enc,
         )
 
+        # Information bottleneck: pool encoder output (across all tokens)
+        # into a small ``z`` (NPMP-style global motion-intent latent).
+        # Concatenated to every per-body t=0 feature so each body decoder
+        # head sees both its own state and the abstracted clip context.
+        self.bottleneck = eqx.nn.Linear(embed_dim, bottleneck_dim, key=key_bn)
+
+        decoder_input_dim = embed_dim + bottleneck_dim
         if decoder_hidden_dim is None:
-            decoder_hidden_dim = embed_dim * 2
+            decoder_hidden_dim = decoder_input_dim * 2
 
         self.decoder = ParentLinkToJointActionDecoder(
             kinematic_tree=kinematic_tree,
-            hidden_dim=embed_dim,
+            hidden_dim=decoder_input_dim,
             activation=decoder_activation,
             action_hidden_dim=decoder_hidden_dim,
             output_gain=1.0,
@@ -146,9 +157,15 @@ class SpaceTimeTransformerActor(BaseActor):
         key: jax.Array | None,
     ) -> jax.Array:
         tokens = self.tokenizer(observation)
-        encoded = self.encoder(tokens, key=key)
-        link_features = encoded[0]
-        return self.decoder(link_features)
+        encoded = self.encoder(tokens, key=key)  # (T+1, B_all, D)
+        # Global bottleneck: pool every token to one vector, project to z.
+        pooled = encoded.reshape(-1, encoded.shape[-1]).mean(axis=0)
+        z = self.bottleneck(pooled)  # (D_z,)
+        # Per-body t=0 features fused with broadcast z.
+        per_body = encoded[0]  # (B_all, D)
+        z_broadcast = jnp.broadcast_to(z, (per_body.shape[0], z.shape[0]))
+        fused = jnp.concatenate([per_body, z_broadcast], axis=-1)
+        return self.decoder(fused)
 
     def __call__(
         self,

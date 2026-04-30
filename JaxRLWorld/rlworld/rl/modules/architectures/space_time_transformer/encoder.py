@@ -179,7 +179,7 @@ class SpaceTimeTransformerEncoder(eqx.Module):
         dropout: float = 0.0,
         kinematic_tree: "KinematicTree | None" = None,
         use_kinematic_mask: bool = True,
-        use_checkpoint: bool = True,
+        use_checkpoint: bool = False,
         *,
         key: jax.Array,
     ):
