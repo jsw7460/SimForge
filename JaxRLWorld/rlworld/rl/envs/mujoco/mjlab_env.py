@@ -237,8 +237,6 @@ class MujocoEnv(World):
         if dr_fields:
             self.scene_manager.sim.expand_model_fields(dr_fields)
 
-    _debug_step_count = 0
-
     def _step_physics(self) -> None:
         for _ in range(self.decimation):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
@@ -256,6 +254,7 @@ class MujocoEnv(World):
 
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
         """Reset with mjlab-specific write to sim."""
+        self.scene_manager.reset(env_ids)
         super()._reset_idx(env_ids)
 
         if len(env_ids) > 0:
@@ -274,3 +273,4 @@ class MujocoEnv(World):
         inside the decimation loop's ``scene.update(dt)`` call.
         """
         self.scene_manager.forward()
+        self.scene_manager.sim.sense()
