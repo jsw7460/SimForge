@@ -199,7 +199,3 @@ class NewtonEnv(World):
         # Update visualization
         if self.vis_manager is not None:
             self.vis_manager.advance()
-
-    def _apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply actions to Newton control."""
-        self.act_manager.apply_actions(processed_actions)

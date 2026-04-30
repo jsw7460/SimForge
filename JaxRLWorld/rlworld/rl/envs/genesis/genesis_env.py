@@ -206,7 +206,3 @@ class GenesisEnv(World):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             self.scene_manager.step()
         self.vis_manager.advance()
-
-    def _apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply actions via the action manager's configured control mode."""
-        self.act_manager.apply_actions(processed_actions)

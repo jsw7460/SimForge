@@ -248,10 +248,6 @@ class MujocoEnv(World):
         if self.visualization_manager is not None:
             self.visualization_manager.advance()
 
-    def _apply_actions(self, processed_actions: torch.Tensor) -> None:
-        """Apply processed actions to mjlab Entity."""
-        self.act_manager.apply_actions(processed_actions)
-
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
         """Reset with mjlab-specific write to sim."""
         self.scene_manager.reset(env_ids)
