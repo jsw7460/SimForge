@@ -173,86 +173,90 @@ def build_scene(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> SceneConfig:
     )
 
 
+_MOTION_PARAMS = {"command_name": "motion"}
+
+
+@dataclass
+class _ActorObsCfg(ObservationGroupConfig):
+    base_ang_vel_obs = ObservationTermConfig(
+        func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
+    )
+    projected_gravity_obs = ObservationTermConfig(
+        func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
+    )
+    dof_pos_obs = ObservationTermConfig(
+        func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
+    )
+    dof_pos_diff_obs = ObservationTermConfig(
+        func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
+    )
+    dof_vel_obs = ObservationTermConfig(
+        func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
+    )
+    prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+    command = ObservationTermConfig(func=command_obs, scale=1.0)
+    motion_anchor_pos = ObservationTermConfig(
+        func=motion_anchor_pos_b, scale=1.0, params=_MOTION_PARAMS,
+        noise=Unoise(-0.05, 0.05),
+    )
+    motion_anchor_ori = ObservationTermConfig(
+        func=motion_anchor_ori_b, scale=1.0, params=_MOTION_PARAMS,
+        noise=Unoise(-0.05, 0.05),
+    )
+    # Multi-clip disambiguation. See newton builder for rationale.
+    motion_clip_id = ObservationTermConfig(
+        func=motion_clip_id_onehot, scale=1.0, params=_MOTION_PARAMS,
+    )
+    # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
+    # obs by assuming future window is the trailing segment.
+    motion_future_window = ObservationTermConfig(
+        func=motion_future_reference_window, scale=1.0, params=_MOTION_PARAMS,
+    )
+
+
+@dataclass
+class _CriticObsCfg(ObservationGroupConfig):
+    base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
+    base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
+    projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
+    dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
+    dof_pos_diff_obs = ObservationTermConfig(
+        func=dof_pos_nominal_difference, scale=1.0,
+    )
+    dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
+    prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+    base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
+    base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
+    command = ObservationTermConfig(func=command_obs, scale=1.0)
+    motion_anchor_pos = ObservationTermConfig(
+        func=motion_anchor_pos_b, scale=1.0, params=_MOTION_PARAMS,
+    )
+    motion_anchor_ori = ObservationTermConfig(
+        func=motion_anchor_ori_b, scale=1.0, params=_MOTION_PARAMS,
+    )
+    robot_body_pos = ObservationTermConfig(
+        func=robot_body_pos_b, scale=1.0, params=_MOTION_PARAMS,
+    )
+    robot_body_ori = ObservationTermConfig(
+        func=robot_body_ori_b, scale=1.0, params=_MOTION_PARAMS,
+    )
+    # Same multi-clip identifier as the actor.
+    motion_clip_id = ObservationTermConfig(
+        func=motion_clip_id_onehot, scale=1.0, params=_MOTION_PARAMS,
+    )
+    # Must be LAST: see _ActorObsCfg.motion_future_window.
+    motion_future_window = ObservationTermConfig(
+        func=motion_future_reference_window, scale=1.0, params=_MOTION_PARAMS,
+    )
+
+
+@dataclass
+class _ObsCfg(ObservationConfig):
+    actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
+    critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
+
+
 def build_observation(cfg: "T1TrackingConfig") -> ObservationConfig:
-    motion_params = {"command_name": "motion"}
-
-    @dataclass
-    class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-        )
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-        )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-        )
-        prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
-        command = ObservationTermConfig(func=command_obs, scale=1.0)
-        motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
-            noise=Unoise(-0.05, 0.05),
-        )
-        motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
-            noise=Unoise(-0.05, 0.05),
-        )
-        # Multi-clip disambiguation. See newton builder for rationale.
-        motion_clip_id = ObservationTermConfig(
-            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
-        )
-        # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
-        # obs by assuming future window is the trailing segment.
-        motion_future_window = ObservationTermConfig(
-            func=motion_future_reference_window, scale=1.0, params=motion_params,
-        )
-
-    @dataclass
-    class _CriticObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
-        base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
-        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
-        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0,
-        )
-        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
-        prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
-        base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
-        base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
-        command = ObservationTermConfig(func=command_obs, scale=1.0)
-        motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
-        )
-        motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
-        )
-        robot_body_pos = ObservationTermConfig(
-            func=robot_body_pos_b, scale=1.0, params=motion_params,
-        )
-        robot_body_ori = ObservationTermConfig(
-            func=robot_body_ori_b, scale=1.0, params=motion_params,
-        )
-        # Same multi-clip identifier as the actor.
-        motion_clip_id = ObservationTermConfig(
-            func=motion_clip_id_onehot, scale=1.0, params=motion_params,
-        )
-        # Must be LAST: see _ActorObsCfg.motion_future_window.
-        motion_future_window = ObservationTermConfig(
-            func=motion_future_reference_window, scale=1.0, params=motion_params,
-        )
-
-    @dataclass
-    class _ObsCfg(ObservationConfig):
-        actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
-        critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
-
     return _ObsCfg()
 
 
