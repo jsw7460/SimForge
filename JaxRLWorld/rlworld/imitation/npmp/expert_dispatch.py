@@ -19,6 +19,20 @@ stepping; the simple constant graph is a worthwhile tradeoff over
 ragged per-expert sub-batches. A vmap-stacked variant (one batched
 module across the expert axis) is the natural follow-up if profiling
 reveals a bottleneck.
+
+**motion_clip_id bridge.** Experts trained with single-clip
+``T1TrackingConfig`` saw a ``motion_clip_id_onehot`` slot of width 1
+(constant ``[1.0]``). The distillation env runs with all N motions, so
+the same obs term widens to width N, shifting every actor first-layer
+weight downstream and breaking ``eqx.tree_deserialise_leaves``. The
+dispatcher detects the motion_clip_id slice in the env's actor obs
+group and at runtime *bridges* it back to a single constant-1.0 column
+before calling each expert. This is mathematically identical to the
+expert's training input (the expert had baked the constant 1.0 into a
+learned bias on that column), so dispatched mean actions match
+training-time outputs bit-for-bit. The bridge is a no-op when the
+motion_clip_id term is absent or already width 1 — i.e. once experts
+are retrained without it, this file needs no further change.
 """
 from __future__ import annotations
 
@@ -40,6 +54,9 @@ if TYPE_CHECKING:
 
 
 __all__ = ["MultiExpertDispatcher"]
+
+
+_CLIP_ID_TERM_NAME = "motion_clip_id"
 
 
 # ── Per-expert deterministic forward ────────────────────────────────
@@ -71,6 +88,9 @@ def _load_expert_policy(
     checkpoint_path: str,
     env: "World",
     key: jax.Array,
+    *,
+    actor_obs_dim_override: int | None = None,
+    critic_obs_dim_override: int | None = None,
 ) -> PPOActorCritic:
     """Reconstruct one expert's :class:`PPOActorCritic` from its checkpoint.
 
@@ -78,16 +98,26 @@ def _load_expert_policy(
     optimizer / storage / runner-state setup — distillation only needs
     the policy weights for inference.
 
-    Loads ``config.yaml`` + ``train_state.yaml`` to recover the original
-    training config, builds an empty ``PPOActorCritic`` with matching
-    architecture, then deserialises ``model.eqx`` into it.
+    The two ``*_override`` kwargs let the caller specify the actor /
+    critic obs dims that the expert was *trained* with, when the
+    distillation env's obs differs in width (e.g. the
+    ``motion_clip_id_onehot`` term widens with multi-motion). Built
+    PPOActorCritic must match the saved shapes for
+    ``eqx.tree_deserialise_leaves`` to succeed; the dispatcher's
+    runtime bridge then reconciles the two layouts before forward.
     """
     metadata = load_checkpoint_metadata(checkpoint_path)
     cfgs = load_config_from_checkpoint(metadata)
 
     obs_dim = env.calculate_obs_dim()
-    actor_obs_dim = obs_dim["actor"]
-    critic_obs_dim = obs_dim["critic"]
+    actor_obs_dim = (
+        actor_obs_dim_override if actor_obs_dim_override is not None
+        else obs_dim["actor"]
+    )
+    critic_obs_dim = (
+        critic_obs_dim_override if critic_obs_dim_override is not None
+        else obs_dim["critic"]
+    )
     num_actions = env.num_actions
 
     policy_cfg = cfgs.nn.policy
@@ -132,6 +162,27 @@ def _load_expert_policy(
     return actor_critic
 
 
+# ── motion_clip_id bridge helpers ───────────────────────────────────
+
+
+def _term_slice(
+    env: "World", group_name: str, term_name: str,
+) -> tuple[int, int] | None:
+    """Look up ``(start, end)`` for an obs term in a group, or ``None``.
+
+    Reads from ``ObservationManager._group_term_indices``, which is
+    populated by ``calculate_obs_dim`` / ``_build_term_indices``. The
+    attribute is private but stable internal API.
+    """
+    om = env.obs_manager
+    # Trigger the lazy index build if needed.
+    om.calculate_obs_dim()
+    group = getattr(om, "_group_term_indices", {}).get(group_name)
+    if not group:
+        return None
+    return group.get(term_name)
+
+
 # ── Multi-expert dispatcher ─────────────────────────────────────────
 
 
@@ -154,13 +205,59 @@ class MultiExpertDispatcher:
                 "MultiExpertDispatcher requires at least one expert "
                 "checkpoint path."
             )
+
+        env_obs_dim = env.calculate_obs_dim()
+        env_actor_dim = env_obs_dim["actor"]
+        env_critic_dim = env_obs_dim["critic"]
+
+        # Detect the motion_clip_id slice in actor / critic groups so
+        # we can map env obs (width N for multi-motion) to the
+        # single-clip width 1 the experts were trained on.
+        actor_clip_slice = _term_slice(env, "actor", _CLIP_ID_TERM_NAME)
+        critic_clip_slice = _term_slice(env, "critic", _CLIP_ID_TERM_NAME)
+
+        actor_clip_len = (
+            actor_clip_slice[1] - actor_clip_slice[0]
+            if actor_clip_slice is not None else 0
+        )
+        critic_clip_len = (
+            critic_clip_slice[1] - critic_clip_slice[0]
+            if critic_clip_slice is not None else 0
+        )
+
+        # Bridge only fires when the env's clip_id term is wider than
+        # 1 (i.e. multi-motion). Width 0 (term absent) or width 1
+        # (single motion) → identity passthrough at runtime.
+        self._needs_actor_bridge = actor_clip_len > 1
+        self._actor_clip_start = actor_clip_slice[0] if actor_clip_slice else 0
+        self._actor_clip_end = actor_clip_slice[1] if actor_clip_slice else 0
+
+        # Expert obs dims (the dims the saved weights were trained
+        # with). When bridging, every clip_id segment collapses from
+        # ``clip_len`` to 1.
+        expert_actor_dim = (
+            env_actor_dim - actor_clip_len + 1
+            if self._needs_actor_bridge else env_actor_dim
+        )
+        expert_critic_dim = (
+            env_critic_dim - critic_clip_len + 1
+            if critic_clip_len > 1 else env_critic_dim
+        )
+        self._expert_actor_dim = expert_actor_dim
+
+        # Load the experts.
         keys = jax.random.split(key, len(checkpoint_paths))
         self._experts: list[PPOActorCritic] = [
-            _load_expert_policy(path, env, k)
+            _load_expert_policy(
+                path, env, k,
+                actor_obs_dim_override=expert_actor_dim,
+                critic_obs_dim_override=expert_critic_dim,
+            )
             for path, k in zip(checkpoint_paths, keys)
         ]
+
         self._action_dim: int = env.num_actions
-        self._actor_obs_dim: int = env.calculate_obs_dim()["actor"]
+        self._env_actor_dim: int = env_actor_dim
 
     @property
     def num_experts(self) -> int:
@@ -170,30 +267,71 @@ class MultiExpertDispatcher:
     def experts(self) -> tuple[PPOActorCritic, ...]:
         return tuple(self._experts)
 
+    @property
+    def expert_actor_obs_dim(self) -> int:
+        """Actor obs dim each loaded expert was *trained* with.
+
+        Equals the env actor obs dim when no bridging is needed, or
+        ``env_actor_dim - clip_id_len + 1`` when the multi-motion
+        clip_id slot is collapsed back to a single constant column.
+        """
+        return self._expert_actor_dim
+
+    def _bridge_actor_obs(self, actor_obs: jax.Array) -> jax.Array:
+        """Replace the multi-motion clip_id one-hot slot with a single
+        constant ``1.0`` column so the obs matches the single-clip
+        layout the experts were trained on.
+
+        For an env tracking motion ``i``, the original clip_id segment
+        is ``e_i`` (one-hot at position ``i``). Slot ``i`` of that
+        segment is already 1.0; slots ``≠ i`` are 0. Replacing the
+        whole segment with a constant 1.0 column is therefore both
+        equivalent to slot ``i``'s value (since each expert's
+        per-row output only matters when its index matches the env's
+        ``motion_id``) *and* identical to what every expert saw at
+        training time (single-clip → constant ``[1.0]``).
+        """
+        if not self._needs_actor_bridge:
+            return actor_obs
+        ones_col = jnp.ones(
+            (actor_obs.shape[0], 1), dtype=actor_obs.dtype,
+        )
+        return jnp.concatenate(
+            [
+                actor_obs[:, : self._actor_clip_start],
+                ones_col,
+                actor_obs[:, self._actor_clip_end :],
+            ],
+            axis=-1,
+        )
+
     def deterministic_mean(
         self,
-        actor_obs: jax.Array,    # (num_envs, D_actor)
+        actor_obs: jax.Array,    # (num_envs, env_actor_dim)
         motion_ids: jax.Array,   # (num_envs,) int — value in [0, num_experts)
     ) -> jax.Array:
         """Return ``(num_envs, action_dim)`` expert means per env.
 
-        For env ``e`` with ``motion_ids[e] = i``, the returned row equals
-        ``experts[i]``'s deterministic actor mean evaluated on
-        ``actor_obs[e]``. All other expert outputs at row ``e`` are
-        masked away with :func:`jnp.where` so the gradient does not
-        flow through them — but since the experts are frozen and never
-        wrapped in ``jax.grad`` here, the practical effect is just a
-        9× actor-forward overhead on row-by-row pruning.
+        The actor obs is bridged through :meth:`_bridge_actor_obs`
+        before being handed to each expert (no-op when the env layout
+        already matches the experts' training layout). For env ``e``
+        with ``motion_ids[e] = i``, the returned row equals
+        ``experts[i]``'s deterministic actor mean on the bridged obs.
+        Other rows of ``experts[i]``'s output are masked away with
+        :func:`jnp.where` so only the matching expert's prediction
+        survives at each row.
         """
-        if actor_obs.shape[1] != self._actor_obs_dim:
+        if actor_obs.shape[1] != self._env_actor_dim:
             raise ValueError(
                 f"actor_obs dim {actor_obs.shape[1]} does not match the "
-                f"distillation env's expected actor dim {self._actor_obs_dim}."
+                f"distillation env's expected actor dim {self._env_actor_dim}."
             )
 
-        out = jnp.zeros((actor_obs.shape[0], self._action_dim))
+        bridged = self._bridge_actor_obs(actor_obs)
+
+        out = jnp.zeros((bridged.shape[0], self._action_dim))
         for i, expert in enumerate(self._experts):
-            mean_i = _expert_mean(expert, actor_obs)
+            mean_i = _expert_mean(expert, bridged)
             mask_i = (motion_ids == i)[:, None]
             out = jnp.where(mask_i, mean_i, out)
         return out
