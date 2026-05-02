@@ -28,28 +28,29 @@ from rlworld.rl.runners import BaseRunner
 from rlworld.rl.utils.utils import setup_log_dir
 
 
-# ── Expert checkpoints — one per motion clip, same order as motion_files ──
+# ── Expert checkpoints — keyed by motion clip basename ─────────────────
 #
-# Each entry is either:
+# Keys MUST cover exactly the set of basenames in
+# T1NPMPDistillConfig.motion_files (default: the nine booster T1
+# clips). Each value is a CheckpointRef pointing at the policy
+# trained on that specific clip:
+#
 #   CheckpointRef(local_path="outputs/models/.../checkpoint_latest/")
 #   CheckpointRef(wandb_run_path="entity/project/run_id")
 #   CheckpointRef(wandb_run_path="entity/project/run_id", wandb_checkpoint_iter=N)
 #
-# The order MUST match T1NPMPDistillConfig's motion_files order:
-#   0 goal_kick    1 jogging      2 kick_ball2     3 kick_ball3
-#   4 pass_ball1   5 powerful_kick  6 running       7 soccer_drill_run
-#   8 walking1
-EXPERT_REFS: tuple[CheckpointRef, ...] = (
-    CheckpointRef(local_path="<TODO: goal_kick checkpoint path>"),
-    CheckpointRef(local_path="<TODO: jogging checkpoint path>"),
-    CheckpointRef(local_path="<TODO: kick_ball2 checkpoint path>"),
-    CheckpointRef(local_path="<TODO: kick_ball3 checkpoint path>"),
-    CheckpointRef(local_path="<TODO: pass_ball1 checkpoint path>"),
-    CheckpointRef(local_path="<TODO: powerful_kick checkpoint path>"),
-    CheckpointRef(local_path="<TODO: running checkpoint path>"),
-    CheckpointRef(local_path="<TODO: soccer_drill_run checkpoint path>"),
-    CheckpointRef(local_path="<TODO: walking1 checkpoint path>"),
-)
+# Mixing local and wandb refs in the same dict is fine.
+EXPERT_REFS: dict[str, CheckpointRef] = {
+    "goal_kick":        CheckpointRef(local_path="<TODO>"),
+    "jogging":          CheckpointRef(local_path="<TODO>"),
+    "kick_ball2":       CheckpointRef(local_path="<TODO>"),
+    "kick_ball3":       CheckpointRef(local_path="<TODO>"),
+    "pass_ball1":       CheckpointRef(local_path="<TODO>"),
+    "powerful_kick":    CheckpointRef(local_path="<TODO>"),
+    "running":          CheckpointRef(local_path="<TODO>"),
+    "soccer_drill_run": CheckpointRef(local_path="<TODO>"),
+    "walking1":         CheckpointRef(local_path="<TODO>"),
+}
 
 
 def main() -> None:

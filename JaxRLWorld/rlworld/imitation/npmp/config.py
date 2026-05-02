@@ -203,9 +203,13 @@ class T1NPMPDistillConfig(T1TrackingConfig):
     ``decoder_input`` (NPMP decoder s_t), and ``encoder_input`` (NPMP
     encoder x_t) in one pass through the observation manager.
 
-    ``expert_refs`` must have the same length and order as
-    ``motion_files`` — env env's motion_id ``i`` is supervised by
-    ``expert_refs[i]``.
+    ``expert_refs`` is a ``dict`` keyed by **motion clip basename**
+    (the NPZ filename without the ``.npz`` extension). The keys must
+    exactly match the basenames of every entry in ``motion_files``.
+    Keying by name (instead of ordering a tuple in lockstep with
+    ``motion_files``) eliminates index-mismatch footguns: each
+    expert checkpoint is explicitly tagged with the clip it was
+    trained on.
     """
 
     # ── Multi-motion default: the nine booster T1 clips. ──────────────
@@ -216,8 +220,8 @@ class T1NPMPDistillConfig(T1TrackingConfig):
         )
     )
 
-    # ── Expert checkpoint references (1:1 with motion_files). ─────────
-    expert_refs: tuple[CheckpointRef, ...] = ()
+    # ── Expert checkpoints, keyed by motion-clip basename. ────────────
+    expert_refs: dict[str, CheckpointRef] = field(default_factory=dict)
     expert_cache_dir: str = _DEFAULT_EXPERT_CACHE_DIR
 
     # ── NPMP architecture. ────────────────────────────────────────────
@@ -254,12 +258,32 @@ class T1NPMPDistillConfig(T1TrackingConfig):
                 f"_NPMPObsCfg (the t1_tracking builders are already "
                 f"hoisted, so adding one is mechanical)."
             )
-        if len(self.expert_refs) != len(self.motion_files):
+
+        expected_keys = {self._motion_key(p) for p in self.motion_files}
+        if len(expected_keys) != len(self.motion_files):
+            # Two motion files share a basename — would collide as
+            # expert_refs keys. Force users to disambiguate upstream.
             raise ValueError(
-                f"expert_refs ({len(self.expert_refs)}) must match "
-                f"motion_files ({len(self.motion_files)}) in length and "
-                f"order — env motion_id i is supervised by expert_refs[i]."
+                "motion_files contains entries with duplicate basenames. "
+                "Rename or move so every clip has a unique basename "
+                "(used as the expert_refs key)."
             )
+
+        provided_keys = set(self.expert_refs.keys())
+        missing = expected_keys - provided_keys
+        extra = provided_keys - expected_keys
+        if missing or extra:
+            msg = ["expert_refs keys must exactly match motion_files basenames."]
+            if missing:
+                msg.append(f"  missing: {sorted(missing)}")
+            if extra:
+                msg.append(f"  extra:   {sorted(extra)}")
+            raise ValueError("\n".join(msg))
+
+    @staticmethod
+    def _motion_key(motion_path: str) -> str:
+        """Strip directory + ``.npz`` to yield the canonical clip key."""
+        return os.path.splitext(os.path.basename(motion_path))[0]
 
     # ── Build override: swap observation only. ────────────────────────
 
@@ -273,10 +297,14 @@ class T1NPMPDistillConfig(T1TrackingConfig):
     # ── Resolve checkpoint paths once at trainer init time. ───────────
 
     def resolve_expert_paths(self) -> tuple[str, ...]:
-        """Return a tuple of local checkpoint directories, downloading
-        any wandb refs into :attr:`expert_cache_dir`.
+        """Return local checkpoint directories ordered to match
+        ``motion_files``, downloading any wandb refs into
+        :attr:`expert_cache_dir`. The dispatcher's ``experts[i]`` thus
+        ends up paired with ``motion_files[i]`` regardless of dict
+        insertion order in ``expert_refs``.
         """
         os.makedirs(self.expert_cache_dir, exist_ok=True)
         return tuple(
-            ref.resolve(self.expert_cache_dir) for ref in self.expert_refs
+            self.expert_refs[self._motion_key(p)].resolve(self.expert_cache_dir)
+            for p in self.motion_files
         )
