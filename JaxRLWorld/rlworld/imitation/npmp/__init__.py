@@ -11,6 +11,7 @@ from rlworld.imitation.npmp.decoder import NPMPDecoder
 from rlworld.imitation.npmp.encoder import NPMPEncoder
 from rlworld.imitation.npmp.expert_dispatch import MultiExpertDispatcher
 from rlworld.imitation.npmp.loss import NPMPBatch, NPMPLossInfo, npmp_elbo_loss
+from rlworld.imitation.npmp.metrics import NPMPMetrics
 from rlworld.imitation.npmp.module import NPMPModule, NPMPStepOutput
 from rlworld.imitation.npmp.prior import AR1Prior
 from rlworld.imitation.npmp.trainer import NPMPTrainer
@@ -24,6 +25,7 @@ __all__ = [
     "NPMPDecoder",
     "NPMPEncoder",
     "NPMPLossInfo",
+    "NPMPMetrics",
     "NPMPModule",
     "NPMPStepOutput",
     "NPMPTrainer",

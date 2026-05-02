@@ -51,10 +51,11 @@ class NPMPBatch(NamedTuple):
 class NPMPLossInfo(NamedTuple):
     """Auxiliary metrics returned alongside the loss for logging."""
 
-    loss: jax.Array            # scalar — total loss minimised
-    recon: jax.Array           # scalar — mean Gaussian NLL across (B, T)
-    kl: jax.Array              # scalar — mean KL(q ‖ p_z) across (B, T)
-    decoder_log_std: jax.Array # (A,)   — current decoder log std (per-action-dim)
+    loss: jax.Array             # scalar — total loss minimised
+    recon: jax.Array            # scalar — mean Gaussian NLL across (B, T)
+    kl: jax.Array               # scalar — mean KL(q ‖ p_z) across (B, T)
+    decoder_log_std: jax.Array  # (A,)   — current decoder log std (per-action-dim)
+    q_log_std_mean: jax.Array   # scalar — encoder posterior log_std avg over (B, T, D_z)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -150,5 +151,6 @@ def npmp_elbo_loss(
         recon=recon_mean,
         kl=kl_mean,
         decoder_log_std=module.decoder.log_std,
+        q_log_std_mean=jnp.mean(outputs.q_log_std),
     )
     return loss, info

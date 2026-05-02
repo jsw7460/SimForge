@@ -247,6 +247,12 @@ class T1NPMPDistillConfig(T1TrackingConfig):
     save_interval: int = 200
     run_name: str = "T1_NPMP"
 
+    # ── Logging. ──────────────────────────────────────────────────────
+    use_wandb: bool = True
+    wandb_project: str = "T1_NPMP"
+    wandb_group: str | None = None  # None → auto from run_name
+    upload_checkpoint_artifact: bool = True
+
     # ── Validation ────────────────────────────────────────────────────
 
     def __post_init__(self) -> None:

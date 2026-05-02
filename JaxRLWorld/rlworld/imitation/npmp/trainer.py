@@ -2,7 +2,11 @@
 
 Wires together the env, the multi-expert dispatcher, the rolling
 trajectory buffer, and the NPMP module + ELBO loss into a single
-online-BC training loop.
+online-BC training loop. Logging mirrors the RL stack's
+``ConsoleWriter`` / ``WandbLogger`` / :class:`IterationData` pattern
+so distillation runs render the same boxed iteration display the user
+already sees from PPO training (run info, performance, algorithm
+metrics, ETA) and stream the same flat dicts to wandb.
 
 Per outer iteration:
 
@@ -18,15 +22,15 @@ Per outer iteration:
      trajectories sampled from the buffer. Each minibatch runs the
      ELBO loss + clipped Adam step on the NPMP module.
 
-Checkpoints persist (a) the NPMP weights via
-``eqx.tree_serialise_leaves``, and (b) a small YAML metadata sidecar
-that captures the architecture + train-state counters needed to
-reload the module standalone — i.e. without re-instantiating the full
-distillation config — so downstream HL-controller training can pick
-up just the motor primitive module.
+  3. **Log + (every save_interval) checkpoint** — :class:`NPMPMetrics`
+     populates an :class:`IterationData`; ``ConsoleWriter`` and
+     ``WandbLogger`` consume it identically to the PPO path. Saved
+     checkpoints are uploaded as wandb artifacts so downstream HL
+     controller training can pull them by run path.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import time
 from typing import TYPE_CHECKING, Any
@@ -41,8 +45,12 @@ from rlworld.imitation.npmp.buffer import NPMPBuffer
 from rlworld.imitation.npmp.config import T1NPMPDistillConfig
 from rlworld.imitation.npmp.expert_dispatch import MultiExpertDispatcher
 from rlworld.imitation.npmp.loss import NPMPLossInfo, npmp_elbo_loss
+from rlworld.imitation.npmp.metrics import NPMPMetrics
 from rlworld.imitation.npmp.module import NPMPModule
+from rlworld.rl.runners.iteration_data import EpisodeStats, IterationData
 from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+from rlworld.rl.utils.logger import ConsoleWriter, WandbLogger
+from rlworld.rl.utils.utils import setup_log_dir
 from rlworld.rl.utils.yaml_io import dump_yaml, load_yaml
 
 if TYPE_CHECKING:
@@ -149,9 +157,26 @@ class NPMPTrainer:
         # Counters / per-env state.
         self._iteration = 0
         self._total_env_steps = 0
+        self._train_start_time = time.time()
         self._just_reset = jnp.ones(env.num_envs, dtype=jnp.bool_)
 
         self._env.reset()
+
+        # Logging — log dirs, console writer, wandb.
+        self._model_log_dir, self._wandb_log_dir = setup_log_dir(
+            output_dir="auto",
+        )
+        self._console_writer = ConsoleWriter()
+        self._wandb_logger: WandbLogger | None = None
+        if cfg.use_wandb:
+            wandb_cfg = self._cfg_to_wandb_dict()
+            self._wandb_logger = WandbLogger(
+                log_dir=self._wandb_log_dir,
+                project_name=cfg.wandb_project,
+                group_name=cfg.wandb_group or cfg.run_name,
+                run_name=f"{cfg.run_name}_seed{env.seed}",
+                cfg=wandb_cfg,
+            )
 
     # ------------------------------------------------------------------
     # Properties
@@ -165,6 +190,10 @@ class NPMPTrainer:
     def module(self) -> NPMPModule:
         """Up-to-date NPMP module (params combined with static)."""
         return eqx.combine(self._params, self._static)
+
+    @property
+    def model_log_dir(self) -> str:
+        return self._model_log_dir
 
     # ------------------------------------------------------------------
     # Rollout
@@ -226,28 +255,23 @@ class NPMPTrainer:
                 self._cfg.beta,
                 step_key,
             )
-        assert info is not None  # num_grad_steps validated >=1 in cfg
+        assert info is not None  # cfg.num_grad_steps validated >= 1
         return info
 
     # ------------------------------------------------------------------
     # Train
     # ------------------------------------------------------------------
 
-    def train(
-        self,
-        num_iterations: int,
-        save_dir: str | None = None,
-    ) -> None:
-        """Drive ``num_iterations`` rollout + update cycles.
-
-        If ``save_dir`` is given, snapshots NPMP weights every
-        ``cfg.save_interval`` iterations into
-        ``{save_dir}/checkpoint_{it}/`` plus a rolling
-        ``{save_dir}/checkpoint_latest/``.
+    def train(self, num_iterations: int) -> None:
+        """Drive ``num_iterations`` rollout + update cycles, logging via
+        the shared :class:`ConsoleWriter` / :class:`WandbLogger` infra
+        and writing checkpoints under :attr:`model_log_dir` every
+        ``cfg.save_interval`` iterations.
         """
         env_steps_per_iter = self._cfg.rollout_steps * self._env.num_envs
+        end_iter = self._iteration + num_iterations
 
-        for it in range(self._iteration, self._iteration + num_iterations):
+        for it in range(self._iteration, end_iter):
             self._iteration = it
 
             t0 = time.time()
@@ -258,26 +282,115 @@ class NPMPTrainer:
             info = self.update_iteration()
             t_update = time.time() - t0
 
-            print(
-                f"[npmp it {it:5d}] "
-                f"loss={float(info.loss):8.4f} "
-                f"recon={float(info.recon):8.4f} "
-                f"kl={float(info.kl):8.4f} "
-                f"dec_log_std_mean={float(info.decoder_log_std.mean()):+.3f} "
-                f"| rollout {t_rollout:5.2f}s update {t_update:5.2f}s "
-                f"| env_steps={self._total_env_steps:,}"
+            iter_data = self._build_iteration_data(
+                info=info,
+                rollout_time=t_rollout,
+                update_time=t_update,
+                env_steps_per_iter=env_steps_per_iter,
             )
+            context = self._build_console_context(end_iter)
 
-            if save_dir and (
+            self._console_writer.write_iteration(iter_data, context)
+            if self._wandb_logger is not None:
+                self._wandb_logger.log_iteration(
+                    iter_data, step=self._total_env_steps,
+                )
+
+            if (
                 (it + 1) % self._cfg.save_interval == 0
-                or (it + 1) == self._iteration + num_iterations
+                or (it + 1) == end_iter
             ):
-                ckpt_dir = os.path.join(save_dir, f"checkpoint_{it + 1}")
+                ckpt_dir = os.path.join(
+                    self._model_log_dir, f"checkpoint_{it + 1}",
+                )
                 self.save_checkpoint(ckpt_dir)
-                latest = os.path.join(save_dir, "checkpoint_latest")
+                latest = os.path.join(
+                    self._model_log_dir, "checkpoint_latest",
+                )
                 self.save_checkpoint(latest)
+                if (
+                    self._wandb_logger is not None
+                    and self._cfg.upload_checkpoint_artifact
+                ):
+                    self._wandb_logger.upload_checkpoint_artifact(
+                        ckpt_dir, iteration=it + 1,
+                        metadata={
+                            "iteration": it + 1,
+                            "total_env_steps": self._total_env_steps,
+                        },
+                    )
 
-        self._iteration += 1  # advance past last completed iter
+        self._iteration = end_iter
+
+    # ------------------------------------------------------------------
+    # Logging helpers
+    # ------------------------------------------------------------------
+
+    def _build_iteration_data(
+        self,
+        info: NPMPLossInfo,
+        rollout_time: float,
+        update_time: float,
+        env_steps_per_iter: int,
+    ) -> IterationData:
+        decoder_log_std = np.asarray(info.decoder_log_std)
+        metrics = NPMPMetrics(
+            loss=float(info.loss),
+            recon=float(info.recon),
+            kl=float(info.kl),
+            beta=float(self._cfg.beta),
+            decoder_log_std_mean=float(decoder_log_std.mean()),
+            decoder_log_std_min=float(decoder_log_std.min()),
+            decoder_log_std_max=float(decoder_log_std.max()),
+            encoder_q_log_std_mean=float(info.q_log_std_mean),
+        )
+
+        total_step_time = rollout_time + update_time
+        fps = env_steps_per_iter / total_step_time if total_step_time > 0 else 0.0
+
+        return IterationData(
+            collection_time=rollout_time,
+            learning_time=update_time,
+            episode_stats=EpisodeStats(
+                return_buffer=[],
+                length_buffer=[],
+                reward_stats={},
+            ),
+            fps=fps,
+            metrics=metrics,
+            buffer_size=self._buffer.num_filled,
+            iteration=self._iteration,
+            total_timesteps=self._total_env_steps,
+            total_time=time.time() - self._train_start_time,
+        )
+
+    def _build_console_context(self, end_iter: int) -> dict[str, Any]:
+        sim_name = getattr(self._env, "sim_name", "Newton")
+        task_name = getattr(self._env, "task_name", "T1_NPMP_Distill")
+        ctx: dict[str, Any] = {
+            "total_iterations": end_iter,
+            "log_dir": self._model_log_dir,
+            "simulator": sim_name,
+            "task_name": task_name,
+            "wandb_run_name": self._cfg.run_name,
+        }
+        if self._wandb_logger is not None:
+            ctx["wandb_url"] = self._wandb_logger.wandb_url
+            ctx["wandb_run_path"] = self._wandb_logger.run.path
+        return ctx
+
+    def _cfg_to_wandb_dict(self) -> dict[str, Any]:
+        """Best-effort dataclass → dict for wandb config logging.
+
+        Falls back to ``str()`` for any non-serialisable value (e.g. a
+        ``CheckpointRef`` that resolves to a wandb artifact URI). The
+        wandb side stores whatever it gets; we just want the
+        hyperparams visible in the run config UI.
+        """
+        try:
+            return dataclasses.asdict(self._cfg)
+        except TypeError:
+            return {"run_name": self._cfg.run_name}
 
     # ------------------------------------------------------------------
     # Checkpoint
@@ -306,7 +419,6 @@ class NPMPTrainer:
             },
         }
         dump_yaml(os.path.join(save_dir, "npmp_meta.yaml"), meta)
-        print(f"[npmp ckpt] saved → {save_dir}")
 
     # ------------------------------------------------------------------
     # Standalone module loader (for downstream HL controller etc.)
