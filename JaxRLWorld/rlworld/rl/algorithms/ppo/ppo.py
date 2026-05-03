@@ -318,8 +318,8 @@ class PPO(OnPolicyAlgorithm):
         else:
             self.transition.episode_starts = self._last_dones
 
-        # Handle timeout
-        self._handle_timeout(truncated, infos)
+        # Handle timeout (truncated-only; vectorized — no host sync)
+        self._handle_timeout(truncated, terminated, infos)
 
         # Add to storage
         self.storage.add_transition(
@@ -339,25 +339,38 @@ class PPO(OnPolicyAlgorithm):
         self.transition.clear()
         self._last_dones = dones
 
-    def _handle_timeout(self, truncated: jax.Array, infos: Dict[str, Any]) -> None:
-        """Bootstrap terminal value for truncated episodes."""
-        if not truncated.any():
+    def _handle_timeout(
+        self,
+        truncated: jax.Array,
+        terminated: jax.Array,
+        infos: Dict[str, Any],
+    ) -> None:
+        """Bootstrap terminal value for truncated-only episodes (vectorized).
+
+        Adds ``gamma * V(final_obs)`` to the reward for env-slots that hit a
+        time-limit truncation but did NOT genuinely terminate. The
+        ``truncated & ~terminated`` mask guards the rare but real case where
+        an env emits both flags on the same step (e.g. max-episode-length is
+        reached on the same physics step a fall is detected) — without the
+        guard we would over-bootstrap a real termination.
+
+        Implementation runs V on the full ``(num_envs, obs_dim)`` final-obs
+        tensor and multiplies by the mask, so there is no host-device sync,
+        no dynamic-shape indexing, and no JIT recompilation pressure on
+        truncated counts.
+        """
+        if "final_observation" not in infos:
             return
 
-        final_obs = infos["final_observation"]
-        truncated_ids = jnp.nonzero(truncated, size=truncated.shape[0], fill_value=-1)[0]
-        truncated_ids = truncated_ids[truncated_ids >= 0]
-
-        if truncated_ids.shape[0] == 0:
-            return
-
-        critic_obs = final_obs["critic"][truncated_ids]
-        bootstrap_values, _ = self.train_state.model.evaluate_value(critic_obs)
+        final_critic = infos["final_observation"]["critic"]
+        bootstrap_values, _ = self.train_state.model.evaluate_value(final_critic)
         bootstrap_values = bootstrap_values.squeeze(-1)
 
-        self.transition.rewards = self.transition.rewards.at[truncated_ids].add(
+        truncated_only = truncated & ~terminated
+        bonus = truncated_only.astype(self.transition.rewards.dtype) * (
             self.gamma * bootstrap_values
         )
+        self.transition.rewards = self.transition.rewards + bonus
 
     def compute_returns(self, last_critic_obs: jax.Array) -> None:
         """
@@ -366,7 +379,6 @@ class PPO(OnPolicyAlgorithm):
         Args:
             last_critic_obs: Critic observations for the last state
         """
-        self.storage.finalize()
         last_values, _ = self.train_state.model.evaluate_value(last_critic_obs)
         last_values = last_values.squeeze(-1)
 
@@ -381,10 +393,7 @@ class PPO(OnPolicyAlgorithm):
         # When per-minibatch is selected, the same statistic is computed inside
         # compute_batch_loss instead.
         if not self.normalize_advantage_per_minibatch:
-            adv = self.storage._storage["advantages"]
-            self.storage._storage["advantages"] = (
-                (adv - adv.mean()) / (adv.std() + 1e-8)
-            )
+            self.storage.normalize_advantages()
 
     def update(self) -> PPOMetrics:
         """Update policy and value networks with early stopping and adaptive LR."""
@@ -451,12 +460,8 @@ class PPO(OnPolicyAlgorithm):
         # Update observation normalizers with all collected observations.
         # Done AFTER gradient update so that rollout, returns, and loss
         # computation all used the same (frozen) normalizer.
-        if self.obs_normalization and self.storage._storage is not None:
-            all_actor_obs = self.storage._storage["actor_obs"]
-            all_critic_obs = self.storage._storage["critic_obs"]
-            # Reshape [num_steps, num_envs, dim] → [num_steps * num_envs, dim]
-            flat_actor = all_actor_obs.reshape(-1, all_actor_obs.shape[-1])
-            flat_critic = all_critic_obs.reshape(-1, all_critic_obs.shape[-1])
+        if self.obs_normalization:
+            flat_actor, flat_critic = self.storage.get_flat_observations()
             new_model = _update_normalizers(
                 self.train_state.model, flat_actor, flat_critic,
             )

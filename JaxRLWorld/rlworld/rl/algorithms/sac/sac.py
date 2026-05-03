@@ -32,6 +32,22 @@ from rlworld.rl.modules.policies.sac_ac import SACActorCritic
 from rlworld.rl.storages.replay_buffer import ReplayBuffer, ReplayBatch
 
 
+@eqx.filter_jit
+def _update_normalizers(
+    model: SACActorCritic,
+    actor_obs: jax.Array,
+    critic_obs: jax.Array,
+) -> SACActorCritic:
+    """JIT-compiled normalizer update (PPO-style)."""
+    new_actor_normalizer = model.actor_obs_normalizer.update(actor_obs)
+    new_critic_normalizer = model.critic_obs_normalizer.update(critic_obs)
+    return eqx.tree_at(
+        lambda m: (m.actor_obs_normalizer, m.critic_obs_normalizer),
+        model,
+        (new_actor_normalizer, new_critic_normalizer),
+    )
+
+
 class SACTrainState(NamedTuple):
     """Training state for SAC containing all model and optimizer states."""
     model: SACActorCritic
@@ -341,26 +357,25 @@ class SAC(OffPolicyAlgorithm):
         """Sample batch from replay buffer."""
         return self.replay_buffer.sample_batch(batch_size, key)
 
+    def update_normalizers(
+        self, actor_obs: jax.Array, critic_obs: jax.Array
+    ) -> None:
+        """Update obs normalizers with collected env-time observations.
+
+        Called by the runner once per collection cycle so that every env-time
+        observation contributes to the running statistics exactly once. This
+        replaces the previous behavior of updating from sampled replay
+        batches, which biased the statistics toward whatever transitions
+        happened to be sampled most often.
+        """
+        if not self.obs_normalization:
+            return
+        new_model = _update_normalizers(self.train_state.model, actor_obs, critic_obs)
+        self.train_state = self.train_state._replace(model=new_model)
+
     def update(self, batch: ReplayBatch) -> SACMetrics:
         """Update all networks using provided batch."""
         self.total_it += 1
-
-        # Update normalizer stats from batch data
-        if self.obs_normalization:
-            new_actor_norm = self.train_state.model.actor_obs_normalizer.update(
-                batch.actor_observations
-            )
-            new_critic_norm = self.train_state.model.critic_obs_normalizer.update(
-                batch.critic_observations
-            )
-            new_actor_norm = new_actor_norm.update(batch.next_actor_observations)
-            new_critic_norm = new_critic_norm.update(batch.next_critic_observations)
-            new_model = eqx.tree_at(
-                lambda m: (m.actor_obs_normalizer, m.critic_obs_normalizer),
-                self.train_state.model,
-                (new_actor_norm, new_critic_norm),
-            )
-            self.train_state = self.train_state._replace(model=new_model)
 
         key = self.train_state.key
         key, critic_key, actor_key = jax.random.split(key, 3)

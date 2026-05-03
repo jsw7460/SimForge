@@ -352,8 +352,10 @@ class OnPolicyRunner(BaseRunner):
             self.post_iteration(data, total_iter, it)
 
     def _get_action_statistics(self) -> Dict[str, Any]:
-        """Extract from rollout storage."""
-        actions = np.array(self.alg.storage._storage["actions"])  # (num_steps, num_envs, action_dim)
+        """Extract action stats from rollout storage."""
+        # Returns flattened [num_steps * num_envs, action_dim]; the helper
+        # reshape internally if it needs the (T, N, D) layout.
+        actions = np.array(self.alg.storage.get_flat_actions())
         return self._compute_action_distribution_stats(actions)
 
     @classmethod

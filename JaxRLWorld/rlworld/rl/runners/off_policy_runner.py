@@ -280,6 +280,16 @@ class OffPolicyRunner(BaseRunner):
         actor_obs = obs.actor_obs
         critic_obs = obs.critic_obs
 
+        # Buffer env-time observations so the obs normalizer is updated
+        # exactly once per collection cycle (PPO-style), instead of being
+        # repeatedly updated from sampled replay batches inside alg.update().
+        update_normalizers = (
+            getattr(self.alg, "obs_normalization", False)
+            and hasattr(self.alg, "update_normalizers")
+        )
+        norm_actor_buf: List[jax.Array] = [] if update_normalizers else None
+        norm_critic_buf: List[jax.Array] = [] if update_normalizers else None
+
         for step in range(total_steps):
 
             # ========== Warmup: use random actions ==========
@@ -338,6 +348,11 @@ class OffPolicyRunner(BaseRunner):
                 truncated=truncated_jax,
             )
 
+            # Buffer for one-shot normalizer update at the end of the cycle
+            if update_normalizers:
+                norm_actor_buf.append(actor_obs)
+                norm_critic_buf.append(critic_obs)
+
             # Process env step (noise resampling, etc.)
             self.alg.process_env_step(rewards_jax, terminated_jax, truncated_jax, {})
 
@@ -352,6 +367,18 @@ class OffPolicyRunner(BaseRunner):
             # Update observations
             actor_obs = next_actor_obs
             critic_obs = next_critic_obs
+
+        # One-shot obs normalizer update — every env-time obs contributes
+        # exactly once per collection cycle, regardless of how many gradient
+        # steps run later or how often each transition is resampled.
+        if update_normalizers and norm_actor_buf:
+            flat_actor = jnp.stack(norm_actor_buf).reshape(
+                -1, norm_actor_buf[0].shape[-1]
+            )
+            flat_critic = jnp.stack(norm_critic_buf).reshape(
+                -1, norm_critic_buf[0].shape[-1]
+            )
+            self.alg.update_normalizers(flat_actor, flat_critic)
 
         return {
             "collection_time": time.time() - start_time,
