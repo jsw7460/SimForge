@@ -83,7 +83,7 @@ def compute_batch_loss_dr3(
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     # Actor forward pass
-    log_probs, entropy, actor_aux = model.evaluate_actions(
+    log_probs, entropy, _mu_new, _sigma_new, actor_aux = model.evaluate_actions(
         batch.actor_observations, batch.actions, key=key
     )
 

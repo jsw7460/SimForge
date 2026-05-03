@@ -154,12 +154,12 @@ class TD3(OffPolicyAlgorithm):
     def _create_optimizers(self):
         """Create optimizers for actor and critics."""
         self.actor_optimizer = optax.chain(
-            # optax.clip_by_global_norm(self.max_grad_norm),
+            optax.clip_by_global_norm(self.max_grad_norm),
             optax.adam(learning_rate=self.actor_lr),
         )
 
         self.critic_optimizer = optax.chain(
-            # optax.clip_by_global_norm(self.max_grad_norm),
+            optax.clip_by_global_norm(self.max_grad_norm),
             optax.adam(learning_rate=self.critic_lr),
         )
 

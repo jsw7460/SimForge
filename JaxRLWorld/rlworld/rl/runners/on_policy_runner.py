@@ -106,6 +106,7 @@ class OnPolicyRunner(BaseRunner):
             desired_kl=alg_cfg.desired_kl,
             use_reward_scaling=alg_cfg.use_reward_scaling,
             use_early_stop=alg_cfg.use_early_stop,
+            normalize_advantage_per_minibatch=alg_cfg.normalize_advantage_per_minibatch,
             key=key,
         )
 

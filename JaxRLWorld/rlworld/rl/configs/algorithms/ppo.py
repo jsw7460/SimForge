@@ -21,6 +21,9 @@ class PPOConfig(BaseConfig):
     schedule: str = "adaptive"
     use_clipped_value_loss: bool = False
     use_reward_scaling: bool = True
+    # When True, normalize advantages within each minibatch (default, current behavior).
+    # When False, normalize once per rollout in compute_returns (rsl_rl default).
+    normalize_advantage_per_minibatch: bool = True
     value_loss_coef: float = 1.0
     use_truth_value_for_actor: bool = False
     use_truth_value_for_critic: bool = True

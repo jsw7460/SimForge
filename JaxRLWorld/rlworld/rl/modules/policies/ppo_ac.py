@@ -350,11 +350,13 @@ class PPOActorCritic(BaseActorCritic):
         actions: jax.Array,
         *,
         key: jax.Array | None = None,
-    ) -> tuple[jax.Array, jax.Array, dict]:
-        """Evaluate log probability and entropy for given actions.
+    ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, dict]:
+        """Evaluate log probability, entropy, and base-Gaussian (mu, sigma) for given actions.
 
         For squashed distributions, actions should be raw (pre-tanh) values.
         This avoids numerically unstable arctanh inversion (matches Brax).
+        Returned (mu, sigma) refer to the pre-squash Gaussian, matching the
+        (old_mu, old_sigma) stored at rollout time so analytical KL is well-defined.
         """
         dist, aux = self.get_distribution(actor_obs, key=key)
         if dist.is_squashed:
@@ -362,7 +364,7 @@ class PPOActorCritic(BaseActorCritic):
         else:
             log_prob = dist.log_prob(actions)
         entropy = dist.entropy()
-        return log_prob, entropy, aux
+        return log_prob, entropy, dist.mean, dist.std, aux
 
     def evaluate_value(self, critic_obs: jax.Array) -> tuple[jax.Array, dict]:
         """Evaluate value function."""

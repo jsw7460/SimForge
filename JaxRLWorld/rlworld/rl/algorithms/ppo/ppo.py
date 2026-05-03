@@ -112,6 +112,7 @@ class PPO(OnPolicyAlgorithm):
         desired_kl: float = 0.01,
         use_reward_scaling: bool = True,
         use_early_stop: bool = False,
+        normalize_advantage_per_minibatch: bool = True,
         optimizer_class=None,
         key: jax.Array = None,
         **kwargs,
@@ -163,6 +164,7 @@ class PPO(OnPolicyAlgorithm):
         self.desired_kl = desired_kl
         self.use_reward_scaling = use_reward_scaling
         self.use_early_stop = use_early_stop
+        self.normalize_advantage_per_minibatch = normalize_advantage_per_minibatch
         self.optimizer_class = optimizer_class or optax.adam
 
         # Check if model has normalizers enabled
@@ -375,11 +377,14 @@ class PPO(OnPolicyAlgorithm):
             gae_lambda=self.lam,
         )
 
-        # ########################################## Todo
-        # # Normalize advantages over entire rollout
-        # adv = self.storage._storage["advantages"]
-        # self.storage._storage["advantages"] = (adv - adv.mean()) / (adv.std() + 1e-8)
-        # ##########################################
+        # Per-rollout advantage normalization (rsl_rl default).
+        # When per-minibatch is selected, the same statistic is computed inside
+        # compute_batch_loss instead.
+        if not self.normalize_advantage_per_minibatch:
+            adv = self.storage._storage["advantages"]
+            self.storage._storage["advantages"] = (
+                (adv - adv.mean()) / (adv.std() + 1e-8)
+            )
 
     def update(self) -> PPOMetrics:
         """Update policy and value networks with early stopping and adaptive LR."""
@@ -410,7 +415,7 @@ class PPO(OnPolicyAlgorithm):
             self.value_loss_coef,
             self.entropy_coef,
             self.use_clipped_value_loss,
-            True,  # normalize_advantages
+            self.normalize_advantage_per_minibatch,
             self.use_early_stop,
             desired_kl,
             stacked_batches,
@@ -428,9 +433,20 @@ class PPO(OnPolicyAlgorithm):
         # Compute metrics
         metrics = self._compute_metrics(outputs, stacked_batches)
 
-        # Adaptive learning rate based on KL divergence
+        # Adaptive learning rate based on KL divergence.
+        # Use the analytical KL averaged over actually-applied minibatches —
+        # lower-variance signal than approx_kl, matches rsl_rl behavior.
         if self.schedule == "adaptive" and self.desired_kl is not None:
-            self._adaptive_learning_rate(metrics.kl.approx_kl)
+            did_update = outputs.did_update
+            num_actual_updates = int(did_update.sum())
+            if num_actual_updates > 0:
+                update_mask = did_update.astype(jnp.float32)
+                analytical_kl_mean = float(
+                    (outputs.analytical_kl * update_mask).sum() / num_actual_updates
+                )
+            else:
+                analytical_kl_mean = float(outputs.analytical_kl.mean())
+            self._adaptive_learning_rate(analytical_kl_mean)
 
         # Update observation normalizers with all collected observations.
         # Done AFTER gradient update so that rollout, returns, and loss

@@ -8,7 +8,11 @@ import optax
 
 from rlworld.rl.storages.rollout_storage import RolloutBatch
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
-from rlworld.rl.algorithms.ppo.losses import compute_policy_loss, compute_value_loss
+from rlworld.rl.algorithms.ppo.losses import (
+    compute_policy_loss,
+    compute_value_loss,
+    compute_analytical_kl,
+)
 
 
 # ==================== Data Structures ====================
@@ -20,6 +24,7 @@ class PPOLossInfo(NamedTuple):
     value_loss: jax.Array
     entropy: jax.Array
     approx_kl: jax.Array
+    analytical_kl: jax.Array
     clip_fraction: jax.Array
     aux: dict
 
@@ -38,6 +43,7 @@ class ScanOutput(NamedTuple):
     value_loss: jax.Array
     entropy: jax.Array
     approx_kl: jax.Array
+    analytical_kl: jax.Array
     clip_fraction: jax.Array
     did_update: jax.Array
     aux: dict
@@ -134,7 +140,7 @@ def compute_batch_loss(
     if normalize_advantages:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-    log_probs, entropy, actor_aux = model.evaluate_actions(
+    log_probs, entropy, mu_new, sigma_new, actor_aux = model.evaluate_actions(
         batch.actor_observations, batch.actions, key=key
     )
     values, critic_aux = model.evaluate_value(batch.critic_observations)
@@ -145,6 +151,15 @@ def compute_batch_loss(
         old_log_probs=batch.old_log_probs,
         advantages=advantages,
         clip_param=clip_param,
+    )
+
+    # Closed-form KL on the base Gaussian — used by the adaptive-LR schedule.
+    # Lower-variance signal than approx_kl; matches rsl_rl PPO.
+    analytical_kl = compute_analytical_kl(
+        mu_new=mu_new,
+        sigma_new=sigma_new,
+        mu_old=batch.old_mu,
+        sigma_old=batch.old_sigma,
     )
 
     value_loss = compute_value_loss(
@@ -165,6 +180,7 @@ def compute_batch_loss(
         value_loss=value_loss,
         entropy=entropy_mean,
         approx_kl=approx_kl,
+        analytical_kl=analytical_kl,
         clip_fraction=clip_fraction,
         aux=aux,
     )
@@ -233,8 +249,10 @@ def update_all_batches(
         # Compute loss and gradients
         (loss, loss_info), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
 
-        # Check early stop condition
-        should_stop = use_early_stop & (loss_info.approx_kl > desired_kl)
+        # Check early stop condition.
+        # Threshold follows the standard PPO recipe (Spinning Up / OpenAI):
+        # stop once the sample-based KL drifts past 1.5 x the target.
+        should_stop = use_early_stop & (loss_info.approx_kl > 1.5 * desired_kl)
         do_update = ~early_stopped & ~should_stop
 
         # Conditionally apply update
@@ -267,6 +285,7 @@ def update_all_batches(
             value_loss=loss_info.value_loss,
             entropy=loss_info.entropy,
             approx_kl=loss_info.approx_kl,
+            analytical_kl=loss_info.analytical_kl,
             clip_fraction=loss_info.clip_fraction,
             did_update=do_update,
             aux=loss_info.aux,

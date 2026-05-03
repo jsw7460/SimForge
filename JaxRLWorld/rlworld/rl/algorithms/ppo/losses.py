@@ -2,6 +2,25 @@ import jax
 import jax.numpy as jnp
 
 
+def compute_analytical_kl(
+    mu_new: jax.Array,
+    sigma_new: jax.Array,
+    mu_old: jax.Array,
+    sigma_old: jax.Array,
+) -> jax.Array:
+    """Closed-form KL(N(mu_old, sigma_old) || N(mu_new, sigma_new)) per sample, mean over batch.
+
+    Matches rsl_rl PPO's adaptive-LR criterion. Lower variance than Schulman's
+    approx-KL, so it is the right signal for the schedule heuristic.
+    """
+    var_new = jnp.square(sigma_new)
+    var_old = jnp.square(sigma_old)
+    kl = jnp.log(sigma_new / (sigma_old + 1e-5) + 1e-5) \
+        + (var_old + jnp.square(mu_old - mu_new)) / (2.0 * var_new) \
+        - 0.5
+    return kl.sum(axis=-1).mean()
+
+
 def compute_policy_loss(
     log_probs: jax.Array,
     old_log_probs: jax.Array,
