@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -401,8 +402,8 @@ class TD3(OffPolicyAlgorithm):
             action_mean = 0.0
             action_std = 0.0
 
-        jax.block_until_ready(self.train_state.model)
-
+        # Note: no explicit block_until_ready — _build_metrics calls float()
+        # on the device-side losses, which forces the same sync naturally.
         # Build metrics
         metrics = self._build_metrics(critic_info, actor_loss, action_mean, action_std, batch)
 
@@ -466,8 +467,6 @@ class TD3(OffPolicyAlgorithm):
 
     def save_train_state(self, checkpoint_dir: str) -> Dict[str, Any]:
         """Save TD3 training state."""
-        import os
-
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         eqx.tree_serialise_leaves(model_path, self.train_state.model)
 
@@ -489,8 +488,6 @@ class TD3(OffPolicyAlgorithm):
 
     def load_train_state(self, checkpoint_dir: str, metadata: Dict[str, Any]) -> None:
         """Load TD3 training state."""
-        import os
-
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         new_model = eqx.tree_deserialise_leaves(model_path, self.train_state.model)
 

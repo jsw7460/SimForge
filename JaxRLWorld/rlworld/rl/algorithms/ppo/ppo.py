@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -578,8 +579,6 @@ class PPO(OnPolicyAlgorithm):
         Returns:
             Algorithm-specific metadata to include in checkpoint
         """
-        import os
-
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         eqx.tree_serialise_leaves(model_path, self.train_state.model)
 
@@ -598,8 +597,6 @@ class PPO(OnPolicyAlgorithm):
             checkpoint_dir: Directory containing state files
             metadata: Metadata dictionary from checkpoint
         """
-        import os
-
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         new_model = eqx.tree_deserialise_leaves(model_path, self.train_state.model)
 
