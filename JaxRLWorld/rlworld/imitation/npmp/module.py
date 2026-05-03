@@ -174,6 +174,55 @@ class NPMPModule(eqx.Module):
     # Deterministic inference path — used at deploy time.
     # ------------------------------------------------------------------
 
+    def act_step_deterministic(
+        self,
+        z_prev: jax.Array,
+        s_t: jax.Array,
+        x_t: jax.Array,
+        episode_start: jax.Array,
+    ) -> tuple[jax.Array, jax.Array]:
+        """Stateful single-step deterministic inference (env-stepping path).
+
+        Encoder uses its mean (no sampling), decoder uses its mean (no
+        action noise). Episode boundary zeros ``z_prev`` so the AR(1)
+        chain restarts from the prior origin. Caller threads ``z_t``
+        forward as the next step's ``z_prev``.
+
+        Returns ``(z_t, action_mean)``. Used by the viser policy
+        wrapper and any non-jit-fused per-step deployment loop. When
+        you also need encoder log-std diagnostics, see
+        :meth:`eval_step`.
+        """
+        z_prev_used = jnp.where(
+            episode_start, jnp.zeros_like(z_prev), z_prev,
+        )
+        q_mean, _ = self.encoder(z_prev_used, x_t)
+        z_t = q_mean
+        action_mean, _ = self.decoder(s_t, z_t)
+        return z_t, action_mean
+
+    def eval_step(
+        self,
+        z_prev: jax.Array,
+        s_t: jax.Array,
+        x_t: jax.Array,
+        episode_start: jax.Array,
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """Diagnostic-rich variant of :meth:`act_step_deterministic`.
+
+        Returns ``(z_t, action_mean, q_log_std)`` so the in-training
+        evaluator can track encoder posterior spread alongside the
+        latent norm and action output. ``q_log_std`` is the encoder's
+        per-dim log-std at this step.
+        """
+        z_prev_used = jnp.where(
+            episode_start, jnp.zeros_like(z_prev), z_prev,
+        )
+        q_mean, q_log_std = self.encoder(z_prev_used, x_t)
+        z_t = q_mean
+        action_mean, _ = self.decoder(s_t, z_t)
+        return z_t, action_mean, q_log_std
+
     def act(
         self,
         s_seq: jax.Array,           # (T, D_s)

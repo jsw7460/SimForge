@@ -253,6 +253,16 @@ class T1NPMPDistillConfig(T1TrackingConfig):
     wandb_group: str | None = None  # None → auto from run_name
     upload_checkpoint_artifact: bool = True
 
+    # ── In-training evaluation. ───────────────────────────────────────
+    # Periodic deterministic NPMP rollout in a separate eval env to
+    # measure tracking_reward / per-motion breakdown / action_gap to
+    # experts / encoder z diagnostics. Mirrors RL pipeline's
+    # ``BaseRunner._run_evaluation`` cadence.
+    eval_interval: int = 100
+    eval_steps: int = 200
+    eval_num_envs: int = 90  # 10 envs × 9 motions for per-motion breakdown
+    eval_compute_action_gap: bool = True  # requires expert dispatcher
+
     # ── Validation ────────────────────────────────────────────────────
 
     def __post_init__(self) -> None:

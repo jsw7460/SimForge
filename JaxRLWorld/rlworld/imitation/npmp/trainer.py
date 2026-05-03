@@ -47,6 +47,7 @@ from rlworld.imitation.npmp.expert_dispatch import MultiExpertDispatcher
 from rlworld.imitation.npmp.loss import NPMPLossInfo, npmp_elbo_loss
 from rlworld.imitation.npmp.metrics import NPMPMetrics
 from rlworld.imitation.npmp.module import NPMPModule
+from rlworld.rl.runners import BaseRunner
 from rlworld.rl.runners.iteration_data import EpisodeStats, IterationData
 from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 from rlworld.rl.utils.logger import ConsoleWriter, WandbLogger
@@ -161,6 +162,11 @@ class NPMPTrainer:
         self._just_reset = jnp.ones(env.num_envs, dtype=jnp.bool_)
 
         self._env.reset()
+
+        # Eval env (lazy). Built smaller than train env for cheap
+        # periodic evaluation; reused across all in-training eval calls.
+        self._eval_env: "World | None" = None
+        self._last_eval_stats = None
 
         # Logging — log dirs, console writer, wandb.
         self._model_log_dir, self._wandb_log_dir = setup_log_dir(
@@ -282,6 +288,17 @@ class NPMPTrainer:
             info = self.update_iteration()
             t_update = time.time() - t0
 
+            # Periodic in-training evaluation (deterministic NPMP rollout
+            # in a separate env). Folded into the iteration's logged
+            # data so the standard ConsoleWriter / WandbLogger pipeline
+            # picks it up alongside the training metrics.
+            if self._cfg.eval_interval > 0 and (
+                (it + 1) % self._cfg.eval_interval == 0
+                or (it + 1) == end_iter
+                or it == self._iteration  # also at first iter for early signal
+            ):
+                self._last_eval_stats = self._run_evaluation()
+
             iter_data = self._build_iteration_data(
                 info=info,
                 rollout_time=t_rollout,
@@ -295,6 +312,14 @@ class NPMPTrainer:
                 self._wandb_logger.log_iteration(
                     iter_data, step=self._total_env_steps,
                 )
+                # Also push the rich eval stats dict directly to wandb
+                # (per-motion / action_gap / z diagnostics that don't
+                # fit cleanly into IterationData).
+                if self._last_eval_stats is not None:
+                    self._wandb_logger.run.log(
+                        self._last_eval_stats.to_wandb_dict(prefix="Eval"),
+                        step=self._total_env_steps,
+                    )
 
             if (
                 (it + 1) % self._cfg.save_interval == 0
@@ -323,6 +348,49 @@ class NPMPTrainer:
         self._iteration = end_iter
 
     # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
+    def _get_or_create_eval_env(self) -> "World":
+        """Lazily build a smaller eval-only env separate from training."""
+        if self._eval_env is not None:
+            return self._eval_env
+
+        eval_cfg = dataclasses.replace(
+            self._cfg,
+            num_envs=self._cfg.eval_num_envs,
+        )
+        cfgs_for_run = eval_cfg.build()
+        # Disable obs noise during eval — matches RL pipeline's
+        # ``eval_disable_noise`` default.
+        if hasattr(cfgs_for_run.observation, "enable_noise"):
+            cfgs_for_run.observation.enable_noise = False
+        self._eval_env = BaseRunner._create_env_from_config(cfgs_for_run)
+        return self._eval_env
+
+    def _run_evaluation(self):
+        """Deterministic NPMP rollout in the eval env. Returns
+        :class:`NPMPEvalStats`. Lazy-imports the evaluator helper to
+        avoid the trainer↔evaluator import cycle (evaluator imports
+        :class:`NPMPTrainer.load_module`).
+        """
+        from rlworld.imitation.npmp.evaluator import (
+            NPMPEvalStats, run_npmp_eval,
+        )
+        eval_env = self._get_or_create_eval_env()
+        dispatcher = (
+            self._dispatcher
+            if self._cfg.eval_compute_action_gap else None
+        )
+        return run_npmp_eval(
+            module=self.module,
+            env=eval_env,
+            num_steps=self._cfg.eval_steps,
+            dispatcher=dispatcher,
+            per_motion=True,
+        )
+
+    # ------------------------------------------------------------------
     # Logging helpers
     # ------------------------------------------------------------------
 
@@ -348,14 +416,29 @@ class NPMPTrainer:
         total_step_time = rollout_time + update_time
         fps = env_steps_per_iter / total_step_time if total_step_time > 0 else 0.0
 
+        # Fold the most recent eval stats (if any) into EpisodeStats so
+        # the shared ConsoleWriter renders the standard "Episode Stats"
+        # + "Reward Breakdown" sections under the iteration headline,
+        # and WandbLogger emits ``Train/mean_return`` etc. unmodified.
+        if self._last_eval_stats is not None:
+            ev = self._last_eval_stats
+            episode_stats = EpisodeStats(
+                return_buffer=[ev.tracking_reward_mean],
+                length_buffer=[ev.episode_length_mean],
+                reward_stats={
+                    name: {"mean": val}
+                    for name, val in ev.reward_terms.items()
+                },
+            )
+        else:
+            episode_stats = EpisodeStats(
+                return_buffer=[], length_buffer=[], reward_stats={},
+            )
+
         return IterationData(
             collection_time=rollout_time,
             learning_time=update_time,
-            episode_stats=EpisodeStats(
-                return_buffer=[],
-                length_buffer=[],
-                reward_stats={},
-            ),
+            episode_stats=episode_stats,
             fps=fps,
             metrics=metrics,
             buffer_size=self._buffer.num_filled,

@@ -9,6 +9,12 @@ from rlworld.imitation.npmp.buffer import NPMPBuffer
 from rlworld.imitation.npmp.config import CheckpointRef, T1NPMPDistillConfig
 from rlworld.imitation.npmp.decoder import NPMPDecoder
 from rlworld.imitation.npmp.encoder import NPMPEncoder
+from rlworld.imitation.npmp.evaluator import (
+    NPMPEvalStats,
+    NPMPEvaluator,
+    NPMPPolicyWrapper,
+    run_npmp_eval,
+)
 from rlworld.imitation.npmp.expert_dispatch import MultiExpertDispatcher
 from rlworld.imitation.npmp.loss import NPMPBatch, NPMPLossInfo, npmp_elbo_loss
 from rlworld.imitation.npmp.metrics import NPMPMetrics
@@ -24,11 +30,15 @@ __all__ = [
     "NPMPBuffer",
     "NPMPDecoder",
     "NPMPEncoder",
+    "NPMPEvalStats",
+    "NPMPEvaluator",
     "NPMPLossInfo",
     "NPMPMetrics",
     "NPMPModule",
+    "NPMPPolicyWrapper",
     "NPMPStepOutput",
     "NPMPTrainer",
     "T1NPMPDistillConfig",
     "npmp_elbo_loss",
+    "run_npmp_eval",
 ]
