@@ -275,9 +275,10 @@ class NPMPTrainer:
         ``cfg.save_interval`` iterations.
         """
         env_steps_per_iter = self._cfg.rollout_steps * self._env.num_envs
+        start_iter = self._iteration
         end_iter = self._iteration + num_iterations
 
-        for it in range(self._iteration, end_iter):
+        for it in range(start_iter, end_iter):
             self._iteration = it
 
             t0 = time.time()
@@ -295,7 +296,7 @@ class NPMPTrainer:
             if self._cfg.eval_interval > 0 and (
                 (it + 1) % self._cfg.eval_interval == 0
                 or (it + 1) == end_iter
-                or it == self._iteration  # also at first iter for early signal
+                or it == start_iter  # also at first iter for early signal
             ):
                 self._last_eval_stats = self._run_evaluation()
 
