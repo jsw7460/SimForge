@@ -33,6 +33,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import time
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
@@ -40,6 +41,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import torch
 
 from rlworld.imitation.npmp.buffer import NPMPBuffer
 from rlworld.imitation.npmp.config import T1NPMPDistillConfig
@@ -167,6 +169,21 @@ class NPMPTrainer:
         # periodic evaluation; reused across all in-training eval calls.
         self._eval_env: "World | None" = None
         self._last_eval_stats = None
+        # Expert-policy eval baseline (frozen experts → does not change
+        # over training, so computed once on first ``_run_evaluation``
+        # call and reused).
+        self._expert_baseline_stats = None
+
+        # Per-motion training-rollout return tracking. Reward is
+        # captured in ``_rollout_one_step`` while the env runs under
+        # ``μ_E + DART noise``; on each ``done`` we record
+        # ``(motion_id_at_episode_start, ep_return)`` and reset the
+        # per-env accumulator. ``train()`` aggregates per-motion means
+        # at every wandb push and clears the buffer.
+        self._train_ep_returns = torch.zeros(
+            env.num_envs, device=env.device,
+        )
+        self._train_completed: list[tuple[int, float]] = []
 
         # Logging — log dirs, console writer, wandb.
         self._model_log_dir, self._wandb_log_dir = setup_log_dir(
@@ -216,6 +233,10 @@ class NPMPTrainer:
         ep_starts = self._just_reset
 
         prev_time_steps = cmd.time_steps.clone()
+        # Snapshot motion_ids before env.step so post-done lookup gives
+        # the motion the just-finished episode was tracking (the env's
+        # auto-reset reassigns motion_ids in-place).
+        motion_ids_torch = cmd.motion_ids.clone()
 
         mu_E = self._dispatcher.deterministic_mean(actor_obs, motion_ids)
         self._buffer.add(decoder_s, encoder_x, mu_E, ep_starts)
@@ -223,7 +244,19 @@ class NPMPTrainer:
         noise_key, key = jax.random.split(key)
         noise = jax.random.normal(noise_key, mu_E.shape) * self._cfg.expert_noise_std
         action_to_env = jax_to_torch(mu_E + noise, self._env.device)
-        _, _, terminated, truncated, _ = self._env.step(action_to_env)
+        _, reward, terminated, truncated, _ = self._env.step(action_to_env)
+
+        # Per-env rollout return tracking — accumulate every step,
+        # push (motion_id, return) on done, reset the env's slot.
+        self._train_ep_returns = self._train_ep_returns + reward
+        dones = terminated | truncated
+        if dones.any():
+            done_indices = dones.nonzero(as_tuple=False).flatten()
+            done_returns = self._train_ep_returns[done_indices].cpu().numpy()
+            done_motions = motion_ids_torch[done_indices].cpu().numpy()
+            for mi, ret in zip(done_motions, done_returns):
+                self._train_completed.append((int(mi), float(ret)))
+            self._train_ep_returns[done_indices] = 0.0
 
         new_time_steps = cmd.time_steps
         rollover = new_time_steps != (prev_time_steps + 1)
@@ -309,18 +342,41 @@ class NPMPTrainer:
             context = self._build_console_context(end_iter)
 
             self._console_writer.write_iteration(iter_data, context)
+
+            # Drain per-motion training-rollout returns (expert+noise),
+            # built up across this iteration's rollout steps.
+            train_return_log = self._drain_train_returns()
+
             if self._wandb_logger is not None:
                 self._wandb_logger.log_iteration(
                     iter_data, step=self._total_env_steps,
                 )
-                # Also push the rich eval stats dict directly to wandb
-                # (per-motion / action_gap / z diagnostics that don't
-                # fit cleanly into IterationData).
-                if self._last_eval_stats is not None:
+                if train_return_log:
                     self._wandb_logger.run.log(
-                        self._last_eval_stats.to_wandb_dict(prefix="Eval"),
-                        step=self._total_env_steps,
+                        train_return_log, step=self._total_env_steps,
                     )
+                # Eval / expert-baseline / return-gap push.
+                if self._last_eval_stats is not None:
+                    student_log = self._last_eval_stats.to_wandb_dict(
+                        prefix="Eval/student",
+                    )
+                    self._wandb_logger.run.log(
+                        student_log, step=self._total_env_steps,
+                    )
+                    if self._expert_baseline_stats is not None:
+                        expert_log = self._expert_baseline_stats.to_wandb_dict(
+                            prefix="Eval/expert",
+                        )
+                        self._wandb_logger.run.log(
+                            expert_log, step=self._total_env_steps,
+                        )
+                        gap_log = self._compute_return_gap(
+                            self._last_eval_stats,
+                            self._expert_baseline_stats,
+                        )
+                        self._wandb_logger.run.log(
+                            gap_log, step=self._total_env_steps,
+                        )
 
             if (
                 (it + 1) % self._cfg.save_interval == 0
@@ -370,15 +426,27 @@ class NPMPTrainer:
         return self._eval_env
 
     def _run_evaluation(self):
-        """Deterministic NPMP rollout in the eval env. Returns
-        :class:`NPMPEvalStats`. Lazy-imports the evaluator helper to
-        avoid the trainer↔evaluator import cycle (evaluator imports
-        :class:`NPMPTrainer.load_module`).
+        """Run student NPMP eval (always) + expert baseline (lazy, once).
+
+        Both eval rollouts share the same eval env. Expert baseline is
+        frozen — computed once on first call and cached. Student eval
+        runs every ``cfg.eval_interval`` and includes action_gap
+        (NPMP vs expert at student-visited states) when
+        ``eval_compute_action_gap=True``.
         """
-        from rlworld.imitation.npmp.evaluator import (
-            NPMPEvalStats, run_npmp_eval,
-        )
+        from rlworld.imitation.npmp.evaluator import run_npmp_eval
         eval_env = self._get_or_create_eval_env()
+
+        if self._expert_baseline_stats is None:
+            self._expert_baseline_stats = run_npmp_eval(
+                module=self.module,
+                env=eval_env,
+                num_steps=self._cfg.eval_steps,
+                dispatcher=self._dispatcher,
+                per_motion=True,
+                policy="expert",
+            )
+
         dispatcher = (
             self._dispatcher
             if self._cfg.eval_compute_action_gap else None
@@ -389,7 +457,55 @@ class NPMPTrainer:
             num_steps=self._cfg.eval_steps,
             dispatcher=dispatcher,
             per_motion=True,
+            policy="student",
         )
+
+    def _drain_train_returns(self) -> dict[str, float]:
+        """Aggregate ``self._train_completed`` per-motion → wandb dict.
+
+        Returns ``Train/expert_return/per_motion/{name}`` and
+        ``Train/expert_return/overall`` (mean episode SUM under
+        ``μ_E + DART noise`` rollouts). The buffer is cleared on each
+        call so each iteration's wandb point reflects only that
+        iteration's completed episodes.
+        """
+        if not self._train_completed:
+            return {}
+        cmd = self._env.command_manager.get_term("motion")
+        motion_names = [
+            os.path.splitext(os.path.basename(p))[0]
+            for p in cmd.cfg.motion_files
+        ]
+        by_motion: dict[int, list[float]] = defaultdict(list)
+        for mi, ret in self._train_completed:
+            by_motion[mi].append(ret)
+        all_returns = [r for _, r in self._train_completed]
+        log: dict[str, float] = {
+            "Train/expert_return/overall": float(np.mean(all_returns)),
+            "Train/expert_return/completed_episodes": float(len(all_returns)),
+        }
+        for mi, rets in by_motion.items():
+            name = motion_names[mi] if mi < len(motion_names) else f"motion_{mi}"
+            log[f"Train/expert_return/per_motion/{name}"] = float(np.mean(rets))
+        self._train_completed.clear()
+        return log
+
+    @staticmethod
+    def _compute_return_gap(student, expert) -> dict[str, float]:
+        """Per-motion + overall ``expert.return − student.return`` gap."""
+        d: dict[str, float] = {
+            "Eval/return_gap/overall": (
+                expert.episode_return_mean - student.episode_return_mean
+            ),
+        }
+        for name in expert.per_motion:
+            if name not in student.per_motion:
+                continue
+            e = expert.per_motion[name].get("episode_return")
+            s = student.per_motion[name].get("episode_return")
+            if e is not None and s is not None:
+                d[f"Eval/return_gap/per_motion/{name}"] = e - s
+        return d
 
     # ------------------------------------------------------------------
     # Logging helpers
