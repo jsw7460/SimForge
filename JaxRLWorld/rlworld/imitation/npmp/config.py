@@ -237,11 +237,11 @@ class T1NPMPDistillConfig(T1TrackingConfig):
     # ── Distillation training schedule. ───────────────────────────────
     rollout_steps: int = 64
     num_grad_steps: int = 4
-    batch_traj: int = 128
+    batch_traj: int = 2048
     traj_len: int = 32
     learning_rate: float = 3e-4
     max_grad_norm: float = 1.0
-    expert_noise_std: float = 0.05  # DART noise for env step (label clean)
+    expert_noise_std: float = 0.025  # DART noise for env step (label clean)
 
     num_iterations: int = 5000
     save_interval: int = 200
