@@ -18,7 +18,11 @@ from rlworld.rl.runners import BaseRunner
 
 def main():
     cfgs_for_run = (
-        T1TrackingTransformerConfig(sim_type="newton")
+        T1TrackingTransformerConfig(
+            sim_type="newton",
+            pe_type="traversal",
+            use_relational_bias=True
+        )
         .build()
         .with_cli_overrides()
     )

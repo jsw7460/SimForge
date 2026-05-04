@@ -4,25 +4,18 @@ Converts the flat observation vector
 ``[proprio (D_p,), future_window (T * B_tracked * D_ref,)]`` into a
 token grid of shape ``(T + 1, B_all, D_embed)`` where:
 
-* ``t = 0`` row holds per-body projections of the full proprio vector
-  (one learned Linear per kinematic-tree body, but stored as a single
-  *stacked* Linear so the forward compiles to one batched matmul).
-* ``t = 1..T`` rows hold per-body projections of the future-reference
-  features for the *tracked* subset of bodies. Untracked bodies stay
-  as zero tokens at future time steps and only receive information via
-  spatial attention in the encoder.
+* ``t = 0`` row holds **one shared** projection of the full proprio
+  vector, broadcast across every body. All bodies start from the same
+  proprio embedding; body identity is then injected by the encoder's
+  positional embedding (``LearnedPE`` or ``TraversalPE``) before the
+  first attention layer.
+* ``t = 1..T`` rows hold a **shared** projection of each future-reference
+  feature vector, scattered into the tracked-body slots. Untracked
+  bodies stay as zero tokens at future time steps and only receive
+  information via spatial attention.
 
-When ``num_future_frames == 0`` the future branch is skipped entirely
-and the tokenizer returns a ``(1, B_all, D)`` grid — the whole stack
-then reduces to a pure body-axis transformer, so the architecture
-works for non-tracking presets as well.
-
-The implementation uses :func:`equinox.filter_vmap` over the constructor
-to build a single Linear whose ``weight`` and ``bias`` carry an extra
-leading body dimension; the forward applies ``jax.vmap(lin)(...)`` over
-that dimension. This avoids unrolling a Python ``for`` loop over bodies
-at trace time, which is what made the previous implementation produce
-a multi-GB XLA HLO graph for B_all > ~10.
+Processes a single observation per call; ``jax.vmap`` is applied at
+the actor/critic level when batched input is needed.
 """
 from __future__ import annotations
 
@@ -77,7 +70,7 @@ class SpaceTimeTokenizer(eqx.Module):
         if hidden_dim is not None:
             raise NotImplementedError(
                 "tokenizer_hidden_dim is currently unsupported by the "
-                "vmap-stacked tokenizer (single Linear per body is hardcoded). "
+                "shared-Linear tokenizer (single Linear per kind is hardcoded). "
                 "Pass hidden_dim=None until this lands."
             )
 
@@ -92,47 +85,27 @@ class SpaceTimeTokenizer(eqx.Module):
         self.embed_dim = embed_dim
 
         key_p, key_r = jax.random.split(key)
-
-        # Stacked Linear: B_all separate (proprio_dim → embed_dim) Linears
-        # whose weights are stored in a single tensor of shape
-        # (B_all, embed_dim, proprio_dim). Forward applies via vmap.
-        @eqx.filter_vmap
-        def make_proprio(k):
-            return _make_orthogonal_linear(proprio_dim, embed_dim, k)
-
-        self.proprio_proj = make_proprio(
-            jax.random.split(key_p, num_bodies_all),
-        )
-
-        # Stacked ref Linear: B_tracked separate (ref_feature_dim → embed_dim)
-        # Linears. Build at least one even when no future window so the
-        # field has a concrete shape; the forward path skips it when
-        # num_future_frames == 0.
-        n_tracked_for_init = max(self.num_bodies_tracked, 1)
-
-        @eqx.filter_vmap
-        def make_ref(k):
-            return _make_orthogonal_linear(ref_feature_dim, embed_dim, k)
-
-        self.ref_proj = make_ref(jax.random.split(key_r, n_tracked_for_init))
+        self.proprio_proj = _make_orthogonal_linear(proprio_dim, embed_dim, key_p)
+        self.ref_proj = _make_orthogonal_linear(ref_feature_dim, embed_dim, key_r)
 
     def __call__(self, observation: jax.Array) -> jax.Array:
-        """Tokenize a single flat observation.
+        """Tokenize a single (unbatched) flat observation.
 
         Args:
-            observation: ``(proprio_dim + T * B_tracked * D_ref,)`` — unbatched.
+            observation: ``(proprio_dim + T * B_tracked * D_ref,)``.
 
         Returns:
-            tokens: ``(T + 1, num_bodies_all, embed_dim)``. When
-            ``num_future_frames == 0``, returns
-            ``(1, num_bodies_all, embed_dim)``.
+            tokens: ``(T + 1, num_bodies_all, embed_dim)`` (or ``(1, ...)``
+            when ``num_future_frames == 0``).
         """
         proprio = observation[: self.proprio_dim]
 
-        # Apply each per-body Linear to the SAME proprio vector via vmap
-        # over the stacked Linear's body axis. Compiles to one batched
-        # matmul: (B_all, D, D_p) · (D_p,) → (B_all, D).
-        proprio_tokens = jax.vmap(lambda lin: lin(proprio))(self.proprio_proj)
+        # Single proprio embedding shared across bodies; body identity
+        # comes from the encoder's positional embedding.
+        proprio_token = self.proprio_proj(proprio)  # (D,)
+        proprio_tokens = jnp.broadcast_to(
+            proprio_token, (self.num_bodies_all, self.embed_dim),
+        )
 
         if self.num_future_frames == 0:
             return proprio_tokens[None]
@@ -140,17 +113,8 @@ class SpaceTimeTokenizer(eqx.Module):
         ref = observation[self.proprio_dim:].reshape(
             self.num_future_frames, self.num_bodies_tracked, self.ref_feature_dim,
         )
-        # (T, B_tracked, D_ref) → (B_tracked, T, D_ref) so the body axis
-        # aligns with the stacked Linear's leading dim.
-        ref_bt = jnp.transpose(ref, (1, 0, 2))
-
-        def per_body(lin, body_feats):
-            # body_feats: (T, D_ref) → (T, D_embed)
-            return jax.vmap(lin)(body_feats)
-
-        # vmap over body: stacked Linear (B_tracked) and ref_bt (B_tracked, T, D_ref)
-        tracked_tokens_bt = jax.vmap(per_body)(self.ref_proj, ref_bt)
-        tracked_tokens = jnp.transpose(tracked_tokens_bt, (1, 0, 2))
+        # Apply shared ref Linear to every (t, b) ref vector.
+        tracked_tokens = jax.vmap(jax.vmap(self.ref_proj))(ref)  # (T, B_tracked, D)
 
         ref_tokens = jnp.zeros(
             (self.num_future_frames, self.num_bodies_all, self.embed_dim),
