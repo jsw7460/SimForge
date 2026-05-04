@@ -383,8 +383,16 @@ class World(ABC):
     def get_observation(self):
         return self.obs_manager.get_observation()
 
-    def step(self, actions: torch.Tensor) -> Tuple[
-        Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
+    def step(
+        self,
+        actions: torch.Tensor
+    ) -> Tuple[
+        Dict[str, torch.Tensor],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        Dict[str, Any]
+    ]:
         """Execute one environment step."""
         # Process and apply actions
         self.act_manager.process_actions(actions)
