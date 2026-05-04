@@ -101,6 +101,26 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
     r = cfg.robot
     quat = _initial_quat()
 
+    # Resolve PD constants — fall back to module-level defaults from
+    # ``rl/configs/robots/go2.py`` when the corresponding SysID-result
+    # override on ``Go2Config`` is unset (``None``). When set, the
+    # override takes precedence so PPO sees the identified PD gains
+    # from step 0 of training. friction overrides are applied via
+    # event terms (see ``build_dr_terms`` below) since neither the
+    # actuator nor the scene config exposes friction fields.
+    stiffness_hip = (
+        r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
+    )
+    damping_hip = (
+        r.kd_hip_override if r.kd_hip_override is not None else DAMPING_HIP
+    )
+    stiffness_knee = (
+        r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
+    )
+    damping_knee = (
+        r.kd_knee_override if r.kd_knee_override is not None else DAMPING_KNEE
+    )
+
     return NewtonSceneConfig(
         dt=timing["dt"],
         substeps=timing["substeps"],
@@ -128,8 +148,8 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                     actuators=(
                         DelayedPDActuatorCfg(
                             target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
-                            stiffness=STIFFNESS_HIP,
-                            damping=DAMPING_HIP,
+                            stiffness=stiffness_hip,
+                            damping=damping_hip,
                             effort_limit=EFFORT_HIP,
                             armature=ARMATURE_HIP,
                             min_delay=1,
@@ -137,8 +157,8 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                         ),
                         DelayedPDActuatorCfg(
                             target_names_expr=(".*_calf_joint",),
-                            stiffness=STIFFNESS_KNEE,
-                            damping=DAMPING_KNEE,
+                            stiffness=stiffness_knee,
+                            damping=damping_knee,
                             effort_limit=EFFORT_KNEE,
                             armature=ARMATURE_KNEE,
                             min_delay=1,
@@ -284,28 +304,65 @@ def customize_reset_root_params(cfg: "Go2FlatConfig", params: Dict[str, Any]) ->
 
 
 def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
-    """Newton-specific domain randomization terms."""
+    """Newton-specific domain randomization terms.
+
+    Layered scheme:
+
+    1. ``randomize_body_mass`` always installed — mass DR'd ±10 %
+       around the URDF's base body value (which equals the identified
+       value when used with the SysID-aligned training script's
+       ``URDF_PATH``).
+    2. ``set_foot_friction`` / ``set_joint_friction`` installed only
+       when the matching ``Go2Config.*_override`` is set. Each runs
+       every reset with a multiplicative ``dr_scale=(0.9, 1.1)`` band
+       so the friction axes also get ±10 % DR centered on their
+       identified value.
+
+    The legacy ``randomize_friction`` and ``randomize_joint_friction``
+    DR terms (with absolute ranges ``(0.3, 1.2)`` / ``(0.0, 0.05)``) are
+    no longer installed — when SysID overrides are active the friction
+    center is the identified value, and when they aren't, friction is
+    left at URDF defaults rather than randomly scattered. This keeps
+    the DR scope tight enough that downstream sim2real comparisons
+    actually reflect the SysID center rather than a wide random band.
+    """
     from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 
     r = cfg.robot
-    return {
+    terms: Dict[str, EventTermConfig] = {
         "randomize_body_mass": EventTermConfig(
             func=newton_dr.randomize_body_mass,
             mode="reset_dr",
             params={
-                "mass_range": (0.8, 1.2),
+                "mass_range": (0.9, 1.1),
                 "operation": "scale",
                 "body_patterns": "base",
             },
         ),
-        "randomize_friction": EventTermConfig(
-            func=newton_dr.randomize_friction,
-            mode="reset_dr",
-            params={"friction_range": (0.3, 1.2)},
-        ),
-        "randomize_joint_friction": EventTermConfig(
-            func=newton_dr.randomize_joint_friction,
-            mode="reset_dr",
-            params={"friction_range": (0.0, 0.05)},
-        ),
     }
+
+    # SysID-aligned friction terms — each fixes its axis at the
+    # identified value with ±10 % multiplicative DR. Installed only
+    # when the corresponding override field is set, so vanilla
+    # training runs (no SysID injection) get only the body_mass DR
+    # above and otherwise inherit URDF defaults.
+    if r.foot_friction_override is not None:
+        terms["set_foot_friction"] = EventTermConfig(
+            func=newton_dr.set_foot_friction,
+            mode="reset_dr",
+            params={
+                "value": float(r.foot_friction_override),
+                "foot_pattern": ".*foot$",
+                "dr_scale": (0.9, 1.1),
+            },
+        )
+    if r.joint_frictionloss_override is not None:
+        terms["set_joint_friction"] = EventTermConfig(
+            func=newton_dr.set_joint_friction,
+            mode="reset_dr",
+            params={
+                "value": float(r.joint_frictionloss_override),
+                "dr_scale": (0.9, 1.1),
+            },
+        )
+    return terms

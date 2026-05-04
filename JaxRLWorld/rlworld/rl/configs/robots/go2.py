@@ -88,3 +88,18 @@ class Go2Config(RobotConfig):
     foot_names: List[str] = field(default_factory=lambda: [
         "FR_foot", "FL_foot", "RR_foot", "RL_foot"
     ])
+
+    # ── SysID-result override fields (optional, default None = legacy) ──
+    # When set on a preset (e.g. via the SysID-aligned training script),
+    # downstream builders use these values instead of the module-level
+    # ``STIFFNESS_*`` / ``DAMPING_*`` constants and install deterministic
+    # friction event terms. Default ``None`` means "no override" — every
+    # existing training run is bit-identical to before this field was
+    # added. See ``rlworld/rl/configs/presets/go2_flat/_newton_builders.py``
+    # for the read sites.
+    kp_hip_override: float | None = None
+    kd_hip_override: float | None = None
+    kp_knee_override: float | None = None
+    kd_knee_override: float | None = None
+    joint_frictionloss_override: float | None = None
+    foot_friction_override: float | None = None
