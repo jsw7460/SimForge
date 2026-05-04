@@ -99,15 +99,15 @@ class T1TrackingConfig:
     # (``kick_ball1`` / ``walking2`` use a different recording schema and
     # need a separate adapter path — intentionally omitted here).
     motion_files: tuple[str, ...] = (
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/goal_kick.npz",
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/jogging.npz",
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball2.npz",
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball3.npz",
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/pass_ball1.npz",
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/powerful_kick.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/goal_kick.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/jogging.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball2.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/kick_ball3.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/pass_ball1.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/powerful_kick.npz",
         "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/running.npz",
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/soccer_drill_run.npz",
-        # "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/walking1.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/soccer_drill_run.npz",
+        "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/walking1.npz",
     )
     motion_weights: "tuple[float, ...] | None" = None
 
