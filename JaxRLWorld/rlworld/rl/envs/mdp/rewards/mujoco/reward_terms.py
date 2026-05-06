@@ -9,8 +9,11 @@ from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_in
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     VariablePostureTracker,
-    action_rate_l2 as _common_action_rate_l2,
-    flat_orientation as _common_flat_orientation,
+    action_rate_l2,
+    # NOTE: imported under a distinct name because this module also
+    # defines a local Gaussian-style ``flat_orientation`` reward with
+    # a different signature.
+    flat_orientation as flat_orientation_l2_common,
     get_leg_xy_signs,
     penalize_angular_momentum_l2,
     penalize_body_ang_vel_xy,
@@ -19,7 +22,7 @@ from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     penalize_feet_slip,
     penalize_lin_vel_z,
     penalize_soft_landing,
-    raw_action_rate_l2 as _common_raw_action_rate_l2,
+    raw_action_rate_l2,
 )
 from rlworld.rl.utils import string as string_utils
 from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
@@ -111,23 +114,6 @@ def joint_acc_l2(
     return torch.sum(torch.square(robot.data.joint_acc[:, asset_cfg.joint_ids]), dim=1)
 
 
-def action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
-    """Penalize the rate of change of the actions using L2 squared kernel.
-
-    Delegates to ``common.action_rate_l2``. Bit-identical: ``(a-b)² == (b-a)²``.
-    """
-    return _common_action_rate_l2(env)
-
-
-def raw_action_rate_l2(env: "MujocoEnv") -> torch.Tensor:
-    """Penalize the rate of change of raw actions (L2 squared).
-
-    Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
-    pure-Python ``act_manager`` arithmetic, no scene-state involved.
-    """
-    return _common_raw_action_rate_l2(env)
-
-
 def joint_pos_limits(
     env: "MujocoEnv",
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
@@ -156,7 +142,7 @@ def flat_orientation_l2(
     Delegates to ``common.flat_orientation(std=None)`` which computes
     the same ``-sum(projected_gravity_xy²)`` penalty.
     """
-    return _common_flat_orientation(env, entity_name=asset_cfg.name)
+    return flat_orientation_l2_common(env, entity_name=asset_cfg.name)
 
 
 def flat_orientation(
