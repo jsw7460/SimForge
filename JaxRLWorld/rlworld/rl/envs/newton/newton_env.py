@@ -2,7 +2,7 @@ import torch
 import warp as wp
 
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
-from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CurriculumManagerConfig
 from rlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
     NewtonSceneConfig,

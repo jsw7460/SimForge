@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 import torch
 
 from rlworld.rl.envs.mdp.commands.motion import MotionCommand
-from rlworld.rl.envs.mdp.configs.terminations import TerminationResult
+from rlworld.rl.configs.terminations import TerminationResult
 from rlworld.rl.envs.mdp.rewards.common.motion_tracking import _get_body_indexes
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 

@@ -7,7 +7,7 @@ import torch
 
 from rlworld.rl.configs.base_config import iter_terms
 from rlworld.rl.envs.managers.base import BaseManager
-from rlworld.rl.envs.mdp.configs import TerminationTermConfig, TerminationResult
+from rlworld.rl.configs import TerminationTermConfig, TerminationResult
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World

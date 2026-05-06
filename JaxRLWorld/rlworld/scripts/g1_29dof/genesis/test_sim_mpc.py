@@ -32,7 +32,7 @@ from rlworld.rl.algorithms.sim_mpc.planner import planning_step, SimulatorMPPI
 from rlworld.rl.algorithms.sim_mpc.sim_mpc import SimMPC, SimpleReplayBuffer
 from rlworld.rl.algorithms.sim_mpc.state_sync import GenesisStateSync
 from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
-from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 from rlworld.rl.envs.mdp.terminations.common import terminations as tf
 from rlworld.rl.runners.base_runner import BaseRunner

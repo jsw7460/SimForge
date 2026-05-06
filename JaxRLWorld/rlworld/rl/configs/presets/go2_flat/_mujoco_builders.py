@@ -48,7 +48,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf

@@ -1,6 +1,6 @@
 from rlworld.rl.configs.algorithms import TDMPC2Config
 from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
-from rlworld.rl.envs.mdp.configs import (
+from rlworld.rl.configs import (
     TerminationTermConfig,
 )
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed

@@ -42,7 +42,7 @@ from rlworld.rl.configs.common_config_classes import (
 )
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from rlworld.rl.envs.mdp.commands import MotionCommandCfg
-from rlworld.rl.envs.mdp.configs.curriculums import CurriculumManagerConfig
+from rlworld.rl.configs.curriculums import CurriculumManagerConfig
 
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {

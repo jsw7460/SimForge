@@ -41,7 +41,7 @@ from rlworld.rl.configs.common_config_classes import (
 )
 from rlworld.rl.configs.robots.t1 import T1Config
 from rlworld.rl.envs.mdp.commands import MotionCommandCfg
-from rlworld.rl.envs.mdp.configs.curriculums import CurriculumManagerConfig
+from rlworld.rl.configs.curriculums import CurriculumManagerConfig
 
 
 # ── Per-simulator timing (same as t1_getup) ──────────────────────────

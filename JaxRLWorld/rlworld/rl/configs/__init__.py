@@ -12,6 +12,14 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
+# Term-level configs hoisted from the old rlworld.rl.envs.mdp.configs
+# location so callers can do `from rlworld.rl.configs import ...` directly.
+from .terminations.termination_term_config import TerminationTermConfig, TerminationResult
+from .commands.command_term_config import CommandTermConfig
+from .curriculums.curriculum_term_config import (
+    CurriculumTermConfig,
+    CurriculumManagerConfig,
+)
 from .genesis_config_classes import (
     EnvConfig,
     SceneConfig,

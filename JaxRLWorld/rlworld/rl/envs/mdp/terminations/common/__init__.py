@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv, NewtonEnv
 
-from rlworld.rl.envs.mdp.configs.terminations import TerminationResult
+from rlworld.rl.configs.terminations import TerminationResult
 
 
 def max_episode_exceed(env: GenesisEnv | NewtonEnv) -> TerminationResult:

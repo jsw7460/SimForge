@@ -8,7 +8,7 @@ import warp as wp
 
 import newton
 from rlworld.rl.envs.managers.base import BaseManager
-from rlworld.rl.envs.mdp.configs import StateInitializationTermConfig
+from rlworld.rl.configs import StateInitializationTermConfig
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World

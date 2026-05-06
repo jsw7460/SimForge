@@ -27,7 +27,7 @@ import torch
 
 from rlworld.rl.configs.base_config import iter_terms
 from rlworld.rl.envs.managers.base import BaseManager
-from rlworld.rl.envs.mdp.configs.curriculums import (
+from rlworld.rl.configs.curriculums import (
     CurriculumManagerConfig,
     CurriculumTermConfig,
 )

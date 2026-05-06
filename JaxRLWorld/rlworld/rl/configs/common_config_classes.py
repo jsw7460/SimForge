@@ -5,7 +5,7 @@ from .base_config import BaseConfig
 from .rewards import RewardTermConfig
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mdp.configs import CommandTermConfig
+    from rlworld.rl.configs import CommandTermConfig
 
 
 @dataclass

@@ -5,7 +5,7 @@ from rlworld.rl.envs.mujoco.mjlab_env import MujocoEnv
 from rlworld.rl.envs.managers import GaitManager
 from rlworld.rl.envs.genesis.locomotion_env import _gait_config_to_manager_config
 from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
-from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CurriculumManagerConfig
 from rlworld.rl.configs.common_config_classes import VisualizationConfig
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,

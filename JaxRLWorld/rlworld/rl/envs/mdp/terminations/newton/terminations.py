@@ -1,4 +1,4 @@
-from rlworld.rl.envs.mdp.configs.terminations import TerminationResult
+from rlworld.rl.configs.terminations import TerminationResult
 from rlworld.rl.envs.mdp.observations.newton.state import base_euler
 
 import torch

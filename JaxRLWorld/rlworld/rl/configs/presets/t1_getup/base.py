@@ -40,7 +40,7 @@ from rlworld.rl.configs.common_config_classes import (
 )
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.robots.t1 import T1Config
-from rlworld.rl.envs.mdp.configs.curriculums import (
+from rlworld.rl.configs.curriculums import (
     CurriculumManagerConfig,
     CurriculumTermConfig,
 )

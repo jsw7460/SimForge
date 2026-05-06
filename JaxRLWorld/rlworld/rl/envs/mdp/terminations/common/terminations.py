@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from rlworld.rl.envs.mdp.configs.terminations import TerminationResult
+from rlworld.rl.configs.terminations import TerminationResult
 from rlworld.rl.utils.quat_utils import quat_to_euler_wxyz
 
 if TYPE_CHECKING:

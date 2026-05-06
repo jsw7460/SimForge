@@ -37,7 +37,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,

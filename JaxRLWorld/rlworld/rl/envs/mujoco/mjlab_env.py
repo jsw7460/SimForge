@@ -8,7 +8,7 @@ from __future__ import annotations
 import torch
 
 from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
-from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CurriculumManagerConfig
 from rlworld.rl.configs.common_config_classes import VisualizationConfig
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoEnvConfig,

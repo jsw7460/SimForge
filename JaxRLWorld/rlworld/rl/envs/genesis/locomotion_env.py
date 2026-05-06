@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 from rlworld.rl.envs import GenesisEnv
 from rlworld.rl.envs.managers import GaitManagerConfig, GaitManager
-from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CurriculumManagerConfig
 from rlworld.rl.configs import (
     EnvConfig,
     SceneConfig,

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
-    from rlworld.rl.envs.mdp.configs.curriculums.curriculum_term_config import (
+    from rlworld.rl.configs.curriculums.curriculum_term_config import (
         CurriculumTermConfig,
     )
 

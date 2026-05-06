@@ -11,7 +11,7 @@ Example:
         initialize_base_pose,
         initialize_dof_pos,
     )
-    from rlworld.rl.envs.mdp.configs import StateInitializationTermConfig
+    from rlworld.rl.configs import StateInitializationTermConfig
 
     config = NewtonStateInitConfig(
         initialization_terms=[

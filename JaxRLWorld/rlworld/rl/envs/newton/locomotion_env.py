@@ -12,7 +12,7 @@ from rlworld.rl.configs.newton_config_classes import (
     VisualizationConfig
 )
 from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
-from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CurriculumManagerConfig
 
 if TYPE_CHECKING:
     pass

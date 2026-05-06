@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from rlworld.rl.envs.mdp.configs.terminations import TerminationResult
+from rlworld.rl.configs.terminations import TerminationResult
 from rlworld.rl.envs.mdp.observations.mujoco import proprioception
 
 if TYPE_CHECKING:

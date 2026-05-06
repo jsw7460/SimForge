@@ -13,7 +13,7 @@ from .common_config_classes import (
     VisualizationConfig,
 )
 if TYPE_CHECKING:
-    from rlworld.rl.envs.mdp.configs import (
+    from rlworld.rl.configs import (
         CurriculumManagerConfig,
         TerminationTermConfig,
     )
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
     """Lazy default to avoid importing CurriculumManagerConfig at module load."""
-    from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+    from rlworld.rl.configs import CurriculumManagerConfig
     return CurriculumManagerConfig()
 
 

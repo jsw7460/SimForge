@@ -16,7 +16,7 @@ from rlworld.rl.runners import OnPolicyRunner
 from typing import Dict
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.envs.mdp.configs import TerminationTermConfig, StateInitializationTermConfig, CommandTermConfig
+from rlworld.rl.configs import TerminationTermConfig, StateInitializationTermConfig, CommandTermConfig
 
 from rlworld.rl.envs.mdp.observations import proprioception, exteroception
 from rlworld.rl.envs.mdp.rewards import reward_terms as rf

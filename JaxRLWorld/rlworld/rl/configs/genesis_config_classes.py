@@ -17,12 +17,12 @@ from .sensors import SensorConfig
 
 if TYPE_CHECKING:
     from rlworld.rl.configs.robots.base import RobotConfig
-    from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+    from rlworld.rl.configs import CurriculumManagerConfig
 
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
     """Lazy default to avoid importing CurriculumManagerConfig at module load."""
-    from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+    from rlworld.rl.configs import CurriculumManagerConfig
     return CurriculumManagerConfig()
 
 

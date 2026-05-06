@@ -49,7 +49,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.envs.mdp.configs import TerminationTermConfig
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,

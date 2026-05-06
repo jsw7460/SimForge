@@ -5,7 +5,7 @@ from rlworld.rl.configs import (
     EnvConfig, SceneConfig, ObservationConfig, VisualizationConfig,
     ActionConfig, RewardConfig, CommandConfig, EventConfig
 )
-from rlworld.rl.envs.mdp.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CurriculumManagerConfig
 from rlworld.rl.envs.managers import (
     VisualizationManagerConfig, VisualizationManager,
 )
