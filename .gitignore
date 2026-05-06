@@ -73,11 +73,13 @@ Thumbs.db
 wandb/
 logs/
 outputs/
+output/
 runs/
 checkpoints/
 *.ckpt
 *.pt
 *.pth
+*.mp4
 
 # --- Misc ---
 *.log
