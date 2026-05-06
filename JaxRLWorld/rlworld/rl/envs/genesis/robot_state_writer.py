@@ -16,6 +16,7 @@ Genesis-specific quirks the writer hides from callers:
 - ``eval_fk`` is a no-op: Genesis re-evaluates kinematics inside its
   next ``scene.step()``.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ from torch import Tensor
 if TYPE_CHECKING:
     import torch
     from genesis.engine.entities import RigidEntity
+
     from rlworld.rl.envs.genesis.genesis_env import GenesisEnv
 
 
@@ -33,9 +35,9 @@ class GenesisRobotStateWriter:
 
     def __init__(
         self,
-        env: "GenesisEnv",
-        entity: "RigidEntity",
-        actuated_dof_ids: "Tensor | list[int]",
+        env: GenesisEnv,
+        entity: RigidEntity,
+        actuated_dof_ids: Tensor | list[int],
     ) -> None:
         self._env = env
         self._entity = entity
@@ -45,9 +47,7 @@ class GenesisRobotStateWriter:
     # Joint writes
     # ------------------------------------------------------------------
 
-    def set_dof_positions(
-        self, values: Tensor, env_ids: "torch.Tensor | None" = None
-    ) -> None:
+    def set_dof_positions(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
         """Write actuated joint positions."""
         self._entity.set_dofs_position(
             position=values,
@@ -55,9 +55,7 @@ class GenesisRobotStateWriter:
             envs_idx=env_ids,
         )
 
-    def set_dof_velocities(
-        self, values: Tensor, env_ids: "torch.Tensor | None" = None
-    ) -> None:
+    def set_dof_velocities(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
         """Write actuated joint velocities."""
         self._entity.set_dofs_velocity(
             velocity=values,
@@ -73,7 +71,7 @@ class GenesisRobotStateWriter:
         self,
         pos: Tensor,
         quat_wxyz: Tensor,
-        env_ids: "torch.Tensor | None" = None,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
         """Write root link position + orientation. Genesis is wxyz native."""
         self._entity.set_pos(pos, envs_idx=env_ids)
@@ -83,7 +81,7 @@ class GenesisRobotStateWriter:
         self,
         lin_vel: Tensor,
         ang_vel: Tensor,
-        env_ids: "torch.Tensor | None" = None,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
         """Write root link linear + angular velocity.
 
@@ -91,6 +89,7 @@ class GenesisRobotStateWriter:
         the first 6 DOFs (3 linear + 3 angular). Pack and forward.
         """
         import torch
+
         combined = torch.cat([lin_vel, ang_vel], dim=-1)
         self._entity.set_dofs_velocity(
             velocity=combined,
@@ -102,6 +101,6 @@ class GenesisRobotStateWriter:
     # FK
     # ------------------------------------------------------------------
 
-    def eval_fk(self, env_ids: "torch.Tensor | None" = None) -> None:
+    def eval_fk(self, env_ids: torch.Tensor | None = None) -> None:
         """No-op: Genesis updates kinematics during ``scene.step()``."""
         return None

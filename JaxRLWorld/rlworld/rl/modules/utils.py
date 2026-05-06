@@ -1,12 +1,19 @@
 import math
-from typing import Callable, Sequence, Optional
+from typing import Callable, Sequence
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 from rlworld.rl.utils.console import (
-    BOLD, BLUE, GREEN, YELLOW, CYAN, MAGENTA, DIM, RESET,
+    BLUE,
+    BOLD,
+    CYAN,
+    DIM,
+    GREEN,
+    MAGENTA,
+    RESET,
+    YELLOW,
 )
 
 
@@ -36,9 +43,9 @@ def print_model_summary(model: eqx.Module, name: str = "Model", max_depth: int =
 
         parts = []
         for p in path:
-            key = str(p.key) if hasattr(p, 'key') else str(p)
-            key = key.strip('.')
-            if key.startswith('[') and key.endswith(']'):
+            key = str(p.key) if hasattr(p, "key") else str(p)
+            key = key.strip(".")
+            if key.startswith("[") and key.endswith("]"):
                 key = key[1:-1]
             parts.append(key)
 
@@ -80,7 +87,8 @@ def print_model_summary(model: eqx.Module, name: str = "Model", max_depth: int =
 
         if children:
             print(
-                f"{prefix}{connector}{BOLD}{color}{node_name:<45}{RESET} {DIM}{shape_str:<20}{RESET} {BOLD}{count:>10,}{RESET}")
+                f"{prefix}{connector}{BOLD}{color}{node_name:<45}{RESET} {DIM}{shape_str:<20}{RESET} {BOLD}{count:>10,}{RESET}"
+            )
         else:
             print(f"{prefix}{connector}{color}{node_name:<45}{RESET} {DIM}{shape_str:<20}{RESET} {count:>10,}")
 
@@ -88,11 +96,11 @@ def print_model_summary(model: eqx.Module, name: str = "Model", max_depth: int =
         if depth >= max_depth:
             return
 
-        child_names = [k for k in children.keys() if not k.startswith('_')]
+        child_names = [k for k in children.keys() if not k.startswith("_")]
         for i, child in enumerate(sorted(child_names)):
             print_node(child, children[child], depth + 1, i == len(child_names) - 1)
 
-    top_level = [k for k in hierarchy.keys() if not k.startswith('_')]
+    top_level = [k for k in hierarchy.keys() if not k.startswith("_")]
     for i, node_name in enumerate(sorted(top_level)):
         print_node(node_name, hierarchy[node_name], 0, i == len(top_level) - 1)
         total_params += hierarchy[node_name].get("_count", 0)
@@ -105,6 +113,7 @@ def print_model_summary(model: eqx.Module, name: str = "Model", max_depth: int =
 
 
 # ==================== Activation Functions ====================
+
 
 def get_activation(act_name: str) -> Callable:
     """Get activation function by name."""
@@ -126,6 +135,7 @@ def get_activation(act_name: str) -> Callable:
 
 # ==================== MLP ====================
 
+
 class MLP(eqx.Module):
     """
     Multi-layer perceptron with optional LayerNorm.
@@ -133,10 +143,11 @@ class MLP(eqx.Module):
     Equivalent to create_mlp() in PyTorch version.
     Automatically handles batched inputs via vmap.
     """
+
     linears: tuple  # Tuple of Linear layers
     layer_norms: tuple  # Tuple of LayerNorm or None
     activation: Callable = eqx.field(static=True)
-    output_activation: Optional[Callable] = eqx.field(static=True)
+    output_activation: Callable | None = eqx.field(static=True)
     use_layer_norm: bool = eqx.field(static=True)
     num_hidden: int = eqx.field(static=True)  # Number of hidden layers
 
@@ -146,7 +157,7 @@ class MLP(eqx.Module):
         hidden_dims: Sequence[int],
         output_dim: int,
         activation: str = "relu",
-        output_activation: Optional[str] = None,
+        output_activation: str | None = None,
         use_layer_norm: bool = False,
         *,
         key: jax.Array,
@@ -223,6 +234,7 @@ class MLP(eqx.Module):
 
 # ==================== Initialization Utilities ====================
 
+
 def orthogonal_init_mlp(
     mlp: MLP,
     hidden_gain: float = math.sqrt(2),
@@ -245,22 +257,16 @@ def orthogonal_init_mlp(
 
     def init_linear(linear: eqx.nn.Linear, gain: float, key: jax.Array) -> eqx.nn.Linear:
         # Orthogonal initialization
-        weight = jax.nn.initializers.orthogonal(scale=gain)(
-            key, linear.weight.shape, linear.weight.dtype
-        )
+        weight = jax.nn.initializers.orthogonal(scale=gain)(key, linear.weight.shape, linear.weight.dtype)
         bias = jnp.zeros_like(linear.bias)
-        return eqx.tree_at(
-            lambda l: (l.weight, l.bias),
-            linear,
-            (weight, bias)
-        )
+        return eqx.tree_at(lambda l: (l.weight, l.bias), linear, (weight, bias))
 
     num_linears = len(mlp.linears)
     keys = jax.random.split(key, num_linears)
 
     new_linears = []
     for i, (linear, k) in enumerate(zip(mlp.linears, keys)):
-        is_output = (i == num_linears - 1)
+        is_output = i == num_linears - 1
         gain = output_gain if is_output else hidden_gain
         new_linears.append(init_linear(linear, gain, k))
 
@@ -269,6 +275,7 @@ def orthogonal_init_mlp(
 
 # ==================== Running Normalization ====================
 
+
 class RunningNormalization(eqx.Module):
     """
     Running mean/variance normalization.
@@ -276,6 +283,7 @@ class RunningNormalization(eqx.Module):
     Note: In JAX, this is stateful. For pure functional style,
     return updated state explicitly.
     """
+
     running_mean: jax.Array
     running_var: jax.Array
     count: jax.Array
@@ -302,10 +310,8 @@ class RunningNormalization(eqx.Module):
 
         new_mean = self.running_mean + (delta * batch_count / total_count)
         new_var = (
-                      self.running_var * self.count
-                      + batch_var * batch_count
-                      + delta ** 2 * self.count * batch_count / total_count
-                  ) / total_count
+            self.running_var * self.count + batch_var * batch_count + delta**2 * self.count * batch_count / total_count
+        ) / total_count
 
         return RunningNormalization.__new__(RunningNormalization).replace(
             running_mean=new_mean,

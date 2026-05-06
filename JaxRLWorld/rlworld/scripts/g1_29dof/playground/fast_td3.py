@@ -22,14 +22,11 @@ import jax.numpy as jnp
 import mujoco
 import numpy as np
 import torch
-
-from mujoco_playground import registry
-from mujoco_playground import wrapper_torch
+from mujoco_playground import registry, wrapper_torch
 
 from rlworld.rl.algorithms.base import ActInput
 from rlworld.rl.algorithms.fast_td3.fast_td3 import FastTD3
 from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
-
 
 # ===================== Config (matches original G1JoystickFlatTerrain exactly) =====================
 
@@ -40,7 +37,7 @@ SEED = 1
 DEVICE_RANK = 0
 TOTAL_TIMESTEPS = 100_000
 LEARNING_STARTS = 10
-NUM_UPDATES = 2           # Original: num_updates=2
+NUM_UPDATES = 2  # Original: num_updates=2
 BATCH_SIZE = 32768
 GAMMA = 0.97
 TAU = 0.1
@@ -48,12 +45,12 @@ TARGET_POLICY_NOISE = 0.001
 NOISE_CLIP = 0.5
 NOISE_MIN = 0.001
 NOISE_MAX = 0.4
-BUFFER_SIZE_PER_ENV = 1024 * 10   # Original: 10240
+BUFFER_SIZE_PER_ENV = 1024 * 10  # Original: 10240
 N_STEPS = 1
 NUM_ATOMS = 101
 V_MIN = -10.0
 V_MAX = 10.0
-ACTOR_HIDDEN = [512, 256, 128]    # Original: actor_hidden_dim=512 -> [512, 256, 128]
+ACTOR_HIDDEN = [512, 256, 128]  # Original: actor_hidden_dim=512 -> [512, 256, 128]
 CRITIC_HIDDEN = [1024, 512, 256]  # Original: critic_hidden_dim=1024 -> [1024, 512, 256]
 INIT_SCALE = 0.01
 EVAL_INTERVAL = 5000
@@ -199,14 +196,16 @@ def main():
         key=key,
     )
 
-    alg.init_storage({
-        "num_envs": NUM_ENVS,
-        "actor_obs_shape": [n_obs],
-        "critic_obs_shape": [n_critic_obs],
-        "actions_shape": [n_act],
-        "size_per_env": BUFFER_SIZE_PER_ENV,
-        "n_steps": N_STEPS,
-    })
+    alg.init_storage(
+        {
+            "num_envs": NUM_ENVS,
+            "actor_obs_shape": [n_obs],
+            "critic_obs_shape": [n_critic_obs],
+            "actions_shape": [n_act],
+            "size_per_env": BUFFER_SIZE_PER_ENV,
+            "n_steps": N_STEPS,
+        }
+    )
 
     # ===================== Evaluate =====================
     def evaluate():
@@ -265,7 +264,10 @@ def main():
         scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
         scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = False
         frames = raw_render_env.render(
-            trajectory, camera="track", height=480, width=640,
+            trajectory,
+            camera="track",
+            height=480,
+            width=640,
             scene_option=scene_option,
         )
         return frames
@@ -385,7 +387,8 @@ def main():
                         frames = render_with_rollout()
                         video = wandb.Video(
                             np.array(frames).transpose(0, 3, 1, 2),
-                            fps=30, format="gif",
+                            fps=30,
+                            format="gif",
                         )
                         eval_log["eval/video"] = video
                     except Exception as e:

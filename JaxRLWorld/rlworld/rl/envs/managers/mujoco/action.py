@@ -9,8 +9,9 @@ from rlworld.rl.envs.managers.common.action import (
 )
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs import World
     from mjlab.entity import Entity
+
+    from rlworld.rl.envs import World
 
 
 @dataclass
@@ -27,8 +28,8 @@ class MujocoActionManager(ActionManagerBase):
     mjlab set_joint_position_target / set_joint_effort_target.
     """
 
-    def __init__(self, env: "World", config: MujocoActionManagerConfig):
-        self._entity: "Entity" = env.scene_manager.robot
+    def __init__(self, env: World, config: MujocoActionManagerConfig):
+        self._entity: Entity = env.scene_manager.robot
         super().__init__(env, config)
 
     def _apply_position(self, targets):

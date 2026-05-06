@@ -14,6 +14,7 @@ Run::
 
     jaxpy JaxRLWorld/rlworld/scripts/imitation/npmp/train_t1_npmp.py
 """
+
 from __future__ import annotations
 
 import jax
@@ -25,7 +26,6 @@ from rlworld.imitation.npmp import (
     T1NPMPDistillConfig,
 )
 from rlworld.rl.runners import BaseRunner
-
 
 # ── Expert checkpoints — keyed by motion clip basename ─────────────────
 #
@@ -40,15 +40,15 @@ from rlworld.rl.runners import BaseRunner
 #
 # Mixing local and wandb refs in the same dict is fine.
 EXPERT_REFS: dict[str, CheckpointRef] = {
-    "goal_kick":        CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/pjx0oy02"),
-    "jogging":          CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/d7i19dh1"),
-    "kick_ball2":       CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/sg4v0w07"),
-    "kick_ball3":       CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/ejv6dw58"),
-    "pass_ball1":       CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/qhghwhkc"),
-    "powerful_kick":    CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/ba3k5rvn"),
-    "running":          CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/myu6iqr3"),
+    "goal_kick": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/pjx0oy02"),
+    "jogging": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/d7i19dh1"),
+    "kick_ball2": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/sg4v0w07"),
+    "kick_ball3": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/ejv6dw58"),
+    "pass_ball1": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/qhghwhkc"),
+    "powerful_kick": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/ba3k5rvn"),
+    "running": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/myu6iqr3"),
     "soccer_drill_run": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/r5nftv4e"),
-    "walking1":         CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/48a9w8jz"),
+    "walking1": CheckpointRef(wandb_run_path="jsw7460/T1_Tracking/48a9w8jz"),
 }
 
 
@@ -80,7 +80,10 @@ def main() -> None:
     )
 
     trainer = NPMPTrainer(
-        cfg=cfg, env=env, dispatcher=dispatcher, key=key_trainer,
+        cfg=cfg,
+        env=env,
+        dispatcher=dispatcher,
+        key=key_trainer,
     )
 
     print(f"Saving NPMP checkpoints to: {trainer.model_log_dir}")

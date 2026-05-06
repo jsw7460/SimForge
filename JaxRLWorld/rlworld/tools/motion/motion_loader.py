@@ -17,6 +17,7 @@ mjlab / torch / sim dependencies:
     - linear / joint velocities: central finite difference
     - angular velocity: axis-angle of relative quaternion / (2·dt)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,12 +33,12 @@ class InterpolatedMotion:
     output frames and ``J`` actuated joints.
     """
 
-    base_pos: np.ndarray       # (N, 3)
+    base_pos: np.ndarray  # (N, 3)
     base_quat_wxyz: np.ndarray  # (N, 4)
-    base_lin_vel: np.ndarray   # (N, 3) world frame
-    base_ang_vel: np.ndarray   # (N, 3) world frame
-    dof_pos: np.ndarray        # (N, J)
-    dof_vel: np.ndarray        # (N, J)
+    base_lin_vel: np.ndarray  # (N, 3) world frame
+    base_ang_vel: np.ndarray  # (N, 3) world frame
+    dof_pos: np.ndarray  # (N, J)
+    dof_vel: np.ndarray  # (N, J)
     fps: float
 
 
@@ -144,7 +145,7 @@ class CsvMotionLoader:
         motion_file: str,
         input_fps: float,
         output_fps: float,
-        line_range: "tuple[int, int] | None" = None,
+        line_range: tuple[int, int] | None = None,
     ) -> None:
         self.motion_file = motion_file
         self.input_fps = float(input_fps)
@@ -191,7 +192,9 @@ class CsvMotionLoader:
 
         self._base_pos = _lerp(self._base_pos_in[idx_0], self._base_pos_in[idx_1], blend)
         self._base_quat_wxyz = _slerp(
-            self._base_quat_in_wxyz[idx_0], self._base_quat_in_wxyz[idx_1], blend,
+            self._base_quat_in_wxyz[idx_0],
+            self._base_quat_in_wxyz[idx_1],
+            blend,
         )
         self._dof_pos = _lerp(self._dof_pos_in[idx_0], self._dof_pos_in[idx_1], blend)
 

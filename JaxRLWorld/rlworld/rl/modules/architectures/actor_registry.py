@@ -1,5 +1,5 @@
-from typing import Type
 import importlib
+from typing import Type
 
 ACTOR_REGISTRY: dict[str, Type] = {}
 
@@ -10,7 +10,7 @@ _ACTOR_MODULES = [
     # "rlworld.rl.modules.architectures.rodrigues.actor",
     "rlworld.rl.modules.architectures.space_time_transformer.actor",
     # "rlworld.rl.modules.architectures.crba.actor",
-    "rlworld.rl.modules.architectures.gnn.actor"
+    "rlworld.rl.modules.architectures.gnn.actor",
 ]
 
 
@@ -34,8 +34,5 @@ def get_actor_class(name: str) -> Type:
     if not ACTOR_REGISTRY:
         _build_registry()
     if name not in ACTOR_REGISTRY:
-        raise ValueError(
-            f"Unknown actor: {name}. "
-            f"Available: {list(ACTOR_REGISTRY.keys())}"
-        )
+        raise ValueError(f"Unknown actor: {name}. Available: {list(ACTOR_REGISTRY.keys())}")
     return ACTOR_REGISTRY[name]

@@ -1,8 +1,8 @@
+import math
 from typing import Sequence
 
 import equinox as eqx
 import jax
-import math
 
 from rlworld.rl.modules.architectures.base import BaseActor, BaseCritic
 from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
@@ -17,6 +17,7 @@ class MLPActor(BaseActor):
 
     Equivalent to PyTorch MLPActor.
     """
+
     net: MLP
     num_obs: int = eqx.field(static=True)
     num_actions: int = eqx.field(static=True)
@@ -97,6 +98,7 @@ class MLPCritic(BaseCritic):
 
     Returns scalar value estimate.
     """
+
     net: MLP
     num_obs: int = eqx.field(static=True)
 

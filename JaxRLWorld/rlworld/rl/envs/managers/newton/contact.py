@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import newton
 import torch
 import warp as wp
-
-import newton
 from newton.sensors import SensorContact
+
 from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
 from rlworld.rl.envs.utils.newton.label import leaf_name
 
@@ -22,7 +22,7 @@ class NewtonContactManager(BaseContactManager):
     ordering (typically alphabetical).
     """
 
-    def __init__(self, env: "World"):
+    def __init__(self, env: World):
         super().__init__(env)
         self._group_sensors: dict[str, SensorContact] = {}
 

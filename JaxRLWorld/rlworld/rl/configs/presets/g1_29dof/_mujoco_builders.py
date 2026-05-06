@@ -21,7 +21,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -43,7 +43,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
@@ -54,10 +53,10 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     foot_air_time,
     foot_contact_forces,
     foot_contact_indicator as foot_contact,
+    foot_height,
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.observations.common.proprioception import foot_height
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
@@ -75,11 +74,11 @@ OBSERVATION_CFG_CLS = MujocoObservationConfig
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "G1FlatConfig") -> VisualizationConfig:
+def build_visualization(cfg: G1FlatConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
+def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         bad_orientation = TerminationTermConfig(
@@ -99,7 +98,7 @@ def build_env(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
     )
 
 
-def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConfig:
+def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
     """Build scene config with mjlab SceneCfg and SimulationCfg."""
     r = cfg.robot
     physics_dt = timing["dt"]
@@ -175,7 +174,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConfi
     )
 
 
-def build_observation(cfg: "G1FlatConfig") -> MujocoObservationConfig:
+def build_observation(cfg: G1FlatConfig) -> MujocoObservationConfig:
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
         base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
@@ -212,7 +211,7 @@ def build_observation(cfg: "G1FlatConfig") -> MujocoObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "G1FlatConfig") -> MujocoActionConfig:
+def build_action(cfg: G1FlatConfig) -> MujocoActionConfig:
     r = cfg.robot
     return MujocoActionConfig(
         entity_name="robot",
@@ -223,7 +222,7 @@ def build_action(cfg: "G1FlatConfig") -> MujocoActionConfig:
     )
 
 
-def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
+def build_reward(cfg: G1FlatConfig) -> RewardConfig:
     """Build reward configuration matching mjlab G1 velocity task."""
     site_names = ("left_foot", "right_foot")
 
@@ -385,7 +384,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "G1FlatConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
     from rlworld.rl.envs.mdp.events import mujoco as ef
     from rlworld.rl.envs.mdp.events.mujoco import EntityCfg

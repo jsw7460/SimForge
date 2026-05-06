@@ -4,9 +4,9 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+import newton
 import warp as wp
 
-import newton
 from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
@@ -20,6 +20,7 @@ class NewtonVisualizationManagerConfig:
     Note: viewer_type="viser" is handled by ViserVisualizationManager in newton_env.py.
     This manager only handles GL, Rerun, USD, and File viewers.
     """
+
     show_viewer: bool = False
     record_video: bool = False
     video_dir: str = ""
@@ -33,7 +34,7 @@ class NewtonVisualizationManagerConfig:
 class NewtonVisualizationManager(BaseManager):
     """Manages visualization and video recording for Newton environments."""
 
-    def __init__(self, env: "NewtonEnv", config: NewtonVisualizationManagerConfig):
+    def __init__(self, env: NewtonEnv, config: NewtonVisualizationManagerConfig):
         super().__init__(env=env)
         self.config = config
         self.viewer = None
@@ -88,14 +89,14 @@ class NewtonVisualizationManager(BaseManager):
             return
 
         if not isinstance(self.viewer, newton.viewer.ViewerUSD):
-            if hasattr(self.viewer, 'is_running') and not self.viewer.is_running():
+            if hasattr(self.viewer, "is_running") and not self.viewer.is_running():
                 return
 
         state = self.env.scene_manager.state_0
         base_pos = state.joint_q.numpy()[:3]
 
         # Camera tracking (GL only)
-        if isinstance(self.viewer, newton.viewer.ViewerGL) and hasattr(self.viewer, 'set_camera'):
+        if isinstance(self.viewer, newton.viewer.ViewerGL) and hasattr(self.viewer, "set_camera"):
             self.viewer.set_camera(
                 pos=wp.vec3(base_pos[0] + 3.0, base_pos[1] + 3.0, base_pos[2] + 1.0),
                 pitch=-20.0,
@@ -129,7 +130,7 @@ class NewtonVisualizationManager(BaseManager):
     def close(self) -> None:
         """Close viewer."""
         if self.viewer is not None:
-            if hasattr(self.viewer, 'close'):
+            if hasattr(self.viewer, "close"):
                 self.viewer.close()
             self.viewer = None
 

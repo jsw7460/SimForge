@@ -86,12 +86,8 @@ class World(ABC):
     def _init_buffers(self) -> None:
         """Initialize common buffers. Call after setting num_envs and device."""
         self.rew_buf = torch.zeros(self.num_envs, device=self.device)
-        self.episode_sums = defaultdict(
-            lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32)
-        )
-        self.rew_buf_per_type = defaultdict(
-            lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32)
-        )
+        self.episode_sums = defaultdict(lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32))
+        self.rew_buf_per_type = defaultdict(lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32))
         self.extras = {}
 
     def _invalidate_cache(self) -> None:
@@ -143,7 +139,7 @@ class World(ABC):
         pass
 
     @abstractmethod
-    def get_robot_data(self, entity_name: str = "robot") -> "RobotData":
+    def get_robot_data(self, entity_name: str = "robot") -> RobotData:
         """Get the RobotData interface for a named entity.
 
         Args:
@@ -154,7 +150,7 @@ class World(ABC):
         """
         pass
 
-    def _resolve_default_joint_pos(self) -> "torch.Tensor":
+    def _resolve_default_joint_pos(self) -> torch.Tensor:
         """Resolve ``init_state.joint_pos`` dict into a per-joint tensor.
 
         Uses ``act_manager.actuated_joint_names`` for regex matching,
@@ -177,16 +173,14 @@ class World(ABC):
                 break
 
         if robot_cfg:
-            matched_idx, _, matched_vals = _su.resolve_matching_names_values(
-                robot_cfg, all_names
-            )
+            matched_idx, _, matched_vals = _su.resolve_matching_names_values(robot_cfg, all_names)
             for idx, val in zip(matched_idx, matched_vals):
                 base[idx] = val
 
         return base
 
     @abstractmethod
-    def get_robot_state_writer(self, entity_name: str = "robot") -> "RobotStateWriterProtocol":
+    def get_robot_state_writer(self, entity_name: str = "robot") -> RobotStateWriterProtocol:
         """Get the RobotStateWriter interface for a named entity.
 
         Args:
@@ -198,7 +192,7 @@ class World(ABC):
         pass
 
     @property
-    def robot_data(self) -> "RobotData":
+    def robot_data(self) -> RobotData:
         """Shortcut for ``get_robot_data("robot")``."""
         return self.get_robot_data("robot")
 
@@ -223,9 +217,9 @@ class World(ABC):
         """
         num_actions = self.act_manager.total_action_dim
         # Get clip range from action manager if available
-        if hasattr(self.act_manager, 'clip') and self.act_manager.clip is not None:
+        if hasattr(self.act_manager, "clip") and self.act_manager.clip is not None:
             low, high = self.act_manager.clip
-        elif hasattr(self.act_manager, 'clip_actions') and self.act_manager.clip_actions is not None:
+        elif hasattr(self.act_manager, "clip_actions") and self.act_manager.clip_actions is not None:
             low, high = self.act_manager.clip_actions
         else:
             low, high = -np.inf, np.inf
@@ -271,6 +265,7 @@ class World(ABC):
         """
         # Register backend-specific managers in the registry
         from rlworld.rl.envs.managers._registrations import register_all_for
+
         register_all_for(self.sim_type)
 
         # Phase 1 — Build physics scene (simulator-specific)
@@ -293,6 +288,7 @@ class World(ABC):
 
         # Pretty print environment summary
         from rlworld.rl.utils.pretty import print_env_summary
+
         print_env_summary(self)
 
         # Print joint mapping for debugging cross-simulator consistency
@@ -325,10 +321,10 @@ class World(ABC):
         needing a subclass hook.
         """
         from rlworld.rl.envs.managers import (
-            CommandManager, CommandManagerConfig,
-            RewardManagerConfig,
-            TerminationManager, TerminationConfig,
-            EventManager, EventManagerConfig,
+            CommandManager,
+            CommandManagerConfig,
+            EventManager,
+            TerminationManager,
         )
         from rlworld.rl.envs.managers.registry import ManagerRegistry
 
@@ -361,6 +357,7 @@ class World(ABC):
         # empty config via ``_default_curriculum_cfg``, so presets that
         # don't register any curriculum terms still get a no-op manager.
         from rlworld.rl.envs.managers.common.curriculum import CurriculumManager
+
         self.curriculum_manager = CurriculumManager(
             env=self,
             config=self.curriculum_cfg,
@@ -384,15 +381,8 @@ class World(ABC):
         return self.obs_manager.get_observation()
 
     def step(
-        self,
-        actions: torch.Tensor
-    ) -> Tuple[
-        Dict[str, torch.Tensor],
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        Dict[str, Any]
-    ]:
+        self, actions: torch.Tensor
+    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Execute one environment step."""
         # Process and apply actions
         self.act_manager.process_actions(actions)
@@ -405,7 +395,7 @@ class World(ABC):
         self.contact_manager.advance()
 
         # Apply interval events
-        if hasattr(self, 'event_manager') and self.event_manager is not None:
+        if hasattr(self, "event_manager") and self.event_manager is not None:
             if "interval" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="interval", dt=self.control_dt)
 
@@ -415,9 +405,7 @@ class World(ABC):
         # Compute rewards
         self.rew_buf[:] = 0.0
         self.reward_manager.set_rewards(
-            reward_buffer=self.rew_buf,
-            episode_sums=self.episode_sums,
-            reward_buffer_per_type=self.rew_buf_per_type
+            reward_buffer=self.rew_buf, episode_sums=self.episode_sums, reward_buffer_per_type=self.rew_buf_per_type
         )
 
         # Pre-termination hook
@@ -444,9 +432,7 @@ class World(ABC):
         final_info = None
         if len(reset_env_ids) > 0:
             self.obs_manager.process_observations(update_history=True)
-            final_observation = {
-                key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()
-            }
+            final_observation = {key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()}
             self.obs_manager.rollback_last_history_append()
             final_info = {
                 "episode_reward_sums": deepcopy(self.episode_sums),
@@ -583,11 +569,11 @@ class World(ABC):
 
     def __str__(self) -> str:
         """Pretty print environment summary with all manager information."""
-        from rlworld.rl.utils.pretty import (
-            create_env_panel, panel_to_string, get_console
-        )
         from io import StringIO
+
         from rich.console import Console
+
+        from rlworld.rl.utils.pretty import create_env_panel
 
         output = StringIO()
         console = Console(file=output, force_terminal=True, width=100)
@@ -602,10 +588,10 @@ class World(ABC):
             ("Control dt", f"{self.control_dt:.4f}s"),
         ]
 
-        if hasattr(self, 'decimation'):
+        if hasattr(self, "decimation"):
             env_rows.append(("Decimation", str(self.decimation)))
 
-        if hasattr(self, 'task_name') and self.task_name:
+        if hasattr(self, "task_name") and self.task_name:
             env_rows.append(("Task", str(self.task_name)))
 
         panel = create_env_panel(

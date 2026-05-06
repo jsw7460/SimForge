@@ -18,25 +18,25 @@ import trimesh
 import trimesh.visual
 import viser
 
-from .overlays import ViserTermOverlays, ViserDebugOverlays
+from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .play_scene import PlayScene
 from .play_viewer_base import PlayViewerBase
 from .viewer import (
-    _CMD_ARROW_COLOR,
     _ACTUAL_ARROW_COLOR,
-    _ANG_VEL_POS_COLOR,
     _ANG_VEL_NEG_COLOR,
-    _ARROW_Z_OFFSET,
+    _ANG_VEL_POS_COLOR,
     _ANG_VEL_THRESHOLD,
-    _ARROW_LENGTH_SCALE,
-    _MAX_ARROW_LENGTH,
-    _ARROW_SHAFT_RADIUS,
     _ARROW_HEAD_RADIUS,
-    _SHAFT_LENGTH_RATIO,
+    _ARROW_LENGTH_SCALE,
+    _ARROW_SHAFT_RADIUS,
+    _ARROW_Z_OFFSET,
+    _CMD_ARROW_COLOR,
     _HEAD_LENGTH_RATIO,
-    _rotation_quat_from_vectors,
-    _get_unit_shaft_mesh,
+    _MAX_ARROW_LENGTH,
+    _SHAFT_LENGTH_RATIO,
     _get_unit_head_mesh,
+    _get_unit_shaft_mesh,
+    _rotation_quat_from_vectors,
 )
 
 if TYPE_CHECKING:
@@ -98,10 +98,7 @@ class ViserPlayViewer(PlayViewerBase):
         self._build_motion_controls(tabs)
 
         self._update_status_display()
-        print(
-            f"[PlayViewer] Started on port {self._port}. "
-            f"Open the URL above to view. Press Play to start."
-        )
+        print(f"[PlayViewer] Started on port {self._port}. Open the URL above to view. Press Play to start.")
 
     def _build_controls_tab(self, tabs: Any) -> None:
         with tabs.add_tab("Controls", icon=viser.Icon.SETTINGS):
@@ -153,6 +150,7 @@ class ViserPlayViewer(PlayViewerBase):
         self._set_motion_lock(True)
 
         from pathlib import Path
+
         clip_names = [Path(p).stem for p in motion_cmd.cfg.motion_files]
         n_clips = motion_cmd._n_motions
         # Reflect whichever clip env 0 is currently tracking so the
@@ -200,7 +198,9 @@ class ViserPlayViewer(PlayViewerBase):
 
     def _setup_overlays(self, tabs: Any) -> None:
         self._term_overlays = ViserTermOverlays(
-            server=self._server, env=self.env, scene=self._play_scene,
+            server=self._server,
+            env=self.env,
+            scene=self._play_scene,
         )
         self._term_overlays.setup_tabs(tabs)
 
@@ -224,9 +224,7 @@ class ViserPlayViewer(PlayViewerBase):
 
     def _sync_ui_state(self) -> None:
         self._pause_button.label = "Play" if self._is_paused else "Pause"
-        self._pause_button.icon = (
-            viser.Icon.PLAYER_PLAY if self._is_paused else viser.Icon.PLAYER_PAUSE
-        )
+        self._pause_button.icon = viser.Icon.PLAYER_PLAY if self._is_paused else viser.Icon.PLAYER_PAUSE
         self._update_status_display()
 
     def reset_environment(self) -> None:
@@ -275,6 +273,7 @@ class ViserPlayViewer(PlayViewerBase):
                         self._server.flush()
             except Exception:
                 import traceback
+
                 print(f"[PlayViewer] Scene update error:\n{traceback.format_exc()}")
 
         self._threadpool.submit(_do_update)
@@ -305,8 +304,12 @@ class ViserPlayViewer(PlayViewerBase):
 
         if cmd_vx is not None and cmd_vy is not None:
             self._cmd_arrow_handles = self._draw_velocity_arrow(
-                arrow_origin, float(cmd_vx[env_idx]), float(cmd_vy[env_idx]),
-                tracked.yaw, _CMD_ARROW_COLOR, "/overlay/cmd_arrow",
+                arrow_origin,
+                float(cmd_vx[env_idx]),
+                float(cmd_vy[env_idx]),
+                tracked.yaw,
+                _CMD_ARROW_COLOR,
+                "/overlay/cmd_arrow",
                 self._cmd_arrow_handles,
             )
 
@@ -315,25 +318,35 @@ class ViserPlayViewer(PlayViewerBase):
             origin_actual[2] -= 0.05
             self._actual_arrow_handles = self._draw_velocity_arrow(
                 origin_actual,
-                float(tracked.body_velocity[0]), float(tracked.body_velocity[1]),
-                tracked.yaw, _ACTUAL_ARROW_COLOR, "/overlay/actual_arrow",
+                float(tracked.body_velocity[0]),
+                float(tracked.body_velocity[1]),
+                tracked.yaw,
+                _ACTUAL_ARROW_COLOR,
+                "/overlay/actual_arrow",
                 self._actual_arrow_handles,
             )
 
         if cmd_ang is not None:
             self._ang_vel_handle = self._draw_angular_indicator(
-                arrow_origin, float(cmd_ang[env_idx]), self._ang_vel_handle,
+                arrow_origin,
+                float(cmd_ang[env_idx]),
+                self._ang_vel_handle,
             )
 
     def _draw_velocity_arrow(
-        self, origin: np.ndarray, vel_x: float, vel_y: float,
-        yaw: float, color: tuple[int, int, int], name: str,
+        self,
+        origin: np.ndarray,
+        vel_x: float,
+        vel_y: float,
+        yaw: float,
+        color: tuple[int, int, int],
+        name: str,
         old_handles: tuple | None,
     ) -> tuple | None:
         cos_yaw, sin_yaw = np.cos(yaw), np.sin(yaw)
         world_vx = cos_yaw * vel_x - sin_yaw * vel_y
         world_vy = sin_yaw * vel_x + cos_yaw * vel_y
-        magnitude = np.sqrt(world_vx ** 2 + world_vy ** 2)
+        magnitude = np.sqrt(world_vx**2 + world_vy**2)
 
         if magnitude < 1e-4:
             if old_handles is not None:
@@ -354,11 +367,14 @@ class ViserPlayViewer(PlayViewerBase):
         shaft_length = _SHAFT_LENGTH_RATIO * arrow_length
         shaft = _get_unit_shaft_mesh().copy()
         shaft.visual = trimesh.visual.ColorVisuals(
-            mesh=shaft, face_colors=np.tile([r, g, b, 255], (len(shaft.faces), 1)),
+            mesh=shaft,
+            face_colors=np.tile([r, g, b, 255], (len(shaft.faces), 1)),
         )
         shaft_h = self._server.scene.add_mesh_trimesh(
-            name=f"{name}/shaft", mesh=shaft,
-            position=tuple(origin), wxyz=tuple(rot_quat),
+            name=f"{name}/shaft",
+            mesh=shaft,
+            position=tuple(origin),
+            wxyz=tuple(rot_quat),
             scale=(_ARROW_SHAFT_RADIUS, _ARROW_SHAFT_RADIUS, shaft_length),
         )
 
@@ -366,17 +382,23 @@ class ViserPlayViewer(PlayViewerBase):
         head_pos = origin + direction * shaft_length
         head = _get_unit_head_mesh().copy()
         head.visual = trimesh.visual.ColorVisuals(
-            mesh=head, face_colors=np.tile([r, g, b, 255], (len(head.faces), 1)),
+            mesh=head,
+            face_colors=np.tile([r, g, b, 255], (len(head.faces), 1)),
         )
         head_h = self._server.scene.add_mesh_trimesh(
-            name=f"{name}/head", mesh=head,
-            position=tuple(head_pos), wxyz=tuple(rot_quat),
+            name=f"{name}/head",
+            mesh=head,
+            position=tuple(head_pos),
+            wxyz=tuple(rot_quat),
             scale=(_ARROW_HEAD_RADIUS, _ARROW_HEAD_RADIUS, head_length),
         )
         return (shaft_h, head_h)
 
     def _draw_angular_indicator(
-        self, origin: np.ndarray, ang_vel: float, old_handle: Any,
+        self,
+        origin: np.ndarray,
+        ang_vel: float,
+        old_handle: Any,
     ) -> Any:
         if old_handle is not None:
             old_handle.remove()
@@ -389,10 +411,13 @@ class ViserPlayViewer(PlayViewerBase):
         mesh = trimesh.creation.icosphere(subdivisions=2, radius=radius)
         r, g, b = color
         mesh.visual = trimesh.visual.ColorVisuals(
-            mesh=mesh, face_colors=np.tile([r, g, b, 255], (len(mesh.faces), 1)),
+            mesh=mesh,
+            face_colors=np.tile([r, g, b, 255], (len(mesh.faces), 1)),
         )
         return self._server.scene.add_mesh_trimesh(
-            name="/overlay/ang_vel", mesh=mesh, position=tuple(pos),
+            name="/overlay/ang_vel",
+            mesh=mesh,
+            position=tuple(pos),
         )
 
     # ── Lifecycle ──────────────────────────────────────────────────

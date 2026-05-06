@@ -37,6 +37,7 @@ Notes
   for each group at reset, then leaves the assignment fixed for the
   rollout window.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -88,11 +89,11 @@ class NPMPEvalStats:
     """
 
     # Aggregated env reward signal — first episode only.
-    tracking_reward_mean: float          # per-step mean across (env, step) of first ep
+    tracking_reward_mean: float  # per-step mean across (env, step) of first ep
     tracking_reward_std: float
-    episode_return_mean: float            # per-episode SUM mean (first episode)
+    episode_return_mean: float  # per-episode SUM mean (first episode)
     episode_return_std: float
-    episode_length_mean: float            # frame 0 → first done step count
+    episode_length_mean: float  # frame 0 → first done step count
     completed_episodes: int
 
     # Per-term reward breakdown (anchor_pos, anchor_ori, body_pos, ...) —
@@ -149,24 +150,18 @@ class NPMPEvalStats:
         """Human-readable table — used by the standalone entry script."""
         lines = [
             "─" * 80,
-            f"NPMP Evaluation",
+            "NPMP Evaluation",
             "─" * 80,
             f"  episode_return       {self.episode_return_mean:8.4f}  ± {self.episode_return_std:.4f}",
             f"  episode_length       {self.episode_length_mean:8.1f}     ({self.completed_episodes} episodes)",
             f"  tracking_reward      {self.tracking_reward_mean:8.4f}  ± {self.tracking_reward_std:.4f}",
         ]
         if self.z_norm_mean is not None:
-            lines.append(
-                f"  z_norm               {self.z_norm_mean:8.4f}  ± {self.z_norm_std:.4f}"
-            )
+            lines.append(f"  z_norm               {self.z_norm_mean:8.4f}  ± {self.z_norm_std:.4f}")
         if self.q_log_std_mean is not None:
-            lines.append(
-                f"  q_log_std (mean)     {self.q_log_std_mean:+8.4f}"
-            )
+            lines.append(f"  q_log_std (mean)     {self.q_log_std_mean:+8.4f}")
         if self.action_gap_mean is not None:
-            lines.append(
-                f"  action_gap           {self.action_gap_mean:8.4f}"
-            )
+            lines.append(f"  action_gap           {self.action_gap_mean:8.4f}")
         if self.reward_terms:
             lines.append("")
             lines.append("Reward terms:")
@@ -180,10 +175,7 @@ class NPMPEvalStats:
         if self.per_motion:
             lines.append("")
             lines.append("Per-motion:")
-            header = (
-                f"  {'motion':<20s} {'return':>10s} {'length':>10s} "
-                f"{'reward':>10s} {'z_norm':>10s} {'gap':>10s}"
-            )
+            header = f"  {'motion':<20s} {'return':>10s} {'length':>10s} {'reward':>10s} {'z_norm':>10s} {'gap':>10s}"
             lines.append(header)
             lines.append("  " + "─" * (len(header) - 2))
             for name in sorted(self.per_motion):
@@ -193,10 +185,7 @@ class NPMPEvalStats:
                 rew = ms.get("reward", float("nan"))
                 zn = ms.get("z_norm", float("nan"))
                 gap = ms.get("action_gap", float("nan"))
-                lines.append(
-                    f"  {name:<20s} {ret:>10.4f} {length:>10.1f} "
-                    f"{rew:>10.4f} {zn:>10.4f} {gap:>10.4f}"
-                )
+                lines.append(f"  {name:<20s} {ret:>10.4f} {length:>10.1f} {rew:>10.4f} {zn:>10.4f} {gap:>10.4f}")
         lines.append("─" * 80)
         return "\n".join(lines)
 
@@ -225,7 +214,7 @@ def _eval_step_batched(
 
 def run_npmp_eval(
     module: NPMPModule,
-    env: "World",
+    env: World,
     num_steps: int,
     *,
     dispatcher: MultiExpertDispatcher | None = None,
@@ -268,9 +257,7 @@ def run_npmp_eval(
     if policy not in {"student", "expert"}:
         raise ValueError(f"policy must be 'student' or 'expert', got {policy!r}")
     if policy == "expert" and dispatcher is None:
-        raise ValueError(
-            "policy='expert' requires a dispatcher to query expert means."
-        )
+        raise ValueError("policy='expert' requires a dispatcher to query expert means.")
 
     cmd = env.command_manager.get_term("motion")
     n_motions = cmd._n_motions
@@ -302,7 +289,9 @@ def run_npmp_eval(
     # First-episode mask: True until the env's first ``done``; after
     # that env's data is excluded from aggregates.
     first_episode_alive = torch.ones(
-        num_envs, dtype=torch.bool, device=env.device,
+        num_envs,
+        dtype=torch.bool,
+        device=env.device,
     )
     ep_returns = torch.zeros(num_envs, device=env.device)
     ep_lengths = torch.zeros(num_envs, dtype=torch.long, device=env.device)
@@ -318,12 +307,10 @@ def run_npmp_eval(
 
     # First-episode completion records.
     completed_returns: list[tuple[int, float]] = []  # (motion_id, return)
-    completed_lengths: list[tuple[int, int]] = []     # (motion_id, length)
+    completed_lengths: list[tuple[int, int]] = []  # (motion_id, length)
 
     # ── Rollout. ─────────────────────────────────────────────────────
-    track_action_gap = (
-        dispatcher is not None and policy == "student"
-    )
+    track_action_gap = dispatcher is not None and policy == "student"
 
     for step in range(num_steps):
         obs = env.obs_manager.get_observation()
@@ -335,23 +322,27 @@ def run_npmp_eval(
         # ── Choose action source. ───────────────────────────────────
         if policy == "expert":
             action_jax = dispatcher.deterministic_mean(
-                actor_obs, motion_ids_jax,
+                actor_obs,
+                motion_ids_jax,
             )
         else:
             decoder_s = torch_to_jax(obs["decoder_input"])
             encoder_x = torch_to_jax(obs["encoder_input"])
             z_t, action_jax, q_log_std = _eval_step_batched(
-                module, z_prev, decoder_s, encoder_x, just_reset,
+                module,
+                z_prev,
+                decoder_s,
+                encoder_x,
+                just_reset,
             )
             z_norm_buf.append(jnp.linalg.norm(z_t, axis=-1))
             q_log_std_buf.append(jnp.mean(q_log_std, axis=-1))
             if track_action_gap:
                 mu_E = dispatcher.deterministic_mean(
-                    actor_obs, motion_ids_jax,
+                    actor_obs,
+                    motion_ids_jax,
                 )
-                action_gap_buf.append(
-                    jnp.linalg.norm(action_jax - mu_E, axis=-1)
-                )
+                action_gap_buf.append(jnp.linalg.norm(action_jax - mu_E, axis=-1))
 
         # ── Step env. ───────────────────────────────────────────────
         action_torch = jax_to_torch(action_jax, env.device)
@@ -388,7 +379,9 @@ def run_npmp_eval(
             rollover = new_time != (prev_time + 1)
             next_just_reset = torch_to_jax((term | trunc) | rollover)
             z_prev = jnp.where(
-                next_just_reset[:, None], jnp.zeros_like(z_t), z_t,
+                next_just_reset[:, None],
+                jnp.zeros_like(z_t),
+                z_t,
             )
             just_reset = next_just_reset
 
@@ -406,7 +399,7 @@ def run_npmp_eval(
 
     # ── Aggregate. ───────────────────────────────────────────────────
     # Masked per-step tensors for first-episode-only stats.
-    rew_stacked = torch.stack(rew_buf, dim=0)        # (T, num_envs)
+    rew_stacked = torch.stack(rew_buf, dim=0)  # (T, num_envs)
     active_stacked = torch.stack(active_mask_buf, dim=0)  # (T, num_envs)
     n_active = float(active_stacked.sum().item())
 
@@ -428,24 +421,16 @@ def run_npmp_eval(
 
     if hasattr(env.termination_manager, "consume_episode_stats"):
         raw = env.termination_manager.consume_episode_stats()
-        termination_rates = {
-            k.split("/")[-1]: float(v) for k, v in raw.items()
-        }
+        termination_rates = {k.split("/")[-1]: float(v) for k, v in raw.items()}
     else:
         termination_rates = {}
 
     # Episode-return aggregation.
     all_returns = [r for _, r in completed_returns]
     all_lengths = [l for _, l in completed_lengths]
-    episode_return_mean = (
-        float(np.mean(all_returns)) if all_returns else 0.0
-    )
-    episode_return_std = (
-        float(np.std(all_returns)) if all_returns else 0.0
-    )
-    episode_length_mean = (
-        float(np.mean(all_lengths)) if all_lengths else float(num_steps)
-    )
+    episode_return_mean = float(np.mean(all_returns)) if all_returns else 0.0
+    episode_return_std = float(np.std(all_returns)) if all_returns else 0.0
+    episode_length_mean = float(np.mean(all_lengths)) if all_lengths else float(num_steps)
 
     # Latent diagnostics — student-only.
     z_norm_mean: float | None = None
@@ -461,12 +446,8 @@ def run_npmp_eval(
             z_norm_mean = float(jnp.sum(z_norms * active_jax) / n_active_j)
             # std over masked subset
             sq = (z_norms - z_norm_mean) ** 2
-            z_norm_std = float(
-                jnp.sqrt(jnp.sum(sq * active_jax) / n_active_j)
-            )
-            q_log_std_mean = float(
-                jnp.sum(q_log_stds * active_jax) / n_active_j
-            )
+            z_norm_std = float(jnp.sqrt(jnp.sum(sq * active_jax) / n_active_j))
+            q_log_std_mean = float(jnp.sum(q_log_stds * active_jax) / n_active_j)
         else:
             z_norm_mean = z_norm_std = q_log_std_mean = 0.0
 
@@ -493,7 +474,7 @@ def run_npmp_eval(
 
         # Per-step aggregates restricted by initial_motion_ids and
         # first-episode mask.
-        initial_motion_ids_t = initial_motion_ids                # (num_envs,)
+        initial_motion_ids_t = initial_motion_ids  # (num_envs,)
 
         for mi in range(n_motions):
             if mi not in returns_by_motion:
@@ -506,31 +487,20 @@ def run_npmp_eval(
             # Per-step reward / z_norm / etc. for envs whose initial
             # motion was mi *and* still in their first episode.
             env_mask = (initial_motion_ids_t == mi).unsqueeze(0)  # (1, num_envs)
-            step_mask = active_stacked & env_mask                  # (T, num_envs)
+            step_mask = active_stacked & env_mask  # (T, num_envs)
             n_step = float(step_mask.sum().item())
             if n_step > 0:
-                ms["reward"] = float(
-                    rew_stacked[step_mask].mean().item()
-                )
+                ms["reward"] = float(rew_stacked[step_mask].mean().item())
                 if policy == "student" and z_norm_buf:
                     step_mask_j = torch_to_jax(step_mask)
                     z_stacked = jnp.stack(z_norm_buf, axis=0)
-                    ms["z_norm"] = float(
-                        jnp.sum(z_stacked * step_mask_j)
-                        / jnp.sum(step_mask_j)
-                    )
+                    ms["z_norm"] = float(jnp.sum(z_stacked * step_mask_j) / jnp.sum(step_mask_j))
                     qls_stacked = jnp.stack(q_log_std_buf, axis=0)
-                    ms["q_log_std"] = float(
-                        jnp.sum(qls_stacked * step_mask_j)
-                        / jnp.sum(step_mask_j)
-                    )
+                    ms["q_log_std"] = float(jnp.sum(qls_stacked * step_mask_j) / jnp.sum(step_mask_j))
                 if track_action_gap and action_gap_buf:
                     step_mask_j = torch_to_jax(step_mask)
                     gaps_stacked = jnp.stack(action_gap_buf, axis=0)
-                    ms["action_gap"] = float(
-                        jnp.sum(gaps_stacked * step_mask_j)
-                        / jnp.sum(step_mask_j)
-                    )
+                    ms["action_gap"] = float(jnp.sum(gaps_stacked * step_mask_j) / jnp.sum(step_mask_j))
 
             per_motion_stats[motion_names[mi]] = ms
 
@@ -598,7 +568,9 @@ class NPMPPolicyWrapper(PolicyWrapper):
     def notify_reset(self, reset_mask: np.ndarray) -> None:
         mask = jnp.asarray(reset_mask, dtype=jnp.bool_)
         self._z_prev = jnp.where(
-            mask[:, None], jnp.zeros_like(self._z_prev), self._z_prev,
+            mask[:, None],
+            jnp.zeros_like(self._z_prev),
+            self._z_prev,
         )
         self._just_reset = self._just_reset | mask
 
@@ -642,7 +614,7 @@ class NPMPEvaluator:
         self._dispatcher = dispatcher
 
     @property
-    def env(self) -> "World":
+    def env(self) -> World:
         return self._env
 
     @property

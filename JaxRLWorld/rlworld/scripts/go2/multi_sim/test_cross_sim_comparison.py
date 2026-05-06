@@ -12,7 +12,7 @@ Usage:
 
 import random
 from collections import OrderedDict
-from typing import Dict, List
+from typing import Dict
 
 import numpy as np
 import torch
@@ -31,18 +31,24 @@ NUM_ENVS = 4
 # Common observation terms (RobotData protocol — works on all sims)
 # =====================================================================
 
+
 def _build_common_actor_obs_terms():
     from rlworld.rl.configs.observations import ObservationTermConfig
     from rlworld.rl.envs.mdp.observations.common.proprioception import (
-        base_ang_vel, command, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
+        base_ang_vel,
+        command,
+        dof_pos,
+        dof_vel,
+        prev_processed_actions,
+        projected_gravity,
     )
 
     return [
-        ("base_ang_vel",           ObservationTermConfig(func=base_ang_vel, scale=1.0)),
-        ("projected_gravity",      ObservationTermConfig(func=projected_gravity, scale=1.0)),
-        ("command",                ObservationTermConfig(func=command, scale=1.0)),
-        ("dof_pos",                ObservationTermConfig(func=dof_pos, scale=1.0)),
-        ("dof_vel",                ObservationTermConfig(func=dof_vel, scale=1.0)),
+        ("base_ang_vel", ObservationTermConfig(func=base_ang_vel, scale=1.0)),
+        ("projected_gravity", ObservationTermConfig(func=projected_gravity, scale=1.0)),
+        ("command", ObservationTermConfig(func=command, scale=1.0)),
+        ("dof_pos", ObservationTermConfig(func=dof_pos, scale=1.0)),
+        ("dof_vel", ObservationTermConfig(func=dof_vel, scale=1.0)),
         ("prev_processed_actions", ObservationTermConfig(func=prev_processed_actions, scale=1.0)),
     ]
 
@@ -59,60 +65,73 @@ def _genesis_reward_terms():
     from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
     from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_g
 
-    return OrderedDict({
-        "track_lin_vel": RewardTermConfig(
-            rf_common.track_lin_vel, weight=2.0,
-            params={"std": 0.5, "penalize_z": True},
-        ),
-        "track_ang_vel": RewardTermConfig(
-            rf_common.track_ang_vel, weight=2.0,
-            params={"std": 0.707, "penalize_xy": True},
-        ),
-        "flat_orientation": RewardTermConfig(
-            rf_common.flat_orientation, weight=1.0,
-            params={"std": 0.447},
-        ),
-        "processed_action_rate_l2": RewardTermConfig(
-            rf_g.processed_action_rate_l2_mjlab, weight=0.1,
-        ),
-        "variable_posture": RewardTermConfig(
-            rf_g.variable_posture, weight=1.0,
-            params={
-                "std_standing": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.1,
+    return OrderedDict(
+        {
+            "track_lin_vel": RewardTermConfig(
+                rf_common.track_lin_vel,
+                weight=2.0,
+                params={"std": 0.5, "penalize_z": True},
+            ),
+            "track_ang_vel": RewardTermConfig(
+                rf_common.track_ang_vel,
+                weight=2.0,
+                params={"std": 0.707, "penalize_xy": True},
+            ),
+            "flat_orientation": RewardTermConfig(
+                rf_common.flat_orientation,
+                weight=1.0,
+                params={"std": 0.447},
+            ),
+            "processed_action_rate_l2": RewardTermConfig(
+                rf_g.processed_action_rate_l2_mjlab,
+                weight=0.1,
+            ),
+            "variable_posture": RewardTermConfig(
+                rf_g.variable_posture,
+                weight=1.0,
+                params={
+                    "std_standing": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.1,
+                    },
+                    "std_walking": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                    },
+                    "std_running": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                    },
+                    "walking_threshold": 0.05,
+                    "running_threshold": 1.5,
                 },
-                "std_walking": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
-                },
-                "std_running": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
-                },
-                "walking_threshold": 0.05, "running_threshold": 1.5,
-            },
-        ),
-        "joint_pos_limits": RewardTermConfig(
-            rf_g.joint_pos_limits_mjlab, weight=1.0,
-        ),
-        "feet_clearance": RewardTermConfig(
-            rf_g.feet_clearance_mjlab, weight=2.0,
-            params={"feet_links": FEET_LINKS_GENESIS, "target_height": 0.1, "command_threshold": 0.05},
-        ),
-        "feet_swing_height": RewardTermConfig(
-            rf_g.feet_swing_height_mjlab, weight=0.25,
-            params={"feet_links": FEET_LINKS_GENESIS, "target_height": 0.1, "command_threshold": 0.05},
-        ),
-        "feet_slip": RewardTermConfig(
-            rf_g.feet_slip_mjlab, weight=0.1,
-            params={"feet_links": FEET_LINKS_GENESIS, "command_threshold": 0.05},
-        ),
-        "soft_landing": RewardTermConfig(
-            rf_g.soft_landing_mjlab, weight=1e-5,
-            params={"feet_links": FEET_LINKS_GENESIS, "command_threshold": 0.05},
-        ),
-    })
+            ),
+            "joint_pos_limits": RewardTermConfig(
+                rf_g.joint_pos_limits_mjlab,
+                weight=1.0,
+            ),
+            "feet_clearance": RewardTermConfig(
+                rf_g.feet_clearance_mjlab,
+                weight=2.0,
+                params={"feet_links": FEET_LINKS_GENESIS, "target_height": 0.1, "command_threshold": 0.05},
+            ),
+            "feet_swing_height": RewardTermConfig(
+                rf_g.feet_swing_height_mjlab,
+                weight=0.25,
+                params={"feet_links": FEET_LINKS_GENESIS, "target_height": 0.1, "command_threshold": 0.05},
+            ),
+            "feet_slip": RewardTermConfig(
+                rf_g.feet_slip_mjlab,
+                weight=0.1,
+                params={"feet_links": FEET_LINKS_GENESIS, "command_threshold": 0.05},
+            ),
+            "soft_landing": RewardTermConfig(
+                rf_g.soft_landing_mjlab,
+                weight=1e-5,
+                params={"feet_links": FEET_LINKS_GENESIS, "command_threshold": 0.05},
+            ),
+        }
+    )
 
 
 def _newton_reward_terms():
@@ -124,131 +143,165 @@ def _newton_reward_terms():
     robot = Go2Config()
     feet = robot.foot_names
 
-    return OrderedDict({
-        "track_lin_vel": RewardTermConfig(
-            rf_common.track_lin_vel, weight=2.0,
-            params={"std": 0.5, "penalize_z": True},
-        ),
-        "track_ang_vel": RewardTermConfig(
-            rf_common.track_ang_vel, weight=2.0,
-            params={"std": 0.707, "penalize_xy": True},
-        ),
-        "flat_orientation": RewardTermConfig(
-            rf_common.flat_orientation, weight=1.0,
-            params={"std": 0.447},
-        ),
-        "processed_action_rate_l2": RewardTermConfig(
-            rf_n.processed_action_rate_l2_mjlab, weight=0.1,
-        ),
-        "variable_posture": RewardTermConfig(
-            rf_n.variable_posture, weight=1.0,
-            params={
-                "std_standing": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.1,
+    return OrderedDict(
+        {
+            "track_lin_vel": RewardTermConfig(
+                rf_common.track_lin_vel,
+                weight=2.0,
+                params={"std": 0.5, "penalize_z": True},
+            ),
+            "track_ang_vel": RewardTermConfig(
+                rf_common.track_ang_vel,
+                weight=2.0,
+                params={"std": 0.707, "penalize_xy": True},
+            ),
+            "flat_orientation": RewardTermConfig(
+                rf_common.flat_orientation,
+                weight=1.0,
+                params={"std": 0.447},
+            ),
+            "processed_action_rate_l2": RewardTermConfig(
+                rf_n.processed_action_rate_l2_mjlab,
+                weight=0.1,
+            ),
+            "variable_posture": RewardTermConfig(
+                rf_n.variable_posture,
+                weight=1.0,
+                params={
+                    "std_standing": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.1,
+                    },
+                    "std_walking": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                    },
+                    "std_running": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                    },
+                    "walking_threshold": 0.05,
+                    "running_threshold": 1.5,
                 },
-                "std_walking": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
-                },
-                "std_running": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
-                },
-                "walking_threshold": 0.05, "running_threshold": 1.5,
-            },
-        ),
-        "joint_pos_limits": RewardTermConfig(
-            rf_n.joint_pos_limits_mjlab, weight=1.0,
-        ),
-        "feet_clearance": RewardTermConfig(
-            rf_n.feet_clearance_mjlab, weight=2.0,
-            params={"feet_bodies": feet, "target_height": 0.1, "command_threshold": 0.05},
-        ),
-        "feet_swing_height": RewardTermConfig(
-            rf_n.feet_swing_height_mjlab, weight=0.25,
-            params={"feet_bodies": feet, "target_height": 0.1, "command_threshold": 0.05},
-        ),
-        "feet_slip": RewardTermConfig(
-            rf_n.feet_slip_mjlab, weight=0.1,
-            params={"feet_bodies": feet, "command_threshold": 0.05},
-        ),
-        "soft_landing": RewardTermConfig(
-            rf_n.soft_landing_mjlab, weight=1e-5,
-            params={"feet_bodies": feet, "command_threshold": 0.05},
-        ),
-    })
+            ),
+            "joint_pos_limits": RewardTermConfig(
+                rf_n.joint_pos_limits_mjlab,
+                weight=1.0,
+            ),
+            "feet_clearance": RewardTermConfig(
+                rf_n.feet_clearance_mjlab,
+                weight=2.0,
+                params={"feet_bodies": feet, "target_height": 0.1, "command_threshold": 0.05},
+            ),
+            "feet_swing_height": RewardTermConfig(
+                rf_n.feet_swing_height_mjlab,
+                weight=0.25,
+                params={"feet_bodies": feet, "target_height": 0.1, "command_threshold": 0.05},
+            ),
+            "feet_slip": RewardTermConfig(
+                rf_n.feet_slip_mjlab,
+                weight=0.1,
+                params={"feet_bodies": feet, "command_threshold": 0.05},
+            ),
+            "soft_landing": RewardTermConfig(
+                rf_n.soft_landing_mjlab,
+                weight=1e-5,
+                params={"feet_bodies": feet, "command_threshold": 0.05},
+            ),
+        }
+    )
 
 
 def _mujoco_reward_terms():
-    import math
     from mjlab.managers.scene_entity_config import SceneEntityCfg
+
     from rlworld.rl.configs.rewards import RewardTermConfig
     from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
     from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_m
 
     site_names = ("FR_foot", "FL_foot", "RR_foot", "RL_foot")
 
-    return OrderedDict({
-        "track_lin_vel": RewardTermConfig(
-            rf_common.track_lin_vel, weight=2.0,
-            params={"std": 0.5, "penalize_z": True},
-        ),
-        "track_ang_vel": RewardTermConfig(
-            rf_common.track_ang_vel, weight=2.0,
-            params={"std": 0.707, "penalize_xy": True},
-        ),
-        "flat_orientation": RewardTermConfig(
-            rf_m.flat_orientation, weight=1.0,
-            params={"std": 0.447},
-        ),
-        "processed_action_rate_l2": RewardTermConfig(
-            rf_m.raw_action_rate_l2, weight=0.1,
-        ),
-        "variable_posture": RewardTermConfig(
-            rf_m.variable_posture, weight=1.0,
-            params={
-                "asset_cfg": SceneEntityCfg(name="robot", joint_names=(".*",)),
-                "std_standing": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.1,
+    return OrderedDict(
+        {
+            "track_lin_vel": RewardTermConfig(
+                rf_common.track_lin_vel,
+                weight=2.0,
+                params={"std": 0.5, "penalize_z": True},
+            ),
+            "track_ang_vel": RewardTermConfig(
+                rf_common.track_ang_vel,
+                weight=2.0,
+                params={"std": 0.707, "penalize_xy": True},
+            ),
+            "flat_orientation": RewardTermConfig(
+                rf_m.flat_orientation,
+                weight=1.0,
+                params={"std": 0.447},
+            ),
+            "processed_action_rate_l2": RewardTermConfig(
+                rf_m.raw_action_rate_l2,
+                weight=0.1,
+            ),
+            "variable_posture": RewardTermConfig(
+                rf_m.variable_posture,
+                weight=1.0,
+                params={
+                    "asset_cfg": SceneEntityCfg(name="robot", joint_names=(".*",)),
+                    "std_standing": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.1,
+                    },
+                    "std_walking": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                    },
+                    "std_running": {
+                        r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+                        r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+                    },
+                    "walking_threshold": 0.05,
+                    "running_threshold": 1.5,
                 },
-                "std_walking": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+            ),
+            "joint_pos_limits": RewardTermConfig(
+                rf_m.joint_pos_limits,
+                weight=1.0,
+            ),
+            "feet_clearance": RewardTermConfig(
+                rf_m.feet_clearance,
+                weight=2.0,
+                params={
+                    "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                    "target_height": 0.1,
+                    "command_threshold": 0.05,
                 },
-                "std_running": {
-                    r".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
-                    r".*(FR|FL|RR|RL)_calf_joint.*": 0.6,
+            ),
+            "feet_swing_height": RewardTermConfig(
+                rf_m.feet_swing_height,
+                weight=0.25,
+                params={
+                    "sensor_name": "feet_ground_contact",
+                    "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                    "target_height": 0.1,
+                    "command_threshold": 0.05,
                 },
-                "walking_threshold": 0.05, "running_threshold": 1.5,
-            },
-        ),
-        "joint_pos_limits": RewardTermConfig(
-            rf_m.joint_pos_limits, weight=1.0,
-        ),
-        "feet_clearance": RewardTermConfig(
-            rf_m.feet_clearance, weight=2.0,
-            params={"asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
-                     "target_height": 0.1, "command_threshold": 0.05},
-        ),
-        "feet_swing_height": RewardTermConfig(
-            rf_m.feet_swing_height, weight=0.25,
-            params={"sensor_name": "feet_ground_contact",
-                     "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
-                     "target_height": 0.1, "command_threshold": 0.05},
-        ),
-        "feet_slip": RewardTermConfig(
-            rf_m.feet_slip, weight=0.1,
-            params={"sensor_name": "feet_ground_contact",
-                     "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
-                     "command_threshold": 0.05},
-        ),
-        "soft_landing": RewardTermConfig(
-            rf_m.soft_landing, weight=1e-5,
-            params={"sensor_name": "feet_ground_contact", "command_threshold": 0.05},
-        ),
-    })
+            ),
+            "feet_slip": RewardTermConfig(
+                rf_m.feet_slip,
+                weight=0.1,
+                params={
+                    "sensor_name": "feet_ground_contact",
+                    "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                    "command_threshold": 0.05,
+                },
+            ),
+            "soft_landing": RewardTermConfig(
+                rf_m.soft_landing,
+                weight=1e-5,
+                params={"sensor_name": "feet_ground_contact", "command_threshold": 0.05},
+            ),
+        }
+    )
 
 
 # =====================================================================
@@ -256,15 +309,23 @@ def _mujoco_reward_terms():
 # =====================================================================
 
 REWARD_NAMES = [
-    "track_lin_vel", "track_ang_vel", "flat_orientation", "processed_action_rate_l2",
-    "variable_posture", "joint_pos_limits",
-    "feet_clearance", "feet_swing_height", "feet_slip", "soft_landing",
+    "track_lin_vel",
+    "track_ang_vel",
+    "flat_orientation",
+    "processed_action_rate_l2",
+    "variable_posture",
+    "joint_pos_limits",
+    "feet_clearance",
+    "feet_swing_height",
+    "feet_slip",
+    "soft_landing",
 ]
 
 
 # =====================================================================
 # Environment creation
 # =====================================================================
+
 
 def _create_genesis_env():
     from rlworld.rl.configs.presets.go2_flat.mlp import get_config
@@ -275,6 +336,7 @@ def _create_genesis_env():
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
     from rlworld.rl.configs.common_config_classes import disable_corruption
+
     disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _genesis_reward_terms()
     return BaseRunner._create_env_from_config(cfg)
@@ -289,6 +351,7 @@ def _create_newton_env():
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
     from rlworld.rl.configs.common_config_classes import disable_corruption
+
     disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _newton_reward_terms()
     return BaseRunner._create_env_from_config(cfg)
@@ -303,6 +366,7 @@ def _create_mujoco_env():
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
     from rlworld.rl.configs.common_config_classes import disable_corruption
+
     disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _mujoco_reward_terms()
     return BaseRunner._create_env_from_config(cfg)
@@ -343,15 +407,18 @@ def _print_obs_table(title: str, obs_per_sim: Dict[str, Dict[str, torch.Tensor]]
         print(f"\n  [{tn}]  shape={shape}")
         for sn in SIM_NAMES:
             v = obs_per_sim[sn][tn]
-            print(f"    {sn:>8s}:  mean={_fmt(v.mean().item())}  "
-                  f"std={v.std().item():8.6f}  "
-                  f"min={_fmt(v.min().item())}  max={_fmt(v.max().item())}")
+            print(
+                f"    {sn:>8s}:  mean={_fmt(v.mean().item())}  "
+                f"std={v.std().item():8.6f}  "
+                f"min={_fmt(v.min().item())}  max={_fmt(v.max().item())}"
+            )
         for i in range(3):
-            for j in range(i+1, 3):
+            for j in range(i + 1, 3):
                 a, b = obs_per_sim[SIM_NAMES[i]][tn], obs_per_sim[SIM_NAMES[j]][tn]
                 d = (a - b).abs()
-                print(f"    |{SIM_NAMES[i][:1]}-{SIM_NAMES[j][:1]}|: "
-                      f"mean={d.mean().item():.6f}  max={d.max().item():.6f}")
+                print(
+                    f"    |{SIM_NAMES[i][:1]}-{SIM_NAMES[j][:1]}|: mean={d.mean().item():.6f}  max={d.max().item():.6f}"
+                )
 
 
 def _print_reward_table(title: str, rew_per_sim: Dict[str, Dict[str, torch.Tensor]]):
@@ -366,21 +433,22 @@ def _print_reward_table(title: str, rew_per_sim: Dict[str, Dict[str, torch.Tenso
             if v is None:
                 print(f"    {sn:>8s}:  (not available)")
                 continue
-            print(f"    {sn:>8s}:  mean={_fmt(v.mean().item())}  "
-                  f"per_env=[{', '.join(f'{x.item():.4f}' for x in v)}]")
+            print(f"    {sn:>8s}:  mean={_fmt(v.mean().item())}  per_env=[{', '.join(f'{x.item():.4f}' for x in v)}]")
         available = [sn for sn in SIM_NAMES if tn in rew_per_sim[sn]]
         for i in range(len(available)):
-            for j in range(i+1, len(available)):
+            for j in range(i + 1, len(available)):
                 a = rew_per_sim[available[i]][tn]
                 b = rew_per_sim[available[j]][tn]
                 d = (a - b).abs()
-                print(f"    |{available[i][:1]}-{available[j][:1]}|: "
-                      f"mean={d.mean().item():.6f}  max={d.max().item():.6f}")
+                print(
+                    f"    |{available[i][:1]}-{available[j][:1]}|: mean={d.mean().item():.6f}  max={d.max().item():.6f}"
+                )
 
 
 # =====================================================================
 # Main
 # =====================================================================
+
 
 def main():
     print(SEP)
@@ -417,7 +485,7 @@ def main():
     init_obs = {sn: _compute_obs_raw(env) for sn, env in envs.items()}
     _print_obs_table("INITIAL OBSERVATIONS (after reset)", init_obs)
 
-    print(f"\n[4/6] Step with ZERO actions")
+    print("\n[4/6] Step with ZERO actions")
     zero_step = {}
     for sn, env in envs.items():
         z = torch.zeros(NUM_ENVS, env.num_actions, device=env.device)
@@ -432,12 +500,12 @@ def main():
         zero_rew[sn] = {k: rpt[k].detach().clone() for k in rpt}
     _print_reward_table("REWARDS AFTER ZERO-ACTION STEP (from env.step)", zero_rew)
 
-    print(f"\n  [TOTAL REWARD]")
+    print("\n  [TOTAL REWARD]")
     for sn in SIM_NAMES:
         r = zero_step[sn]["rew"]
         print(f"    {sn:>8s}: {r.mean().item():+.6f}  [{', '.join(f'{x.item():.4f}' for x in r)}]")
 
-    print(f"\n[5/6] Step with IDENTICAL random actions")
+    print("\n[5/6] Step with IDENTICAL random actions")
     rand_act = torch.randn(NUM_ENVS, acts[0], device=g_env.device) * 0.1
     rand_act = rand_act.clamp(-1.0, 1.0)
     print(f"  actions: mean={rand_act.mean().item():.4f} std={rand_act.std().item():.4f}")
@@ -456,7 +524,7 @@ def main():
         rand_rew[sn] = {k: rpt[k].detach().clone() for k in rpt}
     _print_reward_table("REWARDS AFTER RANDOM-ACTION STEP", rand_rew)
 
-    print(f"\n  [TOTAL REWARD]")
+    print("\n  [TOTAL REWARD]")
     for sn in SIM_NAMES:
         r = rand_step[sn]["rew"]
         print(f"    {sn:>8s}: {r.mean().item():+.6f}  [{', '.join(f'{x.item():.4f}' for x in r)}]")
@@ -488,7 +556,7 @@ def main():
                 )
 
     print(f"\n{THIN}")
-    print(f"  OBS DIVERGENCE PER STEP (mean |Genesis-X|, env-averaged)")
+    print("  OBS DIVERGENCE PER STEP (mean |Genesis-X|, env-averaged)")
     print(THIN)
     short_obs = [n[:10] for n in OBS_NAMES]
     print(f"  {'step':>4s}", end="")
@@ -509,7 +577,7 @@ def main():
         print()
 
     print(f"\n{THIN}")
-    print(f"  REWARD DIVERGENCE PER STEP (mean |Genesis-X|, env-averaged)")
+    print("  REWARD DIVERGENCE PER STEP (mean |Genesis-X|, env-averaged)")
     print(THIN)
     short_rew = [n[:14] for n in REWARD_NAMES]
     print(f"  {'step':>4s}", end="")
@@ -530,7 +598,7 @@ def main():
         gr = traj_rew["Genesis"][si]
         nr = traj_rew["Newton"][si]
         mr = traj_rew["MuJoCo"][si]
-        print(f"  {(gr-nr).abs().mean().item():7.4f} {(gr-mr).abs().mean().item():7.4f}")
+        print(f"  {(gr - nr).abs().mean().item():7.4f} {(gr - mr).abs().mean().item():7.4f}")
 
     print(f"\n  Cumulative reward over {NUM_STEPS} steps:")
     for sn in SIM_NAMES:
@@ -538,7 +606,7 @@ def main():
         print(f"    {sn:>8s}: {total:+.4f}")
 
     print(f"\n{SEP}")
-    print(f"  SUMMARY")
+    print("  SUMMARY")
     print(SEP)
 
     print(f"\n  Obs dims: {dims[0]}")
@@ -546,16 +614,37 @@ def main():
 
     print(f"\n  Avg obs divergence ({NUM_STEPS} steps):")
     for tn in OBS_NAMES:
-        gn = np.mean([(traj_obs["Genesis"][tn][i] - traj_obs["Newton"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)])
-        gm = np.mean([(traj_obs["Genesis"][tn][i] - traj_obs["MuJoCo"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)])
-        nm = np.mean([(traj_obs["Newton"][tn][i] - traj_obs["MuJoCo"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)])
+        gn = np.mean(
+            [(traj_obs["Genesis"][tn][i] - traj_obs["Newton"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)]
+        )
+        gm = np.mean(
+            [(traj_obs["Genesis"][tn][i] - traj_obs["MuJoCo"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)]
+        )
+        nm = np.mean(
+            [(traj_obs["Newton"][tn][i] - traj_obs["MuJoCo"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)]
+        )
         print(f"    {tn:>25s}:  G-N={gn:.6f}  G-M={gm:.6f}  N-M={nm:.6f}")
 
     print(f"\n  Avg reward divergence ({NUM_STEPS} steps):")
     for tn in REWARD_NAMES:
-        gn = np.mean([(traj_rew_terms["Genesis"][tn][i] - traj_rew_terms["Newton"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)])
-        gm = np.mean([(traj_rew_terms["Genesis"][tn][i] - traj_rew_terms["MuJoCo"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)])
-        nm = np.mean([(traj_rew_terms["Newton"][tn][i] - traj_rew_terms["MuJoCo"][tn][i]).abs().mean().item() for i in range(NUM_STEPS)])
+        gn = np.mean(
+            [
+                (traj_rew_terms["Genesis"][tn][i] - traj_rew_terms["Newton"][tn][i]).abs().mean().item()
+                for i in range(NUM_STEPS)
+            ]
+        )
+        gm = np.mean(
+            [
+                (traj_rew_terms["Genesis"][tn][i] - traj_rew_terms["MuJoCo"][tn][i]).abs().mean().item()
+                for i in range(NUM_STEPS)
+            ]
+        )
+        nm = np.mean(
+            [
+                (traj_rew_terms["Newton"][tn][i] - traj_rew_terms["MuJoCo"][tn][i]).abs().mean().item()
+                for i in range(NUM_STEPS)
+            ]
+        )
         print(f"    {tn:>25s}:  G-N={gn:.6f}  G-M={gm:.6f}  N-M={nm:.6f}")
 
     print(f"\n{SEP}")

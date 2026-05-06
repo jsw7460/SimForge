@@ -75,9 +75,7 @@ class ViserTermPlotter:
         self._env_idx = env_idx
 
         self._build_selector_gui(term_names)
-        self._plots_folder = self._server.gui.add_folder(
-            "Plots", expand_by_default=True
-        )
+        self._plots_folder = self._server.gui.add_folder("Plots", expand_by_default=True)
 
     def _build_selector_gui(self, term_names: list[str]) -> None:
         """Build checkboxes with filter input for term selection."""
@@ -106,9 +104,7 @@ class ViserTermPlotter:
                         self._create_plot(state)
 
             # Bulk actions.
-            bulk = self._server.gui.add_button_group(
-                "Select", options=["All", "None"]
-            )
+            bulk = self._server.gui.add_button_group("Select", options=["All", "None"])
 
             @bulk.on_click
             def _(event) -> None:
@@ -136,9 +132,7 @@ class ViserTermPlotter:
                     self._sync_plots()
 
     def _env_label_text(self) -> str:
-        return (
-            f"<small><em>Showing terms for environment #{self._env_idx}</em></small>"
-        )
+        return f"<small><em>Showing terms for environment #{self._env_idx}</em></small>"
 
     def update_env_idx(self, env_idx: int) -> None:
         """Update the displayed environment index."""
@@ -172,14 +166,10 @@ class ViserTermPlotter:
                 data=(x, y),
                 series=(
                     viser.uplot.Series(label="Steps"),
-                    viser.uplot.Series(
-                        label=state.name, stroke=state.color, width=2
-                    ),
+                    viser.uplot.Series(label=state.name, stroke=state.color, width=2),
                 ),
                 scales={
-                    "x": viser.uplot.Scale(
-                        time=False, auto=False, range=(-self._history_length, 0)
-                    ),
+                    "x": viser.uplot.Scale(time=False, auto=False, range=(-self._history_length, 0)),
                     "y": viser.uplot.Scale(auto=True),
                 },
                 legend=viser.uplot.Legend(show=False),

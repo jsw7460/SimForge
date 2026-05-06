@@ -1,5 +1,4 @@
-from collections import deque, defaultdict
-from typing import Optional
+from collections import defaultdict, deque
 
 import torch
 
@@ -53,13 +52,7 @@ class OnlineStats:
             return {"mean": 0.0, "std": 0.0, "var": 0.0, "min": 0.0, "max": 0.0, "count": 0}
 
         variance = self.M2 / self.count if self.count > 1 else 0.0
-        return {
-            "mean": float(self.mean),
-            "std": float(variance ** 0.5),
-            "var": float(variance),
-            "count": self.count
-        }
-
+        return {"mean": float(self.mean), "std": float(variance**0.5), "var": float(variance), "count": self.count}
 
 
 class EpisodeStatsCollector:
@@ -87,9 +80,7 @@ class EpisodeStatsCollector:
         self.episode_discounted_returns = torch.zeros(num_envs, dtype=torch.float32, device=device)
 
         # Per-reward-type returns (current episode)
-        self.episode_returns_per_type = defaultdict(
-            lambda: torch.zeros(num_envs, dtype=torch.float32, device=device)
-        )
+        self.episode_returns_per_type = defaultdict(lambda: torch.zeros(num_envs, dtype=torch.float32, device=device))
 
         # Historical data (CPU)
         self.return_history = deque(maxlen=window_size)
@@ -104,12 +95,7 @@ class EpisodeStatsCollector:
         self.episode_success = torch.zeros(num_envs, dtype=torch.bool, device=device)
         self.success_history = deque(maxlen=window_size)
 
-    def update(
-        self,
-        reward_info: dict[str, torch.Tensor],
-        dones: torch.Tensor,
-        success: torch.Tensor = None
-    ):
+    def update(self, reward_info: dict[str, torch.Tensor], dones: torch.Tensor, success: torch.Tensor = None):
         """Update episode statistics with new step data."""
         assert "total_reward" in reward_info
         assert reward_info["total_reward"].shape[0] == self.num_envs
@@ -119,7 +105,7 @@ class EpisodeStatsCollector:
         self.episode_returns += reward_info["total_reward"]
 
         # Update discounted returns
-        discount_factor = self.gamma ** self.current_step
+        discount_factor = self.gamma**self.current_step
         self.episode_discounted_returns += discount_factor * reward_info["total_reward"]
 
         # Batch compute all reward stats on GPU (single sync)
@@ -258,12 +244,12 @@ class EpisodeStatsCollector:
             "mean_return": self.get_mean_episode_return(),
             "mean_length": self.get_mean_episode_length(),
             "num_episodes": len(self.return_history),
-            "reward_stats": self.get_all_reward_stats()
+            "reward_stats": self.get_all_reward_stats(),
         }
 
     # ==================== Legacy API ====================
 
-    def get_current_returns(self, dones: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def get_current_returns(self, dones: torch.Tensor | None = None) -> torch.Tensor:
         if dones is not None and torch.any(dones):
             return self.episode_returns[dones]
         return self.episode_returns
@@ -283,6 +269,7 @@ class EpisodeStatsCollector:
     def snapshot(self) -> "EpisodeStats":
         """Create a typed EpisodeStats snapshot of current statistics."""
         from rlworld.rl.runners.iteration_data import EpisodeStats
+
         return EpisodeStats(
             return_buffer=list(self.return_history),
             length_buffer=list(self.episode_length_history),

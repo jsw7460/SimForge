@@ -1,18 +1,14 @@
 import torch
 from torch import nn
 
-from rlworld.rl.modules.utils import RunningNormalization, orthogonal_init, scale_last_layer, get_activation
+from rlworld.rl.modules.utils import get_activation
 
 
 class MLPDecoder(nn.Module):
     def __init__(self, feature_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(feature_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Linear(feature_dim, 128), nn.ReLU(), nn.Linear(128, 128), nn.ReLU(), nn.Linear(128, 1)
         )
 
     def forward(self, body_features):
@@ -41,7 +37,7 @@ class GlobalAggregationDecoder(nn.Module):
         num_actions: int,
         activation: str,
         aggregation_type: str = "attention",
-        hidden_dim: int = 256
+        hidden_dim: int = 256,
     ):
         super().__init__()
         self.num_joints = num_joints
@@ -51,11 +47,7 @@ class GlobalAggregationDecoder(nn.Module):
 
         if aggregation_type == "attention":
             # Attention-based pooling
-            self.attention = nn.Sequential(
-                nn.Linear(feature_dim, hidden_dim),
-                nn.Tanh(),
-                nn.Linear(hidden_dim, 1)
-            )
+            self.attention = nn.Sequential(nn.Linear(feature_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, 1))
 
         # MLP decoder: aggregated features → actions
         self.mlp = nn.Sequential(
@@ -65,7 +57,7 @@ class GlobalAggregationDecoder(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.LayerNorm(hidden_dim // 2),
             nn.ELU(),
-            nn.Linear(hidden_dim // 2, num_actions)
+            nn.Linear(hidden_dim // 2, num_actions),
         )
         self._init_weights()
 
@@ -165,26 +157,17 @@ class KinematicTreeActionDecoder(nn.Module):
 
         for joint_idx in active_joints:
             joint_info = kinematic_tree.joints[joint_idx]
-            parent_indices.append(joint_info['parent_link'])
-            child_indices.append(joint_info['child_link'])
+            parent_indices.append(joint_info["parent_link"])
+            child_indices.append(joint_info["child_link"])
 
         # Register as buffers for device movement
-        self.register_buffer(
-            'parent_indices',
-            torch.tensor(parent_indices, dtype=torch.long)
-        )
-        self.register_buffer(
-            'child_indices',
-            torch.tensor(child_indices, dtype=torch.long)
-        )
+        self.register_buffer("parent_indices", torch.tensor(parent_indices, dtype=torch.long))
+        self.register_buffer("child_indices", torch.tensor(child_indices, dtype=torch.long))
 
         # Separate action head for each joint (Body Transformer style)
         # Input: 2 * hidden_dim (concatenated parent + child)
         # Output: 1 (single action value)
-        self.action_heads = nn.ModuleList([
-            self._make_action_head(activation)
-            for _ in range(self.num_actions)
-        ])
+        self.action_heads = nn.ModuleList([self._make_action_head(activation) for _ in range(self.num_actions)])
 
         if ortho_init:
             self._init_weights()
@@ -194,7 +177,7 @@ class KinematicTreeActionDecoder(nn.Module):
         layers = [
             nn.Linear(2 * self.hidden_dim, self.action_hidden_dim),
             get_activation(activation),
-            nn.Linear(self.action_hidden_dim, 1)
+            nn.Linear(self.action_hidden_dim, 1),
         ]
         return nn.Sequential(*layers)
 
@@ -300,22 +283,16 @@ class ParentLinkToJointActionDecoder(nn.Module):
 
         for joint_idx in active_joints:
             joint_info = kinematic_tree.joints[joint_idx]
-            parent_indices.append(joint_info['parent_link'])
-            child_indices.append(joint_info['child_link'])
+            parent_indices.append(joint_info["parent_link"])
+            child_indices.append(joint_info["child_link"])
 
         # Register as buffers for device movement
-        self.register_buffer(
-            'parent_indices',
-            torch.tensor(parent_indices, dtype=torch.long, device=device)
-        )
+        self.register_buffer("parent_indices", torch.tensor(parent_indices, dtype=torch.long, device=device))
 
         # Separate action head for each joint (Body Transformer style)
         # Input: 2 * hidden_dim (concatenated parent + child)
         # Output: 1 (single action value)
-        self.action_heads = nn.ModuleList([
-            self._make_action_head(activation)
-            for _ in range(self.num_actions)
-        ])
+        self.action_heads = nn.ModuleList([self._make_action_head(activation) for _ in range(self.num_actions)])
         if ortho_init:
             self._init_weights()
 
@@ -324,7 +301,7 @@ class ParentLinkToJointActionDecoder(nn.Module):
         layers = [
             nn.Linear(self.hidden_dim, self.action_hidden_dim),
             get_activation(activation),
-            nn.Linear(self.action_hidden_dim, 1)
+            nn.Linear(self.action_hidden_dim, 1),
         ]
         return nn.Sequential(*layers)
 

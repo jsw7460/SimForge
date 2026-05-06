@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs import TerminationResult, TerminationTermConfig
 from rlworld.rl.configs.base_config import iter_terms
 from rlworld.rl.envs.managers.base import BaseManager
-from rlworld.rl.configs import TerminationTermConfig, TerminationResult
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs import World
     from rlworld.rl.configs.common_config_classes import TerminationsConfig
+    from rlworld.rl.envs import World
 
 # Backward-compatible alias
 TerminationConfig = None  # will be cleaned up later
@@ -23,16 +23,14 @@ class TerminationManager(BaseManager):
     Terms are discovered via :func:`iter_terms` on the config instance.
     """
 
-    def __init__(self, env: "World", config: "TerminationsConfig", episode_length_s: float):
+    def __init__(self, env: World, config: TerminationsConfig, episode_length_s: float):
         super().__init__(env=env)
         self.config = config
         self._episode_length_s = episode_length_s
 
         # Discover named terms
         self._all_terms: dict[str, TerminationTermConfig] = iter_terms(config, TerminationTermConfig)
-        self._resolved_fns: dict[str, callable] = {
-            name: term.resolved_func for name, term in self._all_terms.items()
-        }
+        self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
 
         self.reset_buf = torch.ones(env.num_envs, device=self.device, dtype=torch.bool)
         self.episode_count = torch.zeros(env.num_envs, device=self.device, dtype=torch.long)
@@ -49,12 +47,10 @@ class TerminationManager(BaseManager):
         # downstream code can read the dict structure before the first
         # ``check_termination`` call.
         self._term_dones: dict[str, torch.Tensor] = {
-            name: torch.zeros(env.num_envs, dtype=torch.bool, device=self.device)
-            for name in self._all_terms
+            name: torch.zeros(env.num_envs, dtype=torch.bool, device=self.device) for name in self._all_terms
         }
         self._episode_fires: dict[str, torch.Tensor] = {
-            name: torch.zeros(env.num_envs, dtype=torch.long, device=self.device)
-            for name in self._all_terms
+            name: torch.zeros(env.num_envs, dtype=torch.long, device=self.device) for name in self._all_terms
         }
 
         # Iteration-window accumulators consumed by
@@ -100,10 +96,7 @@ class TerminationManager(BaseManager):
         if self._iter_reset_count == 0:
             return {}
         n = self._iter_reset_count
-        out = {
-            f"Episode_Termination/{name}": count / n
-            for name, count in self._iter_fire_counts.items()
-        }
+        out = {f"Episode_Termination/{name}": count / n for name, count in self._iter_fire_counts.items()}
         self._iter_reset_count = 0
         for name in self._iter_fire_counts:
             self._iter_fire_counts[name] = 0
@@ -133,10 +126,7 @@ class TerminationManager(BaseManager):
         so in-place modifications take effect on the next check.
         """
         if name not in self._all_terms:
-            raise KeyError(
-                f"Termination term {name!r} not found. "
-                f"Available: {list(self._all_terms)}"
-            )
+            raise KeyError(f"Termination term {name!r} not found. Available: {list(self._all_terms)}")
         return self._all_terms[name]
 
     def advance(self) -> None:
@@ -204,7 +194,7 @@ class TerminationManager(BaseManager):
 
         rows = []
         for idx, (name, term) in enumerate(self._all_terms.items()):
-            func_name = getattr(self._resolved_fns[name], '__name__', name)
+            func_name = getattr(self._resolved_fns[name], "__name__", name)
 
             if "timeout" in func_name.lower() or "time_out" in func_name.lower():
                 type_str = "Truncation (timeout)"
@@ -222,6 +212,6 @@ class TerminationManager(BaseManager):
             title="Termination Criteria",
             columns=["Idx", "Name", "Type", "Params"],
             rows=rows,
-            footer=f"Max Episode: {self.max_episode_length} steps ({self._episode_length_s}s)"
+            footer=f"Max Episode: {self.max_episode_length} steps ({self._episode_length_s}s)",
         )
         return table_to_string(table)

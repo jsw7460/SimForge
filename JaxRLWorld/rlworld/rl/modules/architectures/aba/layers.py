@@ -10,12 +10,12 @@ Performance notes:
     num_bodies to max_depth (~4-5 for typical quadrupeds/humanoids).
 """
 
+import math
 from typing import TYPE_CHECKING
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import math
 
 if TYPE_CHECKING:
     from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 # ─────────────────────────────────────────────────────────────────
 #  Helpers
 # ─────────────────────────────────────────────────────────────────
+
 
 def _batched_layer_norm(
     x: jax.Array,
@@ -110,6 +111,7 @@ def _precompute_depth_levels_td(kinematic_tree: "KinematicTree"):
 #  Bottom-Up Layer
 # ─────────────────────────────────────────────────────────────────
 
+
 class PerBodyABABottomUpLayer(eqx.Module):
     """
     ABA Bottom-Up Pass with depth-parallel tree traversal.
@@ -120,17 +122,17 @@ class PerBodyABABottomUpLayer(eqx.Module):
     """
 
     # Batched obs projection
-    obs_W1: jax.Array   # (N, hidden_dim, obs_dim)
-    obs_b1: jax.Array   # (N, hidden_dim)
-    obs_W2: jax.Array   # (N, feature_dim, hidden_dim)
-    obs_b2: jax.Array   # (N, feature_dim)
+    obs_W1: jax.Array  # (N, hidden_dim, obs_dim)
+    obs_b1: jax.Array  # (N, hidden_dim)
+    obs_W2: jax.Array  # (N, feature_dim, hidden_dim)
+    obs_b2: jax.Array  # (N, feature_dim)
 
     # Learnable base features
     link_base: jax.Array  # (N, C, d)
 
     # Batched LayerNorm params
     ln_scale: jax.Array  # (N, C, d)
-    ln_bias: jax.Array   # (N, C, d)
+    ln_bias: jax.Array  # (N, C, d)
 
     # Motion basis
     motion_basis: jax.Array  # (N, C, d, d)
@@ -182,10 +184,7 @@ class PerBodyABABottomUpLayer(eqx.Module):
 
         # Legacy traversal data (kept for compat)
         self.traversal_order = tuple(kinematic_tree.traverse_bottom_up())
-        self.children_map = tuple(
-            tuple(kinematic_tree.get_children(i))
-            for i in range(self.num_bodies)
-        )
+        self.children_map = tuple(tuple(kinematic_tree.get_children(i)) for i in range(self.num_bodies))
 
         # Depth-parallel traversal data
         (
@@ -231,9 +230,11 @@ class PerBodyABABottomUpLayer(eqx.Module):
     def _init_orthogonal_basis(self, key: jax.Array) -> jax.Array:
         shape = (self.num_bodies, self.link_channels, self.spatial_dim, self.spatial_dim)
         W = jax.random.normal(key, shape)
+
         def orthogonalize(w):
             q, _ = jnp.linalg.qr(w)
             return q
+
         return jax.vmap(jax.vmap(orthogonalize))(W)
 
     def __call__(self, observations: jax.Array) -> jax.Array:
@@ -246,9 +247,9 @@ class PerBodyABABottomUpLayer(eqx.Module):
         C, d = self.link_channels, self.spatial_dim
 
         # 1. Batched obs projection — all bodies in one einsum
-        h = jnp.einsum('nhi,i->nh', self.obs_W1, observations) + self.obs_b1
+        h = jnp.einsum("nhi,i->nh", self.obs_W1, observations) + self.obs_b1
         h = jax.nn.relu(h)
-        obs_feat = jnp.einsum('nfh,nh->nf', self.obs_W2, h) + self.obs_b2
+        obs_feat = jnp.einsum("nfh,nh->nf", self.obs_W2, h) + self.obs_b2
         obs_feat = obs_feat.reshape(self.num_bodies, C, d)
 
         # 2. Base + obs features
@@ -262,32 +263,30 @@ class PerBodyABABottomUpLayer(eqx.Module):
         body_features = jnp.zeros((self.num_bodies, C, d))
 
         for level in range(len(self.depth_body_indices)):
-            bidxs = self.depth_body_indices[level]   # tuple of ints
+            bidxs = self.depth_body_indices[level]  # tuple of ints
             K = len(bidxs)
-            bidxs_arr = jnp.array(bidxs)             # (K,) — constant in XLA
+            bidxs_arr = jnp.array(bidxs)  # (K,) — constant in XLA
 
             # Init features for this depth
-            feats = init_features[bidxs_arr]          # (K, C, d)
+            feats = init_features[bidxs_arr]  # (K, C, d)
 
             # Children indices and mask
             ch_idx = jnp.array(self.depth_padded_children[level])  # (K, max_ch)
-            ch_mask = jnp.array(self.depth_children_mask[level])   # (K, max_ch)
+            ch_mask = jnp.array(self.depth_children_mask[level])  # (K, max_ch)
 
             # Gather children features and motion basis
-            child_F = body_features[ch_idx]           # (K, max_ch, C, d)
-            child_W = self.motion_basis[ch_idx]       # (K, max_ch, C, d, d)
+            child_F = body_features[ch_idx]  # (K, max_ch, C, d)
+            child_W = self.motion_basis[ch_idx]  # (K, max_ch, C, d, d)
 
             # Batched contribution: F - diag(F W W^T F)
-            FW = child_F[..., :, None] * child_W                    # (K, mc, C, d, d)
-            FWWt = FW @ child_W.transpose(0, 1, 2, 4, 3)           # (K, mc, C, d, d)
-            proj_diag = jnp.diagonal(
-                FWWt * child_F[..., None, :], axis1=-2, axis2=-1
-            )                                                        # (K, mc, C, d)
-            contribs = child_F - proj_diag                           # (K, mc, C, d)
+            FW = child_F[..., :, None] * child_W  # (K, mc, C, d, d)
+            FWWt = FW @ child_W.transpose(0, 1, 2, 4, 3)  # (K, mc, C, d, d)
+            proj_diag = jnp.diagonal(FWWt * child_F[..., None, :], axis1=-2, axis2=-1)  # (K, mc, C, d)
+            contribs = child_F - proj_diag  # (K, mc, C, d)
 
             # Mask invalid children and sum
             contribs = contribs * ch_mask[:, :, None, None]
-            child_sum = contribs.sum(axis=1)                         # (K, C, d)
+            child_sum = contribs.sum(axis=1)  # (K, C, d)
 
             # Contribution weight
             if self.learnable_contribution_weight:
@@ -309,9 +308,7 @@ class PerBodyABABottomUpLayer(eqx.Module):
         # 4. Optional global normalization
         if self.global_norm is not None:
             shape = body_features.shape
-            body_features = self.global_norm(
-                body_features.reshape(self.num_bodies, -1)
-            )
+            body_features = self.global_norm(body_features.reshape(self.num_bodies, -1))
             body_features = body_features.reshape(shape)
 
         return body_features
@@ -331,10 +328,10 @@ class PerBodyABABottomUpLayer(eqx.Module):
         if link_features is None:
             link_features = self(observations)
 
-        F = link_features                        # (N, C, d)
-        W = self.motion_basis                    # (N, C, d, d)
-        FW = F[:, :, :, None] * W                # (N, C, d, d)
-        gram = W.transpose(0, 1, 3, 2) @ FW     # (N, C, d, d)
+        F = link_features  # (N, C, d)
+        W = self.motion_basis  # (N, C, d, d)
+        FW = F[:, :, :, None] * W  # (N, C, d, d)
+        gram = W.transpose(0, 1, 3, 2) @ FW  # (N, C, d, d)
 
         target = jax.lax.stop_gradient(self._identity)
         return ((gram - target) ** 2).mean()
@@ -348,6 +345,7 @@ class PerBodyABABottomUpLayer(eqx.Module):
 #  Top-Down Layer
 # ─────────────────────────────────────────────────────────────────
 
+
 class PerBodyABATopDownLayer(eqx.Module):
     """
     ABA Top-Down Pass with depth-parallel traversal.
@@ -357,12 +355,12 @@ class PerBodyABATopDownLayer(eqx.Module):
     """
 
     # Batched parent→child projection
-    proj_W: jax.Array   # (N, feature_dim, feature_dim)
-    proj_b: jax.Array   # (N, feature_dim)
+    proj_W: jax.Array  # (N, feature_dim, feature_dim)
+    proj_b: jax.Array  # (N, feature_dim)
 
     # Batched LayerNorm params
     ln_scale: jax.Array  # (N, C, d)
-    ln_bias: jax.Array   # (N, C, d)
+    ln_bias: jax.Array  # (N, C, d)
 
     # Per-body learnable gate
     gate_bias: jax.Array  # (N,)
@@ -388,9 +386,7 @@ class PerBodyABATopDownLayer(eqx.Module):
         self.link_channels = link_channels
         self.spatial_dim = spatial_dim
 
-        self.td_body_indices, self.td_parent_indices = (
-            _precompute_depth_levels_td(kinematic_tree)
-        )
+        self.td_body_indices, self.td_parent_indices = _precompute_depth_levels_td(kinematic_tree)
 
         N = self.num_bodies
         feature_dim = link_channels * spatial_dim
@@ -431,9 +427,9 @@ class PerBodyABATopDownLayer(eqx.Module):
                 parent_flat = td[pidxs_arr].reshape(K, -1)  # (K, C*d)
 
                 # Batched projection
-                W = self.proj_W[bidxs_arr]   # (K, F, F)
-                b = self.proj_b[bidxs_arr]   # (K, F)
-                message = jnp.einsum('kij,kj->ki', W, parent_flat) + b
+                W = self.proj_W[bidxs_arr]  # (K, F, F)
+                b = self.proj_b[bidxs_arr]  # (K, F)
+                message = jnp.einsum("kij,kj->ki", W, parent_flat) + b
                 message = message.reshape(K, C, d)
 
                 gate = jax.nn.sigmoid(self.gate_bias[bidxs_arr])  # (K,)

@@ -7,16 +7,19 @@ import torch
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.configs.scene.unified_entity_config import (
-    EntityCfg, MujocoEntityCfg, GroundPlaneCfg,
+    EntityCfg,
+    GroundPlaneCfg,
+    MujocoEntityCfg,
 )
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs import World
-    from mjlab.scene import Scene
-    from mjlab.sim import Simulation, SimulationCfg
     from mjlab.entity import Entity
+    from mjlab.scene import Scene
+    from mjlab.sim import Simulation
+
+    from rlworld.rl.envs import World
 
 
 @dataclass
@@ -27,6 +30,7 @@ class MujocoSceneManagerConfig:
     Users should not construct this directly — use MujocoSceneConfig
     in presets instead.
     """
+
     device: str = "cuda:0"
     robot_entity_name: str = "robot"
     num_envs: int = 4096
@@ -79,13 +83,13 @@ class MujocoSceneManager(BaseManager):
         scene_manager.step()
     """
 
-    def __init__(self, env: "World", config: MujocoSceneManagerConfig):
+    def __init__(self, env: World, config: MujocoSceneManagerConfig):
         super().__init__(env)
         self.config = config
 
         # mjlab objects (initialized in build_scene)
-        self._scene: "Scene" = None
-        self._sim: "Simulation" = None
+        self._scene: Scene = None
+        self._sim: Simulation = None
 
         # Kinematic trees for each entity
         self.trees: dict[str, KinematicTree] = {}
@@ -94,12 +98,12 @@ class MujocoSceneManager(BaseManager):
         self._physics_dt: float | None = None  # updated from sim config
 
     @property
-    def scene(self) -> "Scene":
+    def scene(self) -> Scene:
         """The mjlab Scene instance."""
         return self._scene
 
     @property
-    def sim(self) -> "Simulation":
+    def sim(self) -> Simulation:
         """The mjlab Simulation instance."""
         return self._sim
 
@@ -130,12 +134,12 @@ class MujocoSceneManager(BaseManager):
         return self._physics_dt
 
     @property
-    def robot(self) -> "Entity":
+    def robot(self) -> Entity:
         """Get the main robot entity."""
         return self._scene[self.config.robot_entity_name]
 
     @property
-    def entities(self) -> dict[str, "Entity"]:
+    def entities(self) -> dict[str, Entity]:
         """Get all entities."""
         return self._scene.entities
 
@@ -151,8 +155,9 @@ class MujocoSceneManager(BaseManager):
         rlworld config fields.  No mjlab imports needed at config level.
         """
         from mjlab.scene import Scene, SceneCfg
-        from mjlab.sim import Simulation, SimulationCfg, MujocoCfg
+        from mjlab.sim import MujocoCfg, Simulation, SimulationCfg
         from mjlab.terrains import TerrainEntityCfg
+
         # Build mjlab SceneCfg
         if self.config.mjlab_scene_cfg is not None:
             # Legacy path — user provided mjlab SceneCfg directly
@@ -192,7 +197,7 @@ class MujocoSceneManager(BaseManager):
                     ccd_iterations=self.config.ccd_iterations,
                     impratio=self.config.impratio,
                     cone=self.config.cone,
-                    disableflags=("nativeccd",)
+                    disableflags=("nativeccd",),
                 ),
                 contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
             )
@@ -225,11 +230,12 @@ class MujocoSceneManager(BaseManager):
           ImplicitActuatorCfg → BuiltinPositionActuatorCfg (simulator PD)
           Any other type      → BuiltinMotorActuatorCfg (direct torque)
         """
-        from mjlab.entity import EntityCfg as MjlabEntityCfg, EntityArticulationInfoCfg
         from mjlab.actuator.builtin_actuator import (
-            BuiltinPositionActuatorCfg,
             BuiltinMotorActuatorCfg,
+            BuiltinPositionActuatorCfg,
         )
+        from mjlab.entity import EntityArticulationInfoCfg, EntityCfg as MjlabEntityCfg
+
         from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 
         for entity_name, cfg in self.config.entities.items():
@@ -237,14 +243,9 @@ class MujocoSceneManager(BaseManager):
                 continue
 
             if not isinstance(cfg, MujocoEntityCfg):
-                raise ValueError(
-                    f"MuJoCo entity '{entity_name}' must be MujocoEntityCfg, "
-                    f"got {type(cfg).__name__}"
-                )
+                raise ValueError(f"MuJoCo entity '{entity_name}' must be MujocoEntityCfg, got {type(cfg).__name__}")
             if cfg.spec_fn is None:
-                raise ValueError(
-                    f"MuJoCo entity '{entity_name}' requires 'spec_fn'"
-                )
+                raise ValueError(f"MuJoCo entity '{entity_name}' requires 'spec_fn'")
 
             # Convert actuator configs → mjlab actuator configs.
             # When stiffness/damping/armature/effort_limit are dicts, we expand
@@ -265,52 +266,66 @@ class MujocoSceneManager(BaseManager):
                     if isinstance(act_cfg.stiffness, dict):
                         # Expand: one BuiltinPositionActuator per gain key
                         for pattern in act_cfg.stiffness.keys():
-                            mjlab_actuators.append(BuiltinPositionActuatorCfg(
-                                target_names_expr=(pattern,),
-                                stiffness=_pick(act_cfg.stiffness, pattern, 0.0),
-                                damping=_pick(act_cfg.damping, pattern, 0.0),
-                                effort_limit=_pick(act_cfg.effort_limit, pattern, None),
-                                armature=_pick(act_cfg.armature, pattern, 0.0),
-                                frictionloss=act_cfg.frictionloss,
-                            ))
+                            mjlab_actuators.append(
+                                BuiltinPositionActuatorCfg(
+                                    target_names_expr=(pattern,),
+                                    stiffness=_pick(act_cfg.stiffness, pattern, 0.0),
+                                    damping=_pick(act_cfg.damping, pattern, 0.0),
+                                    effort_limit=_pick(act_cfg.effort_limit, pattern, None),
+                                    armature=_pick(act_cfg.armature, pattern, 0.0),
+                                    frictionloss=act_cfg.frictionloss,
+                                )
+                            )
                     else:
                         stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
                         damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
                         armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
                         effort_limit = act_cfg.effort_limit if isinstance(act_cfg.effort_limit, (int, float)) else None
-                        mjlab_actuators.append(BuiltinPositionActuatorCfg(
-                            target_names_expr=act_cfg.target_names_expr,
-                            stiffness=stiffness,
-                            damping=damping,
-                            effort_limit=effort_limit,
-                            armature=armature,
-                            frictionloss=act_cfg.frictionloss,
-                        ))
+                        mjlab_actuators.append(
+                            BuiltinPositionActuatorCfg(
+                                target_names_expr=act_cfg.target_names_expr,
+                                stiffness=stiffness,
+                                damping=damping,
+                                effort_limit=effort_limit,
+                                armature=armature,
+                                frictionloss=act_cfg.frictionloss,
+                            )
+                        )
                 else:
                     # Explicit actuator (IdealPD, LSTM, etc.) → motor mode
                     if isinstance(act_cfg.armature, dict):
                         # Expand: one BuiltinMotorActuator per armature key
                         for pattern, arm in act_cfg.armature.items():
-                            mjlab_actuators.append(BuiltinMotorActuatorCfg(
-                                target_names_expr=(pattern,),
-                                effort_limit=_pick(act_cfg.effort_limit, pattern, 1000.0),
-                                armature=arm,
-                                frictionloss=act_cfg.frictionloss,
-                            ))
+                            mjlab_actuators.append(
+                                BuiltinMotorActuatorCfg(
+                                    target_names_expr=(pattern,),
+                                    effort_limit=_pick(act_cfg.effort_limit, pattern, 1000.0),
+                                    armature=arm,
+                                    frictionloss=act_cfg.frictionloss,
+                                )
+                            )
                     else:
                         armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
-                        effort_limit = act_cfg.effort_limit if isinstance(act_cfg.effort_limit, (int, float)) else 1000.0
-                        mjlab_actuators.append(BuiltinMotorActuatorCfg(
-                            target_names_expr=act_cfg.target_names_expr,
-                            effort_limit=effort_limit,
-                            armature=armature,
-                            frictionloss=act_cfg.frictionloss,
-                        ))
+                        effort_limit = (
+                            act_cfg.effort_limit if isinstance(act_cfg.effort_limit, (int, float)) else 1000.0
+                        )
+                        mjlab_actuators.append(
+                            BuiltinMotorActuatorCfg(
+                                target_names_expr=act_cfg.target_names_expr,
+                                effort_limit=effort_limit,
+                                armature=armature,
+                                frictionloss=act_cfg.frictionloss,
+                            )
+                        )
 
-            articulation_info = EntityArticulationInfoCfg(
-                actuators=tuple(mjlab_actuators),
-                soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
-            ) if mjlab_actuators else None
+            articulation_info = (
+                EntityArticulationInfoCfg(
+                    actuators=tuple(mjlab_actuators),
+                    soft_joint_pos_limit_factor=cfg.articulation.soft_joint_pos_limit_factor,
+                )
+                if mjlab_actuators
+                else None
+            )
 
             # Build mjlab EntityCfg
             init_state = MjlabEntityCfg.InitialStateCfg(
@@ -322,6 +337,7 @@ class MujocoSceneManager(BaseManager):
             spec_fn = cfg.spec_fn
             if isinstance(spec_fn, str):
                 from rlworld.rl.utils.resolve import resolve_callable
+
                 spec_fn = resolve_callable(spec_fn)
             mjlab_cfg = MjlabEntityCfg(
                 init_state=init_state,
@@ -334,7 +350,9 @@ class MujocoSceneManager(BaseManager):
             self.config.mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
 
     def build_articulation_indexing(
-        self, actuated_dof_names: list[str], entity_name: str = "robot",
+        self,
+        actuated_dof_names: list[str],
+        entity_name: str = "robot",
     ):
         """Build ArticulationIndexing for the given entity.
 
@@ -350,9 +368,7 @@ class MujocoSceneManager(BaseManager):
         entity = self._scene[entity_name]
 
         if actuated_dof_names:
-            indices, names = entity.find_joints(
-                actuated_dof_names, preserve_order=True
-            )
+            indices, names = entity.find_joints(actuated_dof_names, preserve_order=True)
         else:
             names = list(entity.joint_names)
             indices = list(range(len(names)))
@@ -407,7 +423,7 @@ class MujocoSceneManager(BaseManager):
         """Write entity data to simulation."""
         self._scene.write_data_to_sim()
 
-    def get_entity(self, entity_name: str) -> "Entity":
+    def get_entity(self, entity_name: str) -> Entity:
         """Get an entity by name."""
         return self._scene[entity_name]
 
@@ -449,6 +465,7 @@ class MujocoSceneManager(BaseManager):
         don't carry a ``spec_fn`` (e.g. terrain primitives built
         in-place by mjlab) are skipped.
         """
+
         def _resolve(name: str):
             entity = self._scene.entities[name]
             spec_fn = getattr(getattr(entity, "cfg", None), "spec_fn", None)

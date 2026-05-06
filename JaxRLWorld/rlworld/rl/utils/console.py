@@ -5,15 +5,15 @@ from typing import Any
 
 
 class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    BOLD = '\033[1m'
-    DIM = '\033[2m'
-    RESET = '\033[0m'
+    HEADER = "\033[95m"
+    BLUE = "\033[94m"
+    CYAN = "\033[96m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
 
 
 # Convenience aliases
@@ -78,5 +78,5 @@ def print_progress(current: int, total: int, prefix: str = "", suffix: str = "",
     """Print a progress bar."""
     percent = current / total
     filled = int(width * percent)
-    bar = '█' * filled + '░' * (width - filled)
-    print(f"\r  {prefix} {Colors.CYAN}│{bar}│{Colors.RESET} {percent * 100:5.1f}% {suffix}", end='', flush=True)
+    bar = "█" * filled + "░" * (width - filled)
+    print(f"\r  {prefix} {Colors.CYAN}│{bar}│{Colors.RESET} {percent * 100:5.1f}% {suffix}", end="", flush=True)

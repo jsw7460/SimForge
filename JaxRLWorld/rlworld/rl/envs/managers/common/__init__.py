@@ -1,16 +1,19 @@
-from .contact import BaseContactManager
 from .command import CommandManager, CommandManagerConfig
 from .command_term import (
-    CommandTerm, CommandTermCfg,
-    VelocityCommandTermCfg, VelocityCommandTerm,
-    GaitCommandTermCfg, GaitCommandTerm,
+    CommandTerm,
+    CommandTermCfg,
+    GaitCommandTerm,
+    GaitCommandTermCfg,
+    VelocityCommandTerm,
+    VelocityCommandTermCfg,
 )
-from .reward import RewardManager, RewardManagerConfig
-from .termination import TerminationManager, TerminationConfig
-from .event import EventManager, EventManagerConfig
+from .contact import BaseContactManager
 from .curriculum import CurriculumManager
+from .event import EventManager, EventManagerConfig
 from .gait import GaitManager, GaitManagerConfig
 from .observation import ObservationManager, ObsManagerConfig
+from .reward import RewardManager, RewardManagerConfig
+from .termination import TerminationConfig, TerminationManager
 
 __all__ = [
     "BaseContactManager",

@@ -18,6 +18,7 @@ at view-construction time, so joint / body name collisions between
 robots are resolved by which view you query, not by mangling the
 names themselves.
 """
+
 from __future__ import annotations
 
 import re

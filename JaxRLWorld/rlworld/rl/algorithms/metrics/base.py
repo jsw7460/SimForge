@@ -5,6 +5,7 @@ from typing import Any, Union
 
 class MetricType(Enum):
     """Type of metric for formatting."""
+
     LOSS = auto()
     VALUE = auto()
     ENTROPY = auto()
@@ -17,6 +18,7 @@ class MetricType(Enum):
 @dataclass
 class ConsoleMetric:
     """Single console metric with display info."""
+
     display_name: str
     metric_type: MetricType
     value: Union[float, str] = 0.0
@@ -47,6 +49,7 @@ class BaseMetrics:
 @dataclass
 class ActorMetrics:
     """Common actor metrics for all algorithms."""
+
     loss: float = 0.0
     entropy: float = 0.0
     std: float = 0.0
@@ -63,6 +66,7 @@ class ActorMetrics:
 @dataclass
 class BatchMetrics:
     """Common batch statistics."""
+
     return_mean: float = 0.0
     return_std: float = 0.0
     return_min: float = 0.0

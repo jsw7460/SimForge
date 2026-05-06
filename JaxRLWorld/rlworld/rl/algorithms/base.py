@@ -1,11 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Callable, Dict
 
-import jax
 import equinox as eqx
+import jax
 import optax
-
 
 # ==================== Common Data Structures ====================
 
@@ -13,6 +12,7 @@ import optax
 @dataclass
 class ActInput:
     """Standard observation input format for act methods."""
+
     actor_obs: jax.Array
     critic_obs: jax.Array
 
@@ -49,10 +49,7 @@ def create_optimizer_with_labels(
 
     param_labels = get_labels(params)
 
-    transforms = {
-        label: optimizer_class(learning_rate=lr)
-        for label, lr in lr_config.items()
-    }
+    transforms = {label: optimizer_class(learning_rate=lr) for label, lr in lr_config.items()}
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_grad_norm),
@@ -103,10 +100,7 @@ def polyak_update(
     Returns:
         Updated target parameters
     """
-    return jax.tree.map(
-        lambda p, tp: tau * p + (1 - tau) * tp,
-        params, target_params
-    )
+    return jax.tree.map(lambda p, tp: tau * p + (1 - tau) * tp, params, target_params)
 
 
 def copy_params(params: Any) -> Any:
@@ -158,7 +152,7 @@ class RLAlgorithm(ABC):
         self._static = static
 
         # Subclass should initialize train_state (type varies by algorithm)
-        self.train_state: Optional[Any] = None
+        self.train_state: Any | None = None
 
         # Storage (initialized via init_storage)
         self.storage = None
@@ -327,7 +321,7 @@ class OffPolicyAlgorithm(RLAlgorithm):
         self.tau = tau
 
         # Target network params (initialized by subclass)
-        self._target_params: Optional[Any] = None
+        self._target_params: Any | None = None
 
     def _init_target_params(self, params: Any) -> Any:
         """

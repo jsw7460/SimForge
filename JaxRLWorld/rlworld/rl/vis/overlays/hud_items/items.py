@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
-
 from genesis.utils.misc import tensor_to_array
 
 if TYPE_CHECKING:
@@ -20,6 +19,7 @@ except ImportError:
 @dataclass
 class HUDItemConfig:
     """Base configuration for HUD items."""
+
     enabled: bool = True
 
 
@@ -74,6 +74,7 @@ class HUDItem(ABC):
 @dataclass
 class BaseHeightItemConfig(HUDItemConfig):
     """Config for base height display."""
+
     label: str = "Height"
     precision: int = 3
 
@@ -103,6 +104,7 @@ class BaseHeightItem(HUDItem):
 @dataclass
 class CommandVelItemConfig(HUDItemConfig):
     """Config for command velocity display."""
+
     show_linear: bool = True
     show_angular: bool = True
     precision: int = 2
@@ -146,6 +148,7 @@ class CommandVelItem(HUDItem):
 @dataclass
 class FeetHeightItemConfig(HUDItemConfig):
     """Config for feet height display."""
+
     feet_names: tuple[str, ...] = ("FL", "FR", "RL", "RR")
     feet_links: tuple[str, ...] | None = None  # Auto-generate if None
     bar_width: int = 60
@@ -171,10 +174,7 @@ class FeetHeightItem(HUDItem):
         """Get feet link names."""
         if self.config.feet_links is not None:
             return self.config.feet_links
-        return tuple(
-            f"{name}_foot" if not name.endswith("_foot") else name
-            for name in self.config.feet_names
-        )
+        return tuple(f"{name}_foot" if not name.endswith("_foot") else name for name in self.config.feet_names)
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
         robot = env.scene_manager.entities.get("robot")
@@ -185,10 +185,9 @@ class FeetHeightItem(HUDItem):
         if self._links_idx is None:
             try:
                 from rlworld.rl.utils import entity_utils as eu
+
                 feet_links = list(self._get_feet_links())
-                self._links_idx, _ = eu.find_links(
-                    robot, feet_links, global_ids=False, preserve_order=True
-                )
+                self._links_idx, _ = eu.find_links(robot, feet_links, global_ids=False, preserve_order=True)
             except Exception:
                 return []
 
@@ -209,14 +208,16 @@ class FeetHeightItem(HUDItem):
             value = float(feet_h[i])
 
             if self.config.show_bars:
-                lines.append({
-                    "type": "bar",
-                    "label": name,
-                    "value": value,
-                    "max_value": self.config.max_height,
-                    "bar_width": self.config.bar_width,
-                    "bar_height": self.config.bar_height,
-                })
+                lines.append(
+                    {
+                        "type": "bar",
+                        "label": name,
+                        "value": value,
+                        "max_value": self.config.max_height,
+                        "bar_width": self.config.bar_width,
+                        "bar_height": self.config.bar_height,
+                    }
+                )
             else:
                 lines.append(f"{name}: {value:.{precision}f}m")
 
@@ -226,6 +227,7 @@ class FeetHeightItem(HUDItem):
 @dataclass
 class EpisodeInfoItemConfig(HUDItemConfig):
     """Config for episode info display."""
+
     show_episode_count: bool = True
     show_step: bool = True
 
@@ -270,6 +272,7 @@ class EpisodeInfoItem(HUDItem):
 @dataclass
 class DOFPositionItemConfig(HUDItemConfig):
     """Config for DOF position display."""
+
     joint_names: tuple[str, ...] | None = None  # None = show all
     precision: int = 3
     show_header: bool = True
@@ -321,7 +324,7 @@ class DOFPositionItem(HUDItem):
                 val = float(dof_pos[dof_idx])
                 lines.append(f"{joint.name}: {val:.{precision}f}")
             else:
-                vals = dof_pos[dof_idx:dof_idx + n_dofs]
+                vals = dof_pos[dof_idx : dof_idx + n_dofs]
                 val_str = ", ".join(f"{v:.{precision}f}" for v in vals)
                 lines.append(f"{joint.name}: ({val_str})")
 
@@ -333,6 +336,7 @@ class DOFPositionItem(HUDItem):
 @dataclass
 class DOFVelocityItemConfig(HUDItemConfig):
     """Config for DOF velocity display."""
+
     dof_names: tuple[str, ...] | None = None
     precision: int = 3
     show_header: bool = True
@@ -380,6 +384,7 @@ class DOFVelocityItem(HUDItem):
 @dataclass
 class BaseVelocityItemConfig(HUDItemConfig):
     """Config for base velocity display."""
+
     show_linear: bool = True
     show_angular: bool = True
     precision: int = 3
@@ -407,15 +412,13 @@ class BaseVelocityItem(HUDItem):
         if self.config.show_linear:
             lin_vel = tensor_to_array(robot.get_vel())[env_idx]
             lines.append(
-                f"Lin vel: ({lin_vel[0]:.{precision}f}, "
-                f"{lin_vel[1]:.{precision}f}, {lin_vel[2]:.{precision}f})"
+                f"Lin vel: ({lin_vel[0]:.{precision}f}, {lin_vel[1]:.{precision}f}, {lin_vel[2]:.{precision}f})"
             )
 
         if self.config.show_angular:
             ang_vel = tensor_to_array(robot.get_ang())[env_idx]
             lines.append(
-                f"Ang vel: ({ang_vel[0]:.{precision}f}, "
-                f"{ang_vel[1]:.{precision}f}, {ang_vel[2]:.{precision}f})"
+                f"Ang vel: ({ang_vel[0]:.{precision}f}, {ang_vel[1]:.{precision}f}, {ang_vel[2]:.{precision}f})"
             )
 
         return lines
@@ -424,6 +427,7 @@ class BaseVelocityItem(HUDItem):
 @dataclass
 class LinkPositionItemConfig(HUDItemConfig):
     """Config for link position display."""
+
     link_patterns: tuple[str, ...] = ()  # Regex patterns for link names
     show_header: bool = True
     header_text: str = "Link Positions"
@@ -453,6 +457,7 @@ class LinkPositionItem(HUDItem):
         if self._link_ids is None:
             try:
                 from rlworld.rl.utils import entity_utils as eu
+
                 self._link_ids, self._link_names = eu.find_links(
                     robot,
                     list(self.config.link_patterns),
@@ -464,9 +469,7 @@ class LinkPositionItem(HUDItem):
 
         # Get link positions
         try:
-            link_pos = tensor_to_array(
-                robot.get_links_pos(links_idx_local=self._link_ids)
-            )[env_idx]
+            link_pos = tensor_to_array(robot.get_links_pos(links_idx_local=self._link_ids))[env_idx]
         except Exception:
             return []
 
@@ -478,10 +481,7 @@ class LinkPositionItem(HUDItem):
 
         for i, link_name in enumerate(self._link_names):
             pos = link_pos[i]
-            lines.append(
-                f"{link_name}: ({pos[0]:.{precision}f}, "
-                f"{pos[1]:.{precision}f}, {pos[2]:.{precision}f})"
-            )
+            lines.append(f"{link_name}: ({pos[0]:.{precision}f}, {pos[1]:.{precision}f}, {pos[2]:.{precision}f})")
 
         return lines
 
@@ -489,6 +489,7 @@ class LinkPositionItem(HUDItem):
 @dataclass
 class CustomItemConfig(HUDItemConfig):
     """Config for custom display item."""
+
     item_name: str = "custom"
     label: str = ""
     precision: int = 3

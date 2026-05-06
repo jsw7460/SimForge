@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -43,7 +43,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -56,12 +55,9 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.rewards.common import getup as rf_getup
-from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.newton import reward_terms as rf_newton
+from rlworld.rl.envs.mdp.rewards.common import getup as rf_getup, reward_terms as rf_common
+from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab, reward_terms as rf_newton
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 
 if TYPE_CHECKING:
     from .base import T1GetupConfig
@@ -81,11 +77,11 @@ def _initial_quat() -> Any:
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "T1GetupConfig") -> VisualizationConfig:
+def build_visualization(cfg: T1GetupConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
+def build_env(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         max_episode = TerminationTermConfig(max_episode_exceed)
@@ -111,7 +107,7 @@ def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
     )
 
 
-def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConfig:
+def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
     r = cfg.robot
     quat = _initial_quat()
 
@@ -147,7 +143,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
                 ),
                 body_label_prefix=r.name,
                 sites={"imu_site_base": r.base_link_name},
-                enable_self_collisions=True
+                enable_self_collisions=True,
             ),
         },
         sensors=[
@@ -169,44 +165,24 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> NewtonSceneConf
     )
 
 
-def build_observation(cfg: "T1GetupConfig") -> NewtonObservationConfig:
+def build_observation(cfg: T1GetupConfig) -> NewtonObservationConfig:
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-        )
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-        )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03))
+        dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0
-        )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0
-        )
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0
-        )
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
+        dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0)
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
@@ -219,7 +195,7 @@ def build_observation(cfg: "T1GetupConfig") -> NewtonObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "T1GetupConfig") -> NewtonActionConfig:
+def build_action(cfg: T1GetupConfig) -> NewtonActionConfig:
     """Settle-relative joint position action (mjlab_playground T1 getup).
 
     Uses the new ActionTerm system: a single
@@ -253,7 +229,7 @@ def build_action(cfg: "T1GetupConfig") -> NewtonActionConfig:
     )
 
 
-def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
+def build_reward(cfg: T1GetupConfig) -> RewardConfig:
     r = cfg.robot
 
     @dataclass
@@ -316,7 +292,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
     """Newton domain randomization — mjlab_playground-faithful.
 
     Three-axis geom friction randomization matches mjlab's T1 getup:

@@ -30,9 +30,8 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import torch
 
 if TYPE_CHECKING:
@@ -62,8 +61,8 @@ class ViewerAction(Enum):
     SPEED_DOWN = "speed_down"
     PREV_ENV = "prev_env"
     NEXT_ENV = "next_env"
-    SET_MOTION_CLIP = "set_motion_clip"   # payload: int (clip index)
-    SET_MOTION_LOCK = "set_motion_lock"   # payload: bool (locked)
+    SET_MOTION_CLIP = "set_motion_clip"  # payload: int (clip index)
+    SET_MOTION_LOCK = "set_motion_lock"  # payload: bool (locked)
 
 
 class PlayViewerBase(ABC):
@@ -109,7 +108,7 @@ class PlayViewerBase(ABC):
         self._sps = 0.0
 
         # Action queue, drained on main thread each tick.
-        self._actions: deque[tuple[ViewerAction, Optional[Any]]] = deque()
+        self._actions: deque[tuple[ViewerAction, Any | None]] = deque()
 
     # Abstract hooks.
 
@@ -185,10 +184,7 @@ class PlayViewerBase(ABC):
         # Diagnostic: prints to the eval server's stdout so we can tell
         # whether a dropdown selection is actually reaching the env or
         # the viser callback is not firing.
-        print(
-            f"[PlayViewer] motion clip: env0 motion_ids {before} -> {after} "
-            f"(requested {clip_id})"
-        )
+        print(f"[PlayViewer] motion clip: env0 motion_ids {before} -> {after} (requested {clip_id})")
 
     def _set_motion_lock(self, locked: bool) -> None:
         motion_cmd = self._get_motion_command()
@@ -391,11 +387,7 @@ class PlayViewerBase(ABC):
             except ValueError:
                 pass  # Non-main thread.
 
-            while (
-                self.is_running()
-                and (num_steps is None or self._step_count < num_steps)
-                and not self._interrupted
-            ):
+            while self.is_running() and (num_steps is None or self._step_count < num_steps) and not self._interrupted:
                 if not self.tick():
                     time.sleep(0.001)
                 self._update_stats()

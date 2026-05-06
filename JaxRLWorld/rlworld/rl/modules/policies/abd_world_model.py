@@ -11,7 +11,7 @@ This preserves all TD-MPC2 interfaces (encode, next_latent, predict_reward,
 predict_q, q_value, pi) so it is a drop-in replacement.
 """
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import equinox as eqx
 import jax
@@ -19,10 +19,10 @@ import jax.numpy as jnp
 
 from rlworld.rl.algorithms.tdmpc2.math import (
     TwoHotConfig,
-    two_hot_inv,
-    log_std_transform,
     gaussian_logprob,
+    log_std_transform,
     squash,
+    two_hot_inv,
 )
 from rlworld.rl.modules.policies.tdmpc2_world_model import (
     TDMPC2MLP,
@@ -58,8 +58,8 @@ def simnorm(x: jax.Array, simplex_dim: int = 8) -> jax.Array:
         return x.reshape(shape)
 
     # Split into full groups + remainder group
-    full_part = x[..., :dim - remainder]
-    last_part = x[..., dim - remainder:]
+    full_part = x[..., : dim - remainder]
+    last_part = x[..., dim - remainder :]
 
     full_part = full_part.reshape(*shape[:-1], -1, simplex_dim)
     full_part = jax.nn.softmax(full_part, axis=-1)
@@ -84,10 +84,10 @@ class ABDNetWorldModel(eqx.Module):
     q_ensemble: QEnsemble
     policy: TDMPC2MLP
     pi_encoder_weight: jax.Array  # (obs_dim, obs_dim)
-    pi_encoder_bias: jax.Array    # (obs_dim,)
+    pi_encoder_bias: jax.Array  # (obs_dim,)
 
     # Configuration (static) — matches TDMPC2WorldModel fields
-    latent_dim: int = eqx.field(static=True)   # = obs_dim
+    latent_dim: int = eqx.field(static=True)  # = obs_dim
     action_dim: int = eqx.field(static=True)
     obs_dim: int = eqx.field(static=True)
     num_q: int = eqx.field(static=True)
@@ -146,9 +146,7 @@ class ABDNetWorldModel(eqx.Module):
             self.action_high_tuple = tuple([1.0] * action_dim)
         else:
             if action_low is None or action_high is None:
-                raise ValueError(
-                    "action_low and action_high must be provided when squash_action=False"
-                )
+                raise ValueError("action_low and action_high must be provided when squash_action=False")
             self.action_low_tuple = tuple(float(x) for x in action_low)
             self.action_high_tuple = tuple(float(x) for x in action_high)
 
@@ -201,9 +199,7 @@ class ABDNetWorldModel(eqx.Module):
         )
 
         # Lightweight linear projection for policy input (before SimNorm)
-        self.pi_encoder_weight = jax.random.normal(
-            k_pi_enc, (obs_dim, obs_dim)
-        ) * (1.0 / obs_dim ** 0.5)
+        self.pi_encoder_weight = jax.random.normal(k_pi_enc, (obs_dim, obs_dim)) * (1.0 / obs_dim**0.5)
         self.pi_encoder_bias = jnp.zeros(obs_dim)
 
         # Zero-init reward head output (matches TDMPC2WorldModel.__init__)
@@ -248,7 +244,7 @@ class ABDNetWorldModel(eqx.Module):
         z: jax.Array,
         a: jax.Array,
         *,
-        key: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
         inference: bool = False,
     ) -> jax.Array:
         """Predict Q-values from ensemble."""
@@ -320,9 +316,7 @@ class ABDNetWorldModel(eqx.Module):
 
     # ==================== ABD-Net Specific ====================
 
-    def compute_dynamics_orthogonality_loss(
-        self, state: jax.Array, action: jax.Array
-    ) -> jax.Array:
+    def compute_dynamics_orthogonality_loss(self, state: jax.Array, action: jax.Array) -> jax.Array:
         """Compute ABD-Net orthogonality regularization for dynamics."""
         return self.dynamics.compute_orthogonality_loss(state, action)
 

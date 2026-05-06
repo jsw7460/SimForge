@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 from collections.abc import Sequence
 
 import torch
@@ -41,12 +40,8 @@ class ActuatorNetMLP(ActuatorBase):
         self.network = torch.jit.load(cfg.network_file, map_location=device).eval()
 
         history_length = max(cfg.input_idx) + 1
-        self._pos_error_history = torch.zeros(
-            num_envs, history_length, num_joints, device=device
-        )
-        self._vel_history = torch.zeros(
-            num_envs, history_length, num_joints, device=device
-        )
+        self._pos_error_history = torch.zeros(num_envs, history_length, num_joints, device=device)
+        self._vel_history = torch.zeros(num_envs, history_length, num_joints, device=device)
 
     def reset(self, env_ids: Sequence[int]) -> None:
         self._pos_error_history[env_ids] = 0.0
@@ -94,9 +89,7 @@ class ActuatorNetMLP(ActuatorBase):
         with torch.inference_mode():
             torques = self.network(network_input)
 
-        self.computed_effort = (
-            torques.view(self._num_envs, self._num_joints) * self.cfg.torque_scale
-        )
+        self.computed_effort = torques.view(self._num_envs, self._num_joints) * self.cfg.torque_scale
         self.applied_effort = self._clip_effort(self.computed_effort)
         return self.applied_effort
 
@@ -136,12 +129,8 @@ class ActuatorNetLSTM(ActuatorBase):
         flat_size = num_envs * num_joints
         # Network input: (flat_size, 1, 2)  — sequence_len=1, features=(pos_err, vel)
         self.sea_input = torch.zeros(flat_size, 1, 2, device=device)
-        self.sea_hidden_state = torch.zeros(
-            num_layers, flat_size, hidden_dim, device=device
-        )
-        self.sea_cell_state = torch.zeros(
-            num_layers, flat_size, hidden_dim, device=device
-        )
+        self.sea_hidden_state = torch.zeros(num_layers, flat_size, hidden_dim, device=device)
+        self.sea_cell_state = torch.zeros(num_layers, flat_size, hidden_dim, device=device)
 
         # Views for per-env reset
         layer_shape = (num_layers, num_envs, num_joints, hidden_dim)
@@ -163,11 +152,9 @@ class ActuatorNetLSTM(ActuatorBase):
         self.sea_input[:, 0, 1] = joint_vel.flatten()
 
         with torch.inference_mode():
-            torques, (self.sea_hidden_state[:], self.sea_cell_state[:]) = (
-                self.network(
-                    self.sea_input,
-                    (self.sea_hidden_state, self.sea_cell_state),
-                )
+            torques, (self.sea_hidden_state[:], self.sea_cell_state[:]) = self.network(
+                self.sea_input,
+                (self.sea_hidden_state, self.sea_cell_state),
             )
 
         self.computed_effort = torques.reshape(self._num_envs, self._num_joints)

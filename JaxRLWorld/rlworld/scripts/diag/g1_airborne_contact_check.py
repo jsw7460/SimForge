@@ -29,6 +29,7 @@ If the robot is truly in the air (z=10), ncon must be 0, base must be 0,
 and hinge values must stay within ±frictionloss (0.3 for G1). Any deviation
 means the sim is generating phantom contacts even in free fall.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -111,7 +112,7 @@ def main() -> None:
 
     print(f"=== {args.eval_sim} airborne contact check ===")
     print(f"  n_steps={args.n_steps}  frictionloss_limit={args.frictionloss}")
-    print(f"  (initial root_z taken from preset; edit base_init_height to drop from high)")
+    print("  (initial root_z taken from preset; edit base_init_height to drop from high)")
     print("")
 
     hdr = (

@@ -27,4 +27,4 @@ class SACConfig(BaseConfig):
     buffer_size: int = 1_000_000
     policy_delay: int = 1
     num_gradient_steps: int = 1
-    num_steps_per_env: int =  1
+    num_steps_per_env: int = 1

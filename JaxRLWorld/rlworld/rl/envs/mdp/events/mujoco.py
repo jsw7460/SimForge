@@ -3,6 +3,7 @@
 General-purpose reset / push functions live in ``common.py``;
 domain-randomization functions that wrap mjlab's ``dr`` module remain here.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 # Entity Configuration (simplified from mjlab's SceneEntityCfg)
 # =============================================================================
 
+
 def _default_slice() -> slice:
     return slice(None)
 
@@ -25,6 +27,7 @@ def _default_slice() -> slice:
 @dataclass
 class EntityCfg:
     """Configuration specifying which entity and components to operate on."""
+
     name: str = "robot"
     joint_ids: list[int] | slice = field(default_factory=_default_slice)
     body_ids: list[int] | slice = field(default_factory=_default_slice)
@@ -43,10 +46,11 @@ class EntityCfg:
 # Mjlab env adapter (bridges rlworld's MujocoEnv to mjlab's ManagerBasedRlEnv)
 # =============================================================================
 
+
 class _MujocoEnvAdapter:
     """Adapter that exposes the interface mjlab DR functions expect."""
 
-    def __init__(self, rlworld_env: "MujocoEnv"):
+    def __init__(self, rlworld_env: MujocoEnv):
         self._env = rlworld_env
 
     @property
@@ -87,8 +91,9 @@ def _to_scene_entity_cfg(entity_cfg: EntityCfg):
 # Domain randomization events
 # =============================================================================
 
+
 def randomize_friction(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "abs",
@@ -126,7 +131,7 @@ randomize_geom_friction = randomize_friction
 
 
 def randomize_body_com_offset(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "add",
@@ -150,7 +155,7 @@ def randomize_body_com_offset(
 
 
 def randomize_encoder_bias(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     env_ids: torch.Tensor,
     bias_range: tuple[float, float],
     entity_cfg: EntityCfg | None = None,
@@ -168,7 +173,7 @@ def randomize_encoder_bias(
 
 
 def randomize_body_mass(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "scale",
@@ -190,7 +195,7 @@ def randomize_body_mass(
 
 
 def randomize_pd_gains(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     env_ids: torch.Tensor,
     kp_range: tuple[float, float],
     kd_range: tuple[float, float],
@@ -214,7 +219,7 @@ def randomize_pd_gains(
 
 
 def randomize_joint_armature(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "scale",
@@ -236,7 +241,7 @@ def randomize_joint_armature(
 
 
 def randomize_joint_friction(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     env_ids: torch.Tensor,
     ranges: tuple[float, float] | dict[int, tuple[float, float]],
     operation: Literal["add", "scale", "abs"] = "abs",

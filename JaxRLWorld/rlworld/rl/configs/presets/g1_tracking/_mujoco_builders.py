@@ -6,6 +6,7 @@ Dispatched from :meth:`G1TrackingConfig.build` when
 ``G1_ACTION_SCALE``) as the G1 locomotion preset so the physical model
 is bit-identical to Mjlab's own reference G1 tracking task.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.rl.actuators import IdealPDActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -41,7 +42,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -72,11 +72,11 @@ CONFIGS_FOR_RUN_CLS = MujocoConfigsForRun
 OBSERVATION_CFG_CLS = MujocoObservationConfig
 
 
-def build_visualization(cfg: "G1TrackingConfig") -> VisualizationConfig:
+def build_visualization(cfg: G1TrackingConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
+def build_env(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         time_out = TerminationTermConfig(tf.time_out)
@@ -114,7 +114,7 @@ def build_env(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> MujocoEnvConfi
     )
 
 
-def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> MujocoSceneConfig:
+def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
     """Scene config using mjlab asset_zoo G1 + self-collision subtree sensor.
 
     Mirror of the G1 locomotion preset's MuJoCo scene (pelvis self-collision
@@ -136,7 +136,7 @@ def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> MujocoSceneC
     )
 
     robot_entity = MujocoEntityCfg(
-        urdf_path=r.urdf_path,      # Ignored (spec_fn is used)
+        urdf_path=r.urdf_path,  # Ignored (spec_fn is used)
         init_state=InitialStateCfg(
             pos=(0, 0, r.base_init_height),
             joint_pos=r.default_joint_angles,
@@ -176,34 +176,28 @@ def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> MujocoSceneC
     )
 
 
-def build_observation(cfg: "G1TrackingConfig") -> MujocoObservationConfig:
+def build_observation(cfg: G1TrackingConfig) -> MujocoObservationConfig:
     motion_params = {"command_name": "motion"}
 
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-        )
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-        )
-        base_lin_vel_obs = ObservationTermConfig(
-            func=base_lin_vel, scale=1.0, noise=Unoise(-0.5, 0.5)
-        )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01)
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+        base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0, noise=Unoise(-0.5, 0.5))
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
+            func=motion_anchor_pos_b,
+            scale=1.0,
+            params=motion_params,
             noise=Unoise(-0.25, 0.25),
         )
         motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
+            func=motion_anchor_ori_b,
+            scale=1.0,
+            params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
 
@@ -219,16 +213,24 @@ def build_observation(cfg: "G1TrackingConfig") -> MujocoObservationConfig:
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
         command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
+            func=motion_anchor_pos_b,
+            scale=1.0,
+            params=motion_params,
         )
         motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
+            func=motion_anchor_ori_b,
+            scale=1.0,
+            params=motion_params,
         )
         robot_body_pos = ObservationTermConfig(
-            func=robot_body_pos_b, scale=1.0, params=motion_params,
+            func=robot_body_pos_b,
+            scale=1.0,
+            params=motion_params,
         )
         robot_body_ori = ObservationTermConfig(
-            func=robot_body_ori_b, scale=1.0, params=motion_params,
+            func=robot_body_ori_b,
+            scale=1.0,
+            params=motion_params,
         )
 
     @dataclass
@@ -239,7 +241,7 @@ def build_observation(cfg: "G1TrackingConfig") -> MujocoObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "G1TrackingConfig") -> MujocoActionConfig:
+def build_action(cfg: G1TrackingConfig) -> MujocoActionConfig:
     """JointPositionAction with mjlab-native G1 action scale + default offset."""
     r = cfg.robot
     return MujocoActionConfig(
@@ -251,7 +253,7 @@ def build_action(cfg: "G1TrackingConfig") -> MujocoActionConfig:
     )
 
 
-def build_reward(cfg: "G1TrackingConfig") -> RewardConfig:
+def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
     motion_params_std = lambda std: {"command_name": "motion", "std": std}
 
     @dataclass
@@ -303,7 +305,7 @@ def build_reward(cfg: "G1TrackingConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "G1TrackingConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo DR — 3-axis friction (Mjlab G1 tracking foot_friction)."""
     from rlworld.rl.envs.mdp.events import mujoco as ef
     from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
@@ -321,11 +323,7 @@ def build_dr_terms(cfg: "G1TrackingConfig") -> Dict[str, EventTermConfig]:
                 "distribution": "uniform",
                 "entity_cfg": EntityCfg(
                     name="robot",
-                    geom_names=tuple(
-                        f"{side}_foot{i}_collision"
-                        for side in ("left", "right")
-                        for i in range(1, 8)
-                    ),
+                    geom_names=tuple(f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)),
                 ),
                 "shared_random": True,
             },

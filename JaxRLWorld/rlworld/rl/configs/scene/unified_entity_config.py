@@ -14,7 +14,7 @@ The actuator class determines the control mode:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from rlworld.rl.actuators.actuator_cfg import ActuatorBaseCfg
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Articulation configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ArticulationCfg:
@@ -39,13 +40,14 @@ class ArticulationCfg:
             limits used as "soft" limits (for observations / rewards).
     """
 
-    actuators: tuple["ActuatorBaseCfg", ...] = ()
+    actuators: tuple[ActuatorBaseCfg, ...] = ()
     soft_joint_pos_limit_factor: float = 1.0
 
 
 # ---------------------------------------------------------------------------
 # Initial-state configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class InitialStateCfg:
@@ -73,6 +75,7 @@ class InitialStateCfg:
 # ---------------------------------------------------------------------------
 # Base entity configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class EntityCfg:
@@ -119,6 +122,7 @@ class EntityCfg:
 # ---------------------------------------------------------------------------
 # Per-simulator entity configurations
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class GenesisEntityCfg(EntityCfg):
@@ -175,6 +179,7 @@ class MujocoEntityCfg(EntityCfg):
 # ---------------------------------------------------------------------------
 # Ground plane configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class GroundPlaneCfg:

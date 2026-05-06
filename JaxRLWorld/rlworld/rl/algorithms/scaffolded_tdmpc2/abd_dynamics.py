@@ -10,12 +10,12 @@ Key differences from the policy ABAEncoder:
 - Used as: s_{t+1} = s_t + scale * ABDDynamicsLayer(s_t, a_t)
 """
 
+import math
 from typing import TYPE_CHECKING
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import math
 
 from rlworld.rl.modules.utils import MLP
 
@@ -34,6 +34,7 @@ class ABDDynamicsLayer(eqx.Module):
     - input_dim = state_dim + action_dim (instead of obs_dim)
     - readout MLP appended (per-body features -> delta_state)
     """
+
     # Per-body input projections
     obs_projections: tuple[MLP, ...]
     link_base: jax.Array
@@ -84,10 +85,7 @@ class ABDDynamicsLayer(eqx.Module):
 
         # Tree structure
         self.traversal_order = tuple(kinematic_tree.traverse_bottom_up())
-        self.children_map = tuple(
-            tuple(kinematic_tree.get_children(i))
-            for i in range(self.num_bodies)
-        )
+        self.children_map = tuple(tuple(kinematic_tree.get_children(i)) for i in range(self.num_bodies))
 
         input_dim = state_dim + action_dim
         feature_dim = link_channels * spatial_dim
@@ -95,7 +93,7 @@ class ABDDynamicsLayer(eqx.Module):
 
         # Split keys
         keys = jax.random.split(key, self.num_bodies + 3)
-        proj_keys = keys[:self.num_bodies]
+        proj_keys = keys[: self.num_bodies]
         base_key = keys[self.num_bodies]
         motion_key = keys[self.num_bodies + 1]
         readout_key = keys[self.num_bodies + 2]
@@ -115,15 +113,10 @@ class ABDDynamicsLayer(eqx.Module):
         )
 
         # Learnable base features (analogous to rigid-body inertia I_i)
-        self.link_base = jax.random.normal(
-            base_key, (self.num_bodies, link_channels, spatial_dim)
-        ) * 0.1
+        self.link_base = jax.random.normal(base_key, (self.num_bodies, link_channels, spatial_dim)) * 0.1
 
         # Per-body LayerNorm
-        self.link_norms = tuple(
-            eqx.nn.LayerNorm((link_channels, spatial_dim))
-            for _ in range(self.num_bodies)
-        )
+        self.link_norms = tuple(eqx.nn.LayerNorm((link_channels, spatial_dim)) for _ in range(self.num_bodies))
 
         # Motion basis W per body (orthogonally initialized)
         self.motion_basis = self._init_orthogonal_basis(motion_key)
@@ -132,9 +125,7 @@ class ABDDynamicsLayer(eqx.Module):
         if learnable_contribution_weight:
             init_scale = 0.5
             init_logit = math.log(init_scale / (1 - init_scale))
-            self.contribution_weight = jnp.full(
-                (len(self.traversal_order),), init_logit
-            )
+            self.contribution_weight = jnp.full((len(self.traversal_order),), init_logit)
         else:
             self.contribution_weight = None
 
@@ -156,8 +147,10 @@ class ABDDynamicsLayer(eqx.Module):
     def _init_orthogonal_basis(self, key: jax.Array) -> jax.Array:
         """Initialize motion basis as orthonormal matrices."""
         shape = (
-            self.num_bodies, self.link_channels,
-            self.spatial_dim, self.spatial_dim,
+            self.num_bodies,
+            self.link_channels,
+            self.spatial_dim,
+            self.spatial_dim,
         )
         W = jax.random.normal(key, shape)
 
@@ -210,9 +203,7 @@ class ABDDynamicsLayer(eqx.Module):
                 child_contributions = []
                 for child_idx in children:
                     F_child = body_features[child_idx]
-                    contribution = self._compute_contribution(
-                        F_child, child_idx
-                    )
+                    contribution = self._compute_contribution(F_child, child_idx)
                     child_contributions.append(contribution)
 
                 child_sum = jnp.stack(child_contributions, axis=0).sum(axis=0)
@@ -227,14 +218,10 @@ class ABDDynamicsLayer(eqx.Module):
                 body_features[body_idx] = base_feature
 
             # Per-body LayerNorm
-            body_features[body_idx] = self.link_norms[body_idx](
-                body_features[body_idx]
-            )
+            body_features[body_idx] = self.link_norms[body_idx](body_features[body_idx])
 
         # Stack and flatten for readout
-        link_features = jnp.stack(
-            [body_features[i] for i in range(self.num_bodies)], axis=0
-        )  # (num_bodies, C, d)
+        link_features = jnp.stack([body_features[i] for i in range(self.num_bodies)], axis=0)  # (num_bodies, C, d)
         flat_features = link_features.reshape(-1)  # (num_bodies * C * d,)
 
         # Global normalization across all bodies
@@ -244,9 +231,7 @@ class ABDDynamicsLayer(eqx.Module):
         delta_state = self.readout(flat_features)
         return delta_state
 
-    def _compute_contribution(
-        self, F: jax.Array, body_idx: int
-    ) -> jax.Array:
+    def _compute_contribution(self, F: jax.Array, body_idx: int) -> jax.Array:
         """
         Compute child contribution: F - diag(F W W^T F)
 
@@ -262,9 +247,7 @@ class ABDDynamicsLayer(eqx.Module):
 
         return F - proj_diag
 
-    def compute_orthogonality_loss(
-        self, state: jax.Array, action: jax.Array
-    ) -> jax.Array:
+    def compute_orthogonality_loss(self, state: jax.Array, action: jax.Array) -> jax.Array:
         """
         Compute orthogonality regularization loss.
 
@@ -310,9 +293,7 @@ class ABDDynamicsLayer(eqx.Module):
             else:
                 body_features[body_idx] = base_feature
 
-            body_features[body_idx] = self.link_norms[body_idx](
-                body_features[body_idx]
-            )
+            body_features[body_idx] = self.link_norms[body_idx](body_features[body_idx])
 
         loss = 0.0
         for body_idx in range(self.num_bodies):
@@ -332,6 +313,7 @@ class ABDDynamics(eqx.Module):
 
     s_{t+1} = s_t + scale * ABDDynamicsLayer(s_t, a_t)
     """
+
     dynamics_layer: ABDDynamicsLayer
     residual_scale: jax.Array
 
@@ -386,8 +368,6 @@ class ABDDynamics(eqx.Module):
         """Predict only the delta (for analysis/logging)."""
         return self.dynamics_layer(state, action)
 
-    def compute_orthogonality_loss(
-        self, state: jax.Array, action: jax.Array
-    ) -> jax.Array:
+    def compute_orthogonality_loss(self, state: jax.Array, action: jax.Array) -> jax.Array:
         """Compute ABA orthogonality regularization."""
         return self.dynamics_layer.compute_orthogonality_loss(state, action)

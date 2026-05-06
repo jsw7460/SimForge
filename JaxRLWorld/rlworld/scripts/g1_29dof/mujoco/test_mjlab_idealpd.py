@@ -7,19 +7,20 @@ is stable in MuJoCo.
 If this works → our torque delivery pipeline has an issue.
 If this also NaN → MuJoCo + motor actuator + G1 armature is fundamentally unstable.
 """
+
 import os
 
-os.environ['__NV_PRIME_RENDER_OFFLOAD'] = '1'
-os.environ['__GLX_VENDOR_LIBRARY_NAME'] = 'nvidia'
+os.environ["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+os.environ["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
 
-custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets'))
+custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
 import genesis.utils.terrain
+
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
-from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.runners import BaseRunner
 
 
 def main():
@@ -28,10 +29,11 @@ def main():
     # Override: use mjlab's native IdealPdActuator instead of BuiltinPositionActuator.
     # This creates motor actuators but mjlab computes PD torques in write_data_to_sim().
     from mjlab.actuator.pd_actuator import IdealPdActuatorCfg as MjlabIdealPdCfg
-    from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as g1_get_spec, FULL_COLLISION
-    from mjlab.entity import EntityCfg as MjlabEntityCfg, EntityArticulationInfoCfg
+    from mjlab.asset_zoo.robots.unitree_g1.g1_constants import FULL_COLLISION, get_spec as g1_get_spec
+    from mjlab.entity import EntityArticulationInfoCfg, EntityCfg as MjlabEntityCfg
     from mjlab.scene import SceneCfg
     from mjlab.terrains import TerrainEntityCfg
+
     from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 
     robot = G1MujocoConfig()
@@ -41,12 +43,14 @@ def main():
     for pattern, kp in robot.p_gains.items():
         kd = robot.d_gains.get(pattern, 0.0)
         arm = robot.armature.get(pattern, 0.0)
-        mjlab_actuators.append(MjlabIdealPdCfg(
-            target_names_expr=(pattern,),
-            stiffness=kp,
-            damping=kd,
-            armature=arm,
-        ))
+        mjlab_actuators.append(
+            MjlabIdealPdCfg(
+                target_names_expr=(pattern,),
+                stiffness=kp,
+                damping=kd,
+                armature=arm,
+            )
+        )
 
     mjlab_entity = MjlabEntityCfg(
         init_state=MjlabEntityCfg.InitialStateCfg(

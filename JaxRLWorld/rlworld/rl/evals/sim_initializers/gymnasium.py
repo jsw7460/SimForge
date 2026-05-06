@@ -9,9 +9,9 @@ from rlworld.rl.evals.sim_initializers import SimInitializer
 
 
 class GymnasiumInitializer(SimInitializer):
-
     def init_device(self) -> torch.device:
         import genesis as gs
+
         return gs.device
 
     def prepare_configs(
@@ -37,13 +37,15 @@ class GymnasiumInitializer(SimInitializer):
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
         from gymnasium.vector import SyncVectorEnv
+
         from rlworld.rl.envs import GymnasiumEnv
 
-        seed = kwargs.get('seed', 42)
+        seed = kwargs.get("seed", 42)
 
         def make_env(env_seed):
             def _init():
                 return gym.make(eval_cfgs.env.task_name, max_episode_steps=100)
+
             return _init
 
         num_envs = eval_cfgs.env.num_envs

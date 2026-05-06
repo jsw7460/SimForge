@@ -1,10 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from rlworld.rl.configs.observations import ObservationTermConfig
-from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
-
 from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
+from rlworld.rl.envs.mdp.observations.genesis import proprioception, state
 
 
 @dataclass
@@ -53,9 +52,7 @@ class Go2ScaffoldedTDMPC2Config(Go2FlatConfig):
     max_grad_norm: float = 20.0
 
     # ---- Privileged obs settings ----
-    privileged_feet_links: List[str] = field(
-        default_factory=lambda: ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
-    )
+    privileged_feet_links: List[str] = field(default_factory=lambda: ["FR_foot", "FL_foot", "RR_foot", "RL_foot"])
 
     def __post_init__(self):
         super().__post_init__()
@@ -88,16 +85,10 @@ class Go2ScaffoldedTDMPC2Config(Go2FlatConfig):
                 params={
                     "entity_name": "robot",
                     "links": tuple(self.privileged_feet_links),
-                }
+                },
             ),
-            ObservationTermConfig(
-                state.links_acc,
-                scale=0.005
-            ),
-            ObservationTermConfig(
-                state.actuated_dof_force,
-                scale=0.01
-            ),
+            ObservationTermConfig(state.links_acc, scale=0.005),
+            ObservationTermConfig(state.actuated_dof_force, scale=0.01),
             # Ground truth DOF velocities (no noise)
             ObservationTermConfig(
                 proprioception.dof_vel,
@@ -107,10 +98,7 @@ class Go2ScaffoldedTDMPC2Config(Go2FlatConfig):
                 state.base_quat,
                 scale=1.0,
             ),
-            ObservationTermConfig(
-                state.base_euler,
-                scale=1.0
-            )
+            ObservationTermConfig(state.base_euler, scale=1.0),
         ]
 
     def _build_observation_config(self) -> Dict[str, Any]:
@@ -186,10 +174,12 @@ class Go2ScaffoldedTDMPC2Config(Go2FlatConfig):
 
     def _build_runner_config(self) -> Dict[str, Any]:
         base = super()._build_runner_config()
-        base.update({
-            "algorithm_class_name": self.algorithm_name,
-            "run_name": self.run_name,
-        })
+        base.update(
+            {
+                "algorithm_class_name": self.algorithm_name,
+                "run_name": self.run_name,
+            }
+        )
         return base
 
 

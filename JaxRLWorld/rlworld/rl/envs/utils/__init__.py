@@ -1,7 +1,1 @@
-from .utils import (
-    EnvStepCache,
-    NumStepCallsObserver,
-    MethodEnvStepCache,
-    invalidate_cache,
-    LearningIterationObserver
-)
+from .utils import EnvStepCache, LearningIterationObserver, MethodEnvStepCache, NumStepCallsObserver, invalidate_cache

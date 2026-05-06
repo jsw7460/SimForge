@@ -34,6 +34,7 @@ training-time outputs bit-for-bit. The bridge is a no-op when the
 motion_clip_id term is absent or already width 1 — i.e. once experts
 are retrained without it, this file needs no further change.
 """
+
 from __future__ import annotations
 
 import os
@@ -76,7 +77,9 @@ def _expert_mean(
     key stays stable across calls.
     """
     mean, _ = model.act(
-        actor_obs, key=jax.random.PRNGKey(0), deterministic=True,
+        actor_obs,
+        key=jax.random.PRNGKey(0),
+        deterministic=True,
     )
     return mean
 
@@ -86,7 +89,7 @@ def _expert_mean(
 
 def _load_expert_policy(
     checkpoint_path: str,
-    env: "World",
+    env: World,
     key: jax.Array,
     *,
     actor_obs_dim_override: int | None = None,
@@ -110,28 +113,14 @@ def _load_expert_policy(
     cfgs = load_config_from_checkpoint(metadata)
 
     obs_dim = env.calculate_obs_dim()
-    actor_obs_dim = (
-        actor_obs_dim_override if actor_obs_dim_override is not None
-        else obs_dim["actor"]
-    )
-    critic_obs_dim = (
-        critic_obs_dim_override if critic_obs_dim_override is not None
-        else obs_dim["critic"]
-    )
+    actor_obs_dim = actor_obs_dim_override if actor_obs_dim_override is not None else obs_dim["actor"]
+    critic_obs_dim = critic_obs_dim_override if critic_obs_dim_override is not None else obs_dim["critic"]
     num_actions = env.num_actions
 
     policy_cfg = cfgs.nn.policy
 
-    kinematic_tree = (
-        env.scene_manager.trees.get("robot", None)
-        if hasattr(env, "scene_manager")
-        else None
-    )
-    actuated_joint_names = (
-        list(env.act_manager.actuated_joint_names)
-        if hasattr(env, "act_manager")
-        else None
-    )
+    kinematic_tree = env.scene_manager.trees.get("robot", None) if hasattr(env, "scene_manager") else None
+    actuated_joint_names = list(env.act_manager.actuated_joint_names) if hasattr(env, "act_manager") else None
 
     actor_critic = PPOActorCritic(
         num_actor_obs=actor_obs_dim,
@@ -166,7 +155,9 @@ def _load_expert_policy(
 
 
 def _term_slice(
-    env: "World", group_name: str, term_name: str,
+    env: World,
+    group_name: str,
+    term_name: str,
 ) -> tuple[int, int] | None:
     """Look up ``(start, end)`` for an obs term in a group, or ``None``.
 
@@ -197,14 +188,11 @@ class MultiExpertDispatcher:
     def __init__(
         self,
         checkpoint_paths: tuple[str, ...] | list[str],
-        env: "World",
+        env: World,
         key: jax.Array,
     ):
         if len(checkpoint_paths) == 0:
-            raise ValueError(
-                "MultiExpertDispatcher requires at least one expert "
-                "checkpoint path."
-            )
+            raise ValueError("MultiExpertDispatcher requires at least one expert checkpoint path.")
 
         env_obs_dim = env.calculate_obs_dim()
         env_actor_dim = env_obs_dim["actor"]
@@ -216,14 +204,8 @@ class MultiExpertDispatcher:
         actor_clip_slice = _term_slice(env, "actor", _CLIP_ID_TERM_NAME)
         critic_clip_slice = _term_slice(env, "critic", _CLIP_ID_TERM_NAME)
 
-        actor_clip_len = (
-            actor_clip_slice[1] - actor_clip_slice[0]
-            if actor_clip_slice is not None else 0
-        )
-        critic_clip_len = (
-            critic_clip_slice[1] - critic_clip_slice[0]
-            if critic_clip_slice is not None else 0
-        )
+        actor_clip_len = actor_clip_slice[1] - actor_clip_slice[0] if actor_clip_slice is not None else 0
+        critic_clip_len = critic_clip_slice[1] - critic_clip_slice[0] if critic_clip_slice is not None else 0
 
         # Bridge only fires when the env's clip_id term is wider than
         # 1 (i.e. multi-motion). Width 0 (term absent) or width 1
@@ -235,21 +217,17 @@ class MultiExpertDispatcher:
         # Expert obs dims (the dims the saved weights were trained
         # with). When bridging, every clip_id segment collapses from
         # ``clip_len`` to 1.
-        expert_actor_dim = (
-            env_actor_dim - actor_clip_len + 1
-            if self._needs_actor_bridge else env_actor_dim
-        )
-        expert_critic_dim = (
-            env_critic_dim - critic_clip_len + 1
-            if critic_clip_len > 1 else env_critic_dim
-        )
+        expert_actor_dim = env_actor_dim - actor_clip_len + 1 if self._needs_actor_bridge else env_actor_dim
+        expert_critic_dim = env_critic_dim - critic_clip_len + 1 if critic_clip_len > 1 else env_critic_dim
         self._expert_actor_dim = expert_actor_dim
 
         # Load the experts.
         keys = jax.random.split(key, len(checkpoint_paths))
         self._experts: list[PPOActorCritic] = [
             _load_expert_policy(
-                path, env, k,
+                path,
+                env,
+                k,
                 actor_obs_dim_override=expert_actor_dim,
                 critic_obs_dim_override=expert_critic_dim,
             )
@@ -294,7 +272,8 @@ class MultiExpertDispatcher:
         if not self._needs_actor_bridge:
             return actor_obs
         ones_col = jnp.ones(
-            (actor_obs.shape[0], 1), dtype=actor_obs.dtype,
+            (actor_obs.shape[0], 1),
+            dtype=actor_obs.dtype,
         )
         return jnp.concatenate(
             [
@@ -307,8 +286,8 @@ class MultiExpertDispatcher:
 
     def deterministic_mean(
         self,
-        actor_obs: jax.Array,    # (num_envs, env_actor_dim)
-        motion_ids: jax.Array,   # (num_envs,) int — value in [0, num_experts)
+        actor_obs: jax.Array,  # (num_envs, env_actor_dim)
+        motion_ids: jax.Array,  # (num_envs,) int — value in [0, num_experts)
     ) -> jax.Array:
         """Return ``(num_envs, action_dim)`` expert means per env.
 

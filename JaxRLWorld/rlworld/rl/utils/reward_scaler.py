@@ -48,11 +48,7 @@ class RewardScaler:
         delta = batch_mean - self.mean
         total_count = self.count + batch_count
         new_mean = self.mean + delta * (batch_count / total_count)
-        new_M2 = (
-            self.M2
-            + batch_M2
-            + (delta * delta) * self.count * batch_count / total_count
-        )
+        new_M2 = self.M2 + batch_M2 + (delta * delta) * self.count * batch_count / total_count
 
         self.mean = new_mean
         self.M2 = new_M2
@@ -64,7 +60,7 @@ class RewardScaler:
             return rewards
 
         running_var = self.M2 / self.count if self.count > 0 else 1.0
-        std = max(running_var ** 0.5, 1e-8)
+        std = max(running_var**0.5, 1e-8)
         return rewards / std
 
     def reset_envs_vectorized(self, dones: jnp.ndarray):

@@ -1,14 +1,13 @@
-from .ppo import PPO
-from .td3 import TD3
-from .sac import SAC
-from .ppo_dr3 import PPODR3
+from enum import Enum
+
 from .fast_td3 import FastTD3
-from .tdmpc2 import TDMPC2
+from .ppo import PPO
+from .ppo_dr3 import PPODR3
+from .sac import SAC
 from .scaffolded_tdmpc2 import ScaffoldedTDMPC2
 from .sim_mpc import SimMPC
-
-
-from enum import Enum
+from .td3 import TD3
+from .tdmpc2 import TDMPC2
 
 
 class PolicyType(Enum):

@@ -10,15 +10,16 @@ from rlworld.rl.algorithms.tdmpc2.losses import (
 )
 from rlworld.rl.algorithms.tdmpc2.math import (
     TwoHotConfig,
-    two_hot_inv,
     gumbel_softmax_sample,
+    two_hot_inv,
 )
-from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel, QEnsemble
+from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
 from rlworld.rl.storages.sequence_replay_buffer import SequenceBatch
 
 
 class UnifiedUpdateInfo(NamedTuple):
     """All metrics from unified update."""
+
     # World model
     consistency_loss: jax.Array
     reward_loss: jax.Array
@@ -141,9 +142,12 @@ def unified_update(
         def _single_step(z, pi_k, q_k):
             action, info = full_model.pi(z, key=pi_k)
             q_val = full_model.q_value(
-                z, action, two_hot_cfg,
-                return_type="avg", key=q_k,
-                inference=False  # dropout ON
+                z,
+                action,
+                two_hot_cfg,
+                return_type="avg",
+                key=q_k,
+                inference=False,  # dropout ON
             )
             return action, info, q_val
 
@@ -171,8 +175,9 @@ def unified_update(
             jnp.percentile(q_vals[0].flatten(), 95),
         )
 
-    (_, (pi_loss, pi_entropy, pi_scaled_entropy, updated_scale_value, q_mean, q_std, q_p05, q_p95)), pi_grads = \
+    (_, (pi_loss, pi_entropy, pi_scaled_entropy, updated_scale_value, q_mean, q_std, q_p05, q_p95)), pi_grads = (
         jax.value_and_grad(pi_loss_fn, has_aux=True)(pi_params)
+    )
 
     pi_grad_norm = optax.global_norm(pi_grads)
     pi_updates, new_pi_opt_state = pi_optimizer.update(pi_grads, pi_opt_state, pi_params)
@@ -185,7 +190,8 @@ def unified_update(
     q_params, _ = eqx.partition(final_model.q_ensemble, eqx.is_inexact_array)
     new_target_q_params = jax.tree.map(
         lambda p, tp: tau * p + (1 - tau) * tp,
-        q_params, target_q_params,
+        q_params,
+        target_q_params,
     )
 
     info = UnifiedUpdateInfo(
@@ -243,7 +249,11 @@ def plan_mppi_inner(
 
     # Sample trajectory candidates from learned policy
     pi_actions = _sample_policy_trajectories(
-        model, z, horizon, num_pi_trajs, pi_key,
+        model,
+        z,
+        horizon,
+        num_pi_trajs,
+        pi_key,
     )
 
     # Replicate latent state for all sample trajectories
@@ -272,9 +282,7 @@ def plan_mppi_inner(
 
         key, sample_key, value_key = jax.random.split(key, 3)
 
-        noise = jax.random.normal(
-            sample_key, (horizon, num_samples - num_pi_trajs, action_dim)
-        )
+        noise = jax.random.normal(sample_key, (horizon, num_samples - num_pi_trajs, action_dim))
 
         # Clip sampled actions to action bounds
         # Original: jnp.clip(..., -1.0, 1.0)
@@ -287,7 +295,13 @@ def plan_mppi_inner(
         actions = jnp.concatenate([pi_actions, sampled_actions], axis=1)
 
         values = _estimate_trajectory_value(
-            model, z_expanded, actions, two_hot_cfg, discount, horizon, value_key,
+            model,
+            z_expanded,
+            actions,
+            two_hot_cfg,
+            discount,
+            horizon,
+            value_key,
             episodic=episodic,
         )
 
@@ -304,8 +318,7 @@ def plan_mppi_inner(
         new_mean = (score[None, :, None] * elite_actions).sum(axis=1)
 
         new_std = jnp.sqrt(
-            (score[None, :, None] * (elite_actions - new_mean[:, None, :]) ** 2).sum(axis=1)
-            / (score.sum() + 1e-9)
+            (score[None, :, None] * (elite_actions - new_mean[:, None, :]) ** 2).sum(axis=1) / (score.sum() + 1e-9)
         )
         new_std = jnp.clip(new_std, min_std, max_std)
 

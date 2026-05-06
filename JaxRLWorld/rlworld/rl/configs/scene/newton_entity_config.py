@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-import warp as wp
 import newton
+import warp as wp
 
 RemeshingMethod = Literal["ftetwild", "alphashape", "quadratic", "convex_hull"]
+
 
 @dataclass
 class NewtonEntityConfig:
@@ -48,9 +49,7 @@ class NewtonEntityConfig:
     mesh_approximation: Literal["coacd", "vhacd", "bounding_sphere", "bounding_box"] | RemeshingMethod = "convex_hull"
 
     # Transform
-    transform: wp.transform = field(
-        default_factory=lambda: wp.transform(wp.vec3(0, 0, 0.5), wp.quat_identity())
-    )
+    transform: wp.transform = field(default_factory=lambda: wp.transform(wp.vec3(0, 0, 0.5), wp.quat_identity()))
 
     # Articulation settings
     floating: bool = False
@@ -80,6 +79,7 @@ class NewtonEntityConfig:
 @dataclass
 class NewtonGroundPlaneConfig:
     """Ground plane configuration."""
+
     shape_cfg: "ModelBuilder.ShapeConfig | None" = None
 
 
@@ -91,9 +91,7 @@ class NewtonBoxConfig:
     hx: float = 0.5  # Half-extent in x
     hy: float = 0.5  # Half-extent in y
     hz: float = 0.5  # Half-extent in z
-    transform: wp.transform = field(
-        default_factory=lambda: wp.transform(wp.vec3(0, 0, 0.5), wp.quat_identity())
-    )
+    transform: wp.transform = field(default_factory=lambda: wp.transform(wp.vec3(0, 0, 0.5), wp.quat_identity()))
     density: float = 1000.0
     ke: float = 1.0e4
     kd: float = 1.0e2

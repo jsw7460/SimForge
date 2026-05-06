@@ -3,6 +3,7 @@
 Dispatched from :meth:`G1TrackingConfig.build` when
 ``sim_type == "newton"``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import warp as wp
 
 from rlworld.rl.actuators import IdealPDActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -35,7 +36,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
@@ -55,10 +55,8 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import motion_tracking as rf_motion
-from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.newton import reward_terms as rf_newton
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import motion_tracking as tt_motion
+from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab, reward_terms as rf_newton
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, motion_tracking as tt_motion
 
 if TYPE_CHECKING:
     from .base import G1TrackingConfig
@@ -72,11 +70,11 @@ def _initial_quat() -> Any:
     return wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), 0.0)
 
 
-def build_visualization(cfg: "G1TrackingConfig") -> VisualizationConfig:
+def build_visualization(cfg: G1TrackingConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
+def build_env(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         max_episode = TerminationTermConfig(max_episode_exceed)
@@ -114,7 +112,7 @@ def build_env(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> NewtonEnvConfi
     )
 
 
-def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> NewtonSceneConfig:
+def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
     r = cfg.robot
     quat = _initial_quat()
 
@@ -169,34 +167,32 @@ def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> NewtonSceneC
     )
 
 
-def build_observation(cfg: "G1TrackingConfig") -> NewtonObservationConfig:
+def build_observation(cfg: G1TrackingConfig) -> NewtonObservationConfig:
     motion_params = {"command_name": "motion"}
 
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-        )
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         base_lin_vel_obs = ObservationTermConfig(
-            func=base_lin_vel, scale=1.0, noise=Unoise(-0.5, 0.5),
+            func=base_lin_vel,
+            scale=1.0,
+            noise=Unoise(-0.5, 0.5),
         )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01)
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-        )
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
+            func=motion_anchor_pos_b,
+            scale=1.0,
+            params=motion_params,
             noise=Unoise(-0.25, 0.25),
         )
         motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
+            func=motion_anchor_ori_b,
+            scale=1.0,
+            params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
 
@@ -212,16 +208,24 @@ def build_observation(cfg: "G1TrackingConfig") -> NewtonObservationConfig:
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
         command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
+            func=motion_anchor_pos_b,
+            scale=1.0,
+            params=motion_params,
         )
         motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
+            func=motion_anchor_ori_b,
+            scale=1.0,
+            params=motion_params,
         )
         robot_body_pos = ObservationTermConfig(
-            func=robot_body_pos_b, scale=1.0, params=motion_params,
+            func=robot_body_pos_b,
+            scale=1.0,
+            params=motion_params,
         )
         robot_body_ori = ObservationTermConfig(
-            func=robot_body_ori_b, scale=1.0, params=motion_params,
+            func=robot_body_ori_b,
+            scale=1.0,
+            params=motion_params,
         )
 
     @dataclass
@@ -232,7 +236,7 @@ def build_observation(cfg: "G1TrackingConfig") -> NewtonObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "G1TrackingConfig") -> NewtonActionConfig:
+def build_action(cfg: G1TrackingConfig) -> NewtonActionConfig:
     """JointPositionAction — default_pos + action * per-joint-scale.
 
     Matches Mjlab's ``JointPositionActionCfg(use_default_offset=True,
@@ -248,7 +252,7 @@ def build_action(cfg: "G1TrackingConfig") -> NewtonActionConfig:
     )
 
 
-def build_reward(cfg: "G1TrackingConfig") -> RewardConfig:
+def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
     motion_params_std = lambda std: {"command_name": "motion", "std": std}
 
     @dataclass
@@ -300,7 +304,7 @@ def build_reward(cfg: "G1TrackingConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "G1TrackingConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
     """Newton DR — base_com + joint_friction (matches g1_29dof locomotion DR).
 
     Mjlab's G1 tracking also randomizes foot friction, but G1MujocoConfig

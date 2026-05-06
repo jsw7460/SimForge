@@ -1,11 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Union, TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Dict, Literal
 
 from .base_config import BaseConfig
-from .rewards import RewardTermConfig
 
 if TYPE_CHECKING:
-    from rlworld.rl.configs import CommandTermConfig
+    pass
 
 
 @dataclass
@@ -26,6 +25,7 @@ class RewardConfig(BaseConfig):
         ``"exponential_auto"``: dynamic classification by sign of global sum.
             Each step, terms with negative global sum go inside exp().
     """
+
     reward_mode: str = "sum"
     shaping_sigma: float = 0.02
 
@@ -37,6 +37,7 @@ class CommandConfig(BaseConfig):
     Holds a dict of named CommandTermCfg objects. Each term independently
     manages its own sampling ranges, resampling timer, and post-processing.
     """
+
     terms: dict[str, Any] = field(default_factory=dict)  # str -> CommandTermCfg
 
 
@@ -60,6 +61,7 @@ class GaitConfig(BaseConfig):
         - ``QuadrupedOffsets()``:  reads (phase, offset, bound) -> 4-foot offsets
         - ``DirectOffsets(names)``: reads N named commands -> N-foot offsets
     """
+
     foot_names: tuple[str, ...] | list[str] = field(default_factory=tuple)
 
     # "fixed" or "command"
@@ -94,6 +96,7 @@ class TerminationsConfig(BaseConfig):
             bad_orientation = TerminationTermConfig(func=tf.roll_pitch, params={...})
             time_out = TerminationTermConfig(func=tf.max_episode)
     """
+
     pass
 
 
@@ -108,6 +111,7 @@ class EventConfig(BaseConfig):
             reset_dof = EventTermConfig(func=init_dof, mode="reset")
             push_robot = EventTermConfig(func=push, mode="interval", interval_range_s=(2, 20))
     """
+
     pass
 
 
@@ -135,6 +139,7 @@ class ObservationGroupConfig(BaseConfig):
             base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=0.25)
             ...
     """
+
     enable_corruption: bool = True
 
 
@@ -156,22 +161,28 @@ def disable_corruption(observation_cfg) -> None:
 @dataclass
 class PolicyConfig(BaseConfig):
     """Base policy network configuration — common to all algorithms."""
+
     actor_class_name: str = "MLPActor"
     critic_class_name: str = "MLPCritic"
-    actor_kwargs: Dict[str, Any] = field(default_factory=lambda: {
-        "activation": "elu",
-        "ortho_init": True,
-        "hidden_dims": [256, 128, 64],
-    })
-    critic_kwargs: Dict[str, Any] = field(default_factory=lambda: {
-        "activation": "elu",
-        "ortho_init": True,
-        "hidden_dims": [256, 128, 64],
-    })
+    actor_kwargs: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "activation": "elu",
+            "ortho_init": True,
+            "hidden_dims": [256, 128, 64],
+        }
+    )
+    critic_kwargs: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "activation": "elu",
+            "ortho_init": True,
+            "hidden_dims": [256, 128, 64],
+        }
+    )
 
     def to(self, target_cls: type) -> "PolicyConfig":
         """Convert to another PolicyConfig subclass, copying common fields."""
         import dataclasses as dc
+
         base_field_names = {f.name for f in dc.fields(PolicyConfig)}
         kwargs = {k: getattr(self, k) for k in base_field_names}
         return target_cls(**kwargs)
@@ -185,6 +196,7 @@ class PolicyConfig(BaseConfig):
 @dataclass
 class PPOPolicyConfig(PolicyConfig):
     """PPO policy settings."""
+
     init_noise_std: float = 1.0
     distribution_type: str = "gaussian"
     std_type: str = "state_independent"
@@ -193,6 +205,7 @@ class PPOPolicyConfig(PolicyConfig):
 @dataclass
 class SACPolicyConfig(PolicyConfig):
     """SAC policy settings."""
+
     init_noise_std: float = 0.05
     distribution_type: str = "squashed_gaussian"
     log_std_min: float = -20.0
@@ -202,12 +215,14 @@ class SACPolicyConfig(PolicyConfig):
 @dataclass
 class TD3PolicyConfig(PolicyConfig):
     """TD3 policy settings (deterministic — no extra fields)."""
+
     pass
 
 
 @dataclass
 class FastTD3PolicyConfig(PolicyConfig):
     """FastTD3 policy settings (deterministic — no extra fields)."""
+
     pass
 
 
@@ -224,11 +239,14 @@ _POLICY_CONFIG_CLASSES = {
 @dataclass
 class NNConfig(BaseConfig):
     """Neural network configuration (shared)."""
+
     policy: PolicyConfig = field(default_factory=PPOPolicyConfig)
-    state_estimator: Dict[str, Any] = field(default_factory=lambda: {
-        "activation": "relu",
-        "hidden_dims": [256, 128, 64],
-    })
+    state_estimator: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "activation": "relu",
+            "hidden_dims": [256, 128, 64],
+        }
+    )
 
     def __post_init__(self):
         if isinstance(self.policy, dict):
@@ -252,6 +270,7 @@ class LoggingConfig(BaseConfig):
     default and makes new runs self-documenting about what is being
     tracked.
     """
+
     # Per-dim action statistics — ``ActionDist/{mean,std,min,max}/dim_*``.
     # Noisy for high-dim action spaces (e.g. 23-DoF humanoid → 92 scalar
     # keys per iteration).
@@ -266,12 +285,13 @@ class LoggingConfig(BaseConfig):
 @dataclass
 class RunnerConfig(BaseConfig):
     """Runner configuration (shared)."""
+
     checkpoint: int = -1
     log_interval: int = 1
     max_iterations: int = 99999
     init_at_random_ep_len: bool = False
     resume: bool = False
-    resume_path: Optional[str] = None
+    resume_path: str | None = None
     run_name: str = ""
     logger: str = "wandb"
     wandb_project: str = "SimForge"
@@ -294,9 +314,11 @@ class RunnerConfig(BaseConfig):
 
 from rlworld.rl.vis.overlays.hud_items.items import HUDItem
 
+
 @dataclass
 class VisualizationConfig(BaseConfig):
     """Visualization configuration (shared)."""
+
     _EXCLUDE_FROM_SERIALIZATION = ("extra_hud_items",)
 
     show_viewer: bool = False

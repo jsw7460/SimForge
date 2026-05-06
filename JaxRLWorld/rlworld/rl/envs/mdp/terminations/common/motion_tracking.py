@@ -6,14 +6,15 @@ returns a :class:`TerminationResult` and reads the
 :class:`MotionCommand` from
 ``env.command_manager.get_term(command_name)``.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
 import torch
 
-from rlworld.rl.envs.mdp.commands.motion import MotionCommand
 from rlworld.rl.configs.terminations import TerminationResult
+from rlworld.rl.envs.mdp.commands.motion import MotionCommand
 from rlworld.rl.envs.mdp.rewards.common.motion_tracking import _get_body_indexes
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 
@@ -28,7 +29,9 @@ _GRAVITY_W = (0.0, 0.0, -1.0)
 
 
 def bad_anchor_pos_z_only(
-    env: "World", command_name: str, threshold: float,
+    env: World,
+    command_name: str,
+    threshold: float,
 ) -> TerminationResult:
     """Terminate if the robot's anchor Z drifts more than ``threshold`` meters.
 
@@ -41,7 +44,9 @@ def bad_anchor_pos_z_only(
 
 
 def bad_anchor_ori(
-    env: "World", command_name: str, threshold: float,
+    env: World,
+    command_name: str,
+    threshold: float,
 ) -> TerminationResult:
     """Terminate if the anchor's vertical-axis orientation deviates too far.
 
@@ -52,20 +57,23 @@ def bad_anchor_ori(
     """
     cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
     gravity = torch.tensor(
-        _GRAVITY_W, device=env.device, dtype=torch.float32,
+        _GRAVITY_W,
+        device=env.device,
+        dtype=torch.float32,
     ).expand(env.num_envs, 3)
     motion_gz = quat_rotate_inverse_wxyz(cmd.anchor_quat_w, gravity)[:, 2]
     robot_gz = quat_rotate_inverse_wxyz(cmd.robot_anchor_quat_w, gravity)[:, 2]
     return TerminationResult(
-        reset=(motion_gz - robot_gz).abs() > threshold, is_timeout=False,
+        reset=(motion_gz - robot_gz).abs() > threshold,
+        is_timeout=False,
     )
 
 
 def bad_motion_body_pos_z_only(
-    env: "World",
+    env: World,
     command_name: str,
     threshold: float,
-    body_names: "tuple[str, ...] | None" = None,
+    body_names: tuple[str, ...] | None = None,
 ) -> TerminationResult:
     """Terminate if any tracked body's Z error exceeds ``threshold``.
 
@@ -75,9 +83,8 @@ def bad_motion_body_pos_z_only(
     """
     cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
     idx = _get_body_indexes(cmd, body_names)
-    err = torch.abs(
-        cmd.body_pos_relative_w[:, idx, -1] - cmd.robot_body_pos_w[:, idx, -1]
-    )
+    err = torch.abs(cmd.body_pos_relative_w[:, idx, -1] - cmd.robot_body_pos_w[:, idx, -1])
     return TerminationResult(
-        reset=torch.any(err > threshold, dim=-1), is_timeout=False,
+        reset=torch.any(err > threshold, dim=-1),
+        is_timeout=False,
     )

@@ -1,9 +1,9 @@
 from rlworld.rl.algorithms.metrics.base import (
-    BaseMetrics,
     ActorMetrics,
+    BaseMetrics,
     BatchMetrics,
-    MetricType,
     ConsoleMetric,
+    MetricType,
 )
 
 __all__ = [

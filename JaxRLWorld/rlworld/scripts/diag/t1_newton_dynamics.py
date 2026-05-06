@@ -1,4 +1,5 @@
 """Dump joint friction / damping / mass and solver settings for Newton T1 getup."""
+
 from __future__ import annotations
 
 import warp as wp
@@ -20,10 +21,7 @@ def main() -> None:
 
     qd_start = wp.to_torch(m.joint_qd_start).cpu().numpy()
     jfric = wp.to_torch(m.joint_friction).cpu().numpy() if hasattr(m, "joint_friction") else None
-    jdamp = (
-        wp.to_torch(m.joint_damping).cpu().numpy()
-        if hasattr(m, "joint_damping") else None
-    )
+    jdamp = wp.to_torch(m.joint_damping).cpu().numpy() if hasattr(m, "joint_damping") else None
     body_mass = wp.to_torch(m.body_mass).cpu().numpy()
 
     print("\n=== Newton T1 — joint friction / damping (world 0) ===")
@@ -31,8 +29,8 @@ def main() -> None:
     for j in range(joints_per_world):
         name = leaf_name(m.joint_label[j])
         d0 = int(qd_start[j])
-        f = jfric[d0] if jfric is not None else float('nan')
-        d = jdamp[d0] if jdamp is not None else float('nan')
+        f = jfric[d0] if jfric is not None else float("nan")
+        d = jdamp[d0] if jdamp is not None else float("nan")
         print(f"{j:<4} {name:<30} {f:>12.5f} {d:>12.5f}")
 
     print("\n=== Newton T1 — body masses (world 0) ===")
@@ -53,8 +51,16 @@ def main() -> None:
     # Try to peek into the MuJoCo solver
     if hasattr(sm, "solver") and sm.solver is not None:
         s = sm.solver
-        for attr in ("njmax", "nconmax", "impratio", "iterations", "ls_iterations",
-                     "ccd_iterations", "use_mujoco_contacts", "ls_parallel"):
+        for attr in (
+            "njmax",
+            "nconmax",
+            "impratio",
+            "iterations",
+            "ls_iterations",
+            "ccd_iterations",
+            "use_mujoco_contacts",
+            "ls_parallel",
+        ):
             v = getattr(s, attr, None)
             if v is not None:
                 print(f"  solver.{attr}: {v}")

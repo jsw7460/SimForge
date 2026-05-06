@@ -31,21 +31,11 @@ def main():
     cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(FastTD3PolicyConfig)
     cfgs_for_run.reward.reward_terms["raw_action_rate_l2_mjlab"].weight = 0.01
     cfgs_for_run.nn.policy.actor_kwargs.update(
-        {
-            "activation": "relu",
-            "ortho_init": True,
-            "output_gain": 0.01,
-            "hidden_dims": [512, 256, 128]
-        },
+        {"activation": "relu", "ortho_init": True, "output_gain": 0.01, "hidden_dims": [512, 256, 128]},
     )
 
     cfgs_for_run.nn.policy.critic_kwargs.update(
-        {
-            "activation": "relu",
-            "ortho_init": True,
-            "output_gain": 0.01,
-            "hidden_dims": [1024, 512, 256]
-        }
+        {"activation": "relu", "ortho_init": True, "output_gain": 0.01, "hidden_dims": [1024, 512, 256]}
     )
 
     cfgs_for_run.action.clip_actions = (-1.0, 1.0)
@@ -57,7 +47,7 @@ def main():
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

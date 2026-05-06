@@ -12,18 +12,18 @@ import torch
 from rlworld.rl.envs import EpisodeStatsCollector
 from rlworld.rl.evals.policy_wrappers import PolicyWrapper
 from rlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer, resolve_cross_sim_config
-from rlworld.rl.utils.checkpoint import load_runner, load_checkpoint_metadata
+from rlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_runner
 from rlworld.rl.utils.console import (
     Colors,
+    print_error,
     print_header,
-    print_subheader,
+    print_info,
     print_key_value,
     print_path,
+    print_progress,
+    print_subheader,
     print_success,
     print_warning,
-    print_error,
-    print_info,
-    print_progress,
 )
 
 
@@ -74,6 +74,7 @@ class PolicyEvaluator:
         # Resolve policy_path from wandb if needed
         if wandb_run_path is not None:
             from rlworld.rl.utils.wandb_checkpoint import get_wandb_checkpoint
+
             policy_path, was_cached = get_wandb_checkpoint(
                 wandb_run_path=wandb_run_path,
                 iteration=wandb_checkpoint_iter,
@@ -171,9 +172,7 @@ class PolicyEvaluator:
 
         # Build joint permutation for cross-sim eval (multisim checkpoints)
         joint_perm = self._build_joint_permutation(metadata) if self._cross_sim else None
-        self.policy = PolicyWrapper.from_runner(
-            self.runner, self.device, joint_perm=joint_perm
-        )
+        self.policy = PolicyWrapper.from_runner(self.runner, self.device, joint_perm=joint_perm)
 
         # Episode tracker
         self.episode_tracker = EpisodeStatsCollector(
@@ -181,7 +180,7 @@ class PolicyEvaluator:
             max_episode_length=self.env.max_episode_length,
             device=self.env.device,
             gamma=self.eval_cfgs.algorithm.gamma,
-            window_size=self.env.num_envs + 100
+            window_size=self.env.num_envs + 100,
         )
 
         # Setup evaluation tools
@@ -197,14 +196,16 @@ class PolicyEvaluator:
         - Removes interval and reset_dr events
         """
         # Disable observation noise on every group
-        if hasattr(self.eval_cfgs, 'observation'):
+        if hasattr(self.eval_cfgs, "observation"):
             from rlworld.rl.configs.common_config_classes import disable_corruption
+
             disable_corruption(self.eval_cfgs.observation)
 
         # Disable interval and domain randomization events
-        if hasattr(self.eval_cfgs, 'event'):
+        if hasattr(self.eval_cfgs, "event"):
             from rlworld.rl.configs.base_config import iter_terms
             from rlworld.rl.configs.events.event_term_config import EventTermConfig
+
             event_cfg = self.eval_cfgs.event
             for name, term in iter_terms(event_cfg, EventTermConfig).items():
                 if term.mode in ("interval", "reset_dr"):
@@ -268,10 +269,7 @@ class PolicyEvaluator:
                 # In-place update: obs_group values are dicts from YAML,
                 # assigned directly. Managers resolve func strings lazily.
                 cfgs.observation.obs_group = train_obs_group
-                print_info(
-                    "Copied observation terms from checkpoint "
-                    f"(groups: {list(train_obs_group.keys())})"
-                )
+                print_info(f"Copied observation terms from checkpoint (groups: {list(train_obs_group.keys())})")
             # Eval flow always disables corruption afterwards via
             # _apply_eval_defaults; nothing to preserve from the checkpoint
             # snapshot here.
@@ -283,13 +281,10 @@ class PolicyEvaluator:
         # Visualization: native GL viewer always off; viser controlled via overrides.
         cfgs.visualization.show_viewer = False
         cfgs.visualization.record_video = record_video
-        if hasattr(cfgs.visualization, 'video_dir'):
+        if hasattr(cfgs.visualization, "video_dir"):
             cfgs.visualization.video_dir = video_dir
 
-        print_info(
-            f"Cross-sim eval: checkpoint trained on {self._train_sim_type}, "
-            f"evaluating on {self.sim_type}"
-        )
+        print_info(f"Cross-sim eval: checkpoint trained on {self._train_sim_type}, evaluating on {self.sim_type}")
 
         return cfgs
 
@@ -328,14 +323,11 @@ class PolicyEvaluator:
                 f"  Both simulators must use the same robot."
             )
 
-        print_info(
-            f"Eval env dims: actor_obs={env_actor_obs}, "
-            f"critic_obs={env_critic_obs}, actions={env_action_dim}"
-        )
+        print_info(f"Eval env dims: actor_obs={env_actor_obs}, critic_obs={env_critic_obs}, actions={env_action_dim}")
         print_warning(
-            f"If weight loading fails with shape mismatch, your eval obs terms "
-            f"differ from training. Pass the same obs terms via "
-            f"eval_cfgs.observation.obs_group."
+            "If weight loading fails with shape mismatch, your eval obs terms "
+            "differ from training. Pass the same obs terms via "
+            "eval_cfgs.observation.obs_group."
         )
 
     def _build_joint_permutation(self, metadata: dict):
@@ -349,7 +341,8 @@ class PolicyEvaluator:
         Returns _JointPermutation if reordering is needed, else None.
         """
         from rlworld.rl.envs.multi_sim_world import (
-            _JointPermutation, MultiSimWorld,
+            MultiSimWorld,
+            _JointPermutation,
         )
 
         eval_names = list(self.env.act_manager.actuated_joint_names)
@@ -377,7 +370,8 @@ class PolicyEvaluator:
 
         # Build permutation.
         joint_slices = MultiSimWorld._find_joint_obs_slices(
-            self.env, self.env.num_actions,
+            self.env,
+            self.env.num_actions,
         )
         obs_dims = self.env.obs_manager.calculate_obs_dim()
 
@@ -388,19 +382,17 @@ class PolicyEvaluator:
             obs_group_dims=obs_dims,
             device=self.device,
         )
-        print_info(
-            f"Joint permutation built: {len(canonical_names)} joints "
-            f"(canonical → {self.sim_type})"
-        )
+        print_info(f"Joint permutation built: {len(canonical_names)} joints (canonical → {self.sim_type})")
         return perm
 
     def _resize_mppi_state(self) -> None:
         """Resize MPPI prev_mean to match eval num_envs (may differ from training)."""
-        if not hasattr(self.runner.alg, '_prev_mean'):
+        if not hasattr(self.runner.alg, "_prev_mean"):
             return
         _, horizon, action_dim = self.runner.alg._prev_mean.shape
         self.runner.alg._prev_mean = np.zeros(
-            (self.env.num_envs, horizon, action_dim), dtype=np.float32,
+            (self.env.num_envs, horizon, action_dim),
+            dtype=np.float32,
         )
 
     def _signal_handler(self, sig, frame):
@@ -411,7 +403,7 @@ class PolicyEvaluator:
 
     def cleanup(self):
         """Perform cleanup tasks — delegate to initializer."""
-        if hasattr(self, 'env') and hasattr(self, '_init'):
+        if hasattr(self, "env") and hasattr(self, "_init"):
             self._init.cleanup(self.env)
 
     def _generate_video_dir(self, policy_path: str, record_video: bool, video_dir: str | None) -> str:
@@ -419,7 +411,7 @@ class PolicyEvaluator:
         if record_video and video_dir is None:
             dir_path = os.path.dirname(policy_path)
             filename = os.path.basename(policy_path)
-            step_str = ''.join(filter(str.isdigit, filename))
+            step_str = "".join(filter(str.isdigit, filename))
             video_subdir = os.path.join(dir_path, "videos")
             os.makedirs(video_subdir, exist_ok=True)
 
@@ -453,7 +445,10 @@ class PolicyEvaluator:
 
         play_scene = self._create_play_scene()
         viewer = ViserPlayViewer(
-            env=self.env, play_scene=play_scene, policy=self.policy, port=port,
+            env=self.env,
+            play_scene=play_scene,
+            policy=self.policy,
+            port=port,
         )
         viewer.run()
 
@@ -476,7 +471,8 @@ class PolicyEvaluator:
         try:
             print_subheader("Running Evaluation")
             new_obs, new_robot_states, eval_stats = self._run_evaluation_loop(
-                obs, robot_states,
+                obs,
+                robot_states,
                 track_success=self._init.supports_success_tracking,
             )
 
@@ -517,10 +513,7 @@ class PolicyEvaluator:
 
     @torch.no_grad()
     def _run_evaluation_loop(
-        self,
-        obs: torch.Tensor,
-        robot_states: torch.Tensor | None,
-        track_success: bool = False
+        self, obs: torch.Tensor, robot_states: torch.Tensor | None, track_success: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor | None, dict[str, Any]]:
         """
         Unified evaluation loop for all simulators.
@@ -553,19 +546,13 @@ class PolicyEvaluator:
 
             if current_step % 50 == 0:
                 completed = torch.sum(eval_dones).item()
-                print_progress(
-                    completed, self.env.num_envs,
-                    prefix="Progress",
-                    suffix=f"({current_step} steps)"
-                )
+                print_progress(completed, self.env.num_envs, prefix="Progress", suffix=f"({current_step} steps)")
 
             # Optional mid-episode recording stop (Genesis writes
             # frame-by-frame and needs an early stop). Other backends
             # return False here and the counter stays untouched.
             if self.record_steps is not None:
-                if self._init.try_stop_mid_episode_recording(
-                    self.env, self.record_steps
-                ):
+                if self._init.try_stop_mid_episode_recording(self.env, self.record_steps):
                     self.record_steps = None
 
         print()  # New line after progress bar
@@ -573,8 +560,8 @@ class PolicyEvaluator:
 
         if track_success:
             success_list = episode_success.cpu().tolist()
-            eval_stats['successes'] = success_list
-            eval_stats['success_rate'] = float(np.mean(success_list))
+            eval_stats["successes"] = success_list
+            eval_stats["success_rate"] = float(np.mean(success_list))
 
         return obs, robot_states, eval_stats
 
@@ -586,9 +573,7 @@ class PolicyEvaluator:
 
         returns_per_type: dict[str, list[float]] = {}
         for reward_type in self.episode_tracker.return_history_per_type.keys():
-            returns_per_type[reward_type] = self.episode_tracker.get_return_history_per_type(
-                reward_type
-            )
+            returns_per_type[reward_type] = self.episode_tracker.get_return_history_per_type(reward_type)
 
         if len(returns) > 0:
             mean_return = float(np.mean(returns))
@@ -614,32 +599,32 @@ class PolicyEvaluator:
         for reward_type, type_returns in returns_per_type.items():
             if len(type_returns) > 0:
                 reward_breakdown[reward_type] = {
-                    'mean': float(np.mean(type_returns)),
-                    'std': float(np.std(type_returns)),
-                    'min': float(np.min(type_returns)),
-                    'max': float(np.max(type_returns))
+                    "mean": float(np.mean(type_returns)),
+                    "std": float(np.std(type_returns)),
+                    "min": float(np.min(type_returns)),
+                    "max": float(np.max(type_returns)),
                 }
 
         return {
-            'mean_return': mean_return,
-            'std_return': std_return,
-            'min_return': min_return,
-            'max_return': max_return,
-            'mean_discounted_return': mean_discounted_return,
-            'std_discounted_return': std_discounted_return,
-            'min_discounted_return': min_discounted_return,
-            'max_discounted_return': max_discounted_return,
-            'gamma': self.episode_tracker.gamma,
-            'mean_length': mean_length,
-            'std_length': std_length,
-            'min_length': min_length,
-            'max_length': max_length,
-            'num_episodes': len(returns),
-            'num_envs': self.env.num_envs,
-            'returns': returns,
-            'discounted_returns': discounted_returns,
-            'lengths': lengths,
-            'reward_breakdown': reward_breakdown
+            "mean_return": mean_return,
+            "std_return": std_return,
+            "min_return": min_return,
+            "max_return": max_return,
+            "mean_discounted_return": mean_discounted_return,
+            "std_discounted_return": std_discounted_return,
+            "min_discounted_return": min_discounted_return,
+            "max_discounted_return": max_discounted_return,
+            "gamma": self.episode_tracker.gamma,
+            "mean_length": mean_length,
+            "std_length": std_length,
+            "min_length": min_length,
+            "max_length": max_length,
+            "num_episodes": len(returns),
+            "num_envs": self.env.num_envs,
+            "returns": returns,
+            "discounted_returns": discounted_returns,
+            "lengths": lengths,
+            "reward_breakdown": reward_breakdown,
         }
 
     def _print_evaluation_summary(self, stats: dict[str, Any]) -> None:
@@ -651,8 +636,8 @@ class PolicyEvaluator:
         print(f"    Completed: {Colors.GREEN}{stats['num_episodes']}{Colors.RESET} / {stats['num_envs']}")
 
         # Success rate (if available)
-        if 'success_rate' in stats:
-            success_pct = stats['success_rate'] * 100
+        if "success_rate" in stats:
+            success_pct = stats["success_rate"] * 100
             print(f"\n  {Colors.BOLD}Success Rate{Colors.RESET}")
             print(
                 f"    Rate: {Colors.GREEN}{success_pct:5.1f}%{Colors.RESET} "
@@ -686,11 +671,11 @@ class PolicyEvaluator:
         )
 
         # Reward breakdown
-        if stats['reward_breakdown']:
+        if stats["reward_breakdown"]:
             print(f"\n  {Colors.BOLD}Reward Breakdown{Colors.RESET}")
             print(f"    {'Type':<25} {'Mean':>10} {'± Std':>10} {'Min':>10} {'Max':>10}")
             print(f"    {'-' * 65}")
-            for reward_type, type_stats in sorted(stats['reward_breakdown'].items()):
+            for reward_type, type_stats in sorted(stats["reward_breakdown"].items()):
                 print(
                     f"    {reward_type:<25} {Colors.GREEN}{type_stats['mean']:>10.2f}{Colors.RESET} "
                     f"± {type_stats['std']:>7.2f} "
@@ -717,49 +702,49 @@ class PolicyEvaluator:
             return obj
 
         save_data = {
-            'summary': {
-                'simulator': self.sim_type,
+            "summary": {
+                "simulator": self.sim_type,
                 # Undiscounted return
-                'mean_return': stats['mean_return'],
-                'std_return': stats['std_return'],
-                'min_return': stats['min_return'],
-                'max_return': stats['max_return'],
+                "mean_return": stats["mean_return"],
+                "std_return": stats["std_return"],
+                "min_return": stats["min_return"],
+                "max_return": stats["max_return"],
                 # Discounted return
-                'mean_discounted_return': stats.get('mean_discounted_return'),
-                'std_discounted_return': stats.get('std_discounted_return'),
-                'min_discounted_return': stats.get('min_discounted_return'),
-                'max_discounted_return': stats.get('max_discounted_return'),
-                'gamma': stats.get('gamma'),
+                "mean_discounted_return": stats.get("mean_discounted_return"),
+                "std_discounted_return": stats.get("std_discounted_return"),
+                "min_discounted_return": stats.get("min_discounted_return"),
+                "max_discounted_return": stats.get("max_discounted_return"),
+                "gamma": stats.get("gamma"),
                 # Episode length
-                'mean_length': stats['mean_length'],
-                'std_length': stats['std_length'],
-                'min_length': stats['min_length'],
-                'max_length': stats['max_length'],
+                "mean_length": stats["mean_length"],
+                "std_length": stats["std_length"],
+                "min_length": stats["min_length"],
+                "max_length": stats["max_length"],
                 # Counts
-                'num_episodes': stats['num_episodes'],
-                'num_envs': stats['num_envs'],
+                "num_episodes": stats["num_episodes"],
+                "num_envs": stats["num_envs"],
                 # Success rate
-                'success_rate': stats.get('success_rate'),
-                'num_successes': sum(stats['successes']) if 'successes' in stats else None,
+                "success_rate": stats.get("success_rate"),
+                "num_successes": sum(stats["successes"]) if "successes" in stats else None,
             },
-            'reward_breakdown': stats['reward_breakdown'],
-            'episode_returns': stats['returns'],
-            'episode_discounted_returns': stats.get('discounted_returns'),
-            'episode_lengths': stats['lengths'],
-            'episode_successes': stats.get('successes'),
-            'metadata': {
-                'policy_path': os.path.abspath(self.policy_path),
-                'timestamp': datetime.now().isoformat(),
-                'seed': self.seed,
-                'cross_sim': self._cross_sim,
-                'train_sim': getattr(self, '_train_sim_type', None) if self._cross_sim else None,
-                'eval_sim': self.sim_type,
-            }
+            "reward_breakdown": stats["reward_breakdown"],
+            "episode_returns": stats["returns"],
+            "episode_discounted_returns": stats.get("discounted_returns"),
+            "episode_lengths": stats["lengths"],
+            "episode_successes": stats.get("successes"),
+            "metadata": {
+                "policy_path": os.path.abspath(self.policy_path),
+                "timestamp": datetime.now().isoformat(),
+                "seed": self.seed,
+                "cross_sim": self._cross_sim,
+                "train_sim": getattr(self, "_train_sim_type", None) if self._cross_sim else None,
+                "eval_sim": self.sim_type,
+            },
         }
 
         save_data = convert_to_native(save_data)
 
-        with open(results_file, 'w') as f:
+        with open(results_file, "w") as f:
             json.dump(save_data, f, indent=2)
 
         print_success(f"Results saved to: {results_file}")

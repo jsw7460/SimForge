@@ -4,6 +4,7 @@ All functions accept any ``World`` subclass and read state exclusively
 through ``env.get_robot_data(entity_name)`` or
 ``env.contact_manager``, making them simulator-agnostic.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -65,9 +66,7 @@ def base_quat(env: World, entity_name: str = "robot") -> torch.Tensor:
 
 
 @EnvStepCache()
-def base_euler(
-    env: World, entity_name: str = "robot", degrees: bool = False
-) -> torch.Tensor:
+def base_euler(env: World, entity_name: str = "robot", degrees: bool = False) -> torch.Tensor:
     """Base orientation as Euler angles ``(roll, pitch, yaw)`` in radians.
 
     Args:
@@ -155,8 +154,8 @@ def dof_pos_nominal_difference(env: World, entity_name: str = "robot") -> torch.
 @EnvStepCache()
 def foot_height(
     env: World,
-    body_names: "tuple[str, ...] | None" = None,
-    site_names: "tuple[str, ...] | None" = None,
+    body_names: tuple[str, ...] | None = None,
+    site_names: tuple[str, ...] | None = None,
     entity_name: str = "robot",
 ) -> torch.Tensor:
     """Z-coordinate of each foot above the world origin.
@@ -267,7 +266,7 @@ command = all_commands
 def foot_air_time(
     env: World,
     contact_group: str = "feet_ground_contact",
-    body_names: "tuple[str, ...] | None" = None,
+    body_names: tuple[str, ...] | None = None,
     use_last: bool = False,
 ) -> torch.Tensor:
     """Per-foot air-time observation.
@@ -297,7 +296,7 @@ def foot_air_time(
 def foot_contact_indicator(
     env: World,
     contact_group: str = "feet_ground_contact",
-    body_names: "tuple[str, ...] | None" = None,
+    body_names: tuple[str, ...] | None = None,
 ) -> torch.Tensor:
     """Binary per-foot contact indicator (1.0 = in contact).
 
@@ -312,7 +311,7 @@ def foot_contact_indicator(
 def foot_contact_forces(
     env: World,
     contact_group: str = "feet_ground_contact",
-    body_names: "tuple[str, ...] | None" = None,
+    body_names: tuple[str, ...] | None = None,
 ) -> torch.Tensor:
     """Per-foot 3-D contact force, log-scaled and flattened.
 

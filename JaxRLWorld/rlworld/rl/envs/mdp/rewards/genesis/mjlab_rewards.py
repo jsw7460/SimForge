@@ -8,14 +8,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+from genesis.utils.geom import inv_quat, transform_by_quat
 
-from genesis.utils.geom import transform_by_quat, inv_quat
-from rlworld.rl.envs.mdp.observations.genesis import proprioception
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     VariablePostureTracker,
     penalize_body_ang_vel_xy,
-    penalize_contact_force_count,
     penalize_feet_clearance,
     penalize_feet_slip,
     penalize_joint_pos_limits_l1,
@@ -31,8 +29,9 @@ if TYPE_CHECKING:
 # track_lin_vel_mjlab
 # ============================================================
 
+
 def track_lin_vel_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     std: float,
     entity_name: str = "robot",
 ) -> torch.Tensor:
@@ -50,10 +49,13 @@ def track_lin_vel_mjlab(
         Reward tensor of shape (num_envs,).
     """
     # Get commanded velocity (xy only)
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-    ], dim=1)  # (num_envs, 2)
+    command = torch.stack(
+        [
+            env.command_manager.lin_vel_x,
+            env.command_manager.lin_vel_y,
+        ],
+        dim=1,
+    )  # (num_envs, 2)
 
     # Get actual velocity in body frame
     actual = env.robot_data.root_link_lin_vel_b  # (num_envs, 3)
@@ -63,15 +65,16 @@ def track_lin_vel_mjlab(
     z_error = torch.square(actual[:, 2])
     lin_vel_error = xy_error + z_error
 
-    return torch.exp(-lin_vel_error / (std ** 2))
+    return torch.exp(-lin_vel_error / (std**2))
 
 
 # ============================================================
 # track_ang_vel_mjlab
 # ============================================================
 
+
 def track_ang_vel_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     std: float,
     entity_name: str = "robot",
     base_name: str = "base",
@@ -101,15 +104,16 @@ def track_ang_vel_mjlab(
     xy_error = torch.sum(torch.square(actual[:, :2]), dim=1)
     ang_vel_error = z_error + xy_error
 
-    return torch.exp(-ang_vel_error / (std ** 2))
+    return torch.exp(-ang_vel_error / (std**2))
 
 
 # ============================================================
 # flat_orientation_mjlab
 # ============================================================
 
+
 def flat_orientation_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     std: float,
     body_name: str | None = None,
     entity_name: str = "robot",
@@ -145,12 +149,13 @@ def flat_orientation_mjlab(
         projected_gravity_b = env.get_robot_data(entity_name).projected_gravity_b  # (num_envs, 3)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
 
-    return torch.exp(-xy_squared / (std ** 2))
+    return torch.exp(-xy_squared / (std**2))
 
 
 # ============================================================
 # variable_posture
 # ============================================================
+
 
 class variable_posture:
     """Thin wrapper around ``common.VariablePostureTracker``.
@@ -165,7 +170,7 @@ class variable_posture:
 
     def __init__(
         self,
-        env: "GenesisEnv",
+        env: GenesisEnv,
         std_standing: dict[str, float],
         std_walking: dict[str, float],
         std_running: dict[str, float],
@@ -184,7 +189,7 @@ class variable_posture:
             running_threshold=running_threshold,
         )
 
-    def __call__(self, env: "GenesisEnv") -> torch.Tensor:
+    def __call__(self, env: GenesisEnv) -> torch.Tensor:
         return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
@@ -195,8 +200,9 @@ class variable_posture:
 # body_ang_vel_penalty_mjlab
 # ============================================================
 
+
 def body_ang_vel_penalty_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     body_name: str,
     entity_name: str = "robot",
 ) -> torch.Tensor:
@@ -224,8 +230,9 @@ def body_ang_vel_penalty_mjlab(
 # feet_air_time_mjlab
 # ============================================================
 
+
 def feet_air_time_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     threshold_min: float = 0.05,
     threshold_max: float = 0.5,
     command_threshold: float = 0.5,
@@ -252,11 +259,14 @@ def feet_air_time_mjlab(
     reward = torch.sum(in_range.float(), dim=1)
 
     # Scale by command magnitude
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
+    command = torch.stack(
+        [
+            env.command_manager.lin_vel_x,
+            env.command_manager.lin_vel_y,
+            env.command_manager.ang_vel,
+        ],
+        dim=1,
+    )
 
     linear_norm = torch.norm(command[:, :2], dim=1)
     angular_norm = torch.abs(command[:, 2])
@@ -270,8 +280,9 @@ def feet_air_time_mjlab(
 # feet_clearance_mjlab
 # ============================================================
 
+
 def feet_clearance_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     feet_links: str | list[str],
     target_height: float,
     command_threshold: float = 0.01,
@@ -297,6 +308,7 @@ def feet_clearance_mjlab(
 # feet_swing_height_mjlab
 # ============================================================
 
+
 class feet_swing_height_mjlab:
     """Thin wrapper around ``common.FeetSwingHeightTracker`` (Genesis legacy reset).
 
@@ -308,7 +320,7 @@ class feet_swing_height_mjlab:
 
     def __init__(
         self,
-        env: "GenesisEnv",
+        env: GenesisEnv,
         feet_links: str | list[str],
         target_height: float,
         command_threshold: float = 0.05,
@@ -327,7 +339,7 @@ class feet_swing_height_mjlab:
             reset_mode="zero",
         )
 
-    def __call__(self, env: "GenesisEnv") -> torch.Tensor:
+    def __call__(self, env: GenesisEnv) -> torch.Tensor:
         return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
@@ -338,8 +350,9 @@ class feet_swing_height_mjlab:
 # feet_slip_mjlab
 # ============================================================
 
+
 def feet_slip_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     feet_links: str | list[str],
     command_threshold: float = 0.05,
     entity_name: str = "robot",
@@ -365,8 +378,9 @@ def feet_slip_mjlab(
 # soft_landing_mjlab
 # ============================================================
 
+
 def soft_landing_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     command_threshold: float = 0.05,
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
@@ -386,8 +400,9 @@ def soft_landing_mjlab(
 # joint_pos_limits_mjlab
 # ============================================================
 
+
 def joint_pos_limits_mjlab(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     soft_limit_factor: float = 1.0,
     entity_name: str = "robot",
 ) -> torch.Tensor:
@@ -408,16 +423,15 @@ def joint_pos_limits_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return penalize_joint_pos_limits_l1(
-        env, soft_limit_factor=soft_limit_factor, entity_name=entity_name
-    )
+    return penalize_joint_pos_limits_l1(env, soft_limit_factor=soft_limit_factor, entity_name=entity_name)
 
 
 # ============================================================
 # action_rate_l2_mjlab
 # ============================================================
 
-def raw_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:
+
+def raw_action_rate_l2_mjlab(env: GenesisEnv) -> torch.Tensor:
     """Penalize the rate of change of raw actions (L2 squared).
 
     Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
@@ -425,7 +439,8 @@ def raw_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:
     """
     return raw_action_rate_l2(env)
 
-def processed_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:
+
+def processed_action_rate_l2_mjlab(env: GenesisEnv) -> torch.Tensor:
     """Penalize the rate of change of processed actions using L2 squared kernel.
 
     Matches mjlab.envs.mdp.action_rate_l2 exactly.
@@ -437,7 +452,4 @@ def processed_action_rate_l2_mjlab(env: "GenesisEnv") -> torch.Tensor:
         Penalty tensor of shape (num_envs,).
     """
 
-    return -torch.sum(
-        torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions),
-        dim=1
-    )
+    return -torch.sum(torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions), dim=1)

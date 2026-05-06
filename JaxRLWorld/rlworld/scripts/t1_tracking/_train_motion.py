@@ -7,6 +7,7 @@ clip name. The preset (:class:`T1TrackingConfig`) is reused unchanged
 so wandb runs and checkpoints stay separated by clip without forking
 the preset itself.
 """
+
 from __future__ import annotations
 
 from rlworld.rl.configs.presets.t1_tracking.base import T1TrackingConfig

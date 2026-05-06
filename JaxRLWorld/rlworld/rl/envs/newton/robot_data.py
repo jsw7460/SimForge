@@ -8,6 +8,7 @@ quaternion conversion.
 Newton uses **xyzw** quaternions; the protocol uses **wxyz**.
 Newton velocities are in **world frame**; body-frame properties rotate them.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -19,8 +20,9 @@ from torch import Tensor
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
-    from newton.selection import ArticulationView
     from newton import State
+    from newton.selection import ArticulationView
+
     from rlworld.rl.envs.newton.newton_env import NewtonEnv
 
 
@@ -29,8 +31,8 @@ class NewtonRobotData:
 
     def __init__(
         self,
-        env: "NewtonEnv",
-        view: "ArticulationView",
+        env: NewtonEnv,
+        view: ArticulationView,
         default_joint_pos: Tensor | None = None,
     ) -> None:
         self._env = env
@@ -43,24 +45,28 @@ class NewtonRobotData:
     # ------------------------------------------------------------------
 
     @property
-    def _state(self) -> "State":
+    def _state(self) -> State:
         return self._env.scene_manager.state
 
     def _get_gravity_vec(self) -> Tensor:
         if self._gravity_vec is None:
-            self._gravity_vec = torch.tensor(
-                [[0.0, 0.0, -1.0]],
-                device=self._env.device,
-                dtype=torch.float32,
-            ).expand(self._env.num_envs, -1).contiguous()
+            self._gravity_vec = (
+                torch.tensor(
+                    [[0.0, 0.0, -1.0]],
+                    device=self._env.device,
+                    dtype=torch.float32,
+                )
+                .expand(self._env.num_envs, -1)
+                .contiguous()
+            )
         return self._gravity_vec
 
-    def _root_transform_floats(self, state: "State") -> Tensor:
+    def _root_transform_floats(self, state: State) -> Tensor:
         """(W, 7) float tensor from root transforms."""
         wp_arr = self._view.get_root_transforms(state)
         return wp.to_torch(wp_arr).reshape(-1, 7)
 
-    def _root_velocity_floats(self, state: "State") -> Tensor:
+    def _root_velocity_floats(self, state: State) -> Tensor:
         """(W, 6) float tensor from root velocities."""
         wp_arr = self._view.get_root_velocities(state)
         return wp.to_torch(wp_arr).reshape(-1, 6)
@@ -69,32 +75,32 @@ class NewtonRobotData:
     # Read: raw state (used by observations, event terms, etc.)
     # ------------------------------------------------------------------
 
-    def dof_positions(self, state: "State") -> Tensor:
+    def dof_positions(self, state: State) -> Tensor:
         """Joint coordinate positions. Shape: (W, joint_coord_count)."""
         return wp.to_torch(self._view.get_dof_positions(state)).squeeze(1)
 
-    def dof_velocities(self, state: "State") -> Tensor:
+    def dof_velocities(self, state: State) -> Tensor:
         """Joint coordinate velocities. Shape: (W, joint_dof_count)."""
         return wp.to_torch(self._view.get_dof_velocities(state)).squeeze(1)
 
-    def root_pos_w(self, state: "State") -> Tensor:
+    def root_pos_w(self, state: State) -> Tensor:
         """Root position in world frame. Shape: (W, 3)."""
         return self._root_transform_floats(state)[:, 0:3]
 
-    def root_quat_wxyz(self, state: "State") -> Tensor:
+    def root_quat_wxyz(self, state: State) -> Tensor:
         """Root quaternion in wxyz convention. Shape: (W, 4)."""
         xyzw = self._root_transform_floats(state)[:, 3:7]
         return xyzw[:, [3, 0, 1, 2]]
 
-    def root_quat_xyzw(self, state: "State") -> Tensor:
+    def root_quat_xyzw(self, state: State) -> Tensor:
         """Root quaternion in xyzw convention (Newton native). Shape: (W, 4)."""
         return self._root_transform_floats(state)[:, 3:7]
 
-    def root_lin_vel_w(self, state: "State") -> Tensor:
+    def root_lin_vel_w(self, state: State) -> Tensor:
         """Root linear velocity in world frame. Shape: (W, 3)."""
         return self._root_velocity_floats(state)[:, 0:3]
 
-    def root_ang_vel_w(self, state: "State") -> Tensor:
+    def root_ang_vel_w(self, state: State) -> Tensor:
         """Root angular velocity in world frame. Shape: (W, 3)."""
         return self._root_velocity_floats(state)[:, 3:6]
 
@@ -175,7 +181,7 @@ class NewtonRobotData:
         return qfrc[:, self._env.act_manager.indexing.newton_qd_indices]
 
     @property
-    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Hard joint position limits in canonical actuated order.
 
         Reads ``model.joint_limit_lower`` / ``joint_limit_upper`` (which
@@ -194,7 +200,7 @@ class NewtonRobotData:
         return lower_all[qd_indices], upper_all[qd_indices]
 
     @property
-    def soft_joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Soft joint position limits (hard * 0.9).
 
         Newton only stores hard limits; the soft flavour is hard ×
@@ -218,13 +224,11 @@ class NewtonRobotData:
         entity prefix (e.g. ``"g1_29dof/torso_link"``).
         """
         from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
         cache = get_cache(self._env)
         indices = cache.get_body_indices(body_name)
         if not indices:
-            raise ValueError(
-                f"Body name {body_name!r} not found in Newton model. "
-                f"Available bodies: {cache.body_names}"
-            )
+            raise ValueError(f"Body name {body_name!r} not found in Newton model. Available bodies: {cache.body_names}")
         return indices[0]
 
     def body_ang_vel_w(self, body_index: int) -> Tensor:
@@ -250,6 +254,7 @@ class NewtonRobotData:
         — note Newton's native quaternion is **xyzw**.
         """
         from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
         cache = get_cache(self._env)
         state = self._env.scene_manager.state
         return wp.to_torch(state.body_q).view(self._env.num_envs, cache.bodies_per_env, 7)
@@ -262,6 +267,7 @@ class NewtonRobotData:
         — linear velocity first, then angular, both world frame.
         """
         from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
         cache = get_cache(self._env)
         state = self._env.scene_manager.state
         return wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
@@ -297,7 +303,7 @@ class NewtonRobotData:
     # Per-name body/site reads
     # ------------------------------------------------------------------
 
-    def _resolve_body_indices(self, names: "list[str]") -> "list[int]":
+    def _resolve_body_indices(self, names: list[str]) -> list[int]:
         """Resolve a list of body names to per-env body indices.
 
         Uses the singleton ``NewtonBodyCache``. Names should be the
@@ -313,28 +319,25 @@ class NewtonRobotData:
         for name in names:
             indices = cache.get_body_indices(name)
             if not indices:
-                raise ValueError(
-                    f"Body name {name!r} not found in Newton model. "
-                    f"Available bodies: {cache.body_names}"
-                )
+                raise ValueError(f"Body name {name!r} not found in Newton model. Available bodies: {cache.body_names}")
             out.append(indices[0])
         return out
 
-    def body_pos_w(self, names: "list[str]") -> Tensor:
+    def body_pos_w(self, names: list[str]) -> Tensor:
         idxs = self._resolve_body_indices(list(names))
         return self.body_pos_w_all[:, idxs, :]
 
-    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def body_lin_vel_w(self, names: list[str]) -> Tensor:
         idxs = self._resolve_body_indices(list(names))
         return self.body_lin_vel_w_all[:, idxs, :]
 
-    def site_pos_w(self, names: "list[str]") -> Tensor:
+    def site_pos_w(self, names: list[str]) -> Tensor:
         raise NotImplementedError(
             "NewtonRobotData does not implement site_pos_w. Newton has "
             "no equivalent of MuJoCo sites — use body_pos_w with body names."
         )
 
-    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def site_lin_vel_w(self, names: list[str]) -> Tensor:
         raise NotImplementedError(
             "NewtonRobotData does not implement site_lin_vel_w. Newton has "
             "no equivalent of MuJoCo sites — use body_lin_vel_w with body names."
@@ -363,8 +366,8 @@ class NewtonRobotData:
         ignored (Newton has no built-in angular momentum sensor).
         """
         from rlworld.rl.envs.mdp.observations.newton.state import (
-            _quat_rotate_inverse,
             _quat_rotate,
+            _quat_rotate_inverse,
         )
         from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
@@ -388,4 +391,3 @@ class NewtonRobotData:
         ang_momentum_world = _quat_rotate(body_quat_xyzw, ang_momentum_body)
 
         return torch.sum(ang_momentum_world, dim=1)  # (num_envs, 3)
-

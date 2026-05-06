@@ -9,6 +9,7 @@ paths — length-1 for single-clip, length >= 2 for multi-motion). Default
 points at the Gangnam Style NPZ; edit the preset or subclass it to use
 a different clip set.
 """
+
 from rlworld.rl.configs.presets.g1_tracking.base import G1TrackingConfig
 from rlworld.rl.runners import BaseRunner
 

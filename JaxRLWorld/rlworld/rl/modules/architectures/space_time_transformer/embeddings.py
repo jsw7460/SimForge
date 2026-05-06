@@ -21,6 +21,7 @@ And a relational embedding for the body × body attention bias:
   attention has a continuous, head-specific tree-locality prior (vs.
   the old hard 0/1 adjacency mask which only allowed direct neighbors).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -93,7 +94,7 @@ class TraversalPositionalEmbedding(eqx.Module):
 
     def __init__(
         self,
-        kinematic_tree: "KinematicTree",
+        kinematic_tree: KinematicTree,
         embed_dim: int,
         *,
         key: jax.Array,
@@ -121,7 +122,7 @@ class TraversalPositionalEmbedding(eqx.Module):
 
     @staticmethod
     def _compute_traversals(
-        tree: "KinematicTree",
+        tree: KinematicTree,
     ) -> tuple[list[int], list[int], list[int]]:
         """Compute pre/in/post-order DFS indices for each node.
 
@@ -170,8 +171,8 @@ class TraversalPositionalEmbedding(eqx.Module):
 
     def __call__(self) -> jax.Array:
         """Return ``(num_bodies, embed_dim)``."""
-        pre = self.pre_embedding[self.pre_order]    # (N, D//3)
-        ino = self.in_embedding[self.in_order]      # (N, D//3)
+        pre = self.pre_embedding[self.pre_order]  # (N, D//3)
+        ino = self.in_embedding[self.in_order]  # (N, D//3)
         post = self.post_embedding[self.post_order]  # (N, D//3)
         combined = jnp.concatenate([pre, ino, post], axis=-1)  # (N, 3*(D//3))
         if self.extra_proj is not None:
@@ -205,7 +206,7 @@ class GraphRelationalEmbedding(eqx.Module):
 
     def __init__(
         self,
-        kinematic_tree: "KinematicTree",
+        kinematic_tree: KinematicTree,
         num_heads: int = 1,
         use_laplacian: bool = True,
         use_spd: bool = True,
@@ -233,8 +234,7 @@ class GraphRelationalEmbedding(eqx.Module):
 
         if not feats:
             raise ValueError(
-                "GraphRelationalEmbedding requires at least one of "
-                "use_laplacian / use_spd / use_ppr to be True."
+                "GraphRelationalEmbedding requires at least one of use_laplacian / use_spd / use_ppr to be True."
             )
 
         self.feature_names = tuple(names)

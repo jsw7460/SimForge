@@ -27,6 +27,7 @@ Run::
     jaxpy JaxRLWorld/rlworld/scripts/imitation/npmp/eval_t1_npmp.py \
         --wandb_run_path jsw7460/T1_NPMP/abc123 --play --port 2026
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,42 +47,56 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate trained NPMP")
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument(
-        "--policy_path", type=str,
+        "--policy_path",
+        type=str,
         help="Local NPMP checkpoint dir (contains model.eqx + npmp_meta.yaml).",
     )
     src.add_argument(
-        "--wandb_run_path", type=str,
+        "--wandb_run_path",
+        type=str,
         help="WandB run path 'entity/project/run_id' for an NPMP training run.",
     )
     parser.add_argument(
-        "--wandb_checkpoint_iter", type=int, default=None,
+        "--wandb_checkpoint_iter",
+        type=int,
+        default=None,
         help="Specific NPMP iteration to pull from wandb (default: latest).",
     )
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
-        "--eval", action="store_true", default=True,
+        "--eval",
+        action="store_true",
+        default=True,
         help="Batch deterministic eval (default).",
     )
     mode.add_argument(
-        "--play", action="store_true",
+        "--play",
+        action="store_true",
         help="Launch viser interactive viewer instead of batch eval.",
     )
 
     parser.add_argument(
-        "--num_envs", type=int, default=90,
+        "--num_envs",
+        type=int,
+        default=90,
         help="Env count for eval (must be ≥ 9 for per-motion split).",
     )
     parser.add_argument(
-        "--num_steps", type=int, default=500,
+        "--num_steps",
+        type=int,
+        default=500,
         help="Eval rollout length in env steps.",
     )
     parser.add_argument(
-        "--port", type=int, default=2026,
+        "--port",
+        type=int,
+        default=2026,
         help="Viser port (--play mode).",
     )
     parser.add_argument(
-        "--with_experts", action="store_true",
+        "--with_experts",
+        action="store_true",
         help=(
             "Also load the 9 T1 tracking experts (from train_t1_npmp.py's "
             "EXPERT_REFS) to compute the action-gap diagnostic during eval."
@@ -125,10 +140,7 @@ def main() -> None:
         print(f"Loaded {len(expert_paths)} experts for action-gap eval.")
 
     if args.play:
-        print(
-            f"Launching viser viewer on port {args.port}. "
-            "Use the Motion tab to switch the tracked clip."
-        )
+        print(f"Launching viser viewer on port {args.port}. Use the Motion tab to switch the tracked clip.")
         evaluator.play(port=args.port)
     else:
         stats = evaluator.evaluate(num_steps=args.num_steps)

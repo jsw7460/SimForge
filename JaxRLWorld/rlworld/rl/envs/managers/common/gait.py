@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Protocol
 import torch
 
 from rlworld.rl.envs.managers.base import BaseManager
-from rlworld.rl.utils.resolve import resolve_callable
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -28,7 +27,8 @@ if TYPE_CHECKING:
 
 class FootOffsetProvider(Protocol):
     """Protocol for foot-offset providers."""
-    def __call__(self, cmd: "CommandManager") -> torch.Tensor: ...
+
+    def __call__(self, cmd: CommandManager) -> torch.Tensor: ...
 
 
 @dataclass
@@ -89,13 +89,11 @@ class QuadrupedOffsets:
                 )
             self._formulas.append(self._LEG_FORMULAS[matched[0]])
 
-    def __call__(self, cmd: "CommandManager") -> torch.Tensor:
+    def __call__(self, cmd: CommandManager) -> torch.Tensor:
         phase = getattr(cmd, self.phase_cmd)
         offset = getattr(cmd, self.offset_cmd)
         bound = getattr(cmd, self.bound_cmd)
-        return torch.stack(
-            [fn(phase, offset, bound) for fn in self._formulas], dim=1
-        )
+        return torch.stack([fn(phase, offset, bound) for fn in self._formulas], dim=1)
 
 
 @dataclass
@@ -107,17 +105,17 @@ class DirectOffsets:
     Args:
         command_names: One command name per foot, in foot order.
     """
+
     command_names: tuple[str, ...] = field(default_factory=tuple)
 
-    def __call__(self, cmd: "CommandManager") -> torch.Tensor:
-        return torch.stack(
-            [getattr(cmd, name) for name in self.command_names], dim=1
-        )
+    def __call__(self, cmd: CommandManager) -> torch.Tensor:
+        return torch.stack([getattr(cmd, name) for name in self.command_names], dim=1)
 
 
 # ─────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────
+
 
 @dataclass
 class GaitManagerConfig:
@@ -129,6 +127,7 @@ class GaitManagerConfig:
         - "command": Frequency and duration are read from CommandManager.
                      Foot offsets are produced by ``foot_offset_provider``.
     """
+
     num_envs: int = 0
     foot_names: tuple[str, ...] | list[str] = field(default_factory=tuple)
 
@@ -136,8 +135,8 @@ class GaitManagerConfig:
     offset_mode: str = "fixed"
 
     # ── Fixed-mode settings ──
-    gait_period: float = 0.8    # seconds per gait cycle (freq = 1/period)
-    default_freq: float = 2.5   # Hz, used only if offset_mode == "fixed"
+    gait_period: float = 0.8  # seconds per gait cycle (freq = 1/period)
+    default_freq: float = 2.5  # Hz, used only if offset_mode == "fixed"
     default_duration: float = 0.5  # stance fraction [0, 1]
 
     # ── Command-mode settings ─
@@ -172,14 +171,12 @@ class GaitManager(BaseManager):
         ``desired_contact_states``  [num_envs, num_feet]  Smooth stance prob.
     """
 
-    def __init__(self, env: "World", config: GaitManagerConfig):
+    def __init__(self, env: World, config: GaitManagerConfig):
         super().__init__(env)
         self.config = config
         num_envs = config.num_envs
 
-        self.foot_names = tuple(
-            self.env.scene_manager.find_body_names(body_names=config.foot_names)
-        )
+        self.foot_names = tuple(self.env.scene_manager.find_body_names(body_names=config.foot_names))
         self.num_feet = len(self.foot_names)
 
         # ── Phase state ──
@@ -195,7 +192,10 @@ class GaitManager(BaseManager):
         if config.offset_mode == "command":
             self._foot_offset_provider = config.foot_offset_provider
 
-            if hasattr(self._foot_offset_provider, "foot_names") and tuple(self._foot_offset_provider.foot_names) != self.foot_names:
+            if (
+                hasattr(self._foot_offset_provider, "foot_names")
+                and tuple(self._foot_offset_provider.foot_names) != self.foot_names
+            ):
                 raise ValueError(
                     f"foot_offset_provider foot_names {self._foot_offset_provider.foot_names} does not match "
                     f"GaitManager foot_names {self.foot_names}. "
@@ -261,26 +261,22 @@ class GaitManager(BaseManager):
         missing = set(order) - set(self.foot_names)
         if missing:
             raise ValueError(
-                f"order contains foot names not in gait_manager.foot_names "
-                f"{list(self.foot_names)}: {sorted(missing)}."
+                f"order contains foot names not in gait_manager.foot_names {list(self.foot_names)}: {sorted(missing)}."
             )
         idx = torch.tensor(
             [self.foot_names.index(name) for name in order],
-            dtype=torch.long, device=self.device,
+            dtype=torch.long,
+            device=self.device,
         )
         self._gait_reindex_cache[key] = idx
         return idx
 
-    def _apply_order(
-        self, tensor: torch.Tensor, order: list[str] | tuple[str, ...] | None
-    ) -> torch.Tensor:
+    def _apply_order(self, tensor: torch.Tensor, order: list[str] | tuple[str, ...] | None) -> torch.Tensor:
         if order is None:
             return tensor
         return tensor[:, self._get_reindex(order)]
 
-    def get_desired_contact_states(
-        self, order: list[str] | tuple[str, ...] | None = None
-    ) -> torch.Tensor:
+    def get_desired_contact_states(self, order: list[str] | tuple[str, ...] | None = None) -> torch.Tensor:
         """Per-foot desired contact in [0, 1]. Shape ``(num_envs, num_feet)``.
 
         ``order`` is a list of names from ``self.foot_names``; if given,
@@ -288,9 +284,7 @@ class GaitManager(BaseManager):
         """
         return self._apply_order(self.desired_contact_states, order)
 
-    def get_foot_phases(
-        self, order: list[str] | tuple[str, ...] | None = None
-    ) -> torch.Tensor:
+    def get_foot_phases(self, order: list[str] | tuple[str, ...] | None = None) -> torch.Tensor:
         """Per-foot raw phase in [0, 1). Shape ``(num_envs, num_feet)``.
 
         ``order`` reorders the per-foot column the same way as
@@ -298,9 +292,7 @@ class GaitManager(BaseManager):
         """
         return self._apply_order(self.foot_phases, order)
 
-    def get_clock_inputs(
-        self, order: list[str] | tuple[str, ...] | None = None
-    ) -> torch.Tensor:
+    def get_clock_inputs(self, order: list[str] | tuple[str, ...] | None = None) -> torch.Tensor:
         """Per-foot sin-of-phase clock used by observations.
         Shape ``(num_envs, num_feet)``.
         """
@@ -317,9 +309,7 @@ class GaitManager(BaseManager):
     def get_phase_encoding(self) -> torch.Tensor:
         """Sin/cos encoding. [num_envs, num_feet * 2]: [sin0, cos0, sin1, cos1, ...]."""
         phi = 2.0 * math.pi * self.foot_phases
-        return torch.stack([torch.sin(phi), torch.cos(phi)], dim=-1).reshape(
-            self.env.num_envs, -1
-        )
+        return torch.stack([torch.sin(phi), torch.cos(phi)], dim=-1).reshape(self.env.num_envs, -1)
 
     def get_swing_progress(self) -> torch.Tensor:
         """Normalized [0,1] progress within swing phase. -1 during stance.
@@ -331,9 +321,7 @@ class GaitManager(BaseManager):
         _, duration, _ = self._read_gait_params()
         phase_in_cycle = self.foot_phases % 1.0
 
-        swing_progress = (phase_in_cycle - duration.unsqueeze(1)) / (
-            1.0 - duration.unsqueeze(1) + 1e-8
-        )
+        swing_progress = (phase_in_cycle - duration.unsqueeze(1)) / (1.0 - duration.unsqueeze(1) + 1e-8)
         swing_progress = swing_progress.clamp(0.0, 1.0)
         return torch.where(swing_mask, swing_progress, torch.full_like(swing_progress, -1.0))
 
@@ -390,7 +378,9 @@ class GaitManager(BaseManager):
         return freq, duration, foot_offsets
 
     def _apply_duration_warp(
-        self, phases: torch.Tensor, duration: torch.Tensor,
+        self,
+        phases: torch.Tensor,
+        duration: torch.Tensor,
     ) -> torch.Tensor:
         """Remap so stance -> [0, 0.5), swing -> [0.5, 1)."""
         dur = duration.unsqueeze(1)
@@ -404,7 +394,4 @@ class GaitManager(BaseManager):
         """Smooth desired contact: ~1 during stance, ~0 during swing."""
         cdf = self._smoothing_dist.cdf
         t = warped_phases
-        return (
-            cdf(t) * (1.0 - cdf(t - 0.5))
-            + cdf(t - 1.0) * (1.0 - cdf(t - 1.5))
-        )
+        return cdf(t) * (1.0 - cdf(t - 0.5)) + cdf(t - 1.0) * (1.0 - cdf(t - 1.5))

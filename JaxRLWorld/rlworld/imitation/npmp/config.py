@@ -21,18 +21,20 @@ later by adding sim-specific NPMP obs configs and dispatching from
 ``build()``; the t1_tracking builders are already hoisted so the wiring
 is mechanical.
 """
+
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from rlworld.rl.configs.common_config_classes import ObservationGroupConfig
 from rlworld.rl.configs.newton_config_classes import NewtonObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.presets.t1_tracking._newton_builders import (
+    _MOTION_PARAMS,
     _ActorObsCfg as _T1TrackingActorObsCfg,
     _CriticObsCfg as _T1TrackingCriticObsCfg,
-    _MOTION_PARAMS,
 )
 from rlworld.rl.configs.presets.t1_tracking.base import T1TrackingConfig
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
@@ -45,7 +47,6 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.configs.common_config_classes import ObservationGroupConfig
 
 if TYPE_CHECKING:
     pass
@@ -62,9 +63,7 @@ __all__ = [
 
 _DEFAULT_EXPERT_CACHE_DIR = "outputs/npmp/expert_cache"
 
-_BOOSTER_T1_NPZ_DIR = (
-    "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted"
-)
+_BOOSTER_T1_NPZ_DIR = "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted"
 _BOOSTER_T1_NPZ_NAMES: tuple[str, ...] = (
     "goal_kick",
     "jogging",
@@ -109,14 +108,12 @@ class CheckpointRef:
         skip redundant re-downloads on cache hit.
         """
         if (self.local_path is None) == (self.wandb_run_path is None):
-            raise ValueError(
-                "CheckpointRef requires exactly one of "
-                "local_path or wandb_run_path to be set."
-            )
+            raise ValueError("CheckpointRef requires exactly one of local_path or wandb_run_path to be set.")
         if self.local_path is not None:
             return self.local_path
 
         from rlworld.rl.utils.wandb_checkpoint import get_wandb_checkpoint
+
         path, _ = get_wandb_checkpoint(
             self.wandb_run_path,
             iteration=self.wandb_checkpoint_iter,
@@ -144,7 +141,8 @@ class _DecoderInputObsCfg(ObservationGroupConfig):
 
     base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
     projected_gravity_obs = ObservationTermConfig(
-        func=projected_gravity, scale=1.0,
+        func=projected_gravity,
+        scale=1.0,
     )
     dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
     dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
@@ -162,7 +160,8 @@ class _EncoderInputObsCfg(ObservationGroupConfig):
     """
 
     motion_future_window = ObservationTermConfig(
-        func=motion_future_reference_window, scale=1.0,
+        func=motion_future_reference_window,
+        scale=1.0,
         params=_MOTION_PARAMS,
     )
 
@@ -214,10 +213,7 @@ class T1NPMPDistillConfig(T1TrackingConfig):
 
     # ── Multi-motion default: the nine booster T1 clips. ──────────────
     motion_files: tuple[str, ...] = field(
-        default_factory=lambda: tuple(
-            f"{_BOOSTER_T1_NPZ_DIR}/{name}.npz"
-            for name in _BOOSTER_T1_NPZ_NAMES
-        )
+        default_factory=lambda: tuple(f"{_BOOSTER_T1_NPZ_DIR}/{name}.npz" for name in _BOOSTER_T1_NPZ_NAMES)
     )
 
     # ── Expert checkpoints, keyed by motion-clip basename. ────────────
@@ -258,7 +254,7 @@ class T1NPMPDistillConfig(T1TrackingConfig):
     # measure tracking_reward / per-motion breakdown / action_gap to
     # experts / encoder z diagnostics. Mirrors RL pipeline's
     # ``BaseRunner._run_evaluation`` cadence.
-    eval_interval: int = 100
+    eval_interval: int = 25
     eval_steps: int = 200
     eval_num_envs: int = 90  # 10 envs × 9 motions for per-motion breakdown
     eval_compute_action_gap: bool = True  # requires expert dispatcher
@@ -320,7 +316,4 @@ class T1NPMPDistillConfig(T1TrackingConfig):
         insertion order in ``expert_refs``.
         """
         os.makedirs(self.expert_cache_dir, exist_ok=True)
-        return tuple(
-            self.expert_refs[self._motion_key(p)].resolve(self.expert_cache_dir)
-            for p in self.motion_files
-        )
+        return tuple(self.expert_refs[self._motion_key(p)].resolve(self.expert_cache_dir) for p in self.motion_files)

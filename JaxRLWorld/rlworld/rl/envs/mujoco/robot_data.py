@@ -9,14 +9,13 @@ with the action/observation ordering used by the rest of JaxRLWorld.
 All other properties (root pose, velocities, gravity) are forwarded
 from the underlying ``EntityData`` without reindexing.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import Tensor
-
-from typing import Any
 
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_to_euler_wxyz
 
@@ -33,7 +32,7 @@ class MujocoRobotData:
         joint_ids: Tensor,
         num_envs: int,
         device: torch.device,
-        env: "Any | None" = None,
+        env: Any | None = None,
         default_joint_pos: Tensor | None = None,
     ) -> None:
         self._entity = entity
@@ -49,11 +48,15 @@ class MujocoRobotData:
         # Use quat batch size to handle eval env with different num_envs
         n = self._entity.data.root_link_quat_w.shape[0]
         if self._gravity_vec is None or self._gravity_vec.shape[0] != n:
-            self._gravity_vec = torch.tensor(
-                [[0.0, 0.0, -1.0]],
-                device=self._device,
-                dtype=torch.float32,
-            ).expand(n, -1).contiguous()
+            self._gravity_vec = (
+                torch.tensor(
+                    [[0.0, 0.0, -1.0]],
+                    device=self._device,
+                    dtype=torch.float32,
+                )
+                .expand(n, -1)
+                .contiguous()
+            )
         return self._gravity_vec
 
     @property
@@ -116,7 +119,7 @@ class MujocoRobotData:
         return self._entity.data.qfrc_actuator[:, self._joint_ids]
 
     @property
-    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Hard joint position limits — not exposed by mjlab.
 
         mjlab only stores the *soft* limits (already scaled by the soft
@@ -142,7 +145,7 @@ class MujocoRobotData:
         )
 
     @property
-    def soft_joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Soft joint position limits (mjlab-scaled) in actuated order.
 
         Reads ``entity.data.soft_joint_pos_limits`` which mjlab exposes
@@ -172,9 +175,7 @@ class MujocoRobotData:
         """
         body_ids, _ = self._entity.find_bodies([body_name], preserve_order=True)
         if not body_ids:
-            raise ValueError(
-                f"Body name {body_name!r} not found in mjlab entity"
-            )
+            raise ValueError(f"Body name {body_name!r} not found in mjlab entity")
         return body_ids[0]
 
     def body_ang_vel_w(self, body_index: int) -> Tensor:
@@ -220,19 +221,19 @@ class MujocoRobotData:
     # Per-name body/site reads
     # ------------------------------------------------------------------
 
-    def body_pos_w(self, names: "list[str]") -> Tensor:
+    def body_pos_w(self, names: list[str]) -> Tensor:
         body_ids, _ = self._entity.find_bodies(list(names), preserve_order=True)
         return self._entity.data.body_link_pos_w[:, body_ids, :]
 
-    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def body_lin_vel_w(self, names: list[str]) -> Tensor:
         body_ids, _ = self._entity.find_bodies(list(names), preserve_order=True)
         return self._entity.data.body_link_lin_vel_w[:, body_ids, :]
 
-    def site_pos_w(self, names: "list[str]") -> Tensor:
+    def site_pos_w(self, names: list[str]) -> Tensor:
         site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
         return self._entity.data.site_pos_w[:, site_ids, :]
 
-    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def site_lin_vel_w(self, names: list[str]) -> Tensor:
         site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
         return self._entity.data.site_lin_vel_w[:, site_ids, :]
 

@@ -4,8 +4,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable
 
-import torch
-
 
 class WeightSchedule(ABC):
     """Base class for reward weight scheduling."""
@@ -47,7 +45,7 @@ class ExponentialDecay(WeightSchedule):
         self.min_value = min_value
 
     def __call__(self, step: int) -> float:
-        return max(self.initial * (self.decay_rate ** step), self.min_value)
+        return max(self.initial * (self.decay_rate**step), self.min_value)
 
 
 class StepSchedule(WeightSchedule):
@@ -93,4 +91,5 @@ class RewardTermConfig:
         if callable(self.func):
             return self.func
         from rlworld.rl.utils.resolve import resolve_callable
+
         return resolve_callable(self.func)

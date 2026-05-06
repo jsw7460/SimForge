@@ -24,10 +24,10 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.world import World
     from rlworld.rl.configs.curriculums.curriculum_term_config import (
         CurriculumTermConfig,
     )
+    from rlworld.rl.envs.world import World
 
 
 # ── Stage type schemas ──────────────────────────────────────────────
@@ -73,16 +73,12 @@ def _validate_stages(
     for stage in stages:
         for key in stage:
             if key not in _RESERVED_KEYS and not hasattr(term_cfg, key):
-                raise AttributeError(
-                    f"Field {key!r} does not exist on the resolved term "
-                    f"config for {term_name!r}."
-                )
+                raise AttributeError(f"Field {key!r} does not exist on the resolved term config for {term_name!r}.")
     for stage in stages:
         unknown = stage.get("params", {}).keys() - term_cfg.params.keys()
         if unknown:
             raise KeyError(
-                f"Stage at step {stage['step']} sets unknown param(s)"
-                f" {unknown} on term {term_name!r}. Check for typos."
+                f"Stage at step {stage['step']} sets unknown param(s) {unknown} on term {term_name!r}. Check for typos."
             )
 
 
@@ -152,7 +148,7 @@ class reward_curriculum:
 
     __name__ = "reward_curriculum"
 
-    def __init__(self, env: "World", cfg: "CurriculumTermConfig") -> None:
+    def __init__(self, env: World, cfg: CurriculumTermConfig) -> None:
         reward_name: str = cfg.params["reward_name"]
         stages: list[RewardCurriculumStage] = cfg.params["stages"]
         self._term_cfg = env.reward_manager.get_term_cfg(reward_name)
@@ -161,7 +157,7 @@ class reward_curriculum:
 
     def __call__(
         self,
-        env: "World",
+        env: World,
         env_ids,
         reward_name: str,
         stages: list[RewardCurriculumStage],
@@ -195,7 +191,7 @@ class termination_curriculum:
 
     __name__ = "termination_curriculum"
 
-    def __init__(self, env: "World", cfg: "CurriculumTermConfig") -> None:
+    def __init__(self, env: World, cfg: CurriculumTermConfig) -> None:
         termination_name: str = cfg.params["termination_name"]
         stages: list[TerminationCurriculumStage] = cfg.params["stages"]
         self._term_cfg = env.termination_manager.get_term_cfg(termination_name)
@@ -204,7 +200,7 @@ class termination_curriculum:
 
     def __call__(
         self,
-        env: "World",
+        env: World,
         env_ids,
         termination_name: str,
         stages: list[TerminationCurriculumStage],

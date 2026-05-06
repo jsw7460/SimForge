@@ -11,6 +11,7 @@ Exposed symbols:
   - :class:`GatedPostureTracker`    — posture matching gated by upright
   - :class:`GetupSuccessTracker`    — sticky binary success metric
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
 
 def power_penalty(
-    env: "World",
+    env: World,
     skip_steps: int = 0,
     entity_name: str = "robot",
 ) -> torch.Tensor:
@@ -62,7 +63,7 @@ def power_penalty(
 
 
 def orientation_upright(
-    env: "World",
+    env: World,
     std: float = 0.707,
     entity_name: str = "robot",
 ) -> torch.Tensor:
@@ -95,11 +96,11 @@ def orientation_upright(
     gravity_b = env.get_robot_data(entity_name).projected_gravity_b
     up = torch.tensor([0.0, 0.0, -1.0], device=gravity_b.device)
     err = torch.sum(torch.square(up - gravity_b), dim=-1)
-    return torch.exp(-err / (std ** 2))
+    return torch.exp(-err / (std**2))
 
 
 def height_to_target(
-    env: "World",
+    env: World,
     desired_height: float,
     body_name: str | None = None,
     entity_name: str = "robot",
@@ -174,8 +175,8 @@ class GatedPostureTracker:
 
     def __init__(
         self,
-        env: "World",
-        std_dict: "dict[str, float]",
+        env: World,
+        std_dict: dict[str, float],
         gate_threshold: float = 0.01,
         entity_name: str = "robot",
     ) -> None:
@@ -184,14 +185,10 @@ class GatedPostureTracker:
         self._gate_threshold = gate_threshold
 
         joint_names = list(env.act_manager.actuated_joint_names)
-        _, _, std_vals = string_utils.resolve_matching_names_values(
-            std_dict, joint_names
-        )
-        self._std = torch.tensor(
-            std_vals, device=env.device, dtype=torch.float32
-        )
+        _, _, std_vals = string_utils.resolve_matching_names_values(std_dict, joint_names)
+        self._std = torch.tensor(std_vals, device=env.device, dtype=torch.float32)
 
-    def __call__(self, env: "World") -> torch.Tensor:
+    def __call__(self, env: World) -> torch.Tensor:
         rd = env.get_robot_data(self._entity_name)
         gravity_b = rd.projected_gravity_b
         up = torch.tensor([0.0, 0.0, -1.0], device=gravity_b.device)
@@ -244,7 +241,7 @@ class GetupSuccessTracker:
 
     def __init__(
         self,
-        env: "World",
+        env: World,
         desired_height: float,
         body_name: str | None = None,
         orient_threshold: float = 0.05,
@@ -257,11 +254,9 @@ class GetupSuccessTracker:
         self._orient_threshold = orient_threshold
         self._height_tolerance = height_tolerance
         self._entity_name = entity_name
-        self.success = torch.zeros(
-            (env.num_envs,), device=env.device, dtype=torch.float32
-        )
+        self.success = torch.zeros((env.num_envs,), device=env.device, dtype=torch.float32)
 
-    def __call__(self, env: "World") -> torch.Tensor:
+    def __call__(self, env: World) -> torch.Tensor:
         rd = env.get_robot_data(self._entity_name)
         gravity_b = rd.projected_gravity_b
         up = torch.tensor([0.0, 0.0, -1.0], device=gravity_b.device)

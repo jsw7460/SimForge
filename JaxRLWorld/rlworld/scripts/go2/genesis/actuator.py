@@ -1,7 +1,7 @@
-from rlworld.rl.runners import BaseRunner
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.actuators import IdealPDActuatorCfg
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.configs.robots.go2 import Go2Config
+from rlworld.rl.runners import BaseRunner
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

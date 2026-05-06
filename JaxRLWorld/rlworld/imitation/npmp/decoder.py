@@ -10,6 +10,7 @@ likelihood between the decoder mean and the expert mean; ``log_std``
 is included in the parameter set so the loss can adapt the scale to
 match the noise level of the BC labels.
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -17,7 +18,6 @@ from typing import Sequence
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-
 
 __all__ = ["NPMPDecoder"]
 
@@ -64,7 +64,9 @@ class NPMPDecoder(eqx.Module):
         return self.head(h)
 
     def __call__(
-        self, s_t: jax.Array, z_t: jax.Array,
+        self,
+        s_t: jax.Array,
+        z_t: jax.Array,
     ) -> tuple[jax.Array, jax.Array]:
         """Return (action_mean, action_log_std). log_std is broadcast-ready."""
         return self.mean(s_t, z_t), self.log_std

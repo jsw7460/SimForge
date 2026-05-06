@@ -22,6 +22,7 @@ Usage:
         --sim mujoco --steps 40 > /tmp/trace_mujoco.txt 2>&1
     diff -u /tmp/trace_mujoco.txt /tmp/trace_newton.txt | head -200
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +32,6 @@ import torch
 
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from rlworld.rl.runners import BaseRunner
-
 
 # ─── Hardcoded deterministic fallen pose (wxyz, z=0.8, face-down tilt) ──
 
@@ -69,12 +69,11 @@ def _print_header(env) -> None:
     # per-joint obs/action indexing.
     print("\n[canonical joint order]")
     print("idx  joint_name                        sim_index  scale       offset")
-    scales  = _tensor_to_list(am._scale)
+    scales = _tensor_to_list(am._scale)
     offsets = _tensor_to_list(am._offset[0])
     sim_ids = _tensor_to_list(am._indexing.sim_indices)
     for i, name in enumerate(am.actuated_joint_names):
-        print(f"{i:<4} {name:<32} {int(sim_ids[i]):<9}  "
-              f"{scales[i]:+.6f}  {offsets[i]:+.6f}")
+        print(f"{i:<4} {name:<32} {int(sim_ids[i]):<9}  {scales[i]:+.6f}  {offsets[i]:+.6f}")
 
     # Soft joint limits (in canonical order)
     try:
@@ -92,6 +91,7 @@ def _print_header(env) -> None:
     if not am._actuators:
         print("  (no explicit actuators — Implicit mode, PD is sim-side)")
     else:
+
         def _first_attr(obj, *names):
             for n in names:
                 v = getattr(obj, n, None)
@@ -125,10 +125,10 @@ def _force_state(env, pos, quat_wxyz, lin_vel, ang_vel, joint_pos_vec):
     env_ids = torch.arange(env.num_envs, device=env.device)
     N = env.num_envs
 
-    p  = torch.tensor(pos,       dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
-    q  = torch.tensor(quat_wxyz, dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
-    lv = torch.tensor(lin_vel,   dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
-    av = torch.tensor(ang_vel,   dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
+    p = torch.tensor(pos, dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
+    q = torch.tensor(quat_wxyz, dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
+    lv = torch.tensor(lin_vel, dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
+    av = torch.tensor(ang_vel, dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
     jp = joint_pos_vec.to(env.device).unsqueeze(0).expand(N, -1).contiguous()
     jv = torch.zeros_like(jp)
 
@@ -186,9 +186,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--action", choices=("zero", "ramp"), default="zero")
     parser.add_argument(
-        "--out", type=str, default=None,
+        "--out",
+        type=str,
+        default=None,
         help="Output file path. Defaults to ./t1_trace_<sim>.txt in the "
-             "current working directory. Pass 'stdout' to print to console.",
+        "current working directory. Pass 'stdout' to print to console.",
     )
     args = parser.parse_args()
 
@@ -196,11 +198,11 @@ def main() -> None:
     out_path = args.out or f"t1_trace_{args.sim}.txt"
     if out_path != "stdout":
         import sys as _sys
+
         _log_fh = open(out_path, "w")
         _orig_stdout = _sys.stdout
         _sys.stdout = _log_fh
-        print(f"# t1_trace_v2 sim={args.sim} steps={args.steps} seed={args.seed} "
-              f"action={args.action}")
+        print(f"# t1_trace_v2 sim={args.sim} steps={args.steps} seed={args.seed} action={args.action}")
     else:
         _log_fh = None
 
@@ -210,7 +212,7 @@ def main() -> None:
         sim_type=args.sim,
         num_envs=1,
         seed=args.seed,
-        fallen_prob=0.0,           # avoid random branch — we'll overwrite anyway
+        fallen_prob=0.0,  # avoid random branch — we'll overwrite anyway
         fall_velocity_range=(0.0, 0.0),
         standing_z_offset=0.0,
     )
@@ -226,6 +228,7 @@ def main() -> None:
     # Build canonical joint_pos vector from T1Config.default_joint_angles
     # using the same pattern-resolve as everywhere else.
     from rlworld.rl.utils import string as string_utils
+
     matched_idx, _, matched_vals = string_utils.resolve_matching_names_values(
         cfg.robot.default_joint_angles, list(env.act_manager.actuated_joint_names)
     )
@@ -261,7 +264,7 @@ def main() -> None:
     else:
         action = torch.zeros(env.num_envs, action_dim, device=env.device)
 
-    print(f"\n[forced initial state]")
+    print("\n[forced initial state]")
     _dump_step(env, step_idx=0, raw_action=action)
 
     # Main loop
@@ -271,6 +274,7 @@ def main() -> None:
 
     if _log_fh is not None:
         import sys as _sys
+
         _sys.stdout = _orig_stdout
         _log_fh.close()
         print(f"Trace written to: {out_path}")

@@ -1,29 +1,28 @@
 import os
 import shutil
-import statistics
 import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
 
-from rlworld.rl.algorithms.base import RLAlgorithm, ActInput
+from rlworld.rl.algorithms.base import ActInput, RLAlgorithm
 from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.observations import ObservationTermConfig
-from rlworld.rl.envs import World, EpisodeStatsCollector
-from rlworld.rl.runners.iteration_data import IterationData, EpisodeStats
+from rlworld.rl.envs import EpisodeStatsCollector, World
+from rlworld.rl.runners.iteration_data import EpisodeStats, IterationData
 from rlworld.rl.utils import setup_log_dir
+from rlworld.rl.utils.console import GREEN, RESET
 from rlworld.rl.utils.dynamics_dataset import DynamicsDataset
-from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
-from rlworld.rl.utils.console import GREEN, YELLOW, RED, RESET
-from rlworld.rl.utils.logger import WandbLogger, ConsoleWriter
-
+from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+from rlworld.rl.utils.logger import ConsoleWriter, WandbLogger
 
 # ==================== Base Runner ====================
+
 
 class BaseRunner(ABC):
     is_distributed_runner: bool = False
@@ -40,8 +39,9 @@ class BaseRunner(ABC):
         back to ``cfgs.env.env_name`` for backward compatibility and for
         non-physics environments (Gymnasium, ManiSkill).
         """
-        from gymnasium.vector import SyncVectorEnv, AutoresetMode
         import gymnasium as gym
+        from gymnasium.vector import AutoresetMode, SyncVectorEnv
+
         from rlworld.rl import envs
         from rlworld.rl.envs import GymnasiumEnv
 
@@ -50,9 +50,7 @@ class BaseRunner(ABC):
 
         sim_type = getattr(cfgs, "sim_type", None)
 
-        if sim_type in ("genesis", "newton", "mujoco") or env_class.sim_name in (
-            "Genesis", "Newton", "Mujoco"
-        ):
+        if sim_type in ("genesis", "newton", "mujoco") or env_class.sim_name in ("Genesis", "Newton", "Mujoco"):
             kwargs = dict(
                 num_envs=cfgs.env.num_envs,
                 env_cfg=cfgs.env,
@@ -72,6 +70,7 @@ class BaseRunner(ABC):
 
         elif env_class.sim_name == "ManiSkill":
             from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+
             from rlworld.rl.envs import ManiSkillEnv
 
             env_kwargs = dict(
@@ -91,10 +90,11 @@ class BaseRunner(ABC):
                 act_cfg=cfgs.action,
                 reward_cfg=cfgs.reward,
                 command_cfg=cfgs.command,
-                seed=cfgs.env.seed
+                seed=cfgs.env.seed,
             )
 
         elif env_class.sim_name == "Gymnasium":
+
             def make_env(seed):
                 def _init():
                     env = gym.make(cfgs.env.task_name)
@@ -105,8 +105,7 @@ class BaseRunner(ABC):
                 return _init
 
             env_gym = SyncVectorEnv(
-                [make_env(i) for i in range(cfgs.env.num_envs)],
-                autoreset_mode=AutoresetMode.SAME_STEP
+                [make_env(i) for i in range(cfgs.env.num_envs)], autoreset_mode=AutoresetMode.SAME_STEP
             )
             env = GymnasiumEnv(
                 env_gym,
@@ -116,7 +115,7 @@ class BaseRunner(ABC):
                 act_cfg=cfgs.action,
                 reward_cfg=cfgs.reward,
                 command_cfg=cfgs.command,
-                seed=cfgs.env.seed
+                seed=cfgs.env.seed,
             )
 
         else:
@@ -184,7 +183,7 @@ class BaseRunner(ABC):
                 group_name=group_name,
                 run_name=run_name,
                 log_dir=self.wandb_log_dir,
-                cfg=self.cfgs.recursive_to_dict()
+                cfg=self.cfgs.recursive_to_dict(),
             )
             self.wandb_url = self.wandb_logger.wandb_url
 
@@ -217,18 +216,19 @@ class BaseRunner(ABC):
         self.num_steps_per_env = self.cfgs.algorithm.num_steps_per_env
 
         # Last eval stats (persisted across iterations for console display)
-        self._last_eval_stats: Optional[Dict[str, Any]] = None
+        self._last_eval_stats: Dict[str, Any] | None = None
 
         # Initialize environment
         self.reward_statistics = EpisodeStatsCollector(
             num_envs=self.env.num_envs,
             max_episode_length=self.env.max_episode_length,
             device=self.device,
-            gamma=self.cfgs.algorithm.gamma
+            gamma=self.cfgs.algorithm.gamma,
         )
 
         # Per-sim stats collectors for MultiSimWorld
         from rlworld.rl.envs.multi_sim_world import MultiSimWorld
+
         if isinstance(self.env, MultiSimWorld):
             self._per_sim_collectors: dict[str, EpisodeStatsCollector] = {}
             for sub_env in self.env.envs:
@@ -248,16 +248,14 @@ class BaseRunner(ABC):
         """Update reward statistics including per-sim collectors."""
         self.reward_statistics.update(reward_info=reward_info, dones=dones, success=success)
 
-        if hasattr(self, '_per_sim_collectors'):
+        if hasattr(self, "_per_sim_collectors"):
             offset = 0
             for sub_env in self.env.envs:
                 n = sub_env.num_envs
                 collector = self._per_sim_collectors[sub_env.sim_name]
-                sub_reward_info = {
-                    k: v[offset:offset + n] for k, v in reward_info.items()
-                }
-                sub_dones = dones[offset:offset + n]
-                sub_success = success[offset:offset + n] if success is not None else None
+                sub_reward_info = {k: v[offset : offset + n] for k, v in reward_info.items()}
+                sub_dones = dones[offset : offset + n]
+                sub_success = success[offset : offset + n] if success is not None else None
                 collector.update(
                     reward_info=sub_reward_info,
                     dones=sub_dones,
@@ -321,6 +319,7 @@ class BaseRunner(ABC):
             curriculum_manager = getattr(self.env, "curriculum_manager", None)
             if curriculum_manager is not None and curriculum_manager.state:
                 import math as _math
+
                 import wandb as _wandb
 
                 curr_log: dict[str, float] = {}
@@ -348,16 +347,14 @@ class BaseRunner(ABC):
                 term_log = term_mgr.consume_episode_stats()
                 if term_log:
                     import wandb as _wandb
+
                     _wandb.log(term_log, step=self.total_timesteps)
 
     def _build_episode_stats(self) -> EpisodeStats:
         """Build EpisodeStats from reward_statistics, including per-sim stats if MultiSim."""
         stats = self.reward_statistics.snapshot()
-        if hasattr(self, '_per_sim_collectors'):
-            stats.per_sim_stats = {
-                name: collector.snapshot()
-                for name, collector in self._per_sim_collectors.items()
-            }
+        if hasattr(self, "_per_sim_collectors"):
+            stats.per_sim_stats = {name: collector.snapshot() for name, collector in self._per_sim_collectors.items()}
         return stats
 
     def close(self):
@@ -403,12 +400,12 @@ class BaseRunner(ABC):
 
     def set_eval_mode(self):
         """Set all components to evaluation mode (no-op for JAX)."""
-        if hasattr(self.alg, 'test_mode'):
+        if hasattr(self.alg, "test_mode"):
             self.alg.test_mode()
 
     def set_train_mode(self):
         """Set all components to training mode (no-op for JAX)."""
-        if hasattr(self.alg, 'train_mode'):
+        if hasattr(self.alg, "train_mode"):
             self.alg.train_mode()
 
     # ==================== In-Training Evaluation ====================
@@ -423,12 +420,14 @@ class BaseRunner(ABC):
         # Disable observation noise on every group
         if self.runner_cfg.eval_disable_noise:
             from rlworld.rl.configs.common_config_classes import disable_corruption
+
             disable_corruption(eval_cfgs.observation)
 
         # Disable interval events (external forces, disturbances) by setting to None
-        if self.runner_cfg.eval_disable_interval_events and hasattr(eval_cfgs, 'event'):
+        if self.runner_cfg.eval_disable_interval_events and hasattr(eval_cfgs, "event"):
             from rlworld.rl.configs.base_config import iter_terms
             from rlworld.rl.configs.events.event_term_config import EventTermConfig
+
             for name, term in iter_terms(eval_cfgs.event, EventTermConfig).items():
                 if term.mode == "interval":
                     setattr(eval_cfgs.event, name, None)
@@ -441,7 +440,7 @@ class BaseRunner(ABC):
 
     def _get_or_create_eval_env(self) -> World:
         """Lazily create eval environment on first use."""
-        if not hasattr(self, '_eval_env') or self._eval_env is None:
+        if not hasattr(self, "_eval_env") or self._eval_env is None:
             eval_cfgs = self._create_eval_configs()
             self._eval_env = self._create_env_from_config(eval_cfgs)
         return self._eval_env
@@ -508,9 +507,7 @@ class BaseRunner(ABC):
                     completed_returns.append(episode_returns[i].item())
                     completed_lengths.append(episode_lengths[i].item())
                     for rname in reward_type_sums:
-                        completed_reward_breakdowns[rname].append(
-                            reward_type_sums[rname][i].item()
-                        )
+                        completed_reward_breakdowns[rname].append(reward_type_sums[rname][i].item())
 
             # Reset tracking for done envs
             episode_returns[dones] = 0
@@ -553,11 +550,13 @@ class BaseRunner(ABC):
         n_eps = eval_stats["eval/num_episodes"]
         eval_time = eval_stats["eval/time"]
 
-        print(f"\n  {GREEN}[Eval @ iter {it}]{RESET} "
-              f"return={mean_ret:.2f} ± {std_ret:.2f}  "
-              f"length={mean_len:.1f}  "
-              f"episodes={n_eps}  "
-              f"time={eval_time:.1f}s")
+        print(
+            f"\n  {GREEN}[Eval @ iter {it}]{RESET} "
+            f"return={mean_ret:.2f} ± {std_ret:.2f}  "
+            f"length={mean_len:.1f}  "
+            f"episodes={n_eps}  "
+            f"time={eval_time:.1f}s"
+        )
 
         if self.wandb_logger:
             self.wandb_logger.log_eval_data(eval_stats, step=self.total_timesteps)
@@ -692,15 +691,12 @@ class BaseRunner(ABC):
 
         # Save canonical joint names and training sim info for cross-sim eval.
         from rlworld.rl.envs.multi_sim_world import MultiSimWorld
+
         if isinstance(self.env, MultiSimWorld):
-            train_state["canonical_joint_names"] = list(
-                self.env.envs[0].act_manager.actuated_joint_names
-            )
+            train_state["canonical_joint_names"] = list(self.env.envs[0].act_manager.actuated_joint_names)
             train_state["train_sim_names"] = [e.sim_name for e in self.env.envs]
         elif hasattr(self.env, "act_manager"):
-            train_state["canonical_joint_names"] = list(
-                self.env.act_manager.actuated_joint_names
-            )
+            train_state["canonical_joint_names"] = list(self.env.act_manager.actuated_joint_names)
 
         dump_yaml(
             os.path.join(checkpoint_dir, "train_state.yaml"),
@@ -718,7 +714,7 @@ class BaseRunner(ABC):
         """Post-iteration processing."""
         self.current_learning_iteration += 1
         self.total_timesteps += self.num_steps_per_env * self.env.num_envs
-        self.total_time += (data.collection_time + data.learning_time)
+        self.total_time += data.collection_time + data.learning_time
 
         if it % self.runner_cfg.log_interval == 0:
             self.log_training_data(data, total_iter=total_iter)
@@ -739,8 +735,8 @@ class BaseRunner(ABC):
         self,
         num_samples: int,
         use_random_policy: bool = False,
-        auxiliary_terms: Optional[List[ObservationTermConfig]] = None,
-        progress_interval: int = 100
+        auxiliary_terms: List[ObservationTermConfig] | None = None,
+        progress_interval: int = 100,
     ) -> DynamicsDataset:
         """
         Collect dynamics dataset with optional auxiliary observations.
@@ -755,19 +751,19 @@ class BaseRunner(ABC):
             DynamicsDataset with collected transitions and auxiliary observations
         """
         print(f"\n{'=' * 60}")
-        print(f"Collecting Dynamics Dataset")
+        print("Collecting Dynamics Dataset")
         print(f"{'=' * 60}")
         print(f"Target samples: {num_samples}")
         print(f"Policy: {'Random' if use_random_policy else 'Current Policy'}")
         print(f"Num environments: {self.env.num_envs}")
 
         if auxiliary_terms:
-            print(f"\nAuxiliary observations to collect:")
+            print("\nAuxiliary observations to collect:")
             for i, term in enumerate(auxiliary_terms):
-                term_name = getattr(term.func, '__name__', f'term_{i}')
+                term_name = getattr(term.func, "__name__", f"term_{i}")
                 print(f"  [{i + 1}] {term_name} (scale={term.scale})")
         else:
-            print(f"\nNo auxiliary observations requested")
+            print("\nNo auxiliary observations requested")
 
         # Storage for policy observations
         observations_list = []
@@ -781,7 +777,7 @@ class BaseRunner(ABC):
 
         if auxiliary_terms:
             for i, term in enumerate(auxiliary_terms):
-                term_name = getattr(term.func, '__name__', f'term_{i}')
+                term_name = getattr(term.func, "__name__", f"term_{i}")
                 auxiliary_obs_dict[term_name] = []
                 next_auxiliary_obs_dict[term_name] = []
 
@@ -807,18 +803,14 @@ class BaseRunner(ABC):
                 # Compute auxiliary observations (CURRENT state)
                 if auxiliary_terms:
                     for term in auxiliary_terms:
-                        term_name = getattr(term.func, '__name__', 'unknown')
+                        term_name = getattr(term.func, "__name__", "unknown")
                         aux_value = term.func(self.env, **term.params)
                         aux_value = aux_value * term.scale
                         auxiliary_obs_dict[term_name].append(aux_value.clone().cpu())
 
                 # Choose action
                 if use_random_policy:
-                    actions = torch.randn(
-                        self.env.num_envs,
-                        self.env.num_actions,
-                        device=self.device
-                    )
+                    actions = torch.randn(self.env.num_envs, self.env.num_actions, device=self.device)
                     actions = torch.clamp(actions, -1.0, 1.0)
                 else:
                     actions = self.act(obs_dict, robot_states, deterministic=True)
@@ -839,7 +831,7 @@ class BaseRunner(ABC):
                 # Compute auxiliary observations (NEXT state)
                 if auxiliary_terms:
                     for term in auxiliary_terms:
-                        term_name = getattr(term.func, '__name__', 'unknown')
+                        term_name = getattr(term.func, "__name__", "unknown")
                         next_aux_value = term.func(self.env, **term.params)
                         next_aux_value = next_aux_value * term.scale
                         next_auxiliary_obs_dict[term_name].append(next_aux_value.clone().cpu())
@@ -913,21 +905,26 @@ class BaseRunner(ABC):
 
         # Create dataset with metadata
         metadata = {
-            'collection_iteration': self.current_learning_iteration,
-            'collection_timesteps': self.total_timesteps,
-            'policy_type': 'random' if use_random_policy else 'trained',
-            'num_envs': self.env.num_envs,
-            'episodes_collected': episode_count,
-            'env_name': self.cfgs.env.env_name,
-            'obs_dim': observations.shape[1],
-            'action_dim': actions.shape[1],
-            'auxiliary_terms': list(auxiliary_obs.keys()) if auxiliary_obs else [],
-            'mean_return': sum(episode_returns) / len(episode_returns) if episode_returns else 0.0,
-            'std_return': (sum((r - sum(episode_returns) / len(episode_returns)) ** 2 for r in episode_returns) / len(
-                episode_returns)) ** 0.5 if len(episode_returns) > 1 else 0.0,
-            'min_return': min(episode_returns) if episode_returns else 0.0,
-            'max_return': max(episode_returns) if episode_returns else 0.0,
-            'total_episodes': len(episode_returns),
+            "collection_iteration": self.current_learning_iteration,
+            "collection_timesteps": self.total_timesteps,
+            "policy_type": "random" if use_random_policy else "trained",
+            "num_envs": self.env.num_envs,
+            "episodes_collected": episode_count,
+            "env_name": self.cfgs.env.env_name,
+            "obs_dim": observations.shape[1],
+            "action_dim": actions.shape[1],
+            "auxiliary_terms": list(auxiliary_obs.keys()) if auxiliary_obs else [],
+            "mean_return": sum(episode_returns) / len(episode_returns) if episode_returns else 0.0,
+            "std_return": (
+                sum((r - sum(episode_returns) / len(episode_returns)) ** 2 for r in episode_returns)
+                / len(episode_returns)
+            )
+            ** 0.5
+            if len(episode_returns) > 1
+            else 0.0,
+            "min_return": min(episode_returns) if episode_returns else 0.0,
+            "max_return": max(episode_returns) if episode_returns else 0.0,
+            "total_episodes": len(episode_returns),
         }
 
         dataset = DynamicsDataset(
@@ -937,7 +934,7 @@ class BaseRunner(ABC):
             dones=dones,
             auxiliary_obs=auxiliary_obs,
             next_auxiliary_obs=next_auxiliary_obs,
-            metadata=metadata
+            metadata=metadata,
         )
 
         print(f"\n{GREEN}✓ Dataset collection complete!{RESET}")
@@ -948,24 +945,21 @@ class BaseRunner(ABC):
         print(f"  - Action shape: {actions.shape}")
 
         if episode_returns:
-            print(f"\n  - Return Statistics:")
+            print("\n  - Return Statistics:")
             print(f"    * Mean: {metadata['mean_return']:.2f}")
             print(f"    * Std:  {metadata['std_return']:.2f}")
             print(f"    * Min:  {metadata['min_return']:.2f}")
             print(f"    * Max:  {metadata['max_return']:.2f}")
 
         if auxiliary_obs:
-            print(f"\n  - Auxiliary observations:")
+            print("\n  - Auxiliary observations:")
             for key, tensor in auxiliary_obs.items():
                 print(f"    * {key}: {tensor.shape}")
 
         return dataset
 
     def save_dataset_checkpoint(
-        self,
-        dataset: DynamicsDataset,
-        save_name: Optional[str] = None,
-        include_policy: bool = True
+        self, dataset: DynamicsDataset, save_name: str | None = None, include_policy: bool = True
     ) -> str:
         """Save dataset checkpoint with runner state."""
         from rlworld.rl.utils.dataset_manager import DatasetCheckpointHandler
@@ -976,10 +970,7 @@ class BaseRunner(ABC):
         save_path = os.path.join(self.model_log_dir, save_name)
 
         DatasetCheckpointHandler.save_dataset_checkpoint(
-            runner=self,
-            dataset=dataset,
-            path=save_path,
-            include_policy=include_policy
+            runner=self, dataset=dataset, path=save_path, include_policy=include_policy
         )
 
         return save_path
@@ -987,22 +978,16 @@ class BaseRunner(ABC):
     def collect_and_save_dataset(
         self,
         num_samples: int,
-        save_name: Optional[str] = None,
+        save_name: str | None = None,
         use_random_policy: bool = False,
-        auxiliary_terms: Optional[List[ObservationTermConfig]] = None,
-        include_policy: bool = True
+        auxiliary_terms: List[ObservationTermConfig] | None = None,
+        include_policy: bool = True,
     ) -> Tuple[DynamicsDataset, str]:
         """Convenience method to collect and save dataset in one call."""
         dataset = self.collect_dynamics_dataset(
-            num_samples=num_samples,
-            use_random_policy=use_random_policy,
-            auxiliary_terms=auxiliary_terms
+            num_samples=num_samples, use_random_policy=use_random_policy, auxiliary_terms=auxiliary_terms
         )
 
-        save_path = self.save_dataset_checkpoint(
-            dataset=dataset,
-            save_name=save_name,
-            include_policy=include_policy
-        )
+        save_path = self.save_dataset_checkpoint(dataset=dataset, save_name=save_name, include_policy=include_policy)
 
         return dataset, save_path

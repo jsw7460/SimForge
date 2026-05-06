@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from ..base_config import BaseConfig
 
@@ -32,4 +32,3 @@ class TD3Config(BaseConfig):
 
     num_gradient_steps: int = 1
     max_grad_norm: float = 10.0
-

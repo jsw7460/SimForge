@@ -1,4 +1,4 @@
-from typing import Dict, Any, Tuple, NamedTuple
+from typing import Any, Dict, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -10,6 +10,7 @@ class ReplayBatch(NamedTuple):
     Batch of transitions sampled from replay buffer.
     Supports n-step returns with variable effective n per sample.
     """
+
     actor_observations: jax.Array
     critic_observations: jax.Array
     actions: jax.Array
@@ -60,30 +61,14 @@ class ReplayBuffer:
         self.gamma = gamma
 
         # NumPy buffers for fast in-place writes: [num_envs, size_per_env, dim]
-        self.actor_obs_buf = np.zeros(
-            (num_envs, size_per_env, actor_obs_dim), dtype=np.float32
-        )
-        self.critic_obs_buf = np.zeros(
-            (num_envs, size_per_env, critic_obs_dim), dtype=np.float32
-        )
-        self.next_actor_obs_buf = np.zeros(
-            (num_envs, size_per_env, actor_obs_dim), dtype=np.float32
-        )
-        self.next_critic_obs_buf = np.zeros(
-            (num_envs, size_per_env, critic_obs_dim), dtype=np.float32
-        )
-        self.acts_buf = np.zeros(
-            (num_envs, size_per_env, act_dim), dtype=np.float32
-        )
-        self.rews_buf = np.zeros(
-            (num_envs, size_per_env, 1), dtype=np.float32
-        )
-        self.terminated_buf = np.zeros(
-            (num_envs, size_per_env, 1), dtype=np.float32
-        )
-        self.truncated_buf = np.zeros(
-            (num_envs, size_per_env, 1), dtype=np.float32
-        )
+        self.actor_obs_buf = np.zeros((num_envs, size_per_env, actor_obs_dim), dtype=np.float32)
+        self.critic_obs_buf = np.zeros((num_envs, size_per_env, critic_obs_dim), dtype=np.float32)
+        self.next_actor_obs_buf = np.zeros((num_envs, size_per_env, actor_obs_dim), dtype=np.float32)
+        self.next_critic_obs_buf = np.zeros((num_envs, size_per_env, critic_obs_dim), dtype=np.float32)
+        self.acts_buf = np.zeros((num_envs, size_per_env, act_dim), dtype=np.float32)
+        self.rews_buf = np.zeros((num_envs, size_per_env, 1), dtype=np.float32)
+        self.terminated_buf = np.zeros((num_envs, size_per_env, 1), dtype=np.float32)
+        self.truncated_buf = np.zeros((num_envs, size_per_env, 1), dtype=np.float32)
 
         # Single synchronized pointer
         self.ptr = 0
@@ -109,7 +94,7 @@ class ReplayBuffer:
         next_critic_obs: jax.Array,
         terminated: jax.Array,
         truncated: jax.Array,
-        **kwargs
+        **kwargs,
     ) -> None:
         """
         Store transitions from multiple parallel environments.
@@ -196,10 +181,7 @@ class ReplayBuffer:
 
         # Mask: include reward at boundary step, exclude after
         cumsum_boundaries = np.cumsum(all_boundaries, axis=1)
-        cumsum_boundaries_shifted = np.concatenate([
-            np.zeros((batch_size, 1)),
-            cumsum_boundaries[:, :-1]
-        ], axis=1)
+        cumsum_boundaries_shifted = np.concatenate([np.zeros((batch_size, 1)), cumsum_boundaries[:, :-1]], axis=1)
         done_masks = (cumsum_boundaries_shifted == 0).astype(np.float32)
 
         # Discount factors [γ^0, γ^1, ..., γ^(n-1)]
@@ -314,7 +296,7 @@ class ReplayBuffer:
         if self.filled_size >= self.size_per_env:
             recent_pos = (self.ptr - 1 - np.arange(min(n // self.num_envs, self.size_per_env))) % self.size_per_env
         else:
-            recent_pos = np.arange(self.filled_size - 1, -1, -1)[:n // self.num_envs]
+            recent_pos = np.arange(self.filled_size - 1, -1, -1)[: n // self.num_envs]
 
         actions = self.acts_buf[:, recent_pos].reshape(-1, self.act_dim)
         return jnp.asarray(actions[:n])

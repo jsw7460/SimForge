@@ -1,4 +1,5 @@
 """Dump canonical action/obs joint order for Mjlab T1 getup. (See Newton twin.)"""
+
 from __future__ import annotations
 
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
@@ -36,6 +37,7 @@ def main() -> None:
 
     print("\n=== Mjlab T1 — observation group layout ===")
     import torch
+
     env.reset()
     zero_act = torch.zeros(env.num_envs, am.total_action_dim, device=env.device)
     env.step(zero_act)

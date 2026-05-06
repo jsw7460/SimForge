@@ -1,4 +1,5 @@
 import math
+
 import torch
 from torch import nn
 
@@ -24,20 +25,19 @@ class ActiveJointDecoder(nn.Module):
         self.latent_dim = latent_dim
 
         # Register as buffer for device handling
-        self.register_buffer(
-            'active_joint_indices',
-            torch.tensor(active_joint_indices, dtype=torch.long)
-        )
+        self.register_buffer("active_joint_indices", torch.tensor(active_joint_indices, dtype=torch.long))
 
         # Per-joint projection: latent_dim -> 1
-        self.joint_projections = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(latent_dim, latent_dim // 2),
-                nn.SiLU(),
-                nn.Linear(latent_dim // 2, 1),
-            )
-            for _ in range(self.num_active_joints)
-        ])
+        self.joint_projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(latent_dim, latent_dim // 2),
+                    nn.SiLU(),
+                    nn.Linear(latent_dim // 2, 1),
+                )
+                for _ in range(self.num_active_joints)
+            ]
+        )
 
         self._init_weights()
 
@@ -93,14 +93,16 @@ class SimpleJointDecoder(nn.Module):
         self.latent_dim = latent_dim
 
         # Per-joint projection: latent_dim -> 1
-        self.joint_projections = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(latent_dim, latent_dim // 2),
-                nn.SiLU(),
-                nn.Linear(latent_dim // 2, 1),
-            )
-            for _ in range(num_joints)
-        ])
+        self.joint_projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(latent_dim, latent_dim // 2),
+                    nn.SiLU(),
+                    nn.Linear(latent_dim // 2, 1),
+                )
+                for _ in range(num_joints)
+            ]
+        )
 
         self._init_weights()
 

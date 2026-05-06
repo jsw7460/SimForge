@@ -14,12 +14,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Tuple
 
 import torch
-import torch.nn.functional as F
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.genesis.genesis_env import GenesisEnv
+
+    from .networks import QEnsemble, SimMPCPolicy
     from .state_sync import GenesisStateSync
-    from .networks import SimMPCPolicy, QEnsemble
 
 
 def planning_step(
@@ -127,7 +127,7 @@ class SimulatorMPPI:
         self.min_std = min_std
         self.max_std = max_std
         self.gamma = gamma
-        self.action_low = action_low   # [action_dim]
+        self.action_low = action_low  # [action_dim]
         self.action_high = action_high  # [action_dim]
         self.device = planning_env.device
         self.use_terminal_q = False  # Enable after Q-network is trained
@@ -135,9 +135,7 @@ class SimulatorMPPI:
         action_dim = action_low.shape[0]
 
         # Warm-start mean: [N_train, horizon, action_dim]
-        self._prev_mean = torch.zeros(
-            num_train_envs, horizon, action_dim, device=self.device
-        )
+        self._prev_mean = torch.zeros(num_train_envs, horizon, action_dim, device=self.device)
 
     @torch.no_grad()
     def _sample_policy_trajectories(self) -> torch.Tensor:
@@ -235,9 +233,7 @@ class SimulatorMPPI:
 
             # Sample noise actions: [H, num_noise, action_dim]
             noise = torch.randn(H, num_noise, action_dim, device=self.device)
-            noise_actions = (mean.unsqueeze(1) + std.unsqueeze(1) * noise).clamp(
-                self.action_low, self.action_high
-            )
+            noise_actions = (mean.unsqueeze(1) + std.unsqueeze(1) * noise).clamp(self.action_low, self.action_high)
 
             # Combine: [H, S, action_dim]
             actions = torch.cat([pi_actions, noise_actions], dim=1)
@@ -266,18 +262,17 @@ class SimulatorMPPI:
             elite_values = cumulative_reward[elite_idx]  # [num_elites]
 
             # Softmax scoring
-            score = torch.exp(
-                self.temperature * (elite_values - elite_values.max())
-            )
+            score = torch.exp(self.temperature * (elite_values - elite_values.max()))
             score = score / (score.sum() + 1e-9)  # [num_elites]
 
             # Weighted mean and std
             mean = (score[None, :, None] * elite_actions).sum(dim=1)  # [H, action_dim]
             residual = elite_actions - mean.unsqueeze(1)
             std = (
-                (score[None, :, None] * residual.square()).sum(dim=1)
-                / (score.sum() + 1e-9)
-            ).sqrt().clamp(self.min_std, self.max_std)
+                ((score[None, :, None] * residual.square()).sum(dim=1) / (score.sum() + 1e-9))
+                .sqrt()
+                .clamp(self.min_std, self.max_std)
+            )
 
         # ── Final action selection via Gumbel-Softmax ──
         gumbel = -torch.log(-torch.log(torch.rand_like(score) + 1e-8) + 1e-8)

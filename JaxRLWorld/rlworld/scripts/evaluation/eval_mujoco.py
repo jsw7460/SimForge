@@ -21,10 +21,10 @@ Usage::
     # Custom viser port
     python rlworld/scripts/evaluation/eval_mujoco.py --port 2027
 """
+
 import argparse
 
 from rlworld.rl.evals import PolicyEvaluator
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MuJoCo (mjlab) evaluation")

@@ -1,14 +1,13 @@
-from typing import Optional, Any
-
-import mujoco
-import torch
-
-import numpy as np
+from typing import Any
 
 import genesis as gs
-from rlworld.rl.configs import EnvConfig, SceneConfig, ObservationConfig, ActionConfig, RewardConfig, CommandConfig
-from rlworld.rl.envs import World
+import mujoco
+import numpy as np
+import torch
+
+from rlworld.rl.configs import ActionConfig, CommandConfig, EnvConfig, ObservationConfig, RewardConfig, SceneConfig
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
+from rlworld.rl.envs import World
 
 
 class MuJoCoKinematicTree:
@@ -24,7 +23,7 @@ class MuJoCoKinematicTree:
             mj_model: mujoco.MjModel object
         """
         self.model = mj_model
-        self.name = mj_model.names.decode('utf-8').split('\x00')[0] if mj_model.names else "mujoco_robot"
+        self.name = mj_model.names.decode("utf-8").split("\x00")[0] if mj_model.names else "mujoco_robot"
 
         # Extract robot bodies (excluding world)
         self.links = self._extract_links()
@@ -50,8 +49,8 @@ class MuJoCoKinematicTree:
         for mj_body_idx in range(1, self.model.nbody):
             # Get body name
             body_name_start = self.model.name_bodyadr[mj_body_idx]
-            body_name_end = self.model.names[body_name_start:].find(b'\x00')
-            body_name = self.model.names[body_name_start:body_name_start + body_name_end].decode('utf-8')
+            body_name_end = self.model.names[body_name_start:].find(b"\x00")
+            body_name = self.model.names[body_name_start : body_name_start + body_name_end].decode("utf-8")
 
             # Get body mass
             mass = self.model.body_mass[mj_body_idx]
@@ -63,14 +62,16 @@ class MuJoCoKinematicTree:
             inertia = self.model.body_inertia[mj_body_idx].copy()
 
             # New index starts from 0 (shifted by -1 from MuJoCo index)
-            links.append({
-                "index": len(links),  # Our index (0-based)
-                "mujoco_index": mj_body_idx,  # Original MuJoCo index
-                "name": body_name,
-                "mass": float(mass),
-                "pos": pos,
-                "inertia": inertia
-            })
+            links.append(
+                {
+                    "index": len(links),  # Our index (0-based)
+                    "mujoco_index": mj_body_idx,  # Original MuJoCo index
+                    "name": body_name,
+                    "mass": float(mass),
+                    "pos": pos,
+                    "inertia": inertia,
+                }
+            )
 
         return links
 
@@ -86,10 +87,10 @@ class MuJoCoKinematicTree:
         # Build mapping: MuJoCo body index → Our body index
         mj_to_our_idx = {}
         for link in self.links:
-            mj_to_our_idx[link['mujoco_index']] = link['index']
+            mj_to_our_idx[link["mujoco_index"]] = link["index"]
 
         for link in self.links:
-            mj_body_idx = link['mujoco_index']
+            mj_body_idx = link["mujoco_index"]
             mj_parent_idx = self.model.body_parentid[mj_body_idx]
 
             if mj_parent_idx == 0:
@@ -125,7 +126,7 @@ class MuJoCoKinematicTree:
         # Build mapping: MuJoCo body index → Our body index
         mj_to_our_idx = {}
         for link in self.links:
-            mj_to_our_idx[link['mujoco_index']] = link['index']
+            mj_to_our_idx[link["mujoco_index"]] = link["index"]
 
         joints = []
 
@@ -155,18 +156,13 @@ class MuJoCoKinematicTree:
 
             # Get joint name
             joint_name_start = self.model.name_jntadr[jnt_idx]
-            joint_name_end = self.model.names[joint_name_start:].find(b'\x00')
-            joint_name = self.model.names[joint_name_start:joint_name_start + joint_name_end].decode('utf-8')
+            joint_name_end = self.model.names[joint_name_start:].find(b"\x00")
+            joint_name = self.model.names[joint_name_start : joint_name_start + joint_name_end].decode("utf-8")
 
             # Get joint type
             joint_type = self.model.jnt_type[jnt_idx]
-            joint_type_names = {
-                0: 'free',
-                1: 'ball',
-                2: 'slide',
-                3: 'hinge'
-            }
-            joint_type_str = joint_type_names.get(joint_type, f'unknown({joint_type})')
+            joint_type_names = {0: "free", 1: "ball", 2: "slide", 3: "hinge"}
+            joint_type_str = joint_type_names.get(joint_type, f"unknown({joint_type})")
 
             # Get joint range (limits)
             joint_range = None
@@ -178,18 +174,20 @@ class MuJoCoKinematicTree:
 
             # Store joint info (only if parent != -1, i.e., not root joint)
             if parent_idx != -1:
-                joints.append({
-                    "index": len(joints),
-                    "parent_link": int(parent_idx),
-                    "child_link": int(child_idx),
-                    "name": joint_name,
-                    "type": joint_type_str,
-                    "type_id": int(joint_type),
-                    "axis": joint_axis,
-                    "range": joint_range,
-                    "limited": bool(self.model.jnt_limited[jnt_idx]),
-                    "mujoco_index": jnt_idx
-                })
+                joints.append(
+                    {
+                        "index": len(joints),
+                        "parent_link": int(parent_idx),
+                        "child_link": int(child_idx),
+                        "name": joint_name,
+                        "type": joint_type_str,
+                        "type_id": int(joint_type),
+                        "axis": joint_axis,
+                        "range": joint_range,
+                        "limited": bool(self.model.jnt_limited[jnt_idx]),
+                        "mujoco_index": jnt_idx,
+                    }
+                )
 
         return joints
 
@@ -215,12 +213,12 @@ class MuJoCoKinematicTree:
     def get_joint_parent_link(self, joint_idx: int) -> int:
         if joint_idx >= len(self.joints):
             raise ValueError(f"No joint at index {joint_idx}")
-        return self.joints[joint_idx]['parent_link']
+        return self.joints[joint_idx]["parent_link"]
 
     def get_joint_child_link(self, joint_idx: int) -> int:
         if joint_idx >= len(self.joints):
             raise ValueError(f"No joint at index {joint_idx}")
-        return self.joints[joint_idx]['child_link']
+        return self.joints[joint_idx]["child_link"]
 
     def get_active_joint_indices(self):
         return list(range(len(self.joints)))
@@ -338,24 +336,28 @@ class MuJoCoKinematicTree:
         print(f"Total bodies: {self.num_bodies}")
         print(f"Total joints: {self.num_joints}")
         print(f"Root: {self.root_idx} ({self.links[self.root_idx]['name']})")
-        print(f"\nBodies:")
+        print("\nBodies:")
         for link in self.links:
-            parent_idx = self.parent_indices[link['index']]
-            parent_name = self.links[parent_idx]['name'] if parent_idx != -1 else 'None'
+            parent_idx = self.parent_indices[link["index"]]
+            parent_name = self.links[parent_idx]["name"] if parent_idx != -1 else "None"
             print(f"  [{link['index']}] {link['name']}: mass={link['mass']:.3f}kg, parent={parent_name}")
 
-        print(f"\nJoints:")
+        print("\nJoints:")
         for joint in self.joints:
-            print(f"  [{joint['index']}] {joint['name']}: "
-                  f"type={joint['type']}, "
-                  f"parent={self.links[joint['parent_link']]['name']} → "
-                  f"child={self.links[joint['child_link']]['name']}")
+            print(
+                f"  [{joint['index']}] {joint['name']}: "
+                f"type={joint['type']}, "
+                f"parent={self.links[joint['parent_link']]['name']} → "
+                f"child={self.links[joint['child_link']]['name']}"
+            )
 
     def __repr__(self) -> str:
-        return (f"MuJoCoKinematicTree(name='{self.name}', "
-                f"num_bodies={self.num_bodies}, "
-                f"num_joints={self.num_joints}, "
-                f"root={self.root_idx})")
+        return (
+            f"MuJoCoKinematicTree(name='{self.name}', "
+            f"num_bodies={self.num_bodies}, "
+            f"num_joints={self.num_joints}, "
+            f"root={self.root_idx})"
+        )
 
 
 class GymnasiumEnv(World):
@@ -373,9 +375,10 @@ class GymnasiumEnv(World):
         reward_cfg: RewardConfig,
         command_cfg: CommandConfig,
         max_episode_length: int = 1000,
-        seed: int = 0
+        seed: int = 0,
     ):
         from rlworld.rl.utils import set_seed
+
         set_seed(seed)
         super().__init__()
         # Check if vectorized or not
@@ -392,7 +395,7 @@ class GymnasiumEnv(World):
         self.reward_cfg = reward_cfg
         self.command_cfg = command_cfg
 
-        self.mj_model: Optional[mujoco.MjModel] = None
+        self.mj_model: mujoco.MjModel | None = None
         self.device = gs.device
 
         # Required attributes
@@ -420,7 +423,6 @@ class GymnasiumEnv(World):
         self._reset_counter = 0
 
         # self.mj_model.opt.timestep = 0.001
-
 
     def get_robot_state_writer(self, entity_name: str = "robot") -> "RobotStateWriterProtocol":
         pass
@@ -476,18 +478,18 @@ class GymnasiumEnv(World):
             def __init__(self, kinematic_tree):
                 self.trees = {"robot": kinematic_tree}
 
-        if hasattr(gym_env, 'envs'):
+        if hasattr(gym_env, "envs"):
             first_env = gym_env.envs[0]
         else:
             first_env = gym_env
 
         base_env = first_env.unwrapped
 
-        if hasattr(base_env, 'physics'):
+        if hasattr(base_env, "physics"):
             # dm_control env (via shimmy)
             mj_model = base_env.physics.model._model
             kinematic_tree = MuJoCoKinematicTree(mj_model)
-        elif hasattr(base_env, 'model'):
+        elif hasattr(base_env, "model"):
             # Standard MuJoCo gym env
             mj_model = base_env.model
             kinematic_tree = KinematicTree(mjcf_path=base_env.fullpath)
@@ -574,9 +576,7 @@ class GymnasiumEnv(World):
             # Only overwrite done envs
             done_indices = dones_tensor.nonzero(as_tuple=True)[0].cpu().numpy()
             for i in done_indices:
-                final_obs_tensor[i] = torch.from_numpy(
-                    final_obs_arr[i].astype(np.float32)
-                ).to(self.device)
+                final_obs_tensor[i] = torch.from_numpy(final_obs_arr[i].astype(np.float32)).to(self.device)
 
             final_observation = {
                 "actor": final_obs_tensor,
@@ -602,10 +602,12 @@ class GymnasiumEnv(World):
             formatted_info.update(info)
 
         # Format info
-        formatted_info.update({
-            "final_observation": final_observation,
-            "rewards_per_type": {"total_reward": rewards_tensor},
-        })
+        formatted_info.update(
+            {
+                "final_observation": final_observation,
+                "rewards_per_type": {"total_reward": rewards_tensor},
+            }
+        )
 
         self._update_num_step_calls()
         return obs_dict, rewards_tensor, terminated_tensor, truncated_tensor, formatted_info

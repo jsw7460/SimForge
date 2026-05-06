@@ -7,8 +7,9 @@ import torch
 from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs import World
     from mjlab.sensor.contact_sensor import ContactSensor
+
+    from rlworld.rl.envs import World
 
 
 class MujocoContactManager(BaseContactManager):
@@ -17,9 +18,9 @@ class MujocoContactManager(BaseContactManager):
     Each mjlab ``ContactSensor`` becomes a named group (sensor cfg name = group name).
     """
 
-    def __init__(self, env: "World"):
+    def __init__(self, env: World):
         super().__init__(env)
-        self._group_sensors: dict[str, "ContactSensor"] = {}
+        self._group_sensors: dict[str, ContactSensor] = {}
 
     # -- sensor registration --
 
@@ -29,9 +30,7 @@ class MujocoContactManager(BaseContactManager):
         for sensor_name, sensor in self.env.scene_manager.sensors.items():
             if isinstance(sensor, ContactSensor):
                 self._group_sensors[sensor_name] = sensor
-                primary_names = list(
-                    dict.fromkeys(slot.primary_name for slot in sensor._slots)
-                )
+                primary_names = list(dict.fromkeys(slot.primary_name for slot in sensor._slots))
                 self._register_group(sensor_name, primary_names)
 
     # -- abstract impl --
@@ -40,9 +39,7 @@ class MujocoContactManager(BaseContactManager):
         sensor = self._group_sensors[group.name]
         found = sensor.data.found
         if found is None:
-            return torch.zeros(
-                self.num_envs, group.num_tracked, dtype=torch.bool, device=self.device
-            )
+            return torch.zeros(self.num_envs, group.num_tracked, dtype=torch.bool, device=self.device)
         if found.dim() == 3:
             found = found.squeeze(-1)
         return found > 0

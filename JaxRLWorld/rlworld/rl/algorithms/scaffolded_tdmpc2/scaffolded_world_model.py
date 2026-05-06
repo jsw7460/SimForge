@@ -5,18 +5,18 @@ Training-time only. Operates on s+ = [s-, s_priv].
 At deployment, only ABDNetWorldModel (on s-) is used.
 """
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 from rlworld.rl.algorithms.tdmpc2.math import (
     TwoHotConfig,
-    two_hot_inv,
-    log_std_transform,
     gaussian_logprob,
+    log_std_transform,
     squash,
+    two_hot_inv,
 )
 from rlworld.rl.modules.policies.tdmpc2_world_model import (
     TDMPC2MLP,
@@ -43,13 +43,13 @@ class ScaffoldedWorldModel(eqx.Module):
     q_ensemble: QEnsemble
     exploration_policy: TDMPC2MLP
     pi_encoder_weight: jax.Array  # (scaffolded_dim, scaffolded_dim)
-    pi_encoder_bias: jax.Array    # (scaffolded_dim,)
+    pi_encoder_bias: jax.Array  # (scaffolded_dim,)
 
     scaffolded_dim: int = eqx.field(static=True)
     target_obs_dim: int = eqx.field(static=True)
     privileged_obs_dim: int = eqx.field(static=True)
     action_dim: int = eqx.field(static=True)
-    latent_dim: int = eqx.field(static=True)   # = scaffolded_dim
+    latent_dim: int = eqx.field(static=True)  # = scaffolded_dim
     num_q: int = eqx.field(static=True)
     num_bins: int = eqx.field(static=True)
     simnorm_dim: int = eqx.field(static=True)
@@ -130,9 +130,9 @@ class ScaffoldedWorldModel(eqx.Module):
         )
 
         # Lightweight linear projection for exploration policy input (before SimNorm)
-        self.pi_encoder_weight = jax.random.normal(
-            k_pi_enc, (self.scaffolded_dim, self.scaffolded_dim)
-        ) * (1.0 / self.scaffolded_dim ** 0.5)
+        self.pi_encoder_weight = jax.random.normal(k_pi_enc, (self.scaffolded_dim, self.scaffolded_dim)) * (
+            1.0 / self.scaffolded_dim**0.5
+        )
         self.pi_encoder_bias = jnp.zeros(self.scaffolded_dim)
 
         # Zero-init outputs
@@ -170,16 +170,25 @@ class ScaffoldedWorldModel(eqx.Module):
         return self.reward_head(za)
 
     def predict_q(
-        self, z_plus: jax.Array, a: jax.Array,
-        *, key: Optional[jax.Array] = None, inference: bool = False,
+        self,
+        z_plus: jax.Array,
+        a: jax.Array,
+        *,
+        key: jax.Array | None = None,
+        inference: bool = False,
     ) -> jax.Array:
         za = jnp.concatenate([z_plus, a], axis=-1)
         return self.q_ensemble(za, key=key, inference=inference)
 
     def q_value(
-        self, z_plus: jax.Array, a: jax.Array,
-        two_hot_cfg: TwoHotConfig, return_type: str = "min",
-        *, key: jax.Array, inference: bool = True,
+        self,
+        z_plus: jax.Array,
+        a: jax.Array,
+        two_hot_cfg: TwoHotConfig,
+        return_type: str = "min",
+        *,
+        key: jax.Array,
+        inference: bool = True,
     ) -> jax.Array:
         key1, key2 = jax.random.split(key)
         q_logits = self.predict_q(z_plus, a, key=key1, inference=inference)
@@ -193,7 +202,10 @@ class ScaffoldedWorldModel(eqx.Module):
         return q_values.mean(axis=0)
 
     def pi_explore(
-        self, z_plus: jax.Array, *, key: jax.Array,
+        self,
+        z_plus: jax.Array,
+        *,
+        key: jax.Array,
     ) -> tuple[jax.Array, dict]:
         """Scaffolded exploration policy. Training-time only."""
         z_enc = z_plus @ self.pi_encoder_weight.T + self.pi_encoder_bias
@@ -209,13 +221,16 @@ class ScaffoldedWorldModel(eqx.Module):
         mean, action, log_prob = squash(mean, action, log_prob)
         entropy_scale = scaled_log_prob / (log_prob + 1e-8)
         info = {
-            "mean": mean, "log_std": log_std,
+            "mean": mean,
+            "log_std": log_std,
             "entropy": -log_prob,
             "scaled_entropy": -log_prob * entropy_scale,
         }
         return action, info
 
     def compute_dynamics_orthogonality_loss(
-        self, state: jax.Array, action: jax.Array,
+        self,
+        state: jax.Array,
+        action: jax.Array,
     ) -> jax.Array:
         return self.dynamics.compute_orthogonality_loss(state, action)

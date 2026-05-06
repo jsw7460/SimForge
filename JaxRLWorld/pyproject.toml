@@ -36,6 +36,7 @@ wandb = ["wandb>=0.16.0"]
 dev = [
     "pytest",
     "ruff",
+    "pre-commit",
 ]
 all = [
     "rlworld[genesis,newton,wandb]",
@@ -45,6 +46,53 @@ all = [
 Homepage = "https://github.com/jsw7460/SimForge"
 Repository = "https://github.com/jsw7460/SimForge"
 Issues = "https://github.com/jsw7460/SimForge/issues"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    "third_party",
+    "output",
+    "outputs",
+    "build",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+# Conservative rule set — prioritizes catching real bugs over style policing.
+# `E`/`W`: pycodestyle errors+warnings.
+# `F`: pyflakes — unused imports, undefined names, real bugs.
+# `I`: isort — import order.
+# `UP`: pyupgrade — modernize syntax (e.g. `Optional[X]` → `X | None`) on py310+.
+# `B`: bugbear — common Python pitfalls.
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line too long — formatter handles long-but-stable lines
+    "E731",  # lambda assignment (we use these a lot for inline configs)
+    "E741",  # ambiguous var name (we use single-letter math vars often)
+    "B008",  # function call in default arg — common with field(default_factory=...)
+    "B028",  # warnings.warn without stacklevel
+    "B904",  # raise from inside except — too noisy initially
+    "UP006", # use `list` instead of `List` — we still target older typing in places
+    "UP007", # use `X | Y` instead of `Union[X, Y]` — same reason
+    "UP035", # `typing.X` deprecated alias — same reason
+]
+# Allow autofix for everything ruff can repair on its own.
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # re-exports look like unused imports
+"tests/**/*.py" = ["F401", "F811"]
+"scripts/**/*.py" = ["E402"]  # scripts often set env vars before imports
+
+[tool.ruff.lint.isort]
+known-first-party = ["rlworld"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = false  # don't reformat code blocks inside docstrings
 
 [tool.setuptools.packages.find]
 where = ["."]

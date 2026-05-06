@@ -1,8 +1,9 @@
-from .scene import NewtonSceneManager, NewtonSceneManagerConfig
 from .action import NewtonActionManager, NewtonActionManagerConfig
-from .observation import NewtonObservationManager, NewtonObsManagerConfig
-from .visualization import NewtonVisualizationManager, NewtonVisualizationManagerConfig
 from .contact import NewtonContactManager
+from .observation import NewtonObservationManager, NewtonObsManagerConfig
+from .scene import NewtonSceneManager, NewtonSceneManagerConfig
+from .visualization import NewtonVisualizationManager, NewtonVisualizationManagerConfig
+
 __all__ = [
     "NewtonSceneManager",
     "NewtonSceneManagerConfig",

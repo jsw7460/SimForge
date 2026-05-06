@@ -3,6 +3,7 @@ from itertools import chain
 from typing import Sequence
 
 from genesis.engine.entities import RigidEntity
+
 from rlworld.rl.utils import string as string_utils
 
 
@@ -10,7 +11,7 @@ def find_joints(
     entity: RigidEntity,
     name_keys: str | Sequence[str],
     joint_subset: list[str] | None = None,
-    preserve_order: bool = True
+    preserve_order: bool = True,
 ) -> tuple[list[int], list[str]]:
     """Find joints in the articulation based on the name keys."""
     joint_names = [joint.name for joint in chain.from_iterable(entity._joints)]

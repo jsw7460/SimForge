@@ -9,6 +9,7 @@ from rlworld.rl.utils.resolve import resolve_callable
 @dataclass
 class TerminationResult:
     """Result from a termination check."""
+
     reset: torch.Tensor  # Which envs to reset
     is_timeout: bool = False  # Whether this is a timeout termination
     extras: dict = None  # Additional logging info

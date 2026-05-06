@@ -26,19 +26,15 @@ class ActionManager(ActionManagerBase):
     Genesis control_dofs_position / control_dofs_force.
     """
 
-    def __init__(self, env: "GenesisEnv", config: ActionManagerConfig):
+    def __init__(self, env: GenesisEnv, config: ActionManagerConfig):
         self._genesis_env = env
         super().__init__(env, config)
 
     def _apply_position(self, targets):
-        self._genesis_env.robot.control_dofs_position(
-            targets, self._indexing.sim_indices
-        )
+        self._genesis_env.robot.control_dofs_position(targets, self._indexing.sim_indices)
 
     def _apply_force(self, torques):
-        self._genesis_env.robot.control_dofs_force(
-            torques, self._indexing.sim_indices
-        )
+        self._genesis_env.robot.control_dofs_force(torques, self._indexing.sim_indices)
 
     @property
     def actuated_dof_ids(self):

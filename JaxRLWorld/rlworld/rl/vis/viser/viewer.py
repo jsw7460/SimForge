@@ -8,7 +8,7 @@ Works with any simulator through SimulatorBridge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -17,8 +17,8 @@ import trimesh.visual
 import viser
 
 from .bridge import SimulatorBridge
+from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .scene import ViserScene
-from .overlays import ViserTermOverlays, ViserDebugOverlays
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
@@ -51,9 +51,7 @@ def _yaw_from_quat_wxyz(quat: np.ndarray) -> float:
     return float(np.arctan2(siny_cosp, cosy_cosp))
 
 
-def _rotation_quat_from_vectors(
-    from_vec: np.ndarray, to_vec: np.ndarray
-) -> np.ndarray:
+def _rotation_quat_from_vectors(from_vec: np.ndarray, to_vec: np.ndarray) -> np.ndarray:
     """Compute quaternion (wxyz) that rotates from_vec to to_vec."""
     from_vec = from_vec / np.linalg.norm(from_vec)
     to_vec = to_vec / np.linalg.norm(to_vec)
@@ -151,10 +149,7 @@ class ViserVisualizationManager:
         # Setup GUI.
         self._setup_gui()
 
-        print(
-            f"[ViserViewer] Started on port {self.config.port}. "
-            f"Open the URL above to view."
-        )
+        print(f"[ViserViewer] Started on port {self.config.port}. Open the URL above to view.")
 
     def _setup_gui(self) -> None:
         """Create GUI tabs and overlays."""
@@ -251,7 +246,10 @@ class ViserVisualizationManager:
             vx = float(cmd_vx[env_idx])
             vy = float(cmd_vy[env_idx])
             self._cmd_arrow_handles = self._draw_velocity_arrow(
-                arrow_origin, vx, vy, yaw,
+                arrow_origin,
+                vx,
+                vy,
+                yaw,
                 color=_CMD_ARROW_COLOR,
                 name="/overlay/cmd_arrow",
                 old_handles=self._cmd_arrow_handles,
@@ -277,7 +275,8 @@ class ViserVisualizationManager:
         if cmd_ang is not None:
             ang_vel = float(cmd_ang[env_idx])
             self._ang_vel_handle = self._draw_angular_indicator(
-                arrow_origin, ang_vel,
+                arrow_origin,
+                ang_vel,
                 old_handle=self._ang_vel_handle,
             )
 
@@ -298,7 +297,7 @@ class ViserVisualizationManager:
         world_vx = cos_yaw * vel_x - sin_yaw * vel_y
         world_vy = sin_yaw * vel_x + cos_yaw * vel_y
 
-        magnitude = np.sqrt(world_vx ** 2 + world_vy ** 2)
+        magnitude = np.sqrt(world_vx**2 + world_vy**2)
         if magnitude < 1e-4:
             if old_handles is not None:
                 for h in old_handles:

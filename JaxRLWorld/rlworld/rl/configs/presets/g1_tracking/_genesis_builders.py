@@ -3,6 +3,7 @@
 Dispatched from :meth:`G1TrackingConfig.build` when
 ``sim_type == "genesis"``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import genesis as gs
 
 from rlworld.rl.actuators import IdealPDActuatorCfg
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     RewardConfig,
@@ -37,7 +39,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
@@ -57,10 +58,8 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import motion_tracking as rf_motion
-from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import motion_tracking as tt_motion
+from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab, reward_terms as rf_genesis
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, motion_tracking as tt_motion
 
 if TYPE_CHECKING:
     from .base import G1TrackingConfig
@@ -70,11 +69,11 @@ CONFIGS_FOR_RUN_CLS = GenesisConfigsForRun
 OBSERVATION_CFG_CLS = ObservationConfig
 
 
-def build_visualization(cfg: "G1TrackingConfig") -> VisualizationConfig:
+def build_visualization(cfg: G1TrackingConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False)
 
 
-def build_env(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> EnvConfig:
+def build_env(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> EnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         time_out = TerminationTermConfig(max_episode_exceed)
@@ -112,7 +111,7 @@ def build_env(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> EnvConfig:
     )
 
 
-def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> SceneConfig:
+def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> SceneConfig:
     r = cfg.robot
     sim_dt = timing["dt"]
 
@@ -170,34 +169,28 @@ def build_scene(cfg: "G1TrackingConfig", timing: Dict[str, Any]) -> SceneConfig:
     )
 
 
-def build_observation(cfg: "G1TrackingConfig") -> ObservationConfig:
+def build_observation(cfg: G1TrackingConfig) -> ObservationConfig:
     motion_params = {"command_name": "motion"}
 
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-        )
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-        )
-        base_lin_vel_obs = ObservationTermConfig(
-            func=base_lin_vel, scale=1.0, noise=Unoise(-0.5, 0.5)
-        )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01)
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+        base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0, noise=Unoise(-0.5, 0.5))
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
+            func=motion_anchor_pos_b,
+            scale=1.0,
+            params=motion_params,
             noise=Unoise(-0.25, 0.25),
         )
         motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
+            func=motion_anchor_ori_b,
+            scale=1.0,
+            params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
 
@@ -213,16 +206,24 @@ def build_observation(cfg: "G1TrackingConfig") -> ObservationConfig:
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
         command = ObservationTermConfig(func=command_obs, scale=1.0)
         motion_anchor_pos = ObservationTermConfig(
-            func=motion_anchor_pos_b, scale=1.0, params=motion_params,
+            func=motion_anchor_pos_b,
+            scale=1.0,
+            params=motion_params,
         )
         motion_anchor_ori = ObservationTermConfig(
-            func=motion_anchor_ori_b, scale=1.0, params=motion_params,
+            func=motion_anchor_ori_b,
+            scale=1.0,
+            params=motion_params,
         )
         robot_body_pos = ObservationTermConfig(
-            func=robot_body_pos_b, scale=1.0, params=motion_params,
+            func=robot_body_pos_b,
+            scale=1.0,
+            params=motion_params,
         )
         robot_body_ori = ObservationTermConfig(
-            func=robot_body_ori_b, scale=1.0, params=motion_params,
+            func=robot_body_ori_b,
+            scale=1.0,
+            params=motion_params,
         )
 
     @dataclass
@@ -233,7 +234,7 @@ def build_observation(cfg: "G1TrackingConfig") -> ObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "G1TrackingConfig") -> ActionConfig:
+def build_action(cfg: G1TrackingConfig) -> ActionConfig:
     """default_pos + action * per-joint-scale (Mjlab-equivalent JointPositionAction)."""
     r = cfg.robot
     return ActionConfig(
@@ -244,7 +245,7 @@ def build_action(cfg: "G1TrackingConfig") -> ActionConfig:
     )
 
 
-def build_reward(cfg: "G1TrackingConfig") -> RewardConfig:
+def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
     motion_params_std = lambda std: {"command_name": "motion", "std": std}
 
     @dataclass
@@ -296,7 +297,7 @@ def build_reward(cfg: "G1TrackingConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "G1TrackingConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
     """Genesis DR — scalar friction randomization only.
 
     Genesis lacks the 3-axis geom friction that Mjlab uses for G1 tracking

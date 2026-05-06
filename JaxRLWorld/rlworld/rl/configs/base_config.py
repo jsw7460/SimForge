@@ -11,12 +11,12 @@ T = TypeVar("T", bound="BaseConfig")
 
 def parse_override_args() -> Dict[str, Any]:
     override_dict: Dict[str, Dict[str, Any]] = {}
-    override_args = [arg for arg in sys.argv[1:] if '=' in arg]
+    override_args = [arg for arg in sys.argv[1:] if "=" in arg]
 
     for arg in override_args:
         try:
-            path, value = arg.split('=')
-            parts = path.split('.')
+            path, value = arg.split("=")
+            parts = path.split(".")
 
             if len(parts) < 2:
                 print(f"Warning: Skipping invalid override format: {arg}. Use format: category.parameter=value")
@@ -26,9 +26,9 @@ def parse_override_args() -> Dict[str, Any]:
 
             # Parse the value
             try:
-                if value.lower() in ('true', 'false'):
-                    typed_value = value.lower() == 'true'
-                elif '.' in value or 'e' in value.lower():
+                if value.lower() in ("true", "false"):
+                    typed_value = value.lower() == "true"
+                elif "." in value or "e" in value.lower():
                     typed_value = float(value)
                 else:
                     typed_value = int(value)
@@ -65,14 +65,14 @@ def _print_override_changes(overrides, config):
     def print_nested_changes(params, current_config, prefix=""):
         for param, value in params.items():
             if isinstance(value, dict):
-                current_value = current_config[param] if isinstance(current_config, dict) else getattr(
-                    current_config, param
+                current_value = (
+                    current_config[param] if isinstance(current_config, dict) else getattr(current_config, param)
                 )
                 print(f"{prefix}{param}:")
                 print_nested_changes(value, current_value, prefix + "  ")
             else:
-                current_value = current_config[param] if isinstance(current_config, dict) else getattr(
-                    current_config, param
+                current_value = (
+                    current_config[param] if isinstance(current_config, dict) else getattr(current_config, param)
                 )
                 print(f"{prefix}{param}:")
                 print(f"{prefix}  {Fore.RED}- From: {current_value}{Style.RESET_ALL}")
@@ -85,11 +85,12 @@ def _print_override_changes(overrides, config):
     print(f"\n{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}\n")
 
 
-import numpy as np
-from collections.abc import Mapping, Iterable, Sized
+from collections.abc import Iterable, Mapping, Sized
 
+import numpy as np
 
 # ── Term discovery (IsaacLab pattern) ──────────────────────────────────────
+
 
 def iter_terms(cfg: Any, term_type: type) -> dict:
     """Discover named term attributes on *cfg* that are instances of *term_type*.
@@ -146,6 +147,7 @@ def _convert_value(v: Any) -> Any:
         return v.item()
     if callable(v):
         from rlworld.rl.utils.resolve import callable_to_string
+
         return callable_to_string(v)
     return str(v)
 
@@ -194,6 +196,7 @@ def _recursive_to_dict(obj: "BaseConfig") -> Dict:
 
 
 # ── Deserialization (dict → object, in-place update) ───────────────────────
+
 
 def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
     """Update *obj* in-place from *data*, following IsaacLab's pattern.
@@ -253,13 +256,12 @@ def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
 
 @dataclass
 class BaseConfig:
-
     def get(self, key: str, default: Any = None) -> Any:
         """Dict-like get method for attribute access with default."""
         return getattr(self, key, default)
 
     def to_dict(self) -> Dict:
-        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+        return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
 
     # Fields listed here will be excluded from serialization (e.g. sim-specific objects).
     # ClassVar so dataclass does NOT treat this as an instance field.
@@ -306,11 +308,11 @@ class BaseConfig:
             String representation of the object
         """
         # Terminal color codes
-        BLUE = '\033[94m' if use_colors else ''
-        GREEN = '\033[92m' if use_colors else ''
-        YELLOW = '\033[93m' if use_colors else ''
-        CYAN = '\033[96m' if use_colors else ''
-        ENDC = '\033[0m' if use_colors else ''
+        BLUE = "\033[94m" if use_colors else ""
+        GREEN = "\033[92m" if use_colors else ""
+        YELLOW = "\033[93m" if use_colors else ""
+        CYAN = "\033[96m" if use_colors else ""
+        ENDC = "\033[0m" if use_colors else ""
 
         # Helper function to add colors to json strings
         def colorize_json(json_str: str) -> str:
@@ -318,10 +320,10 @@ class BaseConfig:
                 return json_str
 
             lines = []
-            for line in json_str.split('\n'):
+            for line in json_str.split("\n"):
                 # Check if this is a dict key line
-                if ': ' in line and '"' in line:
-                    parts = line.split(': ', 1)
+                if ": " in line and '"' in line:
+                    parts = line.split(": ", 1)
                     key_part = parts[0]
                     value_part = parts[1] if len(parts) > 1 else ""
 
@@ -336,15 +338,15 @@ class BaseConfig:
                     # Color values based on type
                     if value_part:
                         if value_part.startswith('"'):
-                            value_part = f'{GREEN}{value_part}{ENDC}'
-                        elif value_part.strip() in ('true', 'false', 'null'):
-                            value_part = f'{YELLOW}{value_part}{ENDC}'
-                        elif value_part[0].isdigit() or value_part.startswith('-'):
-                            value_part = f'{BLUE}{value_part}{ENDC}'
+                            value_part = f"{GREEN}{value_part}{ENDC}"
+                        elif value_part.strip() in ("true", "false", "null"):
+                            value_part = f"{YELLOW}{value_part}{ENDC}"
+                        elif value_part[0].isdigit() or value_part.startswith("-"):
+                            value_part = f"{BLUE}{value_part}{ENDC}"
 
                     line = f"{key_part}: {value_part}"
                 lines.append(line)
-            return '\n'.join(lines)
+            return "\n".join(lines)
 
         # Handle serialization of complex objects
         def json_serializer(o):
@@ -355,7 +357,7 @@ class BaseConfig:
         try:
             formatted = json.dumps(obj, indent=indent, default=json_serializer)
             return colorize_json(formatted)
-        except (TypeError, ValueError) as e:
+        except (TypeError, ValueError):
             # Fallback to standard representation if JSON serialization fails
             return str(obj)
 
@@ -369,7 +371,7 @@ class BaseConfig:
                 algorithm={'learning_rate': 0.0003}
             )
         """
-        immutable = getattr(self, 'IMMUTABLE_SETTINGS', {})
+        immutable = getattr(self, "IMMUTABLE_SETTINGS", {})
 
         for config_type, params in kwargs.items():
             if not hasattr(self, config_type):

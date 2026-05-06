@@ -30,13 +30,21 @@ class MultiChannelRodriguesOperator(nn.Module):
 
         # Learnable weights: (C_L, C'_L, C_J, 4, 4) - 5D tensor
         self.W_bias = nn.Parameter(torch.randn(link_channels_in, link_channels_out, spatial_dim, spatial_dim))
-        self.W_cos = nn.Parameter(torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim))
-        self.W_sin = nn.Parameter(torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim))
+        self.W_cos = nn.Parameter(
+            torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim)
+        )
+        self.W_sin = nn.Parameter(
+            torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim)
+        )
 
         # Conjugate weights
         self.W_bias_bar = nn.Parameter(torch.randn(link_channels_in, link_channels_out, spatial_dim, spatial_dim))
-        self.W_cos_bar = nn.Parameter(torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim))
-        self.W_sin_bar = nn.Parameter(torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim))
+        self.W_cos_bar = nn.Parameter(
+            torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim)
+        )
+        self.W_sin_bar = nn.Parameter(
+            torch.randn(link_channels_in, link_channels_out, joint_channels, spatial_dim, spatial_dim)
+        )
 
         self._init_weights()
 
@@ -72,8 +80,7 @@ class MultiChannelRodriguesOperator(nn.Module):
             nn.init.normal_(self.W_bias, mean=0.001, std=std)
             nn.init.normal_(self.W_bias_bar, mean=0.001, std=std)
         else:
-            for w in [self.W_bias, self.W_cos, self.W_sin,
-                      self.W_bias_bar, self.W_cos_bar, self.W_sin_bar]:
+            for w in [self.W_bias, self.W_cos, self.W_sin, self.W_bias_bar, self.W_cos_bar, self.W_sin_bar]:
                 nn.init.xavier_uniform_(w)
 
     # def _init_weights(self):
@@ -111,16 +118,16 @@ class MultiChannelRodriguesOperator(nn.Module):
 
         # Equation 6: Compute transformation matrices U and Ū
         U = self.W_bias.unsqueeze(0)
-        U = U + torch.einsum('bc,ijcde->bijde', cos_theta, self.W_cos)
-        U = U + torch.einsum('bc,ijcde->bijde', sin_theta, self.W_sin)
+        U = U + torch.einsum("bc,ijcde->bijde", cos_theta, self.W_cos)
+        U = U + torch.einsum("bc,ijcde->bijde", sin_theta, self.W_sin)
 
         U_bar = self.W_bias_bar.unsqueeze(0)
-        U_bar = U_bar + torch.einsum('bc,ijcde->bijde', cos_theta, self.W_cos_bar)
-        U_bar = U_bar + torch.einsum('bc,ijcde->bijde', sin_theta, self.W_sin_bar)
+        U_bar = U_bar + torch.einsum("bc,ijcde->bijde", cos_theta, self.W_cos_bar)
+        U_bar = U_bar + torch.einsum("bc,ijcde->bijde", sin_theta, self.W_sin_bar)
 
         # Equation 8: Apply transformations and sum over input channels
-        F_left = torch.einsum('bijde,bief->bjdf', U_bar, f_parent)
-        F_right = torch.einsum('bide,bijef->bjdf', f_parent, U)
+        F_left = torch.einsum("bijde,bief->bjdf", U_bar, f_parent)
+        F_right = torch.einsum("bide,bijef->bjdf", f_parent, U)
 
         return F_right + F_left
 
@@ -155,7 +162,7 @@ class RodriguesLayer(nn.Module):
             init_logit = math.log(init_scale / (1 - init_scale))
             self.contribution_weight = nn.Parameter(torch.full((num_joints,), init_logit))
         else:
-            self.register_buffer('contribution_weight', torch.tensor(parent_contribution))
+            self.register_buffer("contribution_weight", torch.tensor(parent_contribution))
 
         # Sparse operator array matching entity joint indices
         # operators[entity_joint_idx] = operator for that joint
@@ -168,14 +175,13 @@ class RodriguesLayer(nn.Module):
                     link_channels_in=link_channels,
                     link_channels_out=link_channels,
                     spatial_dim=spatial_dim,
-                    use_stable_init=use_stable_init
+                    use_stable_init=use_stable_init,
                 )
 
         # Layer normalization for each link
-        self.layer_norms = nn.ModuleList([
-            nn.LayerNorm([link_channels, spatial_dim, spatial_dim])
-            for _ in range(kinematic_tree.num_bodies)
-        ])
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm([link_channels, spatial_dim, spatial_dim]) for _ in range(kinematic_tree.num_bodies)]
+        )
 
         self.use_global_layer_norm = use_global_layer_norm
         if self.use_global_layer_norm:
@@ -198,8 +204,8 @@ class RodriguesLayer(nn.Module):
         # Process each active joint (Eq. 9-10) - Body-wise LayerNorm applied here
         for idx, entity_joint_idx in enumerate(self.tree.get_active_joint_indices()):
             joint_info = self.tree.joints[entity_joint_idx]
-            parent_idx = joint_info['parent_link']
-            child_idx = joint_info['child_link']
+            parent_idx = joint_info["parent_link"]
+            child_idx = joint_info["child_link"]
 
             F_parent = link_features_in[:, parent_idx]  # (batch, C_L, 4, 4)
             F_child_in = link_features_in[:, child_idx]  # (batch, C_L, 4, 4)
@@ -263,22 +269,16 @@ class JointLayer(nn.Module):
         spatial_dim: Spatial dimension of link features (4 for 4×4, 6 for 6×6)
     """
 
-    def __init__(
-        self,
-        kinematic_tree: "KinematicTree",
-        joint_channels: int,
-        link_channels: int,
-        spatial_dim: int
-    ):
+    def __init__(self, kinematic_tree: "KinematicTree", joint_channels: int, link_channels: int, spatial_dim: int):
         super().__init__()
         self.tree = kinematic_tree
 
         # Pre-compute active joint indices and their child link mappings
         active = kinematic_tree.get_active_joint_indices()
-        self.register_buffer('active_joints', torch.tensor(active, dtype=torch.long))
-        self.register_buffer('child_links', torch.tensor([
-            kinematic_tree.joints[j]['child_link'] for j in active
-        ], dtype=torch.long))
+        self.register_buffer("active_joints", torch.tensor(active, dtype=torch.long))
+        self.register_buffer(
+            "child_links", torch.tensor([kinematic_tree.joints[j]["child_link"] for j in active], dtype=torch.long)
+        )
 
         # Batched linear transformation weights for all joints
         # Shape: (num_active_joints, C_J, C_L * 16)
@@ -293,11 +293,7 @@ class JointLayer(nn.Module):
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         nn.init.zeros_(self.bias)
 
-    def forward(
-        self,
-        joint_features: torch.Tensor,
-        link_features: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, joint_features: torch.Tensor, link_features: torch.Tensor) -> torch.Tensor:
         """
         Update joint features based on child link features.
 
@@ -327,7 +323,7 @@ class JointLayer(nn.Module):
         # weight: (num_active, C_J, C_L*16)
         # F_flat: (batch, num_active, C_L*16)
         # Output: (batch, num_active, C_J)
-        Theta_transformed = torch.einsum('ncd,bnd->bnc', self.weight, F_flat) + self.bias
+        Theta_transformed = torch.einsum("ncd,bnd->bnc", self.weight, F_flat) + self.bias
 
         # Equation 11: Residual connection
         # Θ_j^out = Linear_j(Flatten(F_{cj}^in)) + Θ_j^in
@@ -375,11 +371,7 @@ class SelfAttentionLayer(nn.Module):
         self.to_token = nn.Linear(link_channels * spatial_dim * spatial_dim, embed_dim)
 
         # Multi-head self-attention
-        self.attention = nn.MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            batch_first=True
-        )
+        self.attention = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
 
         # Project tokens back to link features
         self.to_feature = nn.Linear(embed_dim, link_channels * spatial_dim * spatial_dim)
@@ -403,8 +395,7 @@ class SelfAttentionLayer(nn.Module):
 
         # Self-attention
         attended_tokens, _ = self.attention(
-            tokens, tokens, tokens,
-            need_weights=False
+            tokens, tokens, tokens, need_weights=False
         )  # (batch, num_bodies, embed_dim)
 
         # Project back to link feature space
@@ -434,21 +425,21 @@ class RodriguesBlock(nn.Module):
         link_channels: int,
         spatial_dim: int,
         embed_dim: int = 256,
-        num_heads: int = 4
+        num_heads: int = 4,
     ):
         super().__init__()
         self.rodrigues_layer = RodriguesLayer(
             kinematic_tree=kinematic_tree,
             joint_channels=joint_channels,
             link_channels=link_channels,
-            spatial_dim=spatial_dim
+            spatial_dim=spatial_dim,
         )
 
         self.joint_layer = JointLayer(
             kinematic_tree=kinematic_tree,
             joint_channels=joint_channels,
             link_channels=link_channels,
-            spatial_dim=spatial_dim
+            spatial_dim=spatial_dim,
         )
 
         self.self_attention = SelfAttentionLayer(
@@ -456,7 +447,7 @@ class RodriguesBlock(nn.Module):
             link_channels=link_channels,
             embed_dim=embed_dim,
             num_heads=num_heads,
-            spatial_dim=spatial_dim
+            spatial_dim=spatial_dim,
         )
 
     def forward(self, joint_features, link_features, global_token=None):
@@ -524,26 +515,18 @@ class RodriguesFeatureExtractor(nn.Module):
         # Pre-compute active joint indices
         active_joints = kinematic_tree.get_active_joint_indices()
 
-        self.register_buffer('active_joint_indices', torch.tensor(active_joints, dtype=torch.long))
+        self.register_buffer("active_joint_indices", torch.tensor(active_joints, dtype=torch.long))
         num_active_joints = len(active_joints)
         num_bodies = kinematic_tree.num_bodies
 
         # Batched linear transformations for all joints
         # Instead of ModuleList, use single parameter tensor
-        self.joint_weight = nn.Parameter(
-            torch.randn(num_active_joints, joint_channels, obs_dim)
-        )
-        self.joint_bias = nn.Parameter(
-            torch.zeros(num_active_joints, joint_channels)
-        )
+        self.joint_weight = nn.Parameter(torch.randn(num_active_joints, joint_channels, obs_dim))
+        self.joint_bias = nn.Parameter(torch.zeros(num_active_joints, joint_channels))
 
         # Batched linear transformations for all links
-        self.link_weight = nn.Parameter(
-            torch.randn(num_bodies, link_channels * spatial_dim * spatial_dim, obs_dim)
-        )
-        self.link_bias = nn.Parameter(
-            torch.zeros(num_bodies, link_channels * spatial_dim * spatial_dim)
-        )
+        self.link_weight = nn.Parameter(torch.randn(num_bodies, link_channels * spatial_dim * spatial_dim, obs_dim))
+        self.link_bias = nn.Parameter(torch.zeros(num_bodies, link_channels * spatial_dim * spatial_dim))
 
         # Optional: Global token projection
         if use_global_token:
@@ -586,23 +569,16 @@ class RodriguesFeatureExtractor(nn.Module):
         # input_vector: (batch, obs_dim)
         # Output: (batch, num_active, C_J)
         joint_features_active = torch.einsum(
-            'nco,bo->bnc',
-            self.joint_weight,
-            input_vector
+            "nco,bo->bnc", self.joint_weight, input_vector
         ) + self.joint_bias.unsqueeze(0)  # (batch, num_active, C_J)
 
         # Scatter to sparse array
         max_joint_idx = len(self.tree.joints)
-        joint_features = torch.zeros(
-            batch, max_joint_idx, self.joint_channels,
-            device=device
-        )
+        joint_features = torch.zeros(batch, max_joint_idx, self.joint_channels, device=device)
 
         active_indices = self.active_joint_indices.to(device)
         # Expand indices for scatter
-        indices = active_indices.unsqueeze(0).unsqueeze(-1).expand(
-            batch, -1, self.joint_channels
-        )
+        indices = active_indices.unsqueeze(0).unsqueeze(-1).expand(batch, -1, self.joint_channels)
         joint_features.scatter_(1, indices, joint_features_active)
 
         # ===== Link Features (Vectorized) =====
@@ -610,11 +586,9 @@ class RodriguesFeatureExtractor(nn.Module):
         # link_weight: (num_bodies, C_L*16, obs_dim)
         # input_vector: (batch, obs_dim)
         # Output: (batch, num_bodies, C_L*16)
-        link_features_flat = torch.einsum(
-            'nlo,bo->bnl',
-            self.link_weight,
-            input_vector
-        ) + self.link_bias.unsqueeze(0)  # (batch, num_bodies, C_L*16)
+        link_features_flat = torch.einsum("nlo,bo->bnl", self.link_weight, input_vector) + self.link_bias.unsqueeze(
+            0
+        )  # (batch, num_bodies, C_L*16)
 
         # Reshape to 4×4 matrices
         link_features = link_features_flat.reshape(
@@ -662,7 +636,7 @@ class RodriguesEncoder(nn.Module):
         embed_dim: int = 256,
         num_heads: int = 4,
         use_global_token: bool = True,
-        global_token_dim: int = 128
+        global_token_dim: int = 128,
     ):
         super().__init__()
         self.tree = kinematic_tree
@@ -679,21 +653,23 @@ class RodriguesEncoder(nn.Module):
             link_channels=link_channels,
             global_token_dim=global_token_dim,
             use_global_token=use_global_token,
-            spatial_dim=self.spatial_dim
+            spatial_dim=self.spatial_dim,
         )
 
         # Rodrigues Blocks: Process features through kinematic structure
-        self.blocks = nn.ModuleList([
-            RodriguesBlock(
-                kinematic_tree=kinematic_tree,
-                joint_channels=joint_channels,
-                link_channels=link_channels,
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-                spatial_dim=self.spatial_dim
-            )
-            for _ in range(num_blocks)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                RodriguesBlock(
+                    kinematic_tree=kinematic_tree,
+                    joint_channels=joint_channels,
+                    link_channels=link_channels,
+                    embed_dim=embed_dim,
+                    num_heads=num_heads,
+                    spatial_dim=self.spatial_dim,
+                )
+                for _ in range(num_blocks)
+            ]
+        )
 
     def forward(self, observations: torch.Tensor):
         """
@@ -712,8 +688,6 @@ class RodriguesEncoder(nn.Module):
 
         # Step 2: Process through Rodrigues Blocks
         for block in self.blocks:
-            joint_features, link_features, global_token = block(
-                joint_features, link_features, global_token
-            )
+            joint_features, link_features, global_token = block(joint_features, link_features, global_token)
 
         return joint_features, link_features, global_token

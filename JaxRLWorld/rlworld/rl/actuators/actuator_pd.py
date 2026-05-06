@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Sequence
 
 import torch
@@ -50,9 +49,7 @@ class IdealPDActuator(ActuatorBase):
         joint_vel: torch.Tensor,
     ) -> torch.Tensor:
         error_pos = target_pos - joint_pos
-        self.computed_effort = (
-            self.stiffness * error_pos - self.damping * joint_vel
-        )
+        self.computed_effort = self.stiffness * error_pos - self.damping * joint_vel
         self.applied_effort = self._clip_effort(self.computed_effort)
         return self.applied_effort
 
@@ -79,9 +76,7 @@ class DelayedPDActuator(IdealPDActuator):
 
         max_delay = max(cfg.max_delay, 1)
         # Ring buffer: (max_delay, num_envs, num_joints)
-        self._buffer = torch.zeros(
-            max_delay, num_envs, num_joints, device=device
-        )
+        self._buffer = torch.zeros(max_delay, num_envs, num_joints, device=device)
         self._head = 0
         # Per-env delay in [min_delay, max_delay]
         self._delay = torch.randint(
@@ -155,9 +150,7 @@ class DCMotor(IdealPDActuator):
             raise ValueError("velocity_limit must be > 0 for DCMotor")
 
         self._saturation_effort = cfg.saturation_effort
-        self._velocity_limit = torch.full(
-            (num_envs, num_joints), cfg.velocity_limit, device=device
-        )
+        self._velocity_limit = torch.full((num_envs, num_joints), cfg.velocity_limit, device=device)
 
     def compute(
         self,
@@ -167,22 +160,14 @@ class DCMotor(IdealPDActuator):
     ) -> torch.Tensor:
         # Compute raw PD torque
         error_pos = target_pos - joint_pos
-        self.computed_effort = (
-            self.stiffness * error_pos - self.damping * joint_vel
-        )
+        self.computed_effort = self.stiffness * error_pos - self.damping * joint_vel
 
         # Torque-speed curve limits
-        torque_speed_top = self._saturation_effort * (
-            1.0 - joint_vel / self._velocity_limit
-        )
-        torque_speed_bottom = self._saturation_effort * (
-            -1.0 - joint_vel / self._velocity_limit
-        )
+        torque_speed_top = self._saturation_effort * (1.0 - joint_vel / self._velocity_limit)
+        torque_speed_bottom = self._saturation_effort * (-1.0 - joint_vel / self._velocity_limit)
 
         max_effort = torch.clip(torque_speed_top, max=self.effort_limit)
         min_effort = torch.clip(torque_speed_bottom, min=-self.effort_limit)
 
-        self.applied_effort = torch.clip(
-            self.computed_effort, min=min_effort, max=max_effort
-        )
+        self.applied_effort = torch.clip(self.computed_effort, min=min_effort, max=max_effort)
         return self.applied_effort

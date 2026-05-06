@@ -31,8 +31,9 @@ class CircularBuffer:
             raise RuntimeError("Buffer not initialized. Call append() first.")
 
         # Reorder buffer to be chronological (oldest to newest)
-        indices = torch.arange(self._current_idx, self._current_idx + self.max_length,
-                               device=self.device) % self.max_length
+        indices = (
+            torch.arange(self._current_idx, self._current_idx + self.max_length, device=self.device) % self.max_length
+        )
         return self._buffer[:, indices]
 
     def append(self, data: torch.Tensor) -> None:
@@ -45,9 +46,7 @@ class CircularBuffer:
         if self._buffer is None:
             obs_dim = data.shape[1:]
             self._buffer = torch.zeros(
-                (self.batch_size, self.max_length, *obs_dim),
-                dtype=data.dtype,
-                device=self.device
+                (self.batch_size, self.max_length, *obs_dim), dtype=data.dtype, device=self.device
             )
 
         # Add new data at current index (overwrites oldest)

@@ -1,15 +1,15 @@
-
 from typing import Tuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 
 class GaussianDistribution(eqx.Module):
     """
     Diagonal Gaussian distribution for continuous actions.
     """
+
     mean: jax.Array
     std: jax.Array
     is_squashed: bool = eqx.field(static=True, default=False)
@@ -20,7 +20,7 @@ class GaussianDistribution(eqx.Module):
 
     @property
     def variance(self) -> jax.Array:
-        return self.std ** 2
+        return self.std**2
 
     @property
     def stddev(self) -> jax.Array:
@@ -43,11 +43,7 @@ class GaussianDistribution(eqx.Module):
         """
         var = self.variance
         log_scale = jnp.log(self.std)
-        log_prob = -0.5 * (
-            ((actions - self.mean) ** 2) / var
-            + 2 * log_scale
-            + jnp.log(2 * jnp.pi)
-        )
+        log_prob = -0.5 * (((actions - self.mean) ** 2) / var + 2 * log_scale + jnp.log(2 * jnp.pi))
         return log_prob.sum(axis=-1)
 
     def entropy(self) -> jax.Array:
@@ -63,11 +59,7 @@ class GaussianDistribution(eqx.Module):
         var_self = self.variance
         var_other = other.variance
 
-        kl = (
-            jnp.log(other.std / self.std)
-            + (var_self + (self.mean - other.mean) ** 2) / (2 * var_other)
-            - 0.5
-        )
+        kl = jnp.log(other.std / self.std) + (var_self + (self.mean - other.mean) ** 2) / (2 * var_other) - 0.5
         return kl.sum(axis=-1)
 
 
@@ -77,6 +69,7 @@ class SquashedGaussianDistribution(eqx.Module):
 
     Used in SAC and similar algorithms.
     """
+
     mean: jax.Array
     std: jax.Array
     _eps: float = eqx.field(static=True, default=1e-4)
@@ -139,20 +132,14 @@ class SquashedGaussianDistribution(eqx.Module):
     def _log_prob_from_pre_tanh(self, pre_tanh: jax.Array) -> jax.Array:
         """Compute log prob given pre-tanh values."""
         # Gaussian log prob
-        var = self.std ** 2
+        var = self.std**2
         log_scale = jnp.log(self.std)
-        gaussian_log_prob = -0.5 * (
-            ((pre_tanh - self.mean) ** 2) / var
-            + 2 * log_scale
-            + jnp.log(2 * jnp.pi)
-        )
+        gaussian_log_prob = -0.5 * (((pre_tanh - self.mean) ** 2) / var + 2 * log_scale + jnp.log(2 * jnp.pi))
 
         # Tanh correction: log|det(d tanh / d pre_tanh)|
         # = sum(log(1 - tanh^2(pre_tanh)))
         # Numerically stable version: 2 * (log(2) - pre_tanh - softplus(-2 * pre_tanh))
-        log_det_jacobian = 2 * (
-            jnp.log(2.0) - pre_tanh - jax.nn.softplus(-2 * pre_tanh)
-        )
+        log_det_jacobian = 2 * (jnp.log(2.0) - pre_tanh - jax.nn.softplus(-2 * pre_tanh))
 
         return (gaussian_log_prob - log_det_jacobian).sum(axis=-1)
 
@@ -166,6 +153,7 @@ class SquashedGaussianDistribution(eqx.Module):
 
 
 # ==================== Utility Functions ====================
+
 
 def sample_action(
     dist: GaussianDistribution | SquashedGaussianDistribution,

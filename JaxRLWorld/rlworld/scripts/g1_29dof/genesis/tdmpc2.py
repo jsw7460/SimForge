@@ -1,10 +1,9 @@
-from rlworld.rl.configs.algorithms import TDMPC2Config
-from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.configs import (
     TerminationTermConfig,
 )
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as tf
+from rlworld.rl.configs.algorithms import TDMPC2Config
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as tf
 from rlworld.rl.runners import BaseRunner
 
 
@@ -22,15 +21,12 @@ def main():
         buffer_size=1024 * 1024 * 100,
         num_gradient_steps=8,
         batch_size=40000,
-        learning_starts=5000
+        learning_starts=5000,
     )
 
     cfgs_for_run.env.num_envs = 1024
     cfgs_for_run.env.termination_criteria = [
-        TerminationTermConfig(
-            tf.roll_pitch_violation,
-            {"roll_threshold_degree": 45.0, "pitch_threshold_degree": 45.0}
-        ),
+        TerminationTermConfig(tf.roll_pitch_violation, {"roll_threshold_degree": 45.0, "pitch_threshold_degree": 45.0}),
         TerminationTermConfig(max_episode_exceed),
     ]
     cfgs_for_run.runner.max_iterations = 100000
@@ -45,7 +41,7 @@ def main():
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

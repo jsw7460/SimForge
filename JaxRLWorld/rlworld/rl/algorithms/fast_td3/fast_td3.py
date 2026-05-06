@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple
 
 import equinox as eqx
 import jax
@@ -8,33 +8,33 @@ import numpy as np
 import optax
 
 from rlworld.rl.algorithms.base import (
-    OffPolicyAlgorithm,
     ActInput,
+    OffPolicyAlgorithm,
     copy_params,
 )
 from rlworld.rl.algorithms.fast_td3.metrics import (
-    FastTD3Metrics,
-    FastTD3CriticMetrics,
     FastTD3ActorMetrics,
     FastTD3BatchMetrics,
+    FastTD3CriticMetrics,
+    FastTD3Metrics,
 )
 from rlworld.rl.algorithms.fast_td3.update import (
     act_deterministic,
     act_with_noise,
-    update_targets,
     get_value,
-    update_critics,
-    update_actor,
     init_noise_scales,
     resample_noise_on_done,
+    update_actor,
+    update_critics,
+    update_targets,
 )
 from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
-from rlworld.rl.storages.replay_buffer import ReplayBuffer, ReplayBatch
-from rlworld.rl.modules.normalization import EmpiricalNormalization
+from rlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
 
 
 class FastTD3TrainState(NamedTuple):
     """Training state for FastTD3."""
+
     model: FastTD3ActorCritic
     # Target network params
     target_actor_params: Any
@@ -55,6 +55,7 @@ class FastTD3TrainState(NamedTuple):
 @dataclass
 class FastTD3TransitionBuffer:
     """Buffer for current transition."""
+
     actor_observations: jax.Array = None
     critic_observations: jax.Array = None
     actions: jax.Array = None
@@ -160,8 +161,8 @@ class FastTD3(OffPolicyAlgorithm):
         self._init_train_state(key)
 
         # Storage
-        self.replay_buffer: Optional[ReplayBuffer] = None
-        self.transition: Optional[FastTD3TransitionBuffer] = None
+        self.replay_buffer: ReplayBuffer | None = None
+        self.transition: FastTD3TransitionBuffer | None = None
 
         # Update counter
         self.total_it = 0
@@ -180,20 +181,15 @@ class FastTD3(OffPolicyAlgorithm):
             optax.clip_by_global_norm(self.max_grad_norm),
             optax.adamw(learning_rate=self.critic_lr, weight_decay=0.1),
         )
+
     def _init_train_state(self, key: jax.Array):
         """Initialize training state including noise scales."""
         key, noise_key, subkey = jax.random.split(key, 3)
 
         # Partition networks
-        actor_params, actor_static = eqx.partition(
-            self.actor_critic.actor, eqx.is_inexact_array
-        )
-        critic1_params, critic1_static = eqx.partition(
-            self.actor_critic.critic1, eqx.is_inexact_array
-        )
-        critic2_params, critic2_static = eqx.partition(
-            self.actor_critic.critic2, eqx.is_inexact_array
-        )
+        actor_params, actor_static = eqx.partition(self.actor_critic.actor, eqx.is_inexact_array)
+        critic1_params, critic1_static = eqx.partition(self.actor_critic.critic1, eqx.is_inexact_array)
+        critic2_params, critic2_static = eqx.partition(self.actor_critic.critic2, eqx.is_inexact_array)
 
         # Initialize target networks
         target_actor_params = copy_params(actor_params)
@@ -205,9 +201,7 @@ class FastTD3(OffPolicyAlgorithm):
         critic_opt_state = self.critic_optimizer.init((critic1_params, critic2_params))
 
         # Initialize per-environment noise scales
-        noise_scales = init_noise_scales(
-            self.num_envs, self.noise_min, self.noise_max, noise_key
-        )
+        noise_scales = init_noise_scales(self.num_envs, self.noise_min, self.noise_max, noise_key)
 
         # NOTE: Normalizers are now stored inside self.actor_critic (model)
         # instead of in train_state
@@ -242,12 +236,12 @@ class FastTD3(OffPolicyAlgorithm):
         print(f"  Use target actor: {self.use_target_actor}")
         print(f"  Obs normalization: {self.obs_normalization}")
 
-        print(f"\n📊 Distributional RL (C51):")
+        print("\n📊 Distributional RL (C51):")
         print(f"  Num atoms: {self.actor_critic.num_atoms}")
         print(f"  V_min: {self.actor_critic.v_min}")
         print(f"  V_max: {self.actor_critic.v_max}")
 
-        print(f"\n🔍 Network architecture:")
+        print("\n🔍 Network architecture:")
         print(f"  Actor obs dim: {self.actor_critic.actor_obs_dim}")
         print(f"  Critic obs dim: {self.actor_critic.critic_obs_dim}")
         print(f"  Action dim: {self.actor_critic.num_actions}")
@@ -378,12 +372,8 @@ class FastTD3(OffPolicyAlgorithm):
         # Update normalizer stats from batch data (matches original FastTD3 behavior
         # where normalize_obs() updates running stats during both collection AND training)
         if self.obs_normalization:
-            new_actor_norm = self.train_state.model.actor_obs_normalizer.update(
-                batch.actor_observations
-            )
-            new_critic_norm = self.train_state.model.critic_obs_normalizer.update(
-                batch.critic_observations
-            )
+            new_actor_norm = self.train_state.model.actor_obs_normalizer.update(batch.actor_observations)
+            new_critic_norm = self.train_state.model.critic_obs_normalizer.update(batch.critic_observations)
             new_actor_norm = new_actor_norm.update(batch.next_actor_observations)
             new_critic_norm = new_critic_norm.update(batch.next_critic_observations)
             new_model = eqx.tree_at(
@@ -456,9 +446,7 @@ class FastTD3(OffPolicyAlgorithm):
         jax.block_until_ready(self.train_state.model)
 
         # Build metrics
-        metrics = self._build_metrics(
-            critic_info, actor_loss, action_mean, action_std, actor_q_value, batch
-        )
+        metrics = self._build_metrics(critic_info, actor_loss, action_mean, action_std, actor_q_value, batch)
 
         return metrics
 
@@ -577,21 +565,13 @@ class FastTD3(OffPolicyAlgorithm):
         target_networks = eqx.tree_deserialise_leaves(target_path, target_networks_template)
 
         # Re-partition
-        new_actor_params, new_actor_static = eqx.partition(
-            new_model.actor, eqx.is_inexact_array
-        )
-        new_critic1_params, new_critic1_static = eqx.partition(
-            new_model.critic1, eqx.is_inexact_array
-        )
-        new_critic2_params, new_critic2_static = eqx.partition(
-            new_model.critic2, eqx.is_inexact_array
-        )
+        new_actor_params, new_actor_static = eqx.partition(new_model.actor, eqx.is_inexact_array)
+        new_critic1_params, new_critic1_static = eqx.partition(new_model.critic1, eqx.is_inexact_array)
+        new_critic2_params, new_critic2_static = eqx.partition(new_model.critic2, eqx.is_inexact_array)
 
         # Re-initialize optimizer states
         actor_opt_state = self.actor_optimizer.init(new_actor_params)
-        critic_opt_state = self.critic_optimizer.init(
-            (new_critic1_params, new_critic2_params)
-        )
+        critic_opt_state = self.critic_optimizer.init((new_critic1_params, new_critic2_params))
 
         # Restore noise scales
         noise_scales = jnp.array(metadata.get("noise_scales", self.train_state.noise_scales))

@@ -14,7 +14,7 @@ network files, etc.).  The actuator type determines the control mode:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 

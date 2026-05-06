@@ -22,7 +22,7 @@ class RewardManager(BaseManager):
     Terms are discovered via :func:`iter_terms` on the ``RewardConfig`` instance.
     """
 
-    def __init__(self, env: "World", config: RewardConfig):
+    def __init__(self, env: World, config: RewardConfig):
         super().__init__(env=env)
         self.config = config
 
@@ -49,17 +49,14 @@ class RewardManager(BaseManager):
         modifications take effect on the next reward computation.
         """
         if name not in self.reward_terms:
-            raise KeyError(
-                f"Reward term {name!r} not found. "
-                f"Available: {list(self.reward_terms)}"
-            )
+            raise KeyError(f"Reward term {name!r} not found. Available: {list(self.reward_terms)}")
         return self.reward_terms[name]
 
     def set_rewards(
         self,
         reward_buffer: torch.Tensor,
         episode_sums: dict[str, torch.Tensor],
-        reward_buffer_per_type: dict[str, torch.Tensor]
+        reward_buffer_per_type: dict[str, torch.Tensor],
     ) -> None:
         mode = self.config.reward_mode
 
@@ -70,13 +67,9 @@ class RewardManager(BaseManager):
                 episode_sums[name] += reward_value
                 reward_buffer += reward_value
         elif mode == "exponential":
-            self._set_rewards_exponential_fixed(
-                reward_buffer, episode_sums, reward_buffer_per_type
-            )
+            self._set_rewards_exponential_fixed(reward_buffer, episode_sums, reward_buffer_per_type)
         elif mode == "exponential_auto":
-            self._set_rewards_exponential_auto(
-                reward_buffer, episode_sums, reward_buffer_per_type
-            )
+            self._set_rewards_exponential_auto(reward_buffer, episode_sums, reward_buffer_per_type)
         else:
             raise ValueError(f"Unknown reward_mode: {mode!r}")
 
@@ -144,7 +137,7 @@ class RewardManager(BaseManager):
     def reset(self, env_ids: torch.Tensor) -> None:
         """Reset stateful reward terms for specified envs."""
         for instance in self._instances.values():
-            if hasattr(instance, 'reset'):
+            if hasattr(instance, "reset"):
                 instance.reset(env_ids)
 
     def advance(self) -> None:
@@ -152,7 +145,7 @@ class RewardManager(BaseManager):
 
     def __str__(self) -> str:
         """Pretty print reward manager configuration."""
-        from rlworld.rl.utils.pretty import create_manager_table, table_to_string, format_weight
+        from rlworld.rl.utils.pretty import create_manager_table, format_weight, table_to_string
 
         if not self.reward_terms:
             return ""
@@ -174,6 +167,6 @@ class RewardManager(BaseManager):
             title="Reward Terms",
             columns=["Name", "Weight", "Params"],
             rows=rows,
-            footer=f"{len(self.reward_terms)} terms"
+            footer=f"{len(self.reward_terms)} terms",
         )
         return table_to_string(table)

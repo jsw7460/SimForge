@@ -1,17 +1,18 @@
 from dataclasses import dataclass, field
 
 from rlworld.rl.algorithms.metrics.base import (
-    BaseMetrics,
     ActorMetrics,
+    BaseMetrics,
     BatchMetrics,
-    MetricType,
     ConsoleMetric,
+    MetricType,
 )
 
 
 @dataclass
 class PPOCriticMetrics:
     """PPO critic metrics."""
+
     value_loss: float = 0.0
 
     def to_wandb_dict(self, prefix: str = "critic") -> dict[str, float]:
@@ -23,6 +24,7 @@ class PPOCriticMetrics:
 @dataclass
 class PPOActorMetrics(ActorMetrics):
     """PPO actor metrics (extends base)."""
+
     policy_loss: float = 0.0
 
     def to_wandb_dict(self, prefix: str = "actor") -> dict[str, float]:
@@ -36,6 +38,7 @@ class PPOActorMetrics(ActorMetrics):
 @dataclass
 class PPOKLMetrics:
     """PPO KL divergence and clipping metrics."""
+
     approx_kl: float = 0.0
     clip_fraction: float = 0.0
     early_stop_ratio: float = 0.0
@@ -55,6 +58,7 @@ class PPOKLMetrics:
 @dataclass
 class PPOMetrics(BaseMetrics):
     """Complete PPO training metrics."""
+
     critic: PPOCriticMetrics = field(default_factory=PPOCriticMetrics)
     actor: PPOActorMetrics = field(default_factory=PPOActorMetrics)
     kl: PPOKLMetrics = field(default_factory=PPOKLMetrics)

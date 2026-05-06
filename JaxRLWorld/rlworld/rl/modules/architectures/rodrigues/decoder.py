@@ -1,6 +1,7 @@
 import torch
 from torch import nn
-from rlworld.rl.modules.utils import RunningNormalization, orthogonal_init, scale_last_layer
+
+from rlworld.rl.modules.utils import orthogonal_init, scale_last_layer
 
 
 class RodriguesDecoder(nn.Module):
@@ -24,7 +25,7 @@ class RodriguesDecoder(nn.Module):
         link_feature_flatten_dim: int,
         action_dim: int,
         hidden_dims: list[int] = [512, 256],
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.tree = kinematic_tree
@@ -33,8 +34,8 @@ class RodriguesDecoder(nn.Module):
         num_active_joints = len(kinematic_tree.get_active_joint_indices())
 
         input_dim = (
-            num_active_joints * joint_channels +  # Joint features
-            link_feature_flatten_dim
+            num_active_joints * joint_channels  # Joint features
+            + link_feature_flatten_dim
         )
 
         # Build MLP
@@ -42,10 +43,12 @@ class RodriguesDecoder(nn.Module):
         prev_dim = input_dim
 
         for hidden_dim in hidden_dims:
-            layers.extend([
-                nn.Linear(prev_dim, hidden_dim),
-                nn.ReLU(),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(prev_dim, hidden_dim),
+                    nn.ReLU(),
+                ]
+            )
             prev_dim = hidden_dim
 
         # Output layer
@@ -65,12 +68,7 @@ class RodriguesDecoder(nn.Module):
                 nn.init.xavier_uniform_(module.weight)
                 nn.init.zeros_(module.bias)
 
-    def forward(
-        self,
-        joint_features: torch.Tensor,
-        link_features: torch.Tensor,
-        global_token: torch.Tensor = None
-    ):
+    def forward(self, joint_features: torch.Tensor, link_features: torch.Tensor, global_token: torch.Tensor = None):
         """
         Decode features to actions.
 
@@ -99,7 +97,7 @@ class RodriguesDecoder(nn.Module):
 
 
 class FlattenDecoder(nn.Module):
-    def __init__(self, feature_dim, num_joints = None, num_actions = None, **kwargs):
+    def __init__(self, feature_dim, num_joints=None, num_actions=None, **kwargs):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(feature_dim, 16),
@@ -119,7 +117,7 @@ class FlattenDecoder(nn.Module):
 
     def forward(self, body_features):
         """
-            body_features: (batch, num_bodies, feature_dim)
+        body_features: (batch, num_bodies, feature_dim)
         """
         # b = body_features.shape[0]
         # n = body_features.shape[1]

@@ -20,11 +20,11 @@ class ContactManager(BaseContactManager):
     primary/secondary filtering.
     """
 
-    def __init__(self, env: "GenesisEnv"):
+    def __init__(self, env: GenesisEnv):
         super().__init__(env=env)
         self._sensors: dict[str, GenesisContactSensor] = {}
 
-    def register_sensor(self, cfg: "GenesisContactSensorCfg") -> None:
+    def register_sensor(self, cfg: GenesisContactSensorCfg) -> None:
         """Register a contact sensor config as a named group."""
         sensor = GenesisContactSensor(self.env, cfg)
         self._sensors[cfg.name] = sensor

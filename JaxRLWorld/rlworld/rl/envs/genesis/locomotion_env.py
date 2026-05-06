@@ -1,20 +1,21 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
-from rlworld.rl.envs import GenesisEnv
-from rlworld.rl.envs.managers import GaitManagerConfig, GaitManager
-from rlworld.rl.configs import CurriculumManagerConfig
 from rlworld.rl.configs import (
+    ActionConfig,
+    CommandConfig,
+    CurriculumManagerConfig,
     EnvConfig,
+    EventConfig,
+    GaitConfig,
+    ObservationConfig,
+    RewardConfig,
     SceneConfig,
     VisualizationConfig,
-    ObservationConfig,
-    ActionConfig,
-    RewardConfig,
-    CommandConfig,
-    GaitConfig,
-    EventConfig
 )
+from rlworld.rl.envs import GenesisEnv
+from rlworld.rl.envs.managers import GaitManager, GaitManagerConfig
 
 if TYPE_CHECKING:
     pass

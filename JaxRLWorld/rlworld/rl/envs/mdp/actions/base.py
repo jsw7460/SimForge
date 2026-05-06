@@ -28,13 +28,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.world import World
     from rlworld.rl.envs.managers.common.action import ActionManagerBase
+    from rlworld.rl.envs.world import World
 
 
 @dataclass
@@ -58,7 +58,7 @@ class ActionTermCfg:
             ``None`` = no clipping (policy output is passed through).
     """
 
-    class_type: type["ActionTerm"] | None = None
+    class_type: type[ActionTerm] | None = None
     joint_names: list[str] = field(default_factory=lambda: [".*"])
     clip: tuple[float, float] | None = None
 
@@ -81,8 +81,8 @@ class ActionTerm(ABC):
     def __init__(
         self,
         cfg: ActionTermCfg,
-        env: "World",
-        manager: "ActionManagerBase",
+        env: World,
+        manager: ActionManagerBase,
     ) -> None:
         self._cfg = cfg
         self._env = env
@@ -101,11 +101,11 @@ class ActionTerm(ABC):
         return self._cfg
 
     @property
-    def env(self) -> "World":
+    def env(self) -> World:
         return self._env
 
     @property
-    def manager(self) -> "ActionManagerBase":
+    def manager(self) -> ActionManagerBase:
         return self._manager
 
     @property

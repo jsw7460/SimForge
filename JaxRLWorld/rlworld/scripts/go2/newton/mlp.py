@@ -9,7 +9,7 @@ def main():
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

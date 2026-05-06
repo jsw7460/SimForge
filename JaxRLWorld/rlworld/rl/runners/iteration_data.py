@@ -19,7 +19,7 @@ class EpisodeStats:
     length_buffer: list[float]
     reward_stats: dict[str, dict[str, float]]
     success_rate: float | None = None
-    per_sim_stats: dict[str, "EpisodeStats"] | None = None
+    per_sim_stats: dict[str, EpisodeStats] | None = None
 
     @property
     def mean_return(self) -> float:

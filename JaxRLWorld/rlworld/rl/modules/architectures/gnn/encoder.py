@@ -1,8 +1,8 @@
 from typing import TYPE_CHECKING
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.scene_manager import KinematicTree
@@ -12,6 +12,7 @@ __all__ = ["GNNEncoder"]
 
 class GNNLayer(eqx.Module):
     """Single GNN layer with mean aggregation + linear transform."""
+
     linear_self: eqx.nn.Linear
     linear_neighbor: eqx.nn.Linear
     linear_out: eqx.nn.Linear
@@ -38,7 +39,7 @@ class GNNLayer(eqx.Module):
         weight = linear.weight
         max_dim = max(weight.shape)
         q, _ = jnp.linalg.qr(jax.random.normal(key, shape=(max_dim, max_dim)))
-        new_weight = gain * q[:weight.shape[0], :weight.shape[1]]
+        new_weight = gain * q[: weight.shape[0], : weight.shape[1]]
         new_bias = jnp.zeros_like(linear.bias)
         linear = eqx.tree_at(lambda l: l.weight, linear, new_weight)
         linear = eqx.tree_at(lambda l: l.bias, linear, new_bias)
@@ -82,6 +83,7 @@ class GNNLayer(eqx.Module):
 
 class ObsProjection(eqx.Module):
     """Observation projection MLP."""
+
     linear1: eqx.nn.Linear
     linear2: eqx.nn.Linear
 
@@ -100,7 +102,7 @@ class ObsProjection(eqx.Module):
         weight = linear.weight
         max_dim = max(weight.shape)
         q, _ = jnp.linalg.qr(jax.random.normal(key, shape=(max_dim, max_dim)))
-        new_weight = gain * q[:weight.shape[0], :weight.shape[1]]
+        new_weight = gain * q[: weight.shape[0], : weight.shape[1]]
         new_bias = jnp.zeros_like(linear.bias)
         linear = eqx.tree_at(lambda l: l.weight, linear, new_weight)
         linear = eqx.tree_at(lambda l: l.bias, linear, new_bias)
@@ -118,6 +120,7 @@ class GNNEncoder(eqx.Module):
     Bidirectional GNN encoder for kinematic tree.
     Processes unbatched input. Use jax.vmap for batched input.
     """
+
     obs_projections: dict[int, ObsProjection]
     base_features: jax.Array
     layers: list[GNNLayer]
@@ -137,24 +140,20 @@ class GNNEncoder(eqx.Module):
         dropout: float = 0.0,
         *,
         key: jax.Array,
-        **kwargs
+        **kwargs,
     ):
         self.num_bodies = kinematic_tree.num_bodies
         self.hidden_dim = hidden_dim
         self.obs_dim = obs_dim
 
         # Identify leaf nodes
-        self.leaf_indices = tuple(
-            i for i in range(self.num_bodies)
-            if len(kinematic_tree.get_children(i)) == 0
-        )
+        self.leaf_indices = tuple(i for i in range(self.num_bodies) if len(kinematic_tree.get_children(i)) == 0)
 
         key, *proj_keys = jax.random.split(key, len(self.leaf_indices) + 1)
 
         # Per-body observation projection (leaf only)
         self.obs_projections = {
-            idx: ObsProjection(obs_dim, hidden_dim, key=k)
-            for idx, k in zip(self.leaf_indices, proj_keys)
+            idx: ObsProjection(obs_dim, hidden_dim, key=k) for idx, k in zip(self.leaf_indices, proj_keys)
         }
 
         # Learnable features for all bodies
@@ -163,10 +162,7 @@ class GNNEncoder(eqx.Module):
 
         # GNN layers
         key, *layer_keys = jax.random.split(key, num_layers + 1)
-        self.layers = [
-            GNNLayer(hidden_dim, dropout, key=k)
-            for k in layer_keys
-        ]
+        self.layers = [GNNLayer(hidden_dim, dropout, key=k) for k in layer_keys]
 
         # Bidirectional adjacency matrix
         self.adjacency = kinematic_tree.get_adjacency_matrix()

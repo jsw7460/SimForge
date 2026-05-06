@@ -32,6 +32,7 @@ if torch.cuda.is_available():
 # Common observation terms (RobotData protocol — works on both sims)
 # =====================================================================
 
+
 def _build_common_obs():
     """Build unified obs terms for Go2 Genesis+Newton.
 
@@ -43,14 +44,14 @@ def _build_common_obs():
     from rlworld.rl.configs.observations import ObservationTermConfig
     from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
     from rlworld.rl.envs.mdp.observations.common.proprioception import (
-        base_lin_vel,
         base_ang_vel,
         base_height,
+        base_lin_vel,
         command,
-        projected_gravity,
         dof_pos,
         dof_vel,
         prev_processed_actions,
+        projected_gravity,
     )
 
     actor_terms = [

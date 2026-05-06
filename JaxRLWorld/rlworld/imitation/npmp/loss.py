@@ -19,6 +19,7 @@ The BC target is the noiseless expert mean ``μ_E(s_t)`` logged during
 rollout — DART convention. ``s_t`` here is the decoder proprio
 observation; ``x_t`` is the encoder's future motion-reference window.
 """
+
 from __future__ import annotations
 
 import math
@@ -28,7 +29,6 @@ import jax
 import jax.numpy as jnp
 
 from rlworld.imitation.npmp.module import NPMPModule, NPMPStepOutput
-
 
 __all__ = ["NPMPBatch", "NPMPLossInfo", "npmp_elbo_loss"]
 
@@ -42,20 +42,20 @@ _LOG_2PI = math.log(2.0 * math.pi)
 class NPMPBatch(NamedTuple):
     """One mini-batch of (B, T, ...) trajectory data."""
 
-    s: jax.Array               # (B, T, D_s)   decoder proprio
-    x: jax.Array               # (B, T, D_x)   encoder future-window (flattened)
-    mu_E: jax.Array            # (B, T, A)     expert mean target
+    s: jax.Array  # (B, T, D_s)   decoder proprio
+    x: jax.Array  # (B, T, D_x)   encoder future-window (flattened)
+    mu_E: jax.Array  # (B, T, A)     expert mean target
     episode_starts: jax.Array  # (B, T)        bool — True at episode/rollover start
 
 
 class NPMPLossInfo(NamedTuple):
     """Auxiliary metrics returned alongside the loss for logging."""
 
-    loss: jax.Array             # scalar — total loss minimised
-    recon: jax.Array            # scalar — mean Gaussian NLL across (B, T)
-    kl: jax.Array               # scalar — mean KL(q ‖ p_z) across (B, T)
+    loss: jax.Array  # scalar — total loss minimised
+    recon: jax.Array  # scalar — mean Gaussian NLL across (B, T)
+    kl: jax.Array  # scalar — mean KL(q ‖ p_z) across (B, T)
     decoder_log_std: jax.Array  # (A,)   — current decoder log std (per-action-dim)
-    q_log_std_mean: jax.Array   # scalar — encoder posterior log_std avg over (B, T, D_z)
+    q_log_std_mean: jax.Array  # scalar — encoder posterior log_std avg over (B, T, D_z)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -97,12 +97,7 @@ def _diag_gaussian_kl(
     """
     var_q = jnp.exp(2.0 * log_std_q)
     var_p = jnp.exp(2.0 * log_std_p)
-    kl = (
-        log_std_p
-        - log_std_q
-        + (var_q + (mu_q - mu_p) ** 2) / (2.0 * var_p)
-        - 0.5
-    )
+    kl = log_std_p - log_std_q + (var_q + (mu_q - mu_p) ** 2) / (2.0 * var_p) - 0.5
     return jnp.sum(kl, axis=-1)
 
 
@@ -127,19 +122,26 @@ def npmp_elbo_loss(
     keys = jax.random.split(key, B)
 
     outputs: NPMPStepOutput = jax.vmap(module.encode_decode_trajectory)(
-        batch.s, batch.x, batch.episode_starts, keys,
+        batch.s,
+        batch.x,
+        batch.episode_starts,
+        keys,
     )
 
     # Reconstruction: −log π(μ_E | μ̂, σ_a). Decoder log_std is
     # state-independent (A,) but scan stacks it to (T, A) per env, then
     # vmap to (B, T, A). Already broadcast-compatible with action_mean.
     recon = _gaussian_nll(
-        batch.mu_E, outputs.action_mean, outputs.action_log_std,
+        batch.mu_E,
+        outputs.action_mean,
+        outputs.action_log_std,
     )
 
     kl = _diag_gaussian_kl(
-        outputs.q_mean, outputs.q_log_std,
-        outputs.p_mean, outputs.p_log_std,
+        outputs.q_mean,
+        outputs.q_log_std,
+        outputs.p_mean,
+        outputs.p_log_std,
     )
 
     recon_mean = jnp.mean(recon)

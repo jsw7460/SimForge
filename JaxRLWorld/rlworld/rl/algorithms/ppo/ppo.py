@@ -1,36 +1,36 @@
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple
 
-import numpy as np
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
+import numpy as np
 import optax
 
 from rlworld.rl.algorithms.base import (
-    OnPolicyAlgorithm,
     ActInput,
+    OnPolicyAlgorithm,
     create_optimizer_with_labels,
 )
+from rlworld.rl.algorithms.metrics import BatchMetrics
+from rlworld.rl.algorithms.ppo.metrics import (
+    PPOActorMetrics,
+    PPOCriticMetrics,
+    PPOKLMetrics,
+    PPOMetrics,
+)
 from rlworld.rl.algorithms.ppo.update import (
+    ScanOutput,
     forward_policy_and_value,
     forward_policy_and_value_deterministic,
     get_value,
     update_all_batches,
-    ScanOutput,
 )
-from rlworld.rl.algorithms.ppo.metrics import (
-    PPOMetrics,
-    PPOCriticMetrics,
-    PPOActorMetrics,
-    PPOKLMetrics,
-)
-from rlworld.rl.algorithms.metrics import BatchMetrics
-from rlworld.rl.utils.reward_scaler import RewardScaler
-from rlworld.rl.storages.rollout_storage import RolloutStorage
-from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.modules.normalization import EmpiricalNormalization
+from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
+from rlworld.rl.storages.rollout_storage import RolloutStorage
+from rlworld.rl.utils.reward_scaler import RewardScaler
 
 
 @eqx.filter_jit
@@ -51,6 +51,7 @@ def _update_normalizers(
 
 class PPOTrainState(NamedTuple):
     """Training state for PPO."""
+
     model: PPOActorCritic
     opt_state: optax.OptState
     key: jax.Array
@@ -72,6 +73,7 @@ class PPO(OnPolicyAlgorithm):
     @dataclass
     class TransitionBuffer:
         """Buffer for current transition."""
+
         actor_observations: jax.Array = None
         critic_observations: jax.Array = None
         actions: jax.Array = None
@@ -197,14 +199,14 @@ class PPO(OnPolicyAlgorithm):
         )
 
         # Storage (initialized later via init_storage)
-        self.storage: Optional[RolloutStorage] = None
-        self.transition: Optional[PPO.TransitionBuffer] = None
+        self.storage: RolloutStorage | None = None
+        self.transition: PPO.TransitionBuffer | None = None
 
         # Reward scaler (initialized later via init_storage)
-        self._reward_scaler: Optional[RewardScaler] = None
+        self._reward_scaler: RewardScaler | None = None
 
         # Last dones for GAE computation
-        self._last_dones: Optional[jax.Array] = None
+        self._last_dones: jax.Array | None = None
 
     @property
     def actor_critic(self):
@@ -368,9 +370,7 @@ class PPO(OnPolicyAlgorithm):
         bootstrap_values = bootstrap_values.squeeze(-1)
 
         truncated_only = truncated & ~terminated
-        bonus = truncated_only.astype(self.transition.rewards.dtype) * (
-            self.gamma * bootstrap_values
-        )
+        bonus = truncated_only.astype(self.transition.rewards.dtype) * (self.gamma * bootstrap_values)
         self.transition.rewards = self.transition.rewards + bonus
 
     def compute_returns(self, last_critic_obs: jax.Array) -> None:
@@ -451,9 +451,7 @@ class PPO(OnPolicyAlgorithm):
             num_actual_updates = int(did_update.sum())
             if num_actual_updates > 0:
                 update_mask = did_update.astype(jnp.float32)
-                analytical_kl_mean = float(
-                    (outputs.analytical_kl * update_mask).sum() / num_actual_updates
-                )
+                analytical_kl_mean = float((outputs.analytical_kl * update_mask).sum() / num_actual_updates)
             else:
                 analytical_kl_mean = float(outputs.analytical_kl.mean())
             self._adaptive_learning_rate(analytical_kl_mean)
@@ -464,7 +462,9 @@ class PPO(OnPolicyAlgorithm):
         if self.obs_normalization:
             flat_actor, flat_critic = self.storage.get_flat_observations()
             new_model = _update_normalizers(
-                self.train_state.model, flat_actor, flat_critic,
+                self.train_state.model,
+                flat_actor,
+                flat_critic,
             )
             self.train_state = self.train_state._replace(model=new_model)
 

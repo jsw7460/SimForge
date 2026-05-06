@@ -23,12 +23,12 @@ gets amplified by ``omega cross r`` for distant bodies and produces
 nonsense per-body velocities (e.g. T1 hand velocity 12 m/s for a clip
 where the trunk barely moves).
 """
-from __future__ import annotations
 
-import numpy as np
+from __future__ import annotations
 
 # Module-level import (CLAUDE.md: NEVER in-function imports unless circular).
 import mujoco
+import numpy as np
 
 from rlworld.tools.motion.motion_loader import InterpolatedMotion
 
@@ -53,19 +53,18 @@ def _quat_rotate_inverse_wxyz_np(q: np.ndarray, v: np.ndarray) -> np.ndarray:
     return (v.astype(np.float64) + w * t + np.cross(cqxyz, t)).astype(v.dtype)
 
 
-def _free_joint_info(model) -> "tuple[int, int]":
+def _free_joint_info(model) -> tuple[int, int]:
     """Return ``(qpos_adr, qvel_adr)`` for the first free joint, or raise."""
     for jid in range(model.njnt):
         if model.jnt_type[jid] == mujoco.mjtJoint.mjJNT_FREE:
             return int(model.jnt_qposadr[jid]), int(model.jnt_dofadr[jid])
-    raise ValueError(
-        "MJCF has no free joint; motion tracking requires a floating base."
-    )
+    raise ValueError("MJCF has no free joint; motion tracking requires a floating base.")
 
 
 def _joint_adr_map(
-    model, joint_names: "list[str] | None",
-) -> "tuple[np.ndarray, np.ndarray, list[str]]":
+    model,
+    joint_names: list[str] | None,
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Map a preset's ``joint_names`` to model qpos / qvel indices.
 
     If ``joint_names`` is ``None``, use every non-free 1-DoF joint in
@@ -102,17 +101,14 @@ def _joint_adr_map(
 
 
 def _list_body_names(model) -> list[str]:
-    return [
-        str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, bid))
-        for bid in range(model.nbody)
-    ]
+    return [str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, bid)) for bid in range(model.nbody)]
 
 
 def replay_motion(
     mjcf_path: str,
     motion: InterpolatedMotion,
-    joint_names: "list[str] | None" = None,
-    timestep: "float | None" = None,
+    joint_names: list[str] | None = None,
+    timestep: float | None = None,
 ) -> dict[str, np.ndarray]:
     """Forward-kinematics replay producing per-body world state.
 
@@ -149,7 +145,8 @@ def replay_motion(
 
     free_qpos_adr, free_qvel_adr = _free_joint_info(model)
     joint_qpos_adr, joint_qvel_adr, resolved_joint_names = _joint_adr_map(
-        model, joint_names,
+        model,
+        joint_names,
     )
     body_names = _list_body_names(model)
 
@@ -188,7 +185,8 @@ def replay_motion(
         # ``_so3_derivative``), so rotate into local before writing.
         data.qvel[free_qvel_adr : free_qvel_adr + 3] = motion.base_lin_vel[t]
         ang_local = _quat_rotate_inverse_wxyz_np(
-            motion.base_quat_wxyz[t], motion.base_ang_vel[t],
+            motion.base_quat_wxyz[t],
+            motion.base_ang_vel[t],
         )
         data.qvel[free_qvel_adr + 3 : free_qvel_adr + 6] = ang_local
         data.qvel[joint_qvel_adr] = motion.dof_vel[t]
@@ -203,13 +201,16 @@ def replay_motion(
         # Per-body spatial velocity at link origin in world frame.
         for bid in range(B):
             mujoco.mj_objectVelocity(
-                model, data, mujoco.mjtObj.mjOBJ_BODY, bid, vel_buf, 0,
+                model,
+                data,
+                mujoco.mjtObj.mjOBJ_BODY,
+                bid,
+                vel_buf,
+                0,
             )
             # mj_objectVelocity output: [ang_x, ang_y, ang_z, lin_x, lin_y, lin_z].
             out_body_ang_vel[t, bid] = vel_buf[:3]
             out_body_lin_vel[t, bid] = vel_buf[3:]
-
-        import warp as wp
 
     return {
         "joint_pos": out_joint_pos,

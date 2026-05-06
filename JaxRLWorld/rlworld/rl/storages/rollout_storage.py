@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -6,6 +6,7 @@ import jax.numpy as jnp
 
 class RolloutBatch(NamedTuple):
     """Batch of rollout data for PPO update."""
+
     actor_observations: jax.Array
     critic_observations: jax.Array
     actions: jax.Array
@@ -19,6 +20,7 @@ class RolloutBatch(NamedTuple):
 
 class Transition(NamedTuple):
     """Single transition data."""
+
     actor_obs: jax.Array
     critic_obs: jax.Array
     actions: jax.Array
@@ -84,8 +86,8 @@ class RolloutStorage:
         self.mu = jnp.zeros((T, N) + self.action_shape)
         self.sigma = jnp.zeros((T, N) + self.action_shape)
         # Filled by compute_returns()
-        self.advantages: Optional[jax.Array] = None
-        self.returns: Optional[jax.Array] = None
+        self.advantages: jax.Array | None = None
+        self.returns: jax.Array | None = None
 
     # ------------------------------------------------------------ add/clear
 
@@ -152,9 +154,7 @@ class RolloutStorage:
         Must be called after ``compute_returns``.
         """
         if self.advantages is None:
-            raise RuntimeError(
-                "normalize_advantages() called before compute_returns()."
-            )
+            raise RuntimeError("normalize_advantages() called before compute_returns().")
         adv = self.advantages
         self.advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
 
@@ -186,9 +186,7 @@ class RolloutStorage:
         iterates over.
         """
         if self.advantages is None or self.returns is None:
-            raise RuntimeError(
-                "get_stacked_batches() called before compute_returns()."
-            )
+            raise RuntimeError("get_stacked_batches() called before compute_returns().")
         batch_size = self.num_envs * self.num_steps
         minibatch_size = batch_size // num_minibatches
         num_total_batches = num_epochs * num_minibatches
@@ -241,6 +239,7 @@ class RolloutStorage:
 
 # ==================== Functional GAE ====================
 
+
 @jax.jit
 def compute_gae(
     rewards: jax.Array,
@@ -273,10 +272,13 @@ def compute_gae(
     # next_episode_start[t] = episode_starts[t+1] for t < T-1, else last_dones.
     # Equivalent to dones[t]: shifting episode_starts forward by 1 step recovers
     # the original done sequence at every position except the boundary.
-    episode_starts_padded = jnp.concatenate([
-        episode_starts[1:],
-        last_dones[None],
-    ], axis=0)
+    episode_starts_padded = jnp.concatenate(
+        [
+            episode_starts[1:],
+            last_dones[None],
+        ],
+        axis=0,
+    )
 
     def scan_fn(carry, t):
         gae = carry

@@ -4,25 +4,24 @@ os.environ["XLA_FLAGS"] = "--xla_gpu_autotune_level=0"
 os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
 
 
-os.environ['__NV_PRIME_RENDER_OFFLOAD'] = '1'
-os.environ['__GLX_VENDOR_LIBRARY_NAME'] = 'nvidia'
+os.environ["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+os.environ["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
 
-custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets'))
+custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
 import genesis.utils.terrain
 
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-import shimmy
-from rlworld.rl.configs.algorithms import TD3Config
-from rlworld.rl.configs import GenesisConfigsForRun, TD3PolicyConfig
-from rlworld.rl.runners import OffPolicyRunner
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config
+import gymnasium as gym
+from gymnasium.vector import AutoresetMode, SyncVectorEnv
 from gymnasium.wrappers import FlattenObservation
 
-from gymnasium.vector import SyncVectorEnv, AutoresetMode
-import gymnasium as gym
+from rlworld.rl.configs import GenesisConfigsForRun, TD3PolicyConfig
+from rlworld.rl.configs.algorithms import TD3Config
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.envs import GymnasiumEnv
+from rlworld.rl.runners import OffPolicyRunner
 
 
 class ActionRepeatWrapper(gym.Wrapper):
@@ -53,7 +52,7 @@ def main():
 
     cfgs_for_run.env.num_envs = 1
     cfgs_for_run.env.env_name = "GymnasiumEnv"
-    cfgs_for_run.env.seed=0
+    cfgs_for_run.env.seed = 0
     cfgs_for_run.env.task_name = "dm_control/cheetah-run-v0"
     sac_config = TD3Config(
         batch_size=256,
@@ -89,21 +88,16 @@ def main():
         act_cfg=cfgs_for_run.action,
         reward_cfg=cfgs_for_run.reward,
         command_cfg=cfgs_for_run.command,
-        seed=cfgs_for_run.env.seed
+        seed=cfgs_for_run.env.seed,
     )
 
     # runner = BaseRunner.create_with_env(cfgs_for_run)
-    runner = OffPolicyRunner(
-        env=env,
-        cfgs=cfgs_for_run,
-        use_wandb=True,
-        seed=cfgs_for_run.env.seed
-    )
+    runner = OffPolicyRunner(env=env, cfgs=cfgs_for_run, use_wandb=True, seed=cfgs_for_run.env.seed)
 
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

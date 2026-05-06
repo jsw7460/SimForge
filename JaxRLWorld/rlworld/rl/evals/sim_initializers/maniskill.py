@@ -11,13 +11,13 @@ from rlworld.rl.utils.console import print_info, print_success
 
 
 class ManiSkillInitializer(SimInitializer):
-
     @property
     def supports_success_tracking(self) -> bool:
         return True
 
     def init_device(self) -> torch.device:
         import genesis as gs
+
         return gs.device
 
     def prepare_configs(
@@ -42,13 +42,14 @@ class ManiSkillInitializer(SimInitializer):
         return eval_cfgs
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
-        record_video = kwargs.get('record_video', False)
-        video_dir = kwargs.get('video_dir', None)
-        record_steps = kwargs.get('record_steps', 1000)
-        seed = kwargs.get('seed', 42)
+        record_video = kwargs.get("record_video", False)
+        video_dir = kwargs.get("video_dir", None)
+        record_steps = kwargs.get("record_steps", 1000)
+        seed = kwargs.get("seed", 42)
 
-        from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
         from mani_skill.utils.wrappers.record import RecordEpisode
+        from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+
         from rlworld.rl.envs import ManiSkillEnv
 
         env_kwargs = eval_cfgs.env.gym_make_kwargs
@@ -62,7 +63,7 @@ class ManiSkillInitializer(SimInitializer):
                 save_trajectory=False,
                 save_video=True,
                 max_steps_per_video=record_steps,
-                video_fps=30
+                video_fps=30,
             )
 
         env = ManiSkillVectorEnv(env, eval_cfgs.env.num_envs, auto_reset=True, ignore_terminations=False)

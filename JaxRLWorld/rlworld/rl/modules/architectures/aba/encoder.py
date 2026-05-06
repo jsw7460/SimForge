@@ -13,6 +13,7 @@ class ABAEncoder(eqx.Module):
     """
     Encoder using ABA bottom-up pass.
     """
+
     aba_bottom_up: PerBodyABABottomUpLayer
 
     num_bodies: int = eqx.field(static=True)
@@ -68,12 +69,7 @@ class ABAEncoder(eqx.Module):
 
 
 def create_encoder(
-    encoder_type: str,
-    kinematic_tree: "KinematicTree",
-    obs_dim: int,
-    *,
-    key: jax.Array,
-    **kwargs
+    encoder_type: str, kinematic_tree: "KinematicTree", obs_dim: int, *, key: jax.Array, **kwargs
 ) -> eqx.Module:
     """
     Factory function for creating encoders.
@@ -96,9 +92,4 @@ def create_encoder(
         raise ValueError(f"Unknown encoder type: {encoder_type}. Available: {list(encoder_map.keys())}")
 
     encoder_class = encoder_map[encoder_type]
-    return encoder_class(
-        kinematic_tree=kinematic_tree,
-        obs_dim=obs_dim,
-        key=key,
-        **kwargs
-    )
+    return encoder_class(kinematic_tree=kinematic_tree, obs_dim=obs_dim, key=key, **kwargs)

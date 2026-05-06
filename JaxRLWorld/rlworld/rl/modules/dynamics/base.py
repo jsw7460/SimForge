@@ -3,10 +3,10 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
-
 # ============================================================================
 # Abstract Base Class
 # ============================================================================
+
 
 class DynamicsModel(nn.Module, ABC):
     """
@@ -43,11 +43,7 @@ class DynamicsModel(nn.Module, ABC):
         next_x = self.forward(x, action)
         return next_x - x
 
-    def rollout(
-        self,
-        initial_state: torch.Tensor,
-        actions: torch.Tensor
-    ) -> torch.Tensor:
+    def rollout(self, initial_state: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         """
         Perform multi-step rollout.
 

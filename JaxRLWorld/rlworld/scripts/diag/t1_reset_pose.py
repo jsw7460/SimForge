@@ -8,6 +8,7 @@ Usage:
     uv run python JaxRLWorld/rlworld/scripts/diag/t1_reset_pose.py --sim mujoco
     uv run python JaxRLWorld/rlworld/scripts/diag/t1_reset_pose.py --sim newton
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,20 +44,20 @@ def main() -> None:
     env = runner.env
     rd = env.robot_data
 
-    print(f"\n=== Config-level base_init_height ===")
+    print("\n=== Config-level base_init_height ===")
     print(f"  cfg.robot.base_init_height = {cfg.robot.base_init_height}")
     print(f"  cfg.standing_z_offset      = {cfg.standing_z_offset}")
     print(f"  Expected root z after standing reset = {cfg.robot.base_init_height + cfg.standing_z_offset}")
 
-    print(f"\n=== Right after env construction (before any explicit reset) ===")
+    print("\n=== Right after env construction (before any explicit reset) ===")
     print(f"  root_pos_w = {_fmt(rd.root_link_pos_w)}")
 
-    print(f"\n=== After env.reset() — expected: z=0.665 ===")
+    print("\n=== After env.reset() — expected: z=0.665 ===")
     env.reset()
     print(f"  root_pos_w = {_fmt(rd.root_link_pos_w)}")
 
     # Manually invoke the writer to force-set z=0.665 and see if it sticks.
-    print(f"\n=== After manual writer.set_root_pose(pos=[0,0,0.665], quat=[1,0,0,0]) ===")
+    print("\n=== After manual writer.set_root_pose(pos=[0,0,0.665], quat=[1,0,0,0]) ===")
     writer = env.get_robot_state_writer("robot")
     env_ids = torch.arange(env.num_envs, device=env.device)
     pos = torch.tensor([[0.0, 0.0, 0.665]], device=env.device).expand(env.num_envs, -1).contiguous()
@@ -71,7 +72,8 @@ def main() -> None:
         sm = env.scene_manager
         mj = sm.mj_model
         import mujoco
-        print(f"\n=== Mjlab-specific introspection ===")
+
+        print("\n=== Mjlab-specific introspection ===")
         # env_origins (from mjlab Scene)
         scene_obj = getattr(sm, "scene", None)
         if scene_obj is not None:

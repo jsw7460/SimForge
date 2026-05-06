@@ -1,11 +1,13 @@
+from typing import Tuple
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from typing import Tuple
 
 
 class EmpiricalNormalization(eqx.Module):
     """Running mean/std normalization for observations."""
+
     mean: jax.Array
     var: jax.Array
     count: jax.Array
@@ -32,7 +34,7 @@ class EmpiricalNormalization(eqx.Module):
 
         m_a = self.var * self.count
         m_b = batch_var * batch_count
-        m2 = m_a + m_b + (delta ** 2) * self.count * batch_count / total_count
+        m2 = m_a + m_b + (delta**2) * self.count * batch_count / total_count
         new_var = m2 / total_count
 
         return eqx.tree_at(

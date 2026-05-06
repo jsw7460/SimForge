@@ -3,13 +3,13 @@ from __future__ import annotations
 import os
 import statistics
 from datetime import datetime, timezone
-from typing import Dict, List, Union, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Union
 
 import torch
 import wandb
 from colorama import Fore, Style, init
 
-from rlworld.rl.algorithms.metrics import MetricType, ConsoleMetric, BaseMetrics
+from rlworld.rl.algorithms.metrics import BaseMetrics, MetricType
 
 if TYPE_CHECKING:
     from rlworld.rl.runners.iteration_data import IterationData
@@ -40,11 +40,11 @@ class ConsoleWriter:
     def write_metrics(
         self,
         data: Dict,
-        metrics: Optional[BaseMetrics],
+        metrics: BaseMetrics | None,
         mode: str,
         width: int = 100,
         print_reward_stats: bool = True,
-        last_eval_stats: Optional[Dict] = None,
+        last_eval_stats: Dict | None = None,
     ):
         """Write formatted metrics to console."""
         log_string = []
@@ -55,7 +55,7 @@ class ConsoleWriter:
             total_iterations = data.get("total_iterations", "?")
             header = f" Learning iteration {Fore.GREEN}{iteration}/{total_iterations}{Style.RESET_ALL} "
         else:
-            header = f" Evaluation Results "
+            header = " Evaluation Results "
 
         log_string.extend(self._create_section_header(width, header))
 
@@ -96,10 +96,10 @@ class ConsoleWriter:
 
     def write_iteration(
         self,
-        data: "IterationData",
+        data: IterationData,
         context: Dict[str, Any],
         width: int = 100,
-        last_eval_stats: Optional[Dict] = None,
+        last_eval_stats: Dict | None = None,
     ):
         """Write formatted IterationData to console."""
         # Build a compat dict for the existing section formatters
@@ -134,7 +134,7 @@ class ConsoleWriter:
             f"{Fore.CYAN}{'═' * width}{Style.RESET_ALL}",
             f"{Fore.CYAN}║{Style.RESET_ALL}" + title.center(width - 2, " ") + f"{Fore.CYAN}║{Style.RESET_ALL}",
             f"{Fore.CYAN}{'═' * width}{Style.RESET_ALL}",
-            ""
+            "",
         ]
 
     def _format_run_info_section(self, data: Dict) -> List[str]:
@@ -146,18 +146,16 @@ class ConsoleWriter:
             wandb_url = data["wandb_url"]
             run_name = data["wandb_run_name"]
             lines.append(
-                f"  {Fore.WHITE}Run{Style.RESET_ALL}".ljust(self.pad + 9) +
-                f"{Fore.CYAN}{run_name}{Style.RESET_ALL}"
+                f"  {Fore.WHITE}Run{Style.RESET_ALL}".ljust(self.pad + 9) + f"{Fore.CYAN}{run_name}{Style.RESET_ALL}"
             )
             lines.append(
-                f"  {Fore.WHITE}WandB{Style.RESET_ALL}".ljust(self.pad + 9) +
-                f"{Fore.BLUE}{wandb_url}{Style.RESET_ALL}"
+                f"  {Fore.WHITE}WandB{Style.RESET_ALL}".ljust(self.pad + 9) + f"{Fore.BLUE}{wandb_url}{Style.RESET_ALL}"
             )
 
         if "wandb_run_path" in data:
             lines.append(
-                f"  {Fore.WHITE}Run Path{Style.RESET_ALL}".ljust(self.pad + 9) +
-                f"{Fore.GREEN}{data['wandb_run_path']}{Style.RESET_ALL}"
+                f"  {Fore.WHITE}Run Path{Style.RESET_ALL}".ljust(self.pad + 9)
+                + f"{Fore.GREEN}{data['wandb_run_path']}{Style.RESET_ALL}"
             )
 
         # Simulator and task
@@ -165,19 +163,18 @@ class ConsoleWriter:
         task_name = data.get("task_name", "N/A")
 
         lines.append(
-            f"  {Fore.WHITE}Simulator{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"{Fore.YELLOW}{simulator}{Style.RESET_ALL}"
+            f"  {Fore.WHITE}Simulator{Style.RESET_ALL}".ljust(self.pad + 9)
+            + f"{Fore.YELLOW}{simulator}{Style.RESET_ALL}"
         )
         lines.append(
-            f"  {Fore.WHITE}Task{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"{Fore.YELLOW}{task_name}{Style.RESET_ALL}"
+            f"  {Fore.WHITE}Task{Style.RESET_ALL}".ljust(self.pad + 9) + f"{Fore.YELLOW}{task_name}{Style.RESET_ALL}"
         )
 
         # Log directory
         if "log_dir" in data:
             lines.append(
-                f"  {Fore.WHITE}Log Dir{Style.RESET_ALL}".ljust(self.pad + 9) +
-                f"{Fore.WHITE}{data['log_dir']}{Style.RESET_ALL}"
+                f"  {Fore.WHITE}Log Dir{Style.RESET_ALL}".ljust(self.pad + 9)
+                + f"{Fore.WHITE}{data['log_dir']}{Style.RESET_ALL}"
             )
 
         lines.append("")
@@ -190,23 +187,23 @@ class ConsoleWriter:
 
         lines = [f"{Fore.YELLOW}⚡ Performance:{Style.RESET_ALL}"]
 
-        fps = perf_metrics.get('fps', 0)
-        collection_time = perf_metrics.get('collection_time', 0)
-        learning_time = perf_metrics.get('learning_time', 0)
+        fps = perf_metrics.get("fps", 0)
+        collection_time = perf_metrics.get("collection_time", 0)
+        learning_time = perf_metrics.get("learning_time", 0)
 
         lines.append(
-            f"  {Fore.WHITE}Throughput{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"{Fore.GREEN}{fps:,.0f}{Style.RESET_ALL} steps/sec"
+            f"  {Fore.WHITE}Throughput{Style.RESET_ALL}".ljust(self.pad + 9)
+            + f"{Fore.GREEN}{fps:,.0f}{Style.RESET_ALL} steps/sec"
         )
         lines.append(
-            f"  {Fore.WHITE}Timing{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"collect {Fore.CYAN}{collection_time:.3f}s{Style.RESET_ALL} │ "
+            f"  {Fore.WHITE}Timing{Style.RESET_ALL}".ljust(self.pad + 9)
+            + f"collect {Fore.CYAN}{collection_time:.3f}s{Style.RESET_ALL} │ "
             f"learn {Fore.CYAN}{learning_time:.3f}s{Style.RESET_ALL}"
         )
 
         return lines
 
-    def _format_algorithm_metrics(self, metrics: Optional[BaseMetrics]) -> List[str]:
+    def _format_algorithm_metrics(self, metrics: BaseMetrics | None) -> List[str]:
         """Format algorithm metrics from BaseMetrics object."""
         lines = ["", f"{Fore.RED}📉 Algorithm:{Style.RESET_ALL}"]
 
@@ -225,41 +222,35 @@ class ConsoleWriter:
 
     def _format_episode_stats(self, data: Dict) -> List[str]:
         """Format episode statistics section."""
-        lines = [
-            "",
-            f"{Fore.GREEN}📈 Episode Stats:{Style.RESET_ALL}"
-        ]
+        lines = ["", f"{Fore.GREEN}📈 Episode Stats:{Style.RESET_ALL}"]
 
         if "mean_return" in data:
-            mean_return = data['mean_return']
+            mean_return = data["mean_return"]
             color = Fore.GREEN if mean_return >= 0 else Fore.RED
             lines.append(
-                f"  {Fore.WHITE}Mean Return{Style.RESET_ALL}".ljust(self.pad + 9) +
-                f"{color}{mean_return:.2f}{Style.RESET_ALL}"
+                f"  {Fore.WHITE}Mean Return{Style.RESET_ALL}".ljust(self.pad + 9)
+                + f"{color}{mean_return:.2f}{Style.RESET_ALL}"
             )
 
         if "mean_episode_length" in data:
             lines.append(
-                f"  {Fore.WHITE}Mean Episode Length{Style.RESET_ALL}".ljust(self.pad + 9) +
-                f"{Fore.CYAN}{data['mean_episode_length']:.1f}{Style.RESET_ALL}"
+                f"  {Fore.WHITE}Mean Episode Length{Style.RESET_ALL}".ljust(self.pad + 9)
+                + f"{Fore.CYAN}{data['mean_episode_length']:.1f}{Style.RESET_ALL}"
             )
 
         if "success_rate" in data and data["success_rate"] is not None:
-            success_rate = data['success_rate'] * 100
+            success_rate = data["success_rate"] * 100
             color = Fore.GREEN if success_rate >= 50 else Fore.YELLOW if success_rate >= 20 else Fore.RED
             lines.append(
-                f"  {Fore.WHITE}Success Rate{Style.RESET_ALL}".ljust(self.pad + 9) +
-                f"{color}{success_rate:.1f}%{Style.RESET_ALL}"
+                f"  {Fore.WHITE}Success Rate{Style.RESET_ALL}".ljust(self.pad + 9)
+                + f"{color}{success_rate:.1f}%{Style.RESET_ALL}"
             )
 
         return lines
 
     def _format_reward_stats(self, data: Dict) -> List[str]:
         """Format reward statistics section - compact multi-column layout."""
-        lines = [
-            "",
-            f"{Fore.BLUE}💰 Reward Breakdown:{Style.RESET_ALL}"
-        ]
+        lines = ["", f"{Fore.BLUE}💰 Reward Breakdown:{Style.RESET_ALL}"]
 
         reward_stats = data["reward_stats"]
         items = [(k, v["mean"]) for k, v in reward_stats.items()]
@@ -276,11 +267,11 @@ class ConsoleWriter:
 
         # Build rows
         for i in range(0, len(items), num_columns):
-            row_items = items[i:i + num_columns]
+            row_items = items[i : i + num_columns]
             segments = []
             for name, mean in row_items:
                 # Truncate long names
-                display_name = name[:name_width - 2] + ".." if len(name) > name_width else name
+                display_name = name[: name_width - 2] + ".." if len(name) > name_width else name
                 # Color based on sign
                 color = Fore.GREEN if mean >= 0 else Fore.RED
                 segment = f"{Fore.WHITE}{display_name:<{name_width}}{Style.RESET_ALL} {color}{mean:>{value_width}.4f}{Style.RESET_ALL}"
@@ -307,20 +298,18 @@ class ConsoleWriter:
 
         color = Fore.GREEN if mean_ret >= 0 else Fore.RED
         lines.append(
-            f"  {Fore.WHITE}Return{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"{color}{mean_ret:.2f}{Style.RESET_ALL} ± {std_ret:.2f}  "
+            f"  {Fore.WHITE}Return{Style.RESET_ALL}".ljust(self.pad + 9)
+            + f"{color}{mean_ret:.2f}{Style.RESET_ALL} ± {std_ret:.2f}  "
             f"[{min_ret:.2f}, {max_ret:.2f}]"
         )
         lines.append(
-            f"  {Fore.WHITE}Episode Length{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"{Fore.CYAN}{mean_len:.1f}{Style.RESET_ALL}  "
+            f"  {Fore.WHITE}Episode Length{Style.RESET_ALL}".ljust(self.pad + 9)
+            + f"{Fore.CYAN}{mean_len:.1f}{Style.RESET_ALL}  "
             f"({n_eps} episodes)"
         )
 
         # Per-reward-type breakdown
-        reward_keys = sorted(
-            k for k in eval_stats if k.startswith("eval/reward/")
-        )
+        reward_keys = sorted(k for k in eval_stats if k.startswith("eval/reward/"))
         if reward_keys:
             lines.append(f"  {Fore.WHITE}Reward Breakdown:{Style.RESET_ALL}")
             # Multi-column layout matching training reward stats
@@ -329,10 +318,10 @@ class ConsoleWriter:
             name_width = 25
             value_width = 10
             for i in range(0, len(items), num_columns):
-                row_items = items[i:i + num_columns]
+                row_items = items[i : i + num_columns]
                 segments = []
                 for name, mean in row_items:
-                    display_name = name[:name_width - 2] + ".." if len(name) > name_width else name
+                    display_name = name[: name_width - 2] + ".." if len(name) > name_width else name
                     color = Fore.GREEN if mean >= 0 else Fore.RED
                     segment = f"{Fore.WHITE}{display_name:<{name_width}}{Style.RESET_ALL} {color}{mean:>{value_width}.4f}{Style.RESET_ALL}"
                     segments.append(segment)
@@ -350,17 +339,17 @@ class ConsoleWriter:
             f"{Fore.WHITE}📊 Summary:{Style.RESET_ALL}",
         ]
 
-        total_timesteps = data.get('total_timesteps', 0)
-        total_time = perf_metrics.get('total_time', 0)
+        total_timesteps = data.get("total_timesteps", 0)
+        total_time = perf_metrics.get("total_time", 0)
         eta = self._calculate_eta(data, total_time)
 
         lines.append(
-            f"  {Fore.WHITE}Timesteps{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"{Fore.GREEN}{total_timesteps:,}{Style.RESET_ALL}"
+            f"  {Fore.WHITE}Timesteps{Style.RESET_ALL}".ljust(self.pad + 9)
+            + f"{Fore.GREEN}{total_timesteps:,}{Style.RESET_ALL}"
         )
         lines.append(
-            f"  {Fore.WHITE}Elapsed{Style.RESET_ALL}".ljust(self.pad + 9) +
-            f"{Fore.CYAN}{_format_time(total_time)}{Style.RESET_ALL} │ "
+            f"  {Fore.WHITE}Elapsed{Style.RESET_ALL}".ljust(self.pad + 9)
+            + f"{Fore.CYAN}{_format_time(total_time)}{Style.RESET_ALL} │ "
             f"ETA: {Fore.YELLOW}{eta}{Style.RESET_ALL}"
         )
         lines.append("")
@@ -375,19 +364,15 @@ class ConsoleWriter:
         """Format metric items into rows with specified columns."""
         lines = []
         for i in range(0, len(items), num_columns):
-            row = items[i:i + num_columns]
+            row = items[i : i + num_columns]
             segments = []
             for label, value, color in row:
                 if isinstance(value, str):
                     # STRING type: no formatting
-                    segments.append(
-                        f"{Fore.WHITE}{label:<20}{Style.RESET_ALL} {color}{value:>10}{Style.RESET_ALL}"
-                    )
+                    segments.append(f"{Fore.WHITE}{label:<20}{Style.RESET_ALL} {color}{value:>10}{Style.RESET_ALL}")
                 else:
                     # Numeric type: format as float
-                    segments.append(
-                        f"{Fore.WHITE}{label:<20}{Style.RESET_ALL} {color}{value:>10.4f}{Style.RESET_ALL}"
-                    )
+                    segments.append(f"{Fore.WHITE}{label:<20}{Style.RESET_ALL} {color}{value:>10.4f}{Style.RESET_ALL}")
             lines.append("  " + "   ".join(segments))
         return lines
 
@@ -406,7 +391,7 @@ class ConsoleWriter:
 def _format_time(seconds: float) -> str:
     """Convert seconds to days, hours, minutes, seconds format."""
     days = int(seconds // (24 * 3600))
-    seconds %= (24 * 3600)
+    seconds %= 24 * 3600
     hours = int(seconds // 3600)
     seconds %= 3600
     minutes = int(seconds // 60)
@@ -442,7 +427,8 @@ class WandbLogger:
         if run_name is None:
             utc_now = datetime.now(timezone.utc)
             import pytz
-            central = pytz.timezone('America/Chicago')
+
+            central = pytz.timezone("America/Chicago")
             ct_now = utc_now.astimezone(central)
 
             run_name = ct_now.strftime("run_%Y%m%d_%H%M%S_CT")
@@ -453,13 +439,13 @@ class WandbLogger:
             config=cfg,
             group=group_name,
             name=run_name,
-            settings=wandb.Settings(start_method="fork")
+            settings=wandb.Settings(start_method="fork"),
         )
         self.wandb_url = self.run.get_url()
         os.makedirs(log_dir, exist_ok=True)
         self.log_dir = log_dir
 
-    def log_iteration(self, data: "IterationData", step: int):
+    def log_iteration(self, data: IterationData, step: int):
         """Log typed IterationData to WandB."""
         log_dict = data.to_wandb_dict()
 
@@ -470,15 +456,13 @@ class WandbLogger:
                 if stat_name in action_dist:
                     values = action_dist[stat_name]
                     for i, v in enumerate(values):
-                        val = v.item() if hasattr(v, 'item') else v
+                        val = v.item() if hasattr(v, "item") else v
                         log_dict[f"ActionDist/{stat_name}/dim_{i}"] = val
 
             if "raw" in action_dist:
                 raw_actions = action_dist["raw"]
                 for i in range(raw_actions.shape[-1]):
-                    log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(
-                        raw_actions[:, i].flatten()
-                    )
+                    log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(raw_actions[:, i].flatten())
 
         wandb.log(log_dict, step=step)
 
@@ -536,16 +520,14 @@ class WandbLogger:
                 if stat_name in action_dist:
                     values = action_dist[stat_name]
                     for i, v in enumerate(values):
-                        val = v.item() if hasattr(v, 'item') else v
+                        val = v.item() if hasattr(v, "item") else v
                         log_dict[f"ActionDist/{stat_name}/dim_{i}"] = val
 
             # Histograms per dimension
             if "raw" in action_dist:
                 raw_actions = action_dist["raw"]  # (num_steps * num_envs, action_dim)
                 for i in range(raw_actions.shape[-1]):
-                    log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(
-                        raw_actions[:, i].flatten()
-                    )
+                    log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(raw_actions[:, i].flatten())
 
         # Performance
         if "collection_time" in training_data and "learning_time" in training_data:
@@ -569,7 +551,7 @@ class WandbLogger:
 
         wandb.log(log_dict, step=step)
 
-    def _flatten_dict(self, d: Dict, parent_key: str = '', sep: str = '/') -> Dict:
+    def _flatten_dict(self, d: Dict, parent_key: str = "", sep: str = "/") -> Dict:
         """Flatten nested dictionary for wandb logging"""
         items = []
         for k, v in d.items():

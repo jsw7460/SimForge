@@ -3,39 +3,39 @@
 Observation structure matching Walk-These-Ways (69 dim).
 See genesis/gait_conditioned.py for detailed documentation.
 """
+
 from dataclasses import dataclass, field
 
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+
 from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
 from rlworld.rl.configs.mujoco_config_classes import MujocoObservationConfig as ObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.envs.managers.common.command_term import (
-    VelocityCommandTermCfg,
     GaitCommandTermCfg,
+    VelocityCommandTermCfg,
 )
 from rlworld.rl.envs.managers.common.gait import QuadrupedOffsets
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
-    projected_gravity,
+    all_commands,
+    base_height,
+    base_lin_vel,
+    clock_inputs,
     dof_pos_nominal_difference,
     dof_vel,
-    raw_actions,
     prev_raw_actions,
-    clock_inputs,
-    all_commands,
-    base_lin_vel,
-    base_height,
+    projected_gravity,
+    raw_actions,
 )
-from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-from rlworld.rl.envs.mdp.rewards.common import wtw as rf_wtw
+from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common, wtw as rf_wtw
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_mujoco
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 
 
 @dataclass
 class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
-
     sim_type: str = "mujoco"
     run_name: str = "Go2_GaitConditioned_Mujoco"
 
@@ -90,7 +90,9 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
         # to gait_manager order regardless.
         site_names = ("FR", "FL", "RR", "RL")
         foot_asset_cfg = SceneEntityCfg(
-            name="robot", site_names=site_names, preserve_order=False,
+            name="robot",
+            site_names=site_names,
+            preserve_order=False,
         )
 
         @dataclass
@@ -99,57 +101,72 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
             shaping_sigma: float = 0.02
 
             track_lin_vel = RewardTermConfig(
-                func=rf_common.track_lin_vel, weight=1.0,
+                func=rf_common.track_lin_vel,
+                weight=1.0,
                 params={"std": 0.5},
             )
             track_ang_vel = RewardTermConfig(
-                func=rf_common.track_ang_vel, weight=0.5,
+                func=rf_common.track_ang_vel,
+                weight=0.5,
                 params={"std": 0.5},
             )
             tracking_contacts_shaped_force = RewardTermConfig(
-                func=rf_mujoco.wtw_tracking_contacts_shaped_force, weight=4.0,
+                func=rf_mujoco.wtw_tracking_contacts_shaped_force,
+                weight=4.0,
                 params={"contact_group": "feet_ground_contact", "gait_force_sigma": 100.0},
             )
             tracking_contacts_shaped_vel = RewardTermConfig(
-                func=rf_mujoco.wtw_tracking_contacts_shaped_vel, weight=4.0,
+                func=rf_mujoco.wtw_tracking_contacts_shaped_vel,
+                weight=4.0,
                 params={"gait_vel_sigma": 10.0, "asset_cfg": foot_asset_cfg},
             )
             body_height_cmd = RewardTermConfig(
-                func=rf_wtw.reward_body_height_cmd, weight=10.0,
+                func=rf_wtw.reward_body_height_cmd,
+                weight=10.0,
                 params={"base_height_target": 0.30},
             )
             orientation_control = RewardTermConfig(
-                func=rf_wtw.penalize_orientation_control, weight=5.0,
+                func=rf_wtw.penalize_orientation_control,
+                weight=5.0,
             )
             raibert_heuristic = RewardTermConfig(
-                func=rf_mujoco.wtw_raibert_heuristic, weight=10.0,
+                func=rf_mujoco.wtw_raibert_heuristic,
+                weight=10.0,
                 params={"asset_cfg": foot_asset_cfg},
             )
             feet_clearance_cmd_linear = RewardTermConfig(
-                func=rf_mujoco.wtw_feet_clearance_cmd_linear, weight=30.0,
+                func=rf_mujoco.wtw_feet_clearance_cmd_linear,
+                weight=30.0,
                 params={"asset_cfg": foot_asset_cfg},
             )
             feet_slip = RewardTermConfig(
-                func=rf_mujoco.wtw_feet_slip, weight=0.04,
+                func=rf_mujoco.wtw_feet_slip,
+                weight=0.04,
                 params={"contact_group": "feet_ground_contact", "asset_cfg": foot_asset_cfg},
             )
             action_smoothness_1 = RewardTermConfig(
-                func=rf_wtw.penalize_action_smoothness_1, weight=0.1,
+                func=rf_wtw.penalize_action_smoothness_1,
+                weight=0.1,
             )
             action_smoothness_2 = RewardTermConfig(
-                func=rf_wtw.penalize_action_smoothness_2, weight=0.1,
+                func=rf_wtw.penalize_action_smoothness_2,
+                weight=0.1,
             )
             dof_vel = RewardTermConfig(
-                func=rf_common.penalize_dof_vel, weight=1e-4,
+                func=rf_common.penalize_dof_vel,
+                weight=1e-4,
             )
             lin_vel_z = RewardTermConfig(
-                func=rf_common.penalize_lin_vel_z, weight=0.02,
+                func=rf_common.penalize_lin_vel_z,
+                weight=0.02,
             )
             ang_vel_xy = RewardTermConfig(
-                func=rf_common.penalize_ang_vel_xy, weight=0.001,
+                func=rf_common.penalize_ang_vel_xy,
+                weight=0.001,
             )
             collision = RewardTermConfig(
-                func=rf_mujoco.wtw_collision, weight=5.0,
+                func=rf_mujoco.wtw_collision,
+                weight=5.0,
                 params={"contact_group": "body_ground_contact", "force_threshold": 10.0},
             )
 
@@ -159,14 +176,20 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
         @dataclass
         class _ActorObsCfg(ObservationGroupConfig):
             projected_gravity = ObservationTermConfig(
-                func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05),
+                func=projected_gravity,
+                scale=1.0,
+                noise=Unoise(-0.05, 0.05),
             )
             commands = ObservationTermConfig(func=all_commands, scale=1.0)
             dof_pos = ObservationTermConfig(
-                func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.01, 0.01),
+                func=dof_pos_nominal_difference,
+                scale=1.0,
+                noise=Unoise(-0.01, 0.01),
             )
             dof_vel = ObservationTermConfig(
-                func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5),
+                func=dof_vel,
+                scale=0.05,
+                noise=Unoise(-1.5, 1.5),
             )
             actions = ObservationTermConfig(func=raw_actions, scale=1.0)
             last_actions = ObservationTermConfig(func=prev_raw_actions, scale=1.0)

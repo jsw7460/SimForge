@@ -20,8 +20,8 @@ from rlworld.rl.actuators.actuator_cfg import (
     DCMotorCfg,
     DelayedPDActuatorCfg,
     IdealPDActuatorCfg,
+    ImplicitActuatorCfg,
 )
-from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.actuators.actuator_net import ActuatorNetLSTM, ActuatorNetMLP
 from rlworld.rl.actuators.actuator_pd import (
     DCMotor,
@@ -65,12 +65,7 @@ class ActionManagerBaseConfig:
     """
 
     actuated_dof_names: list[str] = field(default_factory=list)
-    clip: (
-        tuple[float, float]
-        | dict[str, tuple[float, float]]
-        | Literal["joint_limit"]
-        | None
-    ) = (-1.0, 1.0)
+    clip: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
     scale: float | dict[str, float] = 1.0
     offset: dict[str, float] | None = None
     settle_steps: int = 0
@@ -84,7 +79,7 @@ class ActionManagerBaseConfig:
     # inactive. This dual path exists so existing go2/g1 presets
     # keep working unchanged while new tasks (T1 getup, etc.) can
     # declare explicit terms.
-    action_terms: "dict[str, Any] | None" = None
+    action_terms: dict[str, Any] | None = None
 
 
 class ActionManagerBase(BaseManager):
@@ -97,7 +92,7 @@ class ActionManagerBase(BaseManager):
     Processing pipeline: raw_action -> clip -> scale -> offset -> processed_action
     """
 
-    def __init__(self, env: "World", config: ActionManagerBaseConfig):
+    def __init__(self, env: World, config: ActionManagerBaseConfig):
         super().__init__(env)
         self.config = config
 
@@ -109,9 +104,7 @@ class ActionManagerBase(BaseManager):
 
         # Action history buffers: index 0 = current (t), 1 = t-1, 2 = t-2, ...
         self._action_history_len = 3
-        _z = lambda: torch.zeros(
-            (self.env.num_envs, self._total_action_dim), device=self.device
-        )
+        _z = lambda: torch.zeros((self.env.num_envs, self._total_action_dim), device=self.device)
         self._raw_action_history = [_z() for _ in range(self._action_history_len)]
         self._processed_action_history = [_z() for _ in range(self._action_history_len)]
 
@@ -149,16 +142,13 @@ class ActionManagerBase(BaseManager):
         # them. Otherwise the legacy monolithic path is used (same as
         # before). See ``rlworld/rl/envs/mdp/actions/`` for the term
         # definitions.
-        self._terms: "dict[str, Any]" = {}
+        self._terms: dict[str, Any] = {}
         self._has_action_terms: bool = False
         if config.action_terms:
             for term_name, term_cfg in config.action_terms.items():
                 term_class = term_cfg.class_type
                 if term_class is None:
-                    raise ValueError(
-                        f"ActionTermCfg for {term_name!r} has no "
-                        f"class_type set — cannot instantiate."
-                    )
+                    raise ValueError(f"ActionTermCfg for {term_name!r} has no class_type set — cannot instantiate.")
                 self._terms[term_name] = term_class(term_cfg, env=self.env, manager=self)
             self._has_action_terms = len(self._terms) > 0
             # Sanity: total joint ids covered by all terms must equal
@@ -247,12 +237,8 @@ class ActionManagerBase(BaseManager):
         Raises:
             ValueError: If clip="joint_limit" and any scale value exceeds 1.0.
         """
-        clip_low = torch.full(
-            (self._total_action_dim,), -float("inf"), device=self.device
-        )
-        clip_high = torch.full(
-            (self._total_action_dim,), float("inf"), device=self.device
-        )
+        clip_low = torch.full((self._total_action_dim,), -float("inf"), device=self.device)
+        clip_high = torch.full((self._total_action_dim,), float("inf"), device=self.device)
 
         if self.config.clip is None:
             pass
@@ -265,10 +251,7 @@ class ActionManagerBase(BaseManager):
                     for i in range(self._total_action_dim)
                     if self._scale[i] > 1.0
                 ]
-                raise ValueError(
-                    f'clip="joint_limit" requires all scale values <= 1.0. '
-                    f"Violating joints: {violating}"
-                )
+                raise ValueError(f'clip="joint_limit" requires all scale values <= 1.0. Violating joints: {violating}')
 
             joint_lower, joint_upper = self._get_joint_limits()
             # offset shape: (num_envs, num_actuated) — use first env row
@@ -287,9 +270,7 @@ class ActionManagerBase(BaseManager):
             indices, _, low_values = string_utils.resolve_matching_names_values(
                 clip_dict_low, self._actuated_joint_names
             )
-            _, _, high_values = string_utils.resolve_matching_names_values(
-                clip_dict_high, self._actuated_joint_names
-            )
+            _, _, high_values = string_utils.resolve_matching_names_values(clip_dict_high, self._actuated_joint_names)
 
             clip_low[indices] = torch.tensor(low_values, device=self.device)
             clip_high[indices] = torch.tensor(high_values, device=self.device)
@@ -302,19 +283,13 @@ class ActionManagerBase(BaseManager):
         Returns:
             Tensor of shape (num_envs, total_action_dim).
         """
-        offset = torch.zeros(
-            (self.env.num_envs, self._total_action_dim), device=self.device
-        )
+        offset = torch.zeros((self.env.num_envs, self._total_action_dim), device=self.device)
 
         if self.config.offset is not None and isinstance(self.config.offset, dict):
-            offset_indices, _, offset_values = (
-                string_utils.resolve_matching_names_values(
-                    self.config.offset, self._actuated_joint_names
-                )
+            offset_indices, _, offset_values = string_utils.resolve_matching_names_values(
+                self.config.offset, self._actuated_joint_names
             )
-            offset[:, offset_indices] = torch.tensor(
-                offset_values, device=self.device
-            )
+            offset[:, offset_indices] = torch.tensor(offset_values, device=self.device)
 
         return offset
 
@@ -611,9 +586,7 @@ class ActionManagerBase(BaseManager):
         processed = clipped * self._scale + self._offset
 
         if self.config.settle_steps > 0:
-            in_settle = (
-                self.env.episode_length_buf < self.config.settle_steps
-            ).unsqueeze(-1).float()
+            in_settle = (self.env.episode_length_buf < self.config.settle_steps).unsqueeze(-1).float()
             current_pos = self._get_joint_pos()
             processed = in_settle * current_pos + (1.0 - in_settle) * processed
 
@@ -680,7 +653,7 @@ class ActionManagerBase(BaseManager):
         if self._has_explicit_actuators:
             print(f"  Explicit actuator groups: {len(self._actuators)}")
         else:
-            print(f"  Mode: Implicit (simulator PD)")
+            print("  Mode: Implicit (simulator PD)")
         print(f"{'=' * 60}\n")
 
     def __str__(self) -> str:

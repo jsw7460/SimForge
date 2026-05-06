@@ -17,6 +17,7 @@ token grid of shape ``(T + 1, B_all, D_embed)`` where:
 Processes a single observation per call; ``jax.vmap`` is applied at
 the actor/critic level when batched input is needed.
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -25,12 +26,13 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-
 __all__ = ["SpaceTimeTokenizer"]
 
 
 def _make_orthogonal_linear(
-    in_dim: int, out_dim: int, key: jax.Array,
+    in_dim: int,
+    out_dim: int,
+    key: jax.Array,
 ) -> eqx.nn.Linear:
     """Linear with QR-orthogonal weight init and zero bias."""
     k_lin, k_ortho = jax.random.split(key)
@@ -77,7 +79,8 @@ class SpaceTimeTokenizer(eqx.Module):
         self.num_bodies_all = num_bodies_all
         self.num_bodies_tracked = len(tracked_body_indices)
         self.tracked_body_indices = jnp.array(
-            list(tracked_body_indices), dtype=jnp.int32,
+            list(tracked_body_indices),
+            dtype=jnp.int32,
         )
         self.proprio_dim = proprio_dim
         self.num_future_frames = num_future_frames
@@ -104,14 +107,17 @@ class SpaceTimeTokenizer(eqx.Module):
         # comes from the encoder's positional embedding.
         proprio_token = self.proprio_proj(proprio)  # (D,)
         proprio_tokens = jnp.broadcast_to(
-            proprio_token, (self.num_bodies_all, self.embed_dim),
+            proprio_token,
+            (self.num_bodies_all, self.embed_dim),
         )
 
         if self.num_future_frames == 0:
             return proprio_tokens[None]
 
-        ref = observation[self.proprio_dim:].reshape(
-            self.num_future_frames, self.num_bodies_tracked, self.ref_feature_dim,
+        ref = observation[self.proprio_dim :].reshape(
+            self.num_future_frames,
+            self.num_bodies_tracked,
+            self.ref_feature_dim,
         )
         # Apply shared ref Linear to every (t, b) ref vector.
         tracked_tokens = jax.vmap(jax.vmap(self.ref_proj))(ref)  # (T, B_tracked, D)

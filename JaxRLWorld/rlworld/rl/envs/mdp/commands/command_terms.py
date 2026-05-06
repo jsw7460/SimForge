@@ -1,12 +1,9 @@
 import torch
+
 from rlworld.rl.utils import gs_rand_float
 
 
-def lin_vel_x(
-    env,
-    env_ids: torch.Tensor,
-    range: tuple[float, float] = (-1.0, 1.5)
-) -> torch.Tensor:
+def lin_vel_x(env, env_ids: torch.Tensor, range: tuple[float, float] = (-1.0, 1.5)) -> torch.Tensor:
     """
     Generate linear velocity X commands.
 
@@ -21,11 +18,7 @@ def lin_vel_x(
     return gs_rand_float(range[0], range[1], (len(env_ids),), env.device)
 
 
-def lin_vel_y(
-    env,
-    env_ids: torch.Tensor,
-    range: tuple[float, float] = (-0.5, 0.5)
-) -> torch.Tensor:
+def lin_vel_y(env, env_ids: torch.Tensor, range: tuple[float, float] = (-0.5, 0.5)) -> torch.Tensor:
     """
     Generate linear velocity Y commands.
 
@@ -40,11 +33,7 @@ def lin_vel_y(
     return gs_rand_float(range[0], range[1], (len(env_ids),), env.device)
 
 
-def ang_vel(
-    env,
-    env_ids: torch.Tensor,
-    range: tuple[float, float] = (-1.0, 1.0)
-) -> torch.Tensor:
+def ang_vel(env, env_ids: torch.Tensor, range: tuple[float, float] = (-1.0, 1.0)) -> torch.Tensor:
     """
     Generate angular velocity (yaw rate) commands.
 
@@ -59,11 +48,7 @@ def ang_vel(
     return gs_rand_float(range[0], range[1], (len(env_ids),), env.device)
 
 
-def base_height(
-    env,
-    env_ids: torch.Tensor,
-    range: tuple[float, float] = (0.6, 0.8)
-) -> torch.Tensor:
+def base_height(env, env_ids: torch.Tensor, range: tuple[float, float] = (0.6, 0.8)) -> torch.Tensor:
     """
     Generate base height commands.
 
@@ -78,11 +63,7 @@ def base_height(
     return gs_rand_float(range[0], range[1], (len(env_ids),), env.device)
 
 
-def foot_height(
-    env,
-    env_ids: torch.Tensor,
-    range: tuple[float, float] = (0.1, 0.3)
-) -> torch.Tensor:
+def foot_height(env, env_ids: torch.Tensor, range: tuple[float, float] = (0.1, 0.3)) -> torch.Tensor:
     """
     Generate foot height commands for swing phase.
 
@@ -97,11 +78,7 @@ def foot_height(
     return gs_rand_float(range[0], range[1], (len(env_ids),), env.device)
 
 
-def gait_frequency(
-    env,
-    env_ids: torch.Tensor,
-    range: tuple[float, float] = (0.8, 1.5)
-) -> torch.Tensor:
+def gait_frequency(env, env_ids: torch.Tensor, range: tuple[float, float] = (0.8, 1.5)) -> torch.Tensor:
     """
     Generate gait frequency commands.
 
@@ -116,11 +93,7 @@ def gait_frequency(
     return gs_rand_float(range[0], range[1], (len(env_ids),), env.device)
 
 
-def constant_height(
-    env,
-    env_ids: torch.Tensor,
-    value: float = 0.75
-) -> torch.Tensor:
+def constant_height(env, env_ids: torch.Tensor, value: float = 0.75) -> torch.Tensor:
     """
     Generate constant height command.
 
@@ -135,10 +108,7 @@ def constant_height(
     return torch.full((len(env_ids),), value, device=env.device)
 
 
-def zero_command(
-    env,
-    env_ids: torch.Tensor
-) -> torch.Tensor:
+def zero_command(env, env_ids: torch.Tensor) -> torch.Tensor:
     """
     Generate zero commands (standing still).
 

@@ -8,6 +8,7 @@ Motion source is set in ``T1TrackingConfig.motion_files`` (tuple of NPZ
 paths — length-1 for single-clip, length >= 2 for multi-motion). Edit
 the preset or subclass it to target a different clip set.
 """
+
 from rlworld.rl.configs.presets.t1_tracking.base import T1TrackingConfig
 from rlworld.rl.runners import BaseRunner
 

@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import genesis as gs
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
+from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     RewardConfig,
@@ -38,7 +39,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -51,12 +51,9 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.rewards.common import getup as rf_getup
-from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
+from rlworld.rl.envs.mdp.rewards.common import getup as rf_getup, reward_terms as rf_common
+from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab, reward_terms as rf_genesis
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 
 if TYPE_CHECKING:
     from .base import T1GetupConfig
@@ -71,11 +68,11 @@ OBSERVATION_CFG_CLS = ObservationConfig
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "T1GetupConfig") -> VisualizationConfig:
+def build_visualization(cfg: T1GetupConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False)
 
 
-def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> EnvConfig:
+def build_env(cfg: T1GetupConfig, timing: Dict[str, Any]) -> EnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         # NO roll_pitch_violation — the robot starts fallen.
@@ -102,7 +99,7 @@ def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> EnvConfig:
     )
 
 
-def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> SceneConfig:
+def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
     r = cfg.robot
     sim_dt = timing["dt"]
 
@@ -163,45 +160,25 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> SceneConfig:
     )
 
 
-def build_observation(cfg: "T1GetupConfig") -> ObservationConfig:
+def build_observation(cfg: T1GetupConfig) -> ObservationConfig:
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-        )
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         # Unbiased dof_pos (see _newton_builders for rationale).
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-        )
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03))
+        dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0
-        )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0
-        )
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0
-        )
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
+        dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0)
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
@@ -214,7 +191,7 @@ def build_observation(cfg: "T1GetupConfig") -> ObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "T1GetupConfig") -> ActionConfig:
+def build_action(cfg: T1GetupConfig) -> ActionConfig:
     """Settle-relative joint position action (mjlab_playground T1 getup).
 
     See ``_newton_builders.build_action`` for the rationale; the
@@ -243,7 +220,7 @@ def build_action(cfg: "T1GetupConfig") -> ActionConfig:
     )
 
 
-def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
+def build_reward(cfg: T1GetupConfig) -> RewardConfig:
     r = cfg.robot
 
     @dataclass
@@ -303,7 +280,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
     """Genesis domain randomization.
 
     **Known gap vs mjlab_playground**: Genesis's contact solver uses a
@@ -344,5 +321,3 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
             params={"friction_range": (0.8, 1.5)},
         ),
     }
-
-

@@ -21,14 +21,11 @@ import mujoco
 import numpy as np
 import optax
 import torch
-
-from mujoco_playground import registry
-from mujoco_playground import wrapper_torch
+from mujoco_playground import registry, wrapper_torch
 
 from rlworld.rl.algorithms.base import ActInput
 from rlworld.rl.algorithms.ppo.ppo import PPO
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
-
 
 # ===================== Config =====================
 
@@ -207,13 +204,15 @@ def main():
         key=key,
     )
 
-    alg.init_storage({
-        "num_envs": NUM_ENVS,
-        "num_transitions_per_env": NUM_STEPS_PER_ENV,
-        "actor_obs_shape": [n_obs],
-        "critic_obs_shape": [n_critic_obs],
-        "actions_shape": [n_act],
-    })
+    alg.init_storage(
+        {
+            "num_envs": NUM_ENVS,
+            "num_transitions_per_env": NUM_STEPS_PER_ENV,
+            "actor_obs_shape": [n_obs],
+            "critic_obs_shape": [n_critic_obs],
+            "actions_shape": [n_act],
+        }
+    )
 
     # ===================== Evaluate =====================
     def evaluate():
@@ -272,7 +271,10 @@ def main():
         scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
         scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = False
         frames = raw_render_env.render(
-            trajectory, camera="track", height=480, width=640,
+            trajectory,
+            camera="track",
+            height=480,
+            width=640,
             scene_option=scene_option,
         )
         return frames
@@ -374,7 +376,8 @@ def main():
                     frames = render_with_rollout()
                     video = wandb.Video(
                         np.array(frames).transpose(0, 3, 1, 2),
-                        fps=30, format="gif",
+                        fps=30,
+                        format="gif",
                     )
                     eval_log["eval/video"] = video
                 except Exception as e:

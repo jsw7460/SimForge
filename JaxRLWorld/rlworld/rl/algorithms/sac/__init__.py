@@ -1,22 +1,22 @@
-from rlworld.rl.algorithms.sac.sac import SAC, SACTrainState, SACTransitionBuffer
-from rlworld.rl.algorithms.sac.metrics import (
-    SACMetrics,
-    SACCriticMetrics,
-    SACAlphaMetrics,
-    SACBatchMetrics,
-)
 from rlworld.rl.algorithms.sac.losses import (
-    compute_critic_loss,
     compute_actor_loss,
     compute_alpha_loss,
+    compute_critic_loss,
 )
+from rlworld.rl.algorithms.sac.metrics import (
+    SACAlphaMetrics,
+    SACBatchMetrics,
+    SACCriticMetrics,
+    SACMetrics,
+)
+from rlworld.rl.algorithms.sac.sac import SAC, SACTrainState, SACTransitionBuffer
 from rlworld.rl.algorithms.sac.update import (
-    act_stochastic,
     act_deterministic,
+    act_stochastic,
     get_value,
-    update_critics,
     update_actor,
     update_alpha,
+    update_critics,
 )
 
 __all__ = [

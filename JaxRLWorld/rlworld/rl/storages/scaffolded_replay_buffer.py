@@ -16,7 +16,6 @@ import numpy as np
 
 from rlworld.rl.storages.sequence_replay_buffer import (
     SequenceReplayBuffer,
-    SequenceBatch,
 )
 
 
@@ -31,6 +30,7 @@ class ScaffoldedSequenceBatch(NamedTuple):
     - terminated:              [horizon,   batch_size, 1]
     - privileged_observations: [horizon+1, batch_size, priv_dim]
     """
+
     observations: jax.Array
     actions: jax.Array
     rewards: jax.Array
@@ -67,12 +67,8 @@ class ScaffoldedSequenceReplayBuffer(SequenceReplayBuffer):
         self.privileged_obs_dim = privileged_obs_dim
 
         # Privileged obs storage (mirrors obs_buf / next_obs_buf)
-        self.priv_obs_buf = np.zeros(
-            (num_envs, size_per_env, privileged_obs_dim), dtype=np.float32
-        )
-        self.next_priv_obs_buf = np.zeros(
-            (num_envs, size_per_env, privileged_obs_dim), dtype=np.float32
-        )
+        self.priv_obs_buf = np.zeros((num_envs, size_per_env, privileged_obs_dim), dtype=np.float32)
+        self.next_priv_obs_buf = np.zeros((num_envs, size_per_env, privileged_obs_dim), dtype=np.float32)
 
     def store_parallel(
         self,
@@ -100,13 +96,15 @@ class ScaffoldedSequenceReplayBuffer(SequenceReplayBuffer):
         # Base class stores obs, action, reward, next_obs, terminated
         # and advances ptr + updates episode_id
         super().store_parallel(
-            obs=obs, action=action, reward=reward,
-            next_obs=next_obs, terminated=terminated, truncated=truncated,
+            obs=obs,
+            action=action,
+            reward=reward,
+            next_obs=next_obs,
+            terminated=terminated,
+            truncated=truncated,
         )
 
-    def sample_batch(
-        self, batch_size: int, key: jax.Array
-    ) -> ScaffoldedSequenceBatch:
+    def sample_batch(self, batch_size: int, key: jax.Array) -> ScaffoldedSequenceBatch:
         """
         Sample batch with privileged observations.
 
@@ -114,43 +112,32 @@ class ScaffoldedSequenceReplayBuffer(SequenceReplayBuffer):
         then extracts privileged obs at the same indices.
         """
         if self.filled_size < self.horizon + 1:
-            raise ValueError(
-                f"Not enough data: need at least {self.horizon + 1} steps, "
-                f"have {self.filled_size}"
-            )
+            raise ValueError(f"Not enough data: need at least {self.horizon + 1} steps, have {self.filled_size}")
 
-        seed = int(jax.random.randint(key, (), 0, 2 ** 31 - 1))
+        seed = int(jax.random.randint(key, (), 0, 2**31 - 1))
         rng = np.random.default_rng(seed)
 
-        env_indices, start_positions = self._sample_valid_indices(
-            batch_size, rng
-        )
+        env_indices, start_positions = self._sample_valid_indices(batch_size, rng)
 
         # Positions for H transitions: [H, B]
         offsets = np.arange(self.horizon)
-        positions = (
-            (start_positions[None, :] + offsets[:, None]) % self.size_per_env
-        )
+        positions = (start_positions[None, :] + offsets[:, None]) % self.size_per_env
         env_exp = np.broadcast_to(env_indices[None, :], positions.shape)
 
         # Base observations (same logic as SequenceReplayBuffer.sample_batch)
-        obs_main = self.obs_buf[env_exp, positions]         # [H, B, obs_dim]
+        obs_main = self.obs_buf[env_exp, positions]  # [H, B, obs_dim]
         last_pos = positions[-1]
         obs_last = self.next_obs_buf[env_indices, last_pos]  # [B, obs_dim]
-        obs_seq = np.concatenate(
-            [obs_main, obs_last[None]], axis=0
-        )  # [H+1, B, obs_dim]
+        obs_seq = np.concatenate([obs_main, obs_last[None]], axis=0)  # [H+1, B, obs_dim]
 
         action_seq = self.action_buf[env_exp, positions]
         reward_seq = self.reward_buf[env_exp, positions]
         terminated_seq = self.terminated_buf[env_exp, positions]
 
         # Privileged observations (same index pattern)
-        priv_main = self.priv_obs_buf[env_exp, positions]    # [H, B, priv_dim]
+        priv_main = self.priv_obs_buf[env_exp, positions]  # [H, B, priv_dim]
         priv_last = self.next_priv_obs_buf[env_indices, last_pos]  # [B, priv_dim]
-        priv_seq = np.concatenate(
-            [priv_main, priv_last[None]], axis=0
-        )  # [H+1, B, priv_dim]
+        priv_seq = np.concatenate([priv_main, priv_last[None]], axis=0)  # [H+1, B, priv_dim]
 
         return ScaffoldedSequenceBatch(
             observations=jnp.asarray(obs_seq),

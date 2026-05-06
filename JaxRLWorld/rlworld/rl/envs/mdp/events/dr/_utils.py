@@ -70,10 +70,7 @@ def sample(
         mean = (lo + hi) / 2.0
         std = (hi - lo) / 4.0  # 95% within [lo, hi]
         return torch.empty(shape, device=device).normal_(mean, std).clamp_(lo, hi)
-    raise ValueError(
-        f"Unknown distribution {distribution!r}. "
-        "Choose from 'uniform', 'log_uniform', 'gaussian'."
-    )
+    raise ValueError(f"Unknown distribution {distribution!r}. Choose from 'uniform', 'log_uniform', 'gaussian'.")
 
 
 def apply_operation(
@@ -98,9 +95,7 @@ def apply_operation(
         return defaults * sampled
     elif operation == "add":
         return defaults + sampled
-    raise ValueError(
-        f"Unknown operation {operation!r}. Choose from 'abs', 'scale', 'add'."
-    )
+    raise ValueError(f"Unknown operation {operation!r}. Choose from 'abs', 'scale', 'add'.")
 
 
 def resolve_patterns(
@@ -127,10 +122,7 @@ def resolve_patterns(
     for pat in patterns:
         matched = [i for i, name in enumerate(all_names) if re.fullmatch(pat, name)]
         if not matched:
-            raise ValueError(
-                f"Pattern {pat!r} matched no names. "
-                f"Available: {list(all_names)}"
-            )
+            raise ValueError(f"Pattern {pat!r} matched no names. Available: {list(all_names)}")
         for idx in matched:
             if idx not in seen:
                 seen.add(idx)

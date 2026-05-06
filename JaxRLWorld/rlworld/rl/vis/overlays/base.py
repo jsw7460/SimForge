@@ -11,18 +11,21 @@ if TYPE_CHECKING:
 @dataclass
 class OverlayConfig:
     """Base configuration for overlays."""
+
     enabled: bool = True
 
 
 @dataclass
 class Overlay3DConfig(OverlayConfig):
     """Configuration for 3D overlays rendered in world space."""
+
     pass
 
 
 @dataclass
 class Overlay2DConfig(OverlayConfig):
     """Configuration for 2D overlays rendered as HUD."""
+
     pass
 
 

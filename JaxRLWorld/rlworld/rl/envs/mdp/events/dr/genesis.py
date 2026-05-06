@@ -27,8 +27,9 @@ if TYPE_CHECKING:
 #  Friction                                                           #
 # ------------------------------------------------------------------ #
 
+
 def randomize_friction(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     env_ids: torch.Tensor,
     friction_range: tuple[float, float] = (0.6, 1.4),
     distribution: str = "uniform",
@@ -66,8 +67,9 @@ def randomize_friction(
 #  Body mass                                                          #
 # ------------------------------------------------------------------ #
 
+
 def randomize_body_mass(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     env_ids: torch.Tensor,
     mass_ratio_range: tuple[float, float] = (0.85, 1.15),
     distribution: str = "uniform",
@@ -118,8 +120,9 @@ def randomize_body_mass(
 #  Body COM offset                                                    #
 # ------------------------------------------------------------------ #
 
+
 def randomize_body_com_offset(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     env_ids: torch.Tensor,
     ranges: dict[int, tuple[float, float]],
     link_names: str | list[str] | tuple[str, ...] = ("torso_link",),
@@ -152,7 +155,9 @@ def randomize_body_com_offset(
     com_shift = torch.zeros(n_envs, n_links, 3, device=env.device)
     for axis, (lo, hi) in ranges.items():
         com_shift[:, :, axis] = torch.empty(
-            n_envs, n_links, device=env.device,
+            n_envs,
+            n_links,
+            device=env.device,
         ).uniform_(lo, hi)
 
     entity.set_COM_shift(
@@ -166,8 +171,9 @@ def randomize_body_com_offset(
 #  PD gains                                                           #
 # ------------------------------------------------------------------ #
 
+
 def randomize_pd_gains(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     env_ids: torch.Tensor,
     kp_range: tuple[float, float] | None = None,
     kd_range: tuple[float, float] | None = None,
@@ -219,8 +225,9 @@ def randomize_pd_gains(
 #  Joint armature                                                     #
 # ------------------------------------------------------------------ #
 
+
 def randomize_joint_armature(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     env_ids: torch.Tensor,
     armature_range: tuple[float, float] = (0.9, 1.1),
     distribution: str = "uniform",
@@ -247,9 +254,7 @@ def randomize_joint_armature(
     ratios = sample((len(env_ids), n_dofs), *armature_range, env.device, distribution)
 
     entity.set_dofs_armature(
-        armature=(current * ratios).cpu().numpy()
-        if current.dim() == 1
-        else (current[env_ids] * ratios).cpu().numpy(),
+        armature=(current * ratios).cpu().numpy() if current.dim() == 1 else (current[env_ids] * ratios).cpu().numpy(),
         envs_idx=env_ids,
     )
 
@@ -258,8 +263,9 @@ def randomize_joint_armature(
 #  Joint friction loss                                                #
 # ------------------------------------------------------------------ #
 
+
 def randomize_joint_friction(
-    env: "GenesisEnv",
+    env: GenesisEnv,
     env_ids: torch.Tensor,
     friction_range: tuple[float, float] = (0.0, 0.05),
     distribution: str = "uniform",

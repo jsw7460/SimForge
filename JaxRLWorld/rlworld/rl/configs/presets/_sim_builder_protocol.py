@@ -22,6 +22,7 @@ guard at the call site so they can be omitted when not needed):
     xyzw initial quat into wxyz, Genesis Go2 shifts the spawn
     position by ``(1.5, 1.5)`` for scene layout reasons.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Protocol
@@ -64,7 +65,7 @@ class SimBuilderProtocol(Protocol):
     def build_reward(cfg: Any) -> Any: ...
 
     @staticmethod
-    def build_dr_terms(cfg: Any) -> "Dict[str, EventTermConfig]": ...
+    def build_dr_terms(cfg: Any) -> Dict[str, EventTermConfig]: ...
 
 
 class Go2SimBuilderProtocol(SimBuilderProtocol, Protocol):

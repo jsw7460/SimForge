@@ -3,12 +3,13 @@ PPO-DR3 Actor-Critic.
 
 Extends PPOActorCritic to use DR3Critic for feature extraction.
 """
+
 from typing import TYPE_CHECKING
 
 import jax
 
-from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.modules.architectures.dr3 import DR3Critic
+from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.scene_manager import KinematicTree
@@ -62,7 +63,7 @@ class PPODR3ActorCritic(PPOActorCritic):
             distribution_type=distribution_type,
             kinematic_tree=kinematic_tree,
             key=key,
-            **kwargs
+            **kwargs,
         )
 
     def _build_networks(

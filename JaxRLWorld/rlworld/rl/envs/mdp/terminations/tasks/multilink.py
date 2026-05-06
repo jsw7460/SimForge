@@ -2,21 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import torch
-
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
 
-from rlworld.rl.envs.mdp.observations import state
 from rlworld.rl.configs.terminations import TerminationResult
-from rlworld.rl.utils import entity_utils as eu
 
 
 def end_effector_below_ground(
-    env: GenesisEnv,
-    entity_name: str = "robot",
-    link_name: str = None,
-    z_threshold: float = 0.0
+    env: GenesisEnv, entity_name: str = "robot", link_name: str = None, z_threshold: float = 0.0
 ) -> TerminationResult:
     """Terminate if the end effector (last link) goes below ground.
 

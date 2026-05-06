@@ -23,11 +23,10 @@ from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
     FULL_COLLISION as T1_FULL_COLLISION,
     get_spec as t1_get_spec,
 )
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -49,7 +48,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
@@ -61,10 +59,8 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.rewards.common import getup as rf_getup
-from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
+from rlworld.rl.envs.mdp.rewards.common import getup as rf_getup, reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
-from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
 
 if TYPE_CHECKING:
@@ -80,11 +76,11 @@ OBSERVATION_CFG_CLS = MujocoObservationConfig
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "T1GetupConfig") -> VisualizationConfig:
+def build_visualization(cfg: T1GetupConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
+def build_env(cfg: T1GetupConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         # NO bad_orientation — the robot starts fallen.
@@ -111,7 +107,7 @@ def build_env(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
     )
 
 
-def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoSceneConfig:
+def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
     """Build scene config with mjlab T1 asset + self-collision sensor."""
     r = cfg.robot
     physics_dt = timing["dt"]
@@ -120,12 +116,8 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoSceneConf
     # Self-collision sensor over the entire T1 subtree (rooted at Trunk).
     self_collision_cfg = ContactSensorCfg(
         name="self_collision",
-        primary=ContactMatch(
-            mode="subtree", pattern=r.trunk_body_name, entity="robot"
-        ),
-        secondary=ContactMatch(
-            mode="subtree", pattern=r.trunk_body_name, entity="robot"
-        ),
+        primary=ContactMatch(mode="subtree", pattern=r.trunk_body_name, entity="robot"),
+        secondary=ContactMatch(mode="subtree", pattern=r.trunk_body_name, entity="robot"),
         fields=("found", "force"),
         reduce="none",
         num_slots=1,
@@ -147,7 +139,7 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoSceneConf
                     damping=r.d_gains,
                     armature=r.armature,
                     effort_limit=r.effort_limits,
-                    frictionloss=0.1
+                    frictionloss=0.1,
                     # min_delay=0,
                     # max_delay=2,
                 ),
@@ -175,55 +167,35 @@ def build_scene(cfg: "T1GetupConfig", timing: Dict[str, Any]) -> MujocoSceneConf
         solver_iterations=10,
         solver_ls_iterations=20,
         ccd_iterations=50,
-        nconmax=None,      # mjlab_playground leaves this unset → auto
-        njmax=200,         # mjlab_playground getup explicit value
-        impratio=10.0,     # mjlab_playground getup explicit value
-        cone="elliptic",   # mjlab_playground getup explicit value
+        nconmax=None,  # mjlab_playground leaves this unset → auto
+        njmax=200,  # mjlab_playground getup explicit value
+        impratio=10.0,  # mjlab_playground getup explicit value
+        cone="elliptic",  # mjlab_playground getup explicit value
         contact_sensor_maxmatch=64,
         preset_class_name=type(cfg).__name__,
         preset_module_path=type(cfg).__module__,
     )
 
 
-def build_observation(cfg: "T1GetupConfig") -> MujocoObservationConfig:
+def build_observation(cfg: T1GetupConfig) -> MujocoObservationConfig:
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-        )
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         # Unbiased dof_pos (see _newton_builders for rationale).
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-        )
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03))
+        dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(
-            func=base_ang_vel, scale=1.0
-        )
+        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
-        projected_gravity_obs = ObservationTermConfig(
-            func=projected_gravity, scale=1.0
-        )
-        dof_pos_obs = ObservationTermConfig(
-            func=dof_pos, scale=1.0
-        )
-        dof_pos_diff_obs = ObservationTermConfig(
-            func=dof_pos_nominal_difference, scale=1.0
-        )
-        dof_vel_obs = ObservationTermConfig(
-            func=dof_vel, scale=1.0
-        )
+        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
+        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
+        dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0)
+        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
@@ -236,7 +208,7 @@ def build_observation(cfg: "T1GetupConfig") -> MujocoObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "T1GetupConfig") -> MujocoActionConfig:
+def build_action(cfg: T1GetupConfig) -> MujocoActionConfig:
     """Settle-relative joint position action (mjlab_playground T1 getup).
 
     See ``_newton_builders.build_action`` for the rationale.
@@ -263,7 +235,7 @@ def build_action(cfg: "T1GetupConfig") -> MujocoActionConfig:
     )
 
 
-def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
+def build_reward(cfg: T1GetupConfig) -> RewardConfig:
     r = cfg.robot
 
     @dataclass
@@ -323,7 +295,7 @@ def build_reward(cfg: "T1GetupConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo domain randomization — mjlab_playground-faithful.
 
     Three-axis geom friction randomization matches

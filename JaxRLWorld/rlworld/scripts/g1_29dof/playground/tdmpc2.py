@@ -22,13 +22,10 @@ import jax.numpy as jnp
 import mujoco
 import numpy as np
 import torch
-
-from mujoco_playground import registry
-from mujoco_playground import wrapper_torch
+from mujoco_playground import registry, wrapper_torch
 
 from rlworld.rl.algorithms.tdmpc2 import TDMPC2
 from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
-
 
 # ===================== Config =====================
 
@@ -38,7 +35,7 @@ NUM_EVAL_ENVS = 1024
 SEED = 1
 DEVICE_RANK = 0
 TOTAL_TIMESTEPS = 100_000
-LEARNING_STARTS = 1024       # Random-action warmup steps
+LEARNING_STARTS = 1024  # Random-action warmup steps
 BATCH_SIZE = 4096
 EPISODE_LENGTH = 1000
 
@@ -242,12 +239,14 @@ def main():
         key=alg_key,
     )
 
-    alg.init_storage({
-        "num_envs": NUM_ENVS,
-        "obs_dim": n_obs,
-        "action_dim": n_act,
-        "size_per_env": BUFFER_SIZE_PER_ENV,
-    })
+    alg.init_storage(
+        {
+            "num_envs": NUM_ENVS,
+            "obs_dim": n_obs,
+            "action_dim": n_act,
+            "size_per_env": BUFFER_SIZE_PER_ENV,
+        }
+    )
 
     # ===================== Action Scaling =====================
     # squash_action=True: world model outputs in [-1, 1], scale to env range
@@ -338,7 +337,10 @@ def main():
         scene_option.flags[mujoco.mjtVisFlag.mjVIS_PERTFORCE] = False
         scene_option.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = False
         frames = raw_render_env.render(
-            trajectory, camera="track", height=480, width=640,
+            trajectory,
+            camera="track",
+            height=480,
+            width=640,
             scene_option=scene_option,
         )
         return frames
@@ -422,7 +424,7 @@ def main():
             for i in range(num_updates):
                 key, subkey = jax.random.split(key)
                 batch = alg.sample_batch(BATCH_SIZE, subkey)
-                is_last = (i == num_updates - 1)
+                is_last = i == num_updates - 1
                 metrics = alg.update(batch, build_metrics=is_last)
 
             # Logging
@@ -457,7 +459,8 @@ def main():
                         frames = render_with_rollout()
                         video = wandb.Video(
                             np.array(frames).transpose(0, 3, 1, 2),
-                            fps=30, format="gif",
+                            fps=30,
+                            format="gif",
                         )
                         eval_log["eval/video"] = video
                     except Exception as e:

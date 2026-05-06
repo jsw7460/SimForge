@@ -22,6 +22,7 @@ The encoder/decoder/prior are stored as plain ``eqx.Module`` fields,
 so :func:`equinox.partition` / :func:`equinox.combine` slice the
 trainable parameters cleanly when wiring up an optimiser.
 """
+
 from __future__ import annotations
 
 from typing import NamedTuple, Sequence
@@ -34,20 +35,19 @@ from rlworld.imitation.npmp.decoder import NPMPDecoder
 from rlworld.imitation.npmp.encoder import NPMPEncoder
 from rlworld.imitation.npmp.prior import AR1Prior
 
-
 __all__ = ["NPMPModule", "NPMPStepOutput"]
 
 
 class NPMPStepOutput(NamedTuple):
     """Per-step bundle of outputs needed by the ELBO loss."""
 
-    z_t: jax.Array            # sampled latent       (D_z,)
-    q_mean: jax.Array         # encoder mean         (D_z,)
-    q_log_std: jax.Array      # encoder log std      (D_z,)
-    p_mean: jax.Array         # AR(1) prior mean     (D_z,)
-    p_log_std: jax.Array      # AR(1) prior log std  (D_z,)
-    action_mean: jax.Array    # decoder mean         (A,)
-    action_log_std: jax.Array # decoder log std      (A,)
+    z_t: jax.Array  # sampled latent       (D_z,)
+    q_mean: jax.Array  # encoder mean         (D_z,)
+    q_log_std: jax.Array  # encoder log std      (D_z,)
+    p_mean: jax.Array  # AR(1) prior mean     (D_z,)
+    p_log_std: jax.Array  # AR(1) prior log std  (D_z,)
+    action_mean: jax.Array  # decoder mean         (A,)
+    action_log_std: jax.Array  # decoder log std      (A,)
 
 
 class NPMPModule(eqx.Module):
@@ -112,7 +112,9 @@ class NPMPModule(eqx.Module):
         single contiguous motion trajectory.
         """
         z_prev_used = jnp.where(
-            episode_start, jnp.zeros_like(z_prev), z_prev,
+            episode_start,
+            jnp.zeros_like(z_prev),
+            z_prev,
         )
 
         # Prior parameters (no learnable params).
@@ -145,8 +147,8 @@ class NPMPModule(eqx.Module):
 
     def encode_decode_trajectory(
         self,
-        s_seq: jax.Array,           # (T, D_s)
-        x_seq: jax.Array,           # (T, D_x)
+        s_seq: jax.Array,  # (T, D_s)
+        x_seq: jax.Array,  # (T, D_x)
         episode_starts: jax.Array,  # (T,)
         key: jax.Array,
     ) -> NPMPStepOutput:
@@ -166,7 +168,9 @@ class NPMPModule(eqx.Module):
             return out.z_t, out
 
         _, outputs = jax.lax.scan(
-            scan_fn, z_init, (s_seq, x_seq, episode_starts, keys),
+            scan_fn,
+            z_init,
+            (s_seq, x_seq, episode_starts, keys),
         )
         return outputs
 
@@ -194,7 +198,9 @@ class NPMPModule(eqx.Module):
         :meth:`eval_step`.
         """
         z_prev_used = jnp.where(
-            episode_start, jnp.zeros_like(z_prev), z_prev,
+            episode_start,
+            jnp.zeros_like(z_prev),
+            z_prev,
         )
         q_mean, _ = self.encoder(z_prev_used, x_t)
         z_t = q_mean
@@ -216,7 +222,9 @@ class NPMPModule(eqx.Module):
         per-dim log-std at this step.
         """
         z_prev_used = jnp.where(
-            episode_start, jnp.zeros_like(z_prev), z_prev,
+            episode_start,
+            jnp.zeros_like(z_prev),
+            z_prev,
         )
         q_mean, q_log_std = self.encoder(z_prev_used, x_t)
         z_t = q_mean
@@ -225,8 +233,8 @@ class NPMPModule(eqx.Module):
 
     def act(
         self,
-        s_seq: jax.Array,           # (T, D_s)
-        x_seq: jax.Array,           # (T, D_x)
+        s_seq: jax.Array,  # (T, D_s)
+        x_seq: jax.Array,  # (T, D_x)
         episode_starts: jax.Array,  # (T,)
     ) -> jax.Array:
         """Deterministic per-step action mean along a trajectory.
@@ -247,6 +255,8 @@ class NPMPModule(eqx.Module):
             return z_t, action_mean
 
         _, actions = jax.lax.scan(
-            scan_fn, z_init, (s_seq, x_seq, episode_starts),
+            scan_fn,
+            z_init,
+            (s_seq, x_seq, episode_starts),
         )
         return actions

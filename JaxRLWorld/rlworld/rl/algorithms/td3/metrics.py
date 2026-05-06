@@ -2,14 +2,15 @@ from dataclasses import dataclass, field
 
 from rlworld.rl.algorithms.metrics.base import (
     BaseMetrics,
-    MetricType,
     ConsoleMetric,
+    MetricType,
 )
 
 
 @dataclass
 class TD3CriticMetrics:
     """TD3 twin critic metrics."""
+
     loss: float = 0.0
     critic1_loss: float = 0.0
     critic2_loss: float = 0.0
@@ -36,6 +37,7 @@ class TD3CriticMetrics:
 @dataclass
 class TD3ActorMetrics:
     """TD3 actor metrics."""
+
     loss: float = 0.0
     action_mean: float = 0.0
     action_std: float = 0.0
@@ -51,6 +53,7 @@ class TD3ActorMetrics:
 @dataclass
 class TD3BatchMetrics:
     """TD3 batch statistics."""
+
     reward_mean: float = 0.0
     reward_std: float = 0.0
     reward_min: float = 0.0
@@ -74,6 +77,7 @@ class TD3BatchMetrics:
 @dataclass
 class TD3Metrics(BaseMetrics):
     """Complete TD3 training metrics."""
+
     critic: TD3CriticMetrics = field(default_factory=TD3CriticMetrics)
     actor: TD3ActorMetrics = field(default_factory=TD3ActorMetrics)
     batch: TD3BatchMetrics = field(default_factory=TD3BatchMetrics)

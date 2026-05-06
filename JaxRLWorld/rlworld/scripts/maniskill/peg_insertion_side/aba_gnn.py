@@ -1,31 +1,27 @@
 import os
 
-os.environ['__NV_PRIME_RENDER_OFFLOAD'] = '1'
-os.environ['__GLX_VENDOR_LIBRARY_NAME'] = 'nvidia'
+os.environ["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+os.environ["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
 
-custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets'))
+custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
 import genesis.utils.terrain
 
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs import GenesisConfigsForRun
-from rlworld.rl.runners import OnPolicyRunner
 from rlworld.rl.configs.presets.maniskill.peg_insertion_side.aba import get_config
+from rlworld.rl.runners import OnPolicyRunner
 
 medium = {
     "encoder_type": "ABAEncoder",
-
     "hidden_dim": 300,
     "embed_dim": 512,
-
     "aba_link_channels": 12,
     "aba_spatial_dim": 6,
     "use_auxiliary_loss": True,
     "aba_orth_loss_weight": 1.0,
     "aba_orth_loss_decay": 1.0,
-
-
     "decoder_hidden_dim": 128,
     "interleave_mask": True,
     "use_adjacency_mask": True,
@@ -48,7 +44,7 @@ def main():
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

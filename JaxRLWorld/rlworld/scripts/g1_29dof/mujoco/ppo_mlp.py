@@ -1,5 +1,5 @@
-from rlworld.rl.runners import BaseRunner
 from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
+from rlworld.rl.runners import BaseRunner
 
 
 def main():

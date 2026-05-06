@@ -6,6 +6,7 @@ Usage:
 
 Compare the two outputs line-by-line to spot which MuJoCo option differs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -13,17 +14,32 @@ import argparse
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from rlworld.rl.runners import BaseRunner
 
-
 OPT_ATTRS = (
-    "timestep", "gravity", "integrator", "solver",
-    "iterations", "ls_iterations", "tolerance", "ls_tolerance",
-    "impratio", "cone", "jacobian",
-    "wind", "density", "viscosity",
-    "noslip_iterations", "noslip_tolerance",
-    "ccd_iterations", "ccd_tolerance",
-    "sdf_iterations", "sdf_initpoints",
-    "o_margin", "o_solref", "o_solimp",
-    "apirate", "magnetic",
+    "timestep",
+    "gravity",
+    "integrator",
+    "solver",
+    "iterations",
+    "ls_iterations",
+    "tolerance",
+    "ls_tolerance",
+    "impratio",
+    "cone",
+    "jacobian",
+    "wind",
+    "density",
+    "viscosity",
+    "noslip_iterations",
+    "noslip_tolerance",
+    "ccd_iterations",
+    "ccd_tolerance",
+    "sdf_iterations",
+    "sdf_initpoints",
+    "o_margin",
+    "o_solref",
+    "o_solimp",
+    "apirate",
+    "magnetic",
 )
 
 
@@ -73,12 +89,13 @@ def main():
     # Enum name lookups for integrator/solver/cone/jacobian (they print as ints)
     try:
         import mujoco
+
         print("\n=== Enum interpretation ===")
         enums = {
             "integrator": mujoco.mjtIntegrator,
-            "solver":     mujoco.mjtSolver,
-            "cone":       mujoco.mjtCone,
-            "jacobian":   mujoco.mjtJacobian,
+            "solver": mujoco.mjtSolver,
+            "cone": mujoco.mjtCone,
+            "jacobian": mujoco.mjtJacobian,
         }
         for attr, enum_cls in enums.items():
             try:

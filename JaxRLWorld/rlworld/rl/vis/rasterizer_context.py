@@ -2,12 +2,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import torch
-
 from genesis.vis.rasterizer_context import RasterizerContext
+
 from .overlays import (
     Base3DOverlay,
-    CommandArrowOverlay,
     CommandArrowConfig,
+    CommandArrowOverlay,
 )
 
 if TYPE_CHECKING:
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 @dataclass
 class OverlaySettings:
     """Settings for visualization overlays."""
+
     enable_command_arrow: bool = True
     command_arrow_config: CommandArrowConfig | None = None
 
@@ -53,7 +54,7 @@ class RLWorldRasterizerContext(RasterizerContext):
         self._visualization_state: dict[str, Any] = {}
 
         # Set by inject_into_scene()
-        self._env: "GenesisEnv | None" = None
+        self._env: GenesisEnv | None = None
 
     def set_env(self, env: "GenesisEnv") -> None:
         """Set environment reference for data access."""
@@ -66,10 +67,7 @@ class RLWorldRasterizerContext(RasterizerContext):
         # Command arrow overlay
         if settings.enable_command_arrow:
             config = settings.command_arrow_config or CommandArrowConfig()
-            self._overlays_3d["command_arrow"] = CommandArrowOverlay(
-                context=self,
-                config=config
-            )
+            self._overlays_3d["command_arrow"] = CommandArrowOverlay(context=self, config=config)
 
     def update(self, force_render: bool = False):
         """Update context and render 3D overlays."""
@@ -112,7 +110,8 @@ class RLWorldRasterizerContext(RasterizerContext):
 
         # Actual base velocity (body frame) for tracking visualization
         if robot is not None:
-            from genesis.utils.geom import transform_by_quat, inv_quat
+            from genesis.utils.geom import inv_quat, transform_by_quat
+
             world_vel = robot.get_vel()
             body_vel = transform_by_quat(world_vel, inv_quat(robot.get_quat()))
             state["actual_lin_vel"] = body_vel
@@ -144,6 +143,7 @@ class RLWorldRasterizerContext(RasterizerContext):
 
         try:
             from rlworld.rl.utils import entity_utils as eu
+
             links_idx, _ = eu.find_links(robot, feet_links, global_ids=False, preserve_order=True)
             feet_pos = robot.get_links_pos(links_idx_local=links_idx)
             return feet_pos[..., 2]
@@ -175,9 +175,7 @@ class RLWorldRasterizerContext(RasterizerContext):
 
 
 def inject_into_scene(
-    scene,
-    env: "GenesisEnv",
-    overlay_settings: OverlaySettings | None = None
+    scene, env: "GenesisEnv", overlay_settings: OverlaySettings | None = None
 ) -> RLWorldRasterizerContext:
     """
     Inject RLWorldRasterizerContext into an existing Genesis Scene.
@@ -196,10 +194,7 @@ def inject_into_scene(
     old_context = visualizer._context
 
     # Create new context with same options
-    new_context = RLWorldRasterizerContext(
-        scene.vis_options,
-        overlay_settings=overlay_settings
-    )
+    new_context = RLWorldRasterizerContext(scene.vis_options, overlay_settings=overlay_settings)
 
     # Copy essential state from old context
     new_context._scene = old_context._scene

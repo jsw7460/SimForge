@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 @dataclass
 class CommandManagerConfig:
     """Configuration for CommandManager."""
+
     terms: dict[str, CommandTermCfg] = field(default_factory=dict)
 
 
@@ -32,7 +33,7 @@ class CommandManager(BaseManager):
         command_manager.get_commands_tensor()      # → all terms concatenated
     """
 
-    def __init__(self, env: "World", config: CommandManagerConfig):
+    def __init__(self, env: World, config: CommandManagerConfig):
         super().__init__(env)
         self.config = config
 
@@ -71,9 +72,7 @@ class CommandManager(BaseManager):
         """
         if not self._terms:
             return torch.zeros(self.env.num_envs, 0, device=self.device)
-        return torch.cat(
-            [term.command for term in self._terms.values()], dim=1
-        )
+        return torch.cat([term.command for term in self._terms.values()], dim=1)
 
     @property
     def num_commands(self) -> int:
@@ -84,9 +83,7 @@ class CommandManager(BaseManager):
         for term in self._terms.values():
             term.compute(dt)
 
-    def set_commands(
-        self, env_ids: torch.Tensor, **kwargs: torch.Tensor
-    ) -> None:
+    def set_commands(self, env_ids: torch.Tensor, **kwargs: torch.Tensor) -> None:
         """Override commands by term name for the given environments.
 
         Disables auto-resampling for the injected envs until
@@ -106,19 +103,13 @@ class CommandManager(BaseManager):
         for name, values in kwargs.items():
             self._terms[name].set_command(env_ids, values)
 
-    def release_commands(
-        self, env_ids: torch.Tensor, *term_names: str
-    ) -> None:
+    def release_commands(self, env_ids: torch.Tensor, *term_names: str) -> None:
         """Release external control and return to auto-resampling.
 
         If no ``term_names`` are given, releases ALL terms for the
         specified envs. Otherwise only the listed terms are released.
         """
-        targets = (
-            [self._terms[n] for n in term_names]
-            if term_names
-            else list(self._terms.values())
-        )
+        targets = [self._terms[n] for n in term_names] if term_names else list(self._terms.values())
         for term in targets:
             term.release_command(env_ids)
 
@@ -177,10 +168,7 @@ class CommandManager(BaseManager):
         for name, term in self._terms.items():
             dim = term.command.shape[1]
             cols = ", ".join(term.column_names) if term.column_names else "-"
-            resample = (
-                f"{term.cfg.resampling_time_range[0]}"
-                f"-{term.cfg.resampling_time_range[1]}s"
-            )
+            resample = f"{term.cfg.resampling_time_range[0]}-{term.cfg.resampling_time_range[1]}s"
             rows.append([name, str(dim), cols, resample])
 
         table = create_manager_table(

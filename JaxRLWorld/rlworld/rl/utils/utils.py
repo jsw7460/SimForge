@@ -1,7 +1,7 @@
 import functools
 import os
 import warnings
-from typing import Optional, Type, Callable, Any
+from typing import Any, Callable, Type
 
 import torch
 
@@ -13,6 +13,7 @@ def gs_rand_float(lower, upper, shape, device):
 def set_seed(seed: int):
     """Set random seeds for reproducibility"""
     import random
+
     import numpy as np
     import torch
 
@@ -39,10 +40,11 @@ def setup_log_dir(output_dir: str | None = None) -> tuple[str, str]:
     """
     from datetime import datetime
     from pathlib import Path
+
     import pytz
 
     # Get current time in Chicago timezone
-    kr_tz = pytz.timezone('America/Chicago')
+    kr_tz = pytz.timezone("America/Chicago")
     now = datetime.now(kr_tz)
 
     # Create directory path
@@ -69,9 +71,9 @@ def setup_log_dir(output_dir: str | None = None) -> tuple[str, str]:
 def deprecated(
     reason: str = "",
     version: str = "",
-    remove_version: Optional[str] = None,
-    alternative: Optional[str] = None,
-    category: Type[Warning] = DeprecationWarning
+    remove_version: str | None = None,
+    alternative: str | None = None,
+    category: Type[Warning] = DeprecationWarning,
 ) -> Callable:
     """
     A flexible decorator to mark functions, methods, or classes as deprecated.
@@ -107,11 +109,7 @@ def deprecated(
 
             @functools.wraps(original_init)
             def wrapped_init(self, *args, **kwargs):
-                warnings.warn(
-                    f"{obj.__name__}: {message}",
-                    category=category,
-                    stacklevel=2
-                )
+                warnings.warn(f"{obj.__name__}: {message}", category=category, stacklevel=2)
                 original_init(self, *args, **kwargs)
 
             obj.__init__ = wrapped_init
@@ -121,11 +119,7 @@ def deprecated(
             # If decorating a function or method
             @functools.wraps(obj)
             def wrapper(*args, **kwargs):
-                warnings.warn(
-                    f"{obj.__name__}: {message}",
-                    category=category,
-                    stacklevel=2
-                )
+                warnings.warn(f"{obj.__name__}: {message}", category=category, stacklevel=2)
                 return obj(*args, **kwargs)
 
             return wrapper

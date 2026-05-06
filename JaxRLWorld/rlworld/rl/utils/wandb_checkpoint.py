@@ -43,9 +43,7 @@ def get_wandb_checkpoint(
         matches = [c for c in checkpoints if c["iteration"] == iteration]
         if not matches:
             available = [c["iteration"] for c in checkpoints]
-            raise ValueError(
-                f"Iteration {iteration} not found. Available: {available}"
-            )
+            raise ValueError(f"Iteration {iteration} not found. Available: {available}")
         selected = matches[0]
     else:
         selected = max(checkpoints, key=lambda c: c["iteration"])
@@ -63,13 +61,13 @@ def get_wandb_checkpoint(
 
     # Check cache with digest comparison
     if os.path.isdir(download_root) and os.path.isfile(digest_file):
-        with open(digest_file, "r") as f:
+        with open(digest_file) as f:
             cached_digest = f.read().strip()
         if cached_digest == remote_digest:
             print(f"Using cached checkpoint: {download_root}")
             return download_root, True
         else:
-            print(f"Cache stale (digest changed), re-downloading...")
+            print("Cache stale (digest changed), re-downloading...")
 
     # Download (or re-download if stale)
     artifact.download(root=download_root)
@@ -107,13 +105,15 @@ def list_wandb_checkpoints(wandb_run_path: str) -> list[dict]:
         else:
             continue
 
-        results.append({
-            "name": artifact.name.split(":")[0],
-            "full_name": artifact.qualified_name,
-            "iteration": iteration,
-            "version": artifact.version,
-            "created_at": artifact.created_at,
-        })
+        results.append(
+            {
+                "name": artifact.name.split(":")[0],
+                "full_name": artifact.qualified_name,
+                "iteration": iteration,
+                "version": artifact.version,
+                "created_at": artifact.created_at,
+            }
+        )
 
     results.sort(key=lambda c: c["iteration"])
     return results

@@ -12,7 +12,7 @@ import numpy as np
 import trimesh
 import trimesh.visual
 
-from ..bridge import SimulatorBridge, SimulatorGeometry, BodyMeshGroup
+from ..bridge import BodyMeshGroup, SimulatorGeometry
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.genesis.scene import SceneManager
@@ -74,9 +74,7 @@ class GenesisBridge:
                 self._link_map.append((entity, link, body_id))
                 # Track robot base.
                 name = getattr(link, "name", "")
-                if self._tracked_body_id is None and (
-                    "base" in name.lower() or "pelvis" in name.lower()
-                ):
+                if self._tracked_body_id is None and ("base" in name.lower() or "pelvis" in name.lower()):
                     self._tracked_body_id = body_id
                 body_id += 1
 
@@ -111,14 +109,16 @@ class GenesisBridge:
             if meshes:
                 is_fixed = getattr(link, "is_fixed", False)
                 link_name = getattr(link, "name", f"link_{body_id}")
-                mesh_groups.append(BodyMeshGroup(
-                    body_id=body_id,
-                    body_name=link_name,
-                    is_fixed=is_fixed,
-                    meshes=meshes,
-                    local_positions=local_positions,
-                    local_quaternions=local_quaternions,
-                ))
+                mesh_groups.append(
+                    BodyMeshGroup(
+                        body_id=body_id,
+                        body_name=link_name,
+                        is_fixed=is_fixed,
+                        meshes=meshes,
+                        local_positions=local_positions,
+                        local_quaternions=local_quaternions,
+                    )
+                )
 
         return SimulatorGeometry(
             mesh_groups=mesh_groups,
@@ -168,6 +168,7 @@ class GenesisBridge:
         quat_wxyz = robot.get_quat()[env_idx].cpu().numpy()  # (4,) wxyz
         w, x, y, z = quat_wxyz
         from scipy.spatial.transform import Rotation
+
         body_vel = Rotation.from_quat([x, y, z, w]).inv().apply(world_vel)
         return body_vel[:2].astype(np.float32)
 

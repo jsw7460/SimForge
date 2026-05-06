@@ -30,7 +30,7 @@ class NewtonActionManager(ActionManagerBase):
     newton_q_indices is used by NewtonRobotData for joint_pos.
     """
 
-    def __init__(self, env: "World", config: NewtonActionManagerConfig):
+    def __init__(self, env: World, config: NewtonActionManagerConfig):
         super().__init__(env, config)
 
     def _apply_position(self, targets: torch.Tensor) -> None:

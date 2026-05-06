@@ -1,6 +1,6 @@
 from .curriculum_term_config import (
-    CurriculumTermConfig,
     CurriculumManagerConfig,
+    CurriculumTermConfig,
 )
 
 __all__ = ["CurriculumTermConfig", "CurriculumManagerConfig"]

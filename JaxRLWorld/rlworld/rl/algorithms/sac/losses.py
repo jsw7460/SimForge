@@ -1,8 +1,8 @@
 from typing import Any, Dict
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 from rlworld.rl.modules.policies.sac_ac import SACActorCritic
 from rlworld.rl.storages.replay_buffer import ReplayBatch
@@ -37,9 +37,7 @@ def compute_critic_loss(
         Tuple of (total_critic_loss, info_dict)
     """
     # Sample next actions from current policy
-    next_actions, next_log_prob, _ = model.act_with_log_prob(
-        batch.next_actor_observations, key=key
-    )
+    next_actions, next_log_prob, _ = model.act_with_log_prob(batch.next_actor_observations, key=key)
 
     # Compute target Q-values using target critics
     target_critic1 = eqx.combine(target_critic1_params, critic1_static)

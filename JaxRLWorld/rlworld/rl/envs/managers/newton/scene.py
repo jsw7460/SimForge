@@ -3,35 +3,37 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Dict
+from typing import TYPE_CHECKING, Any, Dict, Literal
 
+import newton
 import numpy as np
 import torch
 import warp as wp
-
-import newton
 from newton import ShapeFlags
 from newton.selection import ArticulationView
 from newton.sensors import SensorContact
+
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
-from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
-from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.configs.newton_config_classes import SolverMuJoCoCfg
 from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
 )
 from rlworld.rl.configs.scene.unified_entity_config import (
-    EntityCfg, NewtonEntityCfg, GroundPlaneCfg,
+    EntityCfg,
+    GroundPlaneCfg,
+    NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors.newton_sensor_config import (
-    NewtonSensorConfig,
-    NewtonIMUSensorConfig,
     NewtonContactSensorConfig,
     NewtonFrameTransformSensorConfig,
+    NewtonIMUSensorConfig,
+    NewtonSensorConfig,
 )
 from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
+from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
+from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
@@ -66,13 +68,7 @@ def apply_joint_params_by_pattern(
     with the motor spec that training actually assumes (e.g. menagerie
     T1's 15/20 Nm ankle vs booster_t1's 50 Nm).
     """
-    if (
-        ke_map is None
-        and kd_map is None
-        and armature_map is None
-        and effort_limit_map is None
-        and friction_map is None
-    ):
+    if ke_map is None and kd_map is None and armature_map is None and effort_limit_map is None and friction_map is None:
         return
 
     ke_map = ke_map or {}
@@ -131,12 +127,13 @@ def apply_joint_params_by_pattern(
                     builder.joint_friction[dof_start + d] = value
                 break
 
+
 def _state_assign_full(
     dst: newton.State,
     src: newton.State,
     namespaces: tuple[str, ...] = ("mujoco",),
 ) -> None:
-    """Assign ``src`` into ``dst`` including attribute-namespace arrays.
+    r"""Assign ``src`` into ``dst`` including attribute-namespace arrays.
 
     Newton's :meth:`State.assign` iterates ``self.__dict__`` and copies
     top-level ``wp.array`` attributes, but descendants inside
@@ -216,6 +213,7 @@ class NewtonSceneManagerConfig:
             add_ground=True,
         )
     """
+
     num_worlds: int
 
     # Entity and sensor configurations
@@ -258,7 +256,7 @@ class NewtonSceneManager(BaseManager):
         scene_manager.step()
     """
 
-    def __init__(self, env: "World", config: NewtonSceneManagerConfig):
+    def __init__(self, env: World, config: NewtonSceneManagerConfig):
         super().__init__(env)
         self.config = config
 
@@ -311,9 +309,7 @@ class NewtonSceneManager(BaseManager):
         """Current state (state_0)."""
         return self.state_0
 
-    def find_body_names(
-        self, body_names: list[str], entity_name: str = "robot"
-    ) -> list[str]:
+    def find_body_names(self, body_names: list[str], entity_name: str = "robot") -> list[str]:
         """Resolve regex body-name patterns to concrete body names.
 
         Cross-sim signature matches Genesis and mjlab. Newton currently
@@ -325,13 +321,8 @@ class NewtonSceneManager(BaseManager):
         # shared across worlds. Avoids per-Newton-loader XPath quirks.
         view = self.articulation_views.get(entity_name, self.articulation_views.get("robot"))
         if view is None:
-            raise ValueError(
-                f"No ArticulationView for entity {entity_name!r}; "
-                "did build_scene() run?"
-            )
-        _, names = string_utils.resolve_matching_names(
-            body_names, list(view.link_names), preserve_order=True
-        )
+            raise ValueError(f"No ArticulationView for entity {entity_name!r}; did build_scene() run?")
+        _, names = string_utils.resolve_matching_names(body_names, list(view.link_names), preserve_order=True)
         return names
 
     def _prefix_names(
@@ -384,9 +375,7 @@ class NewtonSceneManager(BaseManager):
         elif cfg.urdf_path:
             self._load_urdf_entity(builder, cfg)
         else:
-            raise ValueError(
-                f"Entity '{entity_name}' has no mjcf_path, urdf_path, or usd_path"
-            )
+            raise ValueError(f"Entity '{entity_name}' has no mjcf_path, urdf_path, or usd_path")
 
         self._entity_builders[entity_name] = builder
         self.entities[entity_name] = {
@@ -452,7 +441,9 @@ class NewtonSceneManager(BaseManager):
         self._apply_entity_post_load(builder, cfg)
 
     def _apply_entity_post_load(
-        self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg,
+        self,
+        builder: newton.ModelBuilder,
+        cfg: EntityCfg | NewtonEntityCfg,
     ) -> None:
         """Shared post-load work for URDF and MJCF entities.
 
@@ -799,12 +790,8 @@ class NewtonSceneManager(BaseManager):
         assert (ke >= 0).all(), f"Negative actuator gains: {ke}"
 
         if affine_mask.any():
-            assert (kd[affine_mask] >= 0).all(), (
-                f"Negative velocity gains on affine actuators: {kd[affine_mask]}"
-            )
-            assert np.allclose(ke[affine_mask], ke_bias[affine_mask]), (
-                "Position gain/bias mismatch on affine actuators"
-            )
+            assert (kd[affine_mask] >= 0).all(), f"Negative velocity gains on affine actuators: {kd[affine_mask]}"
+            assert np.allclose(ke[affine_mask], ke_bias[affine_mask]), "Position gain/bias mismatch on affine actuators"
 
         num_affine = int(affine_mask.sum())
         num_motor = int(motor_mask.sum())
@@ -815,24 +802,12 @@ class NewtonSceneManager(BaseManager):
         )
         if num_affine > 0:
             num_zero_affine = int((ke[affine_mask] == 0).sum())
-            print(
-                f"  affine ke range: [{ke[affine_mask].min():.2f}, "
-                f"{ke[affine_mask].max():.2f}]"
-            )
-            print(
-                f"  affine kd range: [{kd[affine_mask].min():.2f}, "
-                f"{kd[affine_mask].max():.2f}]"
-            )
+            print(f"  affine ke range: [{ke[affine_mask].min():.2f}, {ke[affine_mask].max():.2f}]")
+            print(f"  affine kd range: [{kd[affine_mask].min():.2f}, {kd[affine_mask].max():.2f}]")
             if num_zero_affine > 0:
-                print(
-                    f"  ({num_zero_affine} affine joints with ke=0: "
-                    f"explicit actuator mode)"
-                )
+                print(f"  ({num_zero_affine} affine joints with ke=0: explicit actuator mode)")
         if num_motor > 0:
-            print(
-                f"  motor gear range: [{ke[motor_mask].min():.2f}, "
-                f"{ke[motor_mask].max():.2f}]"
-            )
+            print(f"  motor gear range: [{ke[motor_mask].min():.2f}, {ke[motor_mask].max():.2f}]")
 
     def _build_robot_view(self) -> None:
         """Create an ArticulationView for each non-ground-plane entity.
@@ -889,6 +864,7 @@ class NewtonSceneManager(BaseManager):
 
     def _set_kinematic_trees(self) -> None:
         """Build kinematic trees for entities with URDF or MJCF source."""
+
         def _resolve(name: str):
             cfg = self.entities[name]["config"]
             mjcf_path = getattr(cfg, "mjcf_path", None)
@@ -937,10 +913,7 @@ class NewtonSceneManager(BaseManager):
             raise ValueError(f"Sensor '{config.sensor_name}' already exists")
 
         if isinstance(config, NewtonIMUSensorConfig):
-            all_site_indices = [
-                idx for idx, key in enumerate(self.model.shape_label)
-                if key in config.site_names
-            ]
+            all_site_indices = [idx for idx, key in enumerate(self.model.shape_label) if key in config.site_names]
 
             if not all_site_indices:
                 raise ValueError(f"No sites found matching {config.site_names}")
@@ -963,13 +936,9 @@ class NewtonSceneManager(BaseManager):
             # ``r.foot_names = ["left_ankle_roll_link"]``) working on both
             # loaders, while pre-scoped or glob / regex patterns pass
             # through unchanged.
-            sensing_bodies = self._prefix_names(
-                entity_name, as_leaf_globs(config.sensing_obj_bodies)
-            )
+            sensing_bodies = self._prefix_names(entity_name, as_leaf_globs(config.sensing_obj_bodies))
             sensing_shapes = self._prefix_names(entity_name, config.sensing_obj_shapes)
-            counterpart_bodies = self._prefix_names(
-                entity_name, as_leaf_globs(config.counterpart_bodies)
-            )
+            counterpart_bodies = self._prefix_names(entity_name, as_leaf_globs(config.counterpart_bodies))
 
             # Apply exclude filter. Matching happens against world-0
             # slice of ``model.body_label`` (full labels — both the
@@ -980,6 +949,7 @@ class NewtonSceneManager(BaseManager):
             # against ``model.body_label``.
             if config.exclude_bodies and sensing_bodies is not None:
                 from fnmatch import fnmatch
+
                 all_labels = self.model.body_label
                 world_count = self.model.world_count
                 bodies_per_env = len(all_labels) // world_count
@@ -987,11 +957,11 @@ class NewtonSceneManager(BaseManager):
 
                 patterns = [sensing_bodies] if isinstance(sensing_bodies, str) else sensing_bodies
                 matched_indices = [
-                    idx for idx, label in enumerate(first_env_labels)
-                    if any(fnmatch(label, p) for p in patterns)
+                    idx for idx, label in enumerate(first_env_labels) if any(fnmatch(label, p) for p in patterns)
                 ]
                 matched_indices = [
-                    idx for idx in matched_indices
+                    idx
+                    for idx in matched_indices
                     if not any(fnmatch(first_env_labels[idx], exc) for exc in config.exclude_bodies)
                 ]
                 sensing_bodies = [first_env_labels[idx] for idx in matched_indices]
@@ -1007,10 +977,7 @@ class NewtonSceneManager(BaseManager):
             self.sensors[config.sensor_name] = sensor
 
         elif isinstance(config, NewtonFrameTransformSensorConfig):
-            site_indices = [
-                idx for idx, key in enumerate(self.model.shape_label)
-                if key in config.site_names
-            ]
+            site_indices = [idx for idx, key in enumerate(self.model.shape_label) if key in config.site_names]
 
             if site_indices:
                 sensor = config.create_sensor(self.model, site_indices)
@@ -1018,9 +985,7 @@ class NewtonSceneManager(BaseManager):
 
     def capture(self):
         num_worlds = self.model.world_count
-        base_zeros = torch.zeros(
-            (num_worlds, 6), device=self.device, dtype=torch.float32
-        )
+        base_zeros = torch.zeros((num_worlds, 6), device=self.device, dtype=torch.float32)
         dummy_actions = torch.zeros(
             (num_worlds, self.env.act_manager.num_actions), device=self.device, dtype=torch.float32
         )
@@ -1061,10 +1026,7 @@ class NewtonSceneManager(BaseManager):
         all_names = list(view.joint_names)
         # Raw Newton joint-label list over all worlds is still needed
         # to recover q / qd indices into the flat model arrays.
-        joint_names_raw = (
-            getattr(self.model, "joint_label", None)
-            or getattr(self.model, "joint_key", None)
-        )
+        joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
         if not joint_names_raw:
             raise ValueError("Newton model has no joint labels")
         num_worlds = self.model.world_count
@@ -1085,12 +1047,8 @@ class NewtonSceneManager(BaseManager):
         joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
         joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
 
-        q_indices = torch.tensor(
-            [int(joint_q_start[j]) for j in original_indices], device=self.device
-        )
-        qd_indices = torch.tensor(
-            [int(joint_qd_start[j]) for j in original_indices], device=self.device
-        )
+        q_indices = torch.tensor([int(joint_q_start[j]) for j in original_indices], device=self.device)
+        qd_indices = torch.tensor([int(joint_qd_start[j]) for j in original_indices], device=self.device)
 
         # sim_indices = qd_indices (used for _apply_force / _apply_position)
         sim_indices = qd_indices
@@ -1144,9 +1102,7 @@ class NewtonSceneManager(BaseManager):
 
         for i in range(self.config.substeps):
             self.contacts = self.model.collide(
-                self.state_0,
-                contacts=self.contacts,
-                collision_pipeline=self.collision_pipeline
+                self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
             )
             self.state_0.clear_forces()
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
@@ -1165,16 +1121,14 @@ class NewtonSceneManager(BaseManager):
 
     def _update_sensors(self) -> None:
         """Update all sensors after physics step."""
-        has_contact_sensor = any(
-            isinstance(s, SensorContact) for s in self.sensors.values()
-        )
+        has_contact_sensor = any(isinstance(s, SensorContact) for s in self.sensors.values())
         if has_contact_sensor:
             self.solver.update_contacts(self.sensor_contacts, self.state_0)
 
         for sensor_name, sensor in self.sensors.items():
             if isinstance(sensor, SensorContact):
                 sensor.update(self.state_0, self.sensor_contacts)  # Contact sensor takes Contacts
-            elif hasattr(sensor, 'update'):
+            elif hasattr(sensor, "update"):
                 sensor.update(self.state_0)  # IMU takes State
 
     def reset(self, env_ids=None) -> None:
@@ -1194,9 +1148,7 @@ class NewtonSceneManager(BaseManager):
         view = self.robot_view
 
         # Build warp mask inline (avoid torch round-trip).
-        mask_torch = torch.zeros(
-            self.model.world_count, dtype=torch.bool, device=self.env.device
-        )
+        mask_torch = torch.zeros(self.model.world_count, dtype=torch.bool, device=self.env.device)
         mask_torch[env_ids] = True
         mask = wp.from_torch(mask_torch)
 

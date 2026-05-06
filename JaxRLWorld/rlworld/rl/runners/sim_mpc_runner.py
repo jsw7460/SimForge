@@ -6,16 +6,14 @@ but with num_envs = num_samples, then runs MPPI planning each step
 and trains policy + Q-ensemble from collected experience.
 """
 
-import os
-
 import time
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
 
 from rlworld.rl.algorithms.sim_mpc import SimMPC
-from rlworld.rl.configs import ConfigsForRun, configs_from_dict
+from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.envs import World
 from rlworld.rl.runners.base_runner import BaseRunner
 from rlworld.rl.runners.iteration_data import IterationData
@@ -122,9 +120,7 @@ class SimMPCRunner(BaseRunner):
 
             # Warmup: random actions
             if self.total_timesteps < alg_cfg.learning_starts:
-                actions = torch.rand(
-                    self.env.num_envs, self.action_dim, device=self.device
-                )
+                actions = torch.rand(self.env.num_envs, self.action_dim, device=self.device)
                 action_low = self.env.action_low
                 action_high = self.env.action_high
                 actions = actions * (action_high - action_low) + action_low
@@ -132,7 +128,8 @@ class SimMPCRunner(BaseRunner):
                 # MPPI + policy mix
                 t0_mask = self.env.reset_buf
                 actions = self.alg.act(
-                    self.env, t0_mask,
+                    self.env,
+                    t0_mask,
                     eval_mode=False,
                     mppi_ratio=alg_cfg.mppi_ratio,
                     obs=actor_obs,
@@ -185,13 +182,12 @@ class SimMPCRunner(BaseRunner):
 
         min_buffer_size = max(alg_cfg.learning_starts, alg_cfg.batch_size)
 
-        if (self.alg.replay_buffer is not None
-                and self.alg.replay_buffer.size >= min_buffer_size):
+        if self.alg.replay_buffer is not None and self.alg.replay_buffer.size >= min_buffer_size:
             training_start = time.time()
 
-            if not getattr(self, '_pretrained', False):
+            if not getattr(self, "_pretrained", False):
                 num_updates = 1
-                print(f'Pretraining policy on seed data ({num_updates} updates)...')
+                print(f"Pretraining policy on seed data ({num_updates} updates)...")
                 self._pretrained = True
             else:
                 num_updates = max(1, alg_cfg.num_gradient_steps)
@@ -204,14 +200,10 @@ class SimMPCRunner(BaseRunner):
                 self.alg.update(batch_size=alg_cfg.batch_size)
 
             learning_time = time.time() - training_start
-            fps = (self.num_steps_per_env * self.env.num_envs) / max(
-                collection_time + learning_time, 1e-6
-            )
+            fps = (self.num_steps_per_env * self.env.num_envs) / max(collection_time + learning_time, 1e-6)
             buffer_size = self.alg.replay_buffer.size
         else:
-            fps = (self.num_steps_per_env * self.env.num_envs) / max(
-                collection_time, 1e-6
-            )
+            fps = (self.num_steps_per_env * self.env.num_envs) / max(collection_time, 1e-6)
 
         return IterationData(
             collection_time=collection_time,
@@ -247,7 +239,9 @@ class SimMPCRunner(BaseRunner):
             self.it = it
 
             data = self._run_training_iteration(
-                obs=obs, iteration=it, ep_infos=ep_infos,
+                obs=obs,
+                iteration=it,
+                ep_infos=ep_infos,
             )
 
             obs = data.last_obs
@@ -303,9 +297,7 @@ class SimMPCRunner(BaseRunner):
                     completed_returns.append(episode_returns[i].item())
                     completed_lengths.append(episode_lengths[i].item())
                     for rname in reward_type_sums:
-                        completed_reward_breakdowns[rname].append(
-                            reward_type_sums[rname][i].item()
-                        )
+                        completed_reward_breakdowns[rname].append(reward_type_sums[rname][i].item())
 
             episode_returns[dones] = 0
             episode_lengths[dones] = 0
@@ -345,10 +337,12 @@ class SimMPCRunner(BaseRunner):
     ) -> "SimMPCRunner":
         """Load runner from checkpoint."""
         from rlworld.rl.utils.checkpoint import load_checkpoint_metadata
+
         metadata = load_checkpoint_metadata(checkpoint_path)
 
         if cfgs is None:
             from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
+
             cfgs = load_config_from_checkpoint(metadata)
         if env is None:
             env = cls._create_env_from_config(cfgs)
@@ -356,9 +350,7 @@ class SimMPCRunner(BaseRunner):
         runner = cls(env=env, cfgs=cfgs, use_wandb=use_wandb)
         runner.alg.load_train_state(checkpoint_path, metadata)
 
-        runner.current_learning_iteration = metadata.get(
-            "current_learning_iteration", metadata["iteration"]
-        )
+        runner.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
         runner.total_timesteps = metadata["total_timesteps"]
         runner.total_time = metadata.get("total_time", 0)
 

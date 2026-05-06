@@ -9,11 +9,10 @@ from __future__ import annotations
 from io import StringIO
 from typing import TYPE_CHECKING, Any
 
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich import box
-from rich.text import Text
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -51,9 +50,7 @@ def format_weight(weight: Any) -> str:
     Returns:
         Formatted string representation of the weight.
     """
-    from rlworld.rl.configs.rewards import (
-        WeightSchedule, LinearSchedule, ExponentialDecay, StepSchedule
-    )
+    from rlworld.rl.configs.rewards import ExponentialDecay, LinearSchedule, StepSchedule, WeightSchedule
 
     if isinstance(weight, (int, float)):
         if abs(weight) < 0.0001 and weight != 0:
@@ -79,10 +76,7 @@ def format_weight(weight: Any) -> str:
 
 
 def create_env_panel(
-    title: str,
-    rows: list[tuple[str, str]],
-    subtitle: str | None = None,
-    border_style: str = "blue"
+    title: str, rows: list[tuple[str, str]], subtitle: str | None = None, border_style: str = "blue"
 ) -> Panel:
     """Create an environment info panel with key-value pairs.
 
@@ -205,7 +199,7 @@ def panel_to_string(panel: Panel) -> str:
     return console.file.getvalue()
 
 
-def print_env_summary(env: "World") -> None:
+def print_env_summary(env: World) -> None:
     """Print complete environment summary with all managers.
 
     This is the main function to call when displaying environment info.
@@ -226,10 +220,10 @@ def print_env_summary(env: "World") -> None:
         ("Control dt", f"{env.control_dt:.4f}s"),
     ]
 
-    if hasattr(env, 'decimation'):
+    if hasattr(env, "decimation"):
         env_rows.append(("Decimation", str(env.decimation)))
 
-    if hasattr(env, 'task_name'):
+    if hasattr(env, "task_name"):
         env_rows.append(("Task", env.task_name))
 
     panel = create_env_panel(
@@ -254,7 +248,7 @@ def print_env_summary(env: "World") -> None:
     for attr_name, display_name in managers:
         if hasattr(env, attr_name):
             manager = getattr(env, attr_name)
-            if manager is not None and hasattr(manager, '__str__'):
+            if manager is not None and hasattr(manager, "__str__"):
                 manager_str = str(manager)
                 if manager_str.strip():  # Only print if non-empty
                     console.print(manager_str)

@@ -11,21 +11,20 @@ Implicit world model with:
 All networks use NormedLinear (LayerNorm + Mish activation).
 """
 
-from typing import Sequence, Optional
+from typing import Sequence
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 from rlworld.rl.algorithms.tdmpc2.math import (
     TwoHotConfig,
-    two_hot_inv,
-    log_std_transform,
     gaussian_logprob,
+    log_std_transform,
     squash,
+    two_hot_inv,
 )
 from rlworld.rl.modules.normalization import EmpiricalNormalization
-
 
 # ==================== Custom Layers ====================
 
@@ -35,6 +34,7 @@ class SimNorm(eqx.Module):
     Simplicial normalization.
     Reshapes input into groups of `dim` and applies softmax within each group.
     """
+
     dim: int = eqx.field(static=True)
 
     def __init__(self, dim: int = 8):
@@ -53,6 +53,7 @@ class NormedLinear(eqx.Module):
     TD-MPC2's core building block.
     Handles both [dim] and [batch, dim] inputs directly.
     """
+
     weight: jax.Array
     bias: jax.Array
     ln_weight: jax.Array
@@ -60,7 +61,7 @@ class NormedLinear(eqx.Module):
     in_features: int = eqx.field(static=True)
     out_features: int = eqx.field(static=True)
     dropout_rate: float = eqx.field(static=True)
-    custom_act: Optional[SimNorm]
+    custom_act: SimNorm | None
     use_custom_act: bool = eqx.field(static=True)
     ln_eps: float = eqx.field(static=True)
 
@@ -69,7 +70,7 @@ class NormedLinear(eqx.Module):
         in_features: int,
         out_features: int,
         dropout: float = 0.0,
-        act: Optional[SimNorm] = None,
+        act: SimNorm | None = None,
         *,
         key: jax.Array,
     ):
@@ -91,7 +92,7 @@ class NormedLinear(eqx.Module):
         self,
         x: jax.Array,
         *,
-        key: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
         inference: bool = False,
     ) -> jax.Array:
         # Linear
@@ -119,6 +120,7 @@ class NormedLinear(eqx.Module):
 
 class OutputLinear(eqx.Module):
     """Plain linear layer (no norm, no activation) for output heads."""
+
     weight: jax.Array
     bias: jax.Array
     in_features: int = eqx.field(static=True)
@@ -143,6 +145,7 @@ class TDMPC2MLP(eqx.Module):
     MLP with NormedLinear hidden layers and plain linear output.
     Mirrors the PyTorch `layers.mlp()` in TD-MPC2.
     """
+
     layers: tuple
     num_layers: int = eqx.field(static=True)
 
@@ -151,7 +154,7 @@ class TDMPC2MLP(eqx.Module):
         in_dim: int,
         hidden_dims: Sequence[int],
         out_dim: int,
-        act: Optional[SimNorm] = None,
+        act: SimNorm | None = None,
         dropout: float = 0.0,
         *,
         key: jax.Array,
@@ -179,7 +182,8 @@ class TDMPC2MLP(eqx.Module):
             layer_dropout = dropout if i == 0 else 0.0
             layers.append(
                 NormedLinear(
-                    dims[i], dims[i + 1],
+                    dims[i],
+                    dims[i + 1],
                     dropout=layer_dropout,
                     key=keys[i],
                 )
@@ -190,7 +194,8 @@ class TDMPC2MLP(eqx.Module):
             # NormedLinear with custom activation (e.g., SimNorm for encoder)
             layers.append(
                 NormedLinear(
-                    dims[-2], dims[-1],
+                    dims[-2],
+                    dims[-1],
                     act=act,
                     key=keys[-1],
                 )
@@ -206,7 +211,7 @@ class TDMPC2MLP(eqx.Module):
         self,
         x: jax.Array,
         *,
-        key: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
         inference: bool = False,
     ) -> jax.Array:
         """
@@ -234,6 +239,7 @@ class TDMPC2MLP(eqx.Module):
 
 class QFunction(eqx.Module):
     """Single Q-function network."""
+
     net: TDMPC2MLP
 
     def __init__(
@@ -254,9 +260,7 @@ class QFunction(eqx.Module):
             key=key,
         )
 
-    def __call__(
-        self, x: jax.Array, *, key: Optional[jax.Array] = None, inference: bool = False
-    ) -> jax.Array:
+    def __call__(self, x: jax.Array, *, key: jax.Array | None = None, inference: bool = False) -> jax.Array:
         """Forward pass. Handles both [dim] and [batch, dim]."""
         return self.net(x, key=key, inference=inference)
 
@@ -266,6 +270,7 @@ class QEnsemble(eqx.Module):
     Ensemble of Q-functions.
     Each Q-function processes batched inputs via internal vmap.
     """
+
     q_functions: tuple
     num_q: int = eqx.field(static=True)
 
@@ -280,17 +285,14 @@ class QEnsemble(eqx.Module):
         key: jax.Array,
     ):
         keys = jax.random.split(key, num_q)
-        self.q_functions = tuple(
-            QFunction(in_dim, hidden_dims, out_dim, dropout=dropout, key=k)
-            for k in keys
-        )
+        self.q_functions = tuple(QFunction(in_dim, hidden_dims, out_dim, dropout=dropout, key=k) for k in keys)
         self.num_q = num_q
 
     def __call__(
         self,
         x: jax.Array,
         *,
-        key: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
         inference: bool = False,
     ) -> jax.Array:
         """
@@ -338,7 +340,7 @@ class TDMPC2WorldModel(eqx.Module):
     reward_head: TDMPC2MLP
     q_ensemble: QEnsemble
     policy: TDMPC2MLP
-    termination_head: Optional[TDMPC2MLP]
+    termination_head: TDMPC2MLP | None
 
     # Configuration (static)
     latent_dim: int = eqx.field(static=True)
@@ -425,9 +427,7 @@ class TDMPC2WorldModel(eqx.Module):
             self.action_high_tuple = tuple([1.0] * action_dim)
         else:
             if action_low is None or action_high is None:
-                raise ValueError(
-                    "action_low and action_high must be provided when squash_action=False"
-                )
+                raise ValueError("action_low and action_high must be provided when squash_action=False")
             self.action_low_tuple = tuple(float(x) for x in action_low)
             self.action_high_tuple = tuple(float(x) for x in action_high)
 
@@ -583,7 +583,7 @@ class TDMPC2WorldModel(eqx.Module):
         z: jax.Array,
         a: jax.Array,
         *,
-        key: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
         inference: bool = False,
     ) -> jax.Array:
         """

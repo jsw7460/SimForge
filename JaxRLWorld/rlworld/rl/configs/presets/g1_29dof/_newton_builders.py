@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import warp as wp
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -38,7 +38,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -55,10 +54,8 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.newton import reward_terms as rf_newton
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
+from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab, reward_terms as rf_newton
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
 
 if TYPE_CHECKING:
     from .base import G1FlatConfig
@@ -78,11 +75,11 @@ def _initial_quat() -> Any:
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "G1FlatConfig") -> VisualizationConfig:
+def build_visualization(cfg: G1FlatConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
+def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         roll_pitch = TerminationTermConfig(
@@ -102,7 +99,7 @@ def build_env(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
     )
 
 
-def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConfig:
+def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
     r = cfg.robot
     quat = _initial_quat()
 
@@ -168,7 +165,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConfi
     )
 
 
-def build_observation(cfg: "G1FlatConfig") -> NewtonObservationConfig:
+def build_observation(cfg: G1FlatConfig) -> NewtonObservationConfig:
     feet_bodies = tuple(cfg.robot.foot_names)
 
     @dataclass
@@ -190,9 +187,7 @@ def build_observation(cfg: "G1FlatConfig") -> NewtonObservationConfig:
         dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
-        foot_height_obs = ObservationTermConfig(
-            func=foot_height, scale=1.0, params={"body_names": feet_bodies}
-        )
+        foot_height_obs = ObservationTermConfig(func=foot_height, scale=1.0, params={"body_names": feet_bodies})
         foot_air_time_obs = ObservationTermConfig(
             func=foot_air_time,
             scale=1.0,
@@ -221,7 +216,7 @@ def build_observation(cfg: "G1FlatConfig") -> NewtonObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "G1FlatConfig") -> NewtonActionConfig:
+def build_action(cfg: G1FlatConfig) -> NewtonActionConfig:
     r = cfg.robot
     return NewtonActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
@@ -231,7 +226,7 @@ def build_action(cfg: "G1FlatConfig") -> NewtonActionConfig:
     )
 
 
-def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
+def build_reward(cfg: G1FlatConfig) -> RewardConfig:
     r = cfg.robot
 
     @dataclass
@@ -368,7 +363,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "G1FlatConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """Newton-specific domain randomization terms."""
     r = cfg.robot
     return {

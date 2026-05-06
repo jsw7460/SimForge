@@ -3,18 +3,18 @@
 This module provides MujocoEnv, which wraps mjlab's Scene and Simulation
 while following rlworld's World interface and manager pattern.
 """
+
 from __future__ import annotations
 
 import torch
 
-from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
-from rlworld.rl.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
 from rlworld.rl.configs.common_config_classes import VisualizationConfig
 from rlworld.rl.configs.mujoco_config_classes import (
-    MujocoEnvConfig,
-    MujocoSceneConfig,
-    MujocoObservationConfig,
     MujocoActionConfig,
+    MujocoEnvConfig,
+    MujocoObservationConfig,
+    MujocoSceneConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
@@ -103,7 +103,7 @@ class MujocoEnv(World):
         return self.get_robot_data("robot")
 
     def get_robot_data(self, entity_name: str = "robot"):
-        if hasattr(self, '_robot_data_cache') and entity_name in self._robot_data_cache:
+        if hasattr(self, "_robot_data_cache") and entity_name in self._robot_data_cache:
             return self._robot_data_cache[entity_name]
         # Fallback before cache is built (e.g. during setup)
         return self.scene_manager.get_entity(entity_name).data
@@ -149,7 +149,7 @@ class MujocoEnv(World):
                 mjlab_scene_cfg=getattr(self.scene_cfg, "mjlab_scene_cfg", None),
                 mjlab_sim_cfg=getattr(self.scene_cfg, "mjlab_sim_cfg", None),
                 unified_entities=getattr(self.scene_cfg, "unified_entities", None),
-            )
+            ),
         )
         self.scene_manager.build_scene()
 
@@ -174,12 +174,13 @@ class MujocoEnv(World):
                 offset=self.act_cfg.offset,
                 settle_steps=self.act_cfg.settle_steps,
                 action_terms=self.act_cfg.action_terms,
-            )
+            ),
         )
 
         # Build MujocoRobotData using ArticulationIndexing
         from rlworld.rl.envs.mujoco.robot_data import MujocoRobotData
         from rlworld.rl.envs.mujoco.robot_state_writer import MujocoRobotStateWriter
+
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
         entity = self.scene_manager.robot
@@ -214,13 +215,12 @@ class MujocoEnv(World):
                 MujocoVisualizationManager,
                 MujocoVisualizationManagerConfig,
             )
+
             viz_config = MujocoVisualizationManagerConfig(
                 viewer_type="viser",
                 viser_port=self.visualization_cfg.viser_port,
             )
-            self.visualization_manager = MujocoVisualizationManager(
-                env=self, config=viz_config
-            )
+            self.visualization_manager = MujocoVisualizationManager(env=self, config=viz_config)
             self.visualization_manager.setup()
         else:
             self.visualization_manager = None

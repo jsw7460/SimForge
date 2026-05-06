@@ -1,9 +1,9 @@
 from .reward_term_config import (
-    RewardTermConfig,
-    WeightSchedule,
     ConstantWeight,
-    LinearSchedule,
     ExponentialDecay,
+    LinearSchedule,
+    RewardTermConfig,
     StepSchedule,
+    WeightSchedule,
     get_weight_value,
 )

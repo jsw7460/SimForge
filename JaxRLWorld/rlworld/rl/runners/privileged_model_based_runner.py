@@ -24,7 +24,7 @@ from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.envs import World
 from rlworld.rl.runners.model_based_runner import ModelBasedRunner
-from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
+from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 
 
 class PrivilegedModelBasedRunner(ModelBasedRunner):
@@ -129,12 +129,8 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
             # ABD-Net
             link_channels=getattr(alg_cfg, "link_channels", 8),
             spatial_dim=getattr(alg_cfg, "spatial_dim", 6),
-            learnable_contribution_weight=getattr(
-                alg_cfg, "learnable_contribution_weight", False
-            ),
-            use_positive_constraint=getattr(
-                alg_cfg, "use_positive_constraint", True
-            ),
+            learnable_contribution_weight=getattr(alg_cfg, "learnable_contribution_weight", False),
+            use_positive_constraint=getattr(alg_cfg, "use_positive_constraint", True),
             residual_scale_init=getattr(alg_cfg, "residual_scale_init", 0.1),
             ortho_coef=getattr(alg_cfg, "ortho_coef", 0.01),
             # Scaffolding
@@ -152,13 +148,15 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
         alg_cfg = self.cfgs.algorithm
         size_per_env = alg_cfg.get("buffer_size", 1_000_000) // self.env.num_envs
 
-        self.alg.init_storage({
-            "num_envs": self.env.num_envs,
-            "obs_dim": obs_dim["actor"],
-            "action_dim": self.env.num_actions,
-            "privileged_obs_dim": self.privileged_obs_dim,
-            "size_per_env": size_per_env,
-        })
+        self.alg.init_storage(
+            {
+                "num_envs": self.env.num_envs,
+                "obs_dim": obs_dim["actor"],
+                "action_dim": self.env.num_actions,
+                "privileged_obs_dim": self.privileged_obs_dim,
+                "size_per_env": size_per_env,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Override 4: Experience collection
@@ -193,10 +191,13 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
             if self.total_timesteps < self.cfgs.algorithm.learning_starts:
                 self.key, subkey = jax.random.split(self.key)
                 warmup_std = getattr(self.cfgs.algorithm, "warmup_std", 1.0)
-                actions = jax.random.normal(
-                    subkey,
-                    shape=(self.env.num_envs, self.env.num_actions),
-                ) * warmup_std
+                actions = (
+                    jax.random.normal(
+                        subkey,
+                        shape=(self.env.num_envs, self.env.num_actions),
+                    )
+                    * warmup_std
+                )
                 actions = jnp.clip(actions, -1.0, 1.0)
             else:
                 # Target policy on s- (MPPI or pi)
@@ -229,12 +230,8 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
                 mask = (terminated | truncated).cpu().numpy()
                 for i in range(self.env.num_envs):
                     if mask[i]:
-                        next_actor_for_buffer = next_actor_for_buffer.at[i].set(
-                            final_split["actor"][i]
-                        )
-                        next_priv_for_buffer = next_priv_for_buffer.at[i].set(
-                            final_split["privileged"][i]
-                        )
+                        next_actor_for_buffer = next_actor_for_buffer.at[i].set(final_split["actor"][i])
+                        next_priv_for_buffer = next_priv_for_buffer.at[i].set(final_split["privileged"][i])
 
             # Store with privileged obs
             self.alg.store_transition(
@@ -296,8 +293,8 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
             privileged = torch_to_jax(obs_dict["privileged"])
         else:
             # Fallback: split flat obs
-            privileged = actor[..., self.obs_dim:]
-            actor = actor[..., :self.obs_dim]
+            privileged = actor[..., self.obs_dim :]
+            actor = actor[..., : self.obs_dim]
 
         return {"actor": actor, "privileged": privileged}
 
@@ -307,8 +304,8 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
             return obs
         # Fallback: flat jax array
         return {
-            "actor": obs[..., :self.obs_dim],
-            "privileged": obs[..., self.obs_dim:],
+            "actor": obs[..., : self.obs_dim],
+            "privileged": obs[..., self.obs_dim :],
         }
 
     # ------------------------------------------------------------------
@@ -322,10 +319,13 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
             return extra
 
         scaff_fields = [
-            "scaff_consistency_loss", "scaff_reward_loss",
-            "scaff_value_loss", "scaff_total_loss",
+            "scaff_consistency_loss",
+            "scaff_reward_loss",
+            "scaff_value_loss",
+            "scaff_total_loss",
             "explore_entropy",
-            "target_ortho_loss", "scaff_ortho_loss",
+            "target_ortho_loss",
+            "scaff_ortho_loss",
         ]
         for field in scaff_fields:
             val = getattr(metrics, field, None)
@@ -333,4 +333,3 @@ class PrivilegedModelBasedRunner(ModelBasedRunner):
                 extra[f"scaffolding/{field}"] = float(val)
 
         return extra
-

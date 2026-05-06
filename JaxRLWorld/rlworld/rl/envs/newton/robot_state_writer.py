@@ -24,6 +24,7 @@ correct generalized-coordinate indices via ``actuated_q_indices`` /
 **eval_fk.** Must be called after joint/root writes to recompute
 body transforms (``body_q``) from the updated ``joint_q``.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -34,6 +35,7 @@ from torch import Tensor
 
 if TYPE_CHECKING:
     from newton.selection import ArticulationView
+
     from rlworld.rl.envs.newton.newton_env import NewtonEnv
 
 
@@ -44,7 +46,7 @@ class NewtonRobotStateWriter:
     ``state.joint_qd`` for maximum write performance.
     """
 
-    def __init__(self, env: "NewtonEnv", view: "ArticulationView") -> None:
+    def __init__(self, env: NewtonEnv, view: ArticulationView) -> None:
         self._env = env
         self._view = view
 
@@ -67,18 +69,14 @@ class NewtonRobotStateWriter:
     # Joint writes
     # ------------------------------------------------------------------
 
-    def set_dof_positions(
-        self, values: Tensor, env_ids: "Tensor | None" = None
-    ) -> None:
+    def set_dof_positions(self, values: Tensor, env_ids: Tensor | None = None) -> None:
         """Write actuated joint positions via zero-copy view."""
         if env_ids is not None:
             self._joint_q[env_ids.unsqueeze(1), self._q_indices.unsqueeze(0)] = values
         else:
             self._joint_q[:, self._q_indices] = values
 
-    def set_dof_velocities(
-        self, values: Tensor, env_ids: "Tensor | None" = None
-    ) -> None:
+    def set_dof_velocities(self, values: Tensor, env_ids: Tensor | None = None) -> None:
         """Write actuated joint velocities via zero-copy view."""
         if env_ids is not None:
             self._joint_qd[env_ids.unsqueeze(1), self._qd_indices.unsqueeze(0)] = values
@@ -93,7 +91,7 @@ class NewtonRobotStateWriter:
         self,
         pos: Tensor,
         quat_wxyz: Tensor,
-        env_ids: "Tensor | None" = None,
+        env_ids: Tensor | None = None,
     ) -> None:
         """Write root link position + orientation (wxyz → xyzw)."""
         quat_xyzw = quat_wxyz[..., [1, 2, 3, 0]]
@@ -105,7 +103,7 @@ class NewtonRobotStateWriter:
         self,
         lin_vel: Tensor,
         ang_vel: Tensor,
-        env_ids: "Tensor | None" = None,
+        env_ids: Tensor | None = None,
     ) -> None:
         """Write root link linear + angular velocity."""
         rows = env_ids if env_ids is not None else slice(None)
@@ -116,7 +114,7 @@ class NewtonRobotStateWriter:
     # FK
     # ------------------------------------------------------------------
 
-    def eval_fk(self, env_ids: "Tensor | None" = None) -> None:
+    def eval_fk(self, env_ids: Tensor | None = None) -> None:
         """Re-evaluate forward kinematics for the selected environments."""
         self._view.eval_fk(self._env.scene_manager.state, mask=self._mask(env_ids))
 
@@ -124,7 +122,7 @@ class NewtonRobotStateWriter:
     # Internals
     # ==================================================================
 
-    def _mask(self, env_ids: "Tensor | None"):
+    def _mask(self, env_ids: Tensor | None):
         if env_ids is None:
             return None
         num_worlds = self._env.scene_manager.model.world_count

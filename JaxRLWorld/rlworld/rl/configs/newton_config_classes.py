@@ -1,38 +1,40 @@
 from dataclasses import dataclass, field
-from typing import Literal, Dict, Any, Optional, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Literal, Union
 
 from rlworld.rl.configs.scene import GroundPlaneCfg
+
 from .algorithms import AlgorithmConfig, get_algorithm_config_class
 from .base_config import BaseConfig
 from .common_config_classes import (
-    RewardConfig,
     CommandConfig,
-    GaitConfig,
     EventConfig,
+    GaitConfig,
     NNConfig,
+    RewardConfig,
     RunnerConfig,
     VisualizationConfig,
 )
+
 if TYPE_CHECKING:
-    from rlworld.rl.configs.scene import NewtonEntityConfig
-    from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
     from rlworld.rl.configs import (
         CurriculumManagerConfig,
-        TerminationTermConfig,
     )
-    from rlworld.rl.configs.observations import ObservationTermConfig
     from rlworld.rl.configs.robots.base import RobotConfig
+    from rlworld.rl.configs.scene import NewtonEntityConfig
+    from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
 
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
     """Lazy default to avoid importing CurriculumManagerConfig at module load."""
     from rlworld.rl.configs import CurriculumManagerConfig
+
     return CurriculumManagerConfig()
 
 
 @dataclass
 class NewtonEnvConfig(BaseConfig):
     """Newton environment configuration."""
+
     num_envs: int = 4096
     env_name: str = "NewtonEnv"
     task_name: str = "Unknown"
@@ -57,29 +59,29 @@ class SolverMuJoCoCfg(BaseConfig):
     """
 
     # Core algorithm choices
-    solver: Optional[Literal["newton", "cg"]] = "newton"
-    integrator: Optional[Literal["implicitfast", "euler", "rk4"]] = "implicitfast"
-    cone: Optional[Literal["pyramidal", "elliptic"]] = "elliptic"
+    solver: Literal["newton", "cg"] | None = "newton"
+    integrator: Literal["implicitfast", "euler", "rk4"] | None = "implicitfast"
+    cone: Literal["pyramidal", "elliptic"] | None = "elliptic"
 
     # Iteration budgets
-    iterations: Optional[int] = 100
-    ls_iterations: Optional[int] = 50
+    iterations: int | None = 100
+    ls_iterations: int | None = 50
 
     # Contact / constraint buffer sizes
-    njmax: Optional[int] = 1500
-    nconmax: Optional[int] = 150
+    njmax: int | None = 1500
+    nconmax: int | None = 150
 
     # Friction cone tuning
-    impratio: Optional[float] = 100.0
+    impratio: float | None = 100.0
 
     # Solver tolerances (None → MuJoCo defaults: 1e-8 / 0.01 / 1e-6)
-    tolerance: Optional[float] = None
-    ls_tolerance: Optional[float] = None
-    ccd_tolerance: Optional[float] = None
+    tolerance: float | None = None
+    ls_tolerance: float | None = None
+    ccd_tolerance: float | None = None
 
     # Advanced iteration caps (None → MuJoCo defaults: 35 / 10)
-    ccd_iterations: Optional[int] = None
-    sdf_iterations: Optional[int] = None
+    ccd_iterations: int | None = None
+    sdf_iterations: int | None = None
 
     # Mode flags
     ls_parallel: bool = True
@@ -92,6 +94,7 @@ class SolverMuJoCoCfg(BaseConfig):
 @dataclass
 class NewtonSceneConfig(BaseConfig):
     """Newton scene configuration."""
+
     _EXCLUDE_FROM_SERIALIZATION = ("robot_cfg",)
 
     dt: float = 0.02
@@ -114,12 +117,14 @@ class NewtonObservationConfig(BaseConfig):
     ``enable_corruption`` field. Use :func:`disable_corruption` to silence
     every group at once for eval / test flows.
     """
+
     pass
 
 
 @dataclass
 class NewtonActionConfig(BaseConfig):
     """Newton action configuration."""
+
     actuated_dof_names: list[str] = field(default_factory=list)
     action_scale: float | Dict[str, float] = 0.25
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
@@ -135,6 +140,7 @@ class NewtonActionConfig(BaseConfig):
 @dataclass
 class NewtonConfigsForRun(BaseConfig):
     """Complete configuration for Newton training runs."""
+
     sim_type: str = "newton"
     preset_module: str | None = None
     preset_class_name: str | None = None
@@ -148,9 +154,7 @@ class NewtonConfigsForRun(BaseConfig):
     command: CommandConfig = field(default_factory=CommandConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gait: "GaitConfig | None" = None
-    curriculum: "CurriculumManagerConfig" = field(
-        default_factory=lambda: _default_curriculum_cfg()
-    )
+    curriculum: "CurriculumManagerConfig" = field(default_factory=lambda: _default_curriculum_cfg())
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)

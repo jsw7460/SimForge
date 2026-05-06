@@ -1,17 +1,18 @@
 from dataclasses import dataclass, field
 
 from rlworld.rl.algorithms.metrics.base import (
-    BaseMetrics,
     ActorMetrics,
+    BaseMetrics,
     BatchMetrics,
-    MetricType,
     ConsoleMetric,
+    MetricType,
 )
 
 
 @dataclass
 class PPODR3CriticMetrics:
     """PPO-DR3 critic metrics."""
+
     value_loss: float = 0.0
     dr3_loss: float = 0.0
     feature_dot_product: float = 0.0
@@ -31,6 +32,7 @@ class PPODR3CriticMetrics:
 @dataclass
 class PPODR3ActorMetrics(ActorMetrics):
     """PPO-DR3 actor metrics (extends base)."""
+
     policy_loss: float = 0.0
 
     def to_wandb_dict(self, prefix: str = "actor") -> dict[str, float]:
@@ -44,6 +46,7 @@ class PPODR3ActorMetrics(ActorMetrics):
 @dataclass
 class PPODR3KLMetrics:
     """PPO-DR3 KL divergence and clipping metrics."""
+
     approx_kl: float = 0.0
     clip_fraction: float = 0.0
     early_stop_ratio: float = 0.0
@@ -63,6 +66,7 @@ class PPODR3KLMetrics:
 @dataclass
 class PPODR3Metrics(BaseMetrics):
     """Complete PPO-DR3 training metrics."""
+
     critic: PPODR3CriticMetrics = field(default_factory=PPODR3CriticMetrics)
     actor: PPODR3ActorMetrics = field(default_factory=PPODR3ActorMetrics)
     kl: PPODR3KLMetrics = field(default_factory=PPODR3KLMetrics)

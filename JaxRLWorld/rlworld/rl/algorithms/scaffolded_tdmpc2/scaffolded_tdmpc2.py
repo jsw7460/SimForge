@@ -8,7 +8,7 @@ Follows rlworld.rl.algorithms.tdmpc2.tdmpc2 exactly:
 - Same checkpointing interface
 """
 
-from typing import Any, Dict, NamedTuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, NamedTuple
 
 import equinox as eqx
 import jax
@@ -24,31 +24,31 @@ from rlworld.rl.algorithms.tdmpc2.tdmpc2 import TDMPC2TrainState
 if TYPE_CHECKING:
     from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 
-from rlworld.rl.modules.policies.abd_world_model import ABDNetWorldModel
+from rlworld.rl.algorithms.scaffolded_tdmpc2.metrics import (
+    ExplorationPolicyMetrics,
+    QMetrics,
+    ScaffoldedPolicyMetrics,
+    ScaffoldedTDMPC2Metrics,
+    ScaffoldedWorldModelMetrics,
+)
 from rlworld.rl.algorithms.scaffolded_tdmpc2.scaffolded_world_model import (
     ScaffoldedWorldModel,
 )
 from rlworld.rl.algorithms.scaffolded_tdmpc2.update import (
     scaffolded_unified_update,
 )
-from rlworld.rl.algorithms.scaffolded_tdmpc2.metrics import (
-    ScaffoldedTDMPC2Metrics,
-    ScaffoldedWorldModelMetrics,
-    ScaffoldedPolicyMetrics,
-    ExplorationPolicyMetrics,
-    QMetrics,
-)
+from rlworld.rl.modules.policies.abd_world_model import ABDNetWorldModel
 from rlworld.rl.storages.scaffolded_replay_buffer import (
-    ScaffoldedSequenceReplayBuffer,
     ScaffoldedSequenceBatch,
+    ScaffoldedSequenceReplayBuffer,
 )
-
 
 # ==================== Train State ====================
 
 
 class ScaffoldedTrainState(NamedTuple):
     """Full training state for scaffolded TD-MPC2."""
+
     # Target model
     target_model: ABDNetWorldModel
     target_q_params: Any
@@ -217,7 +217,7 @@ class ScaffoldedTDMPC2(TDMPC2):
         self._create_scaffolded_optimizers()
         self._init_scaffolded_train_state(self.train_state.key)
 
-        print(f"\n  Scaffolded TD-MPC2 + ABD-Net:")
+        print("\n  Scaffolded TD-MPC2 + ABD-Net:")
         print(f"  Target obs dim: {obs_dim}")
         print(f"  Privileged obs dim: {privileged_obs_dim}")
         print(f"  Scaffolded dim: {obs_dim + privileged_obs_dim}")
@@ -272,13 +272,9 @@ class ScaffoldedTDMPC2(TDMPC2):
 
         explore_labels = jax.tree.map(
             lambda _: "frozen",
-            eqx.filter(
-                self.scaffolded_world_model.exploration_policy, param_filter
-            ),
+            eqx.filter(self.scaffolded_world_model.exploration_policy, param_filter),
         )
-        labels = eqx.tree_at(
-            lambda m: m.exploration_policy, labels, explore_labels
-        )
+        labels = eqx.tree_at(lambda m: m.exploration_policy, labels, explore_labels)
 
         self.scaff_wm_optimizer = optax.chain(
             optax.clip_by_global_norm(self.grad_clip_norm),
@@ -302,15 +298,11 @@ class ScaffoldedTDMPC2(TDMPC2):
         key, subkey = jax.random.split(key)
 
         # Scaffolded target Q params
-        scaff_q_params, _ = eqx.partition(
-            self.scaffolded_world_model.q_ensemble, eqx.is_inexact_array
-        )
+        scaff_q_params, _ = eqx.partition(self.scaffolded_world_model.q_ensemble, eqx.is_inexact_array)
         scaff_target_q_params = copy_params(scaff_q_params)
 
         # Scaffolded WM optimizer state
-        scaff_wm_opt_state = self.scaff_wm_optimizer.init(
-            eqx.filter(self.scaffolded_world_model, eqx.is_inexact_array)
-        )
+        scaff_wm_opt_state = self.scaff_wm_optimizer.init(eqx.filter(self.scaffolded_world_model, eqx.is_inexact_array))
 
         # Exploration policy optimizer state
         explore_params, _ = eqx.partition(
@@ -354,12 +346,23 @@ class ScaffoldedTDMPC2(TDMPC2):
         )
 
     def store_transition(
-        self, obs, action, reward, next_obs, terminated, truncated,
-        privileged_obs=None, next_privileged_obs=None,
+        self,
+        obs,
+        action,
+        reward,
+        next_obs,
+        terminated,
+        truncated,
+        privileged_obs=None,
+        next_privileged_obs=None,
     ) -> None:
         self.replay_buffer.store_parallel(
-            obs=obs, action=action, reward=reward,
-            next_obs=next_obs, terminated=terminated, truncated=truncated,
+            obs=obs,
+            action=action,
+            reward=reward,
+            next_obs=next_obs,
+            terminated=terminated,
+            truncated=truncated,
             privileged_obs=privileged_obs,
             next_privileged_obs=next_privileged_obs,
         )
@@ -367,7 +370,10 @@ class ScaffoldedTDMPC2(TDMPC2):
     # ==================== Acting ====================
 
     def act_explore(
-        self, scaffolded_obs: jax.Array, *, key: jax.Array,
+        self,
+        scaffolded_obs: jax.Array,
+        *,
+        key: jax.Array,
     ) -> jax.Array:
         """Exploration policy on s+. Training-time only."""
         scaff_model = self.scaffolded_train_state.scaffolded_model
@@ -418,9 +424,14 @@ class ScaffoldedTDMPC2(TDMPC2):
         )
 
         (
-            new_target_model, new_twm_opt, new_target_q,
-            new_scaff_model, new_swm_opt, new_scaff_target_q,
-            new_pi_opt, new_explore_opt,
+            new_target_model,
+            new_twm_opt,
+            new_target_q,
+            new_scaff_model,
+            new_swm_opt,
+            new_scaff_target_q,
+            new_pi_opt,
+            new_explore_opt,
             info,
         ) = results
 

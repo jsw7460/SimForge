@@ -18,6 +18,7 @@ class GNNActor(BaseActor):
     GNN-based actor.
     Processes unbatched input. Use jax.vmap for batched input.
     """
+
     encoder: GNNEncoder
     decoder: ParentLinkToJointActionDecoder
 
@@ -37,7 +38,7 @@ class GNNActor(BaseActor):
         actuated_joint_names: "list[str] | None" = None,
         *,
         key: jax.Array,
-        **kwargs
+        **kwargs,
     ):
         self.num_obs = num_obs
         self.num_actions = num_actions
@@ -51,7 +52,7 @@ class GNNActor(BaseActor):
             num_layers=num_layers,
             dropout=dropout,
             key=key_enc,
-            **kwargs
+            **kwargs,
         )
 
         self.decoder = ParentLinkToJointActionDecoder(

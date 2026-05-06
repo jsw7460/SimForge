@@ -7,6 +7,7 @@ reads the :class:`MotionCommand` from
 per-env tensor. Orientation is encoded as the first two columns of the
 rotation matrix (continuous 6D representation).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
@@ -23,34 +24,38 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 
-def motion_anchor_pos_b(env: "World", command_name: str) -> torch.Tensor:
+def motion_anchor_pos_b(env: World, command_name: str) -> torch.Tensor:
     """Motion anchor position expressed in the robot's anchor frame.
 
     Returns shape ``(num_envs, 3)``.
     """
     cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
     pos, _ = subtract_frame_transforms_wxyz(
-        cmd.robot_anchor_pos_w, cmd.robot_anchor_quat_w,
-        cmd.anchor_pos_w, cmd.anchor_quat_w,
+        cmd.robot_anchor_pos_w,
+        cmd.robot_anchor_quat_w,
+        cmd.anchor_pos_w,
+        cmd.anchor_quat_w,
     )
     return pos.view(env.num_envs, -1)
 
 
-def motion_anchor_ori_b(env: "World", command_name: str) -> torch.Tensor:
+def motion_anchor_ori_b(env: World, command_name: str) -> torch.Tensor:
     """Motion anchor orientation (relative to robot anchor), 6D rep.
 
     Returns shape ``(num_envs, 6)``.
     """
     cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
     _, ori = subtract_frame_transforms_wxyz(
-        cmd.robot_anchor_pos_w, cmd.robot_anchor_quat_w,
-        cmd.anchor_pos_w, cmd.anchor_quat_w,
+        cmd.robot_anchor_pos_w,
+        cmd.robot_anchor_quat_w,
+        cmd.anchor_pos_w,
+        cmd.anchor_quat_w,
     )
     mat = matrix_from_quat_wxyz(ori)
     return mat[..., :2].reshape(mat.shape[0], -1)
 
 
-def robot_body_pos_b(env: "World", command_name: str) -> torch.Tensor:
+def robot_body_pos_b(env: World, command_name: str) -> torch.Tensor:
     """Live robot body positions expressed in the robot anchor frame.
 
     Returns shape ``(num_envs, num_tracked_bodies * 3)``.
@@ -66,7 +71,7 @@ def robot_body_pos_b(env: "World", command_name: str) -> torch.Tensor:
     return pos_b.view(env.num_envs, -1)
 
 
-def robot_body_ori_b(env: "World", command_name: str) -> torch.Tensor:
+def robot_body_ori_b(env: World, command_name: str) -> torch.Tensor:
     """Live robot body orientations relative to the robot anchor (6D rep).
 
     Returns shape ``(num_envs, num_tracked_bodies * 6)``.
@@ -84,7 +89,8 @@ def robot_body_ori_b(env: "World", command_name: str) -> torch.Tensor:
 
 
 def motion_future_reference_window(
-    env: "World", command_name: str,
+    env: World,
+    command_name: str,
 ) -> torch.Tensor:
     """Future motion reference window, flattened for the obs pipeline.
 
@@ -101,7 +107,8 @@ def motion_future_reference_window(
 
 
 def motion_clip_id_onehot(
-    env: "World", command_name: str,
+    env: World,
+    command_name: str,
 ) -> torch.Tensor:
     """One-hot motion clip identifier per env.
 
@@ -115,5 +122,6 @@ def motion_clip_id_onehot(
     """
     cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
     return torch.nn.functional.one_hot(
-        cmd.motion_ids, num_classes=cmd._n_motions,
+        cmd.motion_ids,
+        num_classes=cmd._n_motions,
     ).float()

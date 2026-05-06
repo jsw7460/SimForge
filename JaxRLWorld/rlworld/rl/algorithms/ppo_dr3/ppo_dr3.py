@@ -6,14 +6,15 @@ import jax.numpy as jnp
 
 from rlworld.rl.algorithms.metrics import BatchMetrics
 from rlworld.rl.algorithms.ppo.ppo import PPO, PPOTrainState
-from .metrics import (
-    PPODR3Metrics,
-    PPODR3CriticMetrics,
-    PPODR3ActorMetrics,
-    PPODR3KLMetrics,
-)
 from rlworld.rl.modules.policies import PPODR3ActorCritic
-from .update import update_all_batches_dr3, ScanOutput
+
+from .metrics import (
+    PPODR3ActorMetrics,
+    PPODR3CriticMetrics,
+    PPODR3KLMetrics,
+    PPODR3Metrics,
+)
+from .update import ScanOutput, update_all_batches_dr3
 
 
 class PPODR3(PPO):
@@ -158,9 +159,7 @@ class PPODR3(PPO):
 
         return metrics
 
-    def _compute_dr3_metrics(
-        self, outputs: ScanOutput, stacked_batches
-    ) -> PPODR3Metrics:
+    def _compute_dr3_metrics(self, outputs: ScanOutput, stacked_batches) -> PPODR3Metrics:
         """Compute metrics from update outputs including DR3 metrics."""
         did_update = outputs.did_update
         num_actual_updates = int(did_update.sum())
@@ -234,6 +233,7 @@ class PPODR3(PPO):
     def save_train_state(self, checkpoint_dir: str) -> Dict[str, Any]:
         """Save PPO-DR3 training state."""
         import os
+
         import numpy as np
 
         model_path = os.path.join(checkpoint_dir, "model.eqx")

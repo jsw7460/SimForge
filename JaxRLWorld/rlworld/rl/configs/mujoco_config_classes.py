@@ -1,34 +1,35 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Dict, Literal
 
 from .algorithms import AlgorithmConfig, get_algorithm_config_class
 from .base_config import BaseConfig
 from .common_config_classes import (
-    RewardConfig,
     CommandConfig,
-    GaitConfig,
     EventConfig,
+    GaitConfig,
     NNConfig,
+    RewardConfig,
     RunnerConfig,
     VisualizationConfig,
 )
+
 if TYPE_CHECKING:
     from rlworld.rl.configs import (
         CurriculumManagerConfig,
-        TerminationTermConfig,
     )
-    from rlworld.rl.configs.observations import ObservationTermConfig
 
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
     """Lazy default to avoid importing CurriculumManagerConfig at module load."""
     from rlworld.rl.configs import CurriculumManagerConfig
+
     return CurriculumManagerConfig()
 
 
 @dataclass
 class MujocoEnvConfig(BaseConfig):
     """MuJoCo/mjlab environment configuration."""
+
     num_envs: int = 4096
     env_name: str = "MujocoEnv"
     task_name: str = "Unknown"
@@ -45,6 +46,7 @@ class MujocoSceneConfig(BaseConfig):
     Config-level fields only — no mjlab imports needed.
     The scene manager converts these to mjlab objects internally.
     """
+
     physics_dt: float = 0.002
     substeps: int = 1
     num_envs: int = 4096
@@ -81,9 +83,9 @@ class MujocoSceneConfig(BaseConfig):
 
     def recursive_to_dict(self) -> Dict:
         result = super().recursive_to_dict()
-        result.pop('mjlab_scene_cfg', None)
-        result.pop('mjlab_sim_cfg', None)
-        result.pop('unified_entities', None)
+        result.pop("mjlab_scene_cfg", None)
+        result.pop("mjlab_sim_cfg", None)
+        result.pop("unified_entities", None)
         return result
 
 
@@ -95,12 +97,14 @@ class MujocoObservationConfig(BaseConfig):
     ``enable_corruption`` field. Use :func:`disable_corruption` to silence
     every group at once for eval / test flows.
     """
+
     pass
 
 
 @dataclass
 class MujocoActionConfig(BaseConfig):
     """MuJoCo/mjlab action configuration."""
+
     entity_name: str = "robot"
     actuated_dof_names: list[str] = field(default_factory=list)
     action_scale: float | dict[str, float] = 0.25
@@ -114,6 +118,7 @@ class MujocoActionConfig(BaseConfig):
 @dataclass
 class MujocoConfigsForRun(BaseConfig):
     """Complete configuration for MuJoCo/mjlab training runs."""
+
     sim_type: str = "mujoco"
     preset_module: str | None = None
     preset_class_name: str | None = None
@@ -127,9 +132,7 @@ class MujocoConfigsForRun(BaseConfig):
     command: CommandConfig = field(default_factory=CommandConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gait: "GaitConfig | None" = None
-    curriculum: "CurriculumManagerConfig" = field(
-        default_factory=lambda: _default_curriculum_cfg()
-    )
+    curriculum: "CurriculumManagerConfig" = field(default_factory=lambda: _default_curriculum_cfg())
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)

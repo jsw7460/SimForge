@@ -12,6 +12,7 @@ reset), this term writes a reference state into the sim via the
 not register an additional ``reset_fallen_or_standing`` event — motion
 is the single source of initial state.
 """
+
 from __future__ import annotations
 
 import math
@@ -24,10 +25,10 @@ import torch
 from rlworld.rl.envs.managers.common.command_term import CommandTerm, CommandTermCfg
 from rlworld.rl.utils.quat_utils import (
     matrix_from_quat_wxyz,
+    quat_error_magnitude_wxyz,
     quat_from_euler_xyz_wxyz,
     quat_inv_wxyz,
     quat_mul_wxyz,
-    quat_error_magnitude_wxyz,
     quat_rotate_wxyz,
     subtract_frame_transforms_wxyz,
     yaw_quat_wxyz,
@@ -68,7 +69,7 @@ class MotionLoader:
         self,
         motion_file: str,
         body_names_cfg: tuple[str, ...],
-        joint_names_cfg: "tuple[str, ...] | None" = None,
+        joint_names_cfg: tuple[str, ...] | None = None,
         device: str | torch.device = "cpu",
     ) -> None:
         data = np.load(motion_file, allow_pickle=True)
@@ -84,15 +85,18 @@ class MotionLoader:
         except ValueError as e:
             missing = [n for n in body_names_cfg if n not in npz_body_names]
             raise ValueError(
-                f"Motion file {motion_file!r} is missing body names "
-                f"{missing}. NPZ contains {npz_body_names}."
+                f"Motion file {motion_file!r} is missing body names {missing}. NPZ contains {npz_body_names}."
             ) from e
 
         joint_pos_raw = torch.tensor(
-            data["joint_pos"], dtype=torch.float32, device=device,
+            data["joint_pos"],
+            dtype=torch.float32,
+            device=device,
         )
         joint_vel_raw = torch.tensor(
-            data["joint_vel"], dtype=torch.float32, device=device,
+            data["joint_vel"],
+            dtype=torch.float32,
+            device=device,
         )
 
         # Permute joint columns to the canonical order
@@ -110,14 +114,11 @@ class MotionLoader:
                     "the caller requested canonical-order permutation. Regenerate "
                     "the NPZ via rlworld.tools.motion.csv_to_npz."
                 )
-            npz_joint_names = [
-                str(n) for n in np.asarray(data["joint_names"]).tolist()
-            ]
+            npz_joint_names = [str(n) for n in np.asarray(data["joint_names"]).tolist()]
             missing = [n for n in joint_names_cfg if n not in npz_joint_names]
             if missing:
                 raise ValueError(
-                    f"Motion file {motion_file!r} is missing joints {missing}. "
-                    f"NPZ contains {npz_joint_names}."
+                    f"Motion file {motion_file!r} is missing joints {missing}. NPZ contains {npz_joint_names}."
                 )
             joint_perm = torch.tensor(
                 [npz_joint_names.index(n) for n in joint_names_cfg],
@@ -150,9 +151,9 @@ class MotionLoader:
 class MotionCommand(CommandTerm):
     """Reference-motion tracking command. Sim-agnostic (writes via writer protocol)."""
 
-    cfg: "MotionCommandCfg"
+    cfg: MotionCommandCfg
 
-    def __init__(self, env: "World", cfg: "MotionCommandCfg"):
+    def __init__(self, env: World, cfg: MotionCommandCfg):
         super().__init__(env, cfg)
         self._rd = env.get_robot_data(cfg.entity_name)
         self._writer = env.get_robot_state_writer(cfg.entity_name)
@@ -184,7 +185,8 @@ class MotionCommand(CommandTerm):
             )
         self.motions: list[MotionLoader] = [
             MotionLoader(
-                p, cfg.body_names,
+                p,
+                cfg.body_names,
                 joint_names_cfg=joint_names,
                 device=self.device,
             )
@@ -218,26 +220,33 @@ class MotionCommand(CommandTerm):
         # reduces to a single advanced-indexing op. Global index for env e
         # is ``_motion_offsets[motion_ids[e]] + time_steps[e]``.
         self._concat_joint_pos = torch.cat(
-            [m.joint_pos for m in self.motions], dim=0,
+            [m.joint_pos for m in self.motions],
+            dim=0,
         )
         self._concat_joint_vel = torch.cat(
-            [m.joint_vel for m in self.motions], dim=0,
+            [m.joint_vel for m in self.motions],
+            dim=0,
         )
         self._concat_body_pos_w = torch.cat(
-            [m.body_pos_w for m in self.motions], dim=0,
+            [m.body_pos_w for m in self.motions],
+            dim=0,
         )
         self._concat_body_quat_w = torch.cat(
-            [m.body_quat_w for m in self.motions], dim=0,
+            [m.body_quat_w for m in self.motions],
+            dim=0,
         )
         self._concat_body_lin_vel_w = torch.cat(
-            [m.body_lin_vel_w for m in self.motions], dim=0,
+            [m.body_lin_vel_w for m in self.motions],
+            dim=0,
         )
         self._concat_body_ang_vel_w = torch.cat(
-            [m.body_ang_vel_w for m in self.motions], dim=0,
+            [m.body_ang_vel_w for m in self.motions],
+            dim=0,
         )
         self._motion_lengths = torch.tensor(
             [m.time_step_total for m in self.motions],
-            dtype=torch.long, device=self.device,
+            dtype=torch.long,
+            device=self.device,
         )
         # Cumulative offsets: offsets[0]=0, offsets[i]=sum(lengths[:i]).
         self._motion_offsets = torch.cat(
@@ -250,7 +259,9 @@ class MotionCommand(CommandTerm):
         # Sampling weights over clips (uniform by default, auto-normalised).
         if cfg.motion_weights is None:
             w = torch.ones(
-                self._n_motions, device=self.device, dtype=torch.float32,
+                self._n_motions,
+                device=self.device,
+                dtype=torch.float32,
             )
         else:
             if len(cfg.motion_weights) != self._n_motions:
@@ -260,25 +271,36 @@ class MotionCommand(CommandTerm):
                 )
             w = torch.tensor(
                 cfg.motion_weights,
-                device=self.device, dtype=torch.float32,
+                device=self.device,
+                dtype=torch.float32,
             )
         self._motion_weights = w / w.sum()
 
         self.time_steps = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device,
+            self.num_envs,
+            dtype=torch.long,
+            device=self.device,
         )
         # Per-env motion assignment: which clip each env is currently
         # tracking. Zero-initialised so single-motion configs (_n_motions
         # == 1) have valid indices without any sampling. Multi-motion
         # configs overwrite this in ``_resample_command``.
         self.motion_ids = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device,
+            self.num_envs,
+            dtype=torch.long,
+            device=self.device,
         )
         self.body_pos_relative_w = torch.zeros(
-            self.num_envs, len(cfg.body_names), 3, device=self.device,
+            self.num_envs,
+            len(cfg.body_names),
+            3,
+            device=self.device,
         )
         self.body_quat_relative_w = torch.zeros(
-            self.num_envs, len(cfg.body_names), 4, device=self.device,
+            self.num_envs,
+            len(cfg.body_names),
+            4,
+            device=self.device,
         )
         self.body_quat_relative_w[:, :, 0] = 1.0
 
@@ -287,18 +309,18 @@ class MotionCommand(CommandTerm):
         # time-indexed), but keep a zero buffer so the attribute exists.
         num_cols = 2 * self.motion.joint_pos.shape[1]
         self._command_buf = torch.zeros(
-            self.num_envs, num_cols, device=self.device,
+            self.num_envs,
+            num_cols,
+            device=self.device,
         )
 
         # Adaptive-sampling buffers. One bin per real-time second of
         # motion, matching mjlab's convention.
-        self.bin_count = int(
-            self.motion.time_step_total // (1.0 / env.control_dt)
-        ) + 1
+        self.bin_count = int(self.motion.time_step_total // (1.0 / env.control_dt)) + 1
         self.bin_failed_count = torch.zeros(self.bin_count, device=self.device)
         self._current_bin_failed = torch.zeros(self.bin_count, device=self.device)
         kernel = torch.tensor(
-            [cfg.adaptive_lambda ** i for i in range(cfg.adaptive_kernel_size)],
+            [cfg.adaptive_lambda**i for i in range(cfg.adaptive_kernel_size)],
             device=self.device,
             dtype=torch.float32,
         )
@@ -306,16 +328,21 @@ class MotionCommand(CommandTerm):
 
         # Per-env error / sampling metrics, same keys as mjlab for parity.
         metric_keys = (
-            "error_anchor_pos", "error_anchor_rot",
-            "error_anchor_lin_vel", "error_anchor_ang_vel",
-            "error_body_pos", "error_body_rot",
-            "error_body_lin_vel", "error_body_ang_vel",
-            "error_joint_pos", "error_joint_vel",
-            "sampling_entropy", "sampling_top1_prob", "sampling_top1_bin",
+            "error_anchor_pos",
+            "error_anchor_rot",
+            "error_anchor_lin_vel",
+            "error_anchor_ang_vel",
+            "error_body_pos",
+            "error_body_rot",
+            "error_body_lin_vel",
+            "error_body_ang_vel",
+            "error_joint_pos",
+            "error_joint_vel",
+            "sampling_entropy",
+            "sampling_top1_prob",
+            "sampling_top1_bin",
         )
-        self.metrics: dict[str, torch.Tensor] = {
-            k: torch.zeros(self.num_envs, device=self.device) for k in metric_keys
-        }
+        self.metrics: dict[str, torch.Tensor] = {k: torch.zeros(self.num_envs, device=self.device) for k in metric_keys}
 
         # env_origins is mjlab-only (multi-env spatial offset baked into
         # scene). Newton / Genesis handle per-env isolation internally and
@@ -331,9 +358,7 @@ class MotionCommand(CommandTerm):
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
 
     def set_command(self, env_ids, values):
-        raise NotImplementedError(
-            "MotionCommand is time-indexed; external set_command is not supported."
-        )
+        raise NotImplementedError("MotionCommand is time-indexed; external set_command is not supported.")
 
     # ------------------------------------------------------------------
     # Motion reference (world frame). env_origins offset applied for mjlab.
@@ -362,7 +387,8 @@ class MotionCommand(CommandTerm):
     @property
     def body_pos_w(self) -> torch.Tensor:
         return self._add_env_origins(
-            self._concat_body_pos_w[self._global_indices], per_body=True,
+            self._concat_body_pos_w[self._global_indices],
+            per_body=True,
         )
 
     @property
@@ -379,28 +405,20 @@ class MotionCommand(CommandTerm):
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
-        pos = self._concat_body_pos_w[
-            self._global_indices, self.motion_anchor_body_index
-        ]
+        pos = self._concat_body_pos_w[self._global_indices, self.motion_anchor_body_index]
         return self._add_env_origins(pos, per_body=False)
 
     @property
     def anchor_quat_w(self) -> torch.Tensor:
-        return self._concat_body_quat_w[
-            self._global_indices, self.motion_anchor_body_index
-        ]
+        return self._concat_body_quat_w[self._global_indices, self.motion_anchor_body_index]
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
-        return self._concat_body_lin_vel_w[
-            self._global_indices, self.motion_anchor_body_index
-        ]
+        return self._concat_body_lin_vel_w[self._global_indices, self.motion_anchor_body_index]
 
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
-        return self._concat_body_ang_vel_w[
-            self._global_indices, self.motion_anchor_body_index
-        ]
+        return self._concat_body_ang_vel_w[self._global_indices, self.motion_anchor_body_index]
 
     # ------------------------------------------------------------------
     # Live robot state via RobotData protocol.
@@ -469,11 +487,17 @@ class MotionCommand(CommandTerm):
         offsets = self.cfg.future_offsets
         if not offsets:
             return torch.zeros(
-                self.num_envs, 0, num_bodies, 9, device=self.device,
+                self.num_envs,
+                0,
+                num_bodies,
+                9,
+                device=self.device,
             )
 
         offsets_t = torch.tensor(
-            offsets, device=self.device, dtype=torch.long,
+            offsets,
+            device=self.device,
+            dtype=torch.long,
         )
         T = int(offsets_t.shape[0])
 
@@ -485,15 +509,19 @@ class MotionCommand(CommandTerm):
         future_ts = torch.minimum(future_ts, (per_env_T - 1).unsqueeze(1))
         future_ts = torch.clamp(future_ts, min=0)
 
-        future_global = (
-            motion_offsets_per_env.unsqueeze(1) + future_ts
-        ).reshape(-1)
+        future_global = (motion_offsets_per_env.unsqueeze(1) + future_ts).reshape(-1)
 
         body_pos = self._concat_body_pos_w[future_global].reshape(
-            self.num_envs, T, num_bodies, 3,
+            self.num_envs,
+            T,
+            num_bodies,
+            3,
         )
         body_quat = self._concat_body_quat_w[future_global].reshape(
-            self.num_envs, T, num_bodies, 4,
+            self.num_envs,
+            T,
+            num_bodies,
+            4,
         )
         if self._env_origins is not None:
             body_pos = body_pos + self._env_origins[:, None, None, :]
@@ -504,7 +532,10 @@ class MotionCommand(CommandTerm):
         robot_quat_exp = robot_quat[:, None, None, :].expand(-1, T, num_bodies, 4)
 
         rel_pos, rel_quat = subtract_frame_transforms_wxyz(
-            robot_pos_exp, robot_quat_exp, body_pos, body_quat,
+            robot_pos_exp,
+            robot_quat_exp,
+            body_pos,
+            body_quat,
         )
         mat = matrix_from_quat_wxyz(rel_quat)
         quat_6d = mat[..., :2].reshape(self.num_envs, T, num_bodies, 6)
@@ -527,53 +558,66 @@ class MotionCommand(CommandTerm):
         anchor_pos_rep = self.anchor_pos_w[:, None, :].expand(-1, num_bodies, 3)
         anchor_quat_rep = self.anchor_quat_w[:, None, :].expand(-1, num_bodies, 4)
         robot_anchor_pos_rep = self.robot_anchor_pos_w[:, None, :].expand(
-            -1, num_bodies, 3,
+            -1,
+            num_bodies,
+            3,
         )
         robot_anchor_quat_rep = self.robot_anchor_quat_w[:, None, :].expand(
-            -1, num_bodies, 4,
+            -1,
+            num_bodies,
+            4,
         )
 
         delta_pos_w = robot_anchor_pos_rep.clone()
         delta_pos_w[..., 2] = anchor_pos_rep[..., 2]
-        delta_ori_w = yaw_quat_wxyz(
-            quat_mul_wxyz(robot_anchor_quat_rep, quat_inv_wxyz(anchor_quat_rep))
-        )
+        delta_ori_w = yaw_quat_wxyz(quat_mul_wxyz(robot_anchor_quat_rep, quat_inv_wxyz(anchor_quat_rep)))
 
         self.body_quat_relative_w = quat_mul_wxyz(delta_ori_w, self.body_quat_w)
         self.body_pos_relative_w = delta_pos_w + quat_rotate_wxyz(
-            delta_ori_w, self.body_pos_w - anchor_pos_rep,
+            delta_ori_w,
+            self.body_pos_w - anchor_pos_rep,
         )
 
     def _update_metrics(self) -> None:
         self.metrics["error_anchor_pos"] = torch.norm(
-            self.anchor_pos_w - self.robot_anchor_pos_w, dim=-1,
+            self.anchor_pos_w - self.robot_anchor_pos_w,
+            dim=-1,
         )
         self.metrics["error_anchor_rot"] = quat_error_magnitude_wxyz(
-            self.anchor_quat_w, self.robot_anchor_quat_w,
+            self.anchor_quat_w,
+            self.robot_anchor_quat_w,
         )
         self.metrics["error_anchor_lin_vel"] = torch.norm(
-            self.anchor_lin_vel_w - self.robot_anchor_lin_vel_w, dim=-1,
+            self.anchor_lin_vel_w - self.robot_anchor_lin_vel_w,
+            dim=-1,
         )
         self.metrics["error_anchor_ang_vel"] = torch.norm(
-            self.anchor_ang_vel_w - self.robot_anchor_ang_vel_w, dim=-1,
+            self.anchor_ang_vel_w - self.robot_anchor_ang_vel_w,
+            dim=-1,
         )
         self.metrics["error_body_pos"] = torch.norm(
-            self.body_pos_relative_w - self.robot_body_pos_w, dim=-1,
+            self.body_pos_relative_w - self.robot_body_pos_w,
+            dim=-1,
         ).mean(-1)
         self.metrics["error_body_rot"] = quat_error_magnitude_wxyz(
-            self.body_quat_relative_w, self.robot_body_quat_w,
+            self.body_quat_relative_w,
+            self.robot_body_quat_w,
         ).mean(-1)
         self.metrics["error_body_lin_vel"] = torch.norm(
-            self.body_lin_vel_w - self.robot_body_lin_vel_w, dim=-1,
+            self.body_lin_vel_w - self.robot_body_lin_vel_w,
+            dim=-1,
         ).mean(-1)
         self.metrics["error_body_ang_vel"] = torch.norm(
-            self.body_ang_vel_w - self.robot_body_ang_vel_w, dim=-1,
+            self.body_ang_vel_w - self.robot_body_ang_vel_w,
+            dim=-1,
         ).mean(-1)
         self.metrics["error_joint_pos"] = torch.norm(
-            self.joint_pos - self.robot_joint_pos, dim=-1,
+            self.joint_pos - self.robot_joint_pos,
+            dim=-1,
         )
         self.metrics["error_joint_vel"] = torch.norm(
-            self.joint_vel - self.robot_joint_vel, dim=-1,
+            self.joint_vel - self.robot_joint_vel,
+            dim=-1,
         )
 
     # ------------------------------------------------------------------
@@ -581,7 +625,10 @@ class MotionCommand(CommandTerm):
     # ------------------------------------------------------------------
     def _uniform_sampling(self, env_ids: torch.Tensor) -> None:
         self.time_steps[env_ids] = torch.randint(
-            0, self.motion.time_step_total, (len(env_ids),), device=self.device,
+            0,
+            self.motion.time_step_total,
+            (len(env_ids),),
+            device=self.device,
         )
         self.metrics["sampling_entropy"][:] = 1.0
         self.metrics["sampling_top1_prob"][:] = 1.0 / max(self.bin_count, 1)
@@ -595,20 +642,17 @@ class MotionCommand(CommandTerm):
             episode_failed = term_manager.terminated[env_ids]
             if torch.any(episode_failed):
                 current_bin_index = torch.clamp(
-                    (self.time_steps * self.bin_count)
-                    // max(self.motion.time_step_total, 1),
+                    (self.time_steps * self.bin_count) // max(self.motion.time_step_total, 1),
                     0,
                     self.bin_count - 1,
                 )
                 fail_bins = current_bin_index[env_ids][episode_failed]
                 self._current_bin_failed[:] = torch.bincount(
-                    fail_bins, minlength=self.bin_count,
+                    fail_bins,
+                    minlength=self.bin_count,
                 )
 
-        probs = (
-            self.bin_failed_count
-            + self.cfg.adaptive_uniform_ratio / float(self.bin_count)
-        )
+        probs = self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(self.bin_count)
         probs = torch.nn.functional.pad(
             probs.unsqueeze(0).unsqueeze(0),
             (0, self.cfg.adaptive_kernel_size - 1),
@@ -663,7 +707,9 @@ class MotionCommand(CommandTerm):
         # rollover does — see ``_update_command``).
         if self._is_multi_motion and not keep_motion_id:
             sampled = torch.multinomial(
-                self._motion_weights, len(env_ids), replacement=True,
+                self._motion_weights,
+                len(env_ids),
+                replacement=True,
             )
             self.motion_ids[env_ids] = sampled
 
@@ -675,10 +721,7 @@ class MotionCommand(CommandTerm):
             if self._is_multi_motion:
                 # Per-env clip length; uniform within each env's clip.
                 per_env_T = self._motion_lengths[self.motion_ids[env_ids]]
-                self.time_steps[env_ids] = (
-                    torch.rand(len(env_ids), device=self.device)
-                    * per_env_T.float()
-                ).long()
+                self.time_steps[env_ids] = (torch.rand(len(env_ids), device=self.device) * per_env_T.float()).long()
                 # Keep the same scalar metric schema as single-motion uniform
                 # so downstream loggers don't need to branch on clip count.
                 self.metrics["sampling_entropy"][:] = 1.0
@@ -708,34 +751,34 @@ class MotionCommand(CommandTerm):
 
         # 3. Reference State Initialization (RSI) perturbations.
         pose_ranges = torch.tensor(
-            [
-                self.cfg.pose_range.get(k, (0.0, 0.0))
-                for k in ("x", "y", "z", "roll", "pitch", "yaw")
-            ],
+            [self.cfg.pose_range.get(k, (0.0, 0.0)) for k in ("x", "y", "z", "roll", "pitch", "yaw")],
             device=self.device,
         )
         pose_delta = _sample_uniform(
-            pose_ranges[:, 0], pose_ranges[:, 1],
-            (len(env_ids), 6), device=self.device,
+            pose_ranges[:, 0],
+            pose_ranges[:, 1],
+            (len(env_ids), 6),
+            device=self.device,
         )
         root_pos = root_pos + pose_delta[:, 0:3]
         root_quat = quat_mul_wxyz(
             quat_from_euler_xyz_wxyz(
-                pose_delta[:, 3], pose_delta[:, 4], pose_delta[:, 5],
+                pose_delta[:, 3],
+                pose_delta[:, 4],
+                pose_delta[:, 5],
             ),
             root_quat,
         )
 
         vel_ranges = torch.tensor(
-            [
-                self.cfg.velocity_range.get(k, (0.0, 0.0))
-                for k in ("x", "y", "z", "roll", "pitch", "yaw")
-            ],
+            [self.cfg.velocity_range.get(k, (0.0, 0.0)) for k in ("x", "y", "z", "roll", "pitch", "yaw")],
             device=self.device,
         )
         vel_delta = _sample_uniform(
-            vel_ranges[:, 0], vel_ranges[:, 1],
-            (len(env_ids), 6), device=self.device,
+            vel_ranges[:, 0],
+            vel_ranges[:, 1],
+            (len(env_ids), 6),
+            device=self.device,
         )
         root_lin_vel = root_lin_vel + vel_delta[:, :3]
         root_ang_vel = root_ang_vel + vel_delta[:, 3:]
@@ -752,8 +795,13 @@ class MotionCommand(CommandTerm):
         # 4. Write through the sim-agnostic writer protocol (eval_fk
         # is a no-op on mjlab/Genesis, triggers FK on Newton).
         self._write_reference_state_to_sim(
-            env_ids, root_pos, root_quat, root_lin_vel, root_ang_vel,
-            joint_pos, joint_vel,
+            env_ids,
+            root_pos,
+            root_quat,
+            root_lin_vel,
+            root_ang_vel,
+            joint_pos,
+            joint_vel,
         )
 
     # ------------------------------------------------------------------
@@ -801,7 +849,7 @@ class MotionCommand(CommandTerm):
         self,
         motion_id: int,
         *,
-        env_ids: "torch.Tensor | None" = None,
+        env_ids: torch.Tensor | None = None,
         rewind: bool = True,
     ) -> None:
         """Assign a specific clip to one or more envs — used by interactive
@@ -813,10 +861,7 @@ class MotionCommand(CommandTerm):
         the new clip's reference starts driving rewards from the next step.
         """
         if motion_id < 0 or motion_id >= self._n_motions:
-            raise IndexError(
-                f"motion_id {motion_id} out of range for "
-                f"{self._n_motions} loaded motion(s)."
-            )
+            raise IndexError(f"motion_id {motion_id} out of range for {self._n_motions} loaded motion(s).")
         if env_ids is None:
             self.motion_ids[:] = int(motion_id)
             if rewind:
@@ -840,10 +885,7 @@ class MotionCommand(CommandTerm):
         index in ``[0, len(motions))``.
         """
         if motion_id < 0 or motion_id >= self._n_motions:
-            raise IndexError(
-                f"motion_id {motion_id} out of range for "
-                f"{self._n_motions} loaded motion(s)."
-            )
+            raise IndexError(f"motion_id {motion_id} out of range for {self._n_motions} loaded motion(s).")
         self.motion_ids[env_ids] = int(motion_id)
         self.time_steps[env_ids] = int(frame)
         self._write_reference_state_to_sim(
@@ -871,7 +913,7 @@ class MotionCommandCfg(CommandTermCfg):
     for the rest of the episode — motion-end rollover mid-episode rewinds
     the cursor but keeps the clip."""
 
-    motion_weights: "tuple[float, ...] | None" = None
+    motion_weights: tuple[float, ...] | None = None
     """Per-clip sampling weights over ``motion_files`` (auto-normalised).
     Length must match ``motion_files``. Defaults to uniform."""
 
@@ -944,5 +986,5 @@ class MotionCommandCfg(CommandTermCfg):
     # timer-based resample by setting a huge interval.
     resampling_time_range: tuple[float, float] = (1e9, 1e9)
 
-    def build(self, env: "World") -> MotionCommand:
+    def build(self, env: World) -> MotionCommand:
         return MotionCommand(env, self)

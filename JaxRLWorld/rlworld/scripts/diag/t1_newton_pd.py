@@ -9,6 +9,7 @@ leaf joint name so we can compare against T1Config's
 Usage:
     uv run python JaxRLWorld/rlworld/scripts/diag/t1_newton_pd.py
 """
+
 from __future__ import annotations
 
 import warp as wp
@@ -48,11 +49,7 @@ def main() -> None:
             continue
         # Take the first DOF's values (revolute has 1 DOF; free joint has 6)
         d0 = dof_start
-        print(
-            f"{j:<4} {name:<30} "
-            f"{ke[d0]:>10.3f} {kd[d0]:>10.3f} "
-            f"{arm[d0]:>10.5f} {frc[d0]:>10.2f}"
-        )
+        print(f"{j:<4} {name:<30} {ke[d0]:>10.3f} {kd[d0]:>10.3f} {arm[d0]:>10.5f} {frc[d0]:>10.2f}")
 
 
 if __name__ == "__main__":

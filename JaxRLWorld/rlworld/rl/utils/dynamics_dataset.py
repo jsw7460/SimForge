@@ -1,8 +1,8 @@
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List
 
 import torch
 
-from rlworld.rl.utils.console import GREEN, YELLOW, RED, RESET
+from rlworld.rl.utils.console import GREEN, RESET, YELLOW
 
 
 class DynamicsDataset:
@@ -23,13 +23,13 @@ class DynamicsDataset:
 
     def __init__(
         self,
-        observations: Optional[torch.Tensor] = None,
-        actions: Optional[torch.Tensor] = None,
-        next_observations: Optional[torch.Tensor] = None,
-        dones: Optional[torch.Tensor] = None,
-        auxiliary_obs: Optional[Dict[str, torch.Tensor]] = None,
-        next_auxiliary_obs: Optional[Dict[str, torch.Tensor]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        observations: torch.Tensor | None = None,
+        actions: torch.Tensor | None = None,
+        next_observations: torch.Tensor | None = None,
+        dones: torch.Tensor | None = None,
+        auxiliary_obs: Dict[str, torch.Tensor] | None = None,
+        next_auxiliary_obs: Dict[str, torch.Tensor] | None = None,
+        metadata: Dict[str, Any] | None = None,
     ):
         """
         Initialize dataset.
@@ -44,8 +44,9 @@ class DynamicsDataset:
             metadata: Additional metadata
         """
         if observations is not None:
-            assert observations.shape[0] == actions.shape[0] == next_observations.shape[0], \
+            assert observations.shape[0] == actions.shape[0] == next_observations.shape[0], (
                 "All tensors must have the same number of samples"
+            )
 
             self.observations = observations.cpu()
             self.actions = actions.cpu()
@@ -53,8 +54,9 @@ class DynamicsDataset:
 
             # Handle dones
             if dones is not None:
-                assert dones.shape[0] == observations.shape[0], \
+                assert dones.shape[0] == observations.shape[0], (
                     f"Dones has wrong size: {dones.shape[0]} vs {observations.shape[0]}"
+                )
                 self.dones = dones.cpu()
             else:
                 # If no dones provided, assume no episode terminations
@@ -73,13 +75,15 @@ class DynamicsDataset:
         # Validate auxiliary observations have correct size
         if auxiliary_obs:
             for key, tensor in auxiliary_obs.items():
-                assert tensor.shape[0] == self.observations.shape[0], \
+                assert tensor.shape[0] == self.observations.shape[0], (
                     f"Auxiliary obs '{key}' has wrong size: {tensor.shape[0]} vs {self.observations.shape[0]}"
+                )
 
         if next_auxiliary_obs:
             for key, tensor in next_auxiliary_obs.items():
-                assert tensor.shape[0] == self.observations.shape[0], \
+                assert tensor.shape[0] == self.observations.shape[0], (
                     f"Next auxiliary obs '{key}' has wrong size: {tensor.shape[0]} vs {self.observations.shape[0]}"
+                )
 
         self.metadata = metadata or {}
 
@@ -133,18 +137,18 @@ class DynamicsDataset:
             - 'next_aux_{name}': Next auxiliary observation
         """
         item = {
-            'obs': self.observations[idx],
-            'action': self.actions[idx],
-            'next_obs': self.next_observations[idx],
-            'done': self.dones[idx]
+            "obs": self.observations[idx],
+            "action": self.actions[idx],
+            "next_obs": self.next_observations[idx],
+            "done": self.dones[idx],
         }
 
         # Add auxiliary observations with 'aux_' prefix
         for key, tensor in self.auxiliary_obs.items():
-            item[f'aux_{key}'] = tensor[idx]
+            item[f"aux_{key}"] = tensor[idx]
 
         for key, tensor in self.next_auxiliary_obs.items():
-            item[f'next_aux_{key}'] = tensor[idx]
+            item[f"next_aux_{key}"] = tensor[idx]
 
         return item
 
@@ -170,11 +174,7 @@ class DynamicsDataset:
         """List all available auxiliary terms"""
         return list(self.auxiliary_obs.keys())
 
-    def filter_outliers(
-        self,
-        percentile: float = 99.0,
-        method: str = 'delta_norm'
-    ) -> 'DynamicsDataset':
+    def filter_outliers(self, percentile: float = 99.0, method: str = "delta_norm") -> "DynamicsDataset":
         """
         Filter outliers and return new DynamicsDataset.
 
@@ -185,13 +185,13 @@ class DynamicsDataset:
         Returns:
             New filtered DynamicsDataset
         """
-        if method == 'delta_norm':
+        if method == "delta_norm":
             deltas = self.next_observations - self.observations
             delta_norm = deltas.norm(dim=-1)
             threshold = delta_norm.quantile(percentile / 100)
             mask = delta_norm <= threshold
 
-        elif method == 'any_field':
+        elif method == "any_field":
             obs_abs = self.observations.abs()
             actions_abs = self.actions.abs()
             deltas = self.next_observations - self.observations
@@ -202,12 +202,12 @@ class DynamicsDataset:
             delta_threshold = deltas_abs.quantile(percentile / 100)
 
             mask = (
-                (obs_abs <= obs_threshold).all(dim=-1) &
-                (actions_abs <= action_threshold).all(dim=-1) &
-                (deltas_abs <= delta_threshold).all(dim=-1)
+                (obs_abs <= obs_threshold).all(dim=-1)
+                & (actions_abs <= action_threshold).all(dim=-1)
+                & (deltas_abs <= delta_threshold).all(dim=-1)
             )
 
-        elif method == 'obs_norm':
+        elif method == "obs_norm":
             obs_norm = self.observations.norm(dim=-1)
             threshold = obs_norm.quantile(percentile / 100)
             mask = obs_norm <= threshold
@@ -246,13 +246,11 @@ class DynamicsDataset:
             dones=filtered_dones,
             auxiliary_obs=filtered_auxiliary_obs,
             next_auxiliary_obs=filtered_next_auxiliary_obs,
-            metadata=self.metadata.copy()
+            metadata=self.metadata.copy(),
         )
 
     def analyze_outliers(
-        self,
-        percentiles: List[float] = [90, 95, 99, 99.5, 99.9],
-        verbose: bool = True
+        self, percentiles: List[float] = [90, 95, 99, 99.5, 99.9], verbose: bool = True
     ) -> Dict[str, Any]:
         """
         Analyze outlier distribution in dataset.
@@ -264,12 +262,7 @@ class DynamicsDataset:
         Returns:
             Dictionary containing outlier statistics
         """
-        results = {
-            'observations': {},
-            'actions': {},
-            'next_observations': {},
-            'deltas': {}
-        }
+        results = {"observations": {}, "actions": {}, "next_observations": {}, "deltas": {}}
 
         if verbose:
             print("\n" + "=" * 70)
@@ -290,18 +283,18 @@ class DynamicsDataset:
             print(f"Range: [{obs.min():.6f}, {obs.max():.6f}]")
             print(f"Mean: {obs.mean():.6f}, Std: {obs.std():.6f}")
 
-        results['observations']['shape'] = obs.shape
-        results['observations']['min'] = obs.min().item()
-        results['observations']['max'] = obs.max().item()
-        results['observations']['mean'] = obs.mean().item()
-        results['observations']['std'] = obs.std().item()
-        results['observations']['percentiles'] = {}
+        results["observations"]["shape"] = obs.shape
+        results["observations"]["min"] = obs.min().item()
+        results["observations"]["max"] = obs.max().item()
+        results["observations"]["mean"] = obs.mean().item()
+        results["observations"]["std"] = obs.std().item()
+        results["observations"]["percentiles"] = {}
 
         if verbose:
             print("\nPer-element absolute value percentiles:")
         for p in percentiles:
             val = obs_abs.quantile(p / 100).item()
-            results['observations']['percentiles'][p] = val
+            results["observations"]["percentiles"][p] = val
             if verbose:
                 print(f"  P{p:>5.1f}: {val:.6f}")
 
@@ -333,18 +326,18 @@ class DynamicsDataset:
             print(f"Range: [{actions.min():.6f}, {actions.max():.6f}]")
             print(f"Mean: {actions.mean():.6f}, Std: {actions.std():.6f}")
 
-        results['actions']['shape'] = actions.shape
-        results['actions']['min'] = actions.min().item()
-        results['actions']['max'] = actions.max().item()
-        results['actions']['mean'] = actions.mean().item()
-        results['actions']['std'] = actions.std().item()
-        results['actions']['percentiles'] = {}
+        results["actions"]["shape"] = actions.shape
+        results["actions"]["min"] = actions.min().item()
+        results["actions"]["max"] = actions.max().item()
+        results["actions"]["mean"] = actions.mean().item()
+        results["actions"]["std"] = actions.std().item()
+        results["actions"]["percentiles"] = {}
 
         if verbose:
             print("\nPer-element absolute value percentiles:")
         for p in percentiles:
             val = actions_abs.quantile(p / 100).item()
-            results['actions']['percentiles'][p] = val
+            results["actions"]["percentiles"][p] = val
             if verbose:
                 print(f"  P{p:>5.1f}: {val:.6f}")
 
@@ -358,17 +351,17 @@ class DynamicsDataset:
             print(f"Range: [{deltas.min():.6f}, {deltas.max():.6f}]")
             print(f"Mean: {deltas.mean():.6f}, Std: {deltas.std():.6f}")
 
-        results['deltas']['min'] = deltas.min().item()
-        results['deltas']['max'] = deltas.max().item()
-        results['deltas']['mean'] = deltas.mean().item()
-        results['deltas']['std'] = deltas.std().item()
-        results['deltas']['percentiles'] = {}
+        results["deltas"]["min"] = deltas.min().item()
+        results["deltas"]["max"] = deltas.max().item()
+        results["deltas"]["mean"] = deltas.mean().item()
+        results["deltas"]["std"] = deltas.std().item()
+        results["deltas"]["percentiles"] = {}
 
         if verbose:
             print("\nPer-element absolute value percentiles:")
         for p in percentiles:
             val = deltas_abs.quantile(p / 100).item()
-            results['deltas']['percentiles'][p] = val
+            results["deltas"]["percentiles"][p] = val
             if verbose:
                 print(f"  P{p:>5.1f}: {val:.6f}")
 
@@ -389,18 +382,15 @@ class DynamicsDataset:
             delta_threshold = deltas_abs.quantile(threshold_p / 100)
 
             outlier_mask = (
-                (obs_abs > obs_threshold).any(dim=-1) |
-                (actions_abs > action_threshold).any(dim=-1) |
-                (deltas_abs > delta_threshold).any(dim=-1)
+                (obs_abs > obs_threshold).any(dim=-1)
+                | (actions_abs > action_threshold).any(dim=-1)
+                | (deltas_abs > delta_threshold).any(dim=-1)
             )
 
             n_outliers = outlier_mask.sum().item()
             pct = n_outliers / len(self) * 100
 
-            results[f'joint_outliers_p{threshold_p}'] = {
-                'count': n_outliers,
-                'percentage': pct
-            }
+            results[f"joint_outliers_p{threshold_p}"] = {"count": n_outliers, "percentage": pct}
 
             if verbose:
                 print(f"\nSamples with ANY field > P{threshold_p}:")
@@ -427,19 +417,20 @@ class DynamicsDataset:
     def save(self, path: str) -> None:
         """Save dataset to file"""
         from pathlib import Path
+
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
         save_dict = {
-            'observations': self.observations,
-            'actions': self.actions,
-            'next_observations': self.next_observations,
-            'dones': self.dones,
-            'auxiliary_obs': self.auxiliary_obs,
-            'next_auxiliary_obs': self.next_auxiliary_obs,
-            'metadata': self.metadata,
-            'dataset_size': len(self),
-            'obs_dim': self.get_obs_dim(),
-            'action_dim': self.get_action_dim()
+            "observations": self.observations,
+            "actions": self.actions,
+            "next_observations": self.next_observations,
+            "dones": self.dones,
+            "auxiliary_obs": self.auxiliary_obs,
+            "next_auxiliary_obs": self.next_auxiliary_obs,
+            "metadata": self.metadata,
+            "dataset_size": len(self),
+            "obs_dim": self.get_obs_dim(),
+            "action_dim": self.get_action_dim(),
         }
 
         torch.save(save_dict, path)
@@ -450,32 +441,33 @@ class DynamicsDataset:
             print(f"  - Auxiliary terms: {list(self.auxiliary_obs.keys())}")
 
     @classmethod
-    def load(cls, path: str) -> 'DynamicsDataset':
+    def load(cls, path: str) -> "DynamicsDataset":
         """Load dataset from file (supports both old and new formats)"""
         import os
+
         if not os.path.exists(path):
             raise FileNotFoundError(f"Dataset file not found: {path}")
 
-        data = torch.load(path, map_location='cpu', weights_only=False)
+        data = torch.load(path, map_location="cpu", weights_only=False)
 
         # Handle backward compatibility (old format with 'dataset' wrapper)
-        if 'dataset' in data:
-            observations = data['dataset']['observations']
-            actions = data['dataset']['actions']
-            next_observations = data['dataset']['next_observations']
-            dones = data['dataset']['dones']
-            metadata = data['dataset'].get('metadata', {})
-            auxiliary_obs = data['dataset'].get('auxiliary_obs', {})
-            next_auxiliary_obs = data['dataset'].get('next_auxiliary_obs', {})
+        if "dataset" in data:
+            observations = data["dataset"]["observations"]
+            actions = data["dataset"]["actions"]
+            next_observations = data["dataset"]["next_observations"]
+            dones = data["dataset"]["dones"]
+            metadata = data["dataset"].get("metadata", {})
+            auxiliary_obs = data["dataset"].get("auxiliary_obs", {})
+            next_auxiliary_obs = data["dataset"].get("next_auxiliary_obs", {})
         else:
             # New format (flat structure)
-            observations = data['observations']
-            actions = data['actions']
-            next_observations = data['next_observations']
-            dones = data['dones']
-            metadata = data.get('metadata', {})
-            auxiliary_obs = data.get('auxiliary_obs', {})
-            next_auxiliary_obs = data.get('next_auxiliary_obs', {})
+            observations = data["observations"]
+            actions = data["actions"]
+            next_observations = data["next_observations"]
+            dones = data["dones"]
+            metadata = data.get("metadata", {})
+            auxiliary_obs = data.get("auxiliary_obs", {})
+            next_auxiliary_obs = data.get("next_auxiliary_obs", {})
 
         dataset = cls(
             observations=observations.cpu(),
@@ -484,7 +476,7 @@ class DynamicsDataset:
             dones=dones.cpu() if dones is not None else None,
             auxiliary_obs=auxiliary_obs,
             next_auxiliary_obs=next_auxiliary_obs,
-            metadata=metadata
+            metadata=metadata,
         )
 
         print(f"{GREEN}Loaded dataset from {path}:{RESET}")
@@ -564,29 +556,21 @@ def compute_normalization_stats(dataset, aux_terms: List[str]) -> dict:
     mean = combined_data.mean(dim=0)
     std = combined_data.std(dim=0)
 
-    print(f"\nCombined statistics:")
+    print("\nCombined statistics:")
     print(f"  Mean: {mean.mean():.2f}, Std: {std.mean():.2f}")
 
     # Create normalization dict
-    input_key = f'aux_{"_".join(aux_terms)}'
-    output_key = f'next_aux_{"_".join(aux_terms)}'
+    input_key = f"aux_{'_'.join(aux_terms)}"
+    output_key = f"next_aux_{'_'.join(aux_terms)}"
 
-    return {
-        input_key: (mean, std),
-        output_key: (mean, std)
-    }
+    return {input_key: (mean, std), output_key: (mean, std)}
 
 
 class AuxiliaryBatchLoader:
     """Batch loader that handles multiple auxiliary terms or observations"""
 
     def __init__(
-        self,
-        dataset,
-        batch_size: int,
-        aux_terms: List[str] = None,
-        shuffle: bool = True,
-        normalize_keys: dict = None
+        self, dataset, batch_size: int, aux_terms: List[str] = None, shuffle: bool = True, normalize_keys: dict = None
     ):
         self.dataset = dataset
         self.batch_size = batch_size
@@ -595,7 +579,7 @@ class AuxiliaryBatchLoader:
         self.normalize_keys = normalize_keys or {}
 
         # Handle Subset objects
-        if hasattr(dataset, 'dataset'):
+        if hasattr(dataset, "dataset"):
             self.base_dataset = dataset.dataset
             self.indices = list(dataset.indices)
         else:
@@ -605,47 +589,40 @@ class AuxiliaryBatchLoader:
     def __iter__(self):
         if self.shuffle:
             import random
+
             random.shuffle(self.indices)
 
         for i in range(0, len(self.indices), self.batch_size):
-            batch_indices = self.indices[i:i + self.batch_size]
+            batch_indices = self.indices[i : i + self.batch_size]
 
             # Build batch
             batch = {}
 
             # Actions (always needed)
-            batch['action'] = torch.stack([
-                self.base_dataset.actions[idx] for idx in batch_indices
-            ])
+            batch["action"] = torch.stack([self.base_dataset.actions[idx] for idx in batch_indices])
 
             # Input/Output data
             if not self.aux_terms:
                 # Use observations
-                batch['obs'] = torch.stack([
-                    self.base_dataset.observations[idx] for idx in batch_indices
-                ])
-                batch['next_obs'] = torch.stack([
-                    self.base_dataset.next_observations[idx] for idx in batch_indices
-                ])
+                batch["obs"] = torch.stack([self.base_dataset.observations[idx] for idx in batch_indices])
+                batch["next_obs"] = torch.stack([self.base_dataset.next_observations[idx] for idx in batch_indices])
             else:
                 # Use auxiliary terms
                 aux_data = []
                 next_aux_data = []
 
                 for term in self.aux_terms:
-                    term_data = torch.stack([
-                        self.base_dataset.auxiliary_obs[term][idx] for idx in batch_indices
-                    ])
-                    next_term_data = torch.stack([
-                        self.base_dataset.next_auxiliary_obs[term][idx] for idx in batch_indices
-                    ])
+                    term_data = torch.stack([self.base_dataset.auxiliary_obs[term][idx] for idx in batch_indices])
+                    next_term_data = torch.stack(
+                        [self.base_dataset.next_auxiliary_obs[term][idx] for idx in batch_indices]
+                    )
 
                     aux_data.append(term_data)
                     next_aux_data.append(next_term_data)
 
                 # Concatenate along feature dimension
-                input_key = f'aux_{"_".join(self.aux_terms)}'
-                output_key = f'next_aux_{"_".join(self.aux_terms)}'
+                input_key = f"aux_{'_'.join(self.aux_terms)}"
+                output_key = f"next_aux_{'_'.join(self.aux_terms)}"
 
                 batch[input_key] = torch.cat(aux_data, dim=-1)
                 batch[output_key] = torch.cat(next_aux_data, dim=-1)

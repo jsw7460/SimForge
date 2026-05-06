@@ -14,7 +14,6 @@ from rlworld.rl.envs.mdp.observations.newton.body_utils import (
     get_bodies_quat,
 )
 from rlworld.rl.envs.mdp.observations.newton.state import (
-    _quat_rotate,
     _quat_rotate_inverse,
 )
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
@@ -22,7 +21,6 @@ from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     VariablePostureTracker,
     penalize_angular_momentum_l2,
     penalize_body_ang_vel_xy,
-    penalize_contact_force_count,
     penalize_feet_clearance,
     penalize_feet_slip,
     penalize_joint_pos_limits_l1,
@@ -38,8 +36,9 @@ if TYPE_CHECKING:
 # track_lin_vel_mjlab
 # ============================================================
 
+
 def track_lin_vel_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     std: float,
 ) -> torch.Tensor:
     """Reward for tracking commanded base linear velocity.
@@ -54,10 +53,13 @@ def track_lin_vel_mjlab(
     Returns:
         Reward tensor of shape (num_envs,).
     """
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-    ], dim=1)  # (num_envs, 2)
+    command = torch.stack(
+        [
+            env.command_manager.lin_vel_x,
+            env.command_manager.lin_vel_y,
+        ],
+        dim=1,
+    )  # (num_envs, 2)
 
     actual = env.robot_data.root_link_lin_vel_b  # (num_envs, 3)
 
@@ -65,15 +67,16 @@ def track_lin_vel_mjlab(
     z_error = torch.square(actual[:, 2])
     lin_vel_error = xy_error + z_error
 
-    return torch.exp(-lin_vel_error / (std ** 2))
+    return torch.exp(-lin_vel_error / (std**2))
 
 
 # ============================================================
 # track_ang_vel_mjlab
 # ============================================================
 
+
 def track_ang_vel_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     std: float,
 ) -> torch.Tensor:
     """Reward for tracking commanded angular velocity.
@@ -96,15 +99,16 @@ def track_ang_vel_mjlab(
     xy_error = torch.sum(torch.square(actual[:, :2]), dim=1)
     ang_vel_error = z_error + xy_error
 
-    return torch.exp(-ang_vel_error / (std ** 2))
+    return torch.exp(-ang_vel_error / (std**2))
 
 
 # ============================================================
 # flat_orientation_mjlab
 # ============================================================
 
+
 def flat_orientation_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     std: float,
     body_name: str | None = None,
 ) -> torch.Tensor:
@@ -113,12 +117,12 @@ def flat_orientation_mjlab(
         body_quat_xyzw = result.data[:, 0, :]  # (num_envs, 4)
 
         # Cache normalized gravity vector
-        if not hasattr(env, '_gravity_normalized_cache'):
-            env._gravity_normalized_cache = torch.tensor(
-                [[0.0, 0.0, -1.0]],
-                device=env.device,
-                dtype=torch.float32
-            ).expand(env.num_envs, -1).contiguous()
+        if not hasattr(env, "_gravity_normalized_cache"):
+            env._gravity_normalized_cache = (
+                torch.tensor([[0.0, 0.0, -1.0]], device=env.device, dtype=torch.float32)
+                .expand(env.num_envs, -1)
+                .contiguous()
+            )
 
         projected_gravity_b = _quat_rotate_inverse(body_quat_xyzw, env._gravity_normalized_cache)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
@@ -126,15 +130,16 @@ def flat_orientation_mjlab(
         projected_gravity_b = env.robot_data.projected_gravity_b  # (num_envs, 3)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
 
-    return torch.exp(-xy_squared / (std ** 2))
+    return torch.exp(-xy_squared / (std**2))
 
 
 # ============================================================
 # body_ang_vel_penalty_mjlab
 # ============================================================
 
+
 def body_ang_vel_penalty_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     body_name: str,
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
@@ -160,8 +165,9 @@ def body_ang_vel_penalty_mjlab(
 # feet_air_time_mjlab
 # ============================================================
 
+
 def feet_air_time_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     feet_bodies: str | list[str],
     threshold_min: float = 0.05,
     threshold_max: float = 0.5,
@@ -189,11 +195,14 @@ def feet_air_time_mjlab(
     in_range = (current_air_time > threshold_min) & (current_air_time < threshold_max)
     reward = torch.sum(in_range.float(), dim=1)
 
-    command = torch.stack([
-        env.command_manager.lin_vel_x,
-        env.command_manager.lin_vel_y,
-        env.command_manager.ang_vel,
-    ], dim=1)
+    command = torch.stack(
+        [
+            env.command_manager.lin_vel_x,
+            env.command_manager.lin_vel_y,
+            env.command_manager.ang_vel,
+        ],
+        dim=1,
+    )
 
     linear_norm = torch.norm(command[:, :2], dim=1)
     angular_norm = torch.abs(command[:, 2])
@@ -207,8 +216,9 @@ def feet_air_time_mjlab(
 # feet_clearance_mjlab
 # ============================================================
 
+
 def feet_clearance_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     feet_bodies: str | list[str],
     target_height: float,
     command_threshold: float = 0.01,
@@ -233,8 +243,9 @@ def feet_clearance_mjlab(
 # feet_slip_mjlab
 # ============================================================
 
+
 def feet_slip_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     feet_bodies: str | list[str],
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
@@ -257,8 +268,9 @@ def feet_slip_mjlab(
 # soft_landing_mjlab
 # ============================================================
 
+
 def soft_landing_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     feet_bodies: str | list[str],
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
@@ -283,8 +295,9 @@ def soft_landing_mjlab(
 # joint_pos_limits_mjlab
 # ============================================================
 
+
 def joint_pos_limits_mjlab(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     soft_limit_factor: float = 1.0,
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits.
@@ -310,7 +323,8 @@ def joint_pos_limits_mjlab(
 # action_rate_l2_mjlab
 # ============================================================
 
-def raw_action_rate_l2_mjlab(env: "NewtonEnv") -> torch.Tensor:
+
+def raw_action_rate_l2_mjlab(env: NewtonEnv) -> torch.Tensor:
     """Penalize the rate of change of raw actions (L2 squared).
 
     Delegates to ``common.raw_action_rate_l2``. Bit-identical: same
@@ -318,7 +332,8 @@ def raw_action_rate_l2_mjlab(env: "NewtonEnv") -> torch.Tensor:
     """
     return raw_action_rate_l2(env)
 
-def processed_action_rate_l2_mjlab(env: "NewtonEnv") -> torch.Tensor:
+
+def processed_action_rate_l2_mjlab(env: NewtonEnv) -> torch.Tensor:
     """Penalize the rate of change of actions using L2 squared kernel.
 
     Matches mjlab.envs.mdp.action_rate_l2 exactly.
@@ -329,15 +344,13 @@ def processed_action_rate_l2_mjlab(env: "NewtonEnv") -> torch.Tensor:
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return -torch.sum(
-        torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions),
-        dim=1
-    )
+    return -torch.sum(torch.square(env.act_manager.processed_actions - env.act_manager.prev_processed_actions), dim=1)
 
 
 # ============================================================
 # variable_posture
 # ============================================================
+
 
 class variable_posture:
     """Thin wrapper around ``common.VariablePostureTracker``.
@@ -353,7 +366,7 @@ class variable_posture:
 
     def __init__(
         self,
-        env: "NewtonEnv",
+        env: NewtonEnv,
         std_standing: dict[str, float],
         std_walking: dict[str, float],
         std_running: dict[str, float],
@@ -372,7 +385,7 @@ class variable_posture:
             running_threshold=running_threshold,
         )
 
-    def __call__(self, env: "NewtonEnv") -> torch.Tensor:
+    def __call__(self, env: NewtonEnv) -> torch.Tensor:
         return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
@@ -382,6 +395,7 @@ class variable_posture:
 # ============================================================
 # feet_swing_height_mjlab
 # ============================================================
+
 
 class feet_swing_height_mjlab:
     """Thin wrapper around ``common.FeetSwingHeightTracker`` (Newton legacy reset).
@@ -395,7 +409,7 @@ class feet_swing_height_mjlab:
 
     def __init__(
         self,
-        env: "NewtonEnv",
+        env: NewtonEnv,
         feet_bodies: str | list[str],
         target_height: float,
         command_threshold: float = 0.05,
@@ -411,7 +425,7 @@ class feet_swing_height_mjlab:
             reset_mode="current_foot_height",
         )
 
-    def __call__(self, env: "NewtonEnv") -> torch.Tensor:
+    def __call__(self, env: NewtonEnv) -> torch.Tensor:
         return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
@@ -421,6 +435,7 @@ class feet_swing_height_mjlab:
 # ============================================================
 # feet_swing_height (alias for backward compatibility)
 # ============================================================
+
 
 class feet_swing_height:
     """Walk-These-Ways variant: absolute (not squared) error.
@@ -434,7 +449,7 @@ class feet_swing_height:
 
     def __init__(
         self,
-        env: "NewtonEnv",
+        env: NewtonEnv,
         feet_bodies: str | list[str],
         target_height: float,
         command_threshold: float = 0.05,
@@ -450,7 +465,7 @@ class feet_swing_height:
             reset_mode="current_foot_height",
         )
 
-    def __call__(self, env: "NewtonEnv") -> torch.Tensor:
+    def __call__(self, env: NewtonEnv) -> torch.Tensor:
         return self._impl(env)
 
     def reset(self, env_ids: torch.Tensor) -> None:
@@ -461,8 +476,9 @@ class feet_swing_height:
 # angular_momentum_penalty
 # ============================================================
 
+
 def angular_momentum_penalty(
-    env: "NewtonEnv",
+    env: NewtonEnv,
 ) -> torch.Tensor:
     """Penalize whole-body angular momentum.
 

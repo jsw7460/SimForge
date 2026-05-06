@@ -3,6 +3,7 @@
 Dispatched from :meth:`T1TrackingConfig.build` when
 ``sim_type == "mujoco"``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,8 +15,8 @@ from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
 )
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
-from rlworld.rl.actuators import ImplicitActuatorCfg, IdealPDActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.actuators import IdealPDActuatorCfg
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -37,7 +38,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -71,11 +71,11 @@ CONFIGS_FOR_RUN_CLS = MujocoConfigsForRun
 OBSERVATION_CFG_CLS = MujocoObservationConfig
 
 
-def build_visualization(cfg: "T1TrackingConfig") -> VisualizationConfig:
+def build_visualization(cfg: T1TrackingConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
+def build_env(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         time_out = TerminationTermConfig(tf.time_out)
@@ -113,19 +113,15 @@ def build_env(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> MujocoEnvConfi
     )
 
 
-def build_scene(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> MujocoSceneConfig:
+def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
     r = cfg.robot
     physics_dt = timing["dt"]
     substeps = timing.get("substeps", 1)
 
     self_collision_cfg = ContactSensorCfg(
         name="self_collision",
-        primary=ContactMatch(
-            mode="subtree", pattern=r.trunk_body_name, entity="robot"
-        ),
-        secondary=ContactMatch(
-            mode="subtree", pattern=r.trunk_body_name, entity="robot"
-        ),
+        primary=ContactMatch(mode="subtree", pattern=r.trunk_body_name, entity="robot"),
+        secondary=ContactMatch(mode="subtree", pattern=r.trunk_body_name, entity="robot"),
         fields=("found", "force"),
         reduce="none",
         num_slots=1,
@@ -181,39 +177,37 @@ _MOTION_PARAMS = {"command_name": "motion"}
 
 @dataclass
 class _ActorObsCfg(ObservationGroupConfig):
-    base_ang_vel_obs = ObservationTermConfig(
-        func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-    )
-    projected_gravity_obs = ObservationTermConfig(
-        func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-    )
-    dof_pos_obs = ObservationTermConfig(
-        func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
-    )
-    dof_pos_diff_obs = ObservationTermConfig(
-        func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
-    )
-    dof_vel_obs = ObservationTermConfig(
-        func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-    )
+    base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+    projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+    dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03))
+    dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
+    dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
     prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
     command = ObservationTermConfig(func=command_obs, scale=1.0)
     motion_anchor_pos = ObservationTermConfig(
-        func=motion_anchor_pos_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_pos_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
         noise=Unoise(-0.05, 0.05),
     )
     motion_anchor_ori = ObservationTermConfig(
-        func=motion_anchor_ori_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_ori_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
         noise=Unoise(-0.05, 0.05),
     )
     # Multi-clip disambiguation. See newton builder for rationale.
     motion_clip_id = ObservationTermConfig(
-        func=motion_clip_id_onehot, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_clip_id_onehot,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
     # obs by assuming future window is the trailing segment.
     motion_future_window = ObservationTermConfig(
-        func=motion_future_reference_window, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_future_reference_window,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
 
 
@@ -224,7 +218,8 @@ class _CriticObsCfg(ObservationGroupConfig):
     projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
     dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
     dof_pos_diff_obs = ObservationTermConfig(
-        func=dof_pos_nominal_difference, scale=1.0,
+        func=dof_pos_nominal_difference,
+        scale=1.0,
     )
     dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
     prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
@@ -232,24 +227,36 @@ class _CriticObsCfg(ObservationGroupConfig):
     base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
     command = ObservationTermConfig(func=command_obs, scale=1.0)
     motion_anchor_pos = ObservationTermConfig(
-        func=motion_anchor_pos_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_pos_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     motion_anchor_ori = ObservationTermConfig(
-        func=motion_anchor_ori_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_ori_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     robot_body_pos = ObservationTermConfig(
-        func=robot_body_pos_b, scale=1.0, params=_MOTION_PARAMS,
+        func=robot_body_pos_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     robot_body_ori = ObservationTermConfig(
-        func=robot_body_ori_b, scale=1.0, params=_MOTION_PARAMS,
+        func=robot_body_ori_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     # Same multi-clip identifier as the actor.
     motion_clip_id = ObservationTermConfig(
-        func=motion_clip_id_onehot, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_clip_id_onehot,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     # Must be LAST: see _ActorObsCfg.motion_future_window.
     motion_future_window = ObservationTermConfig(
-        func=motion_future_reference_window, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_future_reference_window,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
 
 
@@ -259,11 +266,11 @@ class _ObsCfg(MujocoObservationConfig):
     critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
 
 
-def build_observation(cfg: "T1TrackingConfig") -> MujocoObservationConfig:
+def build_observation(cfg: T1TrackingConfig) -> MujocoObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "T1TrackingConfig") -> MujocoActionConfig:
+def build_action(cfg: T1TrackingConfig) -> MujocoActionConfig:
     """Action term selection — see ``_newton_builders.build_action``."""
     from rlworld.rl.envs.mdp.actions import (
         JointPositionAction,
@@ -290,10 +297,7 @@ def build_action(cfg: "T1TrackingConfig") -> MujocoActionConfig:
             clip=(-100.0, 100.0),
         )
     else:
-        raise ValueError(
-            f"Unknown action_mode: {cfg.action_mode!r}. "
-            f"Expected 'motion_residual' or 'default_pose'."
-        )
+        raise ValueError(f"Unknown action_mode: {cfg.action_mode!r}. Expected 'motion_residual' or 'default_pose'.")
 
     return MujocoActionConfig(
         entity_name="robot",
@@ -303,7 +307,7 @@ def build_action(cfg: "T1TrackingConfig") -> MujocoActionConfig:
     )
 
 
-def build_reward(cfg: "T1TrackingConfig") -> RewardConfig:
+def build_reward(cfg: T1TrackingConfig) -> RewardConfig:
     motion_params_std = lambda std: {"command_name": "motion", "std": std}
 
     @dataclass
@@ -355,7 +359,7 @@ def build_reward(cfg: "T1TrackingConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "T1TrackingConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo DR (3-axis friction)."""
     from rlworld.rl.envs.mdp.events import mujoco as ef
     from rlworld.rl.envs.mdp.events.mujoco import EntityCfg

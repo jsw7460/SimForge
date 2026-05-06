@@ -5,13 +5,13 @@ from typing import Any
 import torch
 
 from rlworld.rl.evals.sim_initializers import SimInitializer
-from rlworld.rl.utils.console import print_info, print_success, print_error
+from rlworld.rl.utils.console import print_error, print_info, print_success
 
 
 class GenesisInitializer(SimInitializer):
-
     def init_device(self) -> torch.device:
         import genesis as gs
+
         return gs.device
 
     def prepare_configs(
@@ -62,6 +62,7 @@ class GenesisInitializer(SimInitializer):
     def create_play_scene(self, env: Any):
         from rlworld.rl.vis.viser.bridges import GenesisBridge
         from rlworld.rl.vis.viser.play_scene import BridgePlayScene
+
         return BridgePlayScene(GenesisBridge(env.scene_manager))
 
     def try_stop_mid_episode_recording(self, env: Any, target_steps: int) -> bool:
@@ -82,7 +83,7 @@ class GenesisInitializer(SimInitializer):
         print_success("Video recording stopped")
 
     def cleanup(self, env: Any) -> None:
-        if hasattr(env, 'vis_manager'):
+        if hasattr(env, "vis_manager"):
             print_info("Saving video before exit...")
             try:
                 env.vis_manager.stop_recording()

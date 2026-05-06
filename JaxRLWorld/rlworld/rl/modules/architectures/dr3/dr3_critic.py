@@ -1,8 +1,8 @@
+import math
 from typing import Sequence, Union
 
 import equinox as eqx
 import jax
-import math
 
 from rlworld.rl.modules.utils import get_activation, orthogonal_init_mlp
 
@@ -15,6 +15,7 @@ class DR3MLP(eqx.Module):
 
     Same architecture as MLP, but with feature extraction capability.
     """
+
     linears: tuple
     layer_norms: tuple
     activation: callable = eqx.field(static=True)
@@ -125,6 +126,7 @@ class DR3Critic(eqx.Module):
 
     Same as MLPCritic but can return penultimate layer features.
     """
+
     net: DR3MLP
     num_obs: int = eqx.field(static=True)
     feature_dim: int = eqx.field(static=True)
@@ -173,9 +175,7 @@ class DR3Critic(eqx.Module):
         """Standard forward pass."""
         return self.net(observations), {}
 
-    def forward_with_features(
-        self, observations: jax.Array
-    ) -> tuple[jax.Array, jax.Array, dict]:
+    def forward_with_features(self, observations: jax.Array) -> tuple[jax.Array, jax.Array, dict]:
         """
         Forward pass with feature extraction.
 

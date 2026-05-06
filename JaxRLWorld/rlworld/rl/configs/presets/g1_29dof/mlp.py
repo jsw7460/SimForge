@@ -11,9 +11,9 @@ from .base import G1FlatConfig
 # Per-sim default run name preserves the existing strings so wandb runs
 # stay grouped under the same names as before the unification.
 _DEFAULT_RUN_NAMES = {
-    "newton":  "G1_29Dof_Newton_MLP",
+    "newton": "G1_29Dof_Newton_MLP",
     "genesis": "G1_29Dof_Genesis_MLP",
-    "mujoco":  "G1_29Dof_Mujoco_MLP",
+    "mujoco": "G1_29Dof_Mujoco_MLP",
 }
 
 

@@ -7,6 +7,7 @@ from rlworld.rl.utils.resolve import resolve_callable
 @dataclass
 class CommandTermConfig:
     """``func`` accepts a callable or ``"module.path:attr_name"`` string."""
+
     func: Callable | str
     params: dict = field(default_factory=dict)
     scale: float = 1.0

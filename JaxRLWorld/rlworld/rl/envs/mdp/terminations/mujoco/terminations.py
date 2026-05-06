@@ -3,6 +3,7 @@
 These functions provide termination conditions for MuJoCo-based environments,
 ported from mjlab's MDP module with adaptations for rlworld's interface.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.mujoco import MujocoEnv
 
 
-def time_out(env: "MujocoEnv") -> TerminationResult:
+def time_out(env: MujocoEnv) -> TerminationResult:
     """Terminate when the episode length exceeds maximum.
 
     Args:
@@ -30,7 +31,7 @@ def time_out(env: "MujocoEnv") -> TerminationResult:
 
 
 def bad_orientation(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     limit_angle: float = 1.0,
 ) -> TerminationResult:
     """Terminate when the robot's orientation exceeds the limit angle.
@@ -55,7 +56,7 @@ def bad_orientation(
 
 
 def root_height_below_minimum(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     minimum_height: float = 0.2,
 ) -> TerminationResult:
     """Terminate when the robot's root height falls below minimum.
@@ -75,7 +76,7 @@ def root_height_below_minimum(
 
 
 def roll_pitch_violation(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     roll_threshold: float = 0.5,
     pitch_threshold: float = 0.5,
 ) -> TerminationResult:
@@ -105,7 +106,7 @@ def roll_pitch_violation(
 
 
 def illegal_contact(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     sensor_name: str | None = None,
     force_threshold: float = 10.0,
 ) -> TerminationResult:
@@ -137,12 +138,12 @@ def illegal_contact(
 
     # Legacy fallback: contact_manager-based
     contact_data = env.contact_manager
-    if hasattr(contact_data, 'illegal_contact_detected'):
+    if hasattr(contact_data, "illegal_contact_detected"):
         return TerminationResult(contact_data.illegal_contact_detected)
     return TerminationResult(torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
 
 
-def base_contact(env: "MujocoEnv") -> TerminationResult:
+def base_contact(env: MujocoEnv) -> TerminationResult:
     """Terminate when the base/torso makes contact with ground.
 
     Args:
@@ -154,7 +155,7 @@ def base_contact(env: "MujocoEnv") -> TerminationResult:
     contact_data = env.contact_manager
 
     # Check for base contact (typically first body in contact sensor)
-    if hasattr(contact_data, 'base_contact'):
+    if hasattr(contact_data, "base_contact"):
         terminated = contact_data.base_contact
     else:
         terminated = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
@@ -162,7 +163,7 @@ def base_contact(env: "MujocoEnv") -> TerminationResult:
     return TerminationResult(terminated)
 
 
-def nan_detection(env: "MujocoEnv") -> TerminationResult:
+def nan_detection(env: MujocoEnv) -> TerminationResult:
     """Terminate environments that have NaN/Inf values in physics state.
 
     Args:
@@ -175,16 +176,16 @@ def nan_detection(env: "MujocoEnv") -> TerminationResult:
 
     # Check common state variables for NaN
     has_nan = (
-        torch.any(torch.isnan(robot_data.joint_pos), dim=1) |
-        torch.any(torch.isnan(robot_data.joint_vel), dim=1) |
-        torch.any(torch.isnan(robot_data.root_link_pos_w), dim=1)
+        torch.any(torch.isnan(robot_data.joint_pos), dim=1)
+        | torch.any(torch.isnan(robot_data.joint_vel), dim=1)
+        | torch.any(torch.isnan(robot_data.root_link_pos_w), dim=1)
     )
 
     return TerminationResult(has_nan)
 
 
 def joint_limit_violation(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     margin: float = 0.0,
 ) -> TerminationResult:
     """Terminate when joint positions exceed limits.
@@ -201,9 +202,7 @@ def joint_limit_violation(
 
     soft_limits = robot_data.soft_joint_pos_limits
     if soft_limits is None:
-        return TerminationResult(
-            torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-        )
+        return TerminationResult(torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
 
     joint_pos = robot_data.joint_pos[:, joint_ids]
     lower_limits = soft_limits[:, joint_ids, 0] - margin
@@ -216,7 +215,7 @@ def joint_limit_violation(
 
 
 def velocity_limit_violation(
-    env: "MujocoEnv",
+    env: MujocoEnv,
     max_linear_velocity: float = 10.0,
     max_angular_velocity: float = 20.0,
 ) -> TerminationResult:

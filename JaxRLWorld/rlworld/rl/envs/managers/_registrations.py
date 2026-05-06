@@ -16,10 +16,14 @@ from rlworld.rl.envs.managers.registry import ManagerRegistry
 def _register_common() -> None:
     """Register simulator-agnostic managers shared by all backends."""
     from rlworld.rl.envs.managers.common import (
-        CommandManager, CommandManagerConfig,
-        RewardManager, RewardManagerConfig,
-        TerminationManager, TerminationConfig,
-        EventManager, EventManagerConfig,
+        CommandManager,
+        CommandManagerConfig,
+        EventManager,
+        EventManagerConfig,
+        RewardManager,
+        RewardManagerConfig,
+        TerminationConfig,
+        TerminationManager,
     )
 
     for sim_type in ("genesis", "newton", "mujoco"):
@@ -32,11 +36,15 @@ def _register_common() -> None:
 def _register_genesis() -> None:
     """Register Genesis-specific managers."""
     from rlworld.rl.envs.managers.genesis import (
-        ActionManager, ActionManagerConfig,
-        ObservationManager, ObsManagerConfig,
-        SceneManager, SceneManagerConfig,
+        ActionManager,
+        ActionManagerConfig,
         ContactManager,
-        VisualizationManager, VisualizationManagerConfig,
+        ObservationManager,
+        ObsManagerConfig,
+        SceneManager,
+        SceneManagerConfig,
+        VisualizationManager,
+        VisualizationManagerConfig,
     )
 
     ManagerRegistry.register("genesis", "scene", SceneManager, SceneManagerConfig)
@@ -49,11 +57,15 @@ def _register_genesis() -> None:
 def _register_newton() -> None:
     """Register Newton-specific managers (lazy — imports warp)."""
     from rlworld.rl.envs.managers.newton import (
-        NewtonSceneManager, NewtonSceneManagerConfig,
-        NewtonActionManager, NewtonActionManagerConfig,
-        NewtonObservationManager, NewtonObsManagerConfig,
+        NewtonActionManager,
+        NewtonActionManagerConfig,
         NewtonContactManager,
-        NewtonVisualizationManager, NewtonVisualizationManagerConfig,
+        NewtonObservationManager,
+        NewtonObsManagerConfig,
+        NewtonSceneManager,
+        NewtonSceneManagerConfig,
+        NewtonVisualizationManager,
+        NewtonVisualizationManagerConfig,
     )
 
     ManagerRegistry.register("newton", "scene", NewtonSceneManager, NewtonSceneManagerConfig)
@@ -65,15 +77,18 @@ def _register_newton() -> None:
 
 def _register_mujoco() -> None:
     """Register MuJoCo/mjlab-specific managers (lazy — imports mjlab)."""
+    from rlworld.rl.envs.managers.common import (
+        ObservationManager,
+        ObsManagerConfig,
+        RewardManagerConfig,
+    )
     from rlworld.rl.envs.managers.mujoco import (
-        MujocoSceneManager, MujocoSceneManagerConfig,
-        MujocoActionManager, MujocoActionManagerConfig,
+        MujocoActionManager,
+        MujocoActionManagerConfig,
         MujocoContactManager,
         MujocoRewardManager,
-    )
-    from rlworld.rl.envs.managers.common import (
-        ObservationManager, ObsManagerConfig,
-        RewardManagerConfig,
+        MujocoSceneManager,
+        MujocoSceneManagerConfig,
     )
 
     ManagerRegistry.register("mujoco", "scene", MujocoSceneManager, MujocoSceneManagerConfig)
@@ -100,7 +115,5 @@ def register_all_for(sim_type: str) -> None:
 
     registrar = registrars.get(sim_type)
     if registrar is None:
-        raise ValueError(
-            f"Unknown sim_type={sim_type!r}. Available: {list(registrars.keys())}"
-        )
+        raise ValueError(f"Unknown sim_type={sim_type!r}. Available: {list(registrars.keys())}")
     registrar()

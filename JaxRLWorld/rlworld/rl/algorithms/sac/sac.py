@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Optional, Union
+from typing import Any, Dict, NamedTuple, Union
 
 import equinox as eqx
 import jax
@@ -9,28 +9,28 @@ import numpy as np
 import optax
 
 from rlworld.rl.algorithms.base import (
-    OffPolicyAlgorithm,
     ActInput,
-    polyak_update,
+    OffPolicyAlgorithm,
     copy_params,
+    polyak_update,
 )
 from rlworld.rl.algorithms.metrics import ActorMetrics
 from rlworld.rl.algorithms.sac.metrics import (
-    SACMetrics,
-    SACCriticMetrics,
     SACAlphaMetrics,
     SACBatchMetrics,
+    SACCriticMetrics,
+    SACMetrics,
 )
 from rlworld.rl.algorithms.sac.update import (
-    act_stochastic,
     act_deterministic,
+    act_stochastic,
     get_value,
-    update_critics,
     update_actor,
     update_alpha,
+    update_critics,
 )
 from rlworld.rl.modules.policies.sac_ac import SACActorCritic
-from rlworld.rl.storages.replay_buffer import ReplayBuffer, ReplayBatch
+from rlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
 
 
 @eqx.filter_jit
@@ -51,19 +51,21 @@ def _update_normalizers(
 
 class SACTrainState(NamedTuple):
     """Training state for SAC containing all model and optimizer states."""
+
     model: SACActorCritic
     target_critic1_params: Any
     target_critic2_params: Any
     actor_opt_state: optax.OptState
     critic_opt_state: optax.OptState
-    alpha_opt_state: Optional[optax.OptState]
-    log_ent_coef: Optional[jax.Array]
+    alpha_opt_state: optax.OptState | None
+    log_ent_coef: jax.Array | None
     key: jax.Array
 
 
 @dataclass
 class SACTransitionBuffer:
     """Buffer for current transition."""
+
     actor_observations: jax.Array = None
     critic_observations: jax.Array = None
     actions: jax.Array = None
@@ -161,8 +163,8 @@ class SAC(OffPolicyAlgorithm):
         self.obs_normalization = actor_critic.actor_obs_normalizer is not None
 
         # Storage (initialized via init_storage)
-        self.replay_buffer: Optional[ReplayBuffer] = None
-        self.transition: Optional[SACTransitionBuffer] = None
+        self.replay_buffer: ReplayBuffer | None = None
+        self.transition: SACTransitionBuffer | None = None
 
         # Update counter
         self.total_it = 0
@@ -257,7 +259,7 @@ class SAC(OffPolicyAlgorithm):
         else:
             print(f"  Fixed ent_coef: {self.fixed_ent_coef}")
 
-        print(f"\n🔍 Network architecture:")
+        print("\n🔍 Network architecture:")
         print(f"  Actor obs dim: {self.actor_critic.actor_obs_dim}")
         print(f"  Critic obs dim: {self.actor_critic.critic_obs_dim}")
         print(f"  Action dim: {self.actor_critic.num_actions}")
@@ -302,13 +304,9 @@ class SAC(OffPolicyAlgorithm):
         key = self.train_state.key
 
         if deterministic:
-            actions, values, new_key = act_deterministic(
-                model, obs.actor_obs, obs.critic_obs, key
-            )
+            actions, values, new_key = act_deterministic(model, obs.actor_obs, obs.critic_obs, key)
         else:
-            actions, values, new_key = act_stochastic(
-                model, obs.actor_obs, obs.critic_obs, key
-            )
+            actions, values, new_key = act_stochastic(model, obs.actor_obs, obs.critic_obs, key)
 
         self.train_state = self.train_state._replace(key=new_key)
 
@@ -358,9 +356,7 @@ class SAC(OffPolicyAlgorithm):
         """Sample batch from replay buffer."""
         return self.replay_buffer.sample_batch(batch_size, key)
 
-    def update_normalizers(
-        self, actor_obs: jax.Array, critic_obs: jax.Array
-    ) -> None:
+    def update_normalizers(self, actor_obs: jax.Array, critic_obs: jax.Array) -> None:
         """Update obs normalizers with collected env-time observations.
 
         Called by the runner once per collection cycle so that every env-time
@@ -543,8 +539,9 @@ class SAC(OffPolicyAlgorithm):
         return {
             "alg_class": self.__class__.__name__,
             "alg_key": np.array(self.train_state.key),
-            "log_ent_coef": np.array(
-                self.train_state.log_ent_coef) if self.train_state.log_ent_coef is not None else None,
+            "log_ent_coef": np.array(self.train_state.log_ent_coef)
+            if self.train_state.log_ent_coef is not None
+            else None,
             "actor_lr": self.actor_lr,
             "critic_lr": self.critic_lr,
             "total_it": self.total_it,

@@ -27,14 +27,13 @@ from copy import deepcopy
 
 import torch
 
-from rlworld.rl.algorithms.sim_mpc.networks import SimMPCPolicy, QEnsemble
-from rlworld.rl.algorithms.sim_mpc.planner import planning_step, SimulatorMPPI
+from rlworld.rl.algorithms.sim_mpc.networks import QEnsemble, SimMPCPolicy
+from rlworld.rl.algorithms.sim_mpc.planner import SimulatorMPPI, planning_step
 from rlworld.rl.algorithms.sim_mpc.sim_mpc import SimMPC, SimpleReplayBuffer
 from rlworld.rl.algorithms.sim_mpc.state_sync import GenesisStateSync
-from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.configs import TerminationTermConfig
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as tf
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as tf
 from rlworld.rl.runners.base_runner import BaseRunner
 
 # ──────────────────────────────────────────────────────────────────
@@ -81,10 +80,7 @@ def create_envs():
     cfgs = get_config(sim="genesis")
     cfgs.env.num_envs = N_TRAIN
     cfgs.env.termination_criteria = [
-        TerminationTermConfig(
-            tf.roll_pitch_violation,
-            {"roll_threshold_degree": 45.0, "pitch_threshold_degree": 45.0}
-        ),
+        TerminationTermConfig(tf.roll_pitch_violation, {"roll_threshold_degree": 45.0, "pitch_threshold_degree": 45.0}),
         TerminationTermConfig(max_episode_exceed),
     ]
     cfgs.visualization.show_viewer = False
@@ -136,24 +132,29 @@ def make_mpc(train_env, plan_env, sync):
 # 1. Environment Creation
 # ──────────────────────────────────────────────────────────────────
 
+
 def test_env_creation(train_env, plan_env):
-    report("train_env.num_envs", train_env.num_envs == N_TRAIN,
-           f"expected {N_TRAIN}, got {train_env.num_envs}")
-    report("plan_env.num_envs", plan_env.num_envs == N_PLAN,
-           f"expected {N_PLAN}, got {plan_env.num_envs}")
-    report("same action_dim", train_env.num_actions == plan_env.num_actions,
-           f"train={train_env.num_actions}, plan={plan_env.num_actions}")
+    report("train_env.num_envs", train_env.num_envs == N_TRAIN, f"expected {N_TRAIN}, got {train_env.num_envs}")
+    report("plan_env.num_envs", plan_env.num_envs == N_PLAN, f"expected {N_PLAN}, got {plan_env.num_envs}")
+    report(
+        "same action_dim",
+        train_env.num_actions == plan_env.num_actions,
+        f"train={train_env.num_actions}, plan={plan_env.num_actions}",
+    )
     report("same decimation", train_env.decimation == plan_env.decimation, "")
-    report("action bounds match",
-           close_enough(train_env.action_low, plan_env.action_low)
-           and close_enough(train_env.action_high, plan_env.action_high), "")
-    report("has gait_manager",
-           hasattr(train_env, "gait_manager") and hasattr(plan_env, "gait_manager"), "")
+    report(
+        "action bounds match",
+        close_enough(train_env.action_low, plan_env.action_low)
+        and close_enough(train_env.action_high, plan_env.action_high),
+        "",
+    )
+    report("has gait_manager", hasattr(train_env, "gait_manager") and hasattr(plan_env, "gait_manager"), "")
 
 
 # ──────────────────────────────────────────────────────────────────
 # 2. State Fork
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_state_fork(train_env, plan_env):
     sync = make_sync(train_env, plan_env)
@@ -202,6 +203,7 @@ def test_state_fork(train_env, plan_env):
 # 3. Manager Sync
 # ──────────────────────────────────────────────────────────────────
 
+
 def test_manager_sync(train_env, plan_env):
     sync = make_sync(train_env, plan_env)
     train_env.reset()
@@ -212,17 +214,19 @@ def test_manager_sync(train_env, plan_env):
 
     # Command
     cmd_src = train_env.command_manager._commands_tensor[0]
-    report("command sync", all(
-        close_enough(plan_env.command_manager._commands_tensor[s], cmd_src)
-        for s in range(N_PLAN)
-    ), "")
+    report(
+        "command sync",
+        all(close_enough(plan_env.command_manager._commands_tensor[s], cmd_src) for s in range(N_PLAN)),
+        "",
+    )
 
     # Action history
     act_src = train_env.act_manager._processed_action_history[1][0]
-    report("action history sync", all(
-        close_enough(plan_env.act_manager._processed_action_history[1][s], act_src)
-        for s in range(N_PLAN)
-    ), "")
+    report(
+        "action history sync",
+        all(close_enough(plan_env.act_manager._processed_action_history[1][s], act_src) for s in range(N_PLAN)),
+        "",
+    )
 
     # Contact (per-group)
     contact_ok = True
@@ -240,17 +244,21 @@ def test_manager_sync(train_env, plan_env):
     report("contact sync", contact_ok, "")
 
     # Termination
-    report("termination sync",
-           plan_env.termination_manager.episode_length_buf[0].item()
-           == train_env.termination_manager.episode_length_buf[0].item(), "")
+    report(
+        "termination sync",
+        plan_env.termination_manager.episode_length_buf[0].item()
+        == train_env.termination_manager.episode_length_buf[0].item(),
+        "",
+    )
 
     # Gait
     if hasattr(train_env, "gait_manager"):
         gait_src = train_env.gait_manager.gait_timer[0].item()
-        report("gait sync", all(
-            abs(plan_env.gait_manager.gait_timer[s].item() - gait_src) < 1e-6
-            for s in range(N_PLAN)
-        ), "")
+        report(
+            "gait sync",
+            all(abs(plan_env.gait_manager.gait_timer[s].item() - gait_src) < 1e-6 for s in range(N_PLAN)),
+            "",
+        )
 
     # Stateful reward terms
     train_instances = train_env.reward_manager._instances
@@ -276,13 +284,15 @@ def test_manager_sync(train_env, plan_env):
                     stateful_ok = False
                     stateful_details.append(f"{name}.{attr_name}")
                     break
-    report("stateful reward sync", stateful_ok,
-           f"mismatched: {stateful_details}" if stateful_details else "all matched")
+    report(
+        "stateful reward sync", stateful_ok, f"mismatched: {stateful_details}" if stateful_details else "all matched"
+    )
 
 
 # ──────────────────────────────────────────────────────────────────
 # 4. Fork+Sync Exact Reward (per-term, must be diff=0)
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_fork_sync_exact_reward(train_env, plan_env):
     """Fork train[0] → plan, apply identical action, compare ALL reward terms."""
@@ -308,9 +318,11 @@ def test_fork_sync_exact_reward(train_env, plan_env):
 
     # ── Total reward ──
     total_diff = abs(train_reward[0].item() - plan_reward[0].item())
-    report("exact reward: total",
-           total_diff < 1e-5,
-           f"train={train_reward[0].item():.6f}, plan={plan_reward[0].item():.6f}, diff={total_diff:.6f}")
+    report(
+        "exact reward: total",
+        total_diff < 1e-5,
+        f"train={train_reward[0].item():.6f}, plan={plan_reward[0].item():.6f}, diff={total_diff:.6f}",
+    )
 
     # ── Per-term breakdown ──
     all_terms = set(plan_per_type.keys()) | set(train_per_type.keys())
@@ -329,14 +341,17 @@ def test_fork_sync_exact_reward(train_env, plan_env):
         for term, t_val, p_val, d in mismatched:
             print(f"      {term:40s}  train={t_val:+.6f}  plan={p_val:+.6f}  diff={d:.6f}")
 
-    report("exact reward: per-term",
-           len(mismatched) == 0,
-           f"{len(mismatched)} terms differ" if mismatched else "all 0 diff")
+    report(
+        "exact reward: per-term",
+        len(mismatched) == 0,
+        f"{len(mismatched)} terms differ" if mismatched else "all 0 diff",
+    )
 
 
 # ──────────────────────────────────────────────────────────────────
 # 5. Fork+Sync Multi-Step Reward
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_fork_sync_multistep(train_env, plan_env):
     """Fork once, step 3 times with identical actions. All rewards must match."""
@@ -347,8 +362,7 @@ def test_fork_sync_multistep(train_env, plan_env):
 
     sync.fork_and_sync(train_env_idx=0)
 
-    actions = [torch.randn(1, train_env.num_actions, device=train_env.device) * 0.3
-               for _ in range(3)]
+    actions = [torch.randn(1, train_env.num_actions, device=train_env.device) * 0.3 for _ in range(3)]
 
     plan_rewards = []
     for act in actions:
@@ -364,19 +378,22 @@ def test_fork_sync_multistep(train_env, plan_env):
 
     for t in range(3):
         d = abs(train_rewards[t] - plan_rewards[t])
-        report(f"multistep reward step {t}", d < 1e-5,
-               f"train={train_rewards[t]:.6f}, plan={plan_rewards[t]:.6f}, diff={d:.6f}")
+        report(
+            f"multistep reward step {t}",
+            d < 1e-5,
+            f"train={train_rewards[t]:.6f}, plan={plan_rewards[t]:.6f}, diff={d:.6f}",
+        )
 
     # All plan envs identical
     sync.fork_and_sync(train_env_idx=0)
     rew_all, _ = planning_step(plan_env, actions[0].expand(N_PLAN, -1).clone())
-    report("all plan envs identical", rew_all.std().item() < 1e-6,
-           f"std={rew_all.std().item():.8f}")
+    report("all plan envs identical", rew_all.std().item() < 1e-6, f"std={rew_all.std().item():.8f}")
 
 
 # ──────────────────────────────────────────────────────────────────
 # 6. Planning Step Basic
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_planning_step(train_env, plan_env):
     sync = make_sync(train_env, plan_env)
@@ -385,20 +402,22 @@ def test_planning_step(train_env, plan_env):
     train_env.step(torch.zeros(N_TRAIN, train_env.num_actions, device=train_env.device))
     sync.fork_and_sync(train_env_idx=0)
 
-    rewards, dones = planning_step(
-        plan_env, torch.zeros(N_PLAN, plan_env.num_actions, device=plan_env.device))
+    rewards, dones = planning_step(plan_env, torch.zeros(N_PLAN, plan_env.num_actions, device=plan_env.device))
 
     report("planning_step shape", rewards.shape == (N_PLAN,) and dones.shape == (N_PLAN,), "")
-    report("planning_step finite", torch.isfinite(rewards).all().item(),
-           f"min={rewards.min():.4f}, max={rewards.max():.4f}")
-    report("planning_step consistent", rewards.std().item() < 1e-5,
-           f"std={rewards.std().item():.8f}")
+    report(
+        "planning_step finite",
+        torch.isfinite(rewards).all().item(),
+        f"min={rewards.min():.4f}, max={rewards.max():.4f}",
+    )
+    report("planning_step consistent", rewards.std().item() < 1e-5, f"std={rewards.std().item():.8f}")
     report("planning_step dones bool", dones.dtype == torch.bool, "")
 
 
 # ──────────────────────────────────────────────────────────────────
 # 7. Networks
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_networks(train_env):
     obs_dim, action_dim = get_dims(train_env)
@@ -434,6 +453,7 @@ def test_networks(train_env):
 # 8. Replay Buffer
 # ──────────────────────────────────────────────────────────────────
 
+
 def test_replay_buffer(train_env):
     obs_dim, action_dim = get_dims(train_env)
     device = train_env.device
@@ -459,8 +479,7 @@ def test_replay_buffer(train_env):
     known_act = torch.ones(1, action_dim, device=device) * -1.0
     known_rew = torch.tensor([7.0], device=device)
     buf2.add(known_obs, known_act, known_rew, known_obs, torch.zeros(1, device=device))
-    report("buffer content integrity",
-           buf2.obs[0, 0].item() == 42.0 and buf2.reward[0].item() == 7.0, "")
+    report("buffer content integrity", buf2.obs[0, 0].item() == 42.0 and buf2.reward[0].item() == 7.0, "")
 
     # Overflow
     for _ in range(20):
@@ -471,6 +490,7 @@ def test_replay_buffer(train_env):
 # ──────────────────────────────────────────────────────────────────
 # 9. Training Update
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_training_update(train_env, plan_env):
     obs_dim, action_dim = get_dims(train_env)
@@ -489,8 +509,7 @@ def test_training_update(train_env, plan_env):
             torch.randn(N_TRAIN, obs_dim, device=device),
             torch.zeros(N_TRAIN, device=device),
         )
-    report("buffer filled", mpc.replay_buffer.size == 20 * N_TRAIN,
-           f"got {mpc.replay_buffer.size}")
+    report("buffer filled", mpc.replay_buffer.size == 20 * N_TRAIN, f"got {mpc.replay_buffer.size}")
 
     # First update
     m = mpc.update(batch_size=16)
@@ -519,6 +538,7 @@ def test_training_update(train_env, plan_env):
 # 10. Alive Masking
 # ──────────────────────────────────────────────────────────────────
 
+
 def test_alive_masking(train_env):
     S, H = 10, 5
     device = train_env.device
@@ -537,18 +557,25 @@ def test_alive_masking(train_env):
         alive = alive & ~dones
         discount *= 0.99
 
-    expected_alive = sum(0.99 ** t for t in range(H))
+    expected_alive = sum(0.99**t for t in range(H))
     expected_dead = 1.0 + 0.99
 
-    report("alive: live traj", abs(cr[0].item() - expected_alive) < 1e-4,
-           f"expected={expected_alive:.4f}, got={cr[0].item():.4f}")
-    report("alive: dead traj", abs(cr[2].item() - expected_dead) < 1e-4,
-           f"expected={expected_dead:.4f}, got={cr[2].item():.4f}")
+    report(
+        "alive: live traj",
+        abs(cr[0].item() - expected_alive) < 1e-4,
+        f"expected={expected_alive:.4f}, got={cr[0].item():.4f}",
+    )
+    report(
+        "alive: dead traj",
+        abs(cr[2].item() - expected_dead) < 1e-4,
+        f"expected={expected_dead:.4f}, got={cr[2].item():.4f}",
+    )
 
 
 # ──────────────────────────────────────────────────────────────────
 # 11. MPPI Planner with Policy
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_mppi_planner(train_env, plan_env):
     obs_dim, action_dim = get_dims(train_env)
@@ -562,11 +589,19 @@ def test_mppi_planner(train_env, plan_env):
     q_ens = QEnsemble(obs_dim, action_dim, num_q=3, hidden_dims=(64, 32)).to(train_env.device)
 
     planner = SimulatorMPPI(
-        planning_env=plan_env, state_sync=sync,
-        policy=policy, q_ensemble=q_ens,
-        horizon=HORIZON, num_samples=N_PLAN, num_pi_trajs=N_PI_TRAJS,
-        num_elites=NUM_ELITES, num_iterations=NUM_ITERS,
-        temperature=0.5, min_std=0.05, max_std=2.0, gamma=0.99,
+        planning_env=plan_env,
+        state_sync=sync,
+        policy=policy,
+        q_ensemble=q_ens,
+        horizon=HORIZON,
+        num_samples=N_PLAN,
+        num_pi_trajs=N_PI_TRAJS,
+        num_elites=NUM_ELITES,
+        num_iterations=NUM_ITERS,
+        temperature=0.5,
+        min_std=0.05,
+        max_std=2.0,
+        gamma=0.99,
         action_low=plan_env.action_low.clone(),
         action_high=plan_env.action_high.clone(),
         num_train_envs=N_TRAIN,
@@ -581,9 +616,11 @@ def test_mppi_planner(train_env, plan_env):
     lo = _detach(plan_env.action_low)
     hi = _detach(plan_env.action_high)
     a = _detach(action)
-    report("MPPI action in bounds",
-           (a >= lo - 1e-5).all().item() and (a <= hi + 1e-5).all().item(),
-           f"min={a.min():.4f}, max={a.max():.4f}")
+    report(
+        "MPPI action in bounds",
+        (a >= lo - 1e-5).all().item() and (a <= hi + 1e-5).all().item(),
+        f"min={a.min():.4f}, max={a.max():.4f}",
+    )
 
     # Warm-start
     planner._prev_mean[0] = mean
@@ -600,6 +637,7 @@ def test_mppi_planner(train_env, plan_env):
 # ──────────────────────────────────────────────────────────────────
 # 12. SimMPC.act End-to-End
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_sim_mpc_act(train_env, plan_env):
     obs_dim, action_dim = get_dims(train_env)
@@ -623,6 +661,7 @@ def test_sim_mpc_act(train_env, plan_env):
 # ──────────────────────────────────────────────────────────────────
 # 13. SimMPC.act Mixed Mode (mppi_ratio < 1.0)
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_sim_mpc_mixed_mode(train_env, plan_env):
     obs_dim, action_dim = get_dims(train_env)
@@ -648,15 +687,14 @@ def test_sim_mpc_mixed_mode(train_env, plan_env):
     policy_time = time.perf_counter() - t0
     report("policy-only act shape", actions_policy.shape == (N_TRAIN, action_dim), "")
     report("policy-only act finite", torch.isfinite(actions_policy).all().item(), "")
-    report("policy-only fast", policy_time < 0.1, f"{policy_time*1000:.1f}ms")
+    report("policy-only fast", policy_time < 0.1, f"{policy_time * 1000:.1f}ms")
 
     # mppi_ratio=1.0 → all MPPI
     actions_mppi = mpc.act(train_env, t0_mask, mppi_ratio=1.0, obs=actor_obs)
     report("full MPPI act shape", actions_mppi.shape == (N_TRAIN, action_dim), "")
 
     # Policy-only and MPPI should produce different actions (different methods)
-    report("mixed vs policy differs",
-           not torch.allclose(actions_mixed, actions_policy, atol=1e-4), "")
+    report("mixed vs policy differs", not torch.allclose(actions_mixed, actions_policy, atol=1e-4), "")
 
     # All modes should produce env-steppable actions
     _, rew, _, _, _ = train_env.step(actions_mixed)
@@ -666,6 +704,7 @@ def test_sim_mpc_mixed_mode(train_env, plan_env):
 # ──────────────────────────────────────────────────────────────────
 # 14. Benchmark
 # ──────────────────────────────────────────────────────────────────
+
 
 def test_benchmark(train_env, plan_env):
     sync = make_sync(train_env, plan_env)
@@ -714,6 +753,7 @@ def test_benchmark(train_env, plan_env):
 # Main
 # ──────────────────────────────────────────────────────────────────
 
+
 def main():
     print("=" * 60)
     print("SimMPC Component Tests")
@@ -727,20 +767,20 @@ def main():
     print(f"{INFO} Environments created.\n")
 
     sections = [
-        ("Environment Creation",      lambda: test_env_creation(train_env, plan_env)),
-        ("State Fork",                 lambda: test_state_fork(train_env, plan_env)),
-        ("Manager Sync",              lambda: test_manager_sync(train_env, plan_env)),
-        ("Fork+Sync Exact Reward",    lambda: test_fork_sync_exact_reward(train_env, plan_env)),
-        ("Fork+Sync Multi-Step",      lambda: test_fork_sync_multistep(train_env, plan_env)),
-        ("Planning Step",             lambda: test_planning_step(train_env, plan_env)),
-        ("Networks",                   lambda: test_networks(train_env)),
-        ("Replay Buffer",             lambda: test_replay_buffer(train_env)),
-        ("Training Update",           lambda: test_training_update(train_env, plan_env)),
-        ("Alive Masking",             lambda: test_alive_masking(train_env)),
-        ("MPPI Planner",              lambda: test_mppi_planner(train_env, plan_env)),
-        ("SimMPC End-to-End",         lambda: test_sim_mpc_act(train_env, plan_env)),
-        ("SimMPC Mixed Mode",         lambda: test_sim_mpc_mixed_mode(train_env, plan_env)),
-        ("Benchmark",                  lambda: test_benchmark(train_env, plan_env)),
+        ("Environment Creation", lambda: test_env_creation(train_env, plan_env)),
+        ("State Fork", lambda: test_state_fork(train_env, plan_env)),
+        ("Manager Sync", lambda: test_manager_sync(train_env, plan_env)),
+        ("Fork+Sync Exact Reward", lambda: test_fork_sync_exact_reward(train_env, plan_env)),
+        ("Fork+Sync Multi-Step", lambda: test_fork_sync_multistep(train_env, plan_env)),
+        ("Planning Step", lambda: test_planning_step(train_env, plan_env)),
+        ("Networks", lambda: test_networks(train_env)),
+        ("Replay Buffer", lambda: test_replay_buffer(train_env)),
+        ("Training Update", lambda: test_training_update(train_env, plan_env)),
+        ("Alive Masking", lambda: test_alive_masking(train_env)),
+        ("MPPI Planner", lambda: test_mppi_planner(train_env, plan_env)),
+        ("SimMPC End-to-End", lambda: test_sim_mpc_act(train_env, plan_env)),
+        ("SimMPC Mixed Mode", lambda: test_sim_mpc_mixed_mode(train_env, plan_env)),
+        ("Benchmark", lambda: test_benchmark(train_env, plan_env)),
     ]
 
     for name, fn in sections:
@@ -750,6 +790,7 @@ def main():
         except Exception as e:
             report(f"{name} EXCEPTION", False, str(e))
             import traceback
+
             traceback.print_exc()
         print()
 

@@ -1,7 +1,5 @@
-import os
-
 import time
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 import jax
 import jax.numpy as jnp
@@ -10,15 +8,15 @@ import torch
 
 from rlworld.rl.algorithms.ppo import PPO
 from rlworld.rl.algorithms.ppo_dr3 import PPODR3
-from rlworld.rl.configs import ConfigsForRun, configs_from_dict
+from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.algorithms import PPOConfig, PPODR3Config
 from rlworld.rl.envs import World
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.modules.policies.ppo_dr3_ac import PPODR3ActorCritic
-from rlworld.rl.modules.utils import print_model_summary, count_parameters
+from rlworld.rl.modules.utils import count_parameters, print_model_summary
 from rlworld.rl.runners.base_runner import BaseRunner
 from rlworld.rl.runners.iteration_data import IterationData
-from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
+from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 
 
 class OnPolicyRunner(BaseRunner):
@@ -142,9 +140,7 @@ class OnPolicyRunner(BaseRunner):
             kinematic_tree = None
 
         actuated_joint_names = (
-            list(self.env.act_manager.actuated_joint_names)
-            if hasattr(self.env, "act_manager")
-            else None
+            list(self.env.act_manager.actuated_joint_names) if hasattr(self.env, "act_manager") else None
         )
 
         self.actor_critic = PPOActorCritic(
@@ -236,7 +232,6 @@ class OnPolicyRunner(BaseRunner):
         infos = {}
 
         for _step_i in range(self.num_steps_per_env):
-
             # Get action
             actions = self.alg.act(PPO.ActInput(actor_obs, critic_obs))
             actions_for_env = self._process_action_for_env(actions)
@@ -267,7 +262,7 @@ class OnPolicyRunner(BaseRunner):
                 truncated_jax,
                 infos_jax,
                 next_actor_obs=actor_obs,
-                next_critic_obs=critic_obs
+                next_critic_obs=critic_obs,
             )
 
             # Update statistics
@@ -380,11 +375,13 @@ class OnPolicyRunner(BaseRunner):
         """
         # Load metadata (YAML)
         from rlworld.rl.utils.checkpoint import load_checkpoint_metadata
+
         metadata = load_checkpoint_metadata(checkpoint_path)
 
         # Use saved config if not provided
         if cfgs is None:
             from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
+
             cfgs = load_config_from_checkpoint(metadata)
 
         # Create env if not provided
@@ -398,9 +395,7 @@ class OnPolicyRunner(BaseRunner):
         runner.alg.load_train_state(checkpoint_path, metadata)
 
         # Restore runner state
-        runner.current_learning_iteration = metadata.get(
-            "current_learning_iteration", metadata["iteration"]
-        )
+        runner.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
         runner.total_timesteps = metadata["total_timesteps"]
         runner.total_time = metadata.get("total_time", 0)
         runner.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)
@@ -410,6 +405,6 @@ class OnPolicyRunner(BaseRunner):
         print(f"  Iteration: {runner.current_learning_iteration}")
         print(f"  Timesteps: {runner.total_timesteps}")
         print(f"  Total time: {runner.total_time:.2f}s")
-        print(f"  Note: Optimizer state re-initialized (momentum reset)")
+        print("  Note: Optimizer state re-initialized (momentum reset)")
 
         return runner

@@ -9,20 +9,21 @@ Usage:
         dof_pos, dof_vel,
     )
 """
+
+from .proprioception import (
+    dof_pos,
+    dof_pos_nominal_difference,
+    dof_vel,
+    prev_processed_actions,
+    projected_gravity,
+    raw_actions,
+)
 from .state import (
-    base_pos,
-    base_quat,
+    base_ang_vel,
     base_height,
     base_lin_vel,
-    base_ang_vel,
-)
-from .proprioception import (
-    projected_gravity,
-    dof_pos,
-    dof_vel,
-    raw_actions,
-    prev_processed_actions,
-    dof_pos_nominal_difference
+    base_pos,
+    base_quat,
 )
 
 __all__ = [
@@ -38,5 +39,5 @@ __all__ = [
     "dof_vel",
     "raw_actions",
     "prev_processed_actions",
-    "dof_pos_nominal_difference"
+    "dof_pos_nominal_difference",
 ]

@@ -31,10 +31,10 @@ Usage::
         --policy-path outputs/models/2026-04-29/14-45-08/checkpoint_latest \
         --max-steps 200
 """
+
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -59,9 +59,11 @@ def _summarise_module(name: str, module) -> None:
         total += float(jnp.sum(leaf.astype(jnp.float32) ** 2))
         n_params += int(leaf.size)
         if i < 6:
-            print(f"  leaf[{i}] shape={tuple(leaf.shape)} "
-                  f"l2={_l2(leaf):.4f} mean={float(leaf.mean()):+.4f} "
-                  f"std={float(leaf.std()):.4f}")
+            print(
+                f"  leaf[{i}] shape={tuple(leaf.shape)} "
+                f"l2={_l2(leaf):.4f} mean={float(leaf.mean()):+.4f} "
+                f"std={float(leaf.std()):.4f}"
+            )
     if len(arr_leaves) > 6:
         print(f"  ... ({len(arr_leaves) - 6} more leaves)")
     print(f"  TOTAL params={n_params:,}  global_l2={float(np.sqrt(total)):.4f}")
@@ -76,12 +78,13 @@ def _dump_obs_normalizer(label: str, norm) -> None:
     var = np.array(norm.var)
     std = np.sqrt(np.maximum(var, 0.0))
     print(f"\n[{label}] obs_normalizer:")
-    print(f"  count = {count:.6g}    "
-          f"({'LOADED — valid stats' if count > 1.0 else 'NOT LOADED — fresh init (count≈1e-4)'})")
+    print(
+        f"  count = {count:.6g}    "
+        f"({'LOADED — valid stats' if count > 1.0 else 'NOT LOADED — fresh init (count≈1e-4)'})"
+    )
     print(f"  mean[:8] = {np.array2string(mean[:8], precision=4, suppress_small=True)}")
-    print(f"  std[:8]  = {np.array2string(std[:8],  precision=4, suppress_small=True)}")
-    print(f"  ||mean|| = {float(np.linalg.norm(mean)):.4f}, "
-          f"||std||  = {float(np.linalg.norm(std)):.4f}")
+    print(f"  std[:8]  = {np.array2string(std[:8], precision=4, suppress_small=True)}")
+    print(f"  ||mean|| = {float(np.linalg.norm(mean)):.4f}, ||std||  = {float(np.linalg.norm(std)):.4f}")
 
 
 def _get_motion_cmd(env):
@@ -90,7 +93,9 @@ def _get_motion_cmd(env):
 
 def _format_vec(t: torch.Tensor, prec: int = 3) -> str:
     return np.array2string(
-        t.detach().cpu().numpy(), precision=prec, suppress_small=True,
+        t.detach().cpu().numpy(),
+        precision=prec,
+        suppress_small=True,
     )
 
 
@@ -103,8 +108,10 @@ def _dump_first_reset(env) -> None:
     print(f"  rollover_teleport  = {cmd.cfg.rollover_teleport}")
     print(f"  sampling_mode      = {cmd.cfg.sampling_mode}")
     print(f"  num envs           = {env.num_envs}")
-    print(f"  time_steps[0]      = {int(cmd.time_steps[0].item())}  "
-          f"(motion length = {int(cmd._motion_lengths[0].item())})")
+    print(
+        f"  time_steps[0]      = {int(cmd.time_steps[0].item())}  "
+        f"(motion length = {int(cmd._motion_lengths[0].item())})"
+    )
 
     # Motion's reference at current cursor
     motion_anchor_pos = cmd.body_pos_w[:, cmd.motion_anchor_body_index][0]
@@ -121,23 +128,24 @@ def _dump_first_reset(env) -> None:
     print(f"\n  motion anchor pos  = {_format_vec(motion_anchor_pos)}")
     print(f"  robot  anchor pos  = {_format_vec(robot_anchor_pos)}")
     delta_pos = (robot_anchor_pos - motion_anchor_pos).norm().item()
-    print(f"  Δ‖anchor pos‖      = {delta_pos:.5f} m  "
-          f"({'OK (< 1 cm)' if delta_pos < 0.01 else 'MISMATCH — reference state was NOT written into sim'})")
+    print(
+        f"  Δ‖anchor pos‖      = {delta_pos:.5f} m  "
+        f"({'OK (< 1 cm)' if delta_pos < 0.01 else 'MISMATCH — reference state was NOT written into sim'})"
+    )
 
     print(f"\n  motion anchor quat = {_format_vec(motion_anchor_quat, 4)}")
     print(f"  robot  anchor quat = {_format_vec(robot_anchor_quat, 4)}")
 
     j_diff = (robot_joint_pos - motion_joint_pos).abs()
     print(f"\n  joint_pos|motion vs robot|  max-abs-diff = {j_diff.max().item():.5f}")
-    print(f"  joint_vel|motion vs robot|  "
-          f"max-abs-diff = {(robot_joint_vel - motion_joint_vel).abs().max().item():.5f}")
+    print(f"  joint_vel|motion vs robot|  max-abs-diff = {(robot_joint_vel - motion_joint_vel).abs().max().item():.5f}")
     print(f"  ‖robot_joint_vel‖           = {robot_joint_vel.norm().item():.5f}")
 
     # Per-body errors at first reset
     body_pos_motion = cmd.body_pos_w[0]
     body_pos_robot = rd.body_pos_w_all[0, cmd.body_indexes]
     pb_err = (body_pos_robot - body_pos_motion).norm(dim=-1)
-    print(f"\n  per-body pos error after reset (m):")
+    print("\n  per-body pos error after reset (m):")
     for i, name in enumerate(cmd.cfg.body_names):
         print(f"    [{i}] {name:<22s}  err = {pb_err[i].item():.5f}")
 
@@ -156,10 +164,12 @@ def _dump_step_metrics(env, step_idx: int, action: torch.Tensor) -> None:
     body_z_err = (body_pos_robot[:, 2] - body_pos_motion[:, 2]).abs().max().item()
 
     a = action[0]
-    print(f"  step {step_idx:>4d}  ts={int(cmd.time_steps[0].item()):>4d}  "
-          f"|a|={a.norm().item():.3f}  amax={a.abs().max().item():.3f}  "
-          f"anchor_err={anchor_err:.4f}  anchor_z_err={z_err:.4f}  "
-          f"body_z_err_max={body_z_err:.4f}")
+    print(
+        f"  step {step_idx:>4d}  ts={int(cmd.time_steps[0].item()):>4d}  "
+        f"|a|={a.norm().item():.3f}  amax={a.abs().max().item():.3f}  "
+        f"anchor_err={anchor_err:.4f}  anchor_z_err={z_err:.4f}  "
+        f"body_z_err_max={body_z_err:.4f}"
+    )
 
 
 def main():
@@ -170,12 +180,14 @@ def main():
         default="outputs/models/2026-04-29/14-45-08/checkpoint_latest/",
         help="Path to checkpoint directory (default matches eval_mujoco.py)",
     )
-    parser.add_argument("--wandb", type=str, default=None,
-                        help="Optional wandb run path (e.g. user/proj/run_id) — overrides --policy-path")
-    parser.add_argument("--max-steps", type=int, default=200,
-                        help="Max rollout steps to print")
-    parser.add_argument("--print-every", type=int, default=1,
-                        help="Print metrics every N steps")
+    parser.add_argument(
+        "--wandb",
+        type=str,
+        default=None,
+        help="Optional wandb run path (e.g. user/proj/run_id) — overrides --policy-path",
+    )
+    parser.add_argument("--max-steps", type=int, default=200, help="Max rollout steps to print")
+    parser.add_argument("--print-every", type=int, default=1, help="Print metrics every N steps")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -246,15 +258,14 @@ def main():
         robot_states = env.get_robot_state()
 
         if bool(terminated[0].item()) or bool(truncated[0].item()):
-            print(f"\n  TERMINATED at step {step_idx} "
-                  f"(terminated={bool(terminated[0].item())}, "
-                  f"truncated={bool(truncated[0].item())})")
+            print(
+                f"\n  TERMINATED at step {step_idx} "
+                f"(terminated={bool(terminated[0].item())}, "
+                f"truncated={bool(truncated[0].item())})"
+            )
             tm = getattr(env, "termination_manager", None)
             if tm is not None and hasattr(tm, "term_dones"):
-                fired = [
-                    name for name, mask in tm.term_dones.items()
-                    if bool(mask[0].item())
-                ]
+                fired = [name for name, mask in tm.term_dones.items() if bool(mask[0].item())]
                 print(f"  term_dones fired this step: {fired}")
             break
     else:

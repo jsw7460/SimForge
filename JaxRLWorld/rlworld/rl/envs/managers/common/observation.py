@@ -8,9 +8,9 @@ import torch
 from rlworld.rl.configs.base_config import iter_terms
 from rlworld.rl.configs.common_config_classes import ObservationGroupConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
+from rlworld.rl.configs.observations.noise import apply_noise
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.storages import CircularBuffer
-from rlworld.rl.configs.observations.noise import apply_noise
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -27,7 +27,7 @@ class ObservationManager(BaseManager):
     - Terms are discovered as ``ObservationTermConfig`` attributes on each group.
     """
 
-    def __init__(self, env: "World", config):
+    def __init__(self, env: World, config):
         BaseManager.__init__(self, env=env)
         self.config = config
 
@@ -50,9 +50,7 @@ class ObservationManager(BaseManager):
         for group_name, group_cfg in self._groups.items():
             terms = iter_terms(group_cfg, ObservationTermConfig)
             self._group_terms[group_name] = terms
-            self._resolved_fns[group_name] = {
-                name: t.resolved_func for name, t in terms.items()
-            }
+            self._resolved_fns[group_name] = {name: t.resolved_func for name, t in terms.items()}
 
         # History buffers
         self._group_obs_term_history_buffer: dict[str, dict[str, CircularBuffer]] = {}
@@ -200,7 +198,7 @@ class ObservationManager(BaseManager):
         self.process_observations(update_history=True)
 
     def __str__(self) -> str:
-        from rlworld.rl.utils.pretty import create_manager_table, table_to_string, format_shape
+        from rlworld.rl.utils.pretty import create_manager_table, format_shape, table_to_string
 
         output_parts = []
 
@@ -211,7 +209,7 @@ class ObservationManager(BaseManager):
 
             for idx, (term_name, obs_term) in enumerate(terms.items()):
                 resolved_fn = self._resolved_fns[group_name][term_name]
-                func_name = getattr(resolved_fn, '__name__', term_name)
+                func_name = getattr(resolved_fn, "__name__", term_name)
 
                 try:
                     dummy = resolved_fn(self.env, **obs_term.params)

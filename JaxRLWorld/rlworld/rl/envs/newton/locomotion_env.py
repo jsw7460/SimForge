@@ -1,18 +1,18 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
-from rlworld.rl.envs import NewtonEnv
-from rlworld.rl.envs.managers import GaitManagerConfig, GaitManager
-from rlworld.rl.envs.genesis.locomotion_env import _gait_config_to_manager_config
+from rlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, GaitConfig, RewardConfig
 from rlworld.rl.configs.newton_config_classes import (
-    NewtonEnvConfig,
-    NewtonSceneConfig,
-    NewtonObservationConfig,
     NewtonActionConfig,
-    VisualizationConfig
+    NewtonEnvConfig,
+    NewtonObservationConfig,
+    NewtonSceneConfig,
+    VisualizationConfig,
 )
-from rlworld.rl.configs import RewardConfig, CommandConfig, GaitConfig, EventConfig
-from rlworld.rl.configs import CurriculumManagerConfig
+from rlworld.rl.envs import NewtonEnv
+from rlworld.rl.envs.genesis.locomotion_env import _gait_config_to_manager_config
+from rlworld.rl.envs.managers import GaitManager
 
 if TYPE_CHECKING:
     pass

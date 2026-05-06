@@ -10,7 +10,6 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-
 # ==================== Symmetric Log/Exp ====================
 
 
@@ -29,6 +28,7 @@ def symexp(x: jax.Array) -> jax.Array:
 
 class TwoHotConfig(NamedTuple):
     """Configuration for two-hot encoding."""
+
     num_bins: int
     vmin: float
     vmax: float
@@ -138,7 +138,7 @@ def gaussian_logprob(eps: jax.Array, log_std: jax.Array) -> jax.Array:
     Returns:
         Log probability [batch_size, 1]
     """
-    residual = -0.5 * eps ** 2 - log_std
+    residual = -0.5 * eps**2 - log_std
     log_prob = residual - 0.9189385175704956  # -0.5 * log(2*pi)
     return log_prob.sum(axis=-1, keepdims=True)
 
@@ -153,7 +153,7 @@ def squash(mu: jax.Array, pi: jax.Array, log_pi: jax.Array):
     mu = jnp.tanh(mu)
     pi = jnp.tanh(pi)
     # Correction for tanh squashing
-    squash_correction = jnp.log(jax.nn.relu(1.0 - pi ** 2) + 1e-6)
+    squash_correction = jnp.log(jax.nn.relu(1.0 - pi**2) + 1e-6)
     log_pi = log_pi - squash_correction.sum(axis=-1, keepdims=True)
     return mu, pi, log_pi
 

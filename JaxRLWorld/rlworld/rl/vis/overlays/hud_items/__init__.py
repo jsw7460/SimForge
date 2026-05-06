@@ -1,9 +1,15 @@
 from .items import (
+    BaseHeightItem,
+    BaseHeightItemConfig,
+    CommandVelItem,
+    CommandVelItemConfig,
+    DOFPositionItem,
+    DOFPositionItemConfig,
+    EpisodeInfoItem,
+    EpisodeInfoItemConfig,
+    FeetHeightItem,
+    FeetHeightItemConfig,
     HUDItem,
-    BaseHeightItemConfig, BaseHeightItem,
-    CommandVelItemConfig, CommandVelItem,
-    FeetHeightItemConfig, FeetHeightItem,
-    DOFPositionItemConfig, DOFPositionItem,
-    EpisodeInfoItemConfig, EpisodeInfoItem,
-    LinkPositionItemConfig, LinkPositionItem
+    LinkPositionItem,
+    LinkPositionItemConfig,
 )

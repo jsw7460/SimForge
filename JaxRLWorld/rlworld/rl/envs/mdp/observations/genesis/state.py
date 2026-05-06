@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+from genesis.utils.geom import inv_quat, quat_to_xyz, transform_by_quat
 
 from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils import entity_utils as eu
-from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
@@ -60,6 +60,7 @@ def foot_air_time(env: GenesisEnv, contact_group: str = "feet_ground_contact"):
     current_air_time = env.contact_manager.current_air_time(contact_group)
     return current_air_time
 
+
 @EnvStepCache()
 def contact_indicator(
     env: GenesisEnv,
@@ -67,6 +68,7 @@ def contact_indicator(
 ) -> torch.Tensor:
     """Binary contact indicator. Shape: (num_envs, N)."""
     return env.contact_manager.is_contact(contact_group).float()
+
 
 @EnvStepCache()
 def contact_force(
@@ -119,12 +121,9 @@ def dof_force(
     return entity.get_dofs_force(dofs_idx_local=dofs_idx_local)
 
 
-
 @EnvStepCache()
 def actuated_dof_force(env: GenesisEnv) -> torch.Tensor:
     """
     Output: [num_envs, num_actuated_dofs]
     """
-    return env.robot.get_dofs_force(
-        dofs_idx_local=env.act_manager.actuated_dof_ids
-    )
+    return env.robot.get_dofs_force(dofs_idx_local=env.act_manager.actuated_dof_ids)

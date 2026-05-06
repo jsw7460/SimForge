@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 class MujocoRewardManager(RewardManager):
     """MuJoCo-specific reward manager with SceneEntityCfg resolution."""
 
-    def __init__(self, env: "World", config: RewardConfig):
+    def __init__(self, env: World, config: RewardConfig):
         # Resolve SceneEntityCfg params before parent init
         terms = iter_terms(config, RewardTermConfig)
         for term in terms.values():

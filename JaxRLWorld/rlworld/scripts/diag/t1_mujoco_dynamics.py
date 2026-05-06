@@ -1,4 +1,5 @@
 """Dump joint friction / damping / mass and solver settings for mjlab T1 getup."""
+
 from __future__ import annotations
 
 import mujoco

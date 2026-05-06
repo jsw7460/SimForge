@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 @dataclass
 class MujocoVisualizationManagerConfig:
     """Config for MujocoVisualizationManager."""
+
     show_viewer: bool = False
     viewer_type: Literal["viser"] = "viser"
     viser_port: int = 8080
@@ -26,7 +27,7 @@ class MujocoVisualizationManagerConfig:
 class MujocoVisualizationManager(BaseManager):
     """Manages Viser visualization for MujocoEnv using ViserMujocoScene."""
 
-    def __init__(self, env: "MujocoEnv", config: MujocoVisualizationManagerConfig):
+    def __init__(self, env: MujocoEnv, config: MujocoVisualizationManagerConfig):
         super().__init__(env=env)
         self.config = config
         self._scene = None

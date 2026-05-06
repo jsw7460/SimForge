@@ -3,6 +3,7 @@
 Dispatched from :meth:`T1TrackingConfig.build` when
 ``sim_type == "genesis"``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import genesis as gs
 
 from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     RewardConfig,
@@ -36,7 +38,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
@@ -59,10 +60,8 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import motion_tracking as rf_motion
-from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import motion_tracking as tt_motion
+from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab, reward_terms as rf_genesis
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, motion_tracking as tt_motion
 
 if TYPE_CHECKING:
     from .base import T1TrackingConfig
@@ -72,11 +71,11 @@ CONFIGS_FOR_RUN_CLS = GenesisConfigsForRun
 OBSERVATION_CFG_CLS = ObservationConfig
 
 
-def build_visualization(cfg: "T1TrackingConfig") -> VisualizationConfig:
+def build_visualization(cfg: T1TrackingConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False)
 
 
-def build_env(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> EnvConfig:
+def build_env(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> EnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         time_out = TerminationTermConfig(max_episode_exceed)
@@ -114,7 +113,7 @@ def build_env(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> EnvConfig:
     )
 
 
-def build_scene(cfg: "T1TrackingConfig", timing: Dict[str, Any]) -> SceneConfig:
+def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> SceneConfig:
     r = cfg.robot
     sim_dt = timing["dt"]
 
@@ -178,39 +177,37 @@ _MOTION_PARAMS = {"command_name": "motion"}
 
 @dataclass
 class _ActorObsCfg(ObservationGroupConfig):
-    base_ang_vel_obs = ObservationTermConfig(
-        func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2)
-    )
-    projected_gravity_obs = ObservationTermConfig(
-        func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05)
-    )
-    dof_pos_obs = ObservationTermConfig(
-        func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03)
-    )
-    dof_pos_diff_obs = ObservationTermConfig(
-        func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03)
-    )
-    dof_vel_obs = ObservationTermConfig(
-        func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5)
-    )
+    base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+    projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+    dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.03, 0.03))
+    dof_pos_diff_obs = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
+    dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
     prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
     command = ObservationTermConfig(func=command_obs, scale=1.0)
     motion_anchor_pos = ObservationTermConfig(
-        func=motion_anchor_pos_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_pos_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
         noise=Unoise(-0.05, 0.05),
     )
     motion_anchor_ori = ObservationTermConfig(
-        func=motion_anchor_ori_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_ori_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
         noise=Unoise(-0.05, 0.05),
     )
     # Multi-clip disambiguation. See newton builder for rationale.
     motion_clip_id = ObservationTermConfig(
-        func=motion_clip_id_onehot, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_clip_id_onehot,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
     # obs by assuming future window is the trailing segment.
     motion_future_window = ObservationTermConfig(
-        func=motion_future_reference_window, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_future_reference_window,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
 
 
@@ -221,7 +218,8 @@ class _CriticObsCfg(ObservationGroupConfig):
     projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
     dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0)
     dof_pos_diff_obs = ObservationTermConfig(
-        func=dof_pos_nominal_difference, scale=1.0,
+        func=dof_pos_nominal_difference,
+        scale=1.0,
     )
     dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0)
     prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
@@ -229,24 +227,36 @@ class _CriticObsCfg(ObservationGroupConfig):
     base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
     command = ObservationTermConfig(func=command_obs, scale=1.0)
     motion_anchor_pos = ObservationTermConfig(
-        func=motion_anchor_pos_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_pos_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     motion_anchor_ori = ObservationTermConfig(
-        func=motion_anchor_ori_b, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_anchor_ori_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     robot_body_pos = ObservationTermConfig(
-        func=robot_body_pos_b, scale=1.0, params=_MOTION_PARAMS,
+        func=robot_body_pos_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     robot_body_ori = ObservationTermConfig(
-        func=robot_body_ori_b, scale=1.0, params=_MOTION_PARAMS,
+        func=robot_body_ori_b,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     # Same multi-clip identifier as the actor.
     motion_clip_id = ObservationTermConfig(
-        func=motion_clip_id_onehot, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_clip_id_onehot,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
     # Must be LAST: see _ActorObsCfg.motion_future_window.
     motion_future_window = ObservationTermConfig(
-        func=motion_future_reference_window, scale=1.0, params=_MOTION_PARAMS,
+        func=motion_future_reference_window,
+        scale=1.0,
+        params=_MOTION_PARAMS,
     )
 
 
@@ -256,11 +266,11 @@ class _ObsCfg(ObservationConfig):
     critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
 
 
-def build_observation(cfg: "T1TrackingConfig") -> ObservationConfig:
+def build_observation(cfg: T1TrackingConfig) -> ObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "T1TrackingConfig") -> ActionConfig:
+def build_action(cfg: T1TrackingConfig) -> ActionConfig:
     """Action term selection — see ``_newton_builders.build_action``."""
     from rlworld.rl.envs.mdp.actions import (
         JointPositionAction,
@@ -287,10 +297,7 @@ def build_action(cfg: "T1TrackingConfig") -> ActionConfig:
             clip=(-100.0, 100.0),
         )
     else:
-        raise ValueError(
-            f"Unknown action_mode: {cfg.action_mode!r}. "
-            f"Expected 'motion_residual' or 'default_pose'."
-        )
+        raise ValueError(f"Unknown action_mode: {cfg.action_mode!r}. Expected 'motion_residual' or 'default_pose'.")
 
     return ActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
@@ -299,7 +306,7 @@ def build_action(cfg: "T1TrackingConfig") -> ActionConfig:
     )
 
 
-def build_reward(cfg: "T1TrackingConfig") -> RewardConfig:
+def build_reward(cfg: T1TrackingConfig) -> RewardConfig:
     motion_params_std = lambda std: {"command_name": "motion", "std": std}
 
     @dataclass
@@ -351,7 +358,7 @@ def build_reward(cfg: "T1TrackingConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "T1TrackingConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
     """Scalar friction DR only — Genesis can't do per-axis 3-vector friction."""
     return {
         "randomize_friction_scalar": EventTermConfig(

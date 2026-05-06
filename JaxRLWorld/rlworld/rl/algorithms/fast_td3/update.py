@@ -1,18 +1,17 @@
 from typing import Any, Dict
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 import optax
 
-from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
-from rlworld.rl.storages.replay_buffer import ReplayBatch
 from rlworld.rl.algorithms.base import polyak_update
 from rlworld.rl.algorithms.fast_td3.losses import (
-    compute_critic_loss,
     compute_actor_loss,
+    compute_critic_loss,
 )
-
+from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
+from rlworld.rl.storages.replay_buffer import ReplayBatch
 
 # ==================== Forward Functions ====================
 
@@ -143,16 +142,10 @@ def update_critics(
         )
         return loss, info
 
-    (loss, info), grads = jax.value_and_grad(critic_loss_fn, has_aux=True)(
-        (critic1_params, critic2_params)
-    )
+    (loss, info), grads = jax.value_and_grad(critic_loss_fn, has_aux=True)((critic1_params, critic2_params))
 
-    updates, new_critic_opt_state = critic_optimizer.update(
-        grads, critic_opt_state, (critic1_params, critic2_params)
-    )
-    new_critic1_params, new_critic2_params = optax.apply_updates(
-        (critic1_params, critic2_params), updates
-    )
+    updates, new_critic_opt_state = critic_optimizer.update(grads, critic_opt_state, (critic1_params, critic2_params))
+    new_critic1_params, new_critic2_params = optax.apply_updates((critic1_params, critic2_params), updates)
 
     new_critic1 = eqx.combine(new_critic1_params, critic1_static)
     new_critic2 = eqx.combine(new_critic2_params, critic2_static)
@@ -196,9 +189,7 @@ def update_actor(
 
     (loss, info), grads = jax.value_and_grad(actor_loss_fn, has_aux=True)(actor_params)
 
-    updates, new_actor_opt_state = actor_optimizer.update(
-        grads, actor_opt_state, actor_params
-    )
+    updates, new_actor_opt_state = actor_optimizer.update(grads, actor_opt_state, actor_params)
     new_actor_params = optax.apply_updates(actor_params, updates)
 
     new_actor = eqx.combine(new_actor_params, actor_static)
@@ -278,9 +269,7 @@ def resample_noise_on_done(
         Tuple of (new_noise_scales, new_key)
     """
     key, subkey = jax.random.split(key)
-    new_scales = jax.random.uniform(
-        subkey, noise_scales.shape, minval=noise_min, maxval=noise_max
-    )
+    new_scales = jax.random.uniform(subkey, noise_scales.shape, minval=noise_min, maxval=noise_max)
     # Only update noise for done environments
     dones_expanded = dones[:, None] if dones.ndim == 1 else dones
     updated_scales = jnp.where(dones_expanded > 0, new_scales, noise_scales)

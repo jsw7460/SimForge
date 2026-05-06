@@ -4,6 +4,7 @@ Lazily computes each property from the Genesis ``RigidEntity`` API.
 Genesis uses **wxyz** quaternions natively, so no reordering is needed.
 Genesis velocities are in **world frame**, so we rotate to body frame.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -37,11 +38,15 @@ class GenesisRobotData:
 
     def _get_gravity_vec(self) -> Tensor:
         if self._gravity_vec is None:
-            self._gravity_vec = torch.tensor(
-                [[0.0, 0.0, -1.0]],
-                device=self._device,
-                dtype=torch.float32,
-            ).expand(self._num_envs, -1).contiguous()
+            self._gravity_vec = (
+                torch.tensor(
+                    [[0.0, 0.0, -1.0]],
+                    device=self._device,
+                    dtype=torch.float32,
+                )
+                .expand(self._num_envs, -1)
+                .contiguous()
+            )
         return self._gravity_vec
 
     @property
@@ -105,7 +110,7 @@ class GenesisRobotData:
         return self._entity.get_dofs_control_force(dofs_idx_local=self._actuated_dof_ids)
 
     @property
-    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Hard joint position limits in canonical actuated order.
 
         Calls Genesis's ``entity.get_dofs_limit(actuated_dof_ids)``. Per
@@ -126,7 +131,7 @@ class GenesisRobotData:
         return lower, upper
 
     @property
-    def soft_joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Soft joint position limits (hard * 0.9) in actuated order.
 
         Genesis only stores hard limits via ``get_dofs_limit``; the
@@ -190,25 +195,25 @@ class GenesisRobotData:
     # Per-name body/site reads
     # ------------------------------------------------------------------
 
-    def _resolve_link_indices(self, names: "list[str]") -> "list[int]":
+    def _resolve_link_indices(self, names: list[str]) -> list[int]:
         """Resolve link names to local link indices, preserving input order."""
         return [self._entity.get_link(name=n).idx_local for n in names]
 
-    def body_pos_w(self, names: "list[str]") -> Tensor:
+    def body_pos_w(self, names: list[str]) -> Tensor:
         idxs = self._resolve_link_indices(list(names))
         return self._entity.get_links_pos(links_idx_local=idxs)
 
-    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def body_lin_vel_w(self, names: list[str]) -> Tensor:
         idxs = self._resolve_link_indices(list(names))
         return self._entity.get_links_vel(links_idx_local=idxs)
 
-    def site_pos_w(self, names: "list[str]") -> Tensor:
+    def site_pos_w(self, names: list[str]) -> Tensor:
         raise NotImplementedError(
             "GenesisRobotData does not implement site_pos_w. Genesis has "
             "no equivalent of MuJoCo sites — use body_pos_w with link names."
         )
 
-    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def site_lin_vel_w(self, names: list[str]) -> Tensor:
         raise NotImplementedError(
             "GenesisRobotData does not implement site_lin_vel_w. Genesis has "
             "no equivalent of MuJoCo sites — use body_lin_vel_w with link names."

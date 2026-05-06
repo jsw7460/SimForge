@@ -40,24 +40,23 @@ from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
 from rlworld.rl.envs.mdp.events import common as common_ef
 
-
 # ── Per-simulator constants ──────────────────────────────────────────
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "newton": {"dt": 0.005, "substeps": 1, "decimation": 4},
     "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
-    "mujoco":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "mujoco": {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
-    "newton":  "G1_29dof_Newton",
+    "newton": "G1_29dof_Newton",
     "genesis": "G1_29dof_Genesis",
-    "mujoco":  "G1_29Dof_Mujoco",
+    "mujoco": "G1_29Dof_Mujoco",
 }
 
 _SIM_RUNNER_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "newton":  {"init_at_random_ep_len": False,  "save_interval": 1000},
+    "newton": {"init_at_random_ep_len": False, "save_interval": 1000},
     "genesis": {"init_at_random_ep_len": False, "save_interval": 1000},
-    "mujoco":  {"init_at_random_ep_len": False,  "save_interval": 1000},
+    "mujoco": {"init_at_random_ep_len": False, "save_interval": 1000},
 }
 
 
@@ -74,10 +73,7 @@ def _get_sim_builders(sim_type: str) -> G1SimBuilderProtocol:
     elif sim_type == "mujoco":
         from . import _mujoco_builders as mod
     else:
-        raise ValueError(
-            f"Unknown sim_type: {sim_type!r}. "
-            f"Expected one of {sorted(_SIM_TIMINGS)}."
-        )
+        raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
     return mod  # type: ignore[return-value]
 
 
@@ -159,7 +155,8 @@ class G1FlatConfig:
         Only fields whose value differs from the dataclass default are
         included so the dict stays small and forward-compatible.
         """
-        from dataclasses import fields, MISSING
+        from dataclasses import MISSING, fields
+
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":
@@ -324,5 +321,3 @@ class G1FlatConfig:
             save_interval=overrides["save_interval"],
             output_dir="auto",
         )
-
-

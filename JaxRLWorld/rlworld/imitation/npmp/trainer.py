@@ -28,6 +28,7 @@ Per outer iteration:
      checkpoints are uploaded as wandb artifacts so downstream HL
      controller training can pull them by run path.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -105,7 +106,7 @@ class NPMPTrainer:
     def __init__(
         self,
         cfg: T1NPMPDistillConfig,
-        env: "World",
+        env: World,
         dispatcher: MultiExpertDispatcher,
         key: jax.Array,
     ):
@@ -117,8 +118,7 @@ class NPMPTrainer:
         for required in ("decoder_input", "encoder_input"):
             if required not in obs_dim:
                 raise ValueError(
-                    f"NPMPTrainer expects env obs to include the "
-                    f"{required!r} group; got {sorted(obs_dim)}."
+                    f"NPMPTrainer expects env obs to include the {required!r} group; got {sorted(obs_dim)}."
                 )
         self._s_dim = obs_dim["decoder_input"]
         self._x_dim = obs_dim["encoder_input"]
@@ -153,7 +153,8 @@ class NPMPTrainer:
             max_grad_norm=cfg.max_grad_norm,
         )
         self._params, self._static = eqx.partition(
-            self._module, eqx.is_inexact_array,
+            self._module,
+            eqx.is_inexact_array,
         )
         self._opt_state = self._optimizer.init(self._params)
 
@@ -167,7 +168,7 @@ class NPMPTrainer:
 
         # Eval env (lazy). Built smaller than train env for cheap
         # periodic evaluation; reused across all in-training eval calls.
-        self._eval_env: "World | None" = None
+        self._eval_env: World | None = None
         self._last_eval_stats = None
         # Expert-policy eval baseline (frozen experts → does not change
         # over training, so computed once on first ``_run_evaluation``
@@ -181,7 +182,8 @@ class NPMPTrainer:
         # per-env accumulator. ``train()`` aggregates per-motion means
         # at every wandb push and clears the buffer.
         self._train_ep_returns = torch.zeros(
-            env.num_envs, device=env.device,
+            env.num_envs,
+            device=env.device,
         )
         self._train_completed: list[tuple[int, float]] = []
 
@@ -349,11 +351,13 @@ class NPMPTrainer:
 
             if self._wandb_logger is not None:
                 self._wandb_logger.log_iteration(
-                    iter_data, step=self._total_env_steps,
+                    iter_data,
+                    step=self._total_env_steps,
                 )
                 if train_return_log:
                     self._wandb_logger.run.log(
-                        train_return_log, step=self._total_env_steps,
+                        train_return_log,
+                        step=self._total_env_steps,
                     )
                 # Eval / expert-baseline / return-gap push.
                 if self._last_eval_stats is not None:
@@ -361,41 +365,41 @@ class NPMPTrainer:
                         prefix="Eval/student",
                     )
                     self._wandb_logger.run.log(
-                        student_log, step=self._total_env_steps,
+                        student_log,
+                        step=self._total_env_steps,
                     )
                     if self._expert_baseline_stats is not None:
                         expert_log = self._expert_baseline_stats.to_wandb_dict(
                             prefix="Eval/expert",
                         )
                         self._wandb_logger.run.log(
-                            expert_log, step=self._total_env_steps,
+                            expert_log,
+                            step=self._total_env_steps,
                         )
                         gap_log = self._compute_return_gap(
                             self._last_eval_stats,
                             self._expert_baseline_stats,
                         )
                         self._wandb_logger.run.log(
-                            gap_log, step=self._total_env_steps,
+                            gap_log,
+                            step=self._total_env_steps,
                         )
 
-            if (
-                (it + 1) % self._cfg.save_interval == 0
-                or (it + 1) == end_iter
-            ):
+            if (it + 1) % self._cfg.save_interval == 0 or (it + 1) == end_iter:
                 ckpt_dir = os.path.join(
-                    self._model_log_dir, f"checkpoint_{it + 1}",
+                    self._model_log_dir,
+                    f"checkpoint_{it + 1}",
                 )
                 self.save_checkpoint(ckpt_dir)
                 latest = os.path.join(
-                    self._model_log_dir, "checkpoint_latest",
+                    self._model_log_dir,
+                    "checkpoint_latest",
                 )
                 self.save_checkpoint(latest)
-                if (
-                    self._wandb_logger is not None
-                    and self._cfg.upload_checkpoint_artifact
-                ):
+                if self._wandb_logger is not None and self._cfg.upload_checkpoint_artifact:
                     self._wandb_logger.upload_checkpoint_artifact(
-                        ckpt_dir, iteration=it + 1,
+                        ckpt_dir,
+                        iteration=it + 1,
                         metadata={
                             "iteration": it + 1,
                             "total_env_steps": self._total_env_steps,
@@ -408,7 +412,7 @@ class NPMPTrainer:
     # Evaluation
     # ------------------------------------------------------------------
 
-    def _get_or_create_eval_env(self) -> "World":
+    def _get_or_create_eval_env(self) -> World:
         """Lazily build a smaller eval-only env separate from training."""
         if self._eval_env is not None:
             return self._eval_env
@@ -421,6 +425,7 @@ class NPMPTrainer:
         # Disable obs noise on every group during eval — matches RL pipeline's
         # ``eval_disable_noise`` default.
         from rlworld.rl.configs.common_config_classes import disable_corruption
+
         disable_corruption(cfgs_for_run.observation)
         self._eval_env = BaseRunner._create_env_from_config(cfgs_for_run)
         return self._eval_env
@@ -435,6 +440,7 @@ class NPMPTrainer:
         ``eval_compute_action_gap=True``.
         """
         from rlworld.imitation.npmp.evaluator import run_npmp_eval
+
         eval_env = self._get_or_create_eval_env()
 
         if self._expert_baseline_stats is None:
@@ -447,10 +453,7 @@ class NPMPTrainer:
                 policy="expert",
             )
 
-        dispatcher = (
-            self._dispatcher
-            if self._cfg.eval_compute_action_gap else None
-        )
+        dispatcher = self._dispatcher if self._cfg.eval_compute_action_gap else None
         return run_npmp_eval(
             module=self.module,
             env=eval_env,
@@ -472,10 +475,7 @@ class NPMPTrainer:
         if not self._train_completed:
             return {}
         cmd = self._env.command_manager.get_term("motion")
-        motion_names = [
-            os.path.splitext(os.path.basename(p))[0]
-            for p in cmd.cfg.motion_files
-        ]
+        motion_names = [os.path.splitext(os.path.basename(p))[0] for p in cmd.cfg.motion_files]
         by_motion: dict[int, list[float]] = defaultdict(list)
         for mi, ret in self._train_completed:
             by_motion[mi].append(ret)
@@ -494,9 +494,7 @@ class NPMPTrainer:
     def _compute_return_gap(student, expert) -> dict[str, float]:
         """Per-motion + overall ``expert.return − student.return`` gap."""
         d: dict[str, float] = {
-            "Eval/return_gap/overall": (
-                expert.episode_return_mean - student.episode_return_mean
-            ),
+            "Eval/return_gap/overall": (expert.episode_return_mean - student.episode_return_mean),
         }
         for name in expert.per_motion:
             if name not in student.per_motion:
@@ -542,14 +540,13 @@ class NPMPTrainer:
             episode_stats = EpisodeStats(
                 return_buffer=[ev.tracking_reward_mean],
                 length_buffer=[ev.episode_length_mean],
-                reward_stats={
-                    name: {"mean": val}
-                    for name, val in ev.reward_terms.items()
-                },
+                reward_stats={name: {"mean": val} for name, val in ev.reward_terms.items()},
             )
         else:
             episode_stats = EpisodeStats(
-                return_buffer=[], length_buffer=[], reward_stats={},
+                return_buffer=[],
+                length_buffer=[],
+                reward_stats={},
             )
 
         return IterationData(
@@ -646,5 +643,6 @@ class NPMPTrainer:
             key=jax.random.PRNGKey(0),
         )
         return eqx.tree_deserialise_leaves(
-            os.path.join(checkpoint_dir, "model.eqx"), empty,
+            os.path.join(checkpoint_dir, "model.eqx"),
+            empty,
         )

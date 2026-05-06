@@ -5,17 +5,17 @@ from typing import Any
 import torch
 
 from rlworld.rl.evals.sim_initializers import SimInitializer
-from rlworld.rl.utils.console import print_info, print_success, print_error
+from rlworld.rl.utils.console import print_error, print_info, print_success
 
 
 class NewtonInitializer(SimInitializer):
-
     @property
     def video_extension(self) -> str:
         return ".bin"
 
     def init_device(self) -> torch.device:
         import warp as wp
+
         return wp.device_to_torch(wp.get_device())
 
     def prepare_configs(
@@ -65,6 +65,7 @@ class NewtonInitializer(SimInitializer):
     def create_play_scene(self, env: Any):
         from rlworld.rl.vis.viser.bridges import NewtonBridge
         from rlworld.rl.vis.viser.play_scene import BridgePlayScene
+
         return BridgePlayScene(NewtonBridge(env.scene_manager))
 
     def start_recording(self, env: Any) -> None:
@@ -76,7 +77,7 @@ class NewtonInitializer(SimInitializer):
         print_success("Newton recording saved!")
 
     def cleanup(self, env: Any) -> None:
-        if hasattr(env, 'vis_manager'):
+        if hasattr(env, "vis_manager"):
             print_info("Closing Newton viewer...")
             try:
                 env.vis_manager.close()

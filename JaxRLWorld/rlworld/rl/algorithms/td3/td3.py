@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple
 
 import equinox as eqx
 import jax
@@ -9,26 +9,26 @@ import numpy as np
 import optax
 
 from rlworld.rl.algorithms.base import (
-    OffPolicyAlgorithm,
     ActInput,
+    OffPolicyAlgorithm,
     copy_params,
 )
 from rlworld.rl.algorithms.td3.metrics import (
-    TD3Metrics,
-    TD3CriticMetrics,
     TD3ActorMetrics,
     TD3BatchMetrics,
+    TD3CriticMetrics,
+    TD3Metrics,
 )
 from rlworld.rl.algorithms.td3.update import (
     act_deterministic,
     act_with_noise,
-    update_targets,
     get_value,
-    update_critics,
     update_actor,
+    update_critics,
+    update_targets,
 )
 from rlworld.rl.modules.policies.td3_ac import TD3ActorCritic
-from rlworld.rl.storages.replay_buffer import ReplayBuffer, ReplayBatch
+from rlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
 
 
 @eqx.filter_jit
@@ -49,6 +49,7 @@ def _update_normalizers(
 
 class TD3TrainState(NamedTuple):
     """Training state for TD3 containing all model and optimizer states."""
+
     model: TD3ActorCritic
     # Target network params
     target_actor_params: Any
@@ -67,6 +68,7 @@ class TD3TrainState(NamedTuple):
 @dataclass
 class TD3TransitionBuffer:
     """Buffer for current transition."""
+
     actor_observations: jax.Array = None
     critic_observations: jax.Array = None
     actions: jax.Array = None
@@ -159,8 +161,8 @@ class TD3(OffPolicyAlgorithm):
         self.obs_normalization = actor_critic.actor_obs_normalizer is not None
 
         # Storage (initialized via init_storage)
-        self.replay_buffer: Optional[ReplayBuffer] = None
-        self.transition: Optional[TD3TransitionBuffer] = None
+        self.replay_buffer: ReplayBuffer | None = None
+        self.transition: TD3TransitionBuffer | None = None
 
         # Update counter
         self.total_it = 0
@@ -185,15 +187,9 @@ class TD3(OffPolicyAlgorithm):
         key, subkey = jax.random.split(key)
 
         # Partition current networks into params and static
-        actor_params, actor_static = eqx.partition(
-            self.actor_critic.actor, eqx.is_inexact_array
-        )
-        critic1_params, critic1_static = eqx.partition(
-            self.actor_critic.critic1, eqx.is_inexact_array
-        )
-        critic2_params, critic2_static = eqx.partition(
-            self.actor_critic.critic2, eqx.is_inexact_array
-        )
+        actor_params, actor_static = eqx.partition(self.actor_critic.actor, eqx.is_inexact_array)
+        critic1_params, critic1_static = eqx.partition(self.actor_critic.critic1, eqx.is_inexact_array)
+        critic2_params, critic2_static = eqx.partition(self.actor_critic.critic2, eqx.is_inexact_array)
 
         # Initialize target network parameters (copy from main networks)
         target_actor_params = copy_params(actor_params)
@@ -235,7 +231,7 @@ class TD3(OffPolicyAlgorithm):
         print(f"  Target policy noise: {self.target_policy_noise}")
         print(f"  Target noise clip: {self.target_noise_clip}")
 
-        print(f"\n🔍 Network architecture:")
+        print("\n🔍 Network architecture:")
         print(f"  Actor obs dim: {self.actor_critic.actor_obs_dim}")
         print(f"  Critic obs dim: {self.actor_critic.critic_obs_dim}")
         print(f"  Action dim: {self.actor_critic.num_actions}")
@@ -273,13 +269,9 @@ class TD3(OffPolicyAlgorithm):
         key = self.train_state.key
 
         if deterministic:
-            actions, values, new_key = act_deterministic(
-                model, obs.actor_obs, obs.critic_obs, key
-            )
+            actions, values, new_key = act_deterministic(model, obs.actor_obs, obs.critic_obs, key)
         else:
-            actions, values, new_key = act_with_noise(
-                model, obs.actor_obs, obs.critic_obs, self.exploration_noise, key
-            )
+            actions, values, new_key = act_with_noise(model, obs.actor_obs, obs.critic_obs, self.exploration_noise, key)
 
         self.train_state = self.train_state._replace(key=new_key)
 
@@ -329,9 +321,7 @@ class TD3(OffPolicyAlgorithm):
         """Sample batch from replay buffer."""
         return self.replay_buffer.sample_batch(batch_size, key)
 
-    def update_normalizers(
-        self, actor_obs: jax.Array, critic_obs: jax.Array
-    ) -> None:
+    def update_normalizers(self, actor_obs: jax.Array, critic_obs: jax.Array) -> None:
         """Update obs normalizers with collected env-time observations.
 
         Called by the runner once per collection cycle so that every env-time
@@ -500,21 +490,13 @@ class TD3(OffPolicyAlgorithm):
         target_networks = eqx.tree_deserialise_leaves(target_path, target_networks_template)
 
         # Re-partition to get params and static
-        new_actor_params, new_actor_static = eqx.partition(
-            new_model.actor, eqx.is_inexact_array
-        )
-        new_critic1_params, new_critic1_static = eqx.partition(
-            new_model.critic1, eqx.is_inexact_array
-        )
-        new_critic2_params, new_critic2_static = eqx.partition(
-            new_model.critic2, eqx.is_inexact_array
-        )
+        new_actor_params, new_actor_static = eqx.partition(new_model.actor, eqx.is_inexact_array)
+        new_critic1_params, new_critic1_static = eqx.partition(new_model.critic1, eqx.is_inexact_array)
+        new_critic2_params, new_critic2_static = eqx.partition(new_model.critic2, eqx.is_inexact_array)
 
         # Re-initialize optimizer states
         actor_opt_state = self.actor_optimizer.init(new_actor_params)
-        critic_opt_state = self.critic_optimizer.init(
-            (new_critic1_params, new_critic2_params)
-        )
+        critic_opt_state = self.critic_optimizer.init((new_critic1_params, new_critic2_params))
 
         self.train_state = TD3TrainState(
             model=new_model,

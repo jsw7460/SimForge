@@ -1,11 +1,12 @@
 import argparse
 
 import genesis as gs
+
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from rlworld.rl.evals import PolicyEvaluator
 from rlworld.rl.vis.overlays.hud_items import LinkPositionItem, LinkPositionItemConfig
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Genesis evaluation")
     parser.add_argument("--eval", action="store_true", help="Run batch evaluation instead of interactive viewer")
     parser.add_argument("--record_video", action="store_true")
@@ -20,7 +21,7 @@ if __name__ == '__main__':
     overrides = {
         "env": {
             "num_envs": 1,
-            "episode_length_s": 10e+9,
+            "episode_length_s": 10e9,
         },
         "scene": {
             "vis_options": gs.options.VisOptions(

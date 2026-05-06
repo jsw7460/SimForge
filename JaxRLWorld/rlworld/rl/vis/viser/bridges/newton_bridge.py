@@ -13,7 +13,7 @@ import trimesh
 import trimesh.visual
 from newton import ShapeFlags
 
-from ..bridge import SimulatorBridge, SimulatorGeometry, BodyMeshGroup
+from ..bridge import BodyMeshGroup, SimulatorGeometry
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.newton.scene import NewtonSceneManager
@@ -67,11 +67,7 @@ class NewtonBridge:
 
             if local_body_idx not in body_meshes:
                 body_meshes[local_body_idx] = []
-                label = (
-                    model.body_label[body_idx]
-                    if body_idx < len(model.body_label)
-                    else f"body_{local_body_idx}"
-                )
+                label = model.body_label[body_idx] if body_idx < len(model.body_label) else f"body_{local_body_idx}"
                 body_names[local_body_idx] = label
 
             # Build trimesh from Newton mesh data.
@@ -82,12 +78,14 @@ class NewtonBridge:
         # Build BodyMeshGroups.
         for body_id, meshes in body_meshes.items():
             is_fixed = self._is_ground_body(body_id)
-            mesh_groups.append(BodyMeshGroup(
-                body_id=body_id,
-                body_name=body_names.get(body_id, f"body_{body_id}"),
-                is_fixed=is_fixed,
-                meshes=meshes,
-            ))
+            mesh_groups.append(
+                BodyMeshGroup(
+                    body_id=body_id,
+                    body_name=body_names.get(body_id, f"body_{body_id}"),
+                    is_fixed=is_fixed,
+                    meshes=meshes,
+                )
+            )
 
         return SimulatorGeometry(
             mesh_groups=mesh_groups,
@@ -143,6 +141,7 @@ class NewtonBridge:
         body_q = state.body_q.numpy()[body_idx]  # (7,) [x,y,z,qx,qy,qz,qw]
         qx, qy, qz, qw = body_q[3:7]
         from scipy.spatial.transform import Rotation
+
         body_vel = Rotation.from_quat([qx, qy, qz, qw]).inv().apply(world_vel)
         return body_vel[:2].astype(np.float32)
 
@@ -193,6 +192,7 @@ class NewtonBridge:
         # Convert to rotation matrix.
         qx, qy, qz, qw = local_quat_xyzw
         from scipy.spatial.transform import Rotation
+
         rot = Rotation.from_quat([qx, qy, qz, qw]).as_matrix()
         transformed_verts = (rot @ scaled_verts.T).T + local_pos
 
@@ -202,13 +202,9 @@ class NewtonBridge:
         color = getattr(geo_src, "color", None)
         if color is not None:
             rgba = [int(c * 255) for c in color[:3]] + [255]
-            visual = trimesh.visual.ColorVisuals(
-                face_colors=np.tile(rgba, (len(faces), 1))
-            )
+            visual = trimesh.visual.ColorVisuals(face_colors=np.tile(rgba, (len(faces), 1)))
         else:
-            visual = trimesh.visual.ColorVisuals(
-                face_colors=np.tile([180, 180, 180, 255], (len(faces), 1))
-            )
+            visual = trimesh.visual.ColorVisuals(face_colors=np.tile([180, 180, 180, 255], (len(faces), 1)))
 
         mesh = trimesh.Trimesh(
             vertices=transformed_verts,

@@ -12,6 +12,7 @@ Prints:
      (``dof_pos``, ``dof_vel``, ``raw_actions``) sit at the same
      offsets inside the concatenated obs vector across sims.
 """
+
 from __future__ import annotations
 
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
@@ -54,6 +55,7 @@ def main() -> None:
     print("\n=== Newton T1 — observation group layout ===")
     # Drive one step so obs terms have populated shapes
     import torch
+
     env.reset()
     zero_act = torch.zeros(env.num_envs, am.total_action_dim, device=env.device)
     env.step(zero_act)

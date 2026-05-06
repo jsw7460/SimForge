@@ -1,13 +1,13 @@
+import math
 from typing import TYPE_CHECKING, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import math
 
-from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
-from rlworld.rl.modules.policies.base_ac import BaseActorCritic
 from rlworld.rl.modules.normalization import EmpiricalNormalization
+from rlworld.rl.modules.policies.base_ac import BaseActorCritic
+from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
 
 if TYPE_CHECKING:
     pass
@@ -20,6 +20,7 @@ __all__ = ["FastTD3ActorCritic", "DistributionalQNetwork"]
 
 class DistributionalQNetwork(eqx.Module):
     """Distributional Q-network using C51 algorithm."""
+
     net: MLP
     num_atoms: int
     v_min: float
@@ -214,7 +215,7 @@ def project_distribution(
     u = jnp.ceil(b).astype(jnp.int32)
 
     # Handle l == u edge case: ensure l != u so probability mass is not lost
-    is_int = (l == u)
+    is_int = l == u
     l = jnp.where(is_int & (l > 0), l - 1, l)
     u = jnp.where(is_int & (u < num_atoms - 1), u + 1, u)
 
@@ -279,7 +280,7 @@ def project_distribution_batched(
     # Handle l == u edge case: ensure l != u so probability mass is not lost
     # When l == u and l > 0: shift l down
     # When l == u and l == 0: shift u up
-    is_int = (l == u)
+    is_int = l == u
     l = jnp.where(is_int & (l > 0), l - 1, l)
     u = jnp.where(is_int & (u < num_atoms - 1), u + 1, u)
 
@@ -300,10 +301,12 @@ def project_distribution_batched(
     u_one_hot = jax.nn.one_hot(u, num_atoms)
 
     # proj[batch, dst] = sum over src of (weighted_prob[batch, src] * one_hot[batch, src, dst])
-    proj_dist = jnp.sum(l_weighted_probs[:, :, None] * l_one_hot, axis=1) + \
-                jnp.sum(u_weighted_probs[:, :, None] * u_one_hot, axis=1)
+    proj_dist = jnp.sum(l_weighted_probs[:, :, None] * l_one_hot, axis=1) + jnp.sum(
+        u_weighted_probs[:, :, None] * u_one_hot, axis=1
+    )
 
     return proj_dist
+
 
 # ==================== FastTD3 Actor-Critic ====================
 
@@ -320,6 +323,7 @@ class FastTD3ActorCritic(BaseActorCritic):
     Observation normalization is handled by BaseActorCritic via
     actor_obs_normalizer and critic_obs_normalizer attributes.
     """
+
     critic1: DistributionalQNetwork
     critic2: DistributionalQNetwork
 
@@ -393,7 +397,7 @@ class FastTD3ActorCritic(BaseActorCritic):
             self.actor_obs_normalizer = None
             self.critic_obs_normalizer = None
 
-        print(f"🎭 FastTD3 Actor-Critic: deterministic policy + distributional critics")
+        print("🎭 FastTD3 Actor-Critic: deterministic policy + distributional critics")
         print(f"🤖 Actor: {actor_class_name}")
         print(f"📊 C51: {num_atoms} atoms, support [{v_min}, {v_max}]")
         print(f"📏 Obs normalization: {obs_normalization}")
@@ -585,7 +589,7 @@ class FastTD3ActorCritic(BaseActorCritic):
     def extra_to_log(self) -> dict:
         """Extra metrics to log."""
         extra = {}
-        if hasattr(self.actor, 'encoder') and hasattr(self.actor.encoder, 'last_gate'):
+        if hasattr(self.actor, "encoder") and hasattr(self.actor.encoder, "last_gate"):
             gate = self.actor.encoder.last_gate
             if gate is not None:
                 gate_mean = gate.mean(axis=0)

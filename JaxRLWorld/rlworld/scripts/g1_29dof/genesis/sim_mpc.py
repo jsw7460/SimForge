@@ -1,10 +1,9 @@
-from rlworld.rl.configs.algorithms import SimMPCConfig
-from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.configs import (
     TerminationTermConfig,
 )
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as tf
+from rlworld.rl.configs.algorithms import SimMPCConfig
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as tf
 from rlworld.rl.runners import BaseRunner
 
 
@@ -31,17 +30,14 @@ def main():
         buffer_size=1_000_000,
         learning_starts=1000,
         num_gradient_steps=1,
-        mppi_ratio=0.01
+        mppi_ratio=0.01,
     )
 
     cfgs_for_run.env.num_envs = 1024
     cfgs_for_run.env.decimation = 1
     cfgs_for_run.reward.reward_terms.pop("raw_action_rate_l2_mjlab")
     cfgs_for_run.env.termination_criteria = [
-        TerminationTermConfig(
-            tf.roll_pitch_violation,
-            {"roll_threshold_degree": 45.0, "pitch_threshold_degree": 45.0}
-        ),
+        TerminationTermConfig(tf.roll_pitch_violation, {"roll_threshold_degree": 45.0, "pitch_threshold_degree": 45.0}),
         TerminationTermConfig(max_episode_exceed),
     ]
     cfgs_for_run.runner.max_iterations = 100000

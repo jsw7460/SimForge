@@ -21,7 +21,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.mujoco_config_classes import (
@@ -48,7 +48,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
@@ -71,11 +70,11 @@ def get_foot_names(robot) -> tuple[str, ...]:
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "Go2FlatConfig") -> VisualizationConfig:
+def build_visualization(cfg: Go2FlatConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
+def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         bad_orientation = TerminationTermConfig(
@@ -95,7 +94,7 @@ def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> MujocoEnvConfig:
     )
 
 
-def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConfig:
+def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
     """Build scene config with mjlab SceneCfg."""
     r = cfg.robot
     physics_dt = timing["dt"]
@@ -187,7 +186,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> MujocoSceneConf
     )
 
 
-def build_action(cfg: "Go2FlatConfig") -> MujocoActionConfig:
+def build_action(cfg: Go2FlatConfig) -> MujocoActionConfig:
     r = cfg.robot
     return MujocoActionConfig(
         entity_name="robot",
@@ -198,7 +197,7 @@ def build_action(cfg: "Go2FlatConfig") -> MujocoActionConfig:
     )
 
 
-def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
+def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
     """Build reward configuration matching Genesis/Newton Go2 rewards."""
     site_names = ("FR", "FL", "RR", "RL")
 
@@ -310,7 +309,7 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
     from rlworld.rl.envs.mdp.events import mujoco as ef
     from rlworld.rl.envs.mdp.events.mujoco import EntityCfg

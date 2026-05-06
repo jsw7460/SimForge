@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 try:
     from PIL import Image, ImageDraw, ImageFont
+
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
@@ -219,10 +220,7 @@ class TextHUDOverlay(Base2DOverlay):
 
         # Draw semi-transparent background
         bg_color = self.config.background_color + (int(255 * self.config.background_alpha),)
-        overlay_draw.rectangle(
-            [bg_x, bg_y, bg_x + bg_width, bg_y + bg_height],
-            fill=bg_color
-        )
+        overlay_draw.rectangle([bg_x, bg_y, bg_x + bg_width, bg_y + bg_height], fill=bg_color)
 
         # Composite background
         pil_image = Image.alpha_composite(pil_image.convert("RGBA"), overlay)
@@ -295,9 +293,7 @@ class TextHUDOverlay(Base2DOverlay):
 
         return max_width, total_height
 
-    def _get_background_position(
-        self, w: int, h: int, bg_width: int, bg_height: int
-    ) -> tuple[int, int]:
+    def _get_background_position(self, w: int, h: int, bg_width: int, bg_height: int) -> tuple[int, int]:
         """Get background rectangle position."""
         pos = self.config.position
 
@@ -337,10 +333,7 @@ class TextHUDOverlay(Base2DOverlay):
         bar_y = y + 2
 
         # Background bar
-        draw.rectangle(
-            [bar_x, bar_y, bar_x + bar_width, bar_y + bar_height],
-            fill=(60, 60, 60)
-        )
+        draw.rectangle([bar_x, bar_y, bar_x + bar_width, bar_y + bar_height], fill=(60, 60, 60))
 
         # Filled portion
         fill_ratio = min(1.0, max(0.0, value / max_value))
@@ -356,10 +349,7 @@ class TextHUDOverlay(Base2DOverlay):
         color = (r, g, 0)  # RGB
 
         if fill_width > 0:
-            draw.rectangle(
-                [bar_x, bar_y, bar_x + fill_width, bar_y + bar_height],
-                fill=color
-            )
+            draw.rectangle([bar_x, bar_y, bar_x + fill_width, bar_y + bar_height], fill=color)
 
         # Value text
         draw.text(

@@ -14,7 +14,6 @@ class KinematicTree:
     """
 
     def __init__(self, urdf_path: str = None, mjcf_path: str = None, exclude_links: list[str] | None = None):
-
         """
         Args:
             urdf_path: Path to URDF file
@@ -48,11 +47,11 @@ class KinematicTree:
         tree = ET.parse(self.mjcf_path)
         root = tree.getroot()
 
-        model_elem = root if root.tag == 'mujoco' else root.find('mujoco')
+        model_elem = root if root.tag == "mujoco" else root.find("mujoco")
         if model_elem is not None:
-            self.name = model_elem.get('model', 'mjcf_robot')
+            self.name = model_elem.get("model", "mjcf_robot")
 
-        worldbody = root.find('.//worldbody')
+        worldbody = root.find(".//worldbody")
         if worldbody is None:
             raise ValueError("MJCF file has no worldbody")
 
@@ -60,6 +59,7 @@ class KinematicTree:
         mj_model = None
         try:
             import mujoco
+
             mj_model = mujoco.MjModel.from_xml_path(self.mjcf_path)
         except (ValueError, Exception):
             pass
@@ -68,14 +68,10 @@ class KinematicTree:
         bodies = []
 
         def collect_bodies(elem, parent_idx):
-            for body_elem in elem.findall('body'):
-                body_name = body_elem.get('name', f'body_{len(bodies)}')
+            for body_elem in elem.findall("body"):
+                body_name = body_elem.get("name", f"body_{len(bodies)}")
                 body_idx = len(bodies)
-                bodies.append({
-                    'name': body_name,
-                    'elem': body_elem,
-                    'parent_idx': parent_idx
-                })
+                bodies.append({"name": body_name, "elem": body_elem, "parent_idx": parent_idx})
                 collect_bodies(body_elem, body_idx)
 
         collect_bodies(worldbody, -1)
@@ -83,23 +79,20 @@ class KinematicTree:
         # Build links with mass
         self.links = []
         for idx, body in enumerate(bodies):
-            body_name = body['name']
+            body_name = body["name"]
 
             if mj_model is not None:
                 import mujoco
+
                 mj_body_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
                 mass = mj_model.body_mass[mj_body_id] if mj_body_id >= 0 else 1.0
             else:
-                mass = self._get_body_mass(body['elem'])
+                mass = self._get_body_mass(body["elem"])
 
-            self.links.append({
-                "index": idx,
-                "name": body_name,
-                "mass": mass
-            })
+            self.links.append({"index": idx, "name": body_name, "mass": mass})
 
         # Build parent/children indices
-        self.parent_indices = [body['parent_idx'] for body in bodies]
+        self.parent_indices = [body["parent_idx"] for body in bodies]
         self.children_indices = [[] for _ in range(len(bodies))]
         for child_idx, parent_idx in enumerate(self.parent_indices):
             if parent_idx != -1:
@@ -108,31 +101,33 @@ class KinematicTree:
         # Build joints
         self.joints = []
         for body_idx, body in enumerate(bodies):
-            if body['parent_idx'] == -1:
+            if body["parent_idx"] == -1:
                 continue
-            for joint_elem in body['elem'].findall('joint'):
-                joint_type = joint_elem.get('type', 'hinge')
-                if joint_type == 'fixed':
+            for joint_elem in body["elem"].findall("joint"):
+                joint_type = joint_elem.get("type", "hinge")
+                if joint_type == "fixed":
                     continue
-                self.joints.append({
-                    "index": len(self.joints),
-                    "parent_link": body['parent_idx'],
-                    "child_link": body_idx,
-                    "name": joint_elem.get('name', f'joint_{len(self.joints)}'),
-                    "type": joint_type
-                })
+                self.joints.append(
+                    {
+                        "index": len(self.joints),
+                        "parent_link": body["parent_idx"],
+                        "child_link": body_idx,
+                        "name": joint_elem.get("name", f"joint_{len(self.joints)}"),
+                        "type": joint_type,
+                    }
+                )
 
     def _get_body_mass(self, body_elem) -> float:
         """Extract mass from body element"""
-        inertial = body_elem.find('inertial')
+        inertial = body_elem.find("inertial")
         if inertial is not None:
-            mass = inertial.get('mass')
+            mass = inertial.get("mass")
             if mass is not None:
                 return float(mass)
 
         total_mass = 0.0
-        for geom in body_elem.findall('geom'):
-            mass = geom.get('mass')
+        for geom in body_elem.findall("geom"):
+            mass = geom.get("mass")
             if mass is not None:
                 total_mass += float(mass)
 
@@ -143,16 +138,28 @@ class KinematicTree:
         tree = ET.parse(self.urdf_path)
         root = tree.getroot()
 
-        robot_name = root.get('name', 'robot')
+        robot_name = root.get("name", "robot")
         self.name = robot_name
 
-        all_links = {link.get('name'): link for link in root.findall('link')}
-        joints = list(root.findall('joint'))
+        all_links = {link.get("name"): link for link in root.findall("link")}
+        joints = list(root.findall("joint"))
 
         sensor_keywords = [
-            'camera', 'depth', 'rgb', 'lidar', 'laser', 'radar',
-            'imu', 'gps', 'sonar', 'sensor', 'optical', 'logo', 'd435', 'mid360',
-            'contour'
+            "camera",
+            "depth",
+            "rgb",
+            "lidar",
+            "laser",
+            "radar",
+            "imu",
+            "gps",
+            "sonar",
+            "sensor",
+            "optical",
+            "logo",
+            "d435",
+            "mid360",
+            "contour",
         ]
 
         links = {}
@@ -168,12 +175,12 @@ class KinematicTree:
         # Filter out low-mass links (mass <= 0.01)
         filtered_links = {}
         for name, link_elem in links.items():
-            inertial_elem = link_elem.find('inertial')
+            inertial_elem = link_elem.find("inertial")
             mass = 0.0
             if inertial_elem is not None:
-                mass_elem = inertial_elem.find('mass')
+                mass_elem = inertial_elem.find("mass")
                 if mass_elem is not None:
-                    mass = float(mass_elem.get('value', 0))
+                    mass = float(mass_elem.get("value", 0))
             if mass > 0.01:
                 filtered_links[name] = link_elem
 
@@ -185,28 +192,24 @@ class KinematicTree:
         self.links = []
         for idx, name in enumerate(link_names):
             link_elem = links[name]
-            inertial_elem = link_elem.find('inertial')
+            inertial_elem = link_elem.find("inertial")
 
             mass = 0.0
             if inertial_elem is not None:
-                mass_elem = inertial_elem.find('mass')
+                mass_elem = inertial_elem.find("mass")
                 if mass_elem is not None:
-                    mass = float(mass_elem.get('value', 0))
+                    mass = float(mass_elem.get("value", 0))
 
-            self.links.append({
-                "index": idx,
-                "name": name,
-                "mass": mass
-            })
+            self.links.append({"index": idx, "name": name, "mass": mass})
 
         child_links = set()
         for joint in joints:
-            child_elem = joint.find('child')
-            parent_elem = joint.find('parent')
+            child_elem = joint.find("child")
+            parent_elem = joint.find("parent")
 
             if child_elem is not None and parent_elem is not None:
-                child_link = child_elem.get('link')
-                parent_link = parent_elem.get('link')
+                child_link = child_elem.get("link")
+                parent_link = parent_elem.get("link")
 
                 if child_link in link_to_idx and parent_link in link_to_idx:
                     child_links.add(child_link)
@@ -221,17 +224,17 @@ class KinematicTree:
         joint_info_list = []
 
         for joint in joints:
-            joint_name = joint.get('name')
-            joint_type = joint.get('type')
+            joint_name = joint.get("name")
+            joint_type = joint.get("type")
 
-            parent_elem = joint.find('parent')
-            child_elem = joint.find('child')
+            parent_elem = joint.find("parent")
+            child_elem = joint.find("child")
 
             if parent_elem is None or child_elem is None:
                 continue
 
-            parent_link = parent_elem.get('link')
-            child_link = child_elem.get('link')
+            parent_link = parent_elem.get("link")
+            child_link = child_elem.get("link")
 
             if parent_link not in link_to_idx or child_link not in link_to_idx:
                 continue
@@ -241,14 +244,16 @@ class KinematicTree:
 
             self.parent_indices[child_idx] = parent_idx
 
-            if joint_type != 'fixed':
-                joint_info_list.append({
-                    "index": len(joint_info_list),
-                    "parent_link": parent_idx,
-                    "child_link": child_idx,
-                    "name": joint_name,
-                    "type": joint_type
-                })
+            if joint_type != "fixed":
+                joint_info_list.append(
+                    {
+                        "index": len(joint_info_list),
+                        "parent_link": parent_idx,
+                        "child_link": child_idx,
+                        "name": joint_name,
+                        "type": joint_type,
+                    }
+                )
 
         self.joints = joint_info_list
 
@@ -282,12 +287,12 @@ class KinematicTree:
     def get_joint_parent_link(self, joint_idx: int) -> int:
         if joint_idx >= len(self.joints):
             raise ValueError(f"No joint at index {joint_idx}")
-        return self.joints[joint_idx]['parent_link']
+        return self.joints[joint_idx]["parent_link"]
 
     def get_joint_child_link(self, joint_idx: int) -> int:
         if joint_idx >= len(self.joints):
             raise ValueError(f"No joint at index {joint_idx}")
-        return self.joints[joint_idx]['child_link']
+        return self.joints[joint_idx]["child_link"]
 
     def get_active_joint_indices(self) -> list[int]:
         return list(range(len(self.joints)))
@@ -405,10 +410,12 @@ class KinematicTree:
 
     def __repr__(self) -> str:
         source = "URDF" if self.urdf_path else "MJCF"
-        return (f"KinematicTree(source='{source}', name='{self.name}', "
-                f"num_bodies={self.num_bodies}, "
-                f"num_joints={self.num_joints}, "
-                f"root={self.root_idx})")
+        return (
+            f"KinematicTree(source='{source}', name='{self.name}', "
+            f"num_bodies={self.num_bodies}, "
+            f"num_joints={self.num_joints}, "
+            f"root={self.root_idx})"
+        )
 
     def print_links(self) -> None:
         """Print links in formatted table"""
@@ -429,7 +436,8 @@ class KinematicTree:
         print(f"{'-' * 60}")
         for joint in self.joints:
             print(
-                f"{joint['index']:<8}{joint['name']:<25}{joint['parent_link']:<10}{joint['child_link']:<10}{joint['type']:<10}")
+                f"{joint['index']:<8}{joint['name']:<25}{joint['parent_link']:<10}{joint['child_link']:<10}{joint['type']:<10}"
+            )
 
     def print_tree(self) -> None:
         """Print tree structure visually"""
@@ -438,7 +446,7 @@ class KinematicTree:
         print(f"{'=' * 50}")
 
         def print_node(idx: int, indent: int = 0):
-            link_name = self.links[idx]['name']
+            link_name = self.links[idx]["name"]
             prefix = "  " * indent + ("└─ " if indent > 0 else "")
             print(f"{prefix}[{idx}] {link_name}")
             for child in self.children_indices[idx]:

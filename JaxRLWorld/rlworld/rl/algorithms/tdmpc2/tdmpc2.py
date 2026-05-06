@@ -1,4 +1,4 @@
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple
 
 import equinox as eqx
 import jax
@@ -7,26 +7,22 @@ import numpy as np
 import optax
 
 from rlworld.rl.algorithms.base import (
-    OffPolicyAlgorithm,
     ActInput,
+    OffPolicyAlgorithm,
     copy_params,
 )
 from rlworld.rl.algorithms.metrics import BatchMetrics
 from rlworld.rl.algorithms.tdmpc2.math import make_two_hot_config
 from rlworld.rl.algorithms.tdmpc2.metrics import (
     TDMPC2Metrics,
-    TDMPC2WorldModelMetrics,
-    TDMPC2QMetrics,
     TDMPC2PolicyMetrics,
+    TDMPC2QMetrics,
+    TDMPC2WorldModelMetrics,
 )
-from rlworld.rl.algorithms.tdmpc2.update import (
-    plan_mppi_batched,
-    unified_update
-)
+from rlworld.rl.algorithms.tdmpc2.update import plan_mppi_batched, unified_update
 from rlworld.rl.modules.normalization import EmpiricalNormalization
 from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
-from rlworld.rl.storages.sequence_replay_buffer import SequenceReplayBuffer, SequenceBatch
-
+from rlworld.rl.storages.sequence_replay_buffer import SequenceBatch, SequenceReplayBuffer
 
 # ==================== Running Scale ====================
 
@@ -56,6 +52,7 @@ class RunningScale:
 
 class TDMPC2TrainState(NamedTuple):
     """Training state for TD-MPC2."""
+
     model: TDMPC2WorldModel
     target_q_params: Any
     wm_opt_state: optax.OptState
@@ -165,9 +162,7 @@ class TDMPC2(OffPolicyAlgorithm):
         self.termination_coef = termination_coef
 
         # Discount (heuristic based on episode length)
-        self.discount = self._compute_discount(
-            episode_length, discount_min, discount_max, discount_denom
-        )
+        self.discount = self._compute_discount(episode_length, discount_min, discount_max, discount_denom)
 
         # Discrete regression config
         self.two_hot_cfg = make_two_hot_config(num_bins, vmin, vmax)
@@ -186,15 +181,13 @@ class TDMPC2(OffPolicyAlgorithm):
         self._init_train_state(key)
 
         # Previous MPPI mean (warm-starting across steps)
-        self._prev_mean = np.zeros(
-            (num_envs, horizon, world_model.action_dim), dtype=np.float32
-        )
+        self._prev_mean = np.zeros((num_envs, horizon, world_model.action_dim), dtype=np.float32)
 
         # Observation normalization
         self.obs_normalization = world_model.obs_normalizer is not None
 
         # Storage
-        self.replay_buffer: Optional[SequenceReplayBuffer] = None
+        self.replay_buffer: SequenceReplayBuffer | None = None
 
         # Update counter
         self.total_it = 0
@@ -204,8 +197,11 @@ class TDMPC2(OffPolicyAlgorithm):
     # ==================== Initialization ====================
 
     def _compute_discount(
-        self, episode_length: int, discount_min: float,
-        discount_max: float, discount_denom: float,
+        self,
+        episode_length: int,
+        discount_min: float,
+        discount_max: float,
+        discount_denom: float,
     ) -> float:
         frac = episode_length / discount_denom
         return min(max((frac - 1) / frac, discount_min), discount_max)
@@ -227,7 +223,9 @@ class TDMPC2(OffPolicyAlgorithm):
             norm_params = eqx.filter(model.obs_normalizer, param_filter)
             norm_labels = jax.tree.map(lambda _: "frozen", norm_params)
             labels = eqx.tree_at(
-                lambda m: m.obs_normalizer, labels, norm_labels,
+                lambda m: m.obs_normalizer,
+                labels,
+                norm_labels,
                 is_leaf=lambda x: isinstance(x, EmpiricalNormalization),
             )
 
@@ -257,9 +255,7 @@ class TDMPC2(OffPolicyAlgorithm):
 
         # World model optimizer: init on full model
         # (eqx.filter_value_and_grad + eqx.apply_updates operate on full model)
-        wm_opt_state = self.wm_optimizer.init(
-            eqx.filter(self.world_model, eqx.is_inexact_array)
-        )
+        wm_opt_state = self.wm_optimizer.init(eqx.filter(self.world_model, eqx.is_inexact_array))
 
         # Policy optimizer
         pi_params, _ = eqx.partition(self.world_model.policy, eqx.is_inexact_array)
@@ -274,7 +270,7 @@ class TDMPC2(OffPolicyAlgorithm):
         )
 
     def _print_config(self):
-        print(f"\n🔧 TD-MPC2 Configuration:")
+        print("\n🔧 TD-MPC2 Configuration:")
         print(f"  Discount: {self.discount:.4f}")
         print(f"  LR: {self.lr}, Pi LR: {self.pi_lr}")
         print(f"  Tau: {self.tau}")
@@ -283,12 +279,15 @@ class TDMPC2(OffPolicyAlgorithm):
         print(f"  Num bins: {self.two_hot_cfg.num_bins}, vmin: {self.two_hot_cfg.vmin}, vmax: {self.two_hot_cfg.vmax}")
         print(f"  Batch size: {self.batch_size}")
         print(
-            f"  Obs: {self.world_model.obs_dim}, Act: {self.world_model.action_dim}, Latent: {self.world_model.latent_dim}")
+            f"  Obs: {self.world_model.obs_dim}, Act: {self.world_model.action_dim}, Latent: {self.world_model.latent_dim}"
+        )
         print(f"  Num Q: {self.world_model.num_q}")
         print(f"  Loss coefs: consistency={self.consistency_coef}, reward={self.reward_coef}, value={self.value_coef}")
         print(f"  Squash action: {self.world_model.squash_action}")
         print(f"  Obs normalization: {self.obs_normalization}")
-        print(f"  Episodic: {self.episodic}" + (f", termination_coef: {self.termination_coef}" if self.episodic else ""))
+        print(
+            f"  Episodic: {self.episodic}" + (f", termination_coef: {self.termination_coef}" if self.episodic else "")
+        )
         if not self.world_model.squash_action:
             print(f"  Action bounds: [{self.world_model.action_low_tuple}, {self.world_model.action_high_tuple}]")
 
@@ -321,8 +320,12 @@ class TDMPC2(OffPolicyAlgorithm):
     ) -> None:
         """Store transition in replay buffer."""
         self.replay_buffer.store_parallel(
-            obs=obs, action=action, reward=reward,
-            next_obs=next_obs, terminated=terminated, truncated=truncated,
+            obs=obs,
+            action=action,
+            reward=reward,
+            next_obs=next_obs,
+            terminated=terminated,
+            truncated=truncated,
         )
 
     def sample_batch(self, batch_size: int, key: jax.Array) -> SequenceBatch:
@@ -528,9 +531,7 @@ class TDMPC2(OffPolicyAlgorithm):
         new_model = eqx.tree_deserialise_leaves(model_path, self.train_state.model)
 
         target_path = os.path.join(checkpoint_dir, "target_q.eqx")
-        new_target_q = eqx.tree_deserialise_leaves(
-            target_path, self.train_state.target_q_params
-        )
+        new_target_q = eqx.tree_deserialise_leaves(target_path, self.train_state.target_q_params)
 
         # Re-initialize optimizer states
         wm_params, _ = eqx.partition(new_model, eqx.is_inexact_array)

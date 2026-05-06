@@ -19,6 +19,7 @@ return value is a dict of logged values (one per active term) that
 callers can forward to wandb / training logs. No reward is produced
 here.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -26,11 +27,11 @@ from typing import TYPE_CHECKING
 import torch
 
 from rlworld.rl.configs.base_config import iter_terms
-from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.configs.curriculums import (
     CurriculumManagerConfig,
     CurriculumTermConfig,
 )
+from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
@@ -53,13 +54,11 @@ class CurriculumManager(BaseManager):
     the env's reset hook fires.
     """
 
-    def __init__(self, env: "World", config: CurriculumManagerConfig):
+    def __init__(self, env: World, config: CurriculumManagerConfig):
         super().__init__(env=env)
         self.config = config
 
-        self.curriculum_terms: dict[str, CurriculumTermConfig] = iter_terms(
-            config, CurriculumTermConfig
-        )
+        self.curriculum_terms: dict[str, CurriculumTermConfig] = iter_terms(config, CurriculumTermConfig)
 
         # Instantiate class-based terms once with (env, cfg) so they can
         # resolve target term refs (e.g. reward_manager.get_term_cfg).
@@ -97,13 +96,9 @@ class CurriculumManager(BaseManager):
         snapshot: dict[str, dict] = {}
         for name, term in self.curriculum_terms.items():
             if name in self._instances:
-                result = self._instances[name](
-                    self.env, env_ids, **term.params
-                )
+                result = self._instances[name](self.env, env_ids, **term.params)
             else:
-                result = term.resolved_func(
-                    self.env, env_ids, **term.params
-                )
+                result = term.resolved_func(self.env, env_ids, **term.params)
             if isinstance(result, dict):
                 snapshot[name] = result
             else:

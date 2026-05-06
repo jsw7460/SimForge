@@ -1,1 +1,1 @@
-from .termination_term_config import TerminationTermConfig, TerminationResult
+from .termination_term_config import TerminationResult, TerminationTermConfig

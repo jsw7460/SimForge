@@ -2,7 +2,8 @@
 Dynamics model trainer with comprehensive metrics and logging.
 """
 
-from typing import Dict, Optional
+from typing import Dict
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -27,12 +28,12 @@ class DynamicsTrainer:
         self,
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
-        scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-        device: str = 'cuda',
-        model_name: str = 'Model',
+        scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
+        device: str = "cuda",
+        model_name: str = "Model",
         use_wandb: bool = True,
-        clip_grad_norm: Optional[float] = 1.0,
-        max_loss_threshold: Optional[float] = 10.0,
+        clip_grad_norm: float | None = 1.0,
+        max_loss_threshold: float | None = 10.0,
         use_residual: bool = False,
         max_delta: torch.Tensor | float = 1.0,
     ):
@@ -62,7 +63,7 @@ class DynamicsTrainer:
 
         # Training state
         self.global_step = 0
-        self.best_val_loss = float('inf')
+        self.best_val_loss = float("inf")
         self.best_epoch = 0
 
         # History
@@ -95,19 +96,14 @@ class DynamicsTrainer:
         else:
             return output
 
-    def train_epoch(
-        self,
-        train_loader,
-        input_key: str,
-        output_key: str
-    ) -> float:
+    def train_epoch(self, train_loader, input_key: str, output_key: str) -> float:
         """Train for one epoch."""
         self.model.train()
         epoch_losses = []
 
         for batch in train_loader:
             input_data = batch[input_key].to(self.device)
-            action = batch['action'].to(self.device)
+            action = batch["action"].to(self.device)
             target = batch[output_key].to(self.device)
 
             # Skip extreme outliers
@@ -120,7 +116,7 @@ class DynamicsTrainer:
             loss = F.mse_loss(pred, target)
 
             # Add model-specific losses
-            if hasattr(self.model, 'encoder') and hasattr(self.model.encoder, 'compute_auxiliary_loss'):
+            if hasattr(self.model, "encoder") and hasattr(self.model.encoder, "compute_auxiliary_loss"):
                 orth_loss = self.model.encoder.compute_auxiliary_loss(input_data)
                 loss = loss + orth_loss
 
@@ -137,22 +133,19 @@ class DynamicsTrainer:
 
             # Log batch loss
             if self.use_wandb:
-                wandb.log({
-                    f'{self.model_name}/train_loss_batch': loss.item(),
-                    f'{self.model_name}/global_step': self.global_step
-                })
+                wandb.log(
+                    {
+                        f"{self.model_name}/train_loss_batch": loss.item(),
+                        f"{self.model_name}/global_step": self.global_step,
+                    }
+                )
 
             self.global_step += 1
 
-        avg_loss = np.mean(epoch_losses) if epoch_losses else float('inf')
+        avg_loss = np.mean(epoch_losses) if epoch_losses else float("inf")
         return avg_loss
 
-    def validate(
-        self,
-        val_loader,
-        input_key: str,
-        output_key: str
-    ) -> float:
+    def validate(self, val_loader, input_key: str, output_key: str) -> float:
         """Validate the model."""
         self.model.eval()
         val_losses = []
@@ -160,22 +153,17 @@ class DynamicsTrainer:
         with torch.no_grad():
             for batch in val_loader:
                 input_data = batch[input_key].to(self.device)
-                action = batch['action'].to(self.device)
+                action = batch["action"].to(self.device)
                 target = batch[output_key].to(self.device)
 
                 pred = self._predict(input_data, action)
                 loss = F.mse_loss(pred, target)
                 val_losses.append(loss.item())
 
-        avg_loss = np.mean(val_losses) if val_losses else float('inf')
+        avg_loss = np.mean(val_losses) if val_losses else float("inf")
         return avg_loss
 
-    def compute_final_metrics(
-        self,
-        val_loader,
-        input_key: str,
-        output_key: str
-    ) -> Dict[str, float]:
+    def compute_final_metrics(self, val_loader, input_key: str, output_key: str) -> Dict[str, float]:
         """Compute comprehensive validation metrics."""
         print(f"\n[{self.model_name}] Computing final validation metrics...")
         self.model.eval()
@@ -186,7 +174,7 @@ class DynamicsTrainer:
         with torch.no_grad():
             for batch in val_loader:
                 input_data = batch[input_key].to(self.device)
-                action = batch['action'].to(self.device)
+                action = batch["action"].to(self.device)
                 target = batch[output_key].to(self.device)
 
                 pred = self._predict(input_data, action)
@@ -196,7 +184,7 @@ class DynamicsTrainer:
                 batch_losses.append(loss.item())
 
                 # Sample-level errors
-                per_sample_error = F.mse_loss(pred, target, reduction='none').mean(dim=-1)
+                per_sample_error = F.mse_loss(pred, target, reduction="none").mean(dim=-1)
                 sample_errors.extend(per_sample_error.cpu().numpy())
 
         # Compute statistics
@@ -207,44 +195,42 @@ class DynamicsTrainer:
         error_percentiles = np.percentile(sample_errors, [25, 50, 75, 90, 95, 99])
 
         metrics = {
-            'best_val_loss': self.best_val_loss,
-            'best_epoch': self.best_epoch,
-            'final_mean_loss': mean_loss,
-            'final_std_loss': std_loss,
-            'final_median_loss': median_loss,
-            'final_p25': error_percentiles[0],
-            'final_p50': error_percentiles[1],
-            'final_p75': error_percentiles[2],
-            'final_p90': error_percentiles[3],
-            'final_p95': error_percentiles[4],
-            'final_p99': error_percentiles[5],
+            "best_val_loss": self.best_val_loss,
+            "best_epoch": self.best_epoch,
+            "final_mean_loss": mean_loss,
+            "final_std_loss": std_loss,
+            "final_median_loss": median_loss,
+            "final_p25": error_percentiles[0],
+            "final_p50": error_percentiles[1],
+            "final_p75": error_percentiles[2],
+            "final_p90": error_percentiles[3],
+            "final_p95": error_percentiles[4],
+            "final_p99": error_percentiles[5],
         }
 
         print(f"[{self.model_name}] Final validation metrics:")
         print(f"  Mean loss: {mean_loss:.6f} ± {std_loss:.6f}")
         print(f"  Median loss: {median_loss:.6f}")
-        print(f"  P50/P75/P90/P95: {error_percentiles[1]:.6f} / {error_percentiles[2]:.6f} / "
-              f"{error_percentiles[3]:.6f} / {error_percentiles[4]:.6f}")
+        print(
+            f"  P50/P75/P90/P95: {error_percentiles[1]:.6f} / {error_percentiles[2]:.6f} / "
+            f"{error_percentiles[3]:.6f} / {error_percentiles[4]:.6f}"
+        )
 
         if self.use_wandb:
-            wandb.log({
-                f'{self.model_name}/final_mean_loss': mean_loss,
-                f'{self.model_name}/final_std_loss': std_loss,
-                f'{self.model_name}/final_median_loss': median_loss,
-                f'{self.model_name}/final_p90': error_percentiles[3],
-                f'{self.model_name}/final_p95': error_percentiles[4],
-            })
+            wandb.log(
+                {
+                    f"{self.model_name}/final_mean_loss": mean_loss,
+                    f"{self.model_name}/final_std_loss": std_loss,
+                    f"{self.model_name}/final_median_loss": median_loss,
+                    f"{self.model_name}/final_p90": error_percentiles[3],
+                    f"{self.model_name}/final_p95": error_percentiles[4],
+                }
+            )
 
         return metrics
 
     def train(
-        self,
-        train_loader,
-        val_loader,
-        input_key: str,
-        output_key: str,
-        num_epochs: int,
-        verbose: bool = True
+        self, train_loader, val_loader, input_key: str, output_key: str, num_epochs: int, verbose: bool = True
     ) -> Dict[str, float]:
         """Full training loop."""
         if self.use_residual:
@@ -261,18 +247,20 @@ class DynamicsTrainer:
                 self.scheduler.step()
 
             if verbose:
-                print(f"[{self.model_name}] Epoch {epoch + 1:3d}/{num_epochs} | "
-                      f"Train: {train_loss:.6f} | Val: {val_loss:.6f}")
+                print(
+                    f"[{self.model_name}] Epoch {epoch + 1:3d}/{num_epochs} | "
+                    f"Train: {train_loss:.6f} | Val: {val_loss:.6f}"
+                )
 
             if self.use_wandb:
                 log_dict = {
-                    f'{self.model_name}/train_loss_epoch': train_loss,
-                    f'{self.model_name}/val_loss_epoch': val_loss,
-                    f'{self.model_name}/epoch': epoch + 1
+                    f"{self.model_name}/train_loss_epoch": train_loss,
+                    f"{self.model_name}/val_loss_epoch": val_loss,
+                    f"{self.model_name}/epoch": epoch + 1,
                 }
 
                 if self.scheduler is not None:
-                    log_dict[f'{self.model_name}/learning_rate'] = self.optimizer.param_groups[0]['lr']
+                    log_dict[f"{self.model_name}/learning_rate"] = self.optimizer.param_groups[0]["lr"]
 
                 wandb.log(log_dict)
 
@@ -281,18 +269,20 @@ class DynamicsTrainer:
                 self.best_epoch = epoch + 1
 
                 self.best_model_state = {
-                    'epoch': epoch + 1,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'val_loss': val_loss,
-                    'use_residual': self.use_residual,  # Save this for inference
+                    "epoch": epoch + 1,
+                    "model_state_dict": self.model.state_dict(),
+                    "optimizer_state_dict": self.optimizer.state_dict(),
+                    "val_loss": val_loss,
+                    "use_residual": self.use_residual,  # Save this for inference
                 }
 
                 if self.use_wandb:
-                    wandb.log({
-                        f'{self.model_name}/best_val_loss': self.best_val_loss,
-                        f'{self.model_name}/best_epoch': self.best_epoch
-                    })
+                    wandb.log(
+                        {
+                            f"{self.model_name}/best_val_loss": self.best_val_loss,
+                            f"{self.model_name}/best_epoch": self.best_epoch,
+                        }
+                    )
 
         final_metrics = self.compute_final_metrics(val_loader, input_key, output_key)
         return final_metrics
@@ -309,8 +299,8 @@ def create_trainer(
     learning_rate: float = 1e-4,
     weight_decay: float = 1e-4,
     num_epochs: int = 100,
-    device: str = 'cuda',
-    model_name: str = 'Model',
+    device: str = "cuda",
+    model_name: str = "Model",
     use_wandb: bool = True,
     use_residual: bool = False,
     max_delta: torch.Tensor | float = 1.0,
@@ -332,16 +322,9 @@ def create_trainer(
     Returns:
         Configured DynamicsTrainer
     """
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=learning_rate,
-        weight_decay=weight_decay
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=num_epochs
-    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
 
     trainer = DynamicsTrainer(
         model=model,
@@ -351,7 +334,7 @@ def create_trainer(
         model_name=model_name,
         use_wandb=use_wandb,
         use_residual=use_residual,
-        max_delta=max_delta
+        max_delta=max_delta,
     )
 
     return trainer

@@ -1,6 +1,6 @@
-from typing import TYPE_CHECKING, Literal
-
 import math
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -63,42 +63,37 @@ class CRBABottomUpLayer(nn.Module):
         # Annealing parameters
         self.orth_loss_min_weight = orth_loss_min_weight
         self.orth_loss_decay = orth_loss_decay
-        self.register_buffer('_current_orth_weight', torch.tensor(orth_loss_weight))
+        self.register_buffer("_current_orth_weight", torch.tensor(orth_loss_weight))
 
         # === Per-body inertia projection ===
         # Each body has its own projection: obs -> I_i (full matrix)
         inertia_output_dim = num_heads * spatial_dim * spatial_dim
-        self.inertia_projections = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(obs_dim, inertia_output_dim * 2),
-                nn.SiLU(),
-                nn.Linear(inertia_output_dim * 2, inertia_output_dim),
-            )
-            for _ in range(self.num_bodies)
-        ])
-
-        # Learnable base inertia per body (full matrix)
-        self.base_inertia = nn.Parameter(
-            torch.zeros(self.num_bodies, num_heads, spatial_dim, spatial_dim)
+        self.inertia_projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(obs_dim, inertia_output_dim * 2),
+                    nn.SiLU(),
+                    nn.Linear(inertia_output_dim * 2, inertia_output_dim),
+                )
+                for _ in range(self.num_bodies)
+            ]
         )
 
+        # Learnable base inertia per body (full matrix)
+        self.base_inertia = nn.Parameter(torch.zeros(self.num_bodies, num_heads, spatial_dim, spatial_dim))
+
         # Per-body layer norm for composite inertia
-        self.inertia_norms = nn.ModuleList([
-            nn.LayerNorm([num_heads, spatial_dim, spatial_dim])
-            for _ in range(self.num_bodies)
-        ])
+        self.inertia_norms = nn.ModuleList(
+            [nn.LayerNorm([num_heads, spatial_dim, spatial_dim]) for _ in range(self.num_bodies)]
+        )
 
         # === Per-joint motion subspace (dual) ===
         # S_left and S_right for H_ij = S_left_i^T @ I^c @ S_right_j
-        self.motion_subspace_left = nn.Parameter(
-            torch.randn(self.num_joints, num_heads, spatial_dim)
-        )
-        self.motion_subspace_right = nn.Parameter(
-            torch.randn(self.num_joints, num_heads, spatial_dim)
-        )
+        self.motion_subspace_left = nn.Parameter(torch.randn(self.num_joints, num_heads, spatial_dim))
+        self.motion_subspace_right = nn.Parameter(torch.randn(self.num_joints, num_heads, spatial_dim))
 
         # Identity buffer for auxiliary loss
-        self.register_buffer('_identity', torch.eye(spatial_dim))
+        self.register_buffer("_identity", torch.eye(spatial_dim))
 
         # Precompute tree structure for efficient bottom-up pass
         self._precompute_tree_structure()
@@ -118,9 +113,7 @@ class CRBABottomUpLayer(nn.Module):
         self.traversal_order = list(self.tree.traverse_bottom_up())
 
         # Child indices for each body (for batched aggregation)
-        max_children = max(
-            len(self.tree.get_children(i)) for i in range(self.num_bodies)
-        )
+        max_children = max(len(self.tree.get_children(i)) for i in range(self.num_bodies))
         max_children = max(max_children, 1)
 
         child_indices = torch.zeros((self.num_bodies, max_children), dtype=torch.long)
@@ -132,15 +125,12 @@ class CRBABottomUpLayer(nn.Module):
                 child_indices[body_idx, i] = c
                 child_mask[body_idx, i] = True
 
-        self.register_buffer('child_indices', child_indices)
-        self.register_buffer('child_mask', child_mask)
+        self.register_buffer("child_indices", child_indices)
+        self.register_buffer("child_mask", child_mask)
 
         # Joint to child body mapping as tensor
-        joint_child_indices = torch.tensor(
-            [self.joint_to_child[j] for j in range(self.num_joints)],
-            dtype=torch.long
-        )
-        self.register_buffer('joint_child_indices', joint_child_indices)
+        joint_child_indices = torch.tensor([self.joint_to_child[j] for j in range(self.num_joints)], dtype=torch.long)
+        self.register_buffer("joint_child_indices", joint_child_indices)
 
     def _init_weights(self):
         """Initialize parameters."""
@@ -174,7 +164,7 @@ class CRBABottomUpLayer(nn.Module):
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        state['tree'] = None
+        state["tree"] = None
         return state
 
     def __setstate__(self, state):
@@ -182,10 +172,7 @@ class CRBABottomUpLayer(nn.Module):
 
     def step_annealing(self):
         """Decay orthogonality loss weight."""
-        new_weight = max(
-            self._current_orth_weight.item() * self.orth_loss_decay,
-            self.orth_loss_min_weight
-        )
+        new_weight = max(self._current_orth_weight.item() * self.orth_loss_decay, self.orth_loss_min_weight)
         self._current_orth_weight.fill_(new_weight)
 
     def _compute_per_body_inertia(self, observations: torch.Tensor) -> torch.Tensor:
@@ -203,9 +190,7 @@ class CRBABottomUpLayer(nn.Module):
         inertia_list = []
         for body_idx in range(self.num_bodies):
             proj_out = self.inertia_projections[body_idx](observations)
-            proj_out = proj_out.reshape(
-                batch, self.num_heads, self.spatial_dim, self.spatial_dim
-            )
+            proj_out = proj_out.reshape(batch, self.num_heads, self.spatial_dim, self.spatial_dim)
 
             # Add learnable base
             base = self.base_inertia[body_idx].unsqueeze(0)
@@ -217,10 +202,7 @@ class CRBABottomUpLayer(nn.Module):
 
         return torch.stack(inertia_list, dim=1)
 
-    def _compute_composite_inertia(
-        self,
-        body_inertia: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_composite_inertia(self, body_inertia: torch.Tensor) -> torch.Tensor:
 
         # Use dict instead of inplace tensor modification
         composite_dict = {i: body_inertia[:, i].clone() for i in range(self.num_bodies)}
@@ -241,10 +223,7 @@ class CRBABottomUpLayer(nn.Module):
         composite = torch.stack([composite_dict[i] for i in range(self.num_bodies)], dim=1)
         return composite
 
-    def _compute_H_matrix(
-        self,
-        composite_inertia: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_H_matrix(self, composite_inertia: torch.Tensor) -> torch.Tensor:
         """
         Compute joint-space inertia matrix H.
 
@@ -260,16 +239,16 @@ class CRBABottomUpLayer(nn.Module):
         I_c = composite_inertia[:, self.joint_child_indices]  # (B, J, H, d, d)
 
         # Normalize motion subspaces
-        S_left = F.normalize(self.motion_subspace_left, dim=-1)   # (J, H, d)
+        S_left = F.normalize(self.motion_subspace_left, dim=-1)  # (J, H, d)
         S_right = F.normalize(self.motion_subspace_right, dim=-1)  # (J, H, d)
 
         # S_left^T @ I_c: (B, J, H, d)
         # einsum: 'jhd,bjhde->bjhe'
-        S_I = torch.einsum('ihd,bihdj->bihj', S_left, I_c)  # (B, J, H, d)
+        S_I = torch.einsum("ihd,bihdj->bihj", S_left, I_c)  # (B, J, H, d)
 
         # S_I @ S_right^T: (B, J, J, H)
         # einsum: 'bihd,jhd->bijh'
-        H = torch.einsum('bihd,jhd->bijh', S_I, S_right)  # (B, J, J, H)
+        H = torch.einsum("bihd,jhd->bijh", S_I, S_right)  # (B, J, J, H)
 
         # Permute to (B, H, J, J) for attention
         H = H.permute(0, 3, 1, 2)
@@ -315,7 +294,7 @@ class CRBABottomUpLayer(nn.Module):
             return torch.tensor(0.0, device=observations.device)
 
         # Motion subspace orthogonality within each joint
-        S_left = self.motion_subspace_left   # (J, H, d)
+        S_left = self.motion_subspace_left  # (J, H, d)
         S_right = self.motion_subspace_right  # (J, H, d)
 
         # Encourage diversity across heads: S @ S^T should be diagonal-ish
@@ -326,12 +305,12 @@ class CRBABottomUpLayer(nn.Module):
             # Left subspace gram: (H, H)
             gram_left = S_left[j] @ S_left[j].T
             off_diag_left = gram_left - torch.diag(gram_left.diag())
-            loss = loss + (off_diag_left ** 2).mean()
+            loss = loss + (off_diag_left**2).mean()
 
             # Right subspace gram: (H, H)
             gram_right = S_right[j] @ S_right[j].T
             off_diag_right = gram_right - torch.diag(gram_right.diag())
-            loss = loss + (off_diag_right ** 2).mean()
+            loss = loss + (off_diag_right**2).mean()
 
         loss = loss / (2 * self.num_joints)
         return self._current_orth_weight * loss
@@ -359,14 +338,16 @@ class CRBATokenizer(nn.Module):
         self.embed_dim = embed_dim
 
         # Per-joint projection
-        self.joint_projections = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(obs_dim, embed_dim * 2),
-                nn.SiLU(),
-                nn.Linear(embed_dim * 2, embed_dim),
-            )
-            for _ in range(self.num_joints)
-        ])
+        self.joint_projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(obs_dim, embed_dim * 2),
+                    nn.SiLU(),
+                    nn.Linear(embed_dim * 2, embed_dim),
+                )
+                for _ in range(self.num_joints)
+            ]
+        )
 
         self._init_weights()
 
@@ -468,7 +449,7 @@ class CRBABiasedAttentionLayer(nn.Module):
         # (B, H, N, d)
 
         # Attention scores with bias
-        scale = self.head_dim ** -0.5
+        scale = self.head_dim**-0.5
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) * scale  # (B, H, N, N)
 
         # Add H bias with learnable scale
@@ -477,7 +458,7 @@ class CRBABiasedAttentionLayer(nn.Module):
 
         # Apply mask if provided
         if attn_mask is not None:
-            attn_scores = attn_scores.masked_fill(attn_mask.unsqueeze(0).unsqueeze(0), float('-inf'))
+            attn_scores = attn_scores.masked_fill(attn_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
 
         # Softmax and apply to values
         attn_weights = F.softmax(attn_scores, dim=-1)
@@ -514,7 +495,7 @@ class JointPositionalEmbedding(nn.Module):
 
         # Compute joint depths
         depths = self._compute_joint_depths(kinematic_tree)
-        self.register_buffer('depths', torch.tensor(depths, dtype=torch.long))
+        self.register_buffer("depths", torch.tensor(depths, dtype=torch.long))
 
         max_depth = max(depths) + 1
         self.depth_embedding = nn.Embedding(max_depth, embed_dim)
@@ -624,22 +605,24 @@ class CRBAAttentionBiasedEncoder(nn.Module):
         )
 
         # === Transformer layers ===
-        self.layers = nn.ModuleList([
-            CRBABiasedAttentionLayer(
-                embed_dim=latent_dim,
-                num_heads=num_heads,
-                dim_feedforward=dim_feedforward,
-                dropout=dropout,
-            )
-            for _ in range(num_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                CRBABiasedAttentionLayer(
+                    embed_dim=latent_dim,
+                    num_heads=num_heads,
+                    dim_feedforward=dim_feedforward,
+                    dropout=dropout,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
         # === Adjacency mask ===
         if use_adjacency_mask:
             adj = self._build_joint_adjacency(kinematic_tree)
             adj = adj + torch.eye(self.num_joints)
-            mask = (adj == 0)
-            self.register_buffer('attn_mask', mask)
+            mask = adj == 0
+            self.register_buffer("attn_mask", mask)
         else:
             self.attn_mask = None
 
@@ -672,7 +655,7 @@ class CRBAAttentionBiasedEncoder(nn.Module):
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        state['tree'] = None
+        state["tree"] = None
         return state
 
     def __setstate__(self, state):
@@ -704,7 +687,7 @@ class CRBAAttentionBiasedEncoder(nn.Module):
         for layer_idx, layer in enumerate(self.layers):
             if self.use_adjacency_mask:
                 if self.interleave_mask:
-                    use_mask = (layer_idx % 2 == 0)
+                    use_mask = layer_idx % 2 == 0
                 else:
                     use_mask = True
                 mask = self.attn_mask if use_mask else None

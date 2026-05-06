@@ -111,7 +111,7 @@ def compute_critic_loss(
         target_probs = (target_probs1 + target_probs2) / 2.0
 
     # Compute bootstrap mask
-    bootstrap = (1.0 - batch.terminated.astype(jnp.float32))
+    bootstrap = 1.0 - batch.terminated.astype(jnp.float32)
 
     # Compute effective discount (supports n-step returns via gamma_power)
     discount = batch.gamma_power

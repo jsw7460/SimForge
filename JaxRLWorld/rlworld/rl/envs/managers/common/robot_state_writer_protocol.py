@@ -39,6 +39,7 @@ internally; Genesis and mjlab use wxyz natively.
 and lets callers update only what they need without re-passing the
 unchanged half.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -53,8 +54,8 @@ class RobotStateWriterProtocol(Protocol):
 
     def set_dof_positions(
         self,
-        values: "torch.Tensor",
-        env_ids: "torch.Tensor | None" = None,
+        values: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
         """Write joint positions for the actuated DOFs.
 
@@ -69,17 +70,17 @@ class RobotStateWriterProtocol(Protocol):
 
     def set_dof_velocities(
         self,
-        values: "torch.Tensor",
-        env_ids: "torch.Tensor | None" = None,
+        values: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
         """Write joint velocities for the actuated DOFs."""
         ...
 
     def set_root_pose(
         self,
-        pos: "torch.Tensor",
-        quat_wxyz: "torch.Tensor",
-        env_ids: "torch.Tensor | None" = None,
+        pos: torch.Tensor,
+        quat_wxyz: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
         """Write the root link pose (position + orientation).
 
@@ -95,14 +96,14 @@ class RobotStateWriterProtocol(Protocol):
 
     def set_root_velocity(
         self,
-        lin_vel: "torch.Tensor",
-        ang_vel: "torch.Tensor",
-        env_ids: "torch.Tensor | None" = None,
+        lin_vel: torch.Tensor,
+        ang_vel: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
         """Write the root link velocity (linear + angular)."""
         ...
 
-    def eval_fk(self, env_ids: "torch.Tensor | None" = None) -> None:
+    def eval_fk(self, env_ids: torch.Tensor | None = None) -> None:
         """Re-evaluate forward kinematics for the selected environments.
 
         Newton needs an explicit FK pass after a root / DOF write

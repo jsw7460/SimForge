@@ -42,9 +42,7 @@ class LifecycleManager:
     """Manages lifecycle event callbacks with priority ordering."""
 
     def __init__(self):
-        self._callbacks: dict[LifecycleEvent, list[tuple[int, str, Callable]]] = (
-            defaultdict(list)
-        )
+        self._callbacks: dict[LifecycleEvent, list[tuple[int, str, Callable]]] = defaultdict(list)
         self._dispatched: set[LifecycleEvent] = set()
 
     def on(

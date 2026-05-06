@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import copy
 import os
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict
 
 import torch
 import torch.nn.functional as F
 
-from .networks import SimMPCPolicy, QEnsemble
+from .networks import QEnsemble, SimMPCPolicy
 from .planner import SimulatorMPPI
 from .state_sync import GenesisStateSync
 
@@ -111,7 +111,7 @@ class SimMPC:
         )
 
         # ── Replay buffer ──
-        self.replay_buffer: Optional[SimpleReplayBuffer] = None
+        self.replay_buffer: SimpleReplayBuffer | None = None
 
     def init_storage(self, obs_dim: int, action_dim: int, buffer_size: int):
         """Initialize replay buffer."""
@@ -166,9 +166,7 @@ class SimMPC:
                 obs = obs_dict["actor"]
             policy_obs = obs[num_mppi:]  # [N - num_mppi, obs_dim]
             policy_actions, _ = self.policy(policy_obs, deterministic=eval_mode)
-            policy_actions = policy_actions.clamp(
-                self.planner.action_low, self.planner.action_high
-            )
+            policy_actions = policy_actions.clamp(self.planner.action_low, self.planner.action_high)
             actions[num_mppi:] = policy_actions
 
         return actions
@@ -204,10 +202,7 @@ class SimMPC:
 
         # Each Q in ensemble predicts target
         q_pred = self.q_ensemble(obs, action)  # [num_q, batch, 1]
-        q_loss = sum(
-            F.mse_loss(q_pred[i].squeeze(-1), target)
-            for i in range(len(self.q_ensemble.nets))
-        )
+        q_loss = sum(F.mse_loss(q_pred[i].squeeze(-1), target) for i in range(len(self.q_ensemble.nets)))
 
         self.q_optimizer.zero_grad()
         q_loss.backward()
@@ -236,13 +231,16 @@ class SimMPC:
 
     def save_train_state(self, checkpoint_dir: str) -> dict:
         """Save policy, Q-ensemble, and optimizers."""
-        torch.save({
-            "policy": self.policy.state_dict(),
-            "q_ensemble": self.q_ensemble.state_dict(),
-            "target_q_ensemble": self.target_q_ensemble.state_dict(),
-            "pi_optimizer": self.pi_optimizer.state_dict(),
-            "q_optimizer": self.q_optimizer.state_dict(),
-        }, os.path.join(checkpoint_dir, "sim_mpc.pt"))
+        torch.save(
+            {
+                "policy": self.policy.state_dict(),
+                "q_ensemble": self.q_ensemble.state_dict(),
+                "target_q_ensemble": self.target_q_ensemble.state_dict(),
+                "pi_optimizer": self.pi_optimizer.state_dict(),
+                "q_optimizer": self.q_optimizer.state_dict(),
+            },
+            os.path.join(checkpoint_dir, "sim_mpc.pt"),
+        )
         return {}
 
     def load_train_state(self, checkpoint_dir: str, metadata: dict) -> None:

@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 import torch
 import warp as wp
 
-from rlworld.rl.envs.utils.newton.body_cache import get_cache
 from rlworld.rl.envs.utils import EnvStepCache
+from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -17,9 +17,11 @@ if TYPE_CHECKING:
 # Query Results
 # ============================================================
 
+
 @dataclass
 class BodiesResult:
     """Result of body query."""
+
     data: torch.Tensor
     body_names: list[str]
     body_indices: list[int]
@@ -28,6 +30,7 @@ class BodiesResult:
 @dataclass
 class BodiesWithContactResult:
     """Result of body query with contact information."""
+
     data: torch.Tensor
     body_names: list[str]
     body_indices: list[int]
@@ -38,8 +41,9 @@ class BodiesWithContactResult:
 # General Body Queries (no contact requirement)
 # ============================================================
 
+
 @EnvStepCache()
-def get_body_q(env: "NewtonEnv") -> torch.Tensor:
+def get_body_q(env: NewtonEnv) -> torch.Tensor:
     """Get all body transforms as (num_envs, bodies_per_env, 7) tensor."""
     cache = get_cache(env)
     state = env.scene_manager.state
@@ -47,7 +51,7 @@ def get_body_q(env: "NewtonEnv") -> torch.Tensor:
 
 
 def get_bodies_pos(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     body_patterns: str | list[str],
 ) -> BodiesResult:
     """Get world positions for bodies matching pattern.
@@ -70,7 +74,7 @@ def get_bodies_pos(
 
 
 def get_bodies_quat(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     body_patterns: str | list[str],
 ) -> BodiesResult:
     """Get world quaternions for bodies matching pattern.
@@ -89,7 +93,7 @@ def get_bodies_quat(
 
 
 def get_bodies_height(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     body_patterns: str | list[str],
 ) -> BodiesResult:
     """Get z-coordinates for bodies matching pattern.
@@ -109,8 +113,9 @@ def get_bodies_height(
 # Body Queries with Contact (requires contact_manager tracking)
 # ============================================================
 
+
 def get_bodies_pos_with_contact(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     body_patterns: str | list[str],
 ) -> BodiesWithContactResult:
     """Get world positions for bodies tracked by contact_manager.
@@ -134,7 +139,7 @@ def get_bodies_pos_with_contact(
 
 
 def get_bodies_height_with_contact(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     body_patterns: str | list[str],
 ) -> BodiesWithContactResult:
     """Get z-coordinates for bodies tracked by contact_manager.
@@ -144,7 +149,7 @@ def get_bodies_height_with_contact(
     """
     result = get_bodies_pos_with_contact(env, body_patterns)
     return BodiesWithContactResult(
-        data=result.data[..., 2],       # z
+        data=result.data[..., 2],  # z
         body_names=result.body_names,
         body_indices=result.body_indices,
         contact_indices=result.contact_indices,

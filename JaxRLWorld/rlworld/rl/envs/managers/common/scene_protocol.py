@@ -34,6 +34,7 @@ to runtime-check that an object satisfies the cross-sim contract,
 or as a type annotation in cross-sim helpers/event terms that should
 not depend on a specific backend.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -56,14 +57,14 @@ class SceneManagerProtocol(Protocol):
 
     # ── Attributes ────────────────────────────────────────────────────
 
-    entities: "dict[str, Any]"
+    entities: dict[str, Any]
     """Mapping ``entity_name → backend-native entity object`` (or wrapper).
 
     The value type is sim-specific; cross-sim code should treat the
     object as opaque or downcast to a known sim type.
     """
 
-    sensors: "Any"
+    sensors: Any
     """Sensor collection. Shape is sim-specific:
 
     - Newton: ``dict[str, Sensor]`` (flat by sensor name)
@@ -75,7 +76,7 @@ class SceneManagerProtocol(Protocol):
     (``env.contact_manager``) instead of poking this dict directly.
     """
 
-    trees: "dict[str, KinematicTree]"
+    trees: dict[str, KinematicTree]
     """KinematicTree per entity, built by
     ``managers.common.scene_helpers.build_kinematic_trees``."""
 
@@ -91,7 +92,7 @@ class SceneManagerProtocol(Protocol):
         """
         ...
 
-    def reset(self, env_ids: "torch.Tensor | None" = None) -> None:
+    def reset(self, env_ids: torch.Tensor | None = None) -> None:
         """Reset the given environments to their initial state.
 
         Pass ``None`` to reset all environments. Genesis currently
@@ -101,9 +102,7 @@ class SceneManagerProtocol(Protocol):
         """
         ...
 
-    def find_body_names(
-        self, body_names: "list[str]", entity_name: str = "robot"
-    ) -> "list[str]":
+    def find_body_names(self, body_names: list[str], entity_name: str = "robot") -> list[str]:
         """Resolve a list of regex patterns to concrete body names.
 
         The resolution preserves query order. Each backend reads its

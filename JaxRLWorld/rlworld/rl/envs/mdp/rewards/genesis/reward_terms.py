@@ -8,6 +8,7 @@ and cannot be expressed through the common ``RobotData`` /
 General-purpose rewards live in ``common/reward_terms.py``; mjlab-style
 delegates live in ``genesis/mjlab_rewards.py``.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -31,12 +32,11 @@ def wtw_collision(
     force_threshold: float = 0.1,
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_contact_force_count``."""
-    return penalize_contact_force_count(
-        env, contact_group=contact_group, force_threshold=force_threshold
-    )
+    return penalize_contact_force_count(env, contact_group=contact_group, force_threshold=force_threshold)
 
 
 # ── Walk-These-Ways reward terms (Genesis) ───────────────────────────────
+
 
 def wtw_feet_slip(
     env: GenesisLocomotionEnv,
@@ -68,7 +68,7 @@ def wtw_tracking_contacts_shaped_force(
 
     desired_contact = env.gait_manager.desired_contact_states
 
-    reward = -(1.0 - desired_contact) * (1.0 - torch.exp(-foot_forces ** 2 / gait_force_sigma))
+    reward = -(1.0 - desired_contact) * (1.0 - torch.exp(-(foot_forces**2) / gait_force_sigma))
     return reward.mean(dim=-1)
 
 
@@ -86,7 +86,7 @@ def wtw_tracking_contacts_shaped_vel(
     foot_vel_norm = torch.norm(feet_vel, dim=-1)
     desired_contact = env.gait_manager.desired_contact_states
 
-    reward = -(desired_contact * (1.0 - torch.exp(-foot_vel_norm ** 2 / gait_vel_sigma)))
+    reward = -(desired_contact * (1.0 - torch.exp(-(foot_vel_norm**2) / gait_vel_sigma)))
     return reward.mean(dim=-1)
 
 
@@ -103,9 +103,7 @@ def wtw_feet_clearance_cmd_linear(
     foot_height = feet_pos[..., 2]
 
     foot_phases = env.gait_manager.foot_phases
-    phases = 1.0 - torch.abs(
-        1.0 - torch.clip((foot_phases * 2.0) - 1.0, 0.0, 1.0) * 2.0
-    )
+    phases = 1.0 - torch.abs(1.0 - torch.clip((foot_phases * 2.0) - 1.0, 0.0, 1.0) * 2.0)
 
     footswing_height = env.command_manager.footswing_height
     target_height = footswing_height.unsqueeze(1) * phases + foot_radius

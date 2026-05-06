@@ -25,6 +25,7 @@ Usage::
 
     diff -u /tmp/g1_mjm_mujoco.txt /tmp/g1_mjm_newton.txt
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,11 +62,11 @@ def _leaf(name: str) -> str:
 
 def _names(mj: mujoco.MjModel, obj_type) -> list[str]:
     n = {
-        mujoco.mjtObj.mjOBJ_BODY:     mj.nbody,
-        mujoco.mjtObj.mjOBJ_JOINT:    mj.njnt,
+        mujoco.mjtObj.mjOBJ_BODY: mj.nbody,
+        mujoco.mjtObj.mjOBJ_JOINT: mj.njnt,
         mujoco.mjtObj.mjOBJ_ACTUATOR: mj.nu,
-        mujoco.mjtObj.mjOBJ_GEOM:     mj.ngeom,
-        mujoco.mjtObj.mjOBJ_SITE:     mj.nsite,
+        mujoco.mjtObj.mjOBJ_GEOM: mj.ngeom,
+        mujoco.mjtObj.mjOBJ_SITE: mj.nsite,
     }[obj_type]
     return [mujoco.mj_id2name(mj, obj_type, i) or f"<{obj_type}_{i}>" for i in range(n)]
 
@@ -76,10 +77,8 @@ def dump_opt(mj: mujoco.MjModel) -> None:
     print("[OPT]")
     # Integrator / solver
     print(f"  timestep              = {_fmt(o.timestep)}")
-    print(f"  integrator            = {int(o.integrator)}  "
-          f"(0=EULER 1=RK4 2=IMPLICIT 3=IMPLICITFAST)")
-    print(f"  solver                = {int(o.solver)}      "
-          f"(0=PGS 1=CG 2=NEWTON)")
+    print(f"  integrator            = {int(o.integrator)}  (0=EULER 1=RK4 2=IMPLICIT 3=IMPLICITFAST)")
+    print(f"  solver                = {int(o.solver)}      (0=PGS 1=CG 2=NEWTON)")
     print(f"  iterations            = {int(o.iterations)}")
     print(f"  ls_iterations         = {int(o.ls_iterations)}")
     print(f"  noslip_iterations     = {int(o.noslip_iterations)}")
@@ -108,10 +107,29 @@ def dump_opt(mj: mujoco.MjModel) -> None:
 
 def dump_sizes(mj: mujoco.MjModel) -> None:
     print("\n[SIZES]")
-    for k in ("nq", "nv", "nu", "na", "nbody", "njnt", "ngeom", "nsite",
-              "ncam", "nlight", "nmesh", "neq", "ntendon", "nsensor",
-              "nnumeric", "ntext", "ntuple", "nkey", "nmat", "nexclude",
-              "npair"):
+    for k in (
+        "nq",
+        "nv",
+        "nu",
+        "na",
+        "nbody",
+        "njnt",
+        "ngeom",
+        "nsite",
+        "ncam",
+        "nlight",
+        "nmesh",
+        "neq",
+        "ntendon",
+        "nsensor",
+        "nnumeric",
+        "ntext",
+        "ntuple",
+        "nkey",
+        "nmat",
+        "nexclude",
+        "npair",
+    ):
         print(f"  {k:<10}= {getattr(mj, k)}")
 
 
@@ -147,8 +165,7 @@ def dump_joints(mj: mujoco.MjModel) -> None:
     print("-" * len(header))
     for j in order:
         leaf = _leaf(names[j])
-        print(f"{leaf:<32} {_fmt_vec(mj.jnt_axis[j]):<40} "
-              f"{_fmt_vec(mj.jnt_pos[j]):<40}")
+        print(f"{leaf:<32} {_fmt_vec(mj.jnt_axis[j]):<40} {_fmt_vec(mj.jnt_pos[j]):<40}")
 
 
 # ── per-dof ────────────────────────────────────────────────────────────
@@ -245,9 +262,11 @@ def dump_actuators(mj: mujoco.MjModel) -> None:
     print("\n[ACTUATOR FULL PRM — sorted by leaf name]")
     for a in order:
         leaf = _leaf(names[a])
-        print(f"{leaf:<32} gain={_fmt_vec(mj.actuator_gainprm[a])} "
-              f"bias={_fmt_vec(mj.actuator_biasprm[a])} "
-              f"dyn={_fmt_vec(mj.actuator_dynprm[a])}")
+        print(
+            f"{leaf:<32} gain={_fmt_vec(mj.actuator_gainprm[a])} "
+            f"bias={_fmt_vec(mj.actuator_biasprm[a])} "
+            f"dyn={_fmt_vec(mj.actuator_dynprm[a])}"
+        )
 
 
 # ── per-geom (collision-relevant) ──────────────────────────────────────
@@ -286,8 +305,7 @@ def _resolve_mj_model(env, eval_sim: str) -> mujoco.MjModel:
             raise RuntimeError("Newton scene_manager.solver is None")
         if not hasattr(solver, "mj_model") or solver.mj_model is None:
             raise RuntimeError(
-                "Newton solver does not expose mj_model — expected "
-                "SolverMuJoCo with use_mujoco_contacts=True"
+                "Newton solver does not expose mj_model — expected SolverMuJoCo with use_mujoco_contacts=True"
             )
         return solver.mj_model
     raise ValueError(f"unknown eval_sim: {eval_sim}")

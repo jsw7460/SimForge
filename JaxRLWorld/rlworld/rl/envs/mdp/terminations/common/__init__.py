@@ -19,6 +19,5 @@ def max_episode_exceed(env: GenesisEnv | NewtonEnv) -> TerminationResult:
         have reached max episode length.
     """
     return TerminationResult(
-        env.termination_manager.episode_length_buf >= env.termination_manager.max_episode_length,
-        is_timeout=True
+        env.termination_manager.episode_length_buf >= env.termination_manager.max_episode_length, is_timeout=True
     )

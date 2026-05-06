@@ -35,6 +35,7 @@ Usage::
     uv run python -m rlworld.tools.motion.visualize_npz \\
         --npz .../walking1.npz --mode inspect
 """
+
 from __future__ import annotations
 
 import time
@@ -44,7 +45,6 @@ from typing import Literal
 import mujoco
 import numpy as np
 import tyro
-
 
 _DEFAULT_MJCF = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
 
@@ -62,7 +62,8 @@ def _free_joint_qpos_adr(model: mujoco.MjModel) -> int:
 
 
 def _resolve_joint_qpos_adr(
-    model: mujoco.MjModel, joint_names: list[str],
+    model: mujoco.MjModel,
+    joint_names: list[str],
 ) -> np.ndarray:
     adr = []
     for name in joint_names:
@@ -96,8 +97,8 @@ def _set_frame(
         root_idx = 1
     else:
         root_idx = 0
-    data.qpos[free_adr:free_adr + 3] = npz["body_pos_w"][t, root_idx]
-    data.qpos[free_adr + 3:free_adr + 7] = npz["body_quat_w"][t, root_idx]
+    data.qpos[free_adr : free_adr + 3] = npz["body_pos_w"][t, root_idx]
+    data.qpos[free_adr + 3 : free_adr + 7] = npz["body_quat_w"][t, root_idx]
     data.qpos[joint_qpos_adr] = npz["joint_pos"][t]
     mujoco.mj_forward(model, data)
 
@@ -120,8 +121,7 @@ def _inspect(npz: dict[str, np.ndarray]) -> None:
 
     print()
     print("=" * 64)
-    print(f"FRAMES: T = {T},  fps = {float(npz['fps'])}, duration = "
-          f"{T / float(npz['fps']):.3f} s")
+    print(f"FRAMES: T = {T},  fps = {float(npz['fps'])}, duration = {T / float(npz['fps']):.3f} s")
     print("=" * 64)
 
     print()
@@ -132,10 +132,7 @@ def _inspect(npz: dict[str, np.ndarray]) -> None:
     print(f"JOINTS ({len(joint_names)}):")
     for i, n in enumerate(joint_names):
         jp = npz["joint_pos"][:, i]
-        print(
-            f"  [{i:2}] {n:<30} pos: [{jp.min():+.3f}, {jp.max():+.3f}] "
-            f"mean={jp.mean():+.3f}"
-        )
+        print(f"  [{i:2}] {n:<30} pos: [{jp.min():+.3f}, {jp.max():+.3f}] mean={jp.mean():+.3f}")
 
     # Quaternion norm check
     q = npz["body_quat_w"]
@@ -178,8 +175,9 @@ def _inspect(npz: dict[str, np.ndarray]) -> None:
 
 
 def _resolve_track_body_index(
-    npz: dict[str, np.ndarray], track_body: "str | None",
-) -> "int | None":
+    npz: dict[str, np.ndarray],
+    track_body: str | None,
+) -> int | None:
     """Find the NPZ-side index of the body whose world-pos drives the camera.
 
     Returns ``None`` when tracking is disabled. ``"auto"`` selects the
@@ -195,10 +193,7 @@ def _resolve_track_body_index(
                 return i
         return None
     if track_body not in body_names:
-        raise ValueError(
-            f"Tracking body {track_body!r} not in NPZ body_names. "
-            f"Available: {body_names}"
-        )
+        raise ValueError(f"Tracking body {track_body!r} not in NPZ body_names. Available: {body_names}")
     return body_names.index(track_body)
 
 
@@ -210,7 +205,7 @@ def _run_viewer(
     joint_qpos_adr: np.ndarray,
     fps: float,
     loop: bool,
-    track_body: "str | None",
+    track_body: str | None,
     cam_distance: float,
     cam_azimuth: float,
     cam_elevation: float,
@@ -221,10 +216,7 @@ def _run_viewer(
     dt = 1.0 / fps
     track_idx = _resolve_track_body_index(npz, track_body)
     if track_idx is not None:
-        print(
-            f"[viewer] T={T}, fps={fps:.1f}, tracking '{npz['body_names'][track_idx]}'. "
-            f"Press ESC to quit."
-        )
+        print(f"[viewer] T={T}, fps={fps:.1f}, tracking '{npz['body_names'][track_idx]}'. Press ESC to quit.")
     else:
         print(f"[viewer] T={T}, fps={fps:.1f}. Press ESC to quit.")
 
@@ -266,7 +258,7 @@ def _save_video(
     output_mp4: str,
     width: int,
     height: int,
-    track_body: "str | None",
+    track_body: str | None,
     cam_distance: float,
     cam_azimuth: float,
     cam_elevation: float,
@@ -290,9 +282,7 @@ def _save_video(
             f"tracking '{npz['body_names'][track_idx]}'."
         )
     else:
-        print(
-            f"[video] rendering {T} frames -> {output_mp4!r} ({width}x{height})."
-        )
+        print(f"[video] rendering {T} frames -> {output_mp4!r} ({width}x{height}).")
 
     # Free camera that we manually re-aim at the tracked body each frame.
     # mjvCamera's ``lookat`` is the orbit center; ``azimuth`` / ``elevation``
@@ -331,11 +321,11 @@ def main(
     mjcf: str = _DEFAULT_MJCF,
     mode: Literal["viewer", "video", "inspect"] = "viewer",
     output_mp4: str = "/tmp/motion.mp4",
-    fps_override: "float | None" = None,
+    fps_override: float | None = None,
     loop: bool = True,
     video_width: int = 1280,
     video_height: int = 720,
-    track_body: "str | None" = "auto",
+    track_body: str | None = "auto",
     cam_distance: float = 3.5,
     cam_azimuth: float = 90.0,
     cam_elevation: float = -15.0,
@@ -363,9 +353,7 @@ def main(
         cam_elevation: Camera elevation in degrees (negative = looking down).
     """
     npz_data = _load_npz(npz)
-    fps = float(fps_override) if fps_override is not None else float(
-        npz_data["fps"]
-    )
+    fps = float(fps_override) if fps_override is not None else float(npz_data["fps"])
 
     if mode == "inspect":
         _inspect(npz_data)
@@ -379,15 +367,34 @@ def main(
 
     if mode == "viewer":
         _run_viewer(
-            model, data, npz_data, free_adr, joint_qpos_adr, fps, loop,
-            track_body, cam_distance, cam_azimuth, cam_elevation,
+            model,
+            data,
+            npz_data,
+            free_adr,
+            joint_qpos_adr,
+            fps,
+            loop,
+            track_body,
+            cam_distance,
+            cam_azimuth,
+            cam_elevation,
         )
     elif mode == "video":
         Path(output_mp4).parent.mkdir(parents=True, exist_ok=True)
         _save_video(
-            model, data, npz_data, free_adr, joint_qpos_adr, fps,
-            output_mp4, video_width, video_height,
-            track_body, cam_distance, cam_azimuth, cam_elevation,
+            model,
+            data,
+            npz_data,
+            free_adr,
+            joint_qpos_adr,
+            fps,
+            output_mp4,
+            video_width,
+            video_height,
+            track_body,
+            cam_distance,
+            cam_azimuth,
+            cam_elevation,
         )
     else:
         raise ValueError(f"Unknown mode: {mode!r}")

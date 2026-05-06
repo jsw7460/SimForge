@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
 import genesis.utils.geom as gu
 import genesis.utils.mesh as mu
+import numpy as np
 from genesis.ext import pyrender
 from genesis.utils.misc import tensor_to_array
 
@@ -63,11 +62,7 @@ class CommandArrowOverlay(Base3DOverlay):
     - Angular velocity: Colored sphere indicating rotation direction
     """
 
-    def __init__(
-        self,
-        context: "RLWorldRasterizerContext",
-        config: CommandArrowConfig | None = None
-    ):
+    def __init__(self, context: "RLWorldRasterizerContext", config: CommandArrowConfig | None = None):
         config = config or CommandArrowConfig()
         super().__init__(context, config)
         self.config: CommandArrowConfig = config
@@ -117,7 +112,10 @@ class CommandArrowOverlay(Base3DOverlay):
 
             # Draw command arrow (green, rotated to world frame)
             self._draw_arrow(
-                pos, vel_x, vel_y, yaw,
+                pos,
+                vel_x,
+                vel_y,
+                yaw,
                 body_color=self.config.linear_vel_body_color,
                 head_color=self.config.linear_vel_head_color,
             )
@@ -129,7 +127,10 @@ class CommandArrowOverlay(Base3DOverlay):
                 actual_vx = float(actual[env_idx, 0])
                 actual_vy = float(actual[env_idx, 1])
                 self._draw_arrow(
-                    pos, actual_vx, actual_vy, yaw,
+                    pos,
+                    actual_vx,
+                    actual_vy,
+                    yaw,
                     body_color=self.config.actual_vel_body_color,
                     head_color=self.config.actual_vel_head_color,
                     z_extra_offset=-0.05,
@@ -165,10 +166,7 @@ class CommandArrowOverlay(Base3DOverlay):
         if magnitude < 1e-6:
             return
 
-        arrow_length = min(
-            self.config.max_arrow_length,
-            magnitude * self.config.arrow_length_scale
-        )
+        arrow_length = min(self.config.max_arrow_length, magnitude * self.config.arrow_length_scale)
 
         direction = velocity / magnitude
 
@@ -192,11 +190,7 @@ class CommandArrowOverlay(Base3DOverlay):
         node = pyrender.Mesh.from_trimesh(arrow_mesh, is_marker=True)
         self.add_dynamic_mesh(node)
 
-    def _draw_angular_velocity_indicator(
-        self,
-        pos: np.ndarray,
-        angular_vel: float
-    ) -> None:
+    def _draw_angular_velocity_indicator(self, pos: np.ndarray, angular_vel: float) -> None:
         """Draw indicator for angular velocity command."""
         indicator_pos = pos.copy()
         indicator_pos[2] += self.config.z_offset + 0.15

@@ -8,6 +8,7 @@ that lazily compute each property from their native APIs.
 All quaternions are **wxyz**.  All velocities labelled ``_b`` are in the
 **body frame**.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -100,7 +101,7 @@ class RobotData(Protocol):
         ...
 
     @property
-    def joint_pos_limits(self) -> "tuple[Tensor, Tensor]":
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Hard joint position limits in canonical actuated order.
 
         Returns ``(lower, upper)``, each of shape ``(num_joints,)``. These
@@ -195,7 +196,7 @@ class RobotData(Protocol):
     # both supported because mjlab uses sites for foot reference points
     # while Newton/Genesis use bodies/links.
 
-    def body_pos_w(self, names: "list[str]") -> Tensor:
+    def body_pos_w(self, names: list[str]) -> Tensor:
         """World-frame positions of the named bodies, ordered by ``names``.
 
         Returns:
@@ -203,7 +204,7 @@ class RobotData(Protocol):
         """
         ...
 
-    def body_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def body_lin_vel_w(self, names: list[str]) -> Tensor:
         """World-frame linear velocities of the named bodies, ordered by ``names``.
 
         Returns:
@@ -211,7 +212,7 @@ class RobotData(Protocol):
         """
         ...
 
-    def site_pos_w(self, names: "list[str]") -> Tensor:
+    def site_pos_w(self, names: list[str]) -> Tensor:
         """World-frame positions of the named sites, ordered by ``names``.
 
         Sites are MuJoCo-only coordinate markers. Newton and Genesis
@@ -222,7 +223,7 @@ class RobotData(Protocol):
         """
         ...
 
-    def site_lin_vel_w(self, names: "list[str]") -> Tensor:
+    def site_lin_vel_w(self, names: list[str]) -> Tensor:
         """World-frame linear velocities of the named sites, ordered by ``names``.
 
         Sites are MuJoCo-only coordinate markers. Newton and Genesis

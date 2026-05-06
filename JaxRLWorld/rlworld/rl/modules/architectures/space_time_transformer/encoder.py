@@ -24,6 +24,7 @@ projection weights) because ``eqx.nn.MultiheadAttention`` only accepts
 boolean masks. Temporal attention always goes through the eqx call
 because it has no graph structure to inject.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -192,7 +193,10 @@ class FactorizedAttentionBlock(eqx.Module):
             def spatial_step(t_tokens: jax.Array, k: jax.Array) -> jax.Array:
                 del k  # dropout=0 in this codebase
                 a = _spatial_self_attention_with_bias(
-                    self.spatial_attn, t_tokens, spatial_re_bias, spatial_mask,
+                    self.spatial_attn,
+                    t_tokens,
+                    spatial_re_bias,
+                    spatial_mask,
                 )
                 return jax.vmap(self.spatial_norm)(t_tokens + a)
 
@@ -304,23 +308,24 @@ class JointAttentionBlock(eqx.Module):
         S = T * B
         flat = tokens.reshape(S, D)
 
-        joint_mask = (
-            jnp.tile(body_mask, (T, T)) if body_mask is not None else None
-        )
-        joint_re_bias = (
-            jnp.tile(body_re_bias, (1, T, T))
-            if body_re_bias is not None
-            else None
-        )
+        joint_mask = jnp.tile(body_mask, (T, T)) if body_mask is not None else None
+        joint_re_bias = jnp.tile(body_re_bias, (1, T, T)) if body_re_bias is not None else None
 
         if joint_re_bias is None:
             attn_out = self.attn(
-                query=flat, key_=flat, value=flat,
-                mask=joint_mask, inference=False, key=key,
+                query=flat,
+                key_=flat,
+                value=flat,
+                mask=joint_mask,
+                inference=False,
+                key=key,
             )
         else:
             attn_out = _spatial_self_attention_with_bias(
-                self.attn, flat, joint_re_bias, joint_mask,
+                self.attn,
+                flat,
+                joint_re_bias,
+                joint_mask,
             )
         flat = jax.vmap(self.norm)(flat + attn_out)
 
@@ -378,7 +383,7 @@ class SpaceTimeTransformerEncoder(eqx.Module):
         num_layers: int,
         dim_feedforward: int,
         dropout: float = 0.0,
-        kinematic_tree: "KinematicTree | None" = None,
+        kinematic_tree: KinematicTree | None = None,
         use_kinematic_mask: bool = True,
         use_checkpoint: bool = False,
         pe_type: str = "learned",
@@ -392,10 +397,7 @@ class SpaceTimeTransformerEncoder(eqx.Module):
         key: jax.Array,
     ):
         if attention_mode not in ("factorized", "joint"):
-            raise ValueError(
-                f"Unknown attention_mode={attention_mode!r}. "
-                "Expected 'factorized' or 'joint'."
-            )
+            raise ValueError(f"Unknown attention_mode={attention_mode!r}. Expected 'factorized' or 'joint'.")
         self.num_bodies_all = num_bodies_all
         self.num_time_tokens = num_time_tokens
         self.embed_dim = embed_dim
@@ -408,34 +410,31 @@ class SpaceTimeTransformerEncoder(eqx.Module):
         # Body positional embedding (learned plain or SWAT-style).
         if pe_type == "learned":
             self.body_pe_module = LearnedPositionalEmbedding(
-                num=num_bodies_all, embed_dim=embed_dim, key=key_pe,
+                num=num_bodies_all,
+                embed_dim=embed_dim,
+                key=key_pe,
             )
         elif pe_type == "traversal":
             if kinematic_tree is None:
                 raise ValueError(
-                    "pe_type='traversal' requires kinematic_tree to compute "
-                    "pre/in/post-order DFS indices."
+                    "pe_type='traversal' requires kinematic_tree to compute pre/in/post-order DFS indices."
                 )
             self.body_pe_module = TraversalPositionalEmbedding(
-                kinematic_tree=kinematic_tree, embed_dim=embed_dim, key=key_pe,
+                kinematic_tree=kinematic_tree,
+                embed_dim=embed_dim,
+                key=key_pe,
             )
         else:
-            raise ValueError(
-                f"Unknown pe_type={pe_type!r}. Expected 'learned' or 'traversal'."
-            )
+            raise ValueError(f"Unknown pe_type={pe_type!r}. Expected 'learned' or 'traversal'.")
 
         # Time positional embedding stays a simple learned (T, D) table —
         # the time axis has no graph structure to encode.
-        self.time_pe = (
-            jax.random.normal(key_tpe, (num_time_tokens, embed_dim)) * 0.02
-        )
+        self.time_pe = jax.random.normal(key_tpe, (num_time_tokens, embed_dim)) * 0.02
 
         # Spatial relational bias (optional, additive to attn scores).
         if use_relational_bias:
             if kinematic_tree is None:
-                raise ValueError(
-                    "use_relational_bias=True requires kinematic_tree."
-                )
+                raise ValueError("use_relational_bias=True requires kinematic_tree.")
             self.relational_embedding = GraphRelationalEmbedding(
                 kinematic_tree=kinematic_tree,
                 num_heads=num_heads,
@@ -505,11 +504,7 @@ class SpaceTimeTransformerEncoder(eqx.Module):
         body_pe = self.body_pe_module()  # (B_all, D)
         tokens = tokens + body_pe[None, :, :] + self.time_pe[:, None, :]
 
-        re_bias = (
-            self.relational_embedding()
-            if self.relational_embedding is not None
-            else None
-        )
+        re_bias = self.relational_embedding() if self.relational_embedding is not None else None
 
         layer_keys = jax.random.split(key, len(self.layers))
         call = _layer_call_ckpt if self.use_checkpoint else _layer_call

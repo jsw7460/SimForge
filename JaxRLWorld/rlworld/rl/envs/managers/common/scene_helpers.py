@@ -5,6 +5,7 @@ single place. They are intentionally **standalone functions**, not a
 base class — each scene manager keeps full control of its own lifecycle
 and only delegates the unifiable bits.
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -13,7 +14,6 @@ from pathlib import Path
 from typing import Callable, Iterable, Literal, Tuple, Union
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
-
 
 # Spec returned by a scene manager's per-entity resolver. The first
 # element selects the source format; the second is the payload that
@@ -29,17 +29,15 @@ from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 #       → write to a temp file, then KinematicTree(mjcf_path=tmp)
 #         (used by mjlab where the XML lives in entity.spec.to_xml()
 #         instead of on disk)
-KinematicSourceSpec = Tuple[
-    Literal["urdf", "mjcf_path", "mjcf_xml"], Union[str, Path]
-]
+KinematicSourceSpec = Tuple[Literal["urdf", "mjcf_path", "mjcf_xml"], Union[str, Path]]
 
 
 def build_kinematic_trees(
     entity_names: Iterable[str],
-    spec_resolver: Callable[[str], "KinematicSourceSpec | None"],
+    spec_resolver: Callable[[str], KinematicSourceSpec | None],
     *,
     warn_on_failure: bool = True,
-) -> "dict[str, KinematicTree]":
+) -> dict[str, KinematicTree]:
     """Build a ``KinematicTree`` per entity by querying ``spec_resolver``.
 
     Each scene manager passes a small lambda that converts its own
@@ -64,7 +62,7 @@ def build_kinematic_trees(
         which ``spec_resolver`` returned ``None`` (or that failed in
         warn-mode) are absent from the dict.
     """
-    trees: "dict[str, KinematicTree]" = {}
+    trees: dict[str, KinematicTree] = {}
 
     for name in entity_names:
         spec = spec_resolver(name)
@@ -76,9 +74,7 @@ def build_kinematic_trees(
         except Exception as e:
             if not warn_on_failure:
                 raise
-            warnings.warn(
-                f"Could not build kinematic tree for entity {name!r}: {e}"
-            )
+            warnings.warn(f"Could not build kinematic tree for entity {name!r}: {e}")
             continue
 
         trees[name] = tree
@@ -96,16 +92,11 @@ def _build_one(spec: KinematicSourceSpec) -> KinematicTree:
         # mjlab path: ``entity.spec.to_xml()`` returns the XML as a
         # string, but ``KinematicTree`` only knows how to parse files.
         # Write to a temp file, build, then clean up.
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".xml", delete=False
-        ) as tmp_file:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".xml", delete=False) as tmp_file:
             tmp_file.write(payload)
             tmp_path = Path(tmp_file.name)
         try:
             return KinematicTree(mjcf_path=str(tmp_path))
         finally:
             tmp_path.unlink(missing_ok=True)
-    raise ValueError(
-        f"Unknown KinematicSourceSpec kind: {kind!r}. "
-        f"Expected one of 'urdf', 'mjcf_path', 'mjcf_xml'."
-    )
+    raise ValueError(f"Unknown KinematicSourceSpec kind: {kind!r}. Expected one of 'urdf', 'mjcf_path', 'mjcf_xml'.")

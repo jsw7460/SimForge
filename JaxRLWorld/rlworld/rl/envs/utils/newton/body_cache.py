@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class NewtonBodyCache:
     """Cache for body index lookups."""
 
-    def __init__(self, env: "NewtonEnv"):
+    def __init__(self, env: NewtonEnv):
         self.env = env
         self._body_cache: dict[tuple[str, ...], list[int]] = {}
         self._contact_cache: dict[tuple[str, ...], tuple[list[int], list[int]]] = {}
@@ -29,9 +29,7 @@ class NewtonBodyCache:
         # / other globals and uses its own compacted index space).
         # Leaf extraction is enough to match bare pattern inputs from
         # user configs.
-        self.body_names = [
-            leaf_name(n) for n in model.body_label[:self.bodies_per_env]
-        ]
+        self.body_names = [leaf_name(n) for n in model.body_label[: self.bodies_per_env]]
 
         # Cache original values for domain randomization
         body_mass = wp.to_torch(model.body_mass).reshape(env.num_envs, self.bodies_per_env)
@@ -54,25 +52,19 @@ class NewtonBodyCache:
             for pattern in body_patterns:
                 regex = re.compile(pattern)
                 pattern_matches = [
-                    idx for idx, name in enumerate(self.body_names)
-                    if regex.match(name) and idx not in seen
+                    idx for idx, name in enumerate(self.body_names) if regex.match(name) and idx not in seen
                 ]
                 for idx in pattern_matches:
                     seen.add(idx)
                 body_indices.extend(pattern_matches)
 
             if not body_indices:
-                raise ValueError(
-                    f"No bodies matching '{body_patterns}'. "
-                    f"Available: {self.body_names}"
-                )
+                raise ValueError(f"No bodies matching '{body_patterns}'. Available: {self.body_names}")
             self._body_cache[key] = body_indices
 
         return self._body_cache[key]
 
-    def get_body_indices_with_contact(
-        self, body_patterns: str | list[str]
-    ) -> tuple[list[int], list[int]]:
+    def get_body_indices_with_contact(self, body_patterns: str | list[str]) -> tuple[list[int], list[int]]:
         """Get (body_q_indices, contact_indices) for patterns tracked by contact_manager."""
         if isinstance(body_patterns, str):
             body_patterns = [body_patterns]
@@ -86,8 +78,7 @@ class NewtonBodyCache:
             if not contact_indices:
                 tracked = self.env.contact_manager.tracked_names("foot_contact")
                 raise ValueError(
-                    f"No bodies matching '{body_patterns}' in contact group 'contact'. "
-                    f"Available: {tracked}"
+                    f"No bodies matching '{body_patterns}' in contact group 'contact'. Available: {tracked}"
                 )
 
             tracked_names = self.env.contact_manager.tracked_names("foot_contact")
@@ -101,14 +92,14 @@ class NewtonBodyCache:
 _caches: dict[int, NewtonBodyCache] = {}
 
 
-def get_cache(env: "NewtonEnv") -> NewtonBodyCache:
+def get_cache(env: NewtonEnv) -> NewtonBodyCache:
     env_id = id(env)
     if env_id not in _caches:
         _caches[env_id] = NewtonBodyCache(env)
     return _caches[env_id]
 
 
-def clear_cache(env: "NewtonEnv" = None) -> None:
+def clear_cache(env: NewtonEnv = None) -> None:
     if env is None:
         _caches.clear()
     else:

@@ -10,6 +10,7 @@ actor/critic, future-motion-reference window obs, NPMP-style information
 bottleneck). See ``rl/configs/presets/t1_tracking/transformer.py`` for
 the architecture-specific config fields.
 """
+
 from rlworld.rl.configs.presets.t1_tracking.transformer import (
     T1TrackingTransformerConfig,
 )
@@ -18,11 +19,7 @@ from rlworld.rl.runners import BaseRunner
 
 def main():
     cfgs_for_run = (
-        T1TrackingTransformerConfig(
-            sim_type="newton",
-            pe_type="traversal",
-            use_relational_bias=True
-        )
+        T1TrackingTransformerConfig(sim_type="newton", pe_type="traversal", use_relational_bias=True)
         .build()
         .with_cli_overrides()
     )

@@ -1,4 +1,4 @@
-from typing import Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import equinox as eqx
 import jax
@@ -10,6 +10,7 @@ from rlworld.rl.modules.architectures.space_time_transformer.critic import (
 )
 from rlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
 from rlworld.rl.modules.normalization import EmpiricalNormalization
+
 from .base_ac import BaseActorCritic
 
 if TYPE_CHECKING:
@@ -25,6 +26,7 @@ __all__ = [
 
 # ==================== Std Modules ====================
 
+
 class LearnableStd(eqx.Module):
     std: jax.Array
 
@@ -38,6 +40,7 @@ class LearnableStd(eqx.Module):
 
 class StdNetwork(eqx.Module):
     """Neural network for learning state-dependent action standard deviations."""
+
     linear: eqx.nn.Linear
     min_std: float = eqx.field(static=True)
     max_std: float = eqx.field(static=True)
@@ -81,6 +84,7 @@ class StdNetwork(eqx.Module):
 
 class ConstantStd(eqx.Module):
     """Fixed (non-learnable) standard deviation."""
+
     std: jax.Array
 
     def __init__(self, num_actions: int, init_std: float):
@@ -93,12 +97,12 @@ class ConstantStd(eqx.Module):
 
 class LearnableLogStd(eqx.Module):
     """Learnable state-independent log standard deviation."""
+
     log_std: jax.Array
     log_std_min: float = eqx.field(static=True)
     log_std_max: float = eqx.field(static=True)
 
-    def __init__(self, num_actions: int, init_std: float,
-                 log_std_min: float = -5.0, log_std_max: float = 2.0):
+    def __init__(self, num_actions: int, init_std: float, log_std_min: float = -5.0, log_std_max: float = 2.0):
         self.log_std = jnp.full(num_actions, jnp.log(init_std))
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
@@ -112,12 +116,14 @@ class LearnableLogStd(eqx.Module):
 
 # ==================== PPO Actor-Critic ====================
 
+
 class PPOActorCritic(BaseActorCritic):
     """
     PPO Actor-Critic with Gaussian/SquashedGaussian distributions.
 
     Equivalent to PyTorch PPOActorCritic.
     """
+
     std_module: StdNetwork | ConstantStd | LearnableLogStd | LearnableStd
 
     distribution_type: str = eqx.field(static=True)
@@ -159,7 +165,7 @@ class PPOActorCritic(BaseActorCritic):
         self.critic_obs_dim = num_critic_obs
         self.num_actions = num_actions
         self.distribution_type = distribution_type
-        self.is_squashed = (distribution_type == "squashed_gaussian")
+        self.is_squashed = distribution_type == "squashed_gaussian"
         self.std_type = std_type
         self.init_noise_std = init_noise_std
         self.is_recurrent = False
@@ -214,13 +220,8 @@ class PPOActorCritic(BaseActorCritic):
             )
         elif critic_class_name == "SpaceTimeTransformerCritic":
             if kinematic_tree is None:
-                raise ValueError(
-                    "SpaceTimeTransformerCritic requires kinematic_tree."
-                )
-            stc_kwargs = {
-                k: v for k, v in critic_kwargs.items()
-                if k not in ("num_obs", "key", "kinematic_tree")
-            }
+                raise ValueError("SpaceTimeTransformerCritic requires kinematic_tree.")
+            stc_kwargs = {k: v for k, v in critic_kwargs.items() if k not in ("num_obs", "key", "kinematic_tree")}
             self.critic = SpaceTimeTransformerCritic(
                 kinematic_tree=kinematic_tree,
                 num_obs=self.critic_obs_dim,
@@ -252,14 +253,14 @@ class PPOActorCritic(BaseActorCritic):
                 min_std=0.05,
                 key=key,
             )
-            print(f"📊 Using state-dependent std (neural network)")
+            print("📊 Using state-dependent std (neural network)")
 
         elif self.std_type == "state_independent":
             self.std_module = LearnableLogStd(
                 num_actions=self.num_actions,
                 init_std=self.init_noise_std,
             )
-            print(f"🎚️  Using state-independent log_std (learnable)")
+            print("🎚️  Using state-independent log_std (learnable)")
 
         elif self.std_type == "fixed":
             self.std_module = ConstantStd(
@@ -273,7 +274,7 @@ class PPOActorCritic(BaseActorCritic):
                 num_actions=self.num_actions,
                 init_std=self.init_noise_std,
             )
-            print(f"🎚️ Using scalar std (learnable, no log transform)")
+            print("🎚️ Using scalar std (learnable, no log transform)")
 
         else:
             raise ValueError(f"Unknown std_type: {self.std_type}")
@@ -283,9 +284,7 @@ class PPOActorCritic(BaseActorCritic):
         if self.std_type == "state_dependent":
             return self.std_module(observations)
         elif self.std_type == "state_independent":
-            log_std = jnp.clip(self.std_module.log_std,
-                               self.std_module.log_std_min,
-                               self.std_module.log_std_max)
+            log_std = jnp.clip(self.std_module.log_std, self.std_module.log_std_min, self.std_module.log_std_max)
             std = jnp.exp(log_std)
             if observations is not None:
                 return jnp.broadcast_to(std, (observations.shape[0],) + std.shape)
@@ -410,13 +409,13 @@ class PPOActorCritic(BaseActorCritic):
 
     def post_update_step(self, *args, **kwargs):
         """Placeholder for compatibility."""
-        if hasattr(self.actor, 'post_update_step'):
+        if hasattr(self.actor, "post_update_step"):
             self.actor.post_update_step(*args, **kwargs)
 
     @property
     def extra_to_log(self) -> dict:
         """Extra metrics to log."""
         extra = {}
-        if hasattr(self.actor, 'extra_to_log'):
+        if hasattr(self.actor, "extra_to_log"):
             extra.update(**self.actor.extra_to_log)
         return extra

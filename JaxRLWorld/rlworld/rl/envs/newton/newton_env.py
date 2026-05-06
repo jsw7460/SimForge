@@ -1,17 +1,16 @@
-import torch
 import warp as wp
 
-from rlworld.rl.configs import RewardConfig, CommandConfig, EventConfig
-from rlworld.rl.configs import CurriculumManagerConfig
+from rlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
 from rlworld.rl.configs.newton_config_classes import (
-    NewtonEnvConfig,
-    NewtonSceneConfig,
-    NewtonObservationConfig,
     NewtonActionConfig,
-    VisualizationConfig
+    NewtonEnvConfig,
+    NewtonObservationConfig,
+    NewtonSceneConfig,
+    VisualizationConfig,
 )
 from rlworld.rl.envs.managers.newton import (
-    NewtonVisualizationManager, NewtonVisualizationManagerConfig,
+    NewtonVisualizationManager,
+    NewtonVisualizationManagerConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
@@ -104,7 +103,7 @@ class NewtonEnv(World):
                 solver_type=self.scene_cfg.solver_type,
                 solver_cfg=self.scene_cfg.solver_cfg,
                 env_spacing=self.scene_cfg.env_spacing,
-            )
+            ),
         )
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
@@ -113,8 +112,8 @@ class NewtonEnv(World):
         # viewer_type="viser" → always use ViserVisualizationManager (matches Genesis pattern)
         if self.visualization_cfg.viewer_type == "viser":
             from rlworld.rl.vis.viser import ViserVisualizationManager
-            from rlworld.rl.vis.viser.viewer import ViserViewerConfig
             from rlworld.rl.vis.viser.bridges import NewtonBridge
+            from rlworld.rl.vis.viser.viewer import ViserViewerConfig
 
             bridge = NewtonBridge(self.scene_manager)
             viser_cfg = ViserViewerConfig(
@@ -123,9 +122,7 @@ class NewtonEnv(World):
                 enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
                 enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
             )
-            self.vis_manager = ViserVisualizationManager(
-                env=self, bridge=bridge, config=viser_cfg
-            )
+            self.vis_manager = ViserVisualizationManager(env=self, bridge=bridge, config=viser_cfg)
         elif self.visualization_cfg.show_viewer or self.visualization_cfg.record_video:
             # Non-viser viewer (GL, rerun, usd, file) — only when actively viewing or recording
             vis_manager_cfg = NewtonVisualizationManagerConfig(
@@ -157,7 +154,7 @@ class NewtonEnv(World):
                 offset=self.act_cfg.offset,
                 settle_steps=self.act_cfg.settle_steps,
                 action_terms=self.act_cfg.action_terms,
-            )
+            ),
         )
 
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
@@ -172,14 +169,13 @@ class NewtonEnv(World):
 
         from rlworld.rl.envs.newton.robot_data import NewtonRobotData
         from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
+
         self._robot_data = NewtonRobotData(
             self,
             self.scene_manager.robot_view,
             default_joint_pos=self._resolve_default_joint_pos(),
         )
-        self._robot_state_writer = NewtonRobotStateWriter(
-            self, self.scene_manager.robot_view
-        )
+        self._robot_state_writer = NewtonRobotStateWriter(self, self.scene_manager.robot_view)
 
     def _post_setup(self) -> None:
         """Capture CUDA graph for Newton performance."""

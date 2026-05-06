@@ -1,47 +1,48 @@
+from .commands.command_term_config import CommandTermConfig
 from .common_config_classes import (
-    RewardConfig,
     CommandConfig,
-    GaitConfig,
     EventConfig,
+    FastTD3PolicyConfig,
+    GaitConfig,
+    NNConfig,
     PolicyConfig,
     PPOPolicyConfig,
+    RewardConfig,
+    RunnerConfig,
     SACPolicyConfig,
     TD3PolicyConfig,
-    FastTD3PolicyConfig,
-    NNConfig,
-    RunnerConfig,
     VisualizationConfig,
 )
-# Term-level configs hoisted from the old rlworld.rl.envs.mdp.configs
-# location so callers can do `from rlworld.rl.configs import ...` directly.
-from .terminations.termination_term_config import TerminationTermConfig, TerminationResult
-from .commands.command_term_config import CommandTermConfig
 from .curriculums.curriculum_term_config import (
-    CurriculumTermConfig,
     CurriculumManagerConfig,
+    CurriculumTermConfig,
 )
 from .genesis_config_classes import (
-    EnvConfig,
-    SceneConfig,
-    ObservationConfig,
     ActionConfig,
+    EnvConfig,
     GenesisConfigsForRun,
-)
-from .newton_config_classes import (
-    NewtonEnvConfig,
-    NewtonSceneConfig,
-    NewtonObservationConfig,
-    NewtonActionConfig,
-    NewtonConfigsForRun,
-    SolverMuJoCoCfg,
+    ObservationConfig,
+    SceneConfig,
 )
 from .mujoco_config_classes import (
-    MujocoEnvConfig,
-    MujocoSceneConfig,
-    MujocoObservationConfig,
     MujocoActionConfig,
     MujocoConfigsForRun,
+    MujocoEnvConfig,
+    MujocoObservationConfig,
+    MujocoSceneConfig,
 )
+from .newton_config_classes import (
+    NewtonActionConfig,
+    NewtonConfigsForRun,
+    NewtonEnvConfig,
+    NewtonObservationConfig,
+    NewtonSceneConfig,
+    SolverMuJoCoCfg,
+)
+
+# Term-level configs hoisted from the old rlworld.rl.envs.mdp.configs
+# location so callers can do `from rlworld.rl.configs import ...` directly.
+from .terminations.termination_term_config import TerminationResult, TerminationTermConfig
 
 ConfigsForRun = GenesisConfigsForRun | NewtonConfigsForRun | MujocoConfigsForRun
 
@@ -61,14 +62,9 @@ def configs_from_dict(data: dict) -> ConfigsForRun:
     """
     sim_type = data.get("sim_type") or data.get("simulator")
     if sim_type is None:
-        raise ValueError(
-            "Cannot determine simulator: dict must contain 'sim_type' or 'simulator' key."
-        )
+        raise ValueError("Cannot determine simulator: dict must contain 'sim_type' or 'simulator' key.")
 
     cls = _CONFIGS_FOR_RUN_MAP.get(sim_type)
     if cls is None:
-        raise ValueError(
-            f"Unknown sim_type={sim_type!r}. "
-            f"Available: {list(_CONFIGS_FOR_RUN_MAP.keys())}"
-        )
+        raise ValueError(f"Unknown sim_type={sim_type!r}. Available: {list(_CONFIGS_FOR_RUN_MAP.keys())}")
     return cls.from_dict(data)

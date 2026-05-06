@@ -7,6 +7,7 @@ Usage:
 Motion source is set in ``G1TrackingConfig.motion_files`` (tuple of NPZ
 paths — length-1 for single-clip, length >= 2 for multi-motion).
 """
+
 from rlworld.rl.configs.presets.g1_tracking.base import G1TrackingConfig
 from rlworld.rl.runners import BaseRunner
 

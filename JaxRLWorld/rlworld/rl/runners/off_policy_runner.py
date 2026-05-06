@@ -1,25 +1,22 @@
-import os
-
 import time
-from typing import Dict, List, Any, Union
+from typing import Any, Dict, List, Union
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import torch
 
-from rlworld.rl.algorithms.base import ActInput
 from rlworld.rl.algorithms import SAC, TD3, FastTD3
-from rlworld.rl.configs.algorithms import TD3Config, FastTD3Config, SACConfig
-from rlworld.rl.configs import ConfigsForRun, configs_from_dict
+from rlworld.rl.algorithms.base import ActInput
+from rlworld.rl.configs import ConfigsForRun
+from rlworld.rl.configs.algorithms import FastTD3Config, SACConfig, TD3Config
 from rlworld.rl.envs import World
+from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
 from rlworld.rl.modules.policies.sac_ac import SACActorCritic
 from rlworld.rl.modules.policies.td3_ac import TD3ActorCritic
-from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
-from rlworld.rl.modules.utils import print_model_summary, count_parameters
+from rlworld.rl.modules.utils import count_parameters, print_model_summary
 from rlworld.rl.runners.base_runner import BaseRunner
 from rlworld.rl.runners.iteration_data import IterationData
-from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
+from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 
 
 class OffPolicyRunner(BaseRunner):
@@ -149,13 +146,9 @@ class OffPolicyRunner(BaseRunner):
         if self.algorithm_name == "SAC":
             log_std_params = count_parameters(self.actor_critic.log_std_net)
             wandb.summary["model/log_std_parameters"] = log_std_params
-            wandb.summary["model/total_parameters"] = (
-                actor_params + critic1_params + critic2_params + log_std_params
-            )
+            wandb.summary["model/total_parameters"] = actor_params + critic1_params + critic2_params + log_std_params
         else:
-            wandb.summary["model/total_parameters"] = (
-                actor_params + critic1_params + critic2_params
-            )
+            wandb.summary["model/total_parameters"] = actor_params + critic1_params + critic2_params
 
     def _init_algorithm(self) -> Union[SAC, TD3]:
         """Initialize algorithm based on type."""
@@ -181,7 +174,7 @@ class OffPolicyRunner(BaseRunner):
         print(f"  Tau: {alg_cfg.tau}")
         print(f"  Gamma: {alg_cfg.gamma}")
         print(f"  Batch size: {alg_cfg.batch_size}")
-        print(f"\n  Training config:")
+        print("\n  Training config:")
         print(f"    - num_envs: {self.env.num_envs}")
         print(f"    - num_steps_per_env: {self.cfgs.algorithm.num_steps_per_env}")
         print(f"    - transitions per iter: {num_transitions}")
@@ -283,15 +276,11 @@ class OffPolicyRunner(BaseRunner):
         # Buffer env-time observations so the obs normalizer is updated
         # exactly once per collection cycle (PPO-style), instead of being
         # repeatedly updated from sampled replay batches inside alg.update().
-        update_normalizers = (
-            getattr(self.alg, "obs_normalization", False)
-            and hasattr(self.alg, "update_normalizers")
-        )
+        update_normalizers = getattr(self.alg, "obs_normalization", False) and hasattr(self.alg, "update_normalizers")
         norm_actor_buf: List[jax.Array] = [] if update_normalizers else None
         norm_critic_buf: List[jax.Array] = [] if update_normalizers else None
 
         for step in range(total_steps):
-
             # ========== Warmup: use random actions ==========
             if self.total_timesteps < self.cfgs.algorithm.learning_starts:
                 # Random uniform action in [-1, 1]
@@ -372,12 +361,8 @@ class OffPolicyRunner(BaseRunner):
         # exactly once per collection cycle, regardless of how many gradient
         # steps run later or how often each transition is resampled.
         if update_normalizers and norm_actor_buf:
-            flat_actor = jnp.stack(norm_actor_buf).reshape(
-                -1, norm_actor_buf[0].shape[-1]
-            )
-            flat_critic = jnp.stack(norm_critic_buf).reshape(
-                -1, norm_critic_buf[0].shape[-1]
-            )
+            flat_actor = jnp.stack(norm_actor_buf).reshape(-1, norm_actor_buf[0].shape[-1])
+            flat_critic = jnp.stack(norm_critic_buf).reshape(-1, norm_critic_buf[0].shape[-1])
             self.alg.update_normalizers(flat_actor, flat_critic)
 
         return {
@@ -396,9 +381,7 @@ class OffPolicyRunner(BaseRunner):
     ) -> IterationData:
         """Execute a single training iteration."""
         # Collect experience
-        collection_data = self._collect_experience(
-            obs=obs, ep_infos=ep_infos, iteration=iteration
-        )
+        collection_data = self._collect_experience(obs=obs, ep_infos=ep_infos, iteration=iteration)
 
         collection_time = collection_data["collection_time"]
         metrics = None
@@ -418,9 +401,7 @@ class OffPolicyRunner(BaseRunner):
                 del batch
 
             learning_time = time.time() - training_start_time
-            fps = (self.num_steps_per_env * self.env.num_envs) / (
-                collection_time + learning_time
-            )
+            fps = (self.num_steps_per_env * self.env.num_envs) / (collection_time + learning_time)
             buffer_size = self.alg.replay_buffer.size
 
         # Only compute action statistics on log intervals
@@ -479,10 +460,7 @@ class OffPolicyRunner(BaseRunner):
 
     def _get_action_statistics(self) -> Dict[str, Any]:
         """Extract recent actions from replay buffer."""
-        n_recent = min(
-            self.num_steps_per_env * self.env.num_envs,
-            self.alg.replay_buffer.size
-        )
+        n_recent = min(self.num_steps_per_env * self.env.num_envs, self.alg.replay_buffer.size)
         actions = self.alg.replay_buffer.get_recent_actions(n_recent)
         return self._compute_action_distribution_stats(actions)
 
@@ -505,11 +483,13 @@ class OffPolicyRunner(BaseRunner):
         """
         # Load metadata (YAML)
         from rlworld.rl.utils.checkpoint import load_checkpoint_metadata
+
         metadata = load_checkpoint_metadata(checkpoint_path)
 
         # Use saved config if not provided
         if cfgs is None:
             from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
+
             cfgs = load_config_from_checkpoint(metadata)
 
         # Create env if not provided (reuse BaseRunner logic)
@@ -523,9 +503,7 @@ class OffPolicyRunner(BaseRunner):
         runner.alg.load_train_state(checkpoint_path, metadata)
 
         # Restore runner state
-        runner.current_learning_iteration = metadata.get(
-            "current_learning_iteration", metadata["iteration"]
-        )
+        runner.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
         runner.total_timesteps = metadata["total_timesteps"]
         runner.total_time = metadata.get("total_time", 0)
         runner.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)

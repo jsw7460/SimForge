@@ -10,6 +10,7 @@ statistics (decoder log-std spread, encoder posterior log-std mean)
 that are cheap to compute and useful for diagnosing collapse vs blow-
 up of the latent posterior during early training.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,7 +20,6 @@ from rlworld.rl.algorithms.metrics.base import (
     ConsoleMetric,
     MetricType,
 )
-
 
 __all__ = ["NPMPMetrics"]
 
@@ -44,14 +44,14 @@ class NPMPMetrics(BaseMetrics):
 
     def get_console_metrics(self) -> list[ConsoleMetric]:
         return [
-            ConsoleMetric("Total Loss",            MetricType.LOSS,        self.loss),
-            ConsoleMetric("Recon NLL",             MetricType.LOSS,        self.recon),
-            ConsoleMetric("KL(q || p)",            MetricType.LOSS,        self.kl),
-            ConsoleMetric("beta",                  MetricType.COEFFICIENT, self.beta),
-            ConsoleMetric("Decoder log_std mean",  MetricType.VALUE,       self.decoder_log_std_mean),
-            ConsoleMetric("Decoder log_std min",   MetricType.VALUE,       self.decoder_log_std_min),
-            ConsoleMetric("Decoder log_std max",   MetricType.VALUE,       self.decoder_log_std_max),
-            ConsoleMetric("Encoder q log_std",     MetricType.VALUE,       self.encoder_q_log_std_mean),
+            ConsoleMetric("Total Loss", MetricType.LOSS, self.loss),
+            ConsoleMetric("Recon NLL", MetricType.LOSS, self.recon),
+            ConsoleMetric("KL(q || p)", MetricType.LOSS, self.kl),
+            ConsoleMetric("beta", MetricType.COEFFICIENT, self.beta),
+            ConsoleMetric("Decoder log_std mean", MetricType.VALUE, self.decoder_log_std_mean),
+            ConsoleMetric("Decoder log_std min", MetricType.VALUE, self.decoder_log_std_min),
+            ConsoleMetric("Decoder log_std max", MetricType.VALUE, self.decoder_log_std_max),
+            ConsoleMetric("Encoder q log_std", MetricType.VALUE, self.encoder_q_log_std_mean),
         ]
 
     def to_wandb_dict(self) -> dict[str, float]:

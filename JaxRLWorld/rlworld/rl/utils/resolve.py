@@ -18,9 +18,7 @@ def callable_to_string(fn: Callable) -> str:
     Raises ``ValueError`` for lambdas or objects without proper module info.
     """
     if getattr(fn, "__name__", "") == "<lambda>":
-        raise ValueError(
-            f"Cannot serialize lambda functions. Convert to a named function: {fn}"
-        )
+        raise ValueError(f"Cannot serialize lambda functions. Convert to a named function: {fn}")
 
     module = getattr(fn, "__module__", None)
     qualname = getattr(fn, "__qualname__", None)
@@ -33,10 +31,7 @@ def callable_to_string(fn: Callable) -> str:
 
     # Reject locals (e.g. functions defined inside other functions)
     if "<locals>" in qualname:
-        raise ValueError(
-            f"Cannot serialize locally-defined callable {module}:{qualname}. "
-            "Move it to module level."
-        )
+        raise ValueError(f"Cannot serialize locally-defined callable {module}:{qualname}. Move it to module level.")
 
     return f"{module}:{qualname}"
 
@@ -48,9 +43,7 @@ def resolve_callable(ref: str) -> Callable:
     ``AttributeError`` if the attribute path is invalid.
     """
     if ":" not in ref:
-        raise ValueError(
-            f"Invalid callable reference {ref!r}. Expected 'module.path:attr.name' format."
-        )
+        raise ValueError(f"Invalid callable reference {ref!r}. Expected 'module.path:attr.name' format.")
 
     module_path, attr_path = ref.split(":", 1)
     module = importlib.import_module(module_path)

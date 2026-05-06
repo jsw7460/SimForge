@@ -21,6 +21,7 @@ mjlab-specific quirks the writer hides from callers:
 - ``eval_fk`` is a no-op: mjlab's ``Simulation.step()`` and
   ``Simulation.forward()`` handle FK internally.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -30,6 +31,7 @@ from torch import Tensor
 
 if TYPE_CHECKING:
     from mjlab.entity import Entity
+
     from rlworld.rl.envs.mujoco.mjlab_env import MujocoEnv
 
 
@@ -38,8 +40,8 @@ class MujocoRobotStateWriter:
 
     def __init__(
         self,
-        env: "MujocoEnv",
-        entity: "Entity",
+        env: MujocoEnv,
+        entity: Entity,
         joint_ids: Tensor,
     ) -> None:
         self._env = env
@@ -50,9 +52,7 @@ class MujocoRobotStateWriter:
     # Joint writes
     # ------------------------------------------------------------------
 
-    def set_dof_positions(
-        self, values: Tensor, env_ids: "Tensor | None" = None
-    ) -> None:
+    def set_dof_positions(self, values: Tensor, env_ids: Tensor | None = None) -> None:
         """Write actuated joint positions.
 
         mjlab's ``write_joint_state_to_sim`` requires both pos and vel,
@@ -62,12 +62,13 @@ class MujocoRobotStateWriter:
         env_ids = self._resolve_env_ids(env_ids)
         current_vel = self._entity.data.joint_vel[env_ids][:, self._joint_ids]
         self._entity.write_joint_state_to_sim(
-            values, current_vel, env_ids=env_ids, joint_ids=self._joint_ids,
+            values,
+            current_vel,
+            env_ids=env_ids,
+            joint_ids=self._joint_ids,
         )
 
-    def set_dof_velocities(
-        self, values: Tensor, env_ids: "Tensor | None" = None
-    ) -> None:
+    def set_dof_velocities(self, values: Tensor, env_ids: Tensor | None = None) -> None:
         """Write actuated joint velocities.
 
         Symmetric to :meth:`set_dof_positions` — reads the current
@@ -76,7 +77,10 @@ class MujocoRobotStateWriter:
         env_ids = self._resolve_env_ids(env_ids)
         current_pos = self._entity.data.joint_pos[env_ids][:, self._joint_ids]
         self._entity.write_joint_state_to_sim(
-            current_pos, values, env_ids=env_ids, joint_ids=self._joint_ids,
+            current_pos,
+            values,
+            env_ids=env_ids,
+            joint_ids=self._joint_ids,
         )
 
     # ------------------------------------------------------------------
@@ -87,7 +91,7 @@ class MujocoRobotStateWriter:
         self,
         pos: Tensor,
         quat_wxyz: Tensor,
-        env_ids: "Tensor | None" = None,
+        env_ids: Tensor | None = None,
     ) -> None:
         """Write root link pose. mjlab is wxyz native."""
         env_ids = self._resolve_env_ids(env_ids)
@@ -98,7 +102,7 @@ class MujocoRobotStateWriter:
         self,
         lin_vel: Tensor,
         ang_vel: Tensor,
-        env_ids: "Tensor | None" = None,
+        env_ids: Tensor | None = None,
     ) -> None:
         """Write root link linear + angular velocity."""
         env_ids = self._resolve_env_ids(env_ids)
@@ -109,7 +113,7 @@ class MujocoRobotStateWriter:
     # FK
     # ------------------------------------------------------------------
 
-    def eval_fk(self, env_ids: "Tensor | None" = None) -> None:
+    def eval_fk(self, env_ids: Tensor | None = None) -> None:
         """No-op: mjlab updates kinematics inside ``Simulation.step()``."""
         return None
 
@@ -117,7 +121,7 @@ class MujocoRobotStateWriter:
     # Internals
     # ==================================================================
 
-    def _resolve_env_ids(self, env_ids: "Tensor | None") -> Tensor:
+    def _resolve_env_ids(self, env_ids: Tensor | None) -> Tensor:
         if env_ids is not None:
             return env_ids
         return torch.arange(self._env.num_envs, device=self._env.device)

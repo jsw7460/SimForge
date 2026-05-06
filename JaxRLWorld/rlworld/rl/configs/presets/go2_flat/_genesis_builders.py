@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import genesis as gs
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     RewardConfig,
     TerminationsConfig,
@@ -47,12 +48,10 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
 
 if TYPE_CHECKING:
     from .base import Go2FlatConfig
@@ -72,11 +71,11 @@ def get_foot_names(robot) -> tuple[str, ...]:
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "Go2FlatConfig") -> VisualizationConfig:
+def build_visualization(cfg: Go2FlatConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False)
 
 
-def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> EnvConfig:
+def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> EnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         roll_pitch_violation = TerminationTermConfig(
@@ -96,7 +95,7 @@ def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> EnvConfig:
     )
 
 
-def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> SceneConfig:
+def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
     r = cfg.robot
     sim_dt = timing["dt"]
 
@@ -170,7 +169,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> SceneConfig:
     )
 
 
-def build_action(cfg: "Go2FlatConfig") -> ActionConfig:
+def build_action(cfg: Go2FlatConfig) -> ActionConfig:
     r = cfg.robot
     return ActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
@@ -180,7 +179,7 @@ def build_action(cfg: "Go2FlatConfig") -> ActionConfig:
     )
 
 
-def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
+def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
     @dataclass
     class _RewardsCfg(RewardConfig):
         # Tracking rewards (common — uses RobotData interface)
@@ -275,13 +274,13 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def customize_reset_root_params(cfg: "Go2FlatConfig", params: Dict[str, Any]) -> None:
+def customize_reset_root_params(cfg: Go2FlatConfig, params: Dict[str, Any]) -> None:
     """Genesis hook: spawn at (1.5, 1.5) for scene layout reasons."""
     h = cfg.robot.base_init_height
     params["default_pos"] = (1.5, 1.5, h)
 
 
-def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """Genesis-specific domain randomization terms."""
     return {
         "randomize_base_mass": EventTermConfig(
@@ -300,5 +299,3 @@ def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
             params={"friction_range": (0.0, 0.05)},
         ),
     }
-
-

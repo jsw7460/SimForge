@@ -1,25 +1,25 @@
 from functools import partial
 from typing import Any, NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 import optax
 
-from rlworld.rl.storages.rollout_storage import RolloutBatch
-from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.algorithms.ppo.losses import (
+    compute_analytical_kl,
     compute_policy_loss,
     compute_value_loss,
-    compute_analytical_kl,
 )
-
+from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
+from rlworld.rl.storages.rollout_storage import RolloutBatch
 
 # ==================== Data Structures ====================
 
 
 class PPOLossInfo(NamedTuple):
     """Loss components for logging."""
+
     policy_loss: jax.Array
     value_loss: jax.Array
     entropy: jax.Array
@@ -31,6 +31,7 @@ class PPOLossInfo(NamedTuple):
 
 class ScanCarry(NamedTuple):
     """Carry state for scan loop."""
+
     params: Any
     key: jax.Array
     opt_state: optax.OptState
@@ -39,6 +40,7 @@ class ScanCarry(NamedTuple):
 
 class ScanOutput(NamedTuple):
     """Output from each scan iteration."""
+
     policy_loss: jax.Array
     value_loss: jax.Array
     entropy: jax.Array
@@ -230,7 +232,12 @@ def update_all_batches(
     """
 
     def scan_fn(carry: ScanCarry, batch: RolloutBatch) -> tuple[ScanCarry, ScanOutput]:
-        params, opt_state, key, early_stopped = (carry.params, carry.opt_state, carry.key, carry.early_stopped,)
+        params, opt_state, key, early_stopped = (
+            carry.params,
+            carry.opt_state,
+            carry.key,
+            carry.early_stopped,
+        )
         key, subkey = jax.random.split(key)
 
         def loss_fn(p):

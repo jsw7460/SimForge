@@ -2,14 +2,15 @@ from dataclasses import dataclass, field
 
 from rlworld.rl.algorithms.metrics.base import (
     BaseMetrics,
-    MetricType,
     ConsoleMetric,
+    MetricType,
 )
 
 
 @dataclass
 class FastTD3CriticMetrics:
     """FastTD3 distributional critic metrics."""
+
     loss: float = 0.0
     critic1_loss: float = 0.0
     critic2_loss: float = 0.0
@@ -40,6 +41,7 @@ class FastTD3CriticMetrics:
 @dataclass
 class FastTD3ActorMetrics:
     """FastTD3 actor metrics."""
+
     loss: float = 0.0
     action_mean: float = 0.0
     action_std: float = 0.0
@@ -57,6 +59,7 @@ class FastTD3ActorMetrics:
 @dataclass
 class FastTD3BatchMetrics:
     """FastTD3 batch statistics."""
+
     reward_mean: float = 0.0
     reward_std: float = 0.0
     reward_min: float = 0.0
@@ -80,6 +83,7 @@ class FastTD3BatchMetrics:
 @dataclass
 class FastTD3Metrics(BaseMetrics):
     """Complete FastTD3 training metrics."""
+
     critic: FastTD3CriticMetrics = field(default_factory=FastTD3CriticMetrics)
     actor: FastTD3ActorMetrics = field(default_factory=FastTD3ActorMetrics)
     batch: FastTD3BatchMetrics = field(default_factory=FastTD3BatchMetrics)

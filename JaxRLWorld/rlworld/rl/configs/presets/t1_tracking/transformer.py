@@ -18,6 +18,7 @@ Usage::
     )
     cfgs = T1TrackingTransformerConfig(sim_type="newton").build()
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,7 +27,6 @@ from typing import Literal
 from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig
 
 from .base import T1TrackingConfig
-
 
 __all__ = ["T1TrackingTransformerConfig"]
 

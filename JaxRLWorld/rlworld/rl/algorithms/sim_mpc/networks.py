@@ -11,7 +11,6 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class SimMPCPolicy(nn.Module):
@@ -48,7 +47,9 @@ class SimMPCPolicy(nn.Module):
         self.log_std_head = nn.Linear(in_dim, action_dim)
 
     def forward(
-        self, obs: torch.Tensor, deterministic: bool = False,
+        self,
+        obs: torch.Tensor,
+        deterministic: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -75,11 +76,7 @@ class SimMPCPolicy(nn.Module):
         if self.squash:
             action = torch.tanh(raw_action)
             # Log-prob with tanh correction
-            log_prob = (
-                -0.5 * noise.square().sum(-1)
-                - log_std.sum(-1)
-                - (1 - action.square() + 1e-6).log().sum(-1)
-            )
+            log_prob = -0.5 * noise.square().sum(-1) - log_std.sum(-1) - (1 - action.square() + 1e-6).log().sum(-1)
         else:
             action = raw_action
             log_prob = -0.5 * noise.square().sum(-1) - log_std.sum(-1)
@@ -122,9 +119,7 @@ class QEnsemble(nn.Module):
         hidden_dims: Tuple[int, ...] = (512, 256),
     ):
         super().__init__()
-        self.nets = nn.ModuleList([
-            QNetwork(obs_dim, action_dim, hidden_dims) for _ in range(num_q)
-        ])
+        self.nets = nn.ModuleList([QNetwork(obs_dim, action_dim, hidden_dims) for _ in range(num_q)])
 
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """Returns: [num_q, batch, 1]"""

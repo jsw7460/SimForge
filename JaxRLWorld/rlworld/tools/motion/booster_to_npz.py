@@ -36,6 +36,7 @@ body/joint-identical to ``Mjlab/.../booster_t1/xmls/t1.xml`` — so the
 produced NPZ works for the mujoco, newton, and genesis builders of the
 ``t1_tracking`` preset.
 """
+
 from __future__ import annotations
 
 import os
@@ -51,7 +52,6 @@ from rlworld.tools.motion.motion_loader import (
     _so3_derivative,
 )
 from rlworld.tools.motion.mujoco_replayer import replay_motion
-
 
 # Default MJCF: menagerie T1. Verified (body 24 / hinge 23 / freejoint) to
 # match mjlab's ``booster_t1/xmls/t1.xml`` exactly in body and joint layout,
@@ -95,7 +95,9 @@ def _resample_pose_trajectory(
 
     base_pos_o = _lerp(base_pos[idx_0], base_pos[idx_1], blend).astype(np.float32)
     base_quat_o = _slerp(
-        base_quat_wxyz[idx_0], base_quat_wxyz[idx_1], blend,
+        base_quat_wxyz[idx_0],
+        base_quat_wxyz[idx_1],
+        blend,
     ).astype(np.float32)
     dof_pos_o = _lerp(dof_pos[idx_0], dof_pos[idx_1], blend).astype(np.float32)
 
@@ -159,9 +161,7 @@ def _resolve_segments(split_points: np.ndarray) -> List[Tuple[int, int]]:
     """
     sp = np.asarray(split_points, dtype=np.int64).ravel()
     if sp.shape[0] < 2:
-        raise ValueError(
-            f"split_points must have at least 2 entries; got shape {sp.shape}."
-        )
+        raise ValueError(f"split_points must have at least 2 entries; got shape {sp.shape}.")
     if sp.shape[0] == 2:
         return [(int(sp[0]), int(sp[1]) + 1)]
     return [(int(sp[i]), int(sp[i + 1])) for i in range(sp.shape[0] - 1)]
@@ -181,7 +181,7 @@ def main(
     output_file: str,
     mjcf_path: str = _DEFAULT_MJCF,
     output_fps: float = 50.0,
-    expected_joint_dim: "int | None" = 23,
+    expected_joint_dim: int | None = 23,
 ) -> None:
     """Convert a Booster Robotics NPZ into a JaxRLWorld MotionCommand NPZ.
 
@@ -205,8 +205,7 @@ def main(
     for required in ("qpos", "joint_names", "frequency", "split_points"):
         if required not in data.files:
             raise ValueError(
-                f"Booster NPZ {input_file!r} is missing required field "
-                f"{required!r}. Available: {list(data.files)}"
+                f"Booster NPZ {input_file!r} is missing required field {required!r}. Available: {list(data.files)}"
             )
 
     qpos = np.asarray(data["qpos"], dtype=np.float64)  # (T, 7 + J)
@@ -215,9 +214,7 @@ def main(
     split_points = np.asarray(data["split_points"], dtype=np.int64)
 
     if qpos.ndim != 2 or qpos.shape[1] < 8:
-        raise ValueError(
-            f"qpos has unexpected shape {qpos.shape}; expected (T, 7+J) with J>=1."
-        )
+        raise ValueError(f"qpos has unexpected shape {qpos.shape}; expected (T, 7+J) with J>=1.")
 
     hinge_names = [n for n in joint_names_all if n != "root"]
     n_dof = qpos.shape[1] - 7
@@ -233,10 +230,7 @@ def main(
             f"clip, or a different humanoid), pass --expected-joint-dim={n_dof} "
             f"or disable the check."
         )
-    print(
-        f"[booster_to_npz] T={qpos.shape[0]}  J={n_dof}  input_fps={input_fps}  "
-        f"output_fps={output_fps}"
-    )
+    print(f"[booster_to_npz] T={qpos.shape[0]}  J={n_dof}  input_fps={input_fps}  output_fps={output_fps}")
 
     base_pos_in = qpos[:, :3]
     base_quat_in = qpos[:, 3:7]  # MuJoCo free-joint convention: wxyz
@@ -249,9 +243,7 @@ def main(
         print(f"[booster_to_npz] Dropped {dropped} segment(s) with < 2 frames.")
     n_segments = len(segments)
     if n_segments == 0:
-        raise ValueError(
-            f"No usable segments in {input_file!r}: split_points={split_points.tolist()}"
-        )
+        raise ValueError(f"No usable segments in {input_file!r}: split_points={split_points.tolist()}")
     print(f"[booster_to_npz] Processing {n_segments} segment(s).")
 
     out_dir = os.path.dirname(output_file)
@@ -273,10 +265,7 @@ def main(
             output_fps=output_fps,
         )
         n_out = motion.dof_pos.shape[0]
-        print(
-            f"[booster_to_npz]   resampled T={n_out} "
-            f"({n_out / output_fps:.3f}s)"
-        )
+        print(f"[booster_to_npz]   resampled T={n_out} ({n_out / output_fps:.3f}s)")
 
         print(f"[booster_to_npz]   FK replay via {mjcf_path!r}")
         baked = replay_motion(

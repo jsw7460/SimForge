@@ -1,16 +1,17 @@
 from dataclasses import dataclass, field
 
 from rlworld.rl.algorithms.metrics.base import (
-    BaseMetrics,
     ActorMetrics,
-    MetricType,
+    BaseMetrics,
     ConsoleMetric,
+    MetricType,
 )
 
 
 @dataclass
 class SACCriticMetrics:
     """SAC twin critic metrics."""
+
     loss: float = 0.0
     critic1_loss: float = 0.0
     critic2_loss: float = 0.0
@@ -37,6 +38,7 @@ class SACCriticMetrics:
 @dataclass
 class SACAlphaMetrics:
     """SAC entropy coefficient metrics."""
+
     value: float = 0.0
     loss: float = 0.0
     target_entropy: float = 0.0
@@ -54,6 +56,7 @@ class SACAlphaMetrics:
 @dataclass
 class SACBatchMetrics:
     """SAC batch statistics (uses actual rewards, not returns)."""
+
     reward_mean: float = 0.0
     reward_std: float = 0.0
     reward_min: float = 0.0
@@ -77,6 +80,7 @@ class SACBatchMetrics:
 @dataclass
 class SACMetrics(BaseMetrics):
     """Complete SAC training metrics."""
+
     critic: SACCriticMetrics = field(default_factory=SACCriticMetrics)
     actor: ActorMetrics = field(default_factory=ActorMetrics)
     alpha: SACAlphaMetrics = field(default_factory=SACAlphaMetrics)

@@ -1,7 +1,8 @@
-from .ppo_dr3 import PPODR3
 from rlworld.rl.algorithms.ppo_dr3.ppo_dr3 import PPODR3
-from .metrics import PPODR3Metrics, PPODR3CriticMetrics, PPODR3ActorMetrics
+
 from .losses import compute_dr3_regularizer
+from .metrics import PPODR3ActorMetrics, PPODR3CriticMetrics, PPODR3Metrics
+from .ppo_dr3 import PPODR3
 
 __all__ = [
     "PPODR3",

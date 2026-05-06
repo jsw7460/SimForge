@@ -22,6 +22,7 @@ What it does (num_envs=1, deterministic, no DR, no fallen branch):
 Then diff the three sim outputs. The first mismatching field is
 precisely the bug.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -81,8 +82,9 @@ def main() -> None:
     parser.add_argument("--sim", choices=("newton", "genesis", "mujoco"), required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=3)
-    parser.add_argument("--action-scale", type=float, default=0.0,
-                        help="0 = zero action; positive = small ramp to exercise torque.")
+    parser.add_argument(
+        "--action-scale", type=float, default=0.0, help="0 = zero action; positive = small ramp to exercise torque."
+    )
     args = parser.parse_args()
 
     # fallen_prob=0 forces the standing branch — identical starting pose

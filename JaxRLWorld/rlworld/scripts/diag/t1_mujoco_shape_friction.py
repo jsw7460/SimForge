@@ -8,6 +8,7 @@ for the foot collision geoms (from
 ``T1Config.foot_geom_names_mjlab``) so we can verify randomization
 actually fired and that non-foot geoms are untouched.
 """
+
 from __future__ import annotations
 
 import mujoco
@@ -34,9 +35,19 @@ def main() -> None:
     m = sm.model  # mujoco-warp Model (per-env geom_friction lives here)
 
     r = cfgs.runner.robot if hasattr(cfgs, "runner") and hasattr(cfgs.runner, "robot") else None
-    foot_names = r.foot_geom_names_mjlab if r is not None else (
-        "left_foot1_collision", "left_foot2_collision", "left_foot3_collision", "left_foot4_collision",
-        "right_foot1_collision", "right_foot2_collision", "right_foot3_collision", "right_foot4_collision",
+    foot_names = (
+        r.foot_geom_names_mjlab
+        if r is not None
+        else (
+            "left_foot1_collision",
+            "left_foot2_collision",
+            "left_foot3_collision",
+            "left_foot4_collision",
+            "right_foot1_collision",
+            "right_foot2_collision",
+            "right_foot3_collision",
+            "right_foot4_collision",
+        )
     )
 
     foot_ids = []
@@ -49,7 +60,7 @@ def main() -> None:
 
     import numpy as np
     import torch
-    import warp as wp
+
     # mujoco-warp stores per-env geom_friction. Shape: (nworld, ngeom, 3).
     # Newer warp versions' to_torch hit an is_cpu attr error on torch.device,
     # so go numpy → torch directly.
@@ -70,8 +81,7 @@ def main() -> None:
             tri = gf[env_i, gid].cpu().tolist()
             tag = name if env_i == 0 else ""
             gid_s = str(gid) if env_i == 0 else ""
-            print(f"{tag:<30} {gid_s:<7} env{env_i}  "
-                  f"{tri[0]:>9.5f} {tri[1]:>12.6f} {tri[2]:>12.6f}")
+            print(f"{tag:<30} {gid_s:<7} env{env_i}  {tri[0]:>9.5f} {tri[1]:>12.6f} {tri[2]:>12.6f}")
         print()
 
     # Sanity non-foot geom

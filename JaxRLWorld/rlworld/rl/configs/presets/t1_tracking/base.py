@@ -26,6 +26,7 @@ Usage::
         motion_files=("/tmp/t1_walk.npz",),
     ).build()
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -39,22 +40,21 @@ from rlworld.rl.configs.common_config_classes import (
     PPOPolicyConfig,
     RunnerConfig,
 )
+from rlworld.rl.configs.curriculums import CurriculumManagerConfig
 from rlworld.rl.configs.robots.t1 import T1Config
 from rlworld.rl.envs.mdp.commands import MotionCommandCfg
-from rlworld.rl.configs.curriculums import CurriculumManagerConfig
-
 
 # ── Per-simulator timing (same as t1_getup) ──────────────────────────
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "newton": {"dt": 0.005, "substeps": 1, "decimation": 4},
     "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
-    "mujoco":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "mujoco": {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
-    "newton":  "T1_Tracking_Newton",
+    "newton": "T1_Tracking_Newton",
     "genesis": "T1_Tracking_Genesis",
-    "mujoco":  "T1_Tracking_Mujoco",
+    "mujoco": "T1_Tracking_Mujoco",
 }
 
 
@@ -67,10 +67,7 @@ def _get_sim_builders(sim_type: str):
     elif sim_type == "mujoco":
         from . import _mujoco_builders as mod
     else:
-        raise ValueError(
-            f"Unknown sim_type: {sim_type!r}. "
-            f"Expected one of {sorted(_SIM_TIMINGS)}."
-        )
+        raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
     return mod
 
 
@@ -109,7 +106,7 @@ class T1TrackingConfig:
         "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/soccer_drill_run.npz",
         "./JaxRLWorld/rlworld/assets/motions/booster/booster_t1_converted/walking1.npz",
     )
-    motion_weights: "tuple[float, ...] | None" = None
+    motion_weights: tuple[float, ...] | None = None
 
     # Body list tracked by rewards / observations / terminations.
     # Must exist in both the NPZ's ``body_names`` (bare names, from the
@@ -144,14 +141,22 @@ class T1TrackingConfig:
     # RSI ranges (Mjlab defaults for humanoid locomotion tracking).
     pose_range: Dict[str, tuple[float, float]] = field(
         default_factory=lambda: {
-            "x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01),
-            "roll": (-0.1, 0.1), "pitch": (-0.1, 0.1), "yaw": (-0.2, 0.2),
+            "x": (-0.05, 0.05),
+            "y": (-0.05, 0.05),
+            "z": (-0.01, 0.01),
+            "roll": (-0.1, 0.1),
+            "pitch": (-0.1, 0.1),
+            "yaw": (-0.2, 0.2),
         },
     )
     velocity_range: Dict[str, tuple[float, float]] = field(
         default_factory=lambda: {
-            "x": (-0.5, 0.5), "y": (-0.5, 0.5), "z": (-0.2, 0.2),
-            "roll": (-0.5, 0.5), "pitch": (-0.5, 0.5), "yaw": (-0.5, 0.5),
+            "x": (-0.5, 0.5),
+            "y": (-0.5, 0.5),
+            "z": (-0.2, 0.2),
+            "roll": (-0.5, 0.5),
+            "pitch": (-0.5, 0.5),
+            "yaw": (-0.5, 0.5),
         },
     )
     joint_position_range: tuple[float, float] = (-0.1, 0.1)
@@ -184,8 +189,8 @@ class T1TrackingConfig:
     self_collision_weight: float = 10.0
 
     # ── Termination thresholds ────────────────────────────────────────
-    bad_anchor_pos_z_threshold: float = 0.25   # meters
-    bad_anchor_ori_threshold: float = 0.8       # ~46° projected-gravity mismatch
+    bad_anchor_pos_z_threshold: float = 0.25  # meters
+    bad_anchor_ori_threshold: float = 0.8  # ~46° projected-gravity mismatch
     bad_motion_body_pos_z_threshold: float = 0.25  # meters
 
     # ── Action mode ───────────────────────────────────────────────────
@@ -254,7 +259,8 @@ class T1TrackingConfig:
         return cfgs
 
     def _get_preset_kwargs(self) -> Dict[str, Any]:
-        from dataclasses import fields, MISSING
+        from dataclasses import MISSING, fields
+
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":

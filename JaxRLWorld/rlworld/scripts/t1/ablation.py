@@ -1,18 +1,17 @@
 import os
 
-os.environ['__NV_PRIME_RENDER_OFFLOAD'] = '1'
-os.environ['__GLX_VENDOR_LIBRARY_NAME'] = 'nvidia'
+os.environ["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+os.environ["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
 
-custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets'))
+custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
 import genesis.utils.terrain
 
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs import GenesisConfigsForRun
-from rlworld.rl.runners import OnPolicyRunner
 from rlworld.rl.configs.presets.t1_flat.aba import get_config
-
+from rlworld.rl.runners import OnPolicyRunner
 
 # 아래: Auxiliary 없앤 거
 # medium = {
@@ -88,21 +87,17 @@ from rlworld.rl.configs.presets.t1_flat.aba import get_config
 # 아래: Bidirectional MLP
 medium = {
     "encoder_type": "MLPBidirectionalGNNEncoder",
-
     "aba_link_channels": 11,
     "aba_spatial_dim": 4,
     "use_auxiliary_loss": False,
     "aba_orth_loss_weight": 1.0,
     "aba_orth_loss_decay": 1.0,
-
     "decoder_hidden_dim": 128,
     "interleave_mask": True,
     "use_adjacency_mask": True,
     "rodrigues_use_global_layer_norm": True,
     "use_positive_constraint": False,
 }
-
-
 
 
 def main():
@@ -120,7 +115,7 @@ def main():
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

@@ -18,13 +18,13 @@ Subset convention
 All writer calls use subset-shaped tensors + ``env_ids``, matching the
 ``RobotStateWriterProtocol`` contract.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import torch
 
-from rlworld.rl.utils import string as _su
 from rlworld.rl.utils.quat_utils import quat_from_angle_axis_wxyz, quat_mul_wxyz
 
 if TYPE_CHECKING:
@@ -47,7 +47,7 @@ def _sample_uniform(
 
 
 def push_by_setting_velocity(
-    env: "World",
+    env: World,
     env_ids: torch.Tensor,
     velocity_range: dict[str, tuple[float, float]],
     entity_name: str = "robot",
@@ -89,7 +89,7 @@ def push_by_setting_velocity(
 
 
 def reset_root_state_uniform(
-    env: "World",
+    env: World,
     env_ids: torch.Tensor,
     pose_range: dict[str, tuple[float, float]],
     velocity_range: dict[str, tuple[float, float]] | None = None,
@@ -147,9 +147,7 @@ def reset_root_state_uniform(
         pos = pos + env_origins[env_ids]
 
     # ── Orientation: default quat * delta quat (all wxyz) ─────────
-    default_quat_t = torch.tensor(
-        default_quat_wxyz, device=device, dtype=torch.float32
-    ).unsqueeze(0).expand(n, -1)
+    default_quat_t = torch.tensor(default_quat_wxyz, device=device, dtype=torch.float32).unsqueeze(0).expand(n, -1)
 
     # Euler perturbation → quaternion delta
     roll, pitch, yaw = pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
@@ -183,7 +181,7 @@ def reset_root_state_uniform(
 
 
 def reset_joints_by_offset(
-    env: "World",
+    env: World,
     env_ids: torch.Tensor,
     position_range: tuple[float, float],
     velocity_range: tuple[float, float] = (0.0, 0.0),
@@ -224,7 +222,8 @@ def reset_joints_by_offset(
     # Add position noise
     if position_range != (0.0, 0.0):
         noise = torch.empty(n, num_joints, device=device).uniform_(
-            position_range[0], position_range[1],
+            position_range[0],
+            position_range[1],
         )
         default_pos = default_pos + noise
 
@@ -233,18 +232,20 @@ def reset_joints_by_offset(
         joint_vel = torch.zeros(n, num_joints, device=device)
     else:
         joint_vel = torch.empty(n, num_joints, device=device).uniform_(
-            velocity_range[0], velocity_range[1],
+            velocity_range[0],
+            velocity_range[1],
         )
 
     writer.set_dof_positions(default_pos, env_ids=env_ids)
     writer.set_dof_velocities(joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
 
+
 # ── Encoder bias DR (cross-sim) ─────────────────────────────────────
 
 
 def randomize_encoder_bias(
-    env: "World",
+    env: World,
     env_ids: torch.Tensor,
     bias_range: tuple[float, float] = (-0.015, 0.015),
 ) -> None:
@@ -272,9 +273,7 @@ def randomize_encoder_bias(
 # ── Getup: mixed fallen / standing reset ────────────────────────────
 
 
-def _sample_uniform_quaternion_wxyz(
-    n: int, device: torch.device
-) -> torch.Tensor:
+def _sample_uniform_quaternion_wxyz(n: int, device: torch.device) -> torch.Tensor:
     """Uniformly sample unit quaternions on the 3-sphere (Shoemake 1992).
 
     Returns a ``(n, 4)`` tensor in **wxyz** convention (scalar first).
@@ -294,16 +293,16 @@ def _sample_uniform_quaternion_wxyz(
 
 
 def reset_fallen_or_standing(
-    env: "World",
+    env: World,
     env_ids: torch.Tensor,
     fallen_prob: float = 0.6,
     fall_height: float = 0.8,
     fall_velocity_range: tuple[float, float] = (-0.5, 0.5),
-    fall_joint_noise_range: "tuple[float, float] | str" = "soft_limit",
+    fall_joint_noise_range: tuple[float, float] | str = "soft_limit",
     standing_z_offset: float = 0.02,
     default_pos: tuple[float, ...] = (0.0, 0.0, 0.665),
     default_quat_wxyz: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0),
-    default_joint_pos_dict: "dict[str, float] | None" = None,
+    default_joint_pos_dict: dict[str, float] | None = None,
     entity_name: str = "robot",
 ) -> None:
     """Reset robots to a mix of fallen (random orientation) and standing poses.
@@ -385,9 +384,7 @@ def reset_fallen_or_standing(
     is_fallen_3 = is_fallen.unsqueeze(-1)  # for broadcasting to (n, 3)
 
     # ── Root pose ─────────────────────────────────────────────────
-    default_pos_t = torch.tensor(
-        default_pos, device=device, dtype=torch.float32
-    ).unsqueeze(0).expand(n, -1)
+    default_pos_t = torch.tensor(default_pos, device=device, dtype=torch.float32).unsqueeze(0).expand(n, -1)
     standing_pos = default_pos_t.clone()
     standing_pos[:, 2] = standing_pos[:, 2] + standing_z_offset
 
@@ -398,9 +395,7 @@ def reset_fallen_or_standing(
     if env_origins is not None:
         pos = pos + env_origins[env_ids]
 
-    default_quat_t = torch.tensor(
-        default_quat_wxyz, device=device, dtype=torch.float32
-    ).unsqueeze(0).expand(n, -1)
+    default_quat_t = torch.tensor(default_quat_wxyz, device=device, dtype=torch.float32).unsqueeze(0).expand(n, -1)
     random_quat = _sample_uniform_quaternion_wxyz(n, device)
     quat_wxyz = torch.where(is_fallen.unsqueeze(-1), random_quat, default_quat_t)
 
@@ -441,17 +436,13 @@ def reset_fallen_or_standing(
         # close to the default — useful for robots whose soft limits
         # haven't been validated).
         jn_lo, jn_hi = fall_joint_noise_range
-        joint_noise = torch.empty(
-            (n, num_joints), device=device
-        ).uniform_(jn_lo, jn_hi)
+        joint_noise = torch.empty((n, num_joints), device=device).uniform_(jn_lo, jn_hi)
         fallen_joint_pos = default_joint_pos + joint_noise
 
     is_fallen_j = is_fallen.unsqueeze(-1).expand(-1, num_joints)
     joint_pos = torch.where(is_fallen_j, fallen_joint_pos, default_joint_pos)
 
-    fallen_joint_vel = torch.empty(
-        (n, num_joints), device=device
-    ).uniform_(lo, hi)
+    fallen_joint_vel = torch.empty((n, num_joints), device=device).uniform_(lo, hi)
     zero_joint_vel = torch.zeros((n, num_joints), device=device)
     joint_vel = torch.where(is_fallen_j, fallen_joint_vel, zero_joint_vel)
 

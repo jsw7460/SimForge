@@ -21,19 +21,17 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 
-from rlworld.rl.algorithms.tdmpc2.math import (
-    TwoHotConfig,
-    two_hot_inv,
-    soft_ce,
-)
-from rlworld.rl.modules.policies.tdmpc2_world_model import QEnsemble
-from rlworld.rl.storages.sequence_replay_buffer import SequenceBatch
-
-from rlworld.rl.modules.policies.abd_world_model import ABDNetWorldModel
 from rlworld.rl.algorithms.scaffolded_tdmpc2.scaffolded_world_model import (
     ScaffoldedWorldModel,
 )
-
+from rlworld.rl.algorithms.tdmpc2.math import (
+    TwoHotConfig,
+    soft_ce,
+    two_hot_inv,
+)
+from rlworld.rl.modules.policies.abd_world_model import ABDNetWorldModel
+from rlworld.rl.modules.policies.tdmpc2_world_model import QEnsemble
+from rlworld.rl.storages.sequence_replay_buffer import SequenceBatch
 
 # ==================== Loss Info Types ====================
 # Extends tdmpc2 WorldModelLossInfo with orthogonality_loss field.
@@ -74,10 +72,10 @@ def compute_abd_world_model_loss(
     4. Consistency + reward + value losses with rho weighting
     5. + orthogonality regularization
     """
-    obs = batch.observations        # [H+1, B, obs_dim]
-    actions = batch.actions         # [H, B, action_dim]
-    rewards = batch.rewards         # [H, B, 1]
-    terminated = batch.terminated   # [H, B, 1]
+    obs = batch.observations  # [H+1, B, obs_dim]
+    actions = batch.actions  # [H, B, action_dim]
+    rewards = batch.rewards  # [H, B, 1]
+    terminated = batch.terminated  # [H, B, 1]
     horizon = actions.shape[0]
 
     key, td_key, q_key = jax.random.split(key, 3)
@@ -87,8 +85,14 @@ def compute_abd_world_model_loss(
 
     # TD targets
     td_targets = _compute_td_targets(
-        model, target_q_ensemble, next_z_targets,
-        rewards, terminated, discount, two_hot_cfg, td_key,
+        model,
+        target_q_ensemble,
+        next_z_targets,
+        rewards,
+        terminated,
+        discount,
+        two_hot_cfg,
+        td_key,
     )
 
     # Sequential dynamics rollout via lax.scan
@@ -104,9 +108,7 @@ def compute_abd_world_model_loss(
     rho_weights = rho ** jnp.arange(horizon)
 
     # Consistency loss
-    consistency_per_t = jnp.mean(
-        (zs_post - next_z_targets) ** 2, axis=(-1, -2)
-    )
+    consistency_per_t = jnp.mean((zs_post - next_z_targets) ** 2, axis=(-1, -2))
     consistency_loss = jnp.sum(consistency_per_t * rho_weights) / horizon
 
     # Reward loss
@@ -122,23 +124,15 @@ def compute_abd_world_model_loss(
 
     def _value_loss_single(z, a, td_target, k):
         q_preds = model.predict_q(z, a, key=k)
-        td_broadcast = jnp.broadcast_to(
-            td_target[None], (q_preds.shape[0],) + td_target.shape
-        )
-        q_ce = jax.vmap(soft_ce, in_axes=(0, 0, None))(
-            q_preds, td_broadcast, two_hot_cfg
-        )
+        td_broadcast = jnp.broadcast_to(td_target[None], (q_preds.shape[0],) + td_target.shape)
+        q_ce = jax.vmap(soft_ce, in_axes=(0, 0, None))(q_preds, td_broadcast, two_hot_cfg)
         return q_ce.mean()
 
-    value_losses = jax.vmap(_value_loss_single)(
-        zs_pre, actions, td_targets, q_keys
-    )
+    value_losses = jax.vmap(_value_loss_single)(zs_pre, actions, td_targets, q_keys)
     value_loss = jnp.sum(value_losses * rho_weights) / horizon
 
     # Orthogonality regularization
-    ortho_loss = model.compute_dynamics_orthogonality_loss(
-        obs[0][0], actions[0][0]
-    )
+    ortho_loss = model.compute_dynamics_orthogonality_loss(obs[0][0], actions[0][0])
 
     total_loss = (
         consistency_coef * consistency_loss
@@ -188,8 +182,14 @@ def compute_scaffolded_world_model_loss(
     next_z_targets = jax.lax.stop_gradient(scaffolded_obs[1:])
 
     td_targets = _compute_scaffolded_td_targets(
-        scaffolded_model, scaff_target_q_ensemble, next_z_targets,
-        rewards, terminated, discount, two_hot_cfg, td_key,
+        scaffolded_model,
+        scaff_target_q_ensemble,
+        next_z_targets,
+        rewards,
+        terminated,
+        discount,
+        two_hot_cfg,
+        td_key,
     )
 
     # Sequential dynamics rollout via lax.scan
@@ -203,9 +203,7 @@ def compute_scaffolded_world_model_loss(
 
     rho_weights = rho ** jnp.arange(horizon)
 
-    consistency_per_t = jnp.mean(
-        (zs_post - next_z_targets) ** 2, axis=(-1, -2)
-    )
+    consistency_per_t = jnp.mean((zs_post - next_z_targets) ** 2, axis=(-1, -2))
     consistency_loss = jnp.sum(consistency_per_t * rho_weights) / horizon
 
     def _reward_loss_single(z, a, r):
@@ -219,22 +217,14 @@ def compute_scaffolded_world_model_loss(
 
     def _value_loss_single(z, a, td_target, k):
         q_preds = scaffolded_model.predict_q(z, a, key=k)
-        td_broadcast = jnp.broadcast_to(
-            td_target[None], (q_preds.shape[0],) + td_target.shape
-        )
-        q_ce = jax.vmap(soft_ce, in_axes=(0, 0, None))(
-            q_preds, td_broadcast, two_hot_cfg
-        )
+        td_broadcast = jnp.broadcast_to(td_target[None], (q_preds.shape[0],) + td_target.shape)
+        q_ce = jax.vmap(soft_ce, in_axes=(0, 0, None))(q_preds, td_broadcast, two_hot_cfg)
         return q_ce.mean()
 
-    value_losses = jax.vmap(_value_loss_single)(
-        zs_pre, actions, td_targets, q_keys
-    )
+    value_losses = jax.vmap(_value_loss_single)(zs_pre, actions, td_targets, q_keys)
     value_loss = jnp.sum(value_losses * rho_weights) / horizon
 
-    ortho_loss = scaffolded_model.compute_dynamics_orthogonality_loss(
-        scaffolded_obs[0][0], actions[0][0]
-    )
+    ortho_loss = scaffolded_model.compute_dynamics_orthogonality_loss(scaffolded_obs[0][0], actions[0][0])
 
     total_loss = (
         consistency_coef * consistency_loss
@@ -256,8 +246,14 @@ def compute_scaffolded_world_model_loss(
 
 
 def _compute_td_targets(
-    model, target_q_ensemble, next_z, rewards, terminated,
-    discount, two_hot_cfg, key,
+    model,
+    target_q_ensemble,
+    next_z,
+    rewards,
+    terminated,
+    discount,
+    two_hot_cfg,
+    key,
 ) -> jax.Array:
     """
     TD targets for target model.
@@ -279,15 +275,19 @@ def _compute_td_targets(
         target_q = q_values.min(axis=0)
         return r + discount * (1.0 - done) * target_q
 
-    td_targets = jax.vmap(_single_td)(
-        next_z, rewards, terminated, pi_keys, q_keys
-    )
+    td_targets = jax.vmap(_single_td)(next_z, rewards, terminated, pi_keys, q_keys)
     return jax.lax.stop_gradient(td_targets)
 
 
 def _compute_scaffolded_td_targets(
-    scaffolded_model, scaff_target_q_ensemble, next_z_plus,
-    rewards, terminated, discount, two_hot_cfg, key,
+    scaffolded_model,
+    scaff_target_q_ensemble,
+    next_z_plus,
+    rewards,
+    terminated,
+    discount,
+    two_hot_cfg,
+    key,
 ) -> jax.Array:
     """TD targets for scaffolded model using exploration policy."""
     horizon = next_z_plus.shape[0]
@@ -305,7 +305,5 @@ def _compute_scaffolded_td_targets(
         target_q = q_values.min(axis=0)
         return r + discount * (1.0 - done) * target_q
 
-    td_targets = jax.vmap(_single_td)(
-        next_z_plus, rewards, terminated, pi_keys, q_keys
-    )
+    td_targets = jax.vmap(_single_td)(next_z_plus, rewards, terminated, pi_keys, q_keys)
     return jax.lax.stop_gradient(td_targets)

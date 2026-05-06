@@ -7,15 +7,13 @@ import torch
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
 
-from rlworld.rl.envs.mdp.observations.genesis import state
 from rlworld.rl.configs.terminations import TerminationResult
+from rlworld.rl.envs.mdp.observations.genesis import state
 from rlworld.rl.utils import entity_utils as eu
 
 
 def roll_pitch_violation(
-    env: GenesisEnv,
-    roll_threshold_degree: float = 15.0,
-    pitch_threshold_degree: float = 15.0
+    env: GenesisEnv, roll_threshold_degree: float = 15.0, pitch_threshold_degree: float = 15.0
 ) -> TerminationResult:
     """Check if robot's roll or pitch exceeds safe thresholds.
 
@@ -67,17 +65,16 @@ def out_of_terrain_bounds(env: GenesisEnv, margin: float = 1.0) -> TerminationRe
 
     # Check if out of bounds (with margin)
     out_of_bounds = (
-        (base_pos[:, 0] < margin) | (base_pos[:, 0] > terrain_size_x - margin) |
-        (base_pos[:, 1] < margin) | (base_pos[:, 1] > terrain_size_y - margin)
+        (base_pos[:, 0] < margin)
+        | (base_pos[:, 0] > terrain_size_x - margin)
+        | (base_pos[:, 1] < margin)
+        | (base_pos[:, 1] > terrain_size_y - margin)
     )
 
     return TerminationResult(out_of_bounds)
 
 
-def invalid_contact(
-    env: GenesisEnv,
-    contact_allowed_links: list[str]
-) -> TerminationResult:
+def invalid_contact(env: GenesisEnv, contact_allowed_links: list[str]) -> TerminationResult:
     entity = env.scene_manager["robot"]
 
     # Get allowed link indices (global)
@@ -85,10 +82,7 @@ def invalid_contact(
     allowed_ids_tensor = torch.tensor(allowed_ids, dtype=torch.int32, device=env.device)
 
     # Get all robot link indices
-    all_robot_link_ids = torch.arange(
-        entity.link_start, entity.link_end,
-        dtype=torch.int32, device=env.device
-    )
+    all_robot_link_ids = torch.arange(entity.link_start, entity.link_end, dtype=torch.int32, device=env.device)
 
     # Get contact information
     contact_info = entity.get_contacts(exclude_self_contact=True)

@@ -1,10 +1,10 @@
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-import math
+import genesis as gs
 import numpy as np
 
-import genesis as gs
 from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ class VisualizationManager(BaseManager):
         self._custom_context = None
 
         # Initialize HUD immediately so users can customize before recording
-        self._text_hud: "TextHUDOverlay | None" = None
+        self._text_hud: TextHUDOverlay | None = None
         if self.config.enable_text_hud:
             self._init_default_hud()
 
@@ -109,9 +109,9 @@ class VisualizationManager(BaseManager):
     def inject_custom_context(self) -> None:
         """Inject RLWorldRasterizerContext into scene."""
         from rlworld.rl.vis.rasterizer_context import (
-            inject_into_scene,
-            OverlaySettings,
             CommandArrowConfig,
+            OverlaySettings,
+            inject_into_scene,
         )
 
         arrow_config = None
@@ -126,19 +126,12 @@ class VisualizationManager(BaseManager):
         overlay_settings = OverlaySettings(
             enable_command_arrow=self.config.enable_command_arrow,
             command_arrow_config=arrow_config,
-            feet_links=tuple(
-                f"{name}_foot" if not name.endswith("_foot") else name
-                for name in self.config.feet_names
-            ),
+            feet_links=tuple(f"{name}_foot" if not name.endswith("_foot") else name for name in self.config.feet_names),
             render_env_ids=self.config.record_env_ids,
         )
 
         scene = self.env.scene_manager.scene
-        self._custom_context = inject_into_scene(
-            scene=scene,
-            env=self.env,
-            overlay_settings=overlay_settings
-        )
+        self._custom_context = inject_into_scene(scene=scene, env=self.env, overlay_settings=overlay_settings)
 
         gs.logger.info("RLWorldRasterizerContext injected successfully.")
 
@@ -232,25 +225,31 @@ class VisualizationManager(BaseManager):
             gs.logger.warning("OpenCV not available. Text HUD disabled.")
             return
 
-        from rlworld.rl.vis.overlays import TextHUDOverlay, TextHUDConfig
+        from rlworld.rl.vis.overlays import TextHUDConfig, TextHUDOverlay
         from rlworld.rl.vis.overlays.hud_items import (
             BaseHeightItem,
             CommandVelItem,
+            DOFPositionItem,
+            EpisodeInfoItem,
             FeetHeightItem,
             FeetHeightItemConfig,
-            EpisodeInfoItem,
-            DOFPositionItem
         )
 
-        self._text_hud = TextHUDOverlay(TextHUDConfig(
-            position=self.config.hud_position,
-        ))
+        self._text_hud = TextHUDOverlay(
+            TextHUDConfig(
+                position=self.config.hud_position,
+            )
+        )
 
         self._text_hud.add_item(BaseHeightItem())
         self._text_hud.add_item(CommandVelItem())
-        self._text_hud.add_item(FeetHeightItem(FeetHeightItemConfig(
-            feet_names=self.config.feet_names,
-        )))
+        self._text_hud.add_item(
+            FeetHeightItem(
+                FeetHeightItemConfig(
+                    feet_names=self.config.feet_names,
+                )
+            )
+        )
         self._text_hud.add_item(EpisodeInfoItem())
         self._text_hud.add_item(DOFPositionItem())
 
@@ -289,7 +288,7 @@ class VisualizationManager(BaseManager):
         for idx, frame in enumerate(frames):
             row = idx // cols
             col = idx % cols
-            grid[row * h:(row + 1) * h, col * w:(col + 1) * w] = frame
+            grid[row * h : (row + 1) * h, col * w : (col + 1) * w] = frame
 
         return grid
 

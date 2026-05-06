@@ -49,18 +49,17 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 
-
 # ── Per-simulator constants ──────────────────────────────────────────
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "newton": {"dt": 0.005, "substeps": 1, "decimation": 4},
     "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
-    "mujoco":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "mujoco": {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
-    "newton":  "Go2_Newton",
+    "newton": "Go2_Newton",
     "genesis": "Go2_Genesis",
-    "mujoco":  "Go2_Mujoco",
+    "mujoco": "Go2_Mujoco",
 }
 
 
@@ -72,14 +71,14 @@ def _get_sim_builders(sim_type: str) -> Go2SimBuilderProtocol:
     satisfy :class:`Go2SimBuilderProtocol` — see
     ``presets/_sim_builder_protocol.py`` for the full contract.
     """
-    if sim_type == "newton":    from . import _newton_builders as mod
-    elif sim_type == "genesis": from . import _genesis_builders as mod
-    elif sim_type == "mujoco":  from . import _mujoco_builders as mod
+    if sim_type == "newton":
+        from . import _newton_builders as mod
+    elif sim_type == "genesis":
+        from . import _genesis_builders as mod
+    elif sim_type == "mujoco":
+        from . import _mujoco_builders as mod
     else:
-        raise ValueError(
-            f"Unknown sim_type: {sim_type!r}. "
-            f"Expected one of {sorted(_SIM_TIMINGS)}."
-        )
+        raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
     return mod  # type: ignore[return-value]
 
 
@@ -163,7 +162,8 @@ class Go2FlatConfig:
         Only fields whose value differs from the dataclass default are
         included so the dict stays small and forward-compatible.
         """
-        from dataclasses import fields, MISSING
+        from dataclasses import MISSING, fields
+
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":
@@ -376,5 +376,3 @@ class Go2FlatConfig:
             save_interval=250,
             output_dir="auto",
         )
-
-

@@ -20,6 +20,7 @@ Per-step dump covers steps ``[settle_steps - 5, settle_steps + 20]`` so
 we see the last few settle-masked steps (policy output ignored,
 target held to current pose) and the first 20 policy-driven steps.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,24 +30,23 @@ import torch
 
 from rlworld.rl.evals import PolicyEvaluator
 
-
 # ── Deterministic init poses ────────────────────────────────────────
 
 # Standing: canonical T1 standing pose
 STANDING = {
-    "pos":      (0.0, 0.0, 0.665),
-    "quat":     (1.0, 0.0, 0.0, 0.0),
-    "lin_vel":  (0.0, 0.0, 0.0),
-    "ang_vel":  (0.0, 0.0, 0.0),
+    "pos": (0.0, 0.0, 0.665),
+    "quat": (1.0, 0.0, 0.0, 0.0),
+    "lin_vel": (0.0, 0.0, 0.0),
+    "ang_vel": (0.0, 0.0, 0.0),
 }
 
 # Fallen: dropped from 0.8 m, 60 deg forward pitch
 _PITCH = math.radians(60.0)
 FALLEN = {
-    "pos":      (0.0, 0.0, 0.80),
-    "quat":     (math.cos(_PITCH / 2), 0.0, math.sin(_PITCH / 2), 0.0),
-    "lin_vel":  (0.0, 0.0, 0.0),
-    "ang_vel":  (0.0, 0.0, 0.0),
+    "pos": (0.0, 0.0, 0.80),
+    "quat": (math.cos(_PITCH / 2), 0.0, math.sin(_PITCH / 2), 0.0),
+    "lin_vel": (0.0, 0.0, 0.0),
+    "ang_vel": (0.0, 0.0, 0.0),
 }
 
 
@@ -59,8 +59,8 @@ def _force_state(env, pose_dict, joint_pos_vec):
     writer = env.get_robot_state_writer("robot")
     env_ids = torch.arange(env.num_envs, device=env.device)
     N = env.num_envs
-    p  = torch.tensor(pose_dict["pos"],     dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
-    q  = torch.tensor(pose_dict["quat"],    dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
+    p = torch.tensor(pose_dict["pos"], dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
+    q = torch.tensor(pose_dict["quat"], dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
     lv = torch.tensor(pose_dict["lin_vel"], dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
     av = torch.tensor(pose_dict["ang_vel"], dtype=torch.float32, device=env.device).expand(N, -1).contiguous()
     jp = joint_pos_vec.to(env.device).unsqueeze(0).expand(N, -1).contiguous()
@@ -77,10 +77,9 @@ def _force_state(env, pose_dict, joint_pos_vec):
 def _build_default_joint_pos(env, robot_cfg):
     """Regex-resolve cfg.robot.default_joint_angles against canonical joint order."""
     from rlworld.rl.utils import string as string_utils
+
     all_names = list(env.act_manager.actuated_joint_names)
-    matched_idx, _, matched_vals = string_utils.resolve_matching_names_values(
-        robot_cfg.default_joint_angles, all_names
-    )
+    matched_idx, _, matched_vals = string_utils.resolve_matching_names_values(robot_cfg.default_joint_angles, all_names)
     jp = torch.zeros(len(all_names), dtype=torch.float32)
     for i, v in zip(matched_idx, matched_vals):
         jp[i] = float(v)
@@ -90,6 +89,7 @@ def _build_default_joint_pos(env, robot_cfg):
 def _dump_step(env, step_idx, raw_action, settle_steps):
     am = env.act_manager
     rd = env.robot_data
+
     def g(x):
         if isinstance(x, torch.Tensor):
             return x[0].detach().cpu().tolist() if x.dim() > 1 else x.detach().cpu().tolist()
@@ -133,10 +133,10 @@ def main():
 
     out_path = args.out or f"t1_policy_trace_{args.sim}_{args.scenario}.txt"
     import sys as _sys
+
     _log_fh = open(out_path, "w")
     _sys.stdout = _log_fh
-    print(f"# t1_policy_trace sim={args.sim} scenario={args.scenario} "
-          f"wandb={args.wandb} settle={args.settle_steps}")
+    print(f"# t1_policy_trace sim={args.sim} scenario={args.scenario} wandb={args.wandb} settle={args.settle_steps}")
 
     torch.manual_seed(args.seed)
 
@@ -158,9 +158,11 @@ def main():
     assert env.num_envs == 1 or env.num_envs > 0  # we'll only read env 0
 
     # Build default joint pos vector
-    robot_cfg = evaluator.eval_cfgs.scene.robot_cfg \
-        if hasattr(evaluator.eval_cfgs.scene, "robot_cfg") \
+    robot_cfg = (
+        evaluator.eval_cfgs.scene.robot_cfg
+        if hasattr(evaluator.eval_cfgs.scene, "robot_cfg")
         else evaluator.eval_cfgs.scene.entities["robot"]
+    )
     # Some configs put robot on eval_cfgs.scene.robot_cfg; others on entities["robot"].init_state.joint_pos etc.
     # Fall back to env.robot_data.default_joint_pos
     default_jp = env.robot_data.default_joint_pos.clone().detach().cpu()

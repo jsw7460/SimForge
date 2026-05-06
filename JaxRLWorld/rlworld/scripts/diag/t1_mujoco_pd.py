@@ -13,6 +13,7 @@ forcerange, plus the joint's armature for comparison with T1Config.
 Usage:
     uv run python JaxRLWorld/rlworld/scripts/diag/t1_mujoco_pd.py
 """
+
 from __future__ import annotations
 
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
@@ -29,17 +30,14 @@ def main() -> None:
 
     print("\n=== Mjlab T1 — actual actuator PD / effort values ===")
     print(
-        f"{'ActIdx':<7} {'Actuator':<30} {'Joint':<30} "
-        f"{'kp':>10} {'kd':>10} {'frc_lo':>10} {'frc_hi':>10} {'arm':>10}"
+        f"{'ActIdx':<7} {'Actuator':<30} {'Joint':<30} {'kp':>10} {'kd':>10} {'frc_lo':>10} {'frc_hi':>10} {'arm':>10}"
     )
     print("-" * 120)
 
     for a in range(mj.nu):
         act_name = mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_ACTUATOR, a) or "?"
         jnt_id = int(mj.actuator_trnid[a, 0])
-        jnt_name = (
-            mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_JOINT, jnt_id) or "?"
-        ) if jnt_id >= 0 else "(non-joint)"
+        jnt_name = (mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_JOINT, jnt_id) or "?") if jnt_id >= 0 else "(non-joint)"
 
         kp = float(mj.actuator_gainprm[a, 0])
         kd = -float(mj.actuator_biasprm[a, 2])  # biasprm[2] = -damping

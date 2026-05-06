@@ -6,6 +6,7 @@ weight sharing) and mean-pools the encoded token grid to a scalar
 value. Accepts the same kwargs as the actor so presets can configure
 actor and critic in lockstep.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Sequence
@@ -41,7 +42,7 @@ class SpaceTimeTransformerCritic(BaseCritic):
 
     def __init__(
         self,
-        kinematic_tree: "KinematicTree",
+        kinematic_tree: KinematicTree,
         num_obs: int,
         tracked_body_names: Sequence[str],
         future_offsets: Sequence[int],
@@ -67,7 +68,8 @@ class SpaceTimeTransformerCritic(BaseCritic):
         self.num_obs = num_obs
 
         tracked_body_indices = _resolve_body_indices(
-            kinematic_tree, tracked_body_names,
+            kinematic_tree,
+            tracked_body_names,
         )
         num_future_frames = len(future_offsets)
         future_window_dim = num_future_frames * len(tracked_body_names) * ref_feature_dim

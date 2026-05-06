@@ -6,14 +6,14 @@ ported from mjlab's MDP module.
 
 # MuJoCo-specific termination functions
 from .terminations import (
-    time_out,
     bad_orientation,
-    root_height_below_minimum,
-    roll_pitch_violation,
-    illegal_contact,
     base_contact,
-    nan_detection,
+    illegal_contact,
     joint_limit_violation,
+    nan_detection,
+    roll_pitch_violation,
+    root_height_below_minimum,
+    time_out,
     velocity_limit_violation,
 )
 

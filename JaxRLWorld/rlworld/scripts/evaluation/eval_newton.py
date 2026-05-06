@@ -1,15 +1,12 @@
 import argparse
 
-from rlworld.rl.evals import PolicyEvaluator
-
-import newton
-from newton import ShapeFlags
-from consysid.sysid.param_terms.newton import (
-    apply_contact_friction,
-    apply_joint_friction,
-)
 import numpy as np
 import torch
+from consysid.sysid.param_terms.newton import (
+    apply_contact_friction,
+)
+
+from rlworld.rl.evals import PolicyEvaluator
 
 
 def apply_contact_friction(
@@ -27,6 +24,7 @@ def apply_contact_friction(
     """
     import warp as wp
     from newton.solvers import SolverNotifyFlags
+
     from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
     cache = get_cache(env)
@@ -56,7 +54,7 @@ def apply_contact_friction(
     mj_model = solver.mj_model
     mjw_friction = wp.to_torch(solver.mjw_model.geom_friction)  # [nworld, ngeom, 3]
 
-    if not hasattr(env, '_ground_geom_indices'):
+    if not hasattr(env, "_ground_geom_indices"):
         ground_indices = []
         for i in range(mj_model.ngeom):
             name = mj_model.geom(i).name.lower()
@@ -68,7 +66,7 @@ def apply_contact_friction(
         mjw_friction[env_ids, gi, 0] = mu_val
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Newton evaluation")
     parser.add_argument("--eval", action="store_true", help="Run batch evaluation instead of interactive viewer")
     parser.add_argument("--record_video", action="store_true")
@@ -78,7 +76,7 @@ if __name__ == '__main__':
     overrides = {
         "env": {
             "num_envs": 1,
-            "episode_length_s": 10e+9,
+            "episode_length_s": 10e9,
         },
         # "command": {
         #     "rel_standing_envs": 0.3,

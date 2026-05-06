@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch import nn
 
-from rlworld.rl.modules.architectures.rodrigues import RodriguesEncoder, RodriguesDecoder
+from rlworld.rl.modules.architectures.rodrigues import RodriguesDecoder, RodriguesEncoder
 from rlworld.rl.utils.model_manager import print_detailed_parameters
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ class RodriguesActor(nn.Module):
         num_heads: int = 4,
         use_global_token: bool = True,
         global_token_dim: int = 128,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.kinematic_tree = kinematic_tree
@@ -46,7 +46,7 @@ class RodriguesActor(nn.Module):
             embed_dim=embed_dim,
             num_heads=num_heads,
             use_global_token=use_global_token,
-            global_token_dim=global_token_dim
+            global_token_dim=global_token_dim,
         )
 
         print_detailed_parameters(self.encoder, "Rodrigues Encoder")
@@ -63,7 +63,7 @@ class RodriguesActor(nn.Module):
         print_detailed_parameters(self.decoder, "Rodrigues Decoder")
 
         for name, param in self.encoder.named_parameters():
-            if 'layer_norm' in name.lower() or 'norm' in name.lower():
+            if "layer_norm" in name.lower() or "norm" in name.lower():
                 print(f"{name}: {param.shape}")
 
         for idx in kinematic_tree.get_active_joint_indices():
@@ -75,14 +75,14 @@ class RodriguesActor(nn.Module):
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         """
-                Forward pass: Observation → Action
+        Forward pass: Observation → Action
 
-                Args:
-                    observations: (batch, obs_dim) - Raw observations
+        Args:
+            observations: (batch, obs_dim) - Raw observations
 
-                Returns:
-                    actions: (batch, action_dim) - Predicted actions
-                """
+        Returns:
+            actions: (batch, action_dim) - Predicted actions
+        """
         # Encode observations
         joint_features, link_features, global_token = self.encoder(observations)
         # print("Encoder done")

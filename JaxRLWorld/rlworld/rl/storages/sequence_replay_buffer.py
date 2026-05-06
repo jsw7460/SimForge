@@ -20,10 +20,11 @@ class SequenceBatch(NamedTuple):
     All arrays have shape [horizon+1, batch_size, dim] for observations
     and [horizon, batch_size, dim] for actions/rewards/terminated.
     """
-    observations: jax.Array     # [horizon+1, batch_size, obs_dim]
-    actions: jax.Array          # [horizon, batch_size, action_dim]
-    rewards: jax.Array          # [horizon, batch_size, 1]
-    terminated: jax.Array       # [horizon, batch_size, 1]
+
+    observations: jax.Array  # [horizon+1, batch_size, obs_dim]
+    actions: jax.Array  # [horizon, batch_size, action_dim]
+    rewards: jax.Array  # [horizon, batch_size, 1]
+    terminated: jax.Array  # [horizon, batch_size, 1]
 
 
 class SequenceReplayBuffer:
@@ -185,7 +186,7 @@ class SequenceReplayBuffer:
             for offset in range(1, self.horizon):
                 check_pos = (cand_pos + offset) % self.size_per_env
                 check_ids = self._episode_id[cand_envs, check_pos]
-                valid_mask &= (check_ids == start_episode_ids)
+                valid_mask &= check_ids == start_episode_ids
 
             valid_envs = cand_envs[valid_mask]
             valid_pos = cand_pos[valid_mask]
@@ -232,12 +233,9 @@ class SequenceReplayBuffer:
               terminated: [horizon, batch_size, 1]
         """
         if self.filled_size < self.horizon + 1:
-            raise ValueError(
-                f"Not enough data: need at least {self.horizon + 1} steps, "
-                f"have {self.filled_size}"
-            )
+            raise ValueError(f"Not enough data: need at least {self.horizon + 1} steps, have {self.filled_size}")
 
-        seed = int(jax.random.randint(key, (), 0, 2 ** 31 - 1))
+        seed = int(jax.random.randint(key, (), 0, 2**31 - 1))
         rng = np.random.default_rng(seed)
 
         env_indices, start_positions = self._sample_valid_indices(batch_size, rng)
@@ -274,7 +272,7 @@ class SequenceReplayBuffer:
         if self.filled_size >= self.size_per_env:
             recent_pos = (self.ptr - 1 - np.arange(min(n // self.num_envs, self.size_per_env))) % self.size_per_env
         else:
-            recent_pos = np.arange(self.filled_size - 1, -1, -1)[:n // self.num_envs]
+            recent_pos = np.arange(self.filled_size - 1, -1, -1)[: n // self.num_envs]
         actions = self.action_buf[:, recent_pos].reshape(-1, self.action_dim)
         return jnp.asarray(actions[:n])
 

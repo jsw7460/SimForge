@@ -29,6 +29,7 @@ Usage (run for both sims with the SAME checkpoint, then diff):
 Output is intentionally fixed-precision so line-by-line diff is the
 intended comparison method.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -152,35 +153,21 @@ def dump_raw_sim_state(env, label: str, max_preview: int = 40) -> None:
 
     probes = [
         # mjlab / MuJoCo backend candidate paths.
-        ("scene_manager._scene.data.qpos",
-         lambda: sm._scene.data.qpos),
-        ("scene_manager._scene.data.qvel",
-         lambda: sm._scene.data.qvel),
-        ("scene_manager._scene.mj_data.qpos",
-         lambda: sm._scene.mj_data.qpos),
-        ("scene_manager.sim.data.qpos",
-         lambda: sm.sim.data.qpos),
-        ("scene_manager.sim._data.qpos",
-         lambda: sm.sim._data.qpos),
-        ("scene_manager._scene.sim.data.qpos",
-         lambda: sm._scene.sim.data.qpos),
-        ("scene_manager.mj_data.qpos",
-         lambda: sm.mj_data.qpos),
-        ("scene_manager.model.qpos0",
-         lambda: sm.model.qpos0),
+        ("scene_manager._scene.data.qpos", lambda: sm._scene.data.qpos),
+        ("scene_manager._scene.data.qvel", lambda: sm._scene.data.qvel),
+        ("scene_manager._scene.mj_data.qpos", lambda: sm._scene.mj_data.qpos),
+        ("scene_manager.sim.data.qpos", lambda: sm.sim.data.qpos),
+        ("scene_manager.sim._data.qpos", lambda: sm.sim._data.qpos),
+        ("scene_manager._scene.sim.data.qpos", lambda: sm._scene.sim.data.qpos),
+        ("scene_manager.mj_data.qpos", lambda: sm.mj_data.qpos),
+        ("scene_manager.model.qpos0", lambda: sm.model.qpos0),
         # Newton backend candidate paths.
-        ("scene_manager.state_0.body_q",
-         lambda: sm.state_0.body_q),
-        ("scene_manager.state_0.joint_q",
-         lambda: sm.state_0.joint_q),
-        ("scene_manager.state_0.joint_qd",
-         lambda: sm.state_0.joint_qd),
-        ("scene_manager.state_0.body_qd",
-         lambda: sm.state_0.body_qd),
-        ("scene_manager.robot_view.get_root_pose()",
-         lambda: sm.robot_view.get_root_pose()),
-        ("scene_manager.robot_view.get_root_velocity()",
-         lambda: sm.robot_view.get_root_velocity()),
+        ("scene_manager.state_0.body_q", lambda: sm.state_0.body_q),
+        ("scene_manager.state_0.joint_q", lambda: sm.state_0.joint_q),
+        ("scene_manager.state_0.joint_qd", lambda: sm.state_0.joint_qd),
+        ("scene_manager.state_0.body_qd", lambda: sm.state_0.body_qd),
+        ("scene_manager.robot_view.get_root_pose()", lambda: sm.robot_view.get_root_pose()),
+        ("scene_manager.robot_view.get_root_velocity()", lambda: sm.robot_view.get_root_velocity()),
     ]
 
     hit = 0
@@ -225,9 +212,7 @@ def _fmt_arr(arr, max_n: int = 40, prec: int = 5) -> str:
     n = min(max_n, flat.size)
     if n == 0:
         return "(empty)"
-    return _fmt_row(flat[:n].tolist(), prec=prec) + (
-        f" [+{flat.size - n} more]" if flat.size > n else ""
-    )
+    return _fmt_row(flat[:n].tolist(), prec=prec) + (f" [+{flat.size - n} more]" if flat.size > n else "")
 
 
 def dump_contact_and_physics(env, label: str) -> None:
@@ -237,7 +222,7 @@ def dump_contact_and_physics(env, label: str) -> None:
 
     Intended to be diffed line-by-line between Newton and MuJoCo runs.
     """
-    print(f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"[CONTACT+PHYSICS FULL — {label}]")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     sm = getattr(env, "scene_manager", None)
@@ -264,16 +249,20 @@ def dump_contact_and_physics(env, label: str) -> None:
             return
 
         # Sim options
-        print(f"\n[MJ SIM OPTIONS]")
-        print(f"  nv={int(mj.nv)} nq={int(mj.nq)} nbody={int(mj.nbody)} ngeom={int(mj.ngeom)} "
-              f"npair={int(mj.npair)} njnt={int(mj.njnt)} nu={int(mj.nu)}")
+        print("\n[MJ SIM OPTIONS]")
+        print(
+            f"  nv={int(mj.nv)} nq={int(mj.nq)} nbody={int(mj.nbody)} ngeom={int(mj.ngeom)} "
+            f"npair={int(mj.npair)} njnt={int(mj.njnt)} nu={int(mj.nu)}"
+        )
         print(f"  opt.timestep={float(mj.opt.timestep):.6f}")
         print(f"  opt.integrator={int(mj.opt.integrator)} (0=EULER 1=RK4 2=IMPLICIT 3=IMPLICITFAST)")
         print(f"  opt.solver={int(mj.opt.solver)} (0=PGS 1=CG 2=NEWTON)")
         print(f"  opt.cone={int(mj.opt.cone)} (0=PYRAMIDAL 1=ELLIPTIC)")
         print(f"  opt.jacobian={int(mj.opt.jacobian)}")
-        print(f"  opt.iterations={int(mj.opt.iterations)} ls_iterations={int(mj.opt.ls_iterations)} "
-              f"ccd_iterations={int(mj.opt.ccd_iterations)}")
+        print(
+            f"  opt.iterations={int(mj.opt.iterations)} ls_iterations={int(mj.opt.ls_iterations)} "
+            f"ccd_iterations={int(mj.opt.ccd_iterations)}"
+        )
         print(f"  opt.tolerance={float(mj.opt.tolerance):.2e} ls_tolerance={float(mj.opt.ls_tolerance):.2e}")
         print(f"  opt.impratio={float(mj.opt.impratio):.4f}")
         print(f"  opt.gravity={list(mj.opt.gravity)}")
@@ -288,9 +277,18 @@ def dump_contact_and_physics(env, label: str) -> None:
         src, src_name = (wp_data, "wp_data") if wp_data is not None else (data, "data")
         if src is not None:
             print(f"\n[PER-DOF FORCES (from {src_name})]")
-            for field in ("ctrl", "qfrc_applied", "qfrc_actuator", "qfrc_bias",
-                           "qfrc_passive", "qfrc_smooth", "qfrc_constraint", "qacc",
-                           "qvel", "qpos"):
+            for field in (
+                "ctrl",
+                "qfrc_applied",
+                "qfrc_actuator",
+                "qfrc_bias",
+                "qfrc_passive",
+                "qfrc_smooth",
+                "qfrc_constraint",
+                "qacc",
+                "qvel",
+                "qpos",
+            ):
                 v = getattr(src, field, None)
                 arr = _to_numpy(v)
                 if arr is None:
@@ -299,7 +297,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                 print(f"  {field}: shape={arr.shape} {_fmt_arr(arr, max_n=40, prec=5)}")
 
         # Contacts
-        print(f"\n[ACTIVE CONTACTS]")
+        print("\n[ACTIVE CONTACTS]")
         try:
             ncon = int(data.ncon) if data is not None else 0
         except Exception:
@@ -328,20 +326,24 @@ def dump_contact_and_physics(env, label: str) -> None:
                     except Exception:
                         pass
                     fr = con.friction if hasattr(con, "friction") else None
-                    print(f"  c{c}: {n0} <-> {n1} dist={dist:+.6f} "
-                          f"pos=({pos[0]:+.4f},{pos[1]:+.4f},{pos[2]:+.4f}) "
-                          f"F_n={force[0]:+.3f} F_t1={force[1]:+.3f} F_t2={force[2]:+.3f} "
-                          f"T=({force[3]:+.3f},{force[4]:+.3f},{force[5]:+.3f})"
-                          + (f" fric={list(fr)}" if fr is not None else ""))
+                    print(
+                        f"  c{c}: {n0} <-> {n1} dist={dist:+.6f} "
+                        f"pos=({pos[0]:+.4f},{pos[1]:+.4f},{pos[2]:+.4f}) "
+                        f"F_n={force[0]:+.3f} F_t1={force[1]:+.3f} F_t2={force[2]:+.3f} "
+                        f"T=({force[3]:+.3f},{force[4]:+.3f},{force[5]:+.3f})"
+                        + (f" fric={list(fr)}" if fr is not None else "")
+                    )
                 except Exception as e:
                     print(f"  c{c}: [unreadable: {e}]")
 
         # Per-geom collision params
-        print(f"\n[PER-GEOM COLLISION PARAMS (contype|conaffinity != 0 only)]")
-        hdr = (f"  {'gid':>4} {'geom_name':<44} {'body':<28} "
-               f"{'ctype':>5} {'cafty':>5} {'condim':>6} {'pri':>3} "
-               f"{'size':>24} {'mu':>7} {'tors':>7} {'roll':>7} "
-               f"{'solref':>18} {'solimp':>32} {'margin':>9} {'gap':>8}")
+        print("\n[PER-GEOM COLLISION PARAMS (contype|conaffinity != 0 only)]")
+        hdr = (
+            f"  {'gid':>4} {'geom_name':<44} {'body':<28} "
+            f"{'ctype':>5} {'cafty':>5} {'condim':>6} {'pri':>3} "
+            f"{'size':>24} {'mu':>7} {'tors':>7} {'roll':>7} "
+            f"{'solref':>18} {'solimp':>32} {'margin':>9} {'gap':>8}"
+        )
         print(hdr)
         for g in range(mj.ngeom):
             ctype = int(mj.geom_contype[g])
@@ -362,24 +364,28 @@ def dump_contact_and_physics(env, label: str) -> None:
             si_s = "[" + ",".join(f"{float(v):+.3f}" for v in si) + "]"
             margin = float(mj.geom_margin[g])
             gap = float(mj.geom_gap[g])
-            print(f"  {g:>4} {name[:44]:<44} {bname[:28]:<28} "
-                  f"{ctype:>5} {cafty:>5} {int(mj.geom_condim[g]):>6} {int(mj.geom_priority[g]):>3} "
-                  f"{sz_s:>24} {mu:>+7.3f} {tors:>+7.3f} {roll:>+7.3f} "
-                  f"{sr_s:>18} {si_s:>32} {margin:>+9.5f} {gap:>+8.5f}")
+            print(
+                f"  {g:>4} {name[:44]:<44} {bname[:28]:<28} "
+                f"{ctype:>5} {cafty:>5} {int(mj.geom_condim[g]):>6} {int(mj.geom_priority[g]):>3} "
+                f"{sz_s:>24} {mu:>+7.3f} {tors:>+7.3f} {roll:>+7.3f} "
+                f"{sr_s:>18} {si_s:>32} {margin:>+9.5f} {gap:>+8.5f}"
+            )
 
         # Per-body mass + inertia
-        print(f"\n[PER-BODY MASS + INERTIA + IPOS]")
+        print("\n[PER-BODY MASS + INERTIA + IPOS]")
         for b in range(mj.nbody):
             name = mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_BODY, b) or "?"
             m = float(mj.body_mass[b])
             i = mj.body_inertia[b]
             ipos = mj.body_ipos[b]
-            print(f"  b{b:>3} {name[:36]:<36} mass={m:+.6f} "
-                  f"I=({float(i[0]):+.5f},{float(i[1]):+.5f},{float(i[2]):+.5f}) "
-                  f"ipos=({float(ipos[0]):+.4f},{float(ipos[1]):+.4f},{float(ipos[2]):+.4f})")
+            print(
+                f"  b{b:>3} {name[:36]:<36} mass={m:+.6f} "
+                f"I=({float(i[0]):+.5f},{float(i[1]):+.5f},{float(i[2]):+.5f}) "
+                f"ipos=({float(ipos[0]):+.4f},{float(ipos[1]):+.4f},{float(ipos[2]):+.4f})"
+            )
 
         # Per-DoF params
-        print(f"\n[PER-DOF (armature / damping / frictionloss / invweight)]")
+        print("\n[PER-DOF (armature / damping / frictionloss / invweight)]")
         for d in range(int(mj.nv)):
             a = float(mj.dof_armature[d])
             dmp = float(mj.dof_damping[d])
@@ -388,7 +394,7 @@ def dump_contact_and_physics(env, label: str) -> None:
             print(f"  d{d:>3} armature={a:+.6f} damping={dmp:+.5f} frictionloss={fr:+.4f} invweight0={iw:+.6f}")
 
         # Per-actuator params
-        print(f"\n[PER-ACTUATOR]")
+        print("\n[PER-ACTUATOR]")
         for a in range(int(mj.nu)):
             aname = mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_ACTUATOR, a) or "?"
             jid = int(mj.actuator_trnid[a, 0])
@@ -397,10 +403,12 @@ def dump_contact_and_physics(env, label: str) -> None:
             bp = mj.actuator_biasprm[a]
             fr = mj.actuator_forcerange[a]
             cr = mj.actuator_ctrlrange[a]
-            print(f"  a{a:>3} {aname[:30]:<30} joint={jname[:30]:<30} "
-                  f"gainprm={list(float(x) for x in gp[:3])} biasprm={list(float(x) for x in bp[:3])} "
-                  f"forcerange=[{float(fr[0]):+.1f},{float(fr[1]):+.1f}] "
-                  f"ctrlrange=[{float(cr[0]):+.3f},{float(cr[1]):+.3f}]")
+            print(
+                f"  a{a:>3} {aname[:30]:<30} joint={jname[:30]:<30} "
+                f"gainprm={list(float(x) for x in gp[:3])} biasprm={list(float(x) for x in bp[:3])} "
+                f"forcerange=[{float(fr[0]):+.1f},{float(fr[1]):+.1f}] "
+                f"ctrlrange=[{float(cr[0]):+.3f},{float(cr[1]):+.3f}]"
+            )
 
         # Explicit geom pairs (if any)
         if int(mj.npair) > 0:
@@ -412,10 +420,12 @@ def dump_contact_and_physics(env, label: str) -> None:
                 fr = mj.pair_friction[p]
                 sr = mj.pair_solref[p]
                 si = mj.pair_solimp[p]
-                print(f"  p{p}: {n0} <-> {n1} condim={int(mj.pair_dim[p])} "
-                      f"fric={list(float(x) for x in fr)} "
-                      f"solref={list(float(x) for x in sr)} "
-                      f"solimp={list(float(x) for x in si)}")
+                print(
+                    f"  p{p}: {n0} <-> {n1} condim={int(mj.pair_dim[p])} "
+                    f"fric={list(float(x) for x in fr)} "
+                    f"solref={list(float(x) for x in sr)} "
+                    f"solimp={list(float(x) for x in si)}"
+                )
 
     # ==============================================================
     # Newton branch
@@ -434,12 +444,24 @@ def dump_contact_and_physics(env, label: str) -> None:
         solver = getattr(sm, "solver", None)
 
         # Core scalars
-        print(f"\n[NEWTON SIM OPTIONS]")
-        for a in ("world_count", "joint_count", "joint_dof_count", "body_count",
-                   "shape_count", "rigid_contact_max", "gravity",
-                   "rigid_contact_margin", "rigid_contact_torsional_friction",
-                   "rigid_contact_rolling_friction", "rigid_contact_con_ratio",
-                   "soft_contact_ke", "soft_contact_kd", "soft_contact_mu", "soft_contact_kf"):
+        print("\n[NEWTON SIM OPTIONS]")
+        for a in (
+            "world_count",
+            "joint_count",
+            "joint_dof_count",
+            "body_count",
+            "shape_count",
+            "rigid_contact_max",
+            "gravity",
+            "rigid_contact_margin",
+            "rigid_contact_torsional_friction",
+            "rigid_contact_rolling_friction",
+            "rigid_contact_con_ratio",
+            "soft_contact_ke",
+            "soft_contact_kd",
+            "soft_contact_mu",
+            "soft_contact_kf",
+        ):
             if model is None:
                 break
             v = getattr(model, a, "<missing>")
@@ -453,7 +475,7 @@ def dump_contact_and_physics(env, label: str) -> None:
 
         # Control (applied torque routing)
         if control is not None:
-            print(f"\n[NEWTON CONTROL]")
+            print("\n[NEWTON CONTROL]")
             for a in dir(control):
                 if a.startswith("_"):
                     continue
@@ -496,12 +518,11 @@ def dump_contact_and_physics(env, label: str) -> None:
                     arr = _to_numpy(v)
                     if arr is None:
                         continue
-                    print(f"  {st_name}.mujoco.{a}: shape={arr.shape} "
-                          f"{_fmt_arr(arr, max_n=40, prec=5)}")
+                    print(f"  {st_name}.mujoco.{a}: shape={arr.shape} {_fmt_arr(arr, max_n=40, prec=5)}")
 
         # Contacts
         if contacts is not None:
-            print(f"\n[NEWTON CONTACTS]")
+            print("\n[NEWTON CONTACTS]")
             for a in sorted(dir(contacts)):
                 if a.startswith("_"):
                     continue
@@ -522,21 +543,46 @@ def dump_contact_and_physics(env, label: str) -> None:
 
         # Model: every "physically interesting" attribute
         if model is not None:
-            print(f"\n[NEWTON MODEL — shape/body/joint/contact params]")
+            print("\n[NEWTON MODEL — shape/body/joint/contact params]")
             # Explicit list of attrs we care about, in groups.
             groups = {
-                "joint": ["joint_label", "joint_type", "joint_qd_start", "joint_q_start",
-                           "joint_dof_count", "joint_target_ke", "joint_target_kd",
-                           "joint_armature", "joint_effort_limit", "joint_velocity_limit",
-                           "joint_friction", "joint_damping", "joint_limit_lower",
-                           "joint_limit_upper", "joint_limit_ke", "joint_limit_kd"],
-                "body":  ["body_label", "body_mass", "body_inertia", "body_com",
-                           "body_inv_mass", "body_inv_inertia"],
-                "shape": ["shape_body", "shape_transform", "shape_geo", "shape_count",
-                           "shape_materials", "shape_mu", "shape_ke", "shape_kd", "shape_kf",
-                           "shape_contact_thickness", "shape_flags", "shape_priority",
-                           "shape_filter", "shape_collision_group", "shape_radius",
-                           "shape_scale"],
+                "joint": [
+                    "joint_label",
+                    "joint_type",
+                    "joint_qd_start",
+                    "joint_q_start",
+                    "joint_dof_count",
+                    "joint_target_ke",
+                    "joint_target_kd",
+                    "joint_armature",
+                    "joint_effort_limit",
+                    "joint_velocity_limit",
+                    "joint_friction",
+                    "joint_damping",
+                    "joint_limit_lower",
+                    "joint_limit_upper",
+                    "joint_limit_ke",
+                    "joint_limit_kd",
+                ],
+                "body": ["body_label", "body_mass", "body_inertia", "body_com", "body_inv_mass", "body_inv_inertia"],
+                "shape": [
+                    "shape_body",
+                    "shape_transform",
+                    "shape_geo",
+                    "shape_count",
+                    "shape_materials",
+                    "shape_mu",
+                    "shape_ke",
+                    "shape_kd",
+                    "shape_kf",
+                    "shape_contact_thickness",
+                    "shape_flags",
+                    "shape_priority",
+                    "shape_filter",
+                    "shape_collision_group",
+                    "shape_radius",
+                    "shape_scale",
+                ],
             }
             for gname, attrs in groups.items():
                 print(f"  -- group [{gname}] --")
@@ -548,12 +594,11 @@ def dump_contact_and_physics(env, label: str) -> None:
                     if arr is None:
                         print(f"    model.{a} = <non-array {type(v).__name__}> {v if not callable(v) else ''}")
                         continue
-                    print(f"    model.{a}: shape={arr.shape} dtype={arr.dtype} "
-                          f"{_fmt_arr(arr, max_n=60, prec=5)}")
+                    print(f"    model.{a}: shape={arr.shape} dtype={arr.dtype} {_fmt_arr(arr, max_n=60, prec=5)}")
             # Shape materials submembers
             sm_attr = getattr(model, "shape_materials", None)
             if sm_attr is not None:
-                print(f"  -- group [shape_materials sub-fields] --")
+                print("  -- group [shape_materials sub-fields] --")
                 for a in sorted(dir(sm_attr)):
                     if a.startswith("_"):
                         continue
@@ -564,8 +609,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                     arr = _to_numpy(v)
                     if arr is None:
                         continue
-                    print(f"    shape_materials.{a}: shape={arr.shape} "
-                          f"{_fmt_arr(arr, max_n=60, prec=5)}")
+                    print(f"    shape_materials.{a}: shape={arr.shape} {_fmt_arr(arr, max_n=60, prec=5)}")
 
         # SolverMuJoCo internal mjwarp model / data
         if solver is not None:
@@ -576,11 +620,29 @@ def dump_contact_and_physics(env, label: str) -> None:
                 if inner is None:
                     continue
                 print(f"\n  [solver.{inner_name}] -- interesting attrs")
-                interesting_kw = ("friction", "solref", "solimp", "condim", "priority",
-                                  "margin", "gap", "geom", "dof_", "qfrc_", "ctrl",
-                                  "pair_", "contact", "body_mass", "body_inertia",
-                                  "armature", "damping", "frictionloss", "actuator_",
-                                  "jnt_", "opt_")
+                interesting_kw = (
+                    "friction",
+                    "solref",
+                    "solimp",
+                    "condim",
+                    "priority",
+                    "margin",
+                    "gap",
+                    "geom",
+                    "dof_",
+                    "qfrc_",
+                    "ctrl",
+                    "pair_",
+                    "contact",
+                    "body_mass",
+                    "body_inertia",
+                    "armature",
+                    "damping",
+                    "frictionloss",
+                    "actuator_",
+                    "jnt_",
+                    "opt_",
+                )
                 for a in sorted(dir(inner)):
                     if a.startswith("_"):
                         continue
@@ -626,11 +688,7 @@ def print_static(env) -> None:
         if hasattr(am, "_offset") and am._offset is not None
         else [None] * am.total_action_dim
     )
-    sim_ids = (
-        _tensor_to_list(am._indexing.sim_indices)
-        if hasattr(am, "_indexing")
-        else [None] * am.total_action_dim
-    )
+    sim_ids = _tensor_to_list(am._indexing.sim_indices) if hasattr(am, "_indexing") else [None] * am.total_action_dim
     for i, name in enumerate(am.actuated_joint_names):
         s = f"{scales[i]:+.6f}" if scales[i] is not None else "?"
         o = f"{offsets[i]:+.6f}" if offsets[i] is not None else "?"
@@ -671,23 +729,17 @@ def print_static(env) -> None:
 
     # Bodies + masses (sim-dependent accessors).
     print("\n[BODIES]")
-    body_names = (
-        getattr(rd, "body_names_all", None)
-        or getattr(rd, "body_names", None)
-    )
+    body_names = getattr(rd, "body_names_all", None) or getattr(rd, "body_names", None)
     if body_names is None:
         print("  (body_names unavailable)")
     else:
         print(f"  count = {len(body_names)}")
         masses = None
         for getter in (
-            lambda: getattr(rd, "body_mass_all"),
-            lambda: getattr(rd, "body_masses"),
-            lambda: getattr(rd, "body_mass"),
-            lambda: getattr(
-                getattr(getattr(env, "scene_manager", None), "model", None),
-                "body_mass",
-            ),
+            lambda: rd.body_mass_all,
+            lambda: rd.body_masses,
+            lambda: rd.body_mass,
+            lambda: getattr(getattr(env, "scene_manager", None), "model", None).body_mass,
         ):
             try:
                 m = getter()
@@ -771,11 +823,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy_path", required=True)
     parser.add_argument(
-        "--eval_sim", required=True, choices=("newton", "mujoco", "genesis"),
+        "--eval_sim",
+        required=True,
+        choices=("newton", "mujoco", "genesis"),
     )
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument(
-        "--out", type=str, default=None,
+        "--out",
+        type=str,
+        default=None,
         help="Output file. Defaults to ./g1_dump_<sim>.txt.",
     )
     args = parser.parse_args()
@@ -785,10 +841,7 @@ def main() -> None:
     orig_stdout = sys.stdout
     sys.stdout = log_fh
 
-    print(
-        f"# g1_sim2sim_dump sim={args.eval_sim} steps={args.steps} "
-        f"policy_path={args.policy_path}"
-    )
+    print(f"# g1_sim2sim_dump sim={args.eval_sim} steps={args.steps} policy_path={args.policy_path}")
 
     # num_envs=1 → one row per print.
     extra = {"env": {"num_envs": 1}}

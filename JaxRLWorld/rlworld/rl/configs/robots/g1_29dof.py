@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from .base import RobotConfig
 from rlworld.rl.configs.robots.utils import reflected_inertia_from_two_stage_planetary
+
+from .base import RobotConfig
 
 # Motor 5020 (elbows, shoulders, wrist_roll)
 ROTOR_INERTIAS_5020 = (0.139e-4, 0.017e-4, 0.169e-4)
@@ -94,85 +95,91 @@ class G1MujocoConfig(RobotConfig):
     base_init_height: float = 0.74
     base_link_name: str = "torso_link"
 
-    default_joint_angles: Dict[str, float] = field(default_factory=lambda: {
-        ".*_hip_pitch_joint": -0.312,
-        ".*_knee_joint": 0.669,
-        ".*_ankle_pitch_joint": -0.363,
-        ".*_elbow_joint": 0.6,
-        ".*left_shoulder_roll_joint": 0.2,
-        ".*left_shoulder_pitch_joint": 0.2,
-        ".*right_shoulder_roll_joint": -0.2,
-        ".*right_shoulder_pitch_joint": 0.2,
-    })
+    default_joint_angles: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_pitch_joint": -0.312,
+            ".*_knee_joint": 0.669,
+            ".*_ankle_pitch_joint": -0.363,
+            ".*_elbow_joint": 0.6,
+            ".*left_shoulder_roll_joint": 0.2,
+            ".*left_shoulder_pitch_joint": 0.2,
+            ".*right_shoulder_roll_joint": -0.2,
+            ".*right_shoulder_pitch_joint": 0.2,
+        }
+    )
 
     actuated_dof_patterns: List[str] = field(
         default_factory=lambda: [
             r"left_(?!hand_palm_joint).*",
             r"right_(?!hand_palm_joint).*",
-            r"waist_(?!support_joint).*"
+            r"waist_(?!support_joint).*",
         ]
     )
 
-    p_gains: Dict[str, float] = field(default_factory=lambda: {
-        ".*_hip_pitch_joint": STIFFNESS_7520_14,
-        ".*_hip_yaw_joint": STIFFNESS_7520_14,
-        ".*waist_yaw_joint": STIFFNESS_7520_14,
-        ".*_hip_roll_joint": STIFFNESS_7520_22,
-        ".*_knee_joint": STIFFNESS_7520_22,
-        ".*waist_pitch_joint": STIFFNESS_WAIST,
-        ".*waist_roll_joint": STIFFNESS_WAIST,
-        ".*_ankle_pitch_joint": STIFFNESS_ANKLE,
-        ".*_ankle_roll_joint": STIFFNESS_ANKLE,
-        ".*_shoulder_pitch_joint": STIFFNESS_5020,
-        ".*_shoulder_roll_joint": STIFFNESS_5020,
-        ".*_shoulder_yaw_joint": STIFFNESS_5020,
-        ".*_elbow_joint": STIFFNESS_5020,
-        ".*_wrist_roll_joint": STIFFNESS_5020,
-        ".*_wrist_pitch_joint": STIFFNESS_4010,
-        ".*_wrist_yaw_joint": STIFFNESS_4010,
-    })
-
-    d_gains: Dict[str, float] = field(default_factory=lambda: {
-        ".*_hip_pitch_joint": DAMPING_7520_14,
-        ".*_hip_yaw_joint": DAMPING_7520_14,
-        ".*waist_yaw_joint": DAMPING_7520_14,
-        ".*_hip_roll_joint": DAMPING_7520_22,
-        ".*_knee_joint": DAMPING_7520_22,
-        ".*waist_pitch_joint": DAMPING_WAIST,
-        ".*waist_roll_joint": DAMPING_WAIST,
-        ".*_ankle_pitch_joint": DAMPING_ANKLE,
-        ".*_ankle_roll_joint": DAMPING_ANKLE,
-        ".*_shoulder_pitch_joint": DAMPING_5020,
-        ".*_shoulder_roll_joint": DAMPING_5020,
-        ".*_shoulder_yaw_joint": DAMPING_5020,
-        ".*_elbow_joint": DAMPING_5020,
-        ".*_wrist_roll_joint": DAMPING_5020,
-        ".*_wrist_pitch_joint": DAMPING_4010,
-        ".*_wrist_yaw_joint": DAMPING_4010,
-    })
-
-    armature: Dict[str, float] = field(default_factory=lambda: {
-        ".*_hip_pitch_joint": ARMATURE_7520_14,
-        ".*_hip_yaw_joint": ARMATURE_7520_14,
-        ".*waist_yaw_joint": ARMATURE_7520_14,
-        ".*_hip_roll_joint": ARMATURE_7520_22,
-        ".*_knee_joint": ARMATURE_7520_22,
-        ".*waist_pitch_joint": ARMATURE_WAIST,
-        ".*waist_roll_joint": ARMATURE_WAIST,
-        ".*_ankle_pitch_joint": ARMATURE_ANKLE,
-        ".*_ankle_roll_joint": ARMATURE_ANKLE,
-        ".*_shoulder_pitch_joint": ARMATURE_5020,
-        ".*_shoulder_roll_joint": ARMATURE_5020,
-        ".*_shoulder_yaw_joint": ARMATURE_5020,
-        ".*_elbow_joint": ARMATURE_5020,
-        ".*_wrist_roll_joint": ARMATURE_5020,
-        ".*_wrist_pitch_joint": ARMATURE_4010,
-        ".*_wrist_yaw_joint": ARMATURE_4010,
-    })
-
-    foot_names: List[str] = field(
-        default_factory=lambda: ["left_ankle_roll_link", "right_ankle_roll_link"]
+    p_gains: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_pitch_joint": STIFFNESS_7520_14,
+            ".*_hip_yaw_joint": STIFFNESS_7520_14,
+            ".*waist_yaw_joint": STIFFNESS_7520_14,
+            ".*_hip_roll_joint": STIFFNESS_7520_22,
+            ".*_knee_joint": STIFFNESS_7520_22,
+            ".*waist_pitch_joint": STIFFNESS_WAIST,
+            ".*waist_roll_joint": STIFFNESS_WAIST,
+            ".*_ankle_pitch_joint": STIFFNESS_ANKLE,
+            ".*_ankle_roll_joint": STIFFNESS_ANKLE,
+            ".*_shoulder_pitch_joint": STIFFNESS_5020,
+            ".*_shoulder_roll_joint": STIFFNESS_5020,
+            ".*_shoulder_yaw_joint": STIFFNESS_5020,
+            ".*_elbow_joint": STIFFNESS_5020,
+            ".*_wrist_roll_joint": STIFFNESS_5020,
+            ".*_wrist_pitch_joint": STIFFNESS_4010,
+            ".*_wrist_yaw_joint": STIFFNESS_4010,
+        }
     )
+
+    d_gains: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_pitch_joint": DAMPING_7520_14,
+            ".*_hip_yaw_joint": DAMPING_7520_14,
+            ".*waist_yaw_joint": DAMPING_7520_14,
+            ".*_hip_roll_joint": DAMPING_7520_22,
+            ".*_knee_joint": DAMPING_7520_22,
+            ".*waist_pitch_joint": DAMPING_WAIST,
+            ".*waist_roll_joint": DAMPING_WAIST,
+            ".*_ankle_pitch_joint": DAMPING_ANKLE,
+            ".*_ankle_roll_joint": DAMPING_ANKLE,
+            ".*_shoulder_pitch_joint": DAMPING_5020,
+            ".*_shoulder_roll_joint": DAMPING_5020,
+            ".*_shoulder_yaw_joint": DAMPING_5020,
+            ".*_elbow_joint": DAMPING_5020,
+            ".*_wrist_roll_joint": DAMPING_5020,
+            ".*_wrist_pitch_joint": DAMPING_4010,
+            ".*_wrist_yaw_joint": DAMPING_4010,
+        }
+    )
+
+    armature: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_pitch_joint": ARMATURE_7520_14,
+            ".*_hip_yaw_joint": ARMATURE_7520_14,
+            ".*waist_yaw_joint": ARMATURE_7520_14,
+            ".*_hip_roll_joint": ARMATURE_7520_22,
+            ".*_knee_joint": ARMATURE_7520_22,
+            ".*waist_pitch_joint": ARMATURE_WAIST,
+            ".*waist_roll_joint": ARMATURE_WAIST,
+            ".*_ankle_pitch_joint": ARMATURE_ANKLE,
+            ".*_ankle_roll_joint": ARMATURE_ANKLE,
+            ".*_shoulder_pitch_joint": ARMATURE_5020,
+            ".*_shoulder_roll_joint": ARMATURE_5020,
+            ".*_shoulder_yaw_joint": ARMATURE_5020,
+            ".*_elbow_joint": ARMATURE_5020,
+            ".*_wrist_roll_joint": ARMATURE_5020,
+            ".*_wrist_pitch_joint": ARMATURE_4010,
+            ".*_wrist_yaw_joint": ARMATURE_4010,
+        }
+    )
+
+    foot_names: List[str] = field(default_factory=lambda: ["left_ankle_roll_link", "right_ankle_roll_link"])
 
     @property
     def action_scale(self) -> Dict[str, float]:

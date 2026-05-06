@@ -15,6 +15,7 @@ that gradient steps cannot collapse the posterior to a delta or blow
 it up; the same trick is used by NPMP and most subsequent imitation
 work (e.g. OmniH2O).
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -22,7 +23,6 @@ from typing import Sequence
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-
 
 __all__ = ["NPMPEncoder"]
 
@@ -63,7 +63,9 @@ class NPMPEncoder(eqx.Module):
         self.log_std_head = eqx.nn.Linear(in_dim, latent_dim, key=keys[-1])
 
     def __call__(
-        self, z_prev: jax.Array, x_t: jax.Array,
+        self,
+        z_prev: jax.Array,
+        x_t: jax.Array,
     ) -> tuple[jax.Array, jax.Array]:
         """Single-element forward (unbatched). Returns (mean, log_std)."""
         h = jnp.concatenate([z_prev, x_t], axis=-1)
@@ -71,6 +73,8 @@ class NPMPEncoder(eqx.Module):
             h = jax.nn.elu(layer(h))
         mean = self.mean_head(h)
         log_std = jnp.clip(
-            self.log_std_head(h), self.log_std_min, self.log_std_max,
+            self.log_std_head(h),
+            self.log_std_min,
+            self.log_std_max,
         )
         return mean, log_std

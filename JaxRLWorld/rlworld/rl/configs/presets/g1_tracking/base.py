@@ -27,6 +27,7 @@ Usage::
         motion_files=("/tmp/g1_walk.npz",),
     ).build()
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -40,21 +41,20 @@ from rlworld.rl.configs.common_config_classes import (
     PPOPolicyConfig,
     RunnerConfig,
 )
+from rlworld.rl.configs.curriculums import CurriculumManagerConfig
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from rlworld.rl.envs.mdp.commands import MotionCommandCfg
-from rlworld.rl.configs.curriculums import CurriculumManagerConfig
-
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "newton": {"dt": 0.005, "substeps": 1, "decimation": 4},
     "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
-    "mujoco":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "mujoco": {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
-    "newton":  "G1_Tracking_Newton",
+    "newton": "G1_Tracking_Newton",
     "genesis": "G1_Tracking_Genesis",
-    "mujoco":  "G1_Tracking_Mujoco",
+    "mujoco": "G1_Tracking_Mujoco",
 }
 
 
@@ -66,10 +66,7 @@ def _get_sim_builders(sim_type: str):
     elif sim_type == "mujoco":
         from . import _mujoco_builders as mod
     else:
-        raise ValueError(
-            f"Unknown sim_type: {sim_type!r}. "
-            f"Expected one of {sorted(_SIM_TIMINGS)}."
-        )
+        raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
     return mod
 
 
@@ -89,10 +86,8 @@ class G1TrackingConfig:
     # Motion source: tuple of NPZ paths (length-1 for single-clip, length
     # >= 2 for multi-motion). Each episode reset samples one clip per env
     # (uniform by default) and keeps it for the rest of the episode.
-    motion_files: tuple[str, ...] = (
-        "JaxRLWorld/rlworld/assets/motions/gangnam_style/G1_gangnam_style_V01.npz",
-    )
-    motion_weights: "tuple[float, ...] | None" = None
+    motion_files: tuple[str, ...] = ("JaxRLWorld/rlworld/assets/motions/gangnam_style/G1_gangnam_style_V01.npz",)
+    motion_weights: tuple[float, ...] | None = None
 
     # ── Body list (Mjlab G1 tracking config/g1/env_cfgs.py) ───────────
     # Anchor body is the shared torso link; the first entry of body_names
@@ -127,14 +122,22 @@ class G1TrackingConfig:
     sampling_mode: Literal["adaptive", "uniform", "start"] = "adaptive"
     pose_range: Dict[str, tuple[float, float]] = field(
         default_factory=lambda: {
-            "x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01),
-            "roll": (-0.1, 0.1), "pitch": (-0.1, 0.1), "yaw": (-0.2, 0.2),
+            "x": (-0.05, 0.05),
+            "y": (-0.05, 0.05),
+            "z": (-0.01, 0.01),
+            "roll": (-0.1, 0.1),
+            "pitch": (-0.1, 0.1),
+            "yaw": (-0.2, 0.2),
         },
     )
     velocity_range: Dict[str, tuple[float, float]] = field(
         default_factory=lambda: {
-            "x": (-0.5, 0.5), "y": (-0.5, 0.5), "z": (-0.2, 0.2),
-            "roll": (-0.52, 0.52), "pitch": (-0.52, 0.52), "yaw": (-0.78, 0.78),
+            "x": (-0.5, 0.5),
+            "y": (-0.5, 0.5),
+            "z": (-0.2, 0.2),
+            "roll": (-0.52, 0.52),
+            "pitch": (-0.52, 0.52),
+            "yaw": (-0.78, 0.78),
         },
     )
     joint_position_range: tuple[float, float] = (-0.1, 0.1)
@@ -208,7 +211,8 @@ class G1TrackingConfig:
         return cfgs
 
     def _get_preset_kwargs(self) -> Dict[str, Any]:
-        from dataclasses import fields, MISSING
+        from dataclasses import MISSING, fields
+
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":

@@ -10,6 +10,7 @@ Public API is method-based with a ``group_name`` parameter::
     env.contact_manager.contact_force("feet_ground_contact")    # (B, N, 3)
     env.contact_manager.current_air_time("feet_ground_contact") # (B, N)
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -49,7 +50,7 @@ class BaseContactManager(BaseManager, ABC):
         - ``_compute_group_contact_force(group)`` → ``(num_envs, N, 3)`` or ``None``
     """
 
-    def __init__(self, env: "World"):
+    def __init__(self, env: World):
         super().__init__(env=env)
         self.num_envs = env.num_envs
         self.dt = env.control_dt
@@ -106,9 +107,7 @@ class BaseContactManager(BaseManager, ABC):
             return self._groups[name]
         except KeyError:
             available = list(self._groups.keys())
-            raise KeyError(
-                f"Contact group '{name}' not found. Available: {available}"
-            ) from None
+            raise KeyError(f"Contact group '{name}' not found. Available: {available}") from None
 
     # -- reindex cache for order parameter --
 
@@ -122,33 +121,26 @@ class BaseContactManager(BaseManager, ABC):
             tracked = group.tracked_names
             if len(order) != group.num_tracked:
                 raise ValueError(
-                    f"order has {len(order)} elements but group '{group_name}' "
-                    f"tracks {group.num_tracked}: {tracked}"
+                    f"order has {len(order)} elements but group '{group_name}' tracks {group.num_tracked}: {tracked}"
                 )
             missing = set(order) - set(tracked)
             if missing:
-                raise ValueError(
-                    f"order contains names not in group '{group_name}': {missing}. "
-                    f"Available: {tracked}"
-                )
+                raise ValueError(f"order contains names not in group '{group_name}': {missing}. Available: {tracked}")
             self._reindex_cache[key] = torch.tensor(
                 [tracked.index(name) for name in order],
-                dtype=torch.long, device=self.device,
+                dtype=torch.long,
+                device=self.device,
             )
         return self._reindex_cache[key]
 
-    def _apply_order(
-        self, tensor: torch.Tensor, group_name: str, order: list[str] | None
-    ) -> torch.Tensor:
+    def _apply_order(self, tensor: torch.Tensor, group_name: str, order: list[str] | None) -> torch.Tensor:
         """Reorder dim=1 of tensor if order is specified."""
         if order is None:
             return tensor
         reindex = self._get_reindex(group_name, order)
         return tensor[:, reindex]
 
-    def _apply_order_3d(
-        self, tensor: torch.Tensor, group_name: str, order: list[str] | None
-    ) -> torch.Tensor:
+    def _apply_order_3d(self, tensor: torch.Tensor, group_name: str, order: list[str] | None) -> torch.Tensor:
         """Reorder dim=1 of (num_envs, N, 3) tensor if order is specified."""
         if order is None:
             return tensor
@@ -157,36 +149,26 @@ class BaseContactManager(BaseManager, ABC):
 
     # -- public API --
 
-    def is_contact(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         """Bool contact state. Shape: ``(num_envs, N)``."""
         group = self._get_group(group_name)
         result = self._compute_group_is_contact(group)
         return self._apply_order(result, group_name, order)
 
-    def prev_is_contact(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def prev_is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         """Previous step contact state. Shape: ``(num_envs, N)`` bool."""
         result = self._get_group(group_name)._prev_is_contact
         return self._apply_order(result, group_name, order)
 
-    def contact_force(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def contact_force(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         """Contact force vectors. Shape: ``(num_envs, N, 3)``."""
         group = self._get_group(group_name)
         force = self._compute_group_contact_force(group)
         if force is None:
-            force = torch.zeros(
-                self.num_envs, group.num_tracked, 3, device=self.device
-            )
+            force = torch.zeros(self.num_envs, group.num_tracked, 3, device=self.device)
         return self._apply_order_3d(force, group_name, order)
 
-    def contact_force_history(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor | None:
+    def contact_force_history(self, group_name: str, order: list[str] | None = None) -> torch.Tensor | None:
         """Contact force history across substeps. Shape: ``(num_envs, N, H, 3)``.
 
         Returns ``None`` if the backend does not support substep history
@@ -202,27 +184,19 @@ class BaseContactManager(BaseManager, ABC):
             history = history[:, reindex, :, :]
         return history
 
-    def current_air_time(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def current_air_time(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         result = self._get_group(group_name).current_air_time
         return self._apply_order(result, group_name, order)
 
-    def last_air_time(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def last_air_time(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         result = self._get_group(group_name).last_air_time
         return self._apply_order(result, group_name, order)
 
-    def current_contact_time(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def current_contact_time(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         result = self._get_group(group_name).current_contact_time
         return self._apply_order(result, group_name, order)
 
-    def last_contact_time(
-        self, group_name: str, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def last_contact_time(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         result = self._get_group(group_name).last_contact_time
         return self._apply_order(result, group_name, order)
 
@@ -236,9 +210,7 @@ class BaseContactManager(BaseManager, ABC):
         result = is_in & just_landed
         return self._apply_order(result, group_name, order)
 
-    def compute_first_air(
-        self, group_name: str, abs_tol: float = 1e-6, order: list[str] | None = None
-    ) -> torch.Tensor:
+    def compute_first_air(self, group_name: str, abs_tol: float = 1e-6, order: list[str] | None = None) -> torch.Tensor:
         """``(num_envs, N)`` bool: True for contacts broken this step."""
         g = self._get_group(group_name)
         is_in = g.current_air_time > 0
@@ -257,9 +229,7 @@ class BaseContactManager(BaseManager, ABC):
     ) -> list[int]:
         """Get indices within a group matching name patterns (regex supported)."""
         names = self.tracked_names(group_name)
-        _, matched = string_utils.resolve_matching_names(
-            patterns, names, preserve_order=preserve_order
-        )
+        _, matched = string_utils.resolve_matching_names(patterns, names, preserve_order=preserve_order)
         return [names.index(n) for n in matched]
 
     def group_names(self) -> list[str]:
@@ -282,12 +252,8 @@ class BaseContactManager(BaseManager, ABC):
         is_landing = ~g._prev_is_contact & is_contact
         is_liftoff = g._prev_is_contact & ~is_contact
 
-        g.last_air_time = torch.where(
-            is_landing, g.current_air_time, g.last_air_time
-        )
-        g.last_contact_time = torch.where(
-            is_liftoff, g.current_contact_time, g.last_contact_time
-        )
+        g.last_air_time = torch.where(is_landing, g.current_air_time, g.last_air_time)
+        g.last_contact_time = torch.where(is_liftoff, g.current_contact_time, g.last_contact_time)
 
         g.current_contact_time = torch.where(
             is_contact,

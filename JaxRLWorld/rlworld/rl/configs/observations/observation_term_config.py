@@ -13,6 +13,7 @@ class ObservationTermConfig:
     In presets, use callables directly for IDE support.
     Strings are used after YAML deserialization.
     """
+
     func: Callable | str
     history_length: int = 0
     flatten_history_dim: bool = True

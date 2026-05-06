@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-import os
 from functools import wraps
-from typing import Any, Callable, TYPE_CHECKING
-
-import torch
-from matplotlib import pyplot as plt
-from scipy.signal import butter
+from typing import Any, Callable
 
 
 class EnvStepCache:
@@ -75,7 +70,7 @@ class MethodEnvStepCache:
             cache_key = f"{instance_id}:{func_name}"
 
             # Get current env_step_counter
-            current_step_calls = getattr(instance, '_env_step_counter', 0)
+            current_step_calls = getattr(instance, "_env_step_counter", 0)
 
             # Check if we have a valid cached result
             if cache_key in self._cache:
@@ -98,7 +93,7 @@ class MethodEnvStepCache:
 
         if cache_key in self._cache:
             cached_step_calls, _ = self._cache[cache_key]
-            current_step_calls = getattr(instance, '_env_step_counter', 0)
+            current_step_calls = getattr(instance, "_env_step_counter", 0)
             return cached_step_calls == current_step_calls
 
         return False
@@ -130,7 +125,7 @@ def invalidate_cache(func: Callable) -> Callable:
     def wrapper(instance, *args, **kwargs):
         # Clear all caches associated with this instance
         instance_id = id(instance)
-        if hasattr(instance, '_step_calls_cache'):
+        if hasattr(instance, "_step_calls_cache"):
             cache = instance._step_calls_cache._cache
             # Remove all cached entries for this instance
             cache_keys = [k for k in cache.keys() if k.startswith(f"{instance_id}:")]
@@ -148,8 +143,7 @@ class LearningIterationObserver:
     @property
     def learning_iteration(self):
         raise AttributeError(
-            "LearningIterationObserver singleton removed. "
-            "Use runner.current_learning_iteration instead."
+            "LearningIterationObserver singleton removed. Use runner.current_learning_iteration instead."
         )
 
 
@@ -159,7 +153,4 @@ class NumStepCallsObserver:
 
     @property
     def env_step_calls(self):
-        raise AttributeError(
-            "NumStepCallsObserver singleton removed. "
-            "Use env._env_step_counter instead."
-        )
+        raise AttributeError("NumStepCallsObserver singleton removed. Use env._env_step_counter instead.")

@@ -3,6 +3,7 @@
 All functions accept any ``World`` subclass and read state exclusively
 through ``env.get_robot_data(entity_name)``, making them simulator-agnostic.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def energy_termination(
-    env: "World",
+    env: World,
     threshold: float = float("inf"),
     skip_steps: int = 0,
     entity_name: str = "robot",

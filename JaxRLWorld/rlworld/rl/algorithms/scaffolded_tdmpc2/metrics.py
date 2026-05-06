@@ -10,14 +10,15 @@ from dataclasses import dataclass, field
 from rlworld.rl.algorithms.metrics.base import (
     BaseMetrics,
     BatchMetrics,
-    MetricType,
     ConsoleMetric,
+    MetricType,
 )
 
 
 @dataclass
 class ScaffoldedWorldModelMetrics:
     """Target world model training losses."""
+
     consistency_loss: float = 0.0
     reward_loss: float = 0.0
     value_loss: float = 0.0
@@ -39,6 +40,7 @@ class ScaffoldedWorldModelMetrics:
 @dataclass
 class ScaffoldedPolicyMetrics:
     """Target policy update metrics."""
+
     pi_loss: float = 0.0
     pi_entropy: float = 0.0
     pi_scaled_entropy: float = 0.0
@@ -58,6 +60,7 @@ class ScaffoldedPolicyMetrics:
 @dataclass
 class ExplorationPolicyMetrics:
     """Scaffolded exploration policy metrics."""
+
     pi_loss: float = 0.0
     entropy: float = 0.0
 
@@ -71,6 +74,7 @@ class ExplorationPolicyMetrics:
 @dataclass
 class QMetrics:
     """Q-value statistics."""
+
     mean: float = 0.0
     std: float = 0.0
     p05: float = 0.0
@@ -88,18 +92,11 @@ class QMetrics:
 @dataclass
 class ScaffoldedTDMPC2Metrics(BaseMetrics):
     """Complete scaffolded TD-MPC2 training metrics."""
-    target_wm: ScaffoldedWorldModelMetrics = field(
-        default_factory=ScaffoldedWorldModelMetrics
-    )
-    scaff_wm: ScaffoldedWorldModelMetrics = field(
-        default_factory=ScaffoldedWorldModelMetrics
-    )
-    policy: ScaffoldedPolicyMetrics = field(
-        default_factory=ScaffoldedPolicyMetrics
-    )
-    explore: ExplorationPolicyMetrics = field(
-        default_factory=ExplorationPolicyMetrics
-    )
+
+    target_wm: ScaffoldedWorldModelMetrics = field(default_factory=ScaffoldedWorldModelMetrics)
+    scaff_wm: ScaffoldedWorldModelMetrics = field(default_factory=ScaffoldedWorldModelMetrics)
+    policy: ScaffoldedPolicyMetrics = field(default_factory=ScaffoldedPolicyMetrics)
+    explore: ExplorationPolicyMetrics = field(default_factory=ExplorationPolicyMetrics)
     q: QMetrics = field(default_factory=QMetrics)
     target_q: QMetrics = field(default_factory=QMetrics)
     batch: BatchMetrics = field(default_factory=BatchMetrics)

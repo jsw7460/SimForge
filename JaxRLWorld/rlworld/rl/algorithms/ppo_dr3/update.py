@@ -7,19 +7,20 @@ import jax.numpy as jnp
 import optax
 
 from rlworld.rl.storages.rollout_storage import RolloutBatch
+
 from .losses import (
-    compute_policy_loss,
-    compute_value_loss,
     compute_dr3_regularizer,
     compute_feature_similarity_metrics,
+    compute_policy_loss,
+    compute_value_loss,
 )
-
 
 # ==================== Data Structures ====================
 
 
 class PPODR3LossInfo(NamedTuple):
     """Loss components for logging."""
+
     policy_loss: jax.Array
     value_loss: jax.Array
     dr3_loss: jax.Array
@@ -34,6 +35,7 @@ class PPODR3LossInfo(NamedTuple):
 
 class ScanCarry(NamedTuple):
     """Carry state for scan loop."""
+
     params: Any
     key: jax.Array
     opt_state: optax.OptState
@@ -42,6 +44,7 @@ class ScanCarry(NamedTuple):
 
 class ScanOutput(NamedTuple):
     """Output from each scan iteration."""
+
     policy_loss: jax.Array
     value_loss: jax.Array
     dr3_loss: jax.Array
@@ -88,9 +91,7 @@ def compute_batch_loss_dr3(
     )
 
     # Critic forward pass with features
-    values, features, critic_aux = model.critic.forward_with_features(
-        batch.critic_observations
-    )
+    values, features, critic_aux = model.critic.forward_with_features(batch.critic_observations)
     values = values.squeeze(-1)
 
     # Compute next state features for DR3
@@ -127,12 +128,7 @@ def compute_batch_loss_dr3(
     entropy_mean = entropy.mean()
 
     # Total loss
-    total_loss = (
-        policy_loss
-        + value_loss_coef * value_loss
-        - entropy_coef * entropy_mean
-        + dr3_coef * dr3_loss
-    )
+    total_loss = policy_loss + value_loss_coef * value_loss - entropy_coef * entropy_mean + dr3_coef * dr3_loss
 
     aux = {**actor_aux, **critic_aux}
 
@@ -196,9 +192,7 @@ def update_all_batches_dr3(
     """
 
     def scan_fn(carry: ScanCarry, batch: RolloutBatch) -> tuple[ScanCarry, ScanOutput]:
-        params, opt_state, key, early_stopped = (
-            carry.params, carry.opt_state, carry.key, carry.early_stopped
-        )
+        params, opt_state, key, early_stopped = (carry.params, carry.opt_state, carry.key, carry.early_stopped)
         key, subkey = jax.random.split(key)
 
         def loss_fn(p):

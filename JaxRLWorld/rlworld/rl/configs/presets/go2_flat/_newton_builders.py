@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg
-from rlworld.rl.configs import RewardConfig
+from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.newton_config_classes import (
@@ -44,11 +44,9 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg as UnifiedNewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
 
 if TYPE_CHECKING:
     from .base import Go2FlatConfig
@@ -73,11 +71,11 @@ def _initial_quat() -> Any:
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "Go2FlatConfig") -> VisualizationConfig:
+def build_visualization(cfg: Go2FlatConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False, record_video=False)
 
 
-def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
+def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         roll_pitch = TerminationTermConfig(
@@ -97,7 +95,7 @@ def build_env(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonEnvConfig:
     )
 
 
-def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConfig:
+def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
     r = cfg.robot
     quat = _initial_quat()
 
@@ -108,18 +106,10 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
     # from step 0 of training. friction overrides are applied via
     # event terms (see ``build_dr_terms`` below) since neither the
     # actuator nor the scene config exposes friction fields.
-    stiffness_hip = (
-        r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
-    )
-    damping_hip = (
-        r.kd_hip_override if r.kd_hip_override is not None else DAMPING_HIP
-    )
-    stiffness_knee = (
-        r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
-    )
-    damping_knee = (
-        r.kd_knee_override if r.kd_knee_override is not None else DAMPING_KNEE
-    )
+    stiffness_hip = r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
+    damping_hip = r.kd_hip_override if r.kd_hip_override is not None else DAMPING_HIP
+    stiffness_knee = r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
+    damping_knee = r.kd_knee_override if r.kd_knee_override is not None else DAMPING_KNEE
 
     return NewtonSceneConfig(
         dt=timing["dt"],
@@ -194,7 +184,7 @@ def build_scene(cfg: "Go2FlatConfig", timing: Dict[str, Any]) -> NewtonSceneConf
     )
 
 
-def build_action(cfg: "Go2FlatConfig") -> NewtonActionConfig:
+def build_action(cfg: Go2FlatConfig) -> NewtonActionConfig:
     r = cfg.robot
     return NewtonActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
@@ -204,7 +194,7 @@ def build_action(cfg: "Go2FlatConfig") -> NewtonActionConfig:
     )
 
 
-def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
+def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
     r = cfg.robot
     feet = list(r.foot_names)
 
@@ -294,16 +284,19 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def customize_reset_root_params(cfg: "Go2FlatConfig", params: Dict[str, Any]) -> None:
+def customize_reset_root_params(cfg: Go2FlatConfig, params: Dict[str, Any]) -> None:
     """Newton hook: inject wxyz default quat (Newton native is xyzw)."""
     _iq = _initial_quat()
     _iq_tuple = tuple(float(v) for v in _iq)  # (x, y, z, w)
     params["default_quat_wxyz"] = (
-        _iq_tuple[3], _iq_tuple[0], _iq_tuple[1], _iq_tuple[2],
+        _iq_tuple[3],
+        _iq_tuple[0],
+        _iq_tuple[1],
+        _iq_tuple[2],
     )
 
 
-def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """Newton-specific domain randomization terms.
 
     Layered scheme:

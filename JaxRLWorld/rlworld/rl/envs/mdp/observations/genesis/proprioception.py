@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
-from genesis.utils.geom import transform_by_quat, inv_quat
+from genesis.utils.geom import inv_quat, transform_by_quat
+
+from rlworld.rl.envs.mdp.observations.genesis import state
 from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils import entity_utils as eu
-from rlworld.rl.envs.mdp.observations.genesis import state
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv, LocomotionEnv
@@ -27,16 +29,16 @@ def projected_gravity(env: GenesisEnv) -> torch.Tensor:
 def dof_pos(env: GenesisEnv, dofs_idx_local: torch.Tensor | None = None) -> torch.Tensor:
     """Get DOF positions for the robot.
 
-        Args:
-            env: Genesis environment.
-            dofs_idx_local: DOF indices to query. If None, uses actuated DOF indices.
+    Args:
+        env: Genesis environment.
+        dofs_idx_local: DOF indices to query. If None, uses actuated DOF indices.
 
-        Returns:
-            DOF positions of shape (num_envs, num_dofs).
-            When dofs_idx_local is None, ordering matches env.act_manager._actuated_joint_names.
+    Returns:
+        DOF positions of shape (num_envs, num_dofs).
+        When dofs_idx_local is None, ordering matches env.act_manager._actuated_joint_names.
     """
     if dofs_idx_local is None:
-        dofs_idx_local = env.act_manager.actuated_dof_ids       # To remove base 6-dof joint
+        dofs_idx_local = env.act_manager.actuated_dof_ids  # To remove base 6-dof joint
     return env.robot.get_dofs_position(dofs_idx_local)
 
 
@@ -48,7 +50,7 @@ def dof_pos_nominal_difference(env: GenesisEnv) -> torch.Tensor:
 @EnvStepCache()
 def dof_vel(env: GenesisEnv, entity_name: str = "robot", dofs_idx_local: torch.Tensor | None = None) -> torch.Tensor:
     if dofs_idx_local is None:
-        dofs_idx_local = env.act_manager.actuated_dof_ids       # To remove base 6-dof joint
+        dofs_idx_local = env.act_manager.actuated_dof_ids  # To remove base 6-dof joint
     return env.scene_manager[entity_name].get_dofs_velocity(dofs_idx_local)
 
 
@@ -63,12 +65,7 @@ def prev_processed_actions(env: GenesisEnv):
 
 
 @EnvStepCache()
-def relative_links_pos(
-    env: GenesisEnv,
-    entity_name: str = "robot",
-    base_name: str = "base",
-    links: tuple[str] = None
-):
+def relative_links_pos(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base", links: tuple[str] = None):
     """Get link positions relative to base in body frame.
 
     Args:

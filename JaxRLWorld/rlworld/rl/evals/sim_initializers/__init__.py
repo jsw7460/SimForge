@@ -59,9 +59,7 @@ class SimInitializer(ABC):
             f"evaluator.play()."
         )
 
-    def try_stop_mid_episode_recording(
-        self, env: Any, target_steps: int
-    ) -> bool:
+    def try_stop_mid_episode_recording(self, env: Any, target_steps: int) -> bool:
         """Optionally stop recording before episode ends, return whether stopped.
 
         Hook for backends whose recording API records as the env steps
@@ -109,10 +107,7 @@ def _detect_robot_key(metadata: dict) -> str:
         return "t1"
 
     num_actions = action_cfg.get("num_joint_actions", 0)
-    raise ValueError(
-        f"Cannot detect robot from checkpoint (task_name={task_name!r}, "
-        f"num_actions={num_actions})."
-    )
+    raise ValueError(f"Cannot detect robot from checkpoint (task_name={task_name!r}, num_actions={num_actions}).")
 
 
 def resolve_cross_sim_config(metadata: dict, target_sim: str):
@@ -158,9 +153,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     # --- Strategy 1: path substitution (sim-specific subclass) ---
     if preset_module_path is not None:
         parts = preset_module_path.split(".")
-        sim_idx = next(
-            (i for i, p in enumerate(parts) if p in _SIM_NAMES), None
-        )
+        sim_idx = next((i for i, p in enumerate(parts) if p in _SIM_NAMES), None)
         if sim_idx is not None:
             parts[sim_idx] = sim_key
             target_module_path = ".".join(parts)
@@ -180,10 +173,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
         if cls is not None and is_dataclass(cls):
             field_names = {f.name for f in fields(cls)}
             if "sim_type" in field_names:
-                kwargs = {
-                    k: v for k, v in config_dict.get("preset_kwargs", {}).items()
-                    if k in field_names
-                }
+                kwargs = {k: v for k, v in config_dict.get("preset_kwargs", {}).items() if k in field_names}
                 kwargs["sim_type"] = sim_key
                 return cls(**kwargs).build()
 
@@ -204,16 +194,16 @@ def detect_sim_type(metadata: dict) -> str:
     if train_sims and len(train_sims) > 1:
         return "MultiSim(" + "+".join(train_sims) + ")"
 
-    env_name = metadata.get('config', {}).get('env', {}).get('env_name', '')
+    env_name = metadata.get("config", {}).get("env", {}).get("env_name", "")
     if "Genesis" in env_name:
         return "Genesis"
     elif "Newton" in env_name:
         return "Newton"
     elif "MujocoEnv" in env_name:
         return "MujocoEnv"
-    elif env_name == 'Maniskill':
+    elif env_name == "Maniskill":
         return "ManiSkill"
-    elif env_name == 'Gymnasium':
+    elif env_name == "Gymnasium":
         return "Gymnasium"
 
     # Fallback: check sim_type field directly
@@ -232,18 +222,23 @@ def get_initializer(sim_type: str) -> SimInitializer:
     """Lazy-import factory: return the appropriate SimInitializer subclass."""
     if sim_type == "Genesis":
         from .genesis import GenesisInitializer
+
         return GenesisInitializer()
     elif sim_type == "Newton":
         from .newton import NewtonInitializer
+
         return NewtonInitializer()
     elif sim_type == "MujocoEnv":
         from .mjlab import MujocoInitializer
+
         return MujocoInitializer()
     elif sim_type == "ManiSkill":
         from .maniskill import ManiSkillInitializer
+
         return ManiSkillInitializer()
     elif sim_type == "Gymnasium":
         from .gymnasium import GymnasiumInitializer
+
         return GymnasiumInitializer()
     else:
         raise ValueError(f"Unknown sim_type: {sim_type}")

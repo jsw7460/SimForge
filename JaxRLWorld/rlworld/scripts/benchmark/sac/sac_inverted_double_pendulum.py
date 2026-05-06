@@ -1,20 +1,20 @@
 import os
 
-os.environ['__NV_PRIME_RENDER_OFFLOAD'] = '1'
-os.environ['__GLX_VENDOR_LIBRARY_NAME'] = 'nvidia'
+os.environ["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+os.environ["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
 
-custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets'))
+custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
 import genesis.utils.terrain
 
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.configs.algorithms.sac import SACConfig
-from rlworld.rl.configs import GenesisConfigsForRun, SACPolicyConfig
-from rlworld.rl.runners import OffPolicyRunner
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config
-
 import gymnasium as gym
+
+from rlworld.rl.configs import GenesisConfigsForRun, SACPolicyConfig
+from rlworld.rl.configs.algorithms.sac import SACConfig
+from rlworld.rl.configs.presets.go2_flat.mlp import get_config
+from rlworld.rl.runners import OffPolicyRunner
 
 
 def main():
@@ -27,12 +27,7 @@ def main():
     cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
 
     sac_config = SACConfig(
-        actor_lr=3e-4,
-        critic_lr=3e-4,
-        tau=0.005,
-        batch_size=256,
-        buffer_size=1_000_000,
-        learning_starts=100
+        actor_lr=3e-4, critic_lr=3e-4, tau=0.005, batch_size=256, buffer_size=1_000_000, learning_starts=100
     )
 
     cfgs_for_run.algorithm = sac_config
@@ -44,17 +39,13 @@ def main():
 
     cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(SACPolicyConfig)
     cfgs_for_run.nn.policy.distribution_type = "gaussian"
-    cfgs_for_run.nn.policy.actor_kwargs.update({
-        "hidden_dims": [128, 128],
-        "activation": "tanh"
-    })
-    cfgs_for_run.nn.policy.critic_kwargs.update({
-        "hidden_dims": [256, 128],
-        "activation": "tanh"
-    })
+    cfgs_for_run.nn.policy.actor_kwargs.update({"hidden_dims": [128, 128], "activation": "tanh"})
+    cfgs_for_run.nn.policy.critic_kwargs.update({"hidden_dims": [256, 128], "activation": "tanh"})
+
+    from gymnasium.vector import SyncVectorEnv
 
     from rlworld.rl.envs import GymnasiumEnv
-    from gymnasium.vector import SyncVectorEnv
+
     def make_env(seed):
         def _init():
             return gym.make("InvertedDoublePendulum-v4")
@@ -71,7 +62,7 @@ def main():
         act_cfg=cfgs_for_run.action,
         reward_cfg=cfgs_for_run.reward,
         command_cfg=cfgs_for_run.command,
-        seed=42
+        seed=42,
     )
 
     runner = OffPolicyRunner(env=env, cfgs=cfgs_for_run, use_wandb=True)
@@ -79,7 +70,7 @@ def main():
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

@@ -1,4 +1,5 @@
 import math
+
 import torch
 from torch import nn
 
@@ -23,23 +24,17 @@ class MaskedTransformerLayer(nn.Module):
         nhead: int,
         adjacency_matrix: torch.Tensor,
         dim_feedforward: int = 512,
-        use_mask: bool = True
+        use_mask: bool = True,
     ):
         super().__init__()
         self.embed_dim = embed_dim
 
         # Multi-head self-attention
-        self.attention = nn.MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=nhead,
-            batch_first=True
-        )
+        self.attention = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=nhead, batch_first=True)
 
         # Feedforward network
         self.ffn = nn.Sequential(
-            nn.Linear(embed_dim, dim_feedforward),
-            nn.ReLU(),
-            nn.Linear(dim_feedforward, embed_dim)
+            nn.Linear(embed_dim, dim_feedforward), nn.ReLU(), nn.Linear(dim_feedforward, embed_dim)
         )
 
         # Layer normalization
@@ -57,9 +52,9 @@ class MaskedTransformerLayer(nn.Module):
 
             # Convert to attention mask format (0 = can attend, -inf = cannot attend)
             attn_mask = torch.zeros_like(mask, dtype=torch.float)
-            attn_mask[~mask] = float('-inf')
+            attn_mask[~mask] = float("-inf")
 
-            self.register_buffer('attn_mask', attn_mask)
+            self.register_buffer("attn_mask", attn_mask)
         else:
             self.attn_mask = None
 
@@ -80,11 +75,7 @@ class MaskedTransformerLayer(nn.Module):
             output: (batch, num_bodies, embed_dim)
         """
         # Masked self-attention with residual connection
-        attn_out, _ = self.attention(
-            x, x, x,
-            attn_mask=self.attn_mask,
-            need_weights=False
-        )
+        attn_out, _ = self.attention(x, x, x, attn_mask=self.attn_mask, need_weights=False)
         x = self.norm1(x + attn_out)
 
         # Feedforward with residual connection
@@ -135,9 +126,9 @@ class PairwiseBilinearBias(nn.Module):
         else:
             # Per-head: (H, D, D)
             # (B, N, D) @ (H, D, D) → (B, H, N, D)
-            fW = torch.einsum('bnd,hdk->bhnk', features, self.W)
+            fW = torch.einsum("bnd,hdk->bhnk", features, self.W)
             # (B, H, N, D) @ (B, D, N) → (B, H, N, N)
-            bias = torch.einsum('bhnk,bmk->bhnm', fW, features)
+            bias = torch.einsum("bhnk,bmk->bhnm", fW, features)
 
         return bias
 
@@ -158,7 +149,7 @@ class DualBiasedAttentionLayer(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
 
         # Q, K, V projections
         self.q_proj = nn.Linear(embed_dim, embed_dim)
@@ -207,14 +198,16 @@ class DualBiasedAttentionLayer(nn.Module):
         if attn_mask is not None:
             # attn_mask: (N, N), True = cannot attend
             mask_bias = torch.zeros(N, N, device=x.device, dtype=x.dtype)
-            mask_bias.masked_fill_(attn_mask, float('-inf'))
+            mask_bias.masked_fill_(attn_mask, float("-inf"))
             attn_bias = precomputed_bias + mask_bias.unsqueeze(0).unsqueeze(0)
         else:
             attn_bias = precomputed_bias
 
         # Flash attention with bias
         attn_out = torch.nn.functional.scaled_dot_product_attention(
-            Q, K, V,
+            Q,
+            K,
+            V,
             attn_mask=attn_bias,
             dropout_p=self.dropout.p if self.training else 0.0,
         )

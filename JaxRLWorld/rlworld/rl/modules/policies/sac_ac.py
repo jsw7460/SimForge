@@ -4,10 +4,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from .base_ac import BaseActorCritic
-from rlworld.rl.modules.utils import get_activation
 from rlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
 from rlworld.rl.modules.normalization import EmpiricalNormalization
+from rlworld.rl.modules.utils import get_activation
+
+from .base_ac import BaseActorCritic
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.scene_manager import KinematicTree
@@ -24,6 +25,7 @@ class SACLogStdNetwork(eqx.Module):
 
     Used in SAC for exploration control.
     """
+
     linears: list
     activation: str = eqx.field(static=True)
     log_std_min: float = eqx.field(static=True)
@@ -106,6 +108,7 @@ class SACQNetwork(eqx.Module):
 
     Takes (observation, action) as input and outputs Q-value.
     """
+
     linears: list
     activation: str = eqx.field(static=True)
 
@@ -168,6 +171,7 @@ class SACActorCritic(BaseActorCritic):
     - Separate log_std network for state-dependent exploration
     - Squashed Gaussian distribution for bounded actions
     """
+
     log_std_net: SACLogStdNetwork
     critic1: SACQNetwork
     critic2: SACQNetwork
@@ -216,7 +220,7 @@ class SACActorCritic(BaseActorCritic):
         self.critic_obs_dim = num_critic_obs
         self.num_actions = num_actions
         self.distribution_type = distribution_type
-        self.is_squashed = (distribution_type == "squashed_gaussian")
+        self.is_squashed = distribution_type == "squashed_gaussian"
         self.init_noise_std = init_noise_std
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
@@ -510,7 +514,7 @@ class SACActorCritic(BaseActorCritic):
         extra = {}
 
         # Gate values (for gated encoders)
-        if hasattr(self.actor, 'encoder') and hasattr(self.actor.encoder, 'last_gate'):
+        if hasattr(self.actor, "encoder") and hasattr(self.actor.encoder, "last_gate"):
             gate = self.actor.encoder.last_gate
             if gate is not None:
                 gate_mean = gate.mean(axis=0)

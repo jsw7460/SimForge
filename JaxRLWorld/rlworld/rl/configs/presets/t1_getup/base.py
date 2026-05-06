@@ -38,32 +38,30 @@ from rlworld.rl.configs.common_config_classes import (
     PPOPolicyConfig,
     RunnerConfig,
 )
-from rlworld.rl.configs.events import EventTermConfig
-from rlworld.rl.configs.robots.t1 import T1Config
 from rlworld.rl.configs.curriculums import (
     CurriculumManagerConfig,
     CurriculumTermConfig,
 )
+from rlworld.rl.configs.events import EventTermConfig
+from rlworld.rl.configs.robots.t1 import T1Config
 from rlworld.rl.envs.mdp.curriculums import (
     reward_curriculum,
-    termination_curriculum,
 )
 from rlworld.rl.envs.mdp.events import common as common_ef
-
 
 # ── Per-simulator constants ──────────────────────────────────────────
 # 50 Hz control (decimation 4 × dt 0.005 s = 0.02 s).
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
-    "newton":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "newton": {"dt": 0.005, "substeps": 1, "decimation": 4},
     "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
-    "mujoco":  {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "mujoco": {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
-    "newton":  "T1_Getup_Newton",
+    "newton": "T1_Getup_Newton",
     "genesis": "T1_Getup_Genesis",
-    "mujoco":  "T1_Getup_Mujoco",
+    "mujoco": "T1_Getup_Mujoco",
 }
 
 
@@ -76,10 +74,7 @@ def _get_sim_builders(sim_type: str):
     elif sim_type == "mujoco":
         from . import _mujoco_builders as mod
     else:
-        raise ValueError(
-            f"Unknown sim_type: {sim_type!r}. "
-            f"Expected one of {sorted(_SIM_TIMINGS)}."
-        )
+        raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
     return mod
 
 
@@ -115,7 +110,7 @@ class T1GetupConfig:
     # "soft_limit" → uniform over full soft joint limit range
     # (mjlab_playground default). A ``(lo, hi)`` tuple switches back
     # to additive noise around the default pose.
-    fall_joint_noise_range: "tuple[float, float] | str" = "soft_limit"
+    fall_joint_noise_range: tuple[float, float] | str = "soft_limit"
     standing_z_offset: float = 0.02
 
     # Action settling: hold joint position for the first 50 control
@@ -170,21 +165,23 @@ class T1GetupConfig:
     # Genesis/MuJoCo, so the same dict works on all three sims.
     # Values are looser than mjlab's T1 because T1 getup converges
     # slower on a novel framework — Phase K tuning will tighten.
-    posture_std_dict: Dict[str, float] = field(default_factory=lambda: {
-        r".*_Hip_Roll":       0.08,
-        r".*_Hip_Yaw":        0.08,
-        r".*_Hip_Pitch":      0.12,
-        r".*_Knee_Pitch":     0.15,
-        r".*_Ankle_Pitch":    0.2,
-        r".*_Ankle_Roll":     0.2,
-        r".*AAHead_yaw":      0.15,
-        r".*Head_pitch":      0.15,
-        r".*Waist":           0.5,
-        r".*_Shoulder_Pitch": 0.5,
-        r".*_Shoulder_Roll":  0.5,
-        r".*_Elbow_Pitch":    0.5,
-        r".*_Elbow_Yaw":      0.5,
-    })
+    posture_std_dict: Dict[str, float] = field(
+        default_factory=lambda: {
+            r".*_Hip_Roll": 0.08,
+            r".*_Hip_Yaw": 0.08,
+            r".*_Hip_Pitch": 0.12,
+            r".*_Knee_Pitch": 0.15,
+            r".*_Ankle_Pitch": 0.2,
+            r".*_Ankle_Roll": 0.2,
+            r".*AAHead_yaw": 0.15,
+            r".*Head_pitch": 0.15,
+            r".*Waist": 0.5,
+            r".*_Shoulder_Pitch": 0.5,
+            r".*_Shoulder_Roll": 0.5,
+            r".*_Elbow_Pitch": 0.5,
+            r".*_Elbow_Yaw": 0.5,
+        }
+    )
 
     # Algorithm.
     algorithm_name: str = "PPO"
@@ -222,7 +219,8 @@ class T1GetupConfig:
         return cfgs
 
     def _get_preset_kwargs(self) -> Dict[str, Any]:
-        from dataclasses import fields, MISSING
+        from dataclasses import MISSING, fields
+
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":
@@ -298,6 +296,7 @@ class T1GetupConfig:
         of mjlab's weights with positive sign. The resulting cost is
         mathematically identical.
         """
+
         @dataclass
         class _CurriculumCfg(CurriculumManagerConfig):
             action_rate_weight: CurriculumTermConfig = field(
@@ -306,9 +305,9 @@ class T1GetupConfig:
                     params={
                         "reward_name": "raw_action_rate_l2",
                         "stages": [
-                            {"step": 0,         "weight": 0.01},
-                            {"step": 600 * 24,  "weight": 0.05},
-                            {"step": 900 * 24,  "weight": 0.08},
+                            {"step": 0, "weight": 0.01},
+                            {"step": 600 * 24, "weight": 0.05},
+                            {"step": 900 * 24, "weight": 0.08},
                             {"step": 1200 * 24, "weight": 0.10},
                         ],
                     },
@@ -320,8 +319,8 @@ class T1GetupConfig:
                     params={
                         "reward_name": "joint_vel_l2",
                         "stages": [
-                            {"step": 0,         "weight": 0.0},
-                            {"step": 900 * 24,  "weight": 0.005},
+                            {"step": 0, "weight": 0.0},
+                            {"step": 900 * 24, "weight": 0.005},
                             {"step": 1200 * 24, "weight": 0.008},
                             {"step": 1500 * 24, "weight": 0.010},
                         ],

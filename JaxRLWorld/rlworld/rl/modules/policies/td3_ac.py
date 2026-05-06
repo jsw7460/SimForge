@@ -1,12 +1,13 @@
+import math
 from typing import TYPE_CHECKING, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import math
 
-from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
 from rlworld.rl.modules.normalization import EmpiricalNormalization
+from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
+
 from .base_ac import BaseActorCritic
 
 if TYPE_CHECKING:
@@ -20,6 +21,7 @@ __all__ = ["TD3ActorCritic", "TD3QNetwork"]
 
 class TD3QNetwork(eqx.Module):
     """Q-network for TD3."""
+
     net: MLP
 
     def __init__(
@@ -86,6 +88,7 @@ class TD3ActorCritic(BaseActorCritic):
     - No log_std network (unlike SAC)
     - Actions bounded to [-1, 1] via tanh
     """
+
     critic1: TD3QNetwork
     critic2: TD3QNetwork
 
@@ -142,7 +145,7 @@ class TD3ActorCritic(BaseActorCritic):
             self.actor_obs_normalizer = None
             self.critic_obs_normalizer = None
 
-        print(f"🎭 TD3 Actor-Critic: deterministic policy")
+        print("🎭 TD3 Actor-Critic: deterministic policy")
         print(f"🤖 Actor: {actor_class_name}")
         print(f"📏 Obs normalization: {obs_normalization}")
 
@@ -310,7 +313,7 @@ class TD3ActorCritic(BaseActorCritic):
         extra = {}
 
         # Gate values (for gated encoders)
-        if hasattr(self.actor, 'encoder') and hasattr(self.actor.encoder, 'last_gate'):
+        if hasattr(self.actor, "encoder") and hasattr(self.actor.encoder, "last_gate"):
             gate = self.actor.encoder.last_gate
             if gate is not None:
                 gate_mean = gate.mean(axis=0)

@@ -36,14 +36,17 @@ class GenesisStateSync:
 
         # Pre-slice and detach training state for this env idx
         slices = []
-        for train_ss, plan_ss in zip(
-            train_state.solvers_state, self._cached_plan_state.solvers_state
-        ):
+        for train_ss, plan_ss in zip(train_state.solvers_state, self._cached_plan_state.solvers_state):
             solver_slices = {}
             for attr_name in [
-                "qpos", "dofs_vel", "dofs_acc",
-                "links_pos", "links_quat",
-                "i_pos_shift", "mass_shift", "friction_ratio",
+                "qpos",
+                "dofs_vel",
+                "dofs_acc",
+                "links_pos",
+                "links_quat",
+                "i_pos_shift",
+                "mass_shift",
+                "friction_ratio",
             ]:
                 src = getattr(train_ss, attr_name, None)
                 dst = getattr(plan_ss, attr_name, None)
@@ -71,13 +74,16 @@ class GenesisStateSync:
             # Fallback: get state fresh
             train_state = self.train_env.scene.get_state()
             plan_state = self.plan_env.scene.get_state()
-            for train_ss, plan_ss in zip(
-                train_state.solvers_state, plan_state.solvers_state
-            ):
+            for train_ss, plan_ss in zip(train_state.solvers_state, plan_state.solvers_state):
                 for attr_name in [
-                    "qpos", "dofs_vel", "dofs_acc",
-                    "links_pos", "links_quat",
-                    "i_pos_shift", "mass_shift", "friction_ratio",
+                    "qpos",
+                    "dofs_vel",
+                    "dofs_acc",
+                    "links_pos",
+                    "links_quat",
+                    "i_pos_shift",
+                    "mass_shift",
+                    "friction_ratio",
                 ]:
                     src = getattr(train_ss, attr_name, None)
                     dst = getattr(plan_ss, attr_name, None)
@@ -108,22 +114,16 @@ class GenesisStateSync:
 
         # --- Command Manager ---
         self.plan_env.command_manager._commands_tensor[:] = (
-            _d(self.train_env.command_manager._commands_tensor[idx])
-            .unsqueeze(0)
-            .expand(S, -1)
+            _d(self.train_env.command_manager._commands_tensor[idx]).unsqueeze(0).expand(S, -1)
         )
 
         # --- Action Manager (action history for action_rate reward) ---
         for i in range(self.train_env.act_manager._action_history_len):
             self.plan_env.act_manager._raw_action_history[i][:] = (
-                _d(self.train_env.act_manager._raw_action_history[i][idx])
-                .unsqueeze(0)
-                .expand(S, -1)
+                _d(self.train_env.act_manager._raw_action_history[i][idx]).unsqueeze(0).expand(S, -1)
             )
             self.plan_env.act_manager._processed_action_history[i][:] = (
-                _d(self.train_env.act_manager._processed_action_history[i][idx])
-                .unsqueeze(0)
-                .expand(S, -1)
+                _d(self.train_env.act_manager._processed_action_history[i][idx]).unsqueeze(0).expand(S, -1)
             )
 
         # --- Contact Manager (per-group buffers) ---
@@ -131,8 +131,11 @@ class GenesisStateSync:
             train_group = self.train_env.contact_manager._get_group(group_name)
             plan_group = self.plan_env.contact_manager._get_group(group_name)
             for attr in [
-                "current_air_time", "current_contact_time",
-                "last_air_time", "last_contact_time", "_prev_is_contact",
+                "current_air_time",
+                "current_contact_time",
+                "last_air_time",
+                "last_contact_time",
+                "_prev_is_contact",
             ]:
                 src = getattr(train_group, attr, None)
                 if src is None:
@@ -141,15 +144,13 @@ class GenesisStateSync:
                 dst[:] = _d(src[idx]).unsqueeze(0).expand_as(dst)
 
         # --- Termination Manager ---
-        self.plan_env.termination_manager.episode_length_buf[:] = (
-            _d(self.train_env.termination_manager.episode_length_buf[idx])
+        self.plan_env.termination_manager.episode_length_buf[:] = _d(
+            self.train_env.termination_manager.episode_length_buf[idx]
         )
 
         # --- Gait Manager (if LocomotionEnv) ---
         if hasattr(self.train_env, "gait_manager") and hasattr(self.plan_env, "gait_manager"):
-            self.plan_env.gait_manager.gait_timer[:] = (
-                _d(self.train_env.gait_manager.gait_timer[idx])
-            )
+            self.plan_env.gait_manager.gait_timer[:] = _d(self.train_env.gait_manager.gait_timer[idx])
 
         # --- Stateful Reward Terms (e.g., feet_swing_height_mjlab.peak_heights) ---
         self._sync_stateful_reward_terms(idx)

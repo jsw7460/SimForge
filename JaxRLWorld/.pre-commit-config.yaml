@@ -1,0 +1,40 @@
+# Pre-commit hooks for JaxRLWorld.
+#
+# One-time setup:   uv run pre-commit install     (or: pre-commit install)
+# Manual full run:  uv run pre-commit run --all-files
+# Skip in emergency:  git commit --no-verify         (avoid unless really needed)
+
+repos:
+  # ── Ruff: lint + format (Rust-fast, replaces flake8/isort/black) ──────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── Generic correctness/safety hooks ──────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # Whitespace / line-ending hygiene
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+      # File-system sanity
+      - id: check-added-large-files
+        args: [--maxkb=2000]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+
+      # Format-specific syntax checks
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+
+      # Safety
+      - id: detect-private-key
+      - id: debug-statements   # `breakpoint()` / `pdb.set_trace()` left behind

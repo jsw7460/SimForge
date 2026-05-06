@@ -14,6 +14,7 @@ Exposed symbols:
   - :func:`penalize_orientation_control`
   - :func:`reward_body_height_cmd`
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 
-def penalize_action_smoothness_1(env: "World") -> torch.Tensor:
+def penalize_action_smoothness_1(env: World) -> torch.Tensor:
     """Penalize 1st-order action changes (processed). WTW: _reward_action_smoothness_1.
 
     Uses processed_action_history (joint position targets) and masks
@@ -38,11 +39,11 @@ def penalize_action_smoothness_1(env: "World") -> torch.Tensor:
     """
     hist = env.act_manager.processed_action_history
     diff = torch.square(hist[0] - hist[1])
-    mask = (env.act_manager.raw_action_history[1] != 0)
+    mask = env.act_manager.raw_action_history[1] != 0
     return -torch.sum(diff * mask, dim=1)
 
 
-def penalize_action_smoothness_2(env: "World") -> torch.Tensor:
+def penalize_action_smoothness_2(env: World) -> torch.Tensor:
     """Penalize 2nd-order action changes (processed). WTW: _reward_action_smoothness_2.
 
     Second-order finite difference of joint position targets, masked
@@ -50,14 +51,12 @@ def penalize_action_smoothness_2(env: "World") -> torch.Tensor:
     """
     hist = env.act_manager.processed_action_history
     diff = torch.square(hist[0] - 2.0 * hist[1] + hist[2])
-    mask1 = (env.act_manager.raw_action_history[1] != 0)
-    mask2 = (env.act_manager.raw_action_history[2] != 0)
+    mask1 = env.act_manager.raw_action_history[1] != 0
+    mask2 = env.act_manager.raw_action_history[2] != 0
     return -torch.sum(diff * mask1 * mask2, dim=1)
 
 
-def penalize_orientation_control(
-    env: "World", entity_name: str = "robot"
-) -> torch.Tensor:
+def penalize_orientation_control(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Penalize deviation from commanded body orientation. WTW: _reward_orientation_control.
 
     Constructs desired body quaternion from body_pitch and body_roll commands,
@@ -76,19 +75,15 @@ def penalize_orientation_control(
     quat_pitch = quat_from_angle_axis_wxyz(-body_pitch, axis_y)
     desired_quat = quat_mul_wxyz(quat_roll, quat_pitch)
 
-    gravity_vec = torch.tensor(
-        [0.0, 0.0, -1.0], device=device
-    ).expand(len(body_pitch), -1)
+    gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=device).expand(len(body_pitch), -1)
     desired_gravity = quat_rotate_inverse_wxyz(desired_quat, gravity_vec)
 
     actual_gravity = env.get_robot_data(entity_name).projected_gravity_b
-    return -torch.sum(
-        torch.square(actual_gravity[:, :2] - desired_gravity[:, :2]), dim=1
-    )
+    return -torch.sum(torch.square(actual_gravity[:, :2] - desired_gravity[:, :2]), dim=1)
 
 
 def reward_body_height_cmd(
-    env: "World",
+    env: World,
     base_height_target: float = 0.30,
     entity_name: str = "robot",
 ) -> torch.Tensor:

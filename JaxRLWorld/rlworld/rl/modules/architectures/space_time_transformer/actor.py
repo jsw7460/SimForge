@@ -11,6 +11,7 @@ tracking presets pass ``num_future_frames=0`` so the tokenizer produces
 a single time token and the temporal attention layers become no-ops,
 reducing the architecture to a pure body-axis Body-Transformer.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Sequence
@@ -38,7 +39,7 @@ __all__ = ["SpaceTimeTransformerActor"]
 
 
 def _resolve_body_indices(
-    kinematic_tree: "KinematicTree",
+    kinematic_tree: KinematicTree,
     body_names: Sequence[str],
 ) -> list[int]:
     """Look up each name in the kinematic tree's link list, preserving order."""
@@ -46,10 +47,7 @@ def _resolve_body_indices(
     out: list[int] = []
     for n in body_names:
         if n not in name_to_idx:
-            raise KeyError(
-                f"Tracked body name {n!r} not found in kinematic tree. "
-                f"Available: {sorted(name_to_idx)}"
-            )
+            raise KeyError(f"Tracked body name {n!r} not found in kinematic tree. Available: {sorted(name_to_idx)}")
         out.append(name_to_idx[n])
     return out
 
@@ -66,12 +64,12 @@ class SpaceTimeTransformerActor(BaseActor):
 
     def __init__(
         self,
-        kinematic_tree: "KinematicTree",
+        kinematic_tree: KinematicTree,
         num_obs: int,
         num_actions: int,
         tracked_body_names: Sequence[str],
         future_offsets: Sequence[int],
-        actuated_joint_names: "Sequence[str] | None" = None,
+        actuated_joint_names: Sequence[str] | None = None,
         ref_feature_dim: int = 9,
         embed_dim: int = 128,
         num_heads: int = 4,
@@ -99,7 +97,8 @@ class SpaceTimeTransformerActor(BaseActor):
         self.bottleneck_dim = bottleneck_dim
 
         tracked_body_indices = _resolve_body_indices(
-            kinematic_tree, tracked_body_names,
+            kinematic_tree,
+            tracked_body_names,
         )
         num_future_frames = len(future_offsets)
         future_window_dim = num_future_frames * len(tracked_body_names) * ref_feature_dim
@@ -201,7 +200,8 @@ class SpaceTimeTransformerActor(BaseActor):
             return self._forward_single(observation, key), {}
         if key is None:
             keys = jnp.broadcast_to(
-                jax.random.PRNGKey(0), (observation.shape[0], 2),
+                jax.random.PRNGKey(0),
+                (observation.shape[0], 2),
             )
         else:
             keys = jax.random.split(key, observation.shape[0])

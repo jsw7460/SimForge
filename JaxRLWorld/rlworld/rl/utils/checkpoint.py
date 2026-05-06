@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Optional
 from rlworld.rl.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs import World
     from rlworld.rl.configs import ConfigsForRun
+    from rlworld.rl.envs import World
     from rlworld.rl.runners import BaseRunner
 
 
@@ -128,9 +128,7 @@ def load_runner(
 
     runner_class_name = metadata.get("runner_class")
     if runner_class_name is None:
-        raise ValueError(
-            "Checkpoint missing 'runner_class' in train_state.yaml."
-        )
+        raise ValueError("Checkpoint missing 'runner_class' in train_state.yaml.")
 
     from rlworld.rl import runners
 
@@ -160,10 +158,7 @@ def get_checkpoint_info(checkpoint_path: str) -> dict:
     metadata = load_checkpoint_metadata(checkpoint_path)
 
     files = os.listdir(checkpoint_path)
-    file_sizes = {
-        f: os.path.getsize(os.path.join(checkpoint_path, f))
-        for f in files
-    }
+    file_sizes = {f: os.path.getsize(os.path.join(checkpoint_path, f)) for f in files}
 
     return {
         "runner_class": metadata.get("runner_class", "unknown"),
@@ -187,7 +182,7 @@ def print_checkpoint_info(checkpoint_path: str) -> None:
     print(f"  Iteration: {info['iteration']}")
     print(f"  Timesteps: {info['total_timesteps']:,}")
     print(f"  Training time: {info['total_time']:.1f}s")
-    print(f"\n  Files:")
-    for fname, size in info['files'].items():
+    print("\n  Files:")
+    for fname, size in info["files"].items():
         print(f"    {fname}: {size / 1024:.1f} KB")
     print(f"{'=' * 50}\n")

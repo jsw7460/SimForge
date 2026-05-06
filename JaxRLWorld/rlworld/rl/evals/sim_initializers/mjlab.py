@@ -5,11 +5,10 @@ from typing import Any
 import torch
 
 from rlworld.rl.evals.sim_initializers import SimInitializer
-from rlworld.rl.utils.console import print_info, print_success, print_error
+from rlworld.rl.utils.console import print_error, print_info, print_success
 
 
 class MujocoInitializer(SimInitializer):
-
     def init_device(self) -> torch.device:
         return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -66,10 +65,11 @@ class MujocoInitializer(SimInitializer):
 
     def create_play_scene(self, env: Any):
         from rlworld.rl.vis.viser.play_scene import MujocoPlayScene
+
         return MujocoPlayScene(env.scene_manager)
 
     def cleanup(self, env: Any) -> None:
-        if hasattr(env, 'visualization_manager'):
+        if hasattr(env, "visualization_manager"):
             print_info("Closing Mjlab viewer...")
             try:
                 env.visualization_manager.close()

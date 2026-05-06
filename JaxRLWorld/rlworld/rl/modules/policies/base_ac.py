@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Any
 
 import equinox as eqx
 import jax
@@ -16,6 +16,7 @@ class BaseActorCritic(eqx.Module):
 
     Equivalent to PyTorch BaseActorCritic.
     """
+
     actor: eqx.Module
     critic: eqx.Module
 
@@ -50,24 +51,26 @@ class BaseActorCritic(eqx.Module):
         actor_kwargs = actor_kwargs.copy()
 
         if actor_class_name == "MLPActor":
-            actor_kwargs.update({
-                "num_obs": actor_obs_dim,
-                "num_actions": num_actions,
-                "ortho_init": actor_kwargs["ortho_init"],
-                "key": key,
-            })
+            actor_kwargs.update(
+                {
+                    "num_obs": actor_obs_dim,
+                    "num_actions": num_actions,
+                    "ortho_init": actor_kwargs["ortho_init"],
+                    "key": key,
+                }
+            )
         else:
             if kinematic_tree is None:
-                raise ValueError(
-                    f"{actor_class_name} requires kinematic_tree."
-                )
-            actor_kwargs.update({
-                "kinematic_tree": kinematic_tree,
-                "num_obs": actor_obs_dim,
-                "num_actions": num_actions,
-                "actuated_joint_names": actuated_joint_names,
-                "key": key,
-            })
+                raise ValueError(f"{actor_class_name} requires kinematic_tree.")
+            actor_kwargs.update(
+                {
+                    "kinematic_tree": kinematic_tree,
+                    "num_obs": actor_obs_dim,
+                    "num_actions": num_actions,
+                    "actuated_joint_names": actuated_joint_names,
+                    "key": key,
+                }
+            )
 
         return ActorClass(**actor_kwargs)
 

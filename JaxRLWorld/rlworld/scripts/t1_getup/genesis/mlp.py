@@ -1,4 +1,5 @@
 """Train T1 fall-recovery (getup) policy in Genesis."""
+
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from rlworld.rl.runners import BaseRunner
 
@@ -12,9 +13,9 @@ def _dump_genesis_friction(env) -> None:
     robot_entity = env.scene_manager["robot"]
     solver = robot_entity._solver
 
-    base_friction = solver.geoms_info.friction.to_numpy()          # (n_geoms,)
+    base_friction = solver.geoms_info.friction.to_numpy()  # (n_geoms,)
     friction_ratio = solver.geoms_state.friction_ratio.to_numpy()  # (n_geoms, n_envs)
-    link_idx = solver.geoms_info.link_idx.to_numpy()               # (n_geoms,)
+    link_idx = solver.geoms_info.link_idx.to_numpy()  # (n_geoms,)
 
     n_geoms, n_envs = friction_ratio.shape
     ratio_env0 = friction_ratio[:, 0]
@@ -28,8 +29,7 @@ def _dump_genesis_friction(env) -> None:
     print("=" * 96)
     print(f"Genesis per-geom friction  (n_geoms={n_geoms}, n_envs={n_envs})")
     print("=" * 96)
-    print(f"{'idx':>4} | {'base_mu':>8} | {'ratio[0]':>8} | {'eff[0]':>8} | "
-          f"{'ratio range (env-wide)':>28} | link")
+    print(f"{'idx':>4} | {'base_mu':>8} | {'ratio[0]':>8} | {'eff[0]':>8} | {'ratio range (env-wide)':>28} | link")
     print("-" * 96)
     for gi in range(n_geoms):
         li = int(link_idx[gi])
@@ -40,9 +40,11 @@ def _dump_genesis_friction(env) -> None:
         lo = float(friction_ratio[gi].min())
         hi = float(friction_ratio[gi].max())
         tag = "(randomized)" if (hi - lo) > 1e-6 else "(const)"
-        print(f"{gi:>4} | {base_friction[gi]:>8.4f} | {ratio_env0[gi]:>8.4f} | "
-              f"{effective_env0[gi]:>8.4f} | [{lo:>.4f}, {hi:>.4f}] {tag:<14} | "
-              f"{link_label}")
+        print(
+            f"{gi:>4} | {base_friction[gi]:>8.4f} | {ratio_env0[gi]:>8.4f} | "
+            f"{effective_env0[gi]:>8.4f} | [{lo:>.4f}, {hi:>.4f}] {tag:<14} | "
+            f"{link_label}"
+        )
 
     print("-" * 96)
     if robot_geom_start > 0:
@@ -57,8 +59,7 @@ def _dump_genesis_friction(env) -> None:
             if "foot" in name.lower():
                 eff = float(effective_env0[gi])
                 mx = max(eff, ground_eff)
-                print(f"  geom {gi:3} ({name}): robot_eff={eff:.4f} "
-                      f"ground_eff={ground_eff:.4f} → MAX={mx:.4f}")
+                print(f"  geom {gi:3} ({name}): robot_eff={eff:.4f} ground_eff={ground_eff:.4f} → MAX={mx:.4f}")
     print("=" * 96)
     print()
 

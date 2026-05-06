@@ -3,11 +3,12 @@
 A CommandTerm encapsulates a group of related commands with their own
 sampling logic, resampling timer, and per-step post-processing.
 """
+
 from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
@@ -24,6 +25,7 @@ def _wrap_to_pi(angles: torch.Tensor) -> torch.Tensor:
 # Base
 # ──────────────────────────────────────────────
 
+
 @dataclass
 class CommandTermCfg(ABC):
     """Configuration for a CommandTerm.
@@ -31,11 +33,11 @@ class CommandTermCfg(ABC):
     Each subclass defines its own fields (ranges, flags, etc.)
     and implements ``build()`` to construct the corresponding CommandTerm.
     """
+
     resampling_time_range: tuple[float, float] = (5.0, 10.0)
 
     @abstractmethod
-    def build(self, env: "World") -> "CommandTerm":
-        ...
+    def build(self, env: World) -> CommandTerm: ...
 
 
 class CommandTerm(ABC):
@@ -52,15 +54,13 @@ class CommandTerm(ABC):
 
     column_names: tuple[str, ...] = ()
 
-    def __init__(self, env: "World", cfg: CommandTermCfg):
+    def __init__(self, env: World, cfg: CommandTermCfg):
         self._env = env
         self.cfg = cfg
         self.num_envs = env.num_envs
         self.device = env.device
         self.time_left = torch.zeros(self.num_envs, device=self.device)
-        self._externally_controlled = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
+        self._externally_controlled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
     @property
     @abstractmethod
@@ -82,7 +82,9 @@ class CommandTerm(ABC):
         self.time_left -= dt
         resample_ids = (self.time_left <= 0.0).nonzero(as_tuple=False).flatten()
         if len(resample_ids) > 0:
-            self.time_left[resample_ids] = torch.empty(len(resample_ids), device=self.device).uniform_(*self.cfg.resampling_time_range)
+            self.time_left[resample_ids] = torch.empty(len(resample_ids), device=self.device).uniform_(
+                *self.cfg.resampling_time_range
+            )
             self._resample_command(resample_ids)
         self._update_command()
 
@@ -119,13 +121,16 @@ class CommandTerm(ABC):
         auto-resampling after an episode reset.
         """
         self._externally_controlled[env_ids] = False
-        self.time_left[env_ids] = torch.empty(len(env_ids), device=self.device).uniform_(*self.cfg.resampling_time_range)
+        self.time_left[env_ids] = torch.empty(len(env_ids), device=self.device).uniform_(
+            *self.cfg.resampling_time_range
+        )
         self._resample_command(env_ids)
 
 
 # ──────────────────────────────────────────────
 # VelocityCommandTerm
 # ──────────────────────────────────────────────
+
 
 @dataclass
 class VelocityCommandTermCfg(CommandTermCfg):
@@ -134,6 +139,7 @@ class VelocityCommandTermCfg(CommandTermCfg):
     Samples (lin_vel_x, lin_vel_y, ang_vel) uniformly from configured ranges.
     Optionally applies heading P-control and standing-env zeroing.
     """
+
     lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
     lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
     ang_vel_range: tuple[float, float] = (-1.0, 1.0)
@@ -144,7 +150,7 @@ class VelocityCommandTermCfg(CommandTermCfg):
     heading_range: tuple[float, float] = (-3.14, 3.14)
     rel_heading_envs: float = 1.0
 
-    def build(self, env: "World") -> "VelocityCommandTerm":
+    def build(self, env: World) -> VelocityCommandTerm:
         return VelocityCommandTerm(env, self)
 
 
@@ -155,7 +161,7 @@ class VelocityCommandTerm(CommandTerm):
 
     cfg: VelocityCommandTermCfg
 
-    def __init__(self, env: "World", cfg: VelocityCommandTermCfg):
+    def __init__(self, env: World, cfg: VelocityCommandTermCfg):
         super().__init__(env, cfg)
         self._command = torch.zeros(self.num_envs, 3, device=self.device)
         self.is_standing_env = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -246,6 +252,7 @@ class GaitCommandTermCfg(CommandTermCfg):
     Gait phase/offset/bound are sampled uniformly then post-processed
     according to the selected ``gait_category_mode``.
     """
+
     # Sampling ranges for each parameter.
     freq_range: tuple[float, float] = (2.0, 4.0)
     phase_range: tuple[float, float] = (0.0, 1.0)
@@ -278,7 +285,7 @@ class GaitCommandTermCfg(CommandTermCfg):
     # Matches WTW ``binary_phases``.
     binary_phases: bool = True
 
-    def build(self, env: "World") -> "GaitCommandTerm":
+    def build(self, env: World) -> GaitCommandTerm:
         return GaitCommandTerm(env, self)
 
 
@@ -293,14 +300,22 @@ class GaitCommandTerm(CommandTerm):
     """
 
     column_names = (
-        "gait_freq", "gait_phase", "gait_offset", "gait_bound", "gait_duration",
-        "footswing_height", "body_height", "body_pitch", "body_roll",
-        "stance_width", "stance_length",
+        "gait_freq",
+        "gait_phase",
+        "gait_offset",
+        "gait_bound",
+        "gait_duration",
+        "footswing_height",
+        "body_height",
+        "body_pitch",
+        "body_roll",
+        "stance_width",
+        "stance_length",
     )
 
     cfg: GaitCommandTermCfg
 
-    def __init__(self, env: "World", cfg: GaitCommandTermCfg):
+    def __init__(self, env: World, cfg: GaitCommandTermCfg):
         super().__init__(env, cfg)
         self._command = torch.zeros(self.num_envs, _GAIT_DIM, device=self.device)
 
@@ -318,7 +333,9 @@ class GaitCommandTerm(CommandTerm):
         self._command[env_ids, _GAIT_OFFSET] = torch.empty(n, device=self.device).uniform_(*cfg.offset_range)
         self._command[env_ids, _GAIT_BOUND] = torch.empty(n, device=self.device).uniform_(*cfg.bound_range)
         self._command[env_ids, _GAIT_DURATION] = torch.empty(n, device=self.device).uniform_(*cfg.duration_range)
-        self._command[env_ids, _FOOTSWING_HEIGHT] = torch.empty(n, device=self.device).uniform_(*cfg.footswing_height_range)
+        self._command[env_ids, _FOOTSWING_HEIGHT] = torch.empty(n, device=self.device).uniform_(
+            *cfg.footswing_height_range
+        )
         self._command[env_ids, _BODY_HEIGHT] = torch.empty(n, device=self.device).uniform_(*cfg.body_height_range)
         self._command[env_ids, _BODY_PITCH] = torch.empty(n, device=self.device).uniform_(*cfg.body_pitch_range)
         self._command[env_ids, _BODY_ROLL] = torch.empty(n, device=self.device).uniform_(*cfg.body_roll_range)

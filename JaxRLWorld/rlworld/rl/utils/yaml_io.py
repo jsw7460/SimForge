@@ -40,5 +40,5 @@ def load_yaml(path: str | Path) -> dict:
     """Load a YAML file and return its contents as a dict."""
     if not os.path.isfile(path):
         raise FileNotFoundError(f"YAML file not found: {path}")
-    with open(path, "r") as f:
+    with open(path) as f:
         return yaml.safe_load(f)

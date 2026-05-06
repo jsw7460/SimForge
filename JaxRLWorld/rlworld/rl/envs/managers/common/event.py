@@ -22,7 +22,7 @@ class EventManager:
     Terms are discovered via :func:`iter_terms` on the ``EventConfig`` instance.
     """
 
-    def __init__(self, env: "World", config: EventConfig):
+    def __init__(self, env: World, config: EventConfig):
         self.env = env
         self.config = config
         self.device = env.device
@@ -30,9 +30,7 @@ class EventManager:
 
         # Discover named terms and resolve callables
         self._all_terms: dict[str, EventTermConfig] = iter_terms(config, EventTermConfig)
-        self._resolved_fns: dict[str, callable] = {
-            name: term.resolved_func for name, term in self._all_terms.items()
-        }
+        self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
 
         # Group by mode
         self._terms_by_mode: dict[str, list[tuple[str, EventTermConfig]]] = defaultdict(list)
@@ -45,9 +43,7 @@ class EventManager:
 
         for local_idx, (name, term) in enumerate(self._terms_by_mode.get("interval", [])):
             if term.interval_range_s is None:
-                raise ValueError(
-                    f"Interval event term '{name}' must have interval_range_s specified."
-                )
+                raise ValueError(f"Interval event term '{name}' must have interval_range_s specified.")
             self._interval_ranges[local_idx] = term.interval_range_s
             self._interval_timers[local_idx] = self._sample_interval(local_idx)
 
@@ -55,12 +51,7 @@ class EventManager:
     def available_modes(self) -> list[str]:
         return list(self._terms_by_mode.keys())
 
-    def apply(
-        self,
-        mode: str,
-        env_ids: torch.Tensor | None = None,
-        dt: float | None = None
-    ) -> None:
+    def apply(self, mode: str, env_ids: torch.Tensor | None = None, dt: float | None = None) -> None:
         if mode not in self._terms_by_mode:
             return
 
@@ -126,7 +117,7 @@ class EventManager:
 
         rows = []
         for idx, (name, term) in enumerate(self._all_terms.items()):
-            func_name = getattr(self._resolved_fns[name], '__name__', name)
+            func_name = getattr(self._resolved_fns[name], "__name__", name)
             mode_str = term.mode.capitalize()
 
             interval_str = "-"
@@ -147,9 +138,6 @@ class EventManager:
         footer = ", ".join(f"{mode}: {count}" for mode, count in mode_counts.items())
 
         table = create_manager_table(
-            title="Event Terms",
-            columns=["Idx", "Name", "Mode", "Interval", "Params"],
-            rows=rows,
-            footer=footer
+            title="Event Terms", columns=["Idx", "Name", "Mode", "Interval", "Params"], rows=rows, footer=footer
         )
         return table_to_string(table)

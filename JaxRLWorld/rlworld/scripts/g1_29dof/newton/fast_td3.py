@@ -1,6 +1,6 @@
-from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
-from rlworld.rl.configs.algorithms import FastTD3Config
 from rlworld.rl.configs import FastTD3PolicyConfig
+from rlworld.rl.configs.algorithms import FastTD3Config
+from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 
 
@@ -30,32 +30,21 @@ def main():
     cfgs_for_run.algorithm = fasttd3_config
     cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(FastTD3PolicyConfig)
     cfgs_for_run.nn.policy.actor_kwargs.update(
-        {
-            "activation": "relu",
-            "ortho_init": True,
-            "output_gain": 0.01,
-            "hidden_dims": [512, 256, 128]
-        },
+        {"activation": "relu", "ortho_init": True, "output_gain": 0.01, "hidden_dims": [512, 256, 128]},
     )
 
     cfgs_for_run.nn.policy.critic_kwargs.update(
-        {
-            "activation": "relu",
-            "ortho_init": True,
-            "output_gain": 0.01,
-            "hidden_dims": [1024, 512, 256]
-        }
+        {"activation": "relu", "ortho_init": True, "output_gain": 0.01, "hidden_dims": [1024, 512, 256]}
     )
 
     cfgs_for_run.action.clip_actions = (-1.0, 1.0)
     cfgs_for_run.action.action_scale = 0.5
 
-
     runner = BaseRunner.create_with_env(cfgs_for_run)
     # Start training
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,
-        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
     )
 
 

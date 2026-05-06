@@ -3,6 +3,7 @@
 All functions accept any ``World`` subclass and read state exclusively
 through ``env.get_robot_data(entity_name)``, making them simulator-agnostic.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -10,11 +11,6 @@ from typing import TYPE_CHECKING
 import torch
 
 from rlworld.rl.utils import string as string_utils
-from rlworld.rl.utils.quat_utils import (
-    quat_from_angle_axis_wxyz,
-    quat_mul_wxyz,
-    quat_rotate_inverse_wxyz,
-)
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
@@ -24,10 +20,10 @@ if TYPE_CHECKING:
 
 # Nominal x/y sign for each leg in body frame (x=forward, y=left).
 _LEG_NOMINAL_SIGNS = {
-      "FL": (+1.0, +1.0),   # Front-Left:  +x, +y (URDF: left = +y)
-      "FR": (+1.0, -1.0),   # Front-Right: +x, -y (URDF: right = -y)
-      "RL": (-1.0, +1.0),   # Rear-Left:   -x, +y
-      "RR": (-1.0, -1.0),   # Rear-Right:  -x, -y
+    "FL": (+1.0, +1.0),  # Front-Left:  +x, +y (URDF: left = +y)
+    "FR": (+1.0, -1.0),  # Front-Right: +x, -y (URDF: right = -y)
+    "RL": (-1.0, +1.0),  # Rear-Left:   -x, +y
+    "RR": (-1.0, -1.0),  # Rear-Right:  -x, -y
 }
 
 
@@ -66,14 +62,12 @@ def track_lin_vel(
     Returns:
         Tensor of shape (num_envs,).
     """
-    target = torch.stack(
-        [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y], dim=1
-    )
+    target = torch.stack([env.command_manager.lin_vel_x, env.command_manager.lin_vel_y], dim=1)
     actual = env.get_robot_data(entity_name).root_link_lin_vel_b
     xy_error = torch.sum(torch.square(target - actual[:, :2]), dim=1)
     if penalize_z:
         xy_error = xy_error + torch.square(actual[:, 2])
-    return torch.exp(-xy_error / std ** 2)
+    return torch.exp(-xy_error / std**2)
 
 
 def track_ang_vel(
@@ -98,7 +92,7 @@ def track_ang_vel(
     z_error = torch.square(env.command_manager.ang_vel - actual[:, 2])
     if penalize_xy:
         z_error = z_error + torch.sum(torch.square(actual[:, :2]), dim=1)
-    return torch.exp(-z_error / std ** 2)
+    return torch.exp(-z_error / std**2)
 
 
 def action_rate_l2(env: World) -> torch.Tensor:
@@ -108,10 +102,7 @@ def action_rate_l2(env: World) -> torch.Tensor:
         Tensor of shape (num_envs,).
     """
     return -torch.sum(
-        torch.square(
-            env.act_manager.prev_processed_actions
-            - env.act_manager.processed_actions
-        ),
+        torch.square(env.act_manager.prev_processed_actions - env.act_manager.processed_actions),
         dim=1,
     )
 
@@ -136,12 +127,12 @@ def flat_orientation(
     gravity_b = env.get_robot_data(entity_name).projected_gravity_b
     xy_squared = torch.sum(torch.square(gravity_b[:, :2]), dim=1)
     if std is not None:
-        return torch.exp(-xy_squared / (std ** 2))
+        return torch.exp(-xy_squared / (std**2))
     return -xy_squared
 
 
-
 # ── Walk-These-Ways reward terms ─────────────────────────────────────────
+
 
 def penalize_lin_vel_z(env: World, entity_name: str = "robot") -> torch.Tensor:
     """Penalize z-axis base linear velocity. WTW: _reward_lin_vel_z."""
@@ -166,9 +157,7 @@ def similar_to_default(env: World, entity_name: str = "robot") -> torch.Tensor:
     Returns:
         Tensor of shape (num_envs,).
     """
-    return -torch.sum(
-        torch.abs(env.get_robot_data(entity_name).joint_pos - env.act_manager.offset), dim=1
-    )
+    return -torch.sum(torch.abs(env.get_robot_data(entity_name).joint_pos - env.act_manager.offset), dim=1)
 
 
 def reward_alive(env: World) -> torch.Tensor:
@@ -297,8 +286,7 @@ def penalize_body_ang_vel_xy(
 def _command_active(env: World, command_threshold: float) -> torch.Tensor:
     """Return a (num_envs,) float mask for command magnitude > threshold."""
     cmd = torch.stack(
-        [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y,
-         env.command_manager.ang_vel],
+        [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y, env.command_manager.ang_vel],
         dim=1,
     )
     linear_norm = torch.norm(cmd[:, :2], dim=1)
@@ -309,15 +297,14 @@ def _command_active(env: World, command_threshold: float) -> torch.Tensor:
 
 def _foot_pos_vel(
     env: World,
-    body_names: "list[str] | None",
-    site_names: "list[str] | None",
+    body_names: list[str] | None,
+    site_names: list[str] | None,
     entity_name: str,
-) -> "tuple[torch.Tensor, torch.Tensor]":
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Return (foot_pos_w, foot_lin_vel_w) for either body or site names."""
     if (body_names is None) == (site_names is None):
         raise ValueError(
-            "Pass exactly one of body_names or site_names "
-            "(got body_names=%r, site_names=%r)" % (body_names, site_names)
+            "Pass exactly one of body_names or site_names (got body_names=%r, site_names=%r)" % (body_names, site_names)
         )
     rd = env.get_robot_data(entity_name)
     if body_names is not None:
@@ -329,8 +316,8 @@ def penalize_feet_clearance(
     env: World,
     target_height: float,
     command_threshold: float = 0.01,
-    body_names: "list[str] | None" = None,
-    site_names: "list[str] | None" = None,
+    body_names: list[str] | None = None,
+    site_names: list[str] | None = None,
     entity_name: str = "robot",
 ) -> torch.Tensor:
     """Penalize deviation from target foot clearance, weighted by foot xy speed.
@@ -358,9 +345,9 @@ def penalize_feet_slip(
     env: World,
     contact_group: str,
     command_threshold: float = 0.05,
-    body_names: "list[str] | None" = None,
-    site_names: "list[str] | None" = None,
-    contact_order: "list[str] | None" = None,
+    body_names: list[str] | None = None,
+    site_names: list[str] | None = None,
+    contact_order: list[str] | None = None,
     entity_name: str = "robot",
 ) -> torch.Tensor:
     """Penalize foot xy speed while in contact with the ground.
@@ -439,7 +426,7 @@ def penalize_soft_landing(
     env: World,
     contact_group: str,
     command_threshold: float = 0.05,
-    contact_order: "list[str] | None" = None,
+    contact_order: list[str] | None = None,
 ) -> torch.Tensor:
     """Penalize impact force at first foot contact (sum over feet).
 
@@ -450,9 +437,7 @@ def penalize_soft_landing(
     """
     forces = env.contact_manager.contact_force(contact_group, order=contact_order)
     fmag = torch.norm(forces, dim=-1)
-    first = env.contact_manager.compute_first_contact(
-        contact_group, order=contact_order
-    )
+    first = env.contact_manager.compute_first_contact(contact_group, order=contact_order)
     cost = torch.sum(fmag * first.float(), dim=1)
     return -cost * _command_active(env, command_threshold)
 
@@ -491,9 +476,9 @@ class FeetSwingHeightTracker:
         contact_group: str,
         target_height: float,
         command_threshold: float = 0.05,
-        body_names: "list[str] | None" = None,
-        site_names: "list[str] | None" = None,
-        contact_order: "list[str] | None" = None,
+        body_names: list[str] | None = None,
+        site_names: list[str] | None = None,
+        contact_order: list[str] | None = None,
         entity_name: str = "robot",
         use_squared_error: bool = True,
         reset_mode: str = "zero",
@@ -512,22 +497,15 @@ class FeetSwingHeightTracker:
         self._entity_name = entity_name
         self._use_squared_error = use_squared_error
         if reset_mode not in ("zero", "current_foot_height", "none"):
-            raise ValueError(
-                f"reset_mode must be one of 'zero', 'current_foot_height', "
-                f"'none' (got {reset_mode!r})"
-            )
+            raise ValueError(f"reset_mode must be one of 'zero', 'current_foot_height', 'none' (got {reset_mode!r})")
         self._reset_mode = reset_mode
 
         if contact_order is None and self._body_names is not None:
             contact_order = list(self._body_names)
-        self._contact_order = (
-            list(contact_order) if contact_order is not None else None
-        )
+        self._contact_order = list(contact_order) if contact_order is not None else None
 
         num_feet = len(self._body_names if self._body_names is not None else self._site_names)
-        self.peak_heights = torch.zeros(
-            (env.num_envs, num_feet), device=env.device, dtype=torch.float32
-        )
+        self.peak_heights = torch.zeros((env.num_envs, num_feet), device=env.device, dtype=torch.float32)
 
     def _foot_heights(self, env: World) -> torch.Tensor:
         rd = env.get_robot_data(self._entity_name)
@@ -537,9 +515,7 @@ class FeetSwingHeightTracker:
 
     def __call__(self, env: World) -> torch.Tensor:
         foot_heights = self._foot_heights(env)
-        is_contact = env.contact_manager.is_contact(
-            self._contact_group, order=self._contact_order
-        )
+        is_contact = env.contact_manager.is_contact(self._contact_group, order=self._contact_order)
         in_air = ~is_contact
 
         self.peak_heights = torch.where(
@@ -548,9 +524,7 @@ class FeetSwingHeightTracker:
             self.peak_heights,
         )
 
-        first_contact = env.contact_manager.compute_first_contact(
-            self._contact_group, order=self._contact_order
-        )
+        first_contact = env.contact_manager.compute_first_contact(self._contact_group, order=self._contact_order)
 
         active = _command_active(env, self._command_threshold)
         error = self.peak_heights / self._target_height - 1.0
@@ -629,10 +603,10 @@ class VariablePostureTracker:
     def __init__(
         self,
         env: World,
-        joint_names: "list[str]",
-        std_standing: "dict[str, float]",
-        std_walking: "dict[str, float]",
-        std_running: "dict[str, float]",
+        joint_names: list[str],
+        std_standing: dict[str, float],
+        std_walking: dict[str, float],
+        std_running: dict[str, float],
         get_current_joint_pos,
         default_joint_pos: torch.Tensor,
         walking_threshold: float = 0.5,
@@ -645,29 +619,16 @@ class VariablePostureTracker:
         self._default_joint_pos = default_joint_pos
 
         names = list(joint_names)
-        _, _, std_standing_vals = string_utils.resolve_matching_names_values(
-            std_standing, names
-        )
-        _, _, std_walking_vals = string_utils.resolve_matching_names_values(
-            std_walking, names
-        )
-        _, _, std_running_vals = string_utils.resolve_matching_names_values(
-            std_running, names
-        )
-        self.std_standing = torch.tensor(
-            std_standing_vals, device=env.device, dtype=torch.float32
-        )
-        self.std_walking = torch.tensor(
-            std_walking_vals, device=env.device, dtype=torch.float32
-        )
-        self.std_running = torch.tensor(
-            std_running_vals, device=env.device, dtype=torch.float32
-        )
+        _, _, std_standing_vals = string_utils.resolve_matching_names_values(std_standing, names)
+        _, _, std_walking_vals = string_utils.resolve_matching_names_values(std_walking, names)
+        _, _, std_running_vals = string_utils.resolve_matching_names_values(std_running, names)
+        self.std_standing = torch.tensor(std_standing_vals, device=env.device, dtype=torch.float32)
+        self.std_walking = torch.tensor(std_walking_vals, device=env.device, dtype=torch.float32)
+        self.std_running = torch.tensor(std_running_vals, device=env.device, dtype=torch.float32)
 
     def __call__(self, env: World) -> torch.Tensor:
         cmd = torch.stack(
-            [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y,
-             env.command_manager.ang_vel],
+            [env.command_manager.lin_vel_x, env.command_manager.lin_vel_y, env.command_manager.ang_vel],
             dim=1,
         )
         linear_speed = torch.norm(cmd[:, :2], dim=1)
@@ -675,10 +636,7 @@ class VariablePostureTracker:
         total_speed = linear_speed + angular_speed
 
         standing_mask = (total_speed < self._walking_threshold).float()
-        walking_mask = (
-            (total_speed >= self._walking_threshold)
-            & (total_speed < self._running_threshold)
-        ).float()
+        walking_mask = ((total_speed >= self._walking_threshold) & (total_speed < self._running_threshold)).float()
         running_mask = (total_speed >= self._running_threshold).float()
 
         std = (
@@ -689,16 +647,16 @@ class VariablePostureTracker:
 
         current = self._get_current_joint_pos(env)
         error_squared = torch.square(current - self._default_joint_pos)
-        return torch.exp(-torch.mean(error_squared / (std ** 2), dim=1))
+        return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
 
     def reset(self, env_ids: torch.Tensor) -> None:
         pass
 
 
-
 # ── Getup rewards moved to rewards/common/getup.py ──────────────
 # (orientation_upright, height_to_target, GatedPostureTracker,
 # GetupSuccessTracker). Import from ``rewards.common.getup``.
+
 
 def penalize_joint_pos_limits_l1(
     env: World,

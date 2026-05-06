@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import genesis as gs
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     RewardConfig,
@@ -40,7 +41,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -57,10 +57,8 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
-from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
-from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
-from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
+from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab, reward_terms as rf_genesis
+from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
 
 if TYPE_CHECKING:
     from .base import G1FlatConfig
@@ -75,11 +73,11 @@ OBSERVATION_CFG_CLS = ObservationConfig
 # ── Builders ─────────────────────────────────────────────────────────
 
 
-def build_visualization(cfg: "G1FlatConfig") -> VisualizationConfig:
+def build_visualization(cfg: G1FlatConfig) -> VisualizationConfig:
     return VisualizationConfig(show_viewer=False)
 
 
-def build_env(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> EnvConfig:
+def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> EnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
         roll_pitch_violation = TerminationTermConfig(
@@ -99,7 +97,7 @@ def build_env(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> EnvConfig:
     )
 
 
-def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> SceneConfig:
+def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
     r = cfg.robot
     sim_dt = timing["dt"]
 
@@ -165,7 +163,7 @@ def build_scene(cfg: "G1FlatConfig", timing: Dict[str, Any]) -> SceneConfig:
     )
 
 
-def build_observation(cfg: "G1FlatConfig") -> ObservationConfig:
+def build_observation(cfg: G1FlatConfig) -> ObservationConfig:
     feet_links = ("left_ankle_roll_link", "right_ankle_roll_link")
 
     @dataclass
@@ -187,9 +185,7 @@ def build_observation(cfg: "G1FlatConfig") -> ObservationConfig:
         dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
-        foot_height_obs = ObservationTermConfig(
-            func=foot_height, scale=1.0, params={"body_names": tuple(feet_links)}
-        )
+        foot_height_obs = ObservationTermConfig(func=foot_height, scale=1.0, params={"body_names": tuple(feet_links)})
         foot_air_time_obs = ObservationTermConfig(func=foot_air_time, scale=1.0)
         foot_contact_obs = ObservationTermConfig(func=foot_contact_indicator, scale=1.0)
         foot_contact_forces_obs = ObservationTermConfig(func=foot_contact_forces, scale=0.01)
@@ -202,7 +198,7 @@ def build_observation(cfg: "G1FlatConfig") -> ObservationConfig:
     return _ObsCfg()
 
 
-def build_action(cfg: "G1FlatConfig") -> ActionConfig:
+def build_action(cfg: G1FlatConfig) -> ActionConfig:
     r = cfg.robot
     return ActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
@@ -212,7 +208,7 @@ def build_action(cfg: "G1FlatConfig") -> ActionConfig:
     )
 
 
-def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
+def build_reward(cfg: G1FlatConfig) -> RewardConfig:
     r = cfg.robot
     feet_links = ["left_ankle_roll_link", "right_ankle_roll_link"]
 
@@ -341,7 +337,7 @@ def build_reward(cfg: "G1FlatConfig") -> RewardConfig:
     return _RewardsCfg()
 
 
-def build_dr_terms(cfg: "G1FlatConfig") -> Dict[str, EventTermConfig]:
+def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """Genesis-specific domain randomization terms."""
     return {
         "randomize_body_com": EventTermConfig(
@@ -362,5 +358,3 @@ def build_dr_terms(cfg: "G1FlatConfig") -> Dict[str, EventTermConfig]:
             params={"friction_range": (0.0, 0.05)},
         ),
     }
-
-

@@ -18,13 +18,13 @@ per step across all envs). Sampling picks ``n_traj`` random
 ``(env_idx, start_idx)`` pairs and gathers contiguous length-``T``
 windows so the encoder's AR(1) chain stays valid within each sample.
 """
+
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
 
 from rlworld.imitation.npmp.loss import NPMPBatch
-
 
 __all__ = ["NPMPBuffer"]
 
@@ -60,17 +60,15 @@ class NPMPBuffer:
 
     def add(
         self,
-        s: jax.Array,           # (num_envs, D_s)
-        x: jax.Array,           # (num_envs, D_x)
-        mu_E: jax.Array,        # (num_envs, A)
-        ep_starts: jax.Array,   # (num_envs,)
+        s: jax.Array,  # (num_envs, D_s)
+        x: jax.Array,  # (num_envs, D_x)
+        mu_E: jax.Array,  # (num_envs, A)
+        ep_starts: jax.Array,  # (num_envs,)
     ) -> None:
         """Append one step worth of per-env data at the current write head."""
         if self._write_idx >= self.max_steps:
             raise RuntimeError(
-                f"NPMPBuffer is full "
-                f"({self._write_idx}/{self.max_steps}). "
-                "Call clear() before adding more transitions."
+                f"NPMPBuffer is full ({self._write_idx}/{self.max_steps}). Call clear() before adding more transitions."
             )
         self._validate_step_shapes(s, x, mu_E, ep_starts)
 
@@ -166,7 +164,4 @@ class NPMPBuffer:
         )
         for arr, shape, name in expected:
             if arr.shape != shape:
-                raise ValueError(
-                    f"NPMPBuffer.add: expected {name} shape {shape}, "
-                    f"got {tuple(arr.shape)}"
-                )
+                raise ValueError(f"NPMPBuffer.add: expected {name} shape {shape}, got {tuple(arr.shape)}")

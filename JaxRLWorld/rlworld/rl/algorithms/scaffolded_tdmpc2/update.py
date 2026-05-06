@@ -43,6 +43,7 @@ from rlworld.rl.storages.sequence_replay_buffer import SequenceBatch
 
 class ScaffoldedUnifiedUpdateInfo(NamedTuple):
     """All metrics from scaffolded update. Mirrors UnifiedUpdateInfo."""
+
     # Target world model
     target_consistency_loss: jax.Array
     target_reward_loss: jax.Array
@@ -110,19 +111,24 @@ def scaffolded_unified_update(
     scale_tau: float,
     key: jax.Array,
 ) -> tuple[
-    ABDNetWorldModel, optax.OptState, Any,
-    ScaffoldedWorldModel, optax.OptState, Any,
-    optax.OptState, optax.OptState,
+    ABDNetWorldModel,
+    optax.OptState,
+    Any,
+    ScaffoldedWorldModel,
+    optax.OptState,
+    Any,
+    optax.OptState,
+    optax.OptState,
     ScaffoldedUnifiedUpdateInfo,
 ]:
     key, twm_key, swm_key, pi_key, explore_key = jax.random.split(key, 5)
 
     # Extract batch components
-    target_obs = batch.observations              # [H+1, B, obs_dim]
-    priv_obs = batch.privileged_observations     # [H+1, B, priv_dim]
-    actions = batch.actions                      # [H, B, action_dim]
-    rewards = batch.rewards                      # [H, B, 1]
-    terminated = batch.terminated                # [H, B, 1]
+    target_obs = batch.observations  # [H+1, B, obs_dim]
+    priv_obs = batch.privileged_observations  # [H+1, B, priv_dim]
+    actions = batch.actions  # [H, B, action_dim]
+    rewards = batch.rewards  # [H, B, 1]
+    terminated = batch.terminated  # [H, B, 1]
     horizon = actions.shape[0]
 
     # s+ = [s-, s_priv]
@@ -137,15 +143,15 @@ def scaffolded_unified_update(
     )
 
     # ========== 1. Target World Model Update ==========
-    tq_static = eqx.partition(
-        target_model.q_ensemble, eqx.is_inexact_array
-    )[1]
+    tq_static = eqx.partition(target_model.q_ensemble, eqx.is_inexact_array)[1]
     target_q_ens = eqx.combine(target_q_params, tq_static)
 
     @eqx.filter_value_and_grad(has_aux=True)
     def target_wm_loss_fn(m: ABDNetWorldModel):
         m_stopped_pi = eqx.tree_at(
-            lambda x: x.policy, m, jax.lax.stop_gradient(m.policy),
+            lambda x: x.policy,
+            m,
+            jax.lax.stop_gradient(m.policy),
         )
         return compute_abd_world_model_loss(
             model=m_stopped_pi,
@@ -163,21 +169,18 @@ def scaffolded_unified_update(
 
     (_, twm_info), twm_grads = target_wm_loss_fn(target_model)
     twm_grad_norm = optax.global_norm(twm_grads)
-    twm_updates, new_twm_opt = target_wm_optimizer.update(
-        twm_grads, target_wm_opt_state, target_model
-    )
+    twm_updates, new_twm_opt = target_wm_optimizer.update(twm_grads, target_wm_opt_state, target_model)
     new_target_model = eqx.apply_updates(target_model, twm_updates)
 
     # ========== 2. Scaffolded World Model Update ==========
-    sq_static = eqx.partition(
-        scaffolded_model.q_ensemble, eqx.is_inexact_array
-    )[1]
+    sq_static = eqx.partition(scaffolded_model.q_ensemble, eqx.is_inexact_array)[1]
     scaff_target_q_ens = eqx.combine(scaff_target_q_params, sq_static)
 
     @eqx.filter_value_and_grad(has_aux=True)
     def scaff_wm_loss_fn(sm: ScaffoldedWorldModel):
         sm_stopped_pi = eqx.tree_at(
-            lambda x: x.exploration_policy, sm,
+            lambda x: x.exploration_policy,
+            sm,
             jax.lax.stop_gradient(sm.exploration_policy),
         )
         return compute_scaffolded_world_model_loss(
@@ -199,9 +202,7 @@ def scaffolded_unified_update(
 
     (_, swm_info), swm_grads = scaff_wm_loss_fn(scaffolded_model)
     swm_grad_norm = optax.global_norm(swm_grads)
-    swm_updates, new_swm_opt = scaff_wm_optimizer.update(
-        swm_grads, scaff_wm_opt_state, scaffolded_model
-    )
+    swm_updates, new_swm_opt = scaff_wm_optimizer.update(swm_grads, scaff_wm_opt_state, scaffolded_model)
     new_scaffolded_model = eqx.apply_updates(scaffolded_model, swm_updates)
 
     # ========== 3. Latent Rollouts (stop_gradient, via lax.scan) ==========
@@ -213,13 +214,9 @@ def scaffolded_unified_update(
         z_next = new_target_model.next_latent(z, a)
         return z_next, z_next
 
-    _, target_zs_rolled = jax.lax.scan(
-        _target_dynamics_step, tz0, actions
-    )
+    _, target_zs_rolled = jax.lax.scan(_target_dynamics_step, tz0, actions)
     # Prepend initial state: [H+1, B, obs_dim]
-    target_zs = jax.lax.stop_gradient(
-        jnp.concatenate([tz0[None], target_zs_rolled], axis=0)
-    )
+    target_zs = jax.lax.stop_gradient(jnp.concatenate([tz0[None], target_zs_rolled], axis=0))
 
     # Scaffolded rollout on s+
     sz0 = new_scaffolded_model.encode(scaffolded_obs[0])
@@ -228,29 +225,19 @@ def scaffolded_unified_update(
         z_next = new_scaffolded_model.next_latent(z, a)
         return z_next, z_next
 
-    _, scaff_zs_rolled = jax.lax.scan(
-        _scaff_dynamics_step, sz0, actions
-    )
-    scaff_zs = jax.lax.stop_gradient(
-        jnp.concatenate([sz0[None], scaff_zs_rolled], axis=0)
-    )
+    _, scaff_zs_rolled = jax.lax.scan(_scaff_dynamics_step, sz0, actions)
+    scaff_zs = jax.lax.stop_gradient(jnp.concatenate([sz0[None], scaff_zs_rolled], axis=0))
 
     # ========== 4. Target Policy Update (scaffolded critic) ==========
-    pi_params, pi_static = eqx.partition(
-        new_target_model.policy, eqx.is_inexact_array
-    )
+    pi_params, pi_static = eqx.partition(new_target_model.policy, eqx.is_inexact_array)
 
     def pi_loss_fn(p_params):
         new_policy = eqx.combine(p_params, pi_static)
-        full_model = eqx.tree_at(
-            lambda m: m.policy, new_target_model, new_policy
-        )
+        full_model = eqx.tree_at(lambda m: m.policy, new_target_model, new_policy)
 
         horizon_plus_one = target_zs.shape[0]
         pi_keys = jax.random.split(pi_key, horizon_plus_one)
-        q_keys = jax.random.split(
-            jax.random.fold_in(pi_key, 999), horizon_plus_one
-        )
+        q_keys = jax.random.split(jax.random.fold_in(pi_key, 999), horizon_plus_one)
         rho_weights = rho ** jnp.arange(horizon_plus_one)
 
         def _single_step(z_target, z_scaffolded, pi_k, q_k):
@@ -258,8 +245,12 @@ def scaffolded_unified_update(
             action, info = full_model.pi(z_target, key=pi_k)
             # TODO: Use scaffolded critic (scaff_q_val)
             scaff_q_val = new_scaffolded_model.q_value(
-                z_scaffolded, action, two_hot_cfg,
-                return_type="avg", key=q_k, inference=False,
+                z_scaffolded,
+                action,
+                two_hot_cfg,
+                return_type="avg",
+                key=q_k,
+                inference=False,
             )
 
             # q_val = full_model.q_value(
@@ -270,29 +261,27 @@ def scaffolded_unified_update(
             # Target critic evaluates with s- (for logging only)
             target_q_val = jax.lax.stop_gradient(
                 full_model.q_value(
-                    z_target, action, two_hot_cfg,
-                    return_type="avg", key=q_k, inference=False,
+                    z_target,
+                    action,
+                    two_hot_cfg,
+                    return_type="avg",
+                    key=q_k,
+                    inference=False,
                 )
             )
             return action, info, scaff_q_val, target_q_val
 
-        _, infos, q_vals, target_q_vals = jax.vmap(_single_step)(
-            target_zs, scaff_zs, pi_keys, q_keys
-        )
+        _, infos, q_vals, target_q_vals = jax.vmap(_single_step)(target_zs, scaff_zs, pi_keys, q_keys)
 
         # Inline scale computation (matches tdmpc2/update.py exactly)
         qs_flat = jax.lax.stop_gradient(q_vals[0]).flatten()
         p05 = jnp.percentile(qs_flat, 5)
         p95 = jnp.percentile(qs_flat, 95)
         new_scale_val = jnp.maximum(p95 - p05, 1.0)
-        inner_scale = (
-            (1.0 - scale_tau) * scale_value + scale_tau * new_scale_val
-        )
+        inner_scale = (1.0 - scale_tau) * scale_value + scale_tau * new_scale_val
 
         q_normalized = q_vals / jnp.maximum(inner_scale, 1.0)
-        step_losses = -(
-            entropy_coef * infos["scaled_entropy"] + q_normalized
-        ).mean(axis=(-1, -2))
+        step_losses = -(entropy_coef * infos["scaled_entropy"] + q_normalized).mean(axis=(-1, -2))
 
         pi_loss = jnp.sum(step_losses * rho_weights) / horizon_plus_one
 
@@ -311,26 +300,36 @@ def scaffolded_unified_update(
             jnp.percentile(target_q_vals[0].flatten(), 95),
         )
 
-    (_, (pi_loss, pi_entropy, pi_scaled_entropy,
-         updated_scale, q_mean, q_std, q_p05, q_p95,
-         target_q_mean, target_q_std, target_q_p05, target_q_p95)), pi_grads = \
-        jax.value_and_grad(pi_loss_fn, has_aux=True)(pi_params)
+    (
+        (
+            _,
+            (
+                pi_loss,
+                pi_entropy,
+                pi_scaled_entropy,
+                updated_scale,
+                q_mean,
+                q_std,
+                q_p05,
+                q_p95,
+                target_q_mean,
+                target_q_std,
+                target_q_p05,
+                target_q_p95,
+            ),
+        ),
+        pi_grads,
+    ) = jax.value_and_grad(pi_loss_fn, has_aux=True)(pi_params)
 
     pi_grad_norm = optax.global_norm(pi_grads)
-    pi_updates, new_pi_opt = pi_optimizer.update(
-        pi_grads, pi_opt_state, pi_params
-    )
+    pi_updates, new_pi_opt = pi_optimizer.update(pi_grads, pi_opt_state, pi_params)
     new_pi_params = optax.apply_updates(pi_params, pi_updates)
 
     new_policy = eqx.combine(new_pi_params, pi_static)
-    final_target_model = eqx.tree_at(
-        lambda m: m.policy, new_target_model, new_policy
-    )
+    final_target_model = eqx.tree_at(lambda m: m.policy, new_target_model, new_policy)
 
     # ========== 5. Exploration Policy Update ==========
-    explore_params, explore_static = eqx.partition(
-        new_scaffolded_model.exploration_policy, eqx.is_inexact_array
-    )
+    explore_params, explore_static = eqx.partition(new_scaffolded_model.exploration_policy, eqx.is_inexact_array)
 
     def explore_loss_fn(ep_params):
         new_explore_pi = eqx.combine(ep_params, explore_static)
@@ -342,35 +341,32 @@ def scaffolded_unified_update(
 
         horizon_plus_one = scaff_zs.shape[0]
         ep_keys = jax.random.split(explore_key, horizon_plus_one)
-        eq_keys = jax.random.split(
-            jax.random.fold_in(explore_key, 777), horizon_plus_one
-        )
+        eq_keys = jax.random.split(jax.random.fold_in(explore_key, 777), horizon_plus_one)
         rho_weights = rho ** jnp.arange(horizon_plus_one)
 
         def _single_step(z_plus, pk, qk):
             action, info = full_scaff.pi_explore(z_plus, key=pk)
             q_val = full_scaff.q_value(
-                z_plus, action, two_hot_cfg,
-                return_type="avg", key=qk, inference=False,
+                z_plus,
+                action,
+                two_hot_cfg,
+                return_type="avg",
+                key=qk,
+                inference=False,
             )
             q_norm = q_val / jnp.maximum(updated_scale, 1.0)
-            step_loss = -(
-                entropy_coef * info["scaled_entropy"] + q_norm
-            ).mean()
+            step_loss = -(entropy_coef * info["scaled_entropy"] + q_norm).mean()
             return step_loss, info["entropy"].mean()
 
-        step_losses, entropies = jax.vmap(_single_step)(
-            scaff_zs, ep_keys, eq_keys
-        )
+        step_losses, entropies = jax.vmap(_single_step)(scaff_zs, ep_keys, eq_keys)
         explore_loss = jnp.sum(step_losses * rho_weights) / horizon_plus_one
         return explore_loss, (explore_loss, entropies.mean())
 
-    (_, (explore_pi_loss, explore_entropy)), explore_grads = \
-        jax.value_and_grad(explore_loss_fn, has_aux=True)(explore_params)
-
-    explore_updates, new_explore_opt = explore_pi_optimizer.update(
-        explore_grads, explore_pi_opt_state, explore_params
+    (_, (explore_pi_loss, explore_entropy)), explore_grads = jax.value_and_grad(explore_loss_fn, has_aux=True)(
+        explore_params
     )
+
+    explore_updates, new_explore_opt = explore_pi_optimizer.update(explore_grads, explore_pi_opt_state, explore_params)
     new_explore_params = optax.apply_updates(explore_params, explore_updates)
 
     new_explore_pi = eqx.combine(new_explore_params, explore_static)
@@ -381,20 +377,18 @@ def scaffolded_unified_update(
     )
 
     # ========== 6. Polyak Target Q Updates ==========
-    tq_params, _ = eqx.partition(
-        final_target_model.q_ensemble, eqx.is_inexact_array
-    )
+    tq_params, _ = eqx.partition(final_target_model.q_ensemble, eqx.is_inexact_array)
     new_target_q_params = jax.tree.map(
         lambda p, tp: tau * p + (1 - tau) * tp,
-        tq_params, target_q_params,
+        tq_params,
+        target_q_params,
     )
 
-    sq_params, _ = eqx.partition(
-        final_scaffolded_model.q_ensemble, eqx.is_inexact_array
-    )
+    sq_params, _ = eqx.partition(final_scaffolded_model.q_ensemble, eqx.is_inexact_array)
     new_scaff_target_q_params = jax.tree.map(
         lambda p, tp: tau * p + (1 - tau) * tp,
-        sq_params, scaff_target_q_params,
+        sq_params,
+        scaff_target_q_params,
     )
 
     info = ScaffoldedUnifiedUpdateInfo(
@@ -428,8 +422,13 @@ def scaffolded_unified_update(
     )
 
     return (
-        final_target_model, new_twm_opt, new_target_q_params,
-        final_scaffolded_model, new_swm_opt, new_scaff_target_q_params,
-        new_pi_opt, new_explore_opt,
+        final_target_model,
+        new_twm_opt,
+        new_target_q_params,
+        final_scaffolded_model,
+        new_swm_opt,
+        new_scaff_target_q_params,
+        new_pi_opt,
+        new_explore_opt,
         info,
     )

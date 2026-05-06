@@ -27,8 +27,9 @@ _defaults = DefaultCache()
 #  Friction                                                           #
 # ------------------------------------------------------------------ #
 
+
 def randomize_friction(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     friction_range: tuple[float, float] = (0.3, 1.2),
     operation: str = "abs",
@@ -81,7 +82,7 @@ _FRICTION_AXIS_ATTR = {
 
 
 def randomize_geom_friction_axis(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     ranges: tuple[float, float],
     axes: list[int] = (0,),
@@ -163,10 +164,7 @@ def randomize_geom_friction_axis(
 
     for axis in axes:
         if axis not in _FRICTION_AXIS_ATTR:
-            raise ValueError(
-                f"Unknown friction axis {axis}. "
-                f"Valid: {sorted(_FRICTION_AXIS_ATTR)}."
-            )
+            raise ValueError(f"Unknown friction axis {axis}. Valid: {sorted(_FRICTION_AXIS_ATTR)}.")
         attr = _FRICTION_AXIS_ATTR[axis]
         values = wp.to_torch(view.get_attribute(attr, model))
 
@@ -176,29 +174,23 @@ def randomize_geom_friction_axis(
             if operation == "abs":
                 values[env_ids] = sampled
             else:
-                defaults = _defaults.get_or_cache(
-                    f"geom_friction_axis_{axis}", values.clone()
-                )
-                values[env_ids] = apply_operation(
-                    defaults[env_ids], sampled, operation
-                )
+                defaults = _defaults.get_or_cache(f"geom_friction_axis_{axis}", values.clone())
+                values[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
         else:
-            shape_idx_t = torch.as_tensor(
-                shape_idx, device=env.device, dtype=torch.long
-            )
+            shape_idx_t = torch.as_tensor(shape_idx, device=env.device, dtype=torch.long)
             sub = values[env_ids][:, :, shape_idx_t]
             sampled = sample(sub.shape, *ranges, env.device, distribution)
             if operation == "abs":
                 sub_new = sampled
             else:
-                defaults = _defaults.get_or_cache(
-                    f"geom_friction_axis_{axis}", values.clone()
-                )
+                defaults = _defaults.get_or_cache(f"geom_friction_axis_{axis}", values.clone())
                 default_sub = defaults[env_ids][:, :, shape_idx_t]
                 sub_new = apply_operation(default_sub, sampled, operation)
-            values[env_ids[:, None, None], torch.arange(
-                values.shape[1], device=env.device
-            )[None, :, None], shape_idx_t[None, None, :]] = sub_new
+            values[
+                env_ids[:, None, None],
+                torch.arange(values.shape[1], device=env.device)[None, :, None],
+                shape_idx_t[None, None, :],
+            ] = sub_new
 
         view.set_attribute(attr, model, values)
 
@@ -209,8 +201,9 @@ def randomize_geom_friction_axis(
 #  Body mass                                                          #
 # ------------------------------------------------------------------ #
 
+
 def randomize_body_mass(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     mass_range: tuple[float, float] = (0.85, 1.15),
     operation: str = "scale",
@@ -244,7 +237,9 @@ def randomize_body_mass(
 
     defaults = _defaults.get_or_cache("body_mass", mass.clone())
     mass[env_ids.unsqueeze(1), body_indices] = apply_operation(
-        defaults[env_ids.unsqueeze(1), body_indices], sampled, operation,
+        defaults[env_ids.unsqueeze(1), body_indices],
+        sampled,
+        operation,
     )
 
     wp.copy(
@@ -260,8 +255,9 @@ def randomize_body_mass(
 #  Body COM offset                                                    #
 # ------------------------------------------------------------------ #
 
+
 def randomize_body_com_offset(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     ranges: dict[int, tuple[float, float]],
     body_patterns: str | list[str] = ("torso_link",),
@@ -286,7 +282,9 @@ def randomize_body_com_offset(
     body_indices = cache.get_body_indices(body_patterns)
 
     body_com = wp.to_torch(model.body_com).reshape(
-        env.num_envs, cache.bodies_per_env, 3,
+        env.num_envs,
+        cache.bodies_per_env,
+        3,
     )
 
     defaults = _defaults.get_or_cache("body_com", body_com.clone())
@@ -298,7 +296,9 @@ def randomize_body_com_offset(
     offsets = torch.zeros(n_envs, n_bodies, 3, device=env.device)
     for axis, (lo, hi) in ranges.items():
         offsets[:, :, axis] = torch.empty(
-            n_envs, n_bodies, device=env.device,
+            n_envs,
+            n_bodies,
+            device=env.device,
         ).uniform_(lo, hi)
 
     body_com[env_ids.unsqueeze(1), body_indices] = original + offsets
@@ -316,8 +316,9 @@ def randomize_body_com_offset(
 #  Joint PD gains / armature                                          #
 # ------------------------------------------------------------------ #
 
+
 def randomize_pd_gains(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     kp_range: tuple[float, float] | None = None,
     kd_range: tuple[float, float] | None = None,
@@ -372,7 +373,7 @@ def randomize_pd_gains(
 
 
 def randomize_joint_armature(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     armature_range: tuple[float, float] = (0.9, 1.1),
     operation: str = "scale",
@@ -410,7 +411,7 @@ def randomize_joint_armature(
 
 
 def randomize_joint_friction(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     friction_range: tuple[float, float] = (0.0, 0.05),
     operation: str = "abs",
@@ -460,8 +461,9 @@ def randomize_joint_friction(
 # the value never changes — but riding the existing reset hook avoids
 # adding a new event mode).
 
+
 def set_joint_friction(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     value: float,
     dr_scale: tuple[float, float] | None = None,
@@ -495,7 +497,10 @@ def set_joint_friction(
         friction[env_ids] = float(value)
     else:
         scale = sample(
-            friction[env_ids].shape, *dr_scale, env.device, "uniform",
+            friction[env_ids].shape,
+            *dr_scale,
+            env.device,
+            "uniform",
         )
         friction[env_ids] = float(value) * scale
     view.set_attribute("joint_friction", model, friction)
@@ -505,7 +510,7 @@ def set_joint_friction(
 
 
 def set_foot_friction(
-    env: "NewtonEnv",
+    env: NewtonEnv,
     env_ids: torch.Tensor,
     value: float,
     foot_pattern: str = ".*foot$",
@@ -549,11 +554,16 @@ def set_foot_friction(
     # foot-ground, etc. all see the *same* friction within an env.
     if dr_scale is None:
         mu_val = torch.tensor(
-            float(value), dtype=torch.float32, device=env.device,
+            float(value),
+            dtype=torch.float32,
+            device=env.device,
         )
     else:
         scale = sample(
-            (len(env_ids),), *dr_scale, env.device, "uniform",
+            (len(env_ids),),
+            *dr_scale,
+            env.device,
+            "uniform",
         )
         mu_val = float(value) * scale
 
@@ -587,4 +597,3 @@ def set_foot_friction(
 
     for gi in env._ground_geom_indices:
         mjw_friction[env_ids, gi, 0] = mu_val
-

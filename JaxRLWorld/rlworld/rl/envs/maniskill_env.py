@@ -1,19 +1,16 @@
-from typing import Optional
-
-import gymnasium as gym
+import genesis as gs
 import mujoco
 import numpy as np
 import torch
 
-import genesis as gs
-from rlworld.rl.envs import World
+from rlworld.rl.configs import ActionConfig, CommandConfig, EnvConfig, ObservationConfig, RewardConfig, SceneConfig
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
-from rlworld.rl.configs import EnvConfig, SceneConfig, ObservationConfig, ActionConfig, RewardConfig, CommandConfig
-
+from rlworld.rl.envs import World
 
 
 class ManiSkillEnv(World):
     """Wrapper to make vectorized Maniskill envs compatible with RLEnv interface"""
+
     sim_name: str = "ManiSkill"
 
     def __init__(
@@ -26,7 +23,7 @@ class ManiSkillEnv(World):
         reward_cfg: RewardConfig,
         command_cfg: CommandConfig,
         max_episode_length: int = 1000,
-        seed: int = 0
+        seed: int = 0,
     ):
         super().__init__()
         # Check if vectorized or not
@@ -42,7 +39,7 @@ class ManiSkillEnv(World):
 
         self.is_vectorized = True
 
-        self.mj_model: Optional[mujoco.MjModel] = None
+        self.mj_model: mujoco.MjModel | None = None
         self.device = gs.device
 
         # Required attributes
@@ -92,13 +89,13 @@ class ManiSkillEnv(World):
                 self.trees = {"robot": kinematic_tree}
 
         # Unwrap to base environment
-        if hasattr(gym_env, 'envs'):
+        if hasattr(gym_env, "envs"):
             first_env = gym_env.envs[0]
         else:
             first_env = gym_env
 
         base_env = first_env
-        while hasattr(base_env, 'env'):
+        while hasattr(base_env, "env"):
             base_env = base_env.env
 
         kinematic_tree = self._extract_maniskill_kinematic_tree(base_env._env)
@@ -107,16 +104,16 @@ class ManiSkillEnv(World):
 
     def _extract_maniskill_kinematic_tree(self, base_env):
         """Extract kinematic tree from ManiSkill environment"""
-        if not hasattr(base_env, 'agent'):
+        if not hasattr(base_env, "agent"):
             raise ValueError("ManiSkill environment has no agent")
 
         agent = base_env.agent
 
-        if hasattr(agent, 'robot'):
+        if hasattr(agent, "robot"):
             # Try URDF first, then MJCF
-            if hasattr(agent, 'urdf_path') and agent.urdf_path is not None:
+            if hasattr(agent, "urdf_path") and agent.urdf_path is not None:
                 return KinematicTree(urdf_path=agent.urdf_path)
-            elif hasattr(agent, 'mjcf_path') and agent.mjcf_path is not None:
+            elif hasattr(agent, "mjcf_path") and agent.mjcf_path is not None:
                 return KinematicTree(mjcf_path=agent.mjcf_path)
             else:
                 raise ValueError("Agent has neither urdf_path nor mjcf_path")
@@ -185,12 +182,21 @@ class ManiSkillEnv(World):
         else:
             obs_tensor = torch.from_numpy(obs).float().to(self.device)
 
-        rewards_tensor = torch.from_numpy(rewards).float().to(self.device) \
-            if isinstance(rewards, np.ndarray) else rewards.float().to(self.device)
-        terminated_tensor = torch.from_numpy(terminated).to(self.device) \
-            if isinstance(terminated, np.ndarray) else terminated.to(self.device)
-        truncated_tensor = torch.from_numpy(truncated).to(self.device) \
-            if isinstance(truncated, np.ndarray) else truncated.to(self.device)
+        rewards_tensor = (
+            torch.from_numpy(rewards).float().to(self.device)
+            if isinstance(rewards, np.ndarray)
+            else rewards.float().to(self.device)
+        )
+        terminated_tensor = (
+            torch.from_numpy(terminated).to(self.device)
+            if isinstance(terminated, np.ndarray)
+            else terminated.to(self.device)
+        )
+        truncated_tensor = (
+            torch.from_numpy(truncated).to(self.device)
+            if isinstance(truncated, np.ndarray)
+            else truncated.to(self.device)
+        )
 
         # Compute dones
         dones_tensor = terminated_tensor | truncated_tensor
@@ -230,10 +236,12 @@ class ManiSkillEnv(World):
                 if k not in ["final_observation"]:
                     formatted_info[k] = v
 
-        formatted_info.update({
-            "final_observation": final_observation,  # (num_envs, obs_dim), valid for done envs
-            "rewards_per_type": {"total_reward": rewards_tensor},
-        })
+        formatted_info.update(
+            {
+                "final_observation": final_observation,  # (num_envs, obs_dim), valid for done envs
+                "rewards_per_type": {"total_reward": rewards_tensor},
+            }
+        )
 
         if dones_tensor.any():
             if "success" in info["final_info"]:

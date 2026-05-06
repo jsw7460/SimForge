@@ -15,9 +15,9 @@ def compute_analytical_kl(
     """
     var_new = jnp.square(sigma_new)
     var_old = jnp.square(sigma_old)
-    kl = jnp.log(sigma_new / (sigma_old + 1e-5) + 1e-5) \
-        + (var_old + jnp.square(mu_old - mu_new)) / (2.0 * var_new) \
-        - 0.5
+    kl = (
+        jnp.log(sigma_new / (sigma_old + 1e-5) + 1e-5) + (var_old + jnp.square(mu_old - mu_new)) / (2.0 * var_new) - 0.5
+    )
     return kl.sum(axis=-1).mean()
 
 

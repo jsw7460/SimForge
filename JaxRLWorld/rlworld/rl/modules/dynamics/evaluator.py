@@ -1,4 +1,4 @@
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
@@ -15,10 +15,10 @@ class DynamicsEvaluator:
     def __init__(
         self,
         model: nn.Module,
-        device: str = 'cuda',
-        model_name: str = 'Model',
+        device: str = "cuda",
+        model_name: str = "Model",
         use_residual: bool = False,
-        max_delta: torch.Tensor | float = 1.0
+        max_delta: torch.Tensor | float = 1.0,
     ):
         """
         Initialize evaluator.
@@ -34,7 +34,11 @@ class DynamicsEvaluator:
         self.use_residual = use_residual
         self.max_delta = max_delta
 
-    def _predict(self, x: torch.Tensor, action: torch.Tensor,) -> torch.Tensor:
+    def _predict(
+        self,
+        x: torch.Tensor,
+        action: torch.Tensor,
+    ) -> torch.Tensor:
         """Get prediction with residual handling."""
         output = self.model(x, action)
         if self.use_residual:
@@ -243,7 +247,7 @@ class DynamicsEvaluator:
         num_episodes: int = 1000,
         use_random_starts: bool = True,
         return_trajectories: bool = False,
-        verbose: bool = True
+        verbose: bool = True,
     ) -> Dict[str, Any]:
         """
         Evaluate multi-step prediction error with comprehensive statistics.
@@ -251,7 +255,7 @@ class DynamicsEvaluator:
         self.model.eval()
 
         # Handle Subset objects
-        if hasattr(dataset, 'dataset'):
+        if hasattr(dataset, "dataset"):
             base_dataset = dataset.dataset
         else:
             base_dataset = dataset
@@ -265,7 +269,7 @@ class DynamicsEvaluator:
             valid_starts = []
             for idx in range(total_samples - max_horizon):
                 # start부터 max_horizon 내에 done이 없는지 확인
-                if not base_dataset.dones[idx:idx + max_horizon].any():
+                if not base_dataset.dones[idx : idx + max_horizon].any():
                     valid_starts.append(idx)
         else:
             # 기존: Episode 시작점에서만
@@ -277,9 +281,9 @@ class DynamicsEvaluator:
         if len(valid_starts) == 0:
             print(f"Warning: No valid starts for horizon {max_horizon}")
             return {
-                'mean': {h: float('nan') for h in horizons},
-                'std': {h: float('nan') for h in horizons},
-                'median': {h: float('nan') for h in horizons},
+                "mean": {h: float("nan") for h in horizons},
+                "std": {h: float("nan") for h in horizons},
+                "median": {h: float("nan") for h in horizons},
             }
 
         if len(valid_starts) < num_episodes:
@@ -306,22 +310,16 @@ class DynamicsEvaluator:
         horizons_set = set(horizons)
 
         with torch.no_grad():
-            sampled_starts = np.random.choice(
-                valid_starts,
-                size=num_episodes,
-                replace=False
-            )
+            sampled_starts = np.random.choice(valid_starts, size=num_episodes, replace=False)
 
             for episode_idx, start_idx in enumerate(sampled_starts):
                 # Get initial state
                 if not aux_terms:
-                    x = base_dataset.observations[start_idx:start_idx + 1].to(self.device)
+                    x = base_dataset.observations[start_idx : start_idx + 1].to(self.device)
                 else:
                     aux_data = []
                     for term in aux_terms:
-                        aux_data.append(
-                            base_dataset.auxiliary_obs[term][start_idx:start_idx + 1]
-                        )
+                        aux_data.append(base_dataset.auxiliary_obs[term][start_idx : start_idx + 1])
                     x = torch.cat(aux_data, dim=-1).to(self.device)
 
                 # Apply normalization
@@ -332,16 +330,16 @@ class DynamicsEvaluator:
                 traj_errors = []
 
                 for t in range(max_horizon):
-                    action = base_dataset.actions[start_idx + t:start_idx + t + 1].to(self.device)
+                    action = base_dataset.actions[start_idx + t : start_idx + t + 1].to(self.device)
 
                     # Get true next state
                     if not aux_terms:
-                        next_x_true = base_dataset.next_observations[start_idx + t:start_idx + t + 1].to(self.device)
+                        next_x_true = base_dataset.next_observations[start_idx + t : start_idx + t + 1].to(self.device)
                     else:
                         next_aux_data = []
                         for term in aux_terms:
                             next_aux_data.append(
-                                base_dataset.next_auxiliary_obs[term][start_idx + t:start_idx + t + 1]
+                                base_dataset.next_auxiliary_obs[term][start_idx + t : start_idx + t + 1]
                             )
                         next_x_true = torch.cat(next_aux_data, dim=-1).to(self.device)
 
@@ -372,44 +370,45 @@ class DynamicsEvaluator:
 
         # Compute statistics
         results = {
-            'mean': {},
-            'std': {},
-            'median': {},
-            'p25': {},
-            'p75': {},
-            'p90': {},
-            'p95': {},
-            'min': {},
-            'max': {},
+            "mean": {},
+            "std": {},
+            "median": {},
+            "p25": {},
+            "p75": {},
+            "p90": {},
+            "p95": {},
+            "min": {},
+            "max": {},
         }
 
         for h in horizons:
             errors = rollout_errors[h]
             if len(errors) > 0:
                 errors_arr = np.array(errors)
-                results['mean'][h] = np.mean(errors_arr)
-                results['std'][h] = np.std(errors_arr)
-                results['median'][h] = np.median(errors_arr)
-                results['p25'][h] = np.percentile(errors_arr, 25)
-                results['p75'][h] = np.percentile(errors_arr, 75)
-                results['p90'][h] = np.percentile(errors_arr, 90)
-                results['p95'][h] = np.percentile(errors_arr, 95)
-                results['min'][h] = np.min(errors_arr)
-                results['max'][h] = np.max(errors_arr)
+                results["mean"][h] = np.mean(errors_arr)
+                results["std"][h] = np.std(errors_arr)
+                results["median"][h] = np.median(errors_arr)
+                results["p25"][h] = np.percentile(errors_arr, 25)
+                results["p75"][h] = np.percentile(errors_arr, 75)
+                results["p90"][h] = np.percentile(errors_arr, 90)
+                results["p95"][h] = np.percentile(errors_arr, 95)
+                results["min"][h] = np.min(errors_arr)
+                results["max"][h] = np.max(errors_arr)
             else:
                 for key in results:
-                    results[key][h] = float('nan')
+                    results[key][h] = float("nan")
 
         if return_trajectories:
-            results['trajectories'] = np.array(trajectory_errors)
+            results["trajectories"] = np.array(trajectory_errors)
 
         return results
+
 
 def print_comparison_results(
     physics_results: Dict[str, float],
     mlp_results: Dict[str, float],
     physics_rollout: Dict[str, Any],
-    mlp_rollout: Dict[str, Any]
+    mlp_rollout: Dict[str, Any],
 ):
     """
     Print comprehensive comparison results.
@@ -429,18 +428,18 @@ def print_comparison_results(
     print(f"{'Metric':<20} {'Physics':<15} {'MLP':<15} {'Improvement':<12}")
     print("-" * 65)
 
-    p_mean = physics_results['final_mean_loss']
-    m_mean = mlp_results['final_mean_loss']
+    p_mean = physics_results["final_mean_loss"]
+    m_mean = mlp_results["final_mean_loss"]
     imp_mean = (m_mean - p_mean) / m_mean * 100
     print(f"{'Mean Loss':<20} {p_mean:<15.6f} {m_mean:<15.6f} {imp_mean:>+10.2f}%")
 
-    p_median = physics_results['final_median_loss']
-    m_median = mlp_results['final_median_loss']
+    p_median = physics_results["final_median_loss"]
+    m_median = mlp_results["final_median_loss"]
     imp_median = (m_median - p_median) / m_median * 100
     print(f"{'Median Loss':<20} {p_median:<15.6f} {m_median:<15.6f} {imp_median:>+10.2f}%")
 
-    p_p90 = physics_results['final_p90']
-    m_p90 = mlp_results['final_p90']
+    p_p90 = physics_results["final_p90"]
+    m_p90 = mlp_results["final_p90"]
     imp_p90 = (m_p90 - p_p90) / m_p90 * 100
     print(f"{'P90':<20} {p_p90:<15.6f} {m_p90:<15.6f} {imp_p90:>+10.2f}%")
 
@@ -449,39 +448,37 @@ def print_comparison_results(
     print(f"{'Horizon':<10} {'Physics':<25} {'MLP':<25} {'Improvement':<12}")
     print("-" * 75)
 
-    for h in sorted(physics_rollout['mean'].keys()):
-        p_mean = physics_rollout['mean'][h]
-        p_std = physics_rollout['std'][h]
-        m_mean = mlp_rollout['mean'][h]
-        m_std = mlp_rollout['std'][h]
+    for h in sorted(physics_rollout["mean"].keys()):
+        p_mean = physics_rollout["mean"][h]
+        p_std = physics_rollout["std"][h]
+        m_mean = mlp_rollout["mean"][h]
+        m_std = mlp_rollout["std"][h]
         imp = (m_mean - p_mean) / m_mean * 100
 
-        print(f"{h:<10} {p_mean:>8.6f} ± {p_std:<8.6f}   "
-              f"{m_mean:>8.6f} ± {m_std:<8.6f}   {imp:>+10.2f}%")
+        print(f"{h:<10} {p_mean:>8.6f} ± {p_std:<8.6f}   {m_mean:>8.6f} ± {m_std:<8.6f}   {imp:>+10.2f}%")
 
     # Multi-step performance - Median & P90
     print("\n--- Multi-step Rollout Errors (Median / P90) ---")
     print(f"{'Horizon':<10} {'Physics':<25} {'MLP':<25} {'Improvement':<12}")
     print("-" * 75)
 
-    for h in sorted(physics_rollout['median'].keys()):
-        p_med = physics_rollout['median'][h]
-        p_p90 = physics_rollout['p90'][h]
-        m_med = mlp_rollout['median'][h]
-        m_p90 = mlp_rollout['p90'][h]
+    for h in sorted(physics_rollout["median"].keys()):
+        p_med = physics_rollout["median"][h]
+        p_p90 = physics_rollout["p90"][h]
+        m_med = mlp_rollout["median"][h]
+        m_p90 = mlp_rollout["p90"][h]
         imp_med = (m_med - p_med) / m_med * 100
 
-        print(f"{h:<10} {p_med:>8.6f} / {p_p90:<8.6f}   "
-              f"{m_med:>8.6f} / {m_p90:<8.6f}   {imp_med:>+10.2f}%")
+        print(f"{h:<10} {p_med:>8.6f} / {p_p90:<8.6f}   {m_med:>8.6f} / {m_p90:<8.6f}   {imp_med:>+10.2f}%")
 
     # Worst-case analysis
     print("\n--- Worst-case Performance (P95) ---")
     print(f"{'Horizon':<10} {'Physics':<15} {'MLP':<15} {'Improvement':<12}")
     print("-" * 55)
 
-    for h in sorted(physics_rollout['p95'].keys()):
-        p_p95 = physics_rollout['p95'][h]
-        m_p95 = mlp_rollout['p95'][h]
+    for h in sorted(physics_rollout["p95"].keys()):
+        p_p95 = physics_rollout["p95"][h]
+        m_p95 = mlp_rollout["p95"][h]
         imp_p95 = (m_p95 - p_p95) / m_p95 * 100
         print(f"{h:<10} {p_p95:<15.6f} {m_p95:<15.6f} {imp_p95:>+10.2f}%")
 
@@ -490,7 +487,7 @@ def log_results_to_wandb(
     physics_results: Dict[str, float],
     mlp_results: Dict[str, float],
     physics_rollout: Dict[str, Any],
-    mlp_rollout: Dict[str, Any]
+    mlp_rollout: Dict[str, Any],
 ):
     """
     Log all results to Weights & Biases.
@@ -503,34 +500,36 @@ def log_results_to_wandb(
     """
 
     # Single-step metrics
-    physics_final_loss = physics_results['final_mean_loss']
-    mlp_final_loss = mlp_results['final_mean_loss']
+    physics_final_loss = physics_results["final_mean_loss"]
+    mlp_final_loss = mlp_results["final_mean_loss"]
 
-    wandb.log({
-        # Single-step metrics
-        "final/physics_final_mean_loss": physics_final_loss,
-        "final/mlp_final_mean_loss": mlp_final_loss,
-        "final/improvement_pct": (mlp_final_loss - physics_final_loss) / mlp_final_loss * 100,
-
-        "final/physics_final_median_loss": physics_results['final_median_loss'],
-        "final/mlp_final_median_loss": mlp_results['final_median_loss'],
-
-        "final/physics_best_val_loss": physics_results['best_val_loss'],
-        "final/mlp_best_val_loss": mlp_results['best_val_loss'],
-        "final/physics_best_epoch": physics_results['best_epoch'],
-        "final/mlp_best_epoch": mlp_results['best_epoch'],
-    })
+    wandb.log(
+        {
+            # Single-step metrics
+            "final/physics_final_mean_loss": physics_final_loss,
+            "final/mlp_final_mean_loss": mlp_final_loss,
+            "final/improvement_pct": (mlp_final_loss - physics_final_loss) / mlp_final_loss * 100,
+            "final/physics_final_median_loss": physics_results["final_median_loss"],
+            "final/mlp_final_median_loss": mlp_results["final_median_loss"],
+            "final/physics_best_val_loss": physics_results["best_val_loss"],
+            "final/mlp_best_val_loss": mlp_results["best_val_loss"],
+            "final/physics_best_epoch": physics_results["best_epoch"],
+            "final/mlp_best_epoch": mlp_results["best_epoch"],
+        }
+    )
 
     # Multi-step rollout metrics
-    for h in sorted(physics_rollout['mean'].keys()):
-        wandb.log({
-            f"rollout/horizon_{h}/physics_mean": physics_rollout['mean'][h],
-            f"rollout/horizon_{h}/mlp_mean": mlp_rollout['mean'][h],
-            f"rollout/horizon_{h}/physics_median": physics_rollout['median'][h],
-            f"rollout/horizon_{h}/mlp_median": mlp_rollout['median'][h],
-            f"rollout/horizon_{h}/physics_p90": physics_rollout['p90'][h],
-            f"rollout/horizon_{h}/mlp_p90": mlp_rollout['p90'][h],
-            f"rollout/horizon_{h}/improvement_pct": (
-                (mlp_rollout['mean'][h] - physics_rollout['mean'][h]) / mlp_rollout['mean'][h] * 100
-            )
-        })
+    for h in sorted(physics_rollout["mean"].keys()):
+        wandb.log(
+            {
+                f"rollout/horizon_{h}/physics_mean": physics_rollout["mean"][h],
+                f"rollout/horizon_{h}/mlp_mean": mlp_rollout["mean"][h],
+                f"rollout/horizon_{h}/physics_median": physics_rollout["median"][h],
+                f"rollout/horizon_{h}/mlp_median": mlp_rollout["median"][h],
+                f"rollout/horizon_{h}/physics_p90": physics_rollout["p90"][h],
+                f"rollout/horizon_{h}/mlp_p90": mlp_rollout["p90"][h],
+                f"rollout/horizon_{h}/improvement_pct": (
+                    (mlp_rollout["mean"][h] - physics_rollout["mean"][h]) / mlp_rollout["mean"][h] * 100
+                ),
+            }
+        )

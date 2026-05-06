@@ -6,9 +6,10 @@ Newton supports IMU, Contact, FrameTransform, Raycast, and TiledCamera sensors.
 Sensors in Newton are attached to "sites" which are created on bodies during
 entity registration.
 """
+
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import newton
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 class NewtonSensorType(Enum):
     """Available sensor types in Newton."""
+
     IMU = "imu"
     CONTACT = "contact"
     FRAME_TRANSFORM = "frame_transform"
@@ -36,6 +38,7 @@ class NewtonSensorConfig:
             site_names=["imu_site"],
         )
     """
+
     sensor_name: str  # Unique name for this sensor
     entity_name: str  # Entity this sensor is attached to
     sensor_type: NewtonSensorType = NewtonSensorType.IMU
@@ -55,6 +58,7 @@ class NewtonIMUSensorConfig(NewtonSensorConfig):
             site_names=["base_imu_site"],  # Must match site defined in NewtonEntityConfig
         )
     """
+
     sensor_type: NewtonSensorType = NewtonSensorType.IMU
     site_names: list[str] = field(default_factory=list)  # Names of sites to attach IMU
 
@@ -70,6 +74,7 @@ class NewtonIMUSensorConfig(NewtonSensorConfig):
             The created SensorIMU object
         """
         import newton
+
         return newton.sensors.SensorIMU(model, site_indices)
 
 
@@ -97,6 +102,7 @@ class NewtonContactSensorConfig(NewtonSensorConfig):
             use_regex=True,
         )
     """
+
     sensor_type: NewtonSensorType = NewtonSensorType.CONTACT
 
     # Sensing objects (exactly one must be specified)
@@ -120,6 +126,7 @@ class NewtonFrameTransformSensorConfig(NewtonSensorConfig):
 
     Measures the transform (position and orientation) of specified sites.
     """
+
     sensor_type: NewtonSensorType = NewtonSensorType.FRAME_TRANSFORM
     site_names: list[str] = field(default_factory=list)
 
@@ -127,6 +134,7 @@ class NewtonFrameTransformSensorConfig(NewtonSensorConfig):
     def create_sensor(model: "newton.Model", site_indices: list[int]) -> "newton.sensors.SensorFrameTransform":
         """Create the actual FrameTransform sensor object."""
         import newton
+
         return newton.sensors.SensorFrameTransform(model, site_indices)
 
 
@@ -136,6 +144,7 @@ class NewtonRaycastSensorConfig(NewtonSensorConfig):
 
     Casts rays from specified sites and returns hit information.
     """
+
     sensor_type: NewtonSensorType = NewtonSensorType.RAYCAST
     site_names: list[str] = field(default_factory=list)
     ray_direction: tuple[float, float, float] = (0.0, 0.0, -1.0)  # Local direction
@@ -145,6 +154,7 @@ class NewtonRaycastSensorConfig(NewtonSensorConfig):
         """Create the actual Raycast sensor object."""
         import newton
         import warp as wp
+
         return newton.sensors.SensorRaycast(
             model,
             site_indices,

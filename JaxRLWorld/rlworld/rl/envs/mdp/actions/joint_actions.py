@@ -30,17 +30,17 @@ they differ only in :meth:`ActionTerm.compute_target_positions`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
 
-from rlworld.rl.utils import string as string_utils
 from rlworld.rl.envs.mdp.actions.base import ActionTerm, ActionTermCfg
+from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
-    from rlworld.rl.envs.world import World
     from rlworld.rl.envs.managers.common.action import ActionManagerBase
+    from rlworld.rl.envs.world import World
 
 
 # ── Shared base ─────────────────────────────────────────────────────
@@ -75,30 +75,24 @@ class JointAction(ActionTerm):
     def __init__(
         self,
         cfg: JointActionCfg,
-        env: "World",
-        manager: "ActionManagerBase",
+        env: World,
+        manager: ActionManagerBase,
     ) -> None:
         super().__init__(cfg, env, manager)
 
         # Resolve joint_names → indices into manager.actuated_joint_names.
         all_names = manager.actuated_joint_names
-        matched_indices, _ = string_utils.resolve_matching_names(
-            cfg.joint_names, all_names, preserve_order=True
-        )
+        matched_indices, _ = string_utils.resolve_matching_names(cfg.joint_names, all_names, preserve_order=True)
         if not matched_indices:
             raise ValueError(
                 f"ActionTerm {type(self).__name__} got joint_names={cfg.joint_names!r} "
                 f"but no actuated joints matched. Available: {all_names}"
             )
-        self._joint_ids = torch.tensor(
-            matched_indices, device=env.device, dtype=torch.long
-        )
+        self._joint_ids = torch.tensor(matched_indices, device=env.device, dtype=torch.long)
         self._joint_names_local = [all_names[i] for i in matched_indices]
 
         n = len(matched_indices)
-        self._raw_actions = torch.zeros(
-            (env.num_envs, n), device=env.device, dtype=torch.float32
-        )
+        self._raw_actions = torch.zeros((env.num_envs, n), device=env.device, dtype=torch.float32)
         self._processed_actions = torch.zeros_like(self._raw_actions)
 
         # Resolve scale dict → per-joint tensor (n,).
@@ -108,7 +102,7 @@ class JointAction(ActionTerm):
 
     def _resolve_float_field(
         self,
-        value: "float | dict[str, float]",
+        value: float | dict[str, float],
         default: float,
     ) -> torch.Tensor:
         """Map a float or regex-dict onto the term's joint set."""
@@ -121,14 +115,11 @@ class JointAction(ActionTerm):
         if isinstance(value, (int, float)):
             out[:] = float(value)
         elif isinstance(value, dict):
-            indices, _, values = string_utils.resolve_matching_names_values(
-                value, self._joint_names_local
-            )
+            indices, _, values = string_utils.resolve_matching_names_values(value, self._joint_names_local)
             out[indices] = torch.tensor(values, device=self._env.device)
         else:
             raise TypeError(
-                f"{type(self).__name__}: expected float or dict for "
-                f"scale/offset, got {type(value).__name__}"
+                f"{type(self).__name__}: expected float or dict for scale/offset, got {type(value).__name__}"
             )
         return out
 
@@ -172,8 +163,8 @@ class JointPositionAction(JointAction):
     def __init__(
         self,
         cfg: JointPositionActionCfg,
-        env: "World",
-        manager: "ActionManagerBase",
+        env: World,
+        manager: ActionManagerBase,
     ) -> None:
         super().__init__(cfg, env, manager)
         if cfg.use_default_offset:
@@ -222,8 +213,8 @@ class RelativeJointPositionAction(JointAction):
     def __init__(
         self,
         cfg: RelativeJointPositionActionCfg,
-        env: "World",
-        manager: "ActionManagerBase",
+        env: World,
+        manager: ActionManagerBase,
     ) -> None:
         super().__init__(cfg, env, manager)
         if cfg.use_zero_offset:
@@ -280,9 +271,7 @@ class SettleRelativeJointPositionAction(RelativeJointPositionAction):
 
         settle_steps = self._cfg.settle_steps
         if settle_steps > 0:
-            in_settle = (
-                self._env.episode_length_buf < settle_steps
-            ).unsqueeze(-1)
+            in_settle = (self._env.episode_length_buf < settle_steps).unsqueeze(-1)
             target = torch.where(in_settle, current_pos, target)
 
         return target
@@ -353,9 +342,9 @@ class MotionResidualJointPositionAction(JointAction):
     def __init__(
         self,
         cfg: MotionResidualJointPositionActionCfg,
-        env: "World",
-        manager: "ActionManagerBase",
-        tanh_squash: bool = False
+        env: World,
+        manager: ActionManagerBase,
+        tanh_squash: bool = False,
     ) -> None:
         super().__init__(cfg, env, manager)
         # Per-joint tanh scale (alpha). Replaces self._scale/_offset's role.

@@ -11,12 +11,12 @@ caller passes ``episode_start=True`` for that step.
 The prior carries no learnable parameters; ``alpha`` is a fixed
 hyperparameter (paper default 0.95).
 """
+
 from __future__ import annotations
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-
 
 __all__ = ["AR1Prior"]
 
@@ -34,7 +34,7 @@ class AR1Prior(eqx.Module):
     @property
     def ar_std(self) -> float:
         """Per-dim std of the AR(1) innovation, sqrt(1 - alpha^2)."""
-        return float((1.0 - self.alpha ** 2) ** 0.5)
+        return float((1.0 - self.alpha**2) ** 0.5)
 
     def mean_std(
         self,
@@ -62,7 +62,7 @@ class AR1Prior(eqx.Module):
     ) -> jax.Array:
         """Diagonal Gaussian log-prob, summed over latent dim."""
         mean, std = self.mean_std(z_prev, episode_start)
-        var = std ** 2
+        var = std**2
         return -0.5 * jnp.sum(
             ((z_t - mean) ** 2) / var + jnp.log(2.0 * jnp.pi * var),
             axis=-1,

@@ -2,6 +2,7 @@
 
 See ``newton/space_time_transformer.py`` for details.
 """
+
 from rlworld.rl.configs.presets.t1_tracking.transformer import (
     T1TrackingTransformerConfig,
 )
@@ -9,11 +10,7 @@ from rlworld.rl.runners import BaseRunner
 
 
 def main():
-    cfgs_for_run = (
-        T1TrackingTransformerConfig(sim_type="mujoco")
-        .build()
-        .with_cli_overrides()
-    )
+    cfgs_for_run = T1TrackingTransformerConfig(sim_type="mujoco").build().with_cli_overrides()
     runner = BaseRunner.create_with_env(cfgs_for_run)
     runner.learn(
         num_learning_iterations=cfgs_for_run.runner.max_iterations,

@@ -6,12 +6,12 @@ import optax
 
 from rlworld.rl.algorithms.tdmpc2.math import (
     TwoHotConfig,
-    two_hot_inv,
     soft_ce,
+    two_hot_inv,
 )
 from rlworld.rl.modules.policies.tdmpc2_world_model import (
-    TDMPC2WorldModel,
     QEnsemble,
+    TDMPC2WorldModel,
 )
 from rlworld.rl.storages.sequence_replay_buffer import SequenceBatch
 
@@ -55,14 +55,18 @@ def compute_world_model_loss(
     key, td_key, q_key = jax.random.split(key, 3)
 
     # Encode all next observations (consistency targets, fixed)
-    next_z_targets = jax.lax.stop_gradient(
-        jax.vmap(model.encode)(obs[1:])
-    )  # [H, B, latent_dim]
+    next_z_targets = jax.lax.stop_gradient(jax.vmap(model.encode)(obs[1:]))  # [H, B, latent_dim]
 
     # TD-targets (vectorized)
     td_targets = _compute_td_targets(
-        model, target_q_ensemble, next_z_targets, rewards, terminated,
-        discount, two_hot_cfg, td_key,
+        model,
+        target_q_ensemble,
+        next_z_targets,
+        rewards,
+        terminated,
+        discount,
+        two_hot_cfg,
+        td_key,
     )  # [H, B, 1]
 
     # Sequential dynamics rollout (cannot vectorize due to sequential dependency)
@@ -79,9 +83,7 @@ def compute_world_model_loss(
     rho_weights = rho ** jnp.arange(horizon)  # [H]
 
     # Vectorized consistency loss
-    consistency_per_t = jnp.mean(
-        (zs_post - next_z_targets) ** 2, axis=(-1, -2)
-    )  # [H]
+    consistency_per_t = jnp.mean((zs_post - next_z_targets) ** 2, axis=(-1, -2))  # [H]
     consistency_loss = jnp.sum(consistency_per_t * rho_weights) / horizon
 
     # Vectorized reward loss
@@ -89,9 +91,7 @@ def compute_world_model_loss(
         pred = model.predict_reward(z, a)
         return soft_ce(pred, r, two_hot_cfg).mean()
 
-    reward_losses = jax.vmap(_reward_loss_single)(
-        zs_pre, actions, rewards
-    )  # [H]
+    reward_losses = jax.vmap(_reward_loss_single)(zs_pre, actions, rewards)  # [H]
     reward_loss = jnp.sum(reward_losses * rho_weights) / horizon
 
     # Vectorized value loss
@@ -99,17 +99,11 @@ def compute_world_model_loss(
 
     def _value_loss_single(z, a, td_target, k):
         q_preds = model.predict_q(z, a, key=k)  # [num_q, B, bins]
-        td_broadcast = jnp.broadcast_to(
-            td_target[None], (q_preds.shape[0],) + td_target.shape
-        )  # [num_q, B, 1]
-        q_ce = jax.vmap(soft_ce, in_axes=(0, 0, None))(
-            q_preds, td_broadcast, two_hot_cfg
-        )  # [num_q, B, 1]
+        td_broadcast = jnp.broadcast_to(td_target[None], (q_preds.shape[0],) + td_target.shape)  # [num_q, B, 1]
+        q_ce = jax.vmap(soft_ce, in_axes=(0, 0, None))(q_preds, td_broadcast, two_hot_cfg)  # [num_q, B, 1]
         return q_ce.mean()
 
-    value_losses = jax.vmap(_value_loss_single)(
-        zs_pre, actions, td_targets, q_keys
-    )  # [H]
+    value_losses = jax.vmap(_value_loss_single)(zs_pre, actions, td_targets, q_keys)  # [H]
     value_loss = jnp.sum(value_losses * rho_weights) / horizon
 
     # Termination loss (episodic mode only)
@@ -117,7 +111,8 @@ def compute_world_model_loss(
         term_logits = jax.vmap(model.predict_termination)(zs_post)  # [H, B, 1]
         term_labels = terminated  # [H, B, 1]
         termination_loss = optax.sigmoid_binary_cross_entropy(
-            term_logits, term_labels,
+            term_logits,
+            term_labels,
         ).mean()
     else:
         termination_loss = jnp.float32(0.0)
@@ -164,9 +159,7 @@ def _compute_td_targets(
         target_q = q_values.min(axis=0)
         return r + discount * (1.0 - done) * target_q
 
-    td_targets = jax.vmap(_single_td)(
-        next_z, rewards, terminated, pi_keys, q_keys
-    )  # [H, B, 1]
+    td_targets = jax.vmap(_single_td)(next_z, rewards, terminated, pi_keys, q_keys)  # [H, B, 1]
 
     return jax.lax.stop_gradient(td_targets)
 
@@ -193,16 +186,17 @@ def compute_policy_loss(
     def _single_step(z, pi_k, q_k):
         action, info = model.pi(z, key=pi_k)
         q_val = model.q_value(
-            z, action, two_hot_cfg,
-            return_type="avg", key=q_k,
+            z,
+            action,
+            two_hot_cfg,
+            return_type="avg",
+            key=q_k,
         )
         q_normalized = q_val / jnp.maximum(scale_value, 1.0)
         step_loss = -(entropy_coef * info["scaled_entropy"] + q_normalized).mean()
         return step_loss, info["entropy"].mean(), info["scaled_entropy"].mean()
 
-    step_losses, entropies, scaled_entropies = jax.vmap(_single_step)(
-        zs, pi_keys, q_keys
-    )  # each [H+1]
+    step_losses, entropies, scaled_entropies = jax.vmap(_single_step)(zs, pi_keys, q_keys)  # each [H+1]
 
     pi_loss = jnp.sum(step_losses * rho_weights) / horizon_plus_one
 

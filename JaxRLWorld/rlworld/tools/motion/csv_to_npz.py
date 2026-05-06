@@ -17,6 +17,7 @@ The resulting NPZ contains per-frame per-body world state +
 MotionLoader can reorder bodies to match the preset's ``body_names``
 list. Uses only the ``mujoco`` Python package; no mjlab dependency.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -32,8 +33,8 @@ def main(
     output_file: str,
     input_fps: float = 30.0,
     output_fps: float = 50.0,
-    joint_names: "tuple[str, ...] | None" = None,
-    line_range: "tuple[int, int] | None" = None,
+    joint_names: tuple[str, ...] | None = None,
+    line_range: tuple[int, int] | None = None,
 ) -> None:
     """Convert a retargeted motion CSV + MJCF into a MotionCommand-ready NPZ.
 
@@ -59,10 +60,7 @@ def main(
         output_fps=output_fps,
         line_range=line_range,
     ).get_all()
-    print(
-        f"[csv_to_npz] {motion.dof_pos.shape[0]} output frames @ "
-        f"{output_fps} Hz ({motion.dof_pos.shape[1]} DoFs)."
-    )
+    print(f"[csv_to_npz] {motion.dof_pos.shape[0]} output frames @ {output_fps} Hz ({motion.dof_pos.shape[1]} DoFs).")
 
     print(f"[csv_to_npz] Forward-kinematics replay via {mjcf_path!r}")
     baked = replay_motion(

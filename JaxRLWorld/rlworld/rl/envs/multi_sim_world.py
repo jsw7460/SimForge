@@ -21,7 +21,7 @@ Usage:
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import numpy as np
 import torch
@@ -37,18 +37,21 @@ if TYPE_CHECKING:
 # follow each simulator's internal joint ordering and therefore need
 # permutation when orderings differ.
 # =====================================================================
-_JOINT_INDEXED_OBS_NAMES = frozenset({
-    "dof_pos",
-    "dof_vel",
-    "dof_pos_nominal_difference",
-    "prev_processed_actions",
-    "raw_actions",
-})
+_JOINT_INDEXED_OBS_NAMES = frozenset(
+    {
+        "dof_pos",
+        "dof_vel",
+        "dof_pos_nominal_difference",
+        "prev_processed_actions",
+        "raw_actions",
+    }
+)
 
 
 # =====================================================================
 # _JointPermutation
 # =====================================================================
+
 
 class _JointPermutation:
     """Maps between a sub-environment's joint order and the canonical order.
@@ -71,9 +74,7 @@ class _JointPermutation:
         device: torch.device,
     ):
         n = len(canonical_names)
-        assert len(sim_names) == n, (
-            f"Joint count mismatch: canonical={n}, sim={len(sim_names)}"
-        )
+        assert len(sim_names) == n, f"Joint count mismatch: canonical={n}, sim={len(sim_names)}"
 
         # Strip prefix (Newton adds "g1_29dof/" etc.)
         def _bare(name: str) -> str:
@@ -86,11 +87,7 @@ class _JointPermutation:
         if set(canonical_bare) != set(sim_bare):
             only_canonical = set(canonical_bare) - set(sim_bare)
             only_sim = set(sim_bare) - set(canonical_bare)
-            raise ValueError(
-                f"Joint name mismatch!\n"
-                f"  Only in canonical: {only_canonical}\n"
-                f"  Only in sim: {only_sim}"
-            )
+            raise ValueError(f"Joint name mismatch!\n  Only in canonical: {only_canonical}\n  Only in sim: {only_sim}")
 
         # ── Build permutation indices ──
         # sim_to_canon[s] = c  means sim_names[s] == canonical_names[c]
@@ -135,8 +132,7 @@ class _JointPermutation:
         if self.is_identity:
             return sim_obs
         return {
-            group: tensor[:, self.obs_perms[group]]
-            if group in self.obs_perms else tensor
+            group: tensor[:, self.obs_perms[group]] if group in self.obs_perms else tensor
             for group, tensor in sim_obs.items()
         }
 
@@ -144,6 +140,7 @@ class _JointPermutation:
 # =====================================================================
 # Proxy managers
 # =====================================================================
+
 
 class _TerminationManagerProxy:
     """Proxy that concatenates termination state across sub-environments."""
@@ -158,9 +155,7 @@ class _TerminationManagerProxy:
 
     @property
     def episode_length_buf(self) -> torch.Tensor:
-        return torch.cat(
-            [e.termination_manager.episode_length_buf for e in self._envs], dim=0
-        )
+        return torch.cat([e.termination_manager.episode_length_buf for e in self._envs], dim=0)
 
     @episode_length_buf.setter
     def episode_length_buf(self, value: torch.Tensor) -> None:
@@ -170,15 +165,11 @@ class _TerminationManagerProxy:
 
     @property
     def reset_buf(self) -> torch.Tensor:
-        return torch.cat(
-            [e.termination_manager.reset_buf for e in self._envs], dim=0
-        )
+        return torch.cat([e.termination_manager.reset_buf for e in self._envs], dim=0)
 
     @property
     def episode_count(self) -> torch.Tensor:
-        return torch.cat(
-            [e.termination_manager.episode_count for e in self._envs], dim=0
-        )
+        return torch.cat([e.termination_manager.episode_count for e in self._envs], dim=0)
 
     @property
     def extras(self) -> dict:
@@ -278,6 +269,7 @@ class _ActManagerProxy:
 # MultiSimWorld
 # =====================================================================
 
+
 class MultiSimWorld:
     """Wraps multiple simulator environments into a single unified environment.
 
@@ -334,13 +326,13 @@ class MultiSimWorld:
         # ── Pretty name ──
         sim_names = [e.sim_name for e in envs]
         env_counts = [str(e.num_envs) for e in envs]
-        self.sim_name = "MultiSim(" + "+".join(
-            f"{n}x{c}" for n, c in zip(sim_names, env_counts)
-        ) + ")"
+        self.sim_name = "MultiSim(" + "+".join(f"{n}x{c}" for n, c in zip(sim_names, env_counts)) + ")"
 
         self._task_name = getattr(self._primary, "task_name", "multi_sim")
 
-        import ipdb; ipdb.set_trace()
+        import ipdb
+
+        ipdb.set_trace()
 
     # ------------------------------------------------------------------
     # Joint permutation setup
@@ -372,12 +364,16 @@ class MultiSimWorld:
         # Log permutation info
         needs_perm = [not jp.is_identity for jp in perms]
         if any(needs_perm):
-            print(f"[MultiSimWorld] Joint permutation needed for: "
-                  f"{[self.envs[i].sim_name for i, need in enumerate(needs_perm) if need]}")
-            print(f"[MultiSimWorld] Canonical order (from {self.envs[0].sim_name}): "
-                  f"{canonical_names[:5]}... ({len(canonical_names)} joints)")
+            print(
+                f"[MultiSimWorld] Joint permutation needed for: "
+                f"{[self.envs[i].sim_name for i, need in enumerate(needs_perm) if need]}"
+            )
+            print(
+                f"[MultiSimWorld] Canonical order (from {self.envs[0].sim_name}): "
+                f"{canonical_names[:5]}... ({len(canonical_names)} joints)"
+            )
         else:
-            print(f"[MultiSimWorld] All sub-environments have identical joint ordering.")
+            print("[MultiSimWorld] All sub-environments have identical joint ordering.")
 
         return perms
 
@@ -387,9 +383,7 @@ class MultiSimWorld:
         return list(env.act_manager.actuated_joint_names)
 
     @staticmethod
-    def _find_joint_obs_slices(
-        env: World, num_actions: int
-    ) -> Dict[str, List[Tuple[int, int]]]:
+    def _find_joint_obs_slices(env: World, num_actions: int) -> Dict[str, List[Tuple[int, int]]]:
         """Find slices in each obs group's flat vector that are joint-indexed.
 
         A term is considered joint-indexed if:
@@ -429,10 +423,12 @@ class MultiSimWorld:
                     # History buffer flattened into this term's slice.
                     history_len = term_dim // num_actions
                     for h in range(history_len):
-                        slices.append((
-                            start + h * num_actions,
-                            start + (h + 1) * num_actions,
-                        ))
+                        slices.append(
+                            (
+                                start + h * num_actions,
+                                start + (h + 1) * num_actions,
+                            )
+                        )
 
             result[group_name] = slices
 
@@ -449,26 +445,20 @@ class MultiSimWorld:
         # Device
         devices = {str(e.device) for e in self.envs}
         if len(devices) > 1:
-            raise ValueError(
-                f"All sub-environments must use the same device. Got: {devices}"
-            )
+            raise ValueError(f"All sub-environments must use the same device. Got: {devices}")
 
         # Observation dimensions
         ref_obs_dim = ref.calculate_obs_dim()
         for i, env in enumerate(self.envs[1:], 1):
             obs_dim = env.calculate_obs_dim()
             if obs_dim != ref_obs_dim:
-                raise ValueError(
-                    f"Obs dim mismatch: env[0]={ref_obs_dim}, env[{i}]={obs_dim}"
-                )
+                raise ValueError(f"Obs dim mismatch: env[0]={ref_obs_dim}, env[{i}]={obs_dim}")
 
         # Action dimensions
         ref_act = ref.num_actions
         for i, env in enumerate(self.envs[1:], 1):
             if env.num_actions != ref_act:
-                raise ValueError(
-                    f"Action dim mismatch: env[0]={ref_act}, env[{i}]={env.num_actions}"
-                )
+                raise ValueError(f"Action dim mismatch: env[0]={ref_act}, env[{i}]={env.num_actions}")
 
         # Joint names (same set, possibly different order)
         def _bare(name: str) -> str:
@@ -527,16 +517,17 @@ class MultiSimWorld:
         else:
             low, high = -np.inf, np.inf
         return spaces.Box(
-            low=np.float32(low), high=np.float32(high),
-            shape=(num_actions,), dtype=np.float32,
+            low=np.float32(low),
+            high=np.float32(high),
+            shape=(num_actions,),
+            dtype=np.float32,
         )
 
     @property
     def observation_space(self) -> Dict[str, spaces.Box]:
         obs_dims = self.obs_manager.calculate_obs_dim()
         return {
-            name: spaces.Box(low=-np.inf, high=np.inf, shape=(dim,), dtype=np.float32)
-            for name, dim in obs_dims.items()
+            name: spaces.Box(low=-np.inf, high=np.inf, shape=(dim,), dtype=np.float32) for name, dim in obs_dims.items()
         }
 
     # ------------------------------------------------------------------
@@ -582,9 +573,7 @@ class MultiSimWorld:
             all_infos.append(info)
 
         obs_keys = all_obs[0].keys()
-        merged_obs = {
-            k: torch.cat([o[k] for o in all_obs], dim=0) for k in obs_keys
-        }
+        merged_obs = {k: torch.cat([o[k] for o in all_obs], dim=0) for k in obs_keys}
         merged_rew = torch.cat(all_rew, dim=0)
         merged_term = torch.cat(all_term, dim=0)
         merged_trunc = torch.cat(all_trunc, dim=0)
@@ -596,9 +585,7 @@ class MultiSimWorld:
     # reset
     # ------------------------------------------------------------------
 
-    def reset(
-        self, *, seed=None, options=None
-    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
+    def reset(self, *, seed=None, options=None) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         all_obs: List[Dict[str, torch.Tensor]] = []
 
         for env, jp in zip(self.envs, self._joint_perms):
@@ -606,9 +593,7 @@ class MultiSimWorld:
             all_obs.append(jp.permute_obs(obs))
 
         obs_keys = all_obs[0].keys()
-        merged_obs = {
-            k: torch.cat([o[k] for o in all_obs], dim=0) for k in obs_keys
-        }
+        merged_obs = {k: torch.cat([o[k] for o in all_obs], dim=0) for k in obs_keys}
         merged_extras = {
             "time_outs": torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
             "terminal_observations": None,
@@ -649,8 +634,7 @@ class MultiSimWorld:
                 parts = []
                 for info, n in zip(all_infos, self.splits):
                     sums = info.get("episode_reward_sums")
-                    parts.append(sums[k] if sums is not None and k in sums
-                                 else torch.zeros(n, device=self.device))
+                    parts.append(sums[k] if sums is not None and k in sums else torch.zeros(n, device=self.device))
                 merged_sums[k] = torch.cat(parts, dim=0)
             merged["episode_reward_sums"] = merged_sums
 
@@ -661,9 +645,7 @@ class MultiSimWorld:
 
         return merged
 
-    def _merge_final_observations(
-        self, all_infos: List[Dict[str, Any]]
-    ) -> Dict[str, torch.Tensor] | None:
+    def _merge_final_observations(self, all_infos: List[Dict[str, Any]]) -> Dict[str, torch.Tensor] | None:
         has_any = any(info.get("final_observation") is not None for info in all_infos)
         if not has_any:
             return None
@@ -692,9 +674,7 @@ class MultiSimWorld:
 
         return merged
 
-    def _merge_final_info(
-        self, all_infos: List[Dict[str, Any]]
-    ) -> Dict[str, Any] | None:
+    def _merge_final_info(self, all_infos: List[Dict[str, Any]]) -> Dict[str, Any] | None:
         has_any = any(info.get("final_info") is not None for info in all_infos)
         if not has_any:
             return None
@@ -720,9 +700,7 @@ class MultiSimWorld:
             merged_sums[k] = torch.cat(parts, dim=0)
         return {"episode_reward_sums": merged_sums}
 
-    def _merge_terminal_env_ids(
-        self, all_infos: List[Dict[str, Any]]
-    ) -> torch.Tensor | None:
+    def _merge_terminal_env_ids(self, all_infos: List[Dict[str, Any]]) -> torch.Tensor | None:
         parts = []
         offset = 0
         for info, n in zip(all_infos, self.splits):

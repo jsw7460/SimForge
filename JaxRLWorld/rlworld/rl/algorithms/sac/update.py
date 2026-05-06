@@ -1,17 +1,16 @@
 from typing import Any, Dict
 
-import jax
 import equinox as eqx
+import jax
 import optax
 
-from rlworld.rl.modules.policies.sac_ac import SACActorCritic
-from rlworld.rl.storages.replay_buffer import ReplayBatch
 from rlworld.rl.algorithms.sac.losses import (
-    compute_critic_loss,
     compute_actor_loss,
     compute_alpha_loss,
+    compute_critic_loss,
 )
-
+from rlworld.rl.modules.policies.sac_ac import SACActorCritic
+from rlworld.rl.storages.replay_buffer import ReplayBatch
 
 # ==================== Forward Functions ====================
 
@@ -97,16 +96,10 @@ def update_critics(
         )
         return loss, info
 
-    (loss, info), grads = jax.value_and_grad(critic_loss_fn, has_aux=True)(
-        (critic1_params, critic2_params)
-    )
+    (loss, info), grads = jax.value_and_grad(critic_loss_fn, has_aux=True)((critic1_params, critic2_params))
 
-    updates, new_critic_opt_state = critic_optimizer.update(
-        grads, critic_opt_state, (critic1_params, critic2_params)
-    )
-    new_critic1_params, new_critic2_params = optax.apply_updates(
-        (critic1_params, critic2_params), updates
-    )
+    updates, new_critic_opt_state = critic_optimizer.update(grads, critic_opt_state, (critic1_params, critic2_params))
+    new_critic1_params, new_critic2_params = optax.apply_updates((critic1_params, critic2_params), updates)
 
     # Reconstruct model with updated critics
     new_critic1 = eqx.combine(new_critic1_params, critic1_static)
@@ -147,16 +140,10 @@ def update_actor(
         loss, log_prob, info = compute_actor_loss(new_model, batch, ent_coef, key)
         return loss, (log_prob, info)
 
-    (loss, (log_prob, info)), grads = jax.value_and_grad(actor_loss_fn, has_aux=True)(
-        (actor_params, log_std_params)
-    )
+    (loss, (log_prob, info)), grads = jax.value_and_grad(actor_loss_fn, has_aux=True)((actor_params, log_std_params))
 
-    updates, new_actor_opt_state = actor_optimizer.update(
-        grads, actor_opt_state, (actor_params, log_std_params)
-    )
-    new_actor_params, new_log_std_params = optax.apply_updates(
-        (actor_params, log_std_params), updates
-    )
+    updates, new_actor_opt_state = actor_optimizer.update(grads, actor_opt_state, (actor_params, log_std_params))
+    new_actor_params, new_log_std_params = optax.apply_updates((actor_params, log_std_params), updates)
 
     # Reconstruct model with updated actor
     new_actor = eqx.combine(new_actor_params, actor_static)
@@ -186,9 +173,7 @@ def update_alpha(
 
     (loss, alpha), grad = jax.value_and_grad(alpha_loss_fn, has_aux=True)(log_ent_coef)
 
-    updates, new_alpha_opt_state = alpha_optimizer.update(
-        grad, alpha_opt_state, log_ent_coef
-    )
+    updates, new_alpha_opt_state = alpha_optimizer.update(grad, alpha_opt_state, log_ent_coef)
     new_log_ent_coef = optax.apply_updates(log_ent_coef, updates)
 
     return new_log_ent_coef, new_alpha_opt_state, loss, alpha

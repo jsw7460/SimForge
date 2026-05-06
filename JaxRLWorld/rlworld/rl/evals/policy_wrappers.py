@@ -7,7 +7,7 @@ import jax
 import numpy as np
 import torch
 
-from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
+from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.multi_sim_world import _JointPermutation
@@ -46,7 +46,7 @@ class PolicyWrapper(ABC):
         joint_perm: "_JointPermutation | None" = None,
     ) -> "PolicyWrapper":
         """Factory: returns appropriate subclass based on algorithm type."""
-        if hasattr(runner.alg, 'act_with_t0'):
+        if hasattr(runner.alg, "act_with_t0"):
             return MPCPolicyWrapper(runner, device, joint_perm=joint_perm)
         return ModelPolicyWrapper(runner, device, joint_perm=joint_perm)
 
@@ -56,9 +56,7 @@ class PolicyWrapper(ABC):
             return actions * self.action_scale + self.action_bias
         return actions
 
-    def _permute_obs_to_canonical(
-        self, env_obs: dict[str, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
+    def _permute_obs_to_canonical(self, env_obs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Reorder observations from eval sim's joint order to canonical."""
         if self._joint_perm is None:
             return env_obs
@@ -76,8 +74,7 @@ class PolicyWrapper(ABC):
         env_obs: dict[str, torch.Tensor],
         robot_states: torch.Tensor,
         deterministic: bool = True,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     def notify_reset(self, reset_mask: np.ndarray) -> None:
         """Called when environments reset. Override in subclasses if needed."""
@@ -101,9 +98,7 @@ class ModelPolicyWrapper(PolicyWrapper):
             action, _ = model.act_inference(obs, key=key)
             return action
 
-        self._inference_fn = jax.jit(
-            jax.vmap(_single, in_axes=(0, None))
-        )
+        self._inference_fn = jax.jit(jax.vmap(_single, in_axes=(0, None)))
 
     def get_action(self, env_obs, robot_states, deterministic=True):
         env_obs = self._permute_obs_to_canonical(env_obs)
@@ -124,15 +119,15 @@ class MPCPolicyWrapper(PolicyWrapper):
     ):
         super().__init__(runner, device, joint_perm=joint_perm)
         self._runner = runner
-        self._t0_mask = np.ones(
-            runner.alg._prev_mean.shape[0], dtype=bool
-        )
+        self._t0_mask = np.ones(runner.alg._prev_mean.shape[0], dtype=bool)
 
     def get_action(self, env_obs, robot_states, deterministic=True):
         env_obs = self._permute_obs_to_canonical(env_obs)
         actor_obs = torch_to_jax(env_obs["actor"])
         action_jax = self._runner.alg.act_with_t0(
-            obs=actor_obs, t0_mask=self._t0_mask, eval_mode=True,
+            obs=actor_obs,
+            t0_mask=self._t0_mask,
+            eval_mode=True,
         )
         self._t0_mask[:] = False
         actions = jax_to_torch(self._process_action(action_jax), self.device)

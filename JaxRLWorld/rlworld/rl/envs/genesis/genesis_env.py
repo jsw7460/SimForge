@@ -1,13 +1,19 @@
-import torch
-
 import genesis as gs
+
 from rlworld.rl.configs import (
-    EnvConfig, SceneConfig, ObservationConfig, VisualizationConfig,
-    ActionConfig, RewardConfig, CommandConfig, EventConfig
+    ActionConfig,
+    CommandConfig,
+    CurriculumManagerConfig,
+    EnvConfig,
+    EventConfig,
+    ObservationConfig,
+    RewardConfig,
+    SceneConfig,
+    VisualizationConfig,
 )
-from rlworld.rl.configs import CurriculumManagerConfig
 from rlworld.rl.envs.managers import (
-    VisualizationManagerConfig, VisualizationManager,
+    VisualizationManager,
+    VisualizationManagerConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
@@ -101,7 +107,7 @@ class GenesisEnv(World):
                 sensors=self.scene_cfg.sensors,
                 env_spacing=self.scene_cfg.env_spacing,
                 show_viewer=self.visualization_cfg.show_viewer,
-            )
+            ),
         )
 
         # Visualization (created before register_entities which references it).
@@ -122,7 +128,7 @@ class GenesisEnv(World):
                 hud_position=self.visualization_cfg.hud_position,
                 feet_names=self.visualization_cfg.feet_names,
                 extra_hud_items=self.visualization_cfg.extra_hud_items,
-            )
+            ),
         )
 
         self.scene_manager.register_entities()
@@ -131,8 +137,8 @@ class GenesisEnv(World):
         # Replace with unified Viser viewer after scene is built.
         if self.visualization_cfg.viewer_type == "viser":
             from rlworld.rl.vis.viser import ViserVisualizationManager
-            from rlworld.rl.vis.viser.viewer import ViserViewerConfig
             from rlworld.rl.vis.viser.bridges import GenesisBridge
+            from rlworld.rl.vis.viser.viewer import ViserViewerConfig
 
             bridge = GenesisBridge(self.scene_manager)
             viser_cfg = ViserViewerConfig(
@@ -141,9 +147,7 @@ class GenesisEnv(World):
                 enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
                 enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
             )
-            self.vis_manager = ViserVisualizationManager(
-                env=self, bridge=bridge, config=viser_cfg
-            )
+            self.vis_manager = ViserVisualizationManager(env=self, bridge=bridge, config=viser_cfg)
 
     def _build_sim_managers(self) -> None:
         """Create Genesis-specific managers via ManagerRegistry."""
@@ -164,7 +168,7 @@ class GenesisEnv(World):
                 offset=self.act_cfg.offset,
                 settle_steps=self.act_cfg.settle_steps,
                 action_terms=self.act_cfg.action_terms,
-            )
+            ),
         )
 
         ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
@@ -176,6 +180,7 @@ class GenesisEnv(World):
 
         from rlworld.rl.envs.genesis.robot_data import GenesisRobotData
         from rlworld.rl.envs.genesis.robot_state_writer import GenesisRobotStateWriter
+
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
         indexing = self.act_manager.indexing

@@ -9,10 +9,8 @@ Supports TD-MPC2 and other MBRL algorithms that use:
 Follows the same runner pattern as OnPolicyRunner and OffPolicyRunner.
 """
 
-import os
-
 import time
-from typing import Dict, List, Any, Union
+from typing import Any, Dict, List
 
 import jax
 import jax.numpy as jnp
@@ -20,13 +18,13 @@ import numpy as np
 import torch
 
 from rlworld.rl.algorithms.tdmpc2 import TDMPC2
-from rlworld.rl.configs import ConfigsForRun, configs_from_dict
+from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.envs import World
 from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
-from rlworld.rl.modules.utils import print_model_summary, count_parameters
+from rlworld.rl.modules.utils import count_parameters, print_model_summary
 from rlworld.rl.runners.base_runner import BaseRunner
 from rlworld.rl.runners.iteration_data import IterationData
-from rlworld.rl.utils.jax_utils import torch_to_jax, jax_to_torch
+from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 
 
 class ModelBasedRunner(BaseRunner):
@@ -165,6 +163,7 @@ class ModelBasedRunner(BaseRunner):
     def _log_model_parameters(self) -> None:
         """Log model parameters to wandb."""
         import wandb
+
         total = count_parameters(self.world_model)
         wandb.summary["model/total_parameters"] = total
 
@@ -246,7 +245,7 @@ class ModelBasedRunner(BaseRunner):
                 obs=actor_obs,
                 action=actions,
                 reward=rewards_jax,
-                next_obs=next_obs_for_buffer,       # Terminal observation
+                next_obs=next_obs_for_buffer,  # Terminal observation
                 terminated=terminated_jax,
                 truncated=truncated_jax,
             )
@@ -277,7 +276,9 @@ class ModelBasedRunner(BaseRunner):
     ) -> IterationData:
         """Execute a single training iteration."""
         collection_data = self._collect_experience(
-            obs=obs, ep_infos=ep_infos, iteration=iteration,
+            obs=obs,
+            ep_infos=ep_infos,
+            iteration=iteration,
         )
 
         collection_time = collection_data["collection_time"]
@@ -295,9 +296,9 @@ class ModelBasedRunner(BaseRunner):
         if self.alg.replay_buffer.size >= min_buffer_size:
             training_start = time.time()
 
-            if not getattr(self, '_pretrained', False):
+            if not getattr(self, "_pretrained", False):
                 num_updates = self.cfgs.algorithm.learning_starts // self.env.num_envs
-                print(f'Pretraining agent on seed data ({num_updates} updates)...')
+                print(f"Pretraining agent on seed data ({num_updates} updates)...")
                 self._pretrained = True
             else:
                 num_updates = max(1, self.cfgs.algorithm.num_gradient_steps)
@@ -305,13 +306,11 @@ class ModelBasedRunner(BaseRunner):
             for i in range(num_updates):
                 self.key, subkey = jax.random.split(self.key)
                 batch = self.alg.sample_batch(batch_size, subkey)
-                is_last = (i == num_updates - 1)
+                is_last = i == num_updates - 1
                 metrics = self.alg.update(batch, build_metrics=is_last)
 
             learning_time = time.time() - training_start
-            fps = (self.num_steps_per_env * self.env.num_envs) / (
-                collection_time + learning_time
-            )
+            fps = (self.num_steps_per_env * self.env.num_envs) / (collection_time + learning_time)
             buffer_size = self.alg.replay_buffer.size
 
         return IterationData(
@@ -348,7 +347,9 @@ class ModelBasedRunner(BaseRunner):
             self.it = it
 
             data = self._run_training_iteration(
-                obs=obs, iteration=it, ep_infos=ep_infos,
+                obs=obs,
+                iteration=it,
+                ep_infos=ep_infos,
             )
 
             obs = data.last_obs
@@ -397,7 +398,8 @@ class ModelBasedRunner(BaseRunner):
         _, horizon, action_dim = self.alg._prev_mean.shape
         orig_prev_mean = self.alg._prev_mean
         self.alg._prev_mean = np.zeros(
-            (num_envs, horizon, action_dim), dtype=np.float32,
+            (num_envs, horizon, action_dim),
+            dtype=np.float32,
         )
 
         # MPPI warm-start: all envs start fresh
@@ -442,9 +444,7 @@ class ModelBasedRunner(BaseRunner):
                     completed_returns.append(episode_returns[i].item())
                     completed_lengths.append(episode_lengths[i].item())
                     for rname in reward_type_sums:
-                        completed_reward_breakdowns[rname].append(
-                            reward_type_sums[rname][i].item()
-                        )
+                        completed_reward_breakdowns[rname].append(reward_type_sums[rname][i].item())
 
             # Reset tracking for done envs
             episode_returns[dones] = 0
@@ -487,10 +487,12 @@ class ModelBasedRunner(BaseRunner):
     ) -> "ModelBasedRunner":
         """Load runner from checkpoint."""
         from rlworld.rl.utils.checkpoint import load_checkpoint_metadata
+
         metadata = load_checkpoint_metadata(checkpoint_path)
 
         if cfgs is None:
             from rlworld.rl.utils.checkpoint import load_config_from_checkpoint
+
             cfgs = load_config_from_checkpoint(metadata)
         if env is None:
             env = cls._create_env_from_config(cfgs)
@@ -498,9 +500,7 @@ class ModelBasedRunner(BaseRunner):
         runner = cls(env=env, cfgs=cfgs, use_wandb=use_wandb)
         runner.alg.load_train_state(checkpoint_path, metadata)
 
-        runner.current_learning_iteration = metadata.get(
-            "current_learning_iteration", metadata["iteration"]
-        )
+        runner.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
         runner.total_timesteps = metadata["total_timesteps"]
         runner.total_time = metadata.get("total_time", 0)
         runner.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)

@@ -26,12 +26,14 @@ def _quaternion_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     """Multiply two wxyz quaternions."""
     w1, x1, y1, z1 = q1
     w2, x2, y2, z2 = q2
-    return np.array([
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-    ])
+    return np.array(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ]
+    )
 
 
 # Ground plane settings.
@@ -61,12 +63,14 @@ def _create_checkerboard_ground(
             y1 = y0 + cell
 
             vi = len(vertices)
-            vertices.extend([
-                [x0, y0, 0.0],
-                [x1, y0, 0.0],
-                [x1, y1, 0.0],
-                [x0, y1, 0.0],
-            ])
+            vertices.extend(
+                [
+                    [x0, y0, 0.0],
+                    [x1, y0, 0.0],
+                    [x1, y1, 0.0],
+                    [x0, y1, 0.0],
+                ]
+            )
             faces.extend([[vi, vi + 1, vi + 2], [vi, vi + 2, vi + 3]])
 
             color = _GROUND_COLOR_A if (i + j) % 2 == 0 else _GROUND_COLOR_B
@@ -77,15 +81,14 @@ def _create_checkerboard_ground(
         faces=np.array(faces, dtype=np.int32),
         process=False,
     )
-    mesh.visual = trimesh.visual.ColorVisuals(
-        mesh=mesh, face_colors=np.array(face_colors, dtype=np.uint8)
-    )
+    mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, face_colors=np.array(face_colors, dtype=np.uint8))
     return mesh
 
 
 @dataclass
 class _ArrowRequest:
     """Queued arrow for batch rendering."""
+
     start: np.ndarray
     end: np.ndarray
     color: tuple[int, int, int]
@@ -95,6 +98,7 @@ class _ArrowRequest:
 @dataclass
 class _SphereRequest:
     """Queued sphere for batch rendering."""
+
     position: np.ndarray
     radius: float
     color: tuple[int, int, int]
@@ -243,12 +247,14 @@ class ViserScene:
         radius: float = 0.01,
     ) -> None:
         """Queue an arrow for batch rendering."""
-        self._arrow_queue.append(_ArrowRequest(
-            start=np.asarray(start, dtype=np.float32),
-            end=np.asarray(end, dtype=np.float32),
-            color=color,
-            radius=radius,
-        ))
+        self._arrow_queue.append(
+            _ArrowRequest(
+                start=np.asarray(start, dtype=np.float32),
+                end=np.asarray(end, dtype=np.float32),
+                color=color,
+                radius=radius,
+            )
+        )
 
     def add_sphere(
         self,
@@ -257,11 +263,13 @@ class ViserScene:
         color: tuple[int, int, int] = (0, 255, 0),
     ) -> None:
         """Queue a sphere for batch rendering."""
-        self._sphere_queue.append(_SphereRequest(
-            position=np.asarray(position, dtype=np.float32),
-            radius=radius,
-            color=color,
-        ))
+        self._sphere_queue.append(
+            _SphereRequest(
+                position=np.asarray(position, dtype=np.float32),
+                radius=radius,
+                color=color,
+            )
+        )
 
     def clear_debug(self) -> None:
         """Clear queued debug visuals."""

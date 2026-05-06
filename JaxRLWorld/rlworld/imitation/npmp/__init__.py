@@ -5,6 +5,7 @@ policies into a single motor-primitive module with a latent
 information bottleneck. :class:`NPMPModule` is the architecture
 entry point; :func:`npmp_elbo_loss` is the training objective.
 """
+
 from rlworld.imitation.npmp.buffer import NPMPBuffer
 from rlworld.imitation.npmp.config import CheckpointRef, T1NPMPDistillConfig
 from rlworld.imitation.npmp.decoder import NPMPDecoder

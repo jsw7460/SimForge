@@ -23,6 +23,7 @@ Usage::
 
 Every non-empty diff line is a real physics mismatch between the two sims.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +32,6 @@ import sys
 import numpy as np
 
 from rlworld.rl.evals.evaluator import PolicyEvaluator
-
 
 _NAN = float("nan")
 
@@ -76,15 +76,14 @@ def dump_mujoco(env, canonical_names) -> None:
     mj = env.scene_manager.mj_model
 
     print("[SIM META]")
-    print(f"  sim_type                = mujoco")
+    print("  sim_type                = mujoco")
     print(f"  physics_dt              = {float(mj.opt.timestep):.6f}")
     # mjtIntegrator: 0=EULER, 1=RK4, 2=IMPLICIT, 3=IMPLICITFAST
     print(f"  integrator (mjtInt)     = {int(mj.opt.integrator)}")
     print(f"  solver (mjtSolver)      = {int(mj.opt.solver)}")
     print(f"  iterations              = {int(mj.opt.iterations)}")
     print(f"  ls_iterations           = {int(getattr(mj.opt, 'ls_iterations', -1))}")
-    print(f"  gravity                 = [{mj.opt.gravity[0]:+.4f}, "
-          f"{mj.opt.gravity[1]:+.4f}, {mj.opt.gravity[2]:+.4f}]")
+    print(f"  gravity                 = [{mj.opt.gravity[0]:+.4f}, {mj.opt.gravity[1]:+.4f}, {mj.opt.gravity[2]:+.4f}]")
     print(f"  nu (actuators)          = {int(mj.nu)}")
     print(f"  njnt                    = {int(mj.njnt)}")
     print(f"  nbody                   = {int(mj.nbody)}")
@@ -97,10 +96,7 @@ def dump_mujoco(env, canonical_names) -> None:
     # mjlab attaches entities with an entity-name prefix (``robot/``) on every
     # body + joint + actuator. Build a leaf-name → jid map that matches both
     # prefixed and raw joint names so the canonical-order lookup works.
-    all_jnt_names = [
-        mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_JOINT, j) or ""
-        for j in range(mj.njnt)
-    ]
+    all_jnt_names = [mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_JOINT, j) or "" for j in range(mj.njnt)]
     leaf_to_jid: dict[str, int] = {}
     for j, nm in enumerate(all_jnt_names):
         if not nm:
@@ -149,15 +145,11 @@ def dump_mujoco(env, canonical_names) -> None:
         a_v = float(mj.dof_armature[d])
         d_v = float(mj.dof_damping[d])
         f_v = float(mj.dof_frictionloss[d])
-        print(f"  dof[{d}] armature={_fmt(a_v)} damping={_fmt(d_v)} "
-              f"frictionloss={_fmt(f_v)}")
+        print(f"  dof[{d}] armature={_fmt(a_v)} damping={_fmt(d_v)} frictionloss={_fmt(f_v)}")
 
     # Per-body mass + inertia.
     print("\n[PER-BODY MASS + INERTIA]")
-    header = (
-        f"{'Idx':<4} {'body_name':<36} "
-        f"{'mass[kg]':>11} {'Ixx':>11} {'Iyy':>11} {'Izz':>11}"
-    )
+    header = f"{'Idx':<4} {'body_name':<36} {'mass[kg]':>11} {'Ixx':>11} {'Iyy':>11} {'Izz':>11}"
     print(header)
     print("-" * len(header))
     for b in range(mj.nbody):
@@ -166,19 +158,17 @@ def dump_mujoco(env, canonical_names) -> None:
         ixx = float(mj.body_inertia[b, 0])
         iyy = float(mj.body_inertia[b, 1])
         izz = float(mj.body_inertia[b, 2])
-        print(f"{b:<4} {str(name):<36} "
-              f"{_fmt(mass)} {_fmt(ixx)} {_fmt(iyy)} {_fmt(izz)}")
+        print(f"{b:<4} {str(name):<36} {_fmt(mass)} {_fmt(ixx)} {_fmt(iyy)} {_fmt(izz)}")
 
 
 # ── Newton side ────────────────────────────────────────────────────
 def dump_newton(env, canonical_names) -> None:
-    import warp as wp
     from rlworld.rl.envs.utils.newton.label import leaf_name
 
     model = env.scene_manager.model
 
     print("[SIM META]")
-    print(f"  sim_type                = newton")
+    print("  sim_type                = newton")
     print(f"  physics_dt (env)        = {float(env.physics_dt):.6f}")
     print(f"  control_dt (env)        = {float(env.control_dt):.6f}")
     print(f"  decimation              = {int(env.decimation)}")
@@ -194,9 +184,15 @@ def dump_newton(env, canonical_names) -> None:
             return obj
         return arr
 
-    for a in ("gravity", "soft_contact_ke", "soft_contact_kd",
-              "soft_contact_mu", "soft_contact_kf",
-              "rigid_contact_margin", "rigid_contact_torsional_friction"):
+    for a in (
+        "gravity",
+        "soft_contact_ke",
+        "soft_contact_kd",
+        "soft_contact_mu",
+        "soft_contact_kf",
+        "rigid_contact_margin",
+        "rigid_contact_torsional_friction",
+    ):
         v = _probe(a)
         if v is not None:
             if isinstance(v, np.ndarray):
@@ -263,8 +259,7 @@ def dump_newton(env, canonical_names) -> None:
         a_v = float(armature[d])
         d_v = float(damping[d]) if damping is not None else _NAN
         f_v = float(friction[d]) if friction is not None else _NAN
-        print(f"  dof[{d}] armature={_fmt(a_v)} damping={_fmt(d_v)} "
-              f"frictionloss={_fmt(f_v)}")
+        print(f"  dof[{d}] armature={_fmt(a_v)} damping={_fmt(d_v)} frictionloss={_fmt(f_v)}")
 
     # Per-body mass + inertia (world 0).
     print("\n[PER-BODY MASS + INERTIA]")
@@ -272,10 +267,7 @@ def dump_newton(env, canonical_names) -> None:
     bodies_per_world = len(body_label) // num_worlds
     body_mass = _safe_to_numpy(getattr(model, "body_mass", None))
     body_inertia = _safe_to_numpy(getattr(model, "body_inertia", None))
-    header = (
-        f"{'Idx':<4} {'body_name':<36} "
-        f"{'mass[kg]':>11} {'Ixx':>11} {'Iyy':>11} {'Izz':>11}"
-    )
+    header = f"{'Idx':<4} {'body_name':<36} {'mass[kg]':>11} {'Ixx':>11} {'Iyy':>11} {'Izz':>11}"
     print(header)
     print("-" * len(header))
     for b in range(bodies_per_world):
@@ -293,8 +285,7 @@ def dump_newton(env, canonical_names) -> None:
             elif shape == (9,):
                 # Flattened row-major 3x3.
                 ixx, iyy, izz = float(inert[0]), float(inert[4]), float(inert[8])
-        print(f"{b:<4} {name:<36} "
-              f"{_fmt(mass)} {_fmt(ixx)} {_fmt(iyy)} {_fmt(izz)}")
+        print(f"{b:<4} {name:<36} {_fmt(mass)} {_fmt(ixx)} {_fmt(iyy)} {_fmt(izz)}")
 
 
 # ── main ───────────────────────────────────────────────────────────
@@ -310,8 +301,7 @@ def main() -> None:
     orig_stdout = sys.stdout
     sys.stdout = log_fh
 
-    print(f"# g1_physics_params_dump sim={args.eval_sim} "
-          f"policy={args.policy_path}")
+    print(f"# g1_physics_params_dump sim={args.eval_sim} policy={args.policy_path}")
 
     evaluator = PolicyEvaluator(
         policy_path=args.policy_path,

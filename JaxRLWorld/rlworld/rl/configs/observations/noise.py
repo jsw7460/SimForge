@@ -7,12 +7,14 @@ import torch
 @dataclass
 class NoiseConfig:
     """Base noise configuration."""
+
     pass
 
 
 @dataclass
 class UniformNoiseConfig(NoiseConfig):
     """Uniform distribution noise."""
+
     n_min: float = 0.0
     n_max: float = 0.0
     operation: Literal["add", "scale", "abs"] = "add"
@@ -21,6 +23,7 @@ class UniformNoiseConfig(NoiseConfig):
 @dataclass
 class GaussianNoiseConfig(NoiseConfig):
     """Gaussian distribution noise."""
+
     mean: float = 0.0
     std: float = 1.0
     operation: Literal["add", "scale", "abs"] = "add"

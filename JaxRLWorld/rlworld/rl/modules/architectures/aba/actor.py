@@ -6,7 +6,8 @@ import jax.numpy as jnp
 
 from rlworld.rl.modules.architectures.base import BaseActor
 from rlworld.rl.modules.architectures.morphology_utils import ParentLinkToJointActionDecoder
-from .encoder import create_encoder, ABAEncoder
+
+from .encoder import ABAEncoder, create_encoder
 
 if TYPE_CHECKING:
     from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
@@ -17,6 +18,7 @@ class ABAActor(BaseActor):
     ABA-based actor.
     Processes unbatched input. Use jax.vmap for batched input.
     """
+
     encoder: ABAEncoder | eqx.Module
     decoder: ParentLinkToJointActionDecoder
 
@@ -76,12 +78,7 @@ class ABAActor(BaseActor):
             key=key_dec,
         )
 
-    def __call__(
-        self,
-        observation: jax.Array,
-        *,
-        key: jax.Array | None = None
-    ) -> tuple[jax.Array, dict]:
+    def __call__(self, observation: jax.Array, *, key: jax.Array | None = None) -> tuple[jax.Array, dict]:
         """
         Args:
             observation: (num_obs,) unbatched

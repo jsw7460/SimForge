@@ -11,13 +11,13 @@ verify:
   - non-foot shapes were NOT touched,
   - the expected ranges match the config.
 """
+
 from __future__ import annotations
 
 import warp as wp
 
 from rlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from rlworld.rl.envs.utils.newton.body_cache import get_cache
-from rlworld.rl.envs.utils.newton.label import leaf_name
 from rlworld.rl.runners import BaseRunner
 
 
@@ -35,22 +35,25 @@ def main() -> None:
 
     # Resolve foot shape indices via the same path as the DR term
     cache = get_cache(env)
-    body_idx = cache.get_body_indices(env.env_config.robot.foot_body_pattern_newton) \
-        if hasattr(env, "env_config") else cache.get_body_indices(r"(left|right)_foot_link")
+    body_idx = (
+        cache.get_body_indices(env.env_config.robot.foot_body_pattern_newton)
+        if hasattr(env, "env_config")
+        else cache.get_body_indices(r"(left|right)_foot_link")
+    )
     foot_shape_idx = []
-    for bi in (body_idx.tolist() if hasattr(body_idx, "tolist") else body_idx):
+    for bi in body_idx.tolist() if hasattr(body_idx, "tolist") else body_idx:
         foot_shape_idx.extend(int(si) for si in m.body_shapes[int(bi)])
 
-    slide = _attr(view, m, "shape_material_mu")          # (W, 1, shapes)
-    tor   = _attr(view, m, "shape_material_mu_torsional")
-    rol   = _attr(view, m, "shape_material_mu_rolling")
+    slide = _attr(view, m, "shape_material_mu")  # (W, 1, shapes)
+    tor = _attr(view, m, "shape_material_mu_torsional")
+    rol = _attr(view, m, "shape_material_mu_rolling")
 
     # ArticulationView attrs come out as (num_envs, num_articulations, per_arti)
     # — squeeze the middle dim so indexing is [env, shape].
     if slide.ndim == 3:
         slide = slide[:, 0, :]
-        tor   = tor[:, 0, :]
-        rol   = rol[:, 0, :]
+        tor = tor[:, 0, :]
+        rol = rol[:, 0, :]
 
     shapes_per_arti = slide.shape[1]
     print(f"\nShape tensor shape after squeeze: {tuple(slide.shape)}  (num_envs, shapes_per_arti={shapes_per_arti})")
@@ -59,8 +62,10 @@ def main() -> None:
     # Keep only foot indices that fall within the view's shape space.
     valid_foot = [s for s in foot_shape_idx if s < shapes_per_arti]
     if len(valid_foot) < len(foot_shape_idx):
-        print(f"  WARN: {len(foot_shape_idx) - len(valid_foot)} foot shape indices out of range "
-              f"(model body_shapes may index global space incl. ground plane)")
+        print(
+            f"  WARN: {len(foot_shape_idx) - len(valid_foot)} foot shape indices out of range "
+            f"(model body_shapes may index global space incl. ground plane)"
+        )
 
     print("=== Foot shapes — slide μ (axis 0, DR range (0.8, 1.5) uniform) ===")
     for si in valid_foot:

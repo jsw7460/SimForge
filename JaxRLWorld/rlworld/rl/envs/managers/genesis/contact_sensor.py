@@ -3,6 +3,7 @@
 Wraps ``entity.get_contacts()`` with primary/secondary link filtering
 and per-primary-link force aggregation, producing fixed-shape tensors.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ class GenesisContactSensor:
     from Genesis's variable-length contact data.
     """
 
-    def __init__(self, env: "GenesisEnv", cfg: "GenesisContactSensorCfg"):
+    def __init__(self, env: GenesisEnv, cfg: GenesisContactSensorCfg):
         self.env = env
         self.cfg = cfg
         self.device = env.device
@@ -46,16 +47,16 @@ class GenesisContactSensor:
         self._entity = entity
 
         # Resolve primary link names (regex supported) → global link indices
-        link_ids, link_names = eu.find_links(
-            entity, cfg.primary_links, global_ids=True, preserve_order=True
-        )
+        link_ids, link_names = eu.find_links(entity, cfg.primary_links, global_ids=True, preserve_order=True)
 
         # Apply exclude filter
         if cfg.exclude_links:
             import re
+
             exclude_patterns = [re.compile(p) for p in cfg.exclude_links]
             filtered = [
-                (lid, lname) for lid, lname in zip(link_ids, link_names)
+                (lid, lname)
+                for lid, lname in zip(link_ids, link_names)
                 if not any(rx.search(lname) for rx in exclude_patterns)
             ]
             if filtered:
@@ -64,9 +65,7 @@ class GenesisContactSensor:
             else:
                 link_ids, link_names = [], []
 
-        self._primary_link_ids = torch.tensor(
-            link_ids, dtype=torch.int32, device=self.device
-        )
+        self._primary_link_ids = torch.tensor(link_ids, dtype=torch.int32, device=self.device)
         self._tracked_names = link_names
         self._num_primary = len(link_names)
 
@@ -87,17 +86,11 @@ class GenesisContactSensor:
         if cfg.secondary_entity is not None and cfg.secondary_entity != "self":
             sec_entity = env.scene_manager[cfg.secondary_entity]
             sec_ids = list(range(sec_entity.link_start, sec_entity.link_end))
-            self._secondary_link_ids = torch.tensor(
-                sec_ids, dtype=torch.int32, device=self.device
-            )
+            self._secondary_link_ids = torch.tensor(sec_ids, dtype=torch.int32, device=self.device)
 
         # Pre-allocate output buffers
-        self._found_buf = torch.zeros(
-            self.num_envs, self._num_primary, dtype=torch.bool, device=self.device
-        )
-        self._force_buf = torch.zeros(
-            self.num_envs, self._num_primary, 3, device=self.device
-        )
+        self._found_buf = torch.zeros(self.num_envs, self._num_primary, dtype=torch.bool, device=self.device)
+        self._force_buf = torch.zeros(self.num_envs, self._num_primary, 3, device=self.device)
 
     @property
     def tracked_names(self) -> list[str]:
@@ -145,8 +138,8 @@ class GenesisContactSensor:
 
         # (num_envs, max_contacts, num_primary)
         primary_ids = self._primary_link_ids  # (N,)
-        match_a = (link_a.unsqueeze(-1) == primary_ids)  # primary is link_a side
-        match_b = (link_b.unsqueeze(-1) == primary_ids)  # primary is link_b side
+        match_a = link_a.unsqueeze(-1) == primary_ids  # primary is link_a side
+        match_b = link_b.unsqueeze(-1) == primary_ids  # primary is link_b side
 
         # Apply valid_mask
         if valid_mask is not None:
@@ -172,12 +165,8 @@ class GenesisContactSensor:
         # When primary is link_a: force on primary = force_a
         # When primary is link_b: force on primary = force_b
         # (num_envs, max_contacts, 3) * (num_envs, max_contacts, N) → sum → (num_envs, N, 3)
-        force_from_a = torch.einsum(
-            "bci,bcn->bni", force_a, match_a.float()
-        )
-        force_from_b = torch.einsum(
-            "bci,bcn->bni", force_b, match_b.float()
-        )
+        force_from_a = torch.einsum("bci,bcn->bni", force_a, match_a.float())
+        force_from_b = torch.einsum("bci,bcn->bni", force_b, match_b.float())
         self._force_buf = force_from_a + force_from_b
 
         return ContactSensorData(

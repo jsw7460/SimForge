@@ -5,14 +5,15 @@ from dataclasses import dataclass, field
 from rlworld.rl.algorithms.metrics.base import (
     BaseMetrics,
     BatchMetrics,
-    MetricType,
     ConsoleMetric,
+    MetricType,
 )
 
 
 @dataclass
 class TDMPC2WorldModelMetrics:
     """World model training losses."""
+
     consistency_loss: float = 0.0
     reward_loss: float = 0.0
     value_loss: float = 0.0
@@ -34,6 +35,7 @@ class TDMPC2WorldModelMetrics:
 @dataclass
 class TDMPC2PolicyMetrics:
     """Policy update metrics."""
+
     pi_loss: float = 0.0
     pi_entropy: float = 0.0
     pi_scaled_entropy: float = 0.0
@@ -53,6 +55,7 @@ class TDMPC2PolicyMetrics:
 @dataclass
 class TDMPC2QMetrics:
     """Q-value statistics."""
+
     mean: float = 0.0
     std: float = 0.0
     p05: float = 0.0
@@ -70,6 +73,7 @@ class TDMPC2QMetrics:
 @dataclass
 class TDMPC2Metrics(BaseMetrics):
     """Complete TD-MPC2 training metrics."""
+
     world_model: TDMPC2WorldModelMetrics = field(default_factory=TDMPC2WorldModelMetrics)
     policy: TDMPC2PolicyMetrics = field(default_factory=TDMPC2PolicyMetrics)
     q: TDMPC2QMetrics = field(default_factory=TDMPC2QMetrics)

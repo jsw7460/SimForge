@@ -5,6 +5,7 @@ from typing import List
 
 class MetricType(Enum):
     """Type of metric for console display styling."""
+
     LOSS = "loss"
     ENTROPY = "entropy"
     COEFFICIENT = "coef"
@@ -15,6 +16,7 @@ class MetricType(Enum):
 @dataclass
 class MetricSpec:
     """Specification for a single metric."""
+
     key: str
     label: str
     type: MetricType = MetricType.LOSS
@@ -23,6 +25,7 @@ class MetricSpec:
 @dataclass
 class ConsoleLoggingSpec:
     """Specification for console logging output."""
+
     metrics: List[MetricSpec] = field(default_factory=list)
 
     def add(

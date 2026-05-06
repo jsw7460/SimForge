@@ -12,6 +12,7 @@ at trace time. The previous tuple-of-heads layout produced an XLA HLO
 graph proportional to ``num_actions`` and made compilation slow + GPU
 launch overhead heavy on every step. Equivalent params, much faster.
 """
+
 from typing import TYPE_CHECKING
 
 import equinox as eqx
@@ -44,6 +45,7 @@ def _orthogonal_init_linear(
 
 class ActionHead(eqx.Module):
     """Single action head for one joint."""
+
     linear1: eqx.nn.Linear
     linear2: eqx.nn.Linear
     activation: str = eqx.field(static=True)
@@ -113,15 +115,11 @@ class ParentLinkToJointActionDecoder(eqx.Module):
         if actuated_joint_names is None:
             # Fallback: tree order. Only correct when the env's action
             # manager happens to use the same order — verify before using.
-            parent_indices = [
-                kinematic_tree.joints[j]["parent_link"] for j in active_joints
-            ]
+            parent_indices = [kinematic_tree.joints[j]["parent_link"] for j in active_joints]
         else:
             # Canonical actuator order: re-map so action[k] drives
             # actuated_joint_names[k]'s parent body.
-            tree_idx_by_name = {
-                kinematic_tree.joints[j]["name"]: j for j in active_joints
-            }
+            tree_idx_by_name = {kinematic_tree.joints[j]["name"]: j for j in active_joints}
             missing = [n for n in actuated_joint_names if n not in tree_idx_by_name]
             if missing:
                 raise ValueError(
@@ -129,10 +127,7 @@ class ParentLinkToJointActionDecoder(eqx.Module):
                     f"tree's active set: {missing}. Tree active joints: "
                     f"{sorted(tree_idx_by_name)}."
                 )
-            parent_indices = [
-                kinematic_tree.joints[tree_idx_by_name[n]]["parent_link"]
-                for n in actuated_joint_names
-            ]
+            parent_indices = [kinematic_tree.joints[tree_idx_by_name[n]]["parent_link"] for n in actuated_joint_names]
 
         self.num_actions = len(parent_indices)
         self.parent_indices = jnp.array(parent_indices, dtype=jnp.int32)
@@ -168,6 +163,7 @@ class ParentLinkToJointActionDecoder(eqx.Module):
         parent_features = link_features[self.parent_indices]
         # Apply each stacked head to its joint's parent feature in one batched op.
         actions = jax.vmap(lambda head, x: head(x))(
-            self.stacked_heads, parent_features,
+            self.stacked_heads,
+            parent_features,
         )
         return actions.squeeze(-1)

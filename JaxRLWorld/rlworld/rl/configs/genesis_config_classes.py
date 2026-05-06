@@ -1,34 +1,37 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, Union, TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Dict, Literal, Union
 
 import genesis as gs
+
 from .algorithms import AlgorithmConfig, get_algorithm_config_class
 from .base_config import BaseConfig
 from .common_config_classes import (
-    RewardConfig,
     CommandConfig,
-    GaitConfig,
     EventConfig,
+    GaitConfig,
     NNConfig,
+    RewardConfig,
     RunnerConfig,
     VisualizationConfig,
 )
 from .sensors import SensorConfig
 
 if TYPE_CHECKING:
-    from rlworld.rl.configs.robots.base import RobotConfig
     from rlworld.rl.configs import CurriculumManagerConfig
+    from rlworld.rl.configs.robots.base import RobotConfig
 
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
     """Lazy default to avoid importing CurriculumManagerConfig at module load."""
     from rlworld.rl.configs import CurriculumManagerConfig
+
     return CurriculumManagerConfig()
 
 
 @dataclass
 class EnvConfig(BaseConfig):
     """Genesis environment configuration."""
+
     env_name: str = "World"
     task_name: str = "Unknown"
     gym_make_kwargs: Dict[str, Any] = field(default_factory=dict)
@@ -42,6 +45,7 @@ class EnvConfig(BaseConfig):
 @dataclass
 class SceneConfig(BaseConfig):
     """Genesis scene configuration."""
+
     _EXCLUDE_FROM_SERIALIZATION = ("sim_options", "viewer_options", "vis_options", "rigid_options", "robot_cfg")
 
     sim_options: gs.options.SimOptions = field(default_factory=gs.options.SimOptions)
@@ -74,6 +78,7 @@ class GenesisContactSensorCfg:
         exclude_self_contact: If True, exclude self-collision from results.
             Ignored when ``secondary_entity="self"``.
     """
+
     name: str
     primary_links: list[str] = field(default_factory=list)
     exclude_links: tuple[str, ...] = ()
@@ -98,12 +103,14 @@ class ObservationConfig(BaseConfig):
             actor: ActorObsCfg = field(default_factory=ActorObsCfg)
             critic: CriticObsCfg = field(default_factory=CriticObsCfg)
     """
+
     pass
 
 
 @dataclass
 class ActionConfig(BaseConfig):
     """Genesis action configuration."""
+
     actuated_dof_names: list[str] = field(default_factory=list)
     action_scale: float | dict[str, float] = 0.4
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-100.0, 100.0)
@@ -116,6 +123,7 @@ class ActionConfig(BaseConfig):
 @dataclass
 class GenesisConfigsForRun(BaseConfig):
     """Complete configuration for Genesis training runs."""
+
     sim_type: str = "genesis"
     preset_module: str | None = None  # "rlworld.rl.configs.presets.go2_flat.mlp"
     preset_class_name: str | None = None
@@ -129,17 +137,15 @@ class GenesisConfigsForRun(BaseConfig):
     command: CommandConfig = field(default_factory=CommandConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gait: "GaitConfig | None" = None
-    curriculum: "CurriculumManagerConfig" = field(
-        default_factory=lambda: _default_curriculum_cfg()
-    )
+    curriculum: "CurriculumManagerConfig" = field(default_factory=lambda: _default_curriculum_cfg())
     algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)
 
     IMMUTABLE_SETTINGS = {
-        'env': ['dof_names'],
-        'command': ['num_commands'],
-        'storage': ['action_shape', 'actor_obs_shape', 'estimator_obs_shape', 'robot_state_shape'],
+        "env": ["dof_names"],
+        "command": ["num_commands"],
+        "storage": ["action_shape", "actor_obs_shape", "estimator_obs_shape", "robot_state_shape"],
     }
 
     @classmethod
@@ -190,7 +196,7 @@ class GenesisConfigsForRun(BaseConfig):
             runner=runner,
         )
 
-    def merge_with_new_config(self, new_config: 'GenesisConfigsForRun') -> 'GenesisConfigsForRun':
+    def merge_with_new_config(self, new_config: "GenesisConfigsForRun") -> "GenesisConfigsForRun":
         """
         Safely merge current config with new config, ensuring critical parameters remain unchanged.
 
@@ -229,7 +235,7 @@ class GenesisConfigsForRun(BaseConfig):
 
         return param_name in self.IMMUTABLE_SETTINGS[config_type]
 
-    def _validate_immutable_settings(self, new_config: 'GenesisConfigsForRun'):
+    def _validate_immutable_settings(self, new_config: "GenesisConfigsForRun"):
         """
         Validate that no immutable settings would be changed by the merge.
 

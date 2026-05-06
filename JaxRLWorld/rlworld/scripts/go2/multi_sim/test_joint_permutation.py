@@ -19,8 +19,6 @@ Usage:
 
 import random
 import sys
-from collections import OrderedDict
-from typing import Dict, List
 
 import numpy as np
 import torch
@@ -58,7 +56,12 @@ def check(name: str, condition: bool, detail: str = ""):
 def _build_common_obs_terms():
     from rlworld.rl.configs.observations import ObservationTermConfig
     from rlworld.rl.envs.mdp.observations.common.proprioception import (
-        base_ang_vel, command, projected_gravity, dof_pos, dof_vel, prev_processed_actions,
+        base_ang_vel,
+        command,
+        dof_pos,
+        dof_vel,
+        prev_processed_actions,
+        projected_gravity,
     )
 
     return [
@@ -77,8 +80,9 @@ def _create_envs():
     obs = _build_common_obs_terms()
 
     print("  Creating Genesis env...", end="", flush=True)
-    from rlworld.rl.configs.presets.go2_flat.mlp import get_config
     from rlworld.rl.configs.common_config_classes import disable_corruption
+    from rlworld.rl.configs.presets.go2_flat.mlp import get_config
+
     g_cfg = get_config(sim="genesis")
     g_cfg.env.num_envs = NUM_ENVS
     g_cfg.observation.obs_group = {"actor": obs, "critic": obs}
@@ -134,8 +138,11 @@ def main():
 
     check("Genesis-Newton same joint set", set(g_bare) == set(n_bare))
     check("Genesis-MuJoCo same joint set", set(g_bare) == set(m_bare))
-    check("All 3 have 12 joints", len(g_bare) == 12 and len(n_bare) == 12 and len(m_bare) == 12,
-          f"G={len(g_bare)}, N={len(n_bare)}, M={len(m_bare)}")
+    check(
+        "All 3 have 12 joints",
+        len(g_bare) == 12 and len(n_bare) == 12 and len(m_bare) == 12,
+        f"G={len(g_bare)}, N={len(n_bare)}, M={len(m_bare)}",
+    )
 
     ordering_differs_gn = g_bare != n_bare
     ordering_differs_gm = g_bare != m_bare
@@ -146,7 +153,7 @@ def main():
 
     if ordering_differs_gn:
         diffs = [(i, g, n) for i, (g, n) in enumerate(zip(g_bare, n_bare)) if g != n]
-        print(f"\n  First 5 ordering differences (Genesis vs Newton):")
+        print("\n  First 5 ordering differences (Genesis vs Newton):")
         for i, g, n in diffs[:5]:
             print(f"    [{i:2d}] Genesis: {g:35s}  Newton: {n}")
 
@@ -157,7 +164,7 @@ def main():
     print("  TEST 2: Permutation index correctness")
     print(THIN)
 
-    from rlworld.rl.envs.multi_sim_world import _JointPermutation, MultiSimWorld
+    from rlworld.rl.envs.multi_sim_world import MultiSimWorld, _JointPermutation
 
     canonical_names = g_names
     num_actions = g_env.num_actions
@@ -186,8 +193,10 @@ def main():
             c_idx = jp.action_perm[s_idx].item()
             if can_bare[c_idx] != sim_bare[s_idx]:
                 perm_correct = False
-                print(f"    action_perm ERROR at s={s_idx}: "
-                      f"canonical[{c_idx}]={can_bare[c_idx]} != sim[{s_idx}]={sim_bare[s_idx]}")
+                print(
+                    f"    action_perm ERROR at s={s_idx}: "
+                    f"canonical[{c_idx}]={can_bare[c_idx]} != sim[{s_idx}]={sim_bare[s_idx]}"
+                )
                 break
 
         check(f"{sim_name}: action_perm maps canonical->sim correctly", perm_correct)
@@ -197,8 +206,7 @@ def main():
             test_vec = torch.arange(dim, dtype=torch.float32, device=env.device).unsqueeze(0)
             permuted = jp.permute_obs({group: test_vec})[group]
             if jp.is_identity:
-                check(f"{sim_name}/{group}: identity permutation (no reorder needed)",
-                      torch.equal(test_vec, permuted))
+                check(f"{sim_name}/{group}: identity permutation (no reorder needed)", torch.equal(test_vec, permuted))
             else:
                 non_joint_ok = True
                 joint_ok = True
@@ -262,8 +270,9 @@ def main():
             actual = sim_actions[0, s_idx].item()
             if abs(expected - actual) > 1e-6:
                 all_correct = False
-                print(f"    MISMATCH at sim[{s_idx}]={_bare(sim_joint_names[s_idx])}: "
-                      f"expected={expected}, got={actual}")
+                print(
+                    f"    MISMATCH at sim[{s_idx}]={_bare(sim_joint_names[s_idx])}: expected={expected}, got={actual}"
+                )
 
         check(f"{sim_name}: each sim joint receives its correct canonical action value", all_correct)
 
@@ -298,13 +307,13 @@ def main():
         for k in sorted(g_joint_vals):
             gv, nv = g_joint_vals[k], n_joint_vals[k]
             if abs(gv - nv) > 1e-4:
-                print(f"    {k}: Genesis={gv:.6f} Newton={nv:.6f} diff={abs(gv-nv):.6f}")
+                print(f"    {k}: Genesis={gv:.6f} Newton={nv:.6f} diff={abs(gv - nv):.6f}")
 
     if not gm_match:
         for k in sorted(g_joint_vals):
             gv, mv = g_joint_vals[k], m_joint_vals[k]
             if abs(gv - mv) > 1e-4:
-                print(f"    {k}: Genesis={gv:.6f} MuJoCo={mv:.6f} diff={abs(gv-mv):.6f}")
+                print(f"    {k}: Genesis={gv:.6f} MuJoCo={mv:.6f} diff={abs(gv - mv):.6f}")
 
     for sim_name, env, sim_joint_names, raw_dof in [
         ("Newton", n_env, n_names, n_dof),
@@ -339,8 +348,7 @@ def main():
             actual = permuted_dof[c_idx].item()
             if abs(expected - actual) > 0.05:
                 all_correct = False
-                print(f"    {c_name}: expected={expected:.6f} got={actual:.6f} "
-                      f"diff={abs(expected - actual):.6f}")
+                print(f"    {c_name}: expected={expected:.6f} got={actual:.6f} diff={abs(expected - actual):.6f}")
 
         check(f"{sim_name}: permuted dof_pos matches Genesis canonical order (per joint name)", all_correct)
 
@@ -360,16 +368,18 @@ def main():
 
     obs, rew, term, trunc, info = multi_env.step(canonical_actions)
 
-    check("MultiSimWorld step returns correct num_envs",
-          obs["actor"].shape[0] == NUM_ENVS * 3,
-          f"shape={obs['actor'].shape}")
+    check(
+        "MultiSimWorld step returns correct num_envs",
+        obs["actor"].shape[0] == NUM_ENVS * 3,
+        f"shape={obs['actor'].shape}",
+    )
 
     dof_pos_start = 9
     dof_pos_end = dof_pos_start + num_actions
 
     g_slice = obs["actor"][:NUM_ENVS, dof_pos_start:dof_pos_end]
-    n_slice = obs["actor"][NUM_ENVS:2*NUM_ENVS, dof_pos_start:dof_pos_end]
-    m_slice = obs["actor"][2*NUM_ENVS:, dof_pos_start:dof_pos_end]
+    n_slice = obs["actor"][NUM_ENVS : 2 * NUM_ENVS, dof_pos_start:dof_pos_end]
+    m_slice = obs["actor"][2 * NUM_ENVS :, dof_pos_start:dof_pos_end]
 
     print(f"\n  dof_pos values at canonical position 0 ({can_bare[0]}):")
     print(f"    Genesis: {g_slice[0, 0].item():.6f}")
@@ -385,20 +395,23 @@ def main():
     ppa_end = ppa_start + num_actions
 
     g_ppa = obs["actor"][:NUM_ENVS, ppa_start:ppa_end]
-    n_ppa = obs["actor"][NUM_ENVS:2*NUM_ENVS, ppa_start:ppa_end]
-    m_ppa = obs["actor"][2*NUM_ENVS:, ppa_start:ppa_end]
+    n_ppa = obs["actor"][NUM_ENVS : 2 * NUM_ENVS, ppa_start:ppa_end]
+    m_ppa = obs["actor"][2 * NUM_ENVS :, ppa_start:ppa_end]
 
     gn_ppa_diff = (g_ppa - n_ppa).abs().max().item()
     gm_ppa_diff = (g_ppa - m_ppa).abs().max().item()
     nm_ppa_diff = (n_ppa - m_ppa).abs().max().item()
 
-    print(f"\n  prev_processed_actions max diff (should be ~0 after permutation):")
+    print("\n  prev_processed_actions max diff (should be ~0 after permutation):")
     print(f"    |G-N|: {gn_ppa_diff:.6f}")
     print(f"    |G-M|: {gm_ppa_diff:.6f}")
     print(f"    |N-M|: {nm_ppa_diff:.6f}")
 
-    check("Newton-MuJoCo prev_processed_actions match after permutation",
-          nm_ppa_diff < 1e-3, f"max_diff={nm_ppa_diff:.6f}")
+    check(
+        "Newton-MuJoCo prev_processed_actions match after permutation",
+        nm_ppa_diff < 1e-3,
+        f"max_diff={nm_ppa_diff:.6f}",
+    )
 
     # ══════════════════════════════════════════════════════════════════
     # TEST 6: Permutation round-trip
@@ -435,8 +448,11 @@ def main():
             recovered[0, c] = sim_act[0, s]
 
         roundtrip_ok = torch.allclose(can_act, recovered, atol=1e-6)
-        check(f"{sim_name}: action round-trip (canonical->sim->canonical) exact", roundtrip_ok,
-              f"max_diff={(can_act - recovered).abs().max().item():.8f}")
+        check(
+            f"{sim_name}: action round-trip (canonical->sim->canonical) exact",
+            roundtrip_ok,
+            f"max_diff={(can_act - recovered).abs().max().item():.8f}",
+        )
 
     # ══════════════════════════════════════════════════════════════════
     # Summary
