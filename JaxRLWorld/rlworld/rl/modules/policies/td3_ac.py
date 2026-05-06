@@ -11,7 +11,7 @@ from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
 from .base_ac import BaseActorCritic
 
 if TYPE_CHECKING:
-    pass
+    from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 
 __all__ = ["TD3ActorCritic", "TD3QNetwork"]
 

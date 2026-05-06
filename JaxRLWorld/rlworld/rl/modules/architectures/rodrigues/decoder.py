@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
+
 import torch
 from torch import nn
 
 from rlworld.rl.modules.utils import orthogonal_init, scale_last_layer
+
+if TYPE_CHECKING:
+    from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 
 
 class RodriguesDecoder(nn.Module):

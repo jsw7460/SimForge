@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
+
 import torch
 from torch import nn
 
 from rlworld.rl.modules.utils import get_activation
+
+if TYPE_CHECKING:
+    from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 
 
 class MLPDecoder(nn.Module):

@@ -10,4 +10,10 @@ from .pretty import (
     print_env_summary,
     table_to_string,
 )
-from .utils import *
+from .utils import (
+    compare_dicts,
+    deprecated,
+    gs_rand_float,
+    set_seed,
+    setup_log_dir,
+)

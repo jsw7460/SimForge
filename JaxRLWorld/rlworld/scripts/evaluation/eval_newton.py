@@ -2,9 +2,6 @@ import argparse
 
 import numpy as np
 import torch
-from consysid.sysid.param_terms.newton import (
-    apply_contact_friction,
-)
 
 from rlworld.rl.evals import PolicyEvaluator
 

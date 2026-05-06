@@ -10,7 +10,7 @@ from rlworld.rl.modules.policies.base_ac import BaseActorCritic
 from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
 
 if TYPE_CHECKING:
-    pass
+    from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 
 __all__ = ["FastTD3ActorCritic", "DistributionalQNetwork"]
 

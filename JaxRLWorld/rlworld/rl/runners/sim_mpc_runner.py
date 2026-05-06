@@ -7,6 +7,7 @@ and trains policy + Q-ensemble from collected experience.
 """
 
 import time
+from copy import deepcopy
 from typing import Any, Dict, List
 
 import numpy as np

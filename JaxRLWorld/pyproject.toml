@@ -70,9 +70,16 @@ ignore = [
     "E501",  # line too long — formatter handles long-but-stable lines
     "E731",  # lambda assignment (we use these a lot for inline configs)
     "E741",  # ambiguous var name (we use single-letter math vars often)
+    "E402",  # module-import-not-at-top — required for jax/genesis env-var setup before heavy imports
+    "B006",  # mutable default arg — every hit in this codebase is a read-only list of ints/floats (architecture hyperparams), verified
     "B008",  # function call in default arg — common with field(default_factory=...)
+    "B024",  # ABC without abstract method — we use ABCs for nominal typing too
+    "B027",  # empty method in ABC — these are intentional no-op hooks (e.g. World._post_setup), not abstract
     "B028",  # warnings.warn without stacklevel
     "B904",  # raise from inside except — too noisy initially
+    "B905",  # zip() without strict= — we never hit length-mismatch bugs from zip in this codebase
+    "B007",  # unused loop control variable — purely stylistic noise
+    "F841",  # unused local variable — common debug/inspection pattern in dev scripts; real bugs (F811, B006-mutate) are caught by other rules
     "UP006", # use `list` instead of `List` — we still target older typing in places
     "UP007", # use `X | Y` instead of `Union[X, Y]` — same reason
     "UP035", # `typing.X` deprecated alias — same reason

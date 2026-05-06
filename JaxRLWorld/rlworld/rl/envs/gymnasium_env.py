@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import genesis as gs
 import mujoco
@@ -8,6 +8,9 @@ import torch
 from rlworld.rl.configs import ActionConfig, CommandConfig, EnvConfig, ObservationConfig, RewardConfig, SceneConfig
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.envs import World
+
+if TYPE_CHECKING:
+    from rlworld.rl.envs.managers.common.robot_state_writer_protocol import RobotStateWriterProtocol
 
 
 class MuJoCoKinematicTree:

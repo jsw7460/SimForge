@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
 import jax
@@ -6,6 +6,9 @@ import jax
 from rlworld.rl.modules.architectures.actor_registry import get_actor_class
 from rlworld.rl.modules.architectures.base import BaseActor
 from rlworld.rl.modules.normalization import EmpiricalNormalization
+
+if TYPE_CHECKING:
+    from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 
 __all__ = ["BaseActorCritic"]
 

@@ -1,6 +1,10 @@
 from collections import defaultdict, deque
+from typing import TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from rlworld.rl.runners.iteration_data import EpisodeStats
 
 
 class OnlineStats:

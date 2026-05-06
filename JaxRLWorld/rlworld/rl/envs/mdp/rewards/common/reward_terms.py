@@ -304,7 +304,7 @@ def _foot_pos_vel(
     """Return (foot_pos_w, foot_lin_vel_w) for either body or site names."""
     if (body_names is None) == (site_names is None):
         raise ValueError(
-            "Pass exactly one of body_names or site_names (got body_names=%r, site_names=%r)" % (body_names, site_names)
+            f"Pass exactly one of body_names or site_names (got body_names={body_names!r}, site_names={site_names!r})"
         )
     rd = env.get_robot_data(entity_name)
     if body_names is not None:
@@ -485,8 +485,7 @@ class FeetSwingHeightTracker:
     ) -> None:
         if (body_names is None) == (site_names is None):
             raise ValueError(
-                "Pass exactly one of body_names or site_names "
-                "(got body_names=%r, site_names=%r)" % (body_names, site_names)
+                f"Pass exactly one of body_names or site_names (got body_names={body_names!r}, site_names={site_names!r})"
             )
         self._env = env
         self._contact_group = contact_group

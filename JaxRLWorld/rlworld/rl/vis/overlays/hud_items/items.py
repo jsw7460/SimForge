@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
 
 try:
-    import cv2
+    import cv2  # noqa: F401  # optional dep — gated by HAS_CV2 at use sites
 
     HAS_CV2 = True
 except ImportError:

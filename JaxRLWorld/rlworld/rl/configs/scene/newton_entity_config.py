@@ -80,7 +80,7 @@ class NewtonEntityConfig:
 class NewtonGroundPlaneConfig:
     """Ground plane configuration."""
 
-    shape_cfg: "ModelBuilder.ShapeConfig | None" = None
+    shape_cfg: newton.ModelBuilder.ShapeConfig | None = None
 
 
 @dataclass
