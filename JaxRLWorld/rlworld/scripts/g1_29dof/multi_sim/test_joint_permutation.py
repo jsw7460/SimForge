@@ -78,10 +78,11 @@ def _create_envs():
 
     print("  Creating Genesis env...", end="", flush=True)
     from rlworld.rl.configs.presets.g1_29dof.mlp import get_config
+    from rlworld.rl.configs.common_config_classes import disable_corruption
     g_cfg = get_config(sim="genesis")
     g_cfg.env.num_envs = NUM_ENVS
     g_cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    g_cfg.observation.enable_noise = False
+    disable_corruption(g_cfg.observation)
     g_env = BaseRunner._create_env_from_config(g_cfg)
     print(" done")
 
@@ -89,7 +90,7 @@ def _create_envs():
     n_cfg = get_config(sim="newton")
     n_cfg.env.num_envs = NUM_ENVS
     n_cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    n_cfg.observation.enable_noise = False
+    disable_corruption(n_cfg.observation)
     n_env = BaseRunner._create_env_from_config(n_cfg)
     print(" done")
 
@@ -97,7 +98,7 @@ def _create_envs():
     m_cfg = get_config(sim="mujoco")
     m_cfg.env.num_envs = NUM_ENVS
     m_cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    m_cfg.observation.enable_noise = False
+    disable_corruption(m_cfg.observation)
     m_env = BaseRunner._create_env_from_config(m_cfg)
     print(" done")
 

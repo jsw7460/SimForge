@@ -420,9 +420,10 @@ class BaseRunner(ABC):
         # Use fewer envs for evaluation
         eval_cfgs.env.num_envs = self.runner_cfg.eval_num_envs
 
-        # Disable observation noise
+        # Disable observation noise on every group
         if self.runner_cfg.eval_disable_noise:
-            eval_cfgs.observation.enable_noise = False
+            from rlworld.rl.configs.common_config_classes import disable_corruption
+            disable_corruption(eval_cfgs.observation)
 
         # Disable interval events (external forces, disturbances) by setting to None
         if self.runner_cfg.eval_disable_interval_events and hasattr(eval_cfgs, 'event'):

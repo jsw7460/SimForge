@@ -108,8 +108,13 @@ class NewtonSceneConfig(BaseConfig):
 
 @dataclass
 class NewtonObservationConfig(BaseConfig):
-    """Newton observation configuration. Groups are named ObservationGroupConfig attributes."""
-    enable_noise: bool = True
+    """Newton observation configuration. Groups are named ObservationGroupConfig attributes.
+
+    Per-group noise gating lives on each :class:`ObservationGroupConfig`'s
+    ``enable_corruption`` field. Use :func:`disable_corruption` to silence
+    every group at once for eval / test flows.
+    """
+    pass
 
 
 @dataclass

@@ -89,8 +89,13 @@ class MujocoSceneConfig(BaseConfig):
 
 @dataclass
 class MujocoObservationConfig(BaseConfig):
-    """MuJoCo/mjlab observation configuration. Groups are named ObservationGroupConfig attributes."""
-    enable_noise: bool = True
+    """MuJoCo/mjlab observation configuration. Groups are named ObservationGroupConfig attributes.
+
+    Per-group noise gating lives on each :class:`ObservationGroupConfig`'s
+    ``enable_corruption`` field. Use :func:`disable_corruption` to silence
+    every group at once for eval / test flows.
+    """
+    pass
 
 
 @dataclass

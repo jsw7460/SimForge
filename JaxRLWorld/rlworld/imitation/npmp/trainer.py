@@ -418,10 +418,10 @@ class NPMPTrainer:
             num_envs=self._cfg.eval_num_envs,
         )
         cfgs_for_run = eval_cfg.build()
-        # Disable obs noise during eval — matches RL pipeline's
+        # Disable obs noise on every group during eval — matches RL pipeline's
         # ``eval_disable_noise`` default.
-        if hasattr(cfgs_for_run.observation, "enable_noise"):
-            cfgs_for_run.observation.enable_noise = False
+        from rlworld.rl.configs.common_config_classes import disable_corruption
+        disable_corruption(cfgs_for_run.observation)
         self._eval_env = BaseRunner._create_env_from_config(cfgs_for_run)
         return self._eval_env
 

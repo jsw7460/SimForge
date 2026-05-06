@@ -115,14 +115,42 @@ class EventConfig(BaseConfig):
 class ObservationGroupConfig(BaseConfig):
     """An observation group. Terms are named class attributes of type ObservationTermConfig.
 
+    Attributes:
+        enable_corruption: When True (default), per-term ``noise`` configs are
+            applied to this group. Set to False on the critic / privileged-
+            observation group to feed raw signals while the actor still sees
+            noise — the standard locomotion-from-state recipe. Mirrors
+            ``ObservationGroupCfg.enable_corruption`` from IsaacLab.
+
     Example::
 
         @dataclass
         class ActorObsCfg(ObservationGroupConfig):
             base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=0.25)
             dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0)
+
+        @dataclass
+        class CriticObsCfg(ObservationGroupConfig):
+            enable_corruption = False  # privileged: critic sees raw signals
+            base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=0.25)
+            ...
     """
-    pass
+    enable_corruption: bool = True
+
+
+def disable_corruption(observation_cfg) -> None:
+    """Disable noise on every ObservationGroupConfig field of the given config.
+
+    Convenience for eval / test runs that want raw observations on every
+    group at once. Walks the dataclass fields and sets
+    ``group.enable_corruption = False`` on each :class:`ObservationGroupConfig`
+    attribute. Replaces the old ``observation.enable_noise = False`` call
+    pattern.
+    """
+    for attr_name in vars(observation_cfg):
+        val = getattr(observation_cfg, attr_name)
+        if isinstance(val, ObservationGroupConfig):
+            val.enable_corruption = False
 
 
 @dataclass

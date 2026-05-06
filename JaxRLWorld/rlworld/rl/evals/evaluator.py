@@ -193,12 +193,13 @@ class PolicyEvaluator:
     def _apply_eval_defaults(self) -> None:
         """Apply evaluation-mode defaults to configs.
 
-        - Disables observation noise (enable_noise = False)
+        - Disables observation noise on every group via disable_corruption()
         - Removes interval and reset_dr events
         """
-        # Disable observation noise
+        # Disable observation noise on every group
         if hasattr(self.eval_cfgs, 'observation'):
-            self.eval_cfgs.observation.enable_noise = False
+            from rlworld.rl.configs.common_config_classes import disable_corruption
+            disable_corruption(self.eval_cfgs.observation)
 
         # Disable interval and domain randomization events
         if hasattr(self.eval_cfgs, 'event'):
@@ -271,9 +272,9 @@ class PolicyEvaluator:
                     "Copied observation terms from checkpoint "
                     f"(groups: {list(train_obs_group.keys())})"
                 )
-            # Preserve other obs settings (enable_noise will be disabled by _apply_eval_defaults)
-            if "enable_noise" in train_obs:
-                cfgs.observation.enable_noise = train_obs["enable_noise"]
+            # Eval flow always disables corruption afterwards via
+            # _apply_eval_defaults; nothing to preserve from the checkpoint
+            # snapshot here.
 
         # Apply user overrides
         if extra_overrides is not None:

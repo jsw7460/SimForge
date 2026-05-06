@@ -87,6 +87,10 @@ class ObservationConfig(BaseConfig):
     """Genesis observation configuration.
 
     Groups are named attributes of type ObservationGroupConfig.
+    Per-group noise gating lives on each :class:`ObservationGroupConfig`'s
+    ``enable_corruption`` field. Use :func:`disable_corruption` to silence
+    every group at once for eval / test flows.
+
     Subclass and add groups::
 
         @dataclass
@@ -94,7 +98,7 @@ class ObservationConfig(BaseConfig):
             actor: ActorObsCfg = field(default_factory=ActorObsCfg)
             critic: CriticObsCfg = field(default_factory=CriticObsCfg)
     """
-    enable_noise: bool = True
+    pass
 
 
 @dataclass

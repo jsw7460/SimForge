@@ -305,7 +305,8 @@ def _create_genesis_env():
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    cfg.observation.enable_noise = False
+    from rlworld.rl.configs.common_config_classes import disable_corruption
+    disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _genesis_reward_terms()
     return BaseRunner._create_env_from_config(cfg)
 
@@ -318,7 +319,8 @@ def _create_newton_env():
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    cfg.observation.enable_noise = False
+    from rlworld.rl.configs.common_config_classes import disable_corruption
+    disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _newton_reward_terms()
     return BaseRunner._create_env_from_config(cfg)
 
@@ -331,7 +333,8 @@ def _create_mujoco_env():
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    cfg.observation.enable_noise = False
+    from rlworld.rl.configs.common_config_classes import disable_corruption
+    disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _mujoco_reward_terms()
     return BaseRunner._create_env_from_config(cfg)
 

@@ -63,10 +63,6 @@ class ObservationManager(BaseManager):
         self._is_term_indices_built = False
 
     @property
-    def enable_noise(self) -> bool:
-        return getattr(self.config, "enable_noise", True)
-
-    @property
     def num_envs(self) -> int:
         return self.env.num_envs
 
@@ -159,6 +155,7 @@ class ObservationManager(BaseManager):
 
         for group_name, terms in self._group_terms.items():
             obs_list = []
+            apply_group_noise = self._groups[group_name].enable_corruption
 
             for term_name, obs_term in terms.items():
                 func = self._resolved_fns[group_name][term_name]
@@ -166,7 +163,7 @@ class ObservationManager(BaseManager):
 
                 obs_value = func(self.env, **obs_term.params)
 
-                if self.enable_noise and obs_term.noise is not None:
+                if apply_group_noise and obs_term.noise is not None:
                     obs_value = apply_noise(obs_value, obs_term.noise)
 
                 if obs_term.clip is not None:
@@ -210,6 +207,7 @@ class ObservationManager(BaseManager):
         for group_name, terms in self._group_terms.items():
             rows = []
             total_dim = 0
+            group_noise_on = self._groups[group_name].enable_corruption
 
             for idx, (term_name, obs_term) in enumerate(terms.items()):
                 resolved_fn = self._resolved_fns[group_name][term_name]
@@ -236,15 +234,16 @@ class ObservationManager(BaseManager):
 
                 noise_str = "-"
                 if obs_term.noise is not None:
-                    if self.enable_noise:
+                    if group_noise_on:
                         noise_str = type(obs_term.noise).__name__
                     else:
                         noise_str = f"{type(obs_term.noise).__name__} (off)"
 
                 rows.append([idx, func_name, format_shape(base_dim), scale_str, history_str, noise_str])
 
+            corruption_suffix = "" if group_noise_on else "  [corruption=off]"
             table = create_manager_table(
-                title=f"Observation Space ({group_name})",
+                title=f"Observation Space ({group_name}){corruption_suffix}",
                 columns=["Idx", "Name", "Shape", "Scale", "History", "Noise"],
                 rows=rows,
                 footer=f"Total: {total_dim} dims" if isinstance(total_dim, int) else None,
