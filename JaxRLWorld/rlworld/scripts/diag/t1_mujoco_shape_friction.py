@@ -1,7 +1,7 @@
 """Dump per-env per-geom friction (slide/torsional/rolling) in mjlab.
 
 mjlab's startup-mode ``foot_friction_spin`` / ``foot_friction_roll``
-DR terms use ``mujoco_event_terms.randomize_friction`` which rewrites
+DR terms use ``mujoco.randomize_friction`` which rewrites
 MuJoCo's ``geom_friction[:, geom_ids, axis]`` per world. This script
 builds the env (so startup DR fires), then prints the per-env values
 for the foot collision geoms (from

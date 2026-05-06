@@ -37,7 +37,7 @@ from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets._sim_builder_protocol import Go2SimBuilderProtocol
 from rlworld.rl.configs.robots.go2 import Go2Config
 from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
-from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
+from rlworld.rl.envs.mdp.events import common as common_ef
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,

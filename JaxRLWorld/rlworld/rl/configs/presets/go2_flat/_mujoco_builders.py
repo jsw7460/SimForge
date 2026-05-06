@@ -312,8 +312,8 @@ def build_reward(cfg: "Go2FlatConfig") -> RewardConfig:
 
 def build_dr_terms(cfg: "Go2FlatConfig") -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
-    from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
-    from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
+    from rlworld.rl.envs.mdp.events import mujoco as ef
+    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
 
     foot_geom_names = (
         "FR_foot_collision",

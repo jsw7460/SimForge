@@ -357,8 +357,8 @@ def build_reward(cfg: "T1TrackingConfig") -> RewardConfig:
 
 def build_dr_terms(cfg: "T1TrackingConfig") -> Dict[str, EventTermConfig]:
     """MuJoCo DR (3-axis friction)."""
-    from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
-    from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
+    from rlworld.rl.envs.mdp.events import mujoco as ef
+    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
 
     r = cfg.robot
     foot_geom_names = r.foot_geom_names_mjlab

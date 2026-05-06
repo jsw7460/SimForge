@@ -336,8 +336,8 @@ def build_dr_terms(cfg: "T1GetupConfig") -> Dict[str, EventTermConfig]:
     MuJoCo's solver natively uses the 3-vector ``geom_friction`` so
     this is applied via mjlab's ``dr.geom_friction`` under the hood.
     """
-    from rlworld.rl.envs.mdp.events import mujoco_event_terms as ef
-    from rlworld.rl.envs.mdp.events.mujoco_event_terms import EntityCfg
+    from rlworld.rl.envs.mdp.events import mujoco as ef
+    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
 
     r = cfg.robot
     # mjlab asset_zoo T1 has explicit collision geom names that survive

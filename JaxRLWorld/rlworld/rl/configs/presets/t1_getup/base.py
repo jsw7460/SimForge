@@ -48,7 +48,7 @@ from rlworld.rl.envs.mdp.curriculums import (
     reward_curriculum,
     termination_curriculum,
 )
-from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
+from rlworld.rl.envs.mdp.events import common as common_ef
 
 
 # ── Per-simulator constants ──────────────────────────────────────────

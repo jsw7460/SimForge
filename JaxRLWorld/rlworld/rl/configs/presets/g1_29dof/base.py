@@ -38,7 +38,7 @@ from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.presets._sim_builder_protocol import G1SimBuilderProtocol
 from rlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
-from rlworld.rl.envs.mdp.events import common_event_terms as common_ef
+from rlworld.rl.envs.mdp.events import common as common_ef
 
 
 # ── Per-simulator constants ──────────────────────────────────────────

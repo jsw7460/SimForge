@@ -5,7 +5,7 @@ These functions work on any ``World`` subclass by reading state through
 ``env.get_robot_state_writer()``. They replace the per-simulator
 ``push_robot`` / ``reset_root_state_uniform`` implementations that
 lived in ``newton_event_terms.py``, ``event_terms.py`` (Genesis), and
-``mujoco_event_terms.py``.
+``mujoco.py``.
 
 Quaternion convention
 ---------------------

@@ -1,6 +1,6 @@
 """MuJoCo-specific event terms.
 
-General-purpose reset / push functions live in ``common_event_terms.py``;
+General-purpose reset / push functions live in ``common.py``;
 domain-randomization functions that wrap mjlab's ``dr`` module remain here.
 """
 from __future__ import annotations
