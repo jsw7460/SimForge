@@ -154,5 +154,4 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
             schedule="adaptive",
             use_clipped_value_loss=True,
             value_loss_coef=1.0,
-            use_reward_scaling=False,
         )

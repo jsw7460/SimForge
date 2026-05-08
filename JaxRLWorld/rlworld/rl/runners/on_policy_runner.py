@@ -102,7 +102,7 @@ class OnPolicyRunner(BaseRunner):
             use_clipped_value_loss=alg_cfg.use_clipped_value_loss,
             schedule=alg_cfg.schedule,
             desired_kl=alg_cfg.desired_kl,
-            use_reward_scaling=alg_cfg.use_reward_scaling,
+            use_value_normalization=alg_cfg.use_value_normalization,
             use_early_stop=alg_cfg.use_early_stop,
             normalize_advantage_per_minibatch=alg_cfg.normalize_advantage_per_minibatch,
             key=key,
@@ -126,7 +126,7 @@ class OnPolicyRunner(BaseRunner):
             use_clipped_value_loss=alg_cfg.use_clipped_value_loss,
             schedule=alg_cfg.schedule,
             desired_kl=alg_cfg.desired_kl,
-            use_reward_scaling=alg_cfg.use_reward_scaling,
+            use_value_normalization=alg_cfg.use_value_normalization,
             use_early_stop=alg_cfg.use_early_stop,
             key=key,
         )

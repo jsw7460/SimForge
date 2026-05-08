@@ -20,7 +20,11 @@ class PPOConfig(BaseConfig):
     num_mini_batches: int = 4
     schedule: str = "adaptive"
     use_clipped_value_loss: bool = False
-    use_reward_scaling: bool = True
+    # Value-target normalization (skrl-style). When True, the critic learns
+    # in normalized return space and outputs are inverse-normalized for GAE
+    # / storage / bootstrap. When False (default), behavior is identical
+    # to a pure PPO with no value normalization.
+    use_value_normalization: bool = False
     # When True, normalize advantages within each minibatch (default, current behavior).
     # When False, normalize once per rollout in compute_returns (rsl_rl default).
     normalize_advantage_per_minibatch: bool = True

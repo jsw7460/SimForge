@@ -51,7 +51,6 @@ MAX_GRAD_NORM = 1.0
 SCHEDULE = "fixed"
 DESIRED_KL = 0.01
 USE_CLIPPED_VALUE_LOSS = True
-USE_REWARD_SCALING = False
 OBS_NORMALIZATION = True
 
 # Network
@@ -198,7 +197,6 @@ def main():
         use_clipped_value_loss=USE_CLIPPED_VALUE_LOSS,
         schedule=SCHEDULE,
         desired_kl=DESIRED_KL,
-        use_reward_scaling=USE_REWARD_SCALING,
         use_early_stop=False,
         optimizer_class=optax.adam,
         key=key,

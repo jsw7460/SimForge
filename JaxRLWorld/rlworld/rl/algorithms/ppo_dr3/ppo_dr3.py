@@ -52,7 +52,7 @@ class PPODR3(PPO):
         use_clipped_value_loss: bool = True,
         schedule: str = "fixed",
         desired_kl: float = 0.01,
-        use_reward_scaling: bool = True,
+        use_value_normalization: bool = False,
         use_early_stop: bool = False,
         key: jax.Array = None,
         **kwargs,
@@ -76,7 +76,8 @@ class PPODR3(PPO):
             use_clipped_value_loss: Whether to clip value loss
             schedule: LR schedule ('fixed' or 'adaptive')
             desired_kl: Target KL for adaptive LR
-            use_reward_scaling: Whether to scale rewards
+            use_value_normalization: critic learns in normalized return
+                space when True; pure-PPO behavior when False (default).
             use_early_stop: Whether to use KL-based early stopping
             key: JAX random key
         """
@@ -99,7 +100,7 @@ class PPODR3(PPO):
             use_clipped_value_loss=use_clipped_value_loss,
             schedule=schedule,
             desired_kl=desired_kl,
-            use_reward_scaling=use_reward_scaling,
+            use_value_normalization=use_value_normalization,
             use_early_stop=use_early_stop,
             key=key,
             **kwargs,

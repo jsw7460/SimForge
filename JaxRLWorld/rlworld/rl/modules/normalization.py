@@ -48,6 +48,15 @@ class EmpiricalNormalization(eqx.Module):
         std = jnp.sqrt(self.var)
         return (x - self.mean) / (std + self.epsilon)  # mjlab 방식
 
+    def unnormalize(self, x: jax.Array) -> jax.Array:
+        """Inverse of :meth:`normalize` — recovers raw-space values from
+        a normalized input. Used by the PPO value normalizer to convert
+        critic outputs (normalized space) back to raw return space for
+        GAE / storage / bootstrap.
+        """
+        std = jnp.sqrt(self.var)
+        return x * (std + self.epsilon) + self.mean
+
     def __call__(self, x: jax.Array) -> jax.Array:
         """Alias for normalize."""
         return self.normalize(x)

@@ -333,7 +333,6 @@ class Go2FlatConfig:
             actor_lr=1e-3,
             critic_lr=1e-3,
             estimator_learning_rate=5e-4,
-            use_reward_scaling=False,
             max_grad_norm=0.5,
             num_learning_epochs=5,
             num_mini_batches=4,

@@ -30,7 +30,6 @@ from rlworld.rl.algorithms.ppo.update import (
 from rlworld.rl.modules.normalization import EmpiricalNormalization
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.storages.rollout_storage import RolloutStorage
-from rlworld.rl.utils.reward_scaler import RewardScaler
 
 
 @eqx.filter_jit
@@ -113,7 +112,7 @@ class PPO(OnPolicyAlgorithm):
         use_clipped_value_loss: bool = True,
         schedule: str = "fixed",
         desired_kl: float = 0.01,
-        use_reward_scaling: bool = True,
+        use_value_normalization: bool = False,
         use_early_stop: bool = False,
         normalize_advantage_per_minibatch: bool = True,
         optimizer_class=None,
@@ -138,7 +137,10 @@ class PPO(OnPolicyAlgorithm):
             use_clipped_value_loss: Whether to clip value loss
             schedule: LR schedule ('fixed' or 'adaptive')
             desired_kl: Target KL for adaptive LR
-            use_reward_scaling: Whether to scale rewards
+            use_value_normalization: When True, the critic learns in normalized
+                value space; collected V outputs are inverse-normalized for GAE
+                and storage. When False (default), behavior is identical to a
+                pure PPO with no return/value normalization.
             use_early_stop: Whether to use KL-based early stopping
             key: JAX random key
         """
@@ -165,7 +167,7 @@ class PPO(OnPolicyAlgorithm):
         self.use_clipped_value_loss = use_clipped_value_loss
         self.schedule = schedule
         self.desired_kl = desired_kl
-        self.use_reward_scaling = use_reward_scaling
+        self.use_value_normalization = use_value_normalization
         self.use_early_stop = use_early_stop
         self.normalize_advantage_per_minibatch = normalize_advantage_per_minibatch
         self.optimizer_class = optimizer_class or optax.adam
@@ -202,8 +204,13 @@ class PPO(OnPolicyAlgorithm):
         self.storage: RolloutStorage | None = None
         self.transition: PPO.TransitionBuffer | None = None
 
-        # Reward scaler (initialized later via init_storage)
-        self._reward_scaler: RewardScaler | None = None
+        # Value-target normalizer (skrl-style). Only instantiated when
+        # ``use_value_normalization=True``. When None, the critic learns
+        # in raw return space — identical to pure PPO with no value
+        # normalization.
+        self.value_normalizer: EmpiricalNormalization | None = (
+            EmpiricalNormalization(shape=1) if use_value_normalization else None
+        )
 
         # Last dones for GAE computation
         self._last_dones: jax.Array | None = None
@@ -252,12 +259,6 @@ class PPO(OnPolicyAlgorithm):
         )
         self.transition = PPO.TransitionBuffer()
 
-        if self.use_reward_scaling:
-            self._reward_scaler = RewardScaler(
-                num_envs=cfg["num_envs"],
-                gamma=self.gamma,
-            )
-
     def act(self, obs: ActInput, deterministic: bool = False) -> jax.Array:
         """Select action given observation.
 
@@ -278,6 +279,12 @@ class PPO(OnPolicyAlgorithm):
             env_actions, raw_actions, mean, std, log_prob, values, _ = forward_policy_and_value(
                 model, obs.actor_obs, obs.critic_obs, subkey
             )
+
+        # Hook 1 (value normalization, opt-in): the critic outputs in
+        # normalized return space; convert back to raw before storing
+        # so GAE / bootstrap / storage all stay in raw space.
+        if self.value_normalizer is not None:
+            values = self.value_normalizer.unnormalize(values[..., None]).squeeze(-1)
 
         # Store raw (pre-tanh) actions for numerically stable PPO update
         self.transition.actions = raw_actions
@@ -307,11 +314,6 @@ class PPO(OnPolicyAlgorithm):
         (matching Brax PPO behavior).
         """
         dones = terminated | truncated
-
-        # Reward scaling
-        if self._reward_scaler is not None:
-            rewards = self._reward_scaler.scale(rewards)
-            self._reward_scaler.reset_envs_vectorized(dones)
 
         # Transition assignment
         self.transition.rewards = rewards
@@ -369,6 +371,11 @@ class PPO(OnPolicyAlgorithm):
         bootstrap_values, _ = self.train_state.model.evaluate_value(final_critic)
         bootstrap_values = bootstrap_values.squeeze(-1)
 
+        # Hook 2 (value normalization, opt-in): critic outputs in
+        # normalized space; convert to raw before adding to raw rewards.
+        if self.value_normalizer is not None:
+            bootstrap_values = self.value_normalizer.unnormalize(bootstrap_values[..., None]).squeeze(-1)
+
         truncated_only = truncated & ~terminated
         bonus = truncated_only.astype(self.transition.rewards.dtype) * (self.gamma * bootstrap_values)
         self.transition.rewards = self.transition.rewards + bonus
@@ -383,12 +390,33 @@ class PPO(OnPolicyAlgorithm):
         last_values, _ = self.train_state.model.evaluate_value(last_critic_obs)
         last_values = last_values.squeeze(-1)
 
+        # Hook 3a (value normalization, opt-in): last_values comes from the
+        # critic in normalized space; GAE runs in raw space along with the
+        # raw values stored in `act()`, so unnormalize first.
+        if self.value_normalizer is not None:
+            last_values = self.value_normalizer.unnormalize(last_values[..., None]).squeeze(-1)
+
         self.storage.compute_returns(
             last_values=last_values,
             last_dones=self._last_dones,
             gamma=self.gamma,
             gae_lambda=self.lam,
         )
+
+        # Hook 3b (value normalization, opt-in): now that returns/values are
+        # computed in raw space, fold raw returns into the running stats and
+        # rewrite storage.values / storage.returns into normalized space so
+        # the critic loss in compute_batch_loss naturally targets ~unit
+        # variance. Advantages are NOT normalized here — they keep raw
+        # scale (PPO's per-minibatch / per-rollout advantage normalization
+        # below handles that separately).
+        if self.value_normalizer is not None:
+            raw_returns = self.storage.returns
+            raw_values = self.storage.values
+            flat_returns = raw_returns.reshape(-1, 1)
+            self.value_normalizer = self.value_normalizer.update(flat_returns)
+            self.storage.returns = self.value_normalizer.normalize(raw_returns[..., None]).squeeze(-1)
+            self.storage.values = self.value_normalizer.normalize(raw_values[..., None]).squeeze(-1)
 
         # Per-rollout advantage normalization (rsl_rl default).
         # When per-minibatch is selected, the same statistic is computed inside
