@@ -274,7 +274,7 @@ def build_reward(cfg: T1GetupConfig) -> RewardConfig:
             weight=cfg.joint_pos_limits_weight,
         )
         raw_action_rate_l2 = RewardTermConfig(
-            func=rf.raw_action_rate_l2,
+            func=rf_common.raw_action_rate_l2,
             weight=cfg.action_rate_l2_weight,
         )
         joint_vel_l2 = RewardTermConfig(
