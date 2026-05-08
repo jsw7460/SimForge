@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import genesis as gs
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     RewardConfig,
@@ -99,6 +99,12 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
     r = cfg.robot
     sim_dt = timing["dt"]
 
+    ActuatorCls, _delay_kwargs = (
+        (IdealPDActuatorCfg, {})
+        if cfg.use_ideal_pd_actuator
+        else (DelayedPDActuatorCfg, {"min_delay": 1, "max_delay": 3})
+    )
+
     return SceneConfig(
         env_spacing=(20.0, 20.0),
         entities={
@@ -113,23 +119,21 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                 links_to_keep=["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
                 articulation=ArticulationCfg(
                     actuators=(
-                        DelayedPDActuatorCfg(
+                        ActuatorCls(
                             target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
                             stiffness=STIFFNESS_HIP,
                             damping=DAMPING_HIP,
                             effort_limit=EFFORT_HIP,
                             armature=ARMATURE_HIP,
-                            min_delay=1,
-                            max_delay=3,
+                            **_delay_kwargs,
                         ),
-                        DelayedPDActuatorCfg(
+                        ActuatorCls(
                             target_names_expr=(".*_calf_joint",),
                             stiffness=STIFFNESS_KNEE,
                             damping=DAMPING_KNEE,
                             effort_limit=EFFORT_KNEE,
                             armature=ARMATURE_KNEE,
-                            min_delay=1,
-                            max_delay=3,
+                            **_delay_kwargs,
                         ),
                     ),
                 ),

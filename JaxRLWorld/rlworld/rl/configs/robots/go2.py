@@ -46,11 +46,13 @@ GO2_ACTION_SCALE: Dict[str, float] = {
 class Go2Config(RobotConfig):
     """Configuration for Unitree Go2 quadruped robot."""
 
-    name: str = "go2_description"
+    name: str = "go2"
     urdf_path: str = "Genesis/genesis/assets/urdf/go2/urdf/go2.urdf"
+    mjcf_path: str = "Mjlab/src/mjlab/asset_zoo/robots/unitree_go2/xmls/go2.xml"
 
     base_init_height: float = 0.278
-    base_link_name: str = "base"
+    # base_link_name: str = "base"
+    base_link_name: str = "trunk"
 
     default_joint_angles: Dict[str, float] = field(
         default_factory=lambda: {

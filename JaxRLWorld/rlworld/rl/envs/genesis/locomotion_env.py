@@ -14,7 +14,7 @@ from rlworld.rl.configs import (
     SceneConfig,
     VisualizationConfig,
 )
-from rlworld.rl.envs import GenesisEnv
+from rlworld.rl.envs.genesis.genesis_env import GenesisEnv
 from rlworld.rl.envs.managers import GaitManager, GaitManagerConfig
 
 if TYPE_CHECKING:

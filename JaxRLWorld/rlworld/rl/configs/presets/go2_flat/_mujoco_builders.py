@@ -20,7 +20,7 @@ from mjlab.asset_zoo.robots.unitree_go2.go2_constants import (
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.events import EventTermConfig
@@ -133,6 +133,12 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         history_length=timing["decimation"],
     )
 
+    ActuatorCls, _delay_kwargs = (
+        (IdealPDActuatorCfg, {})
+        if cfg.use_ideal_pd_actuator
+        else (DelayedPDActuatorCfg, {"min_delay": 1, "max_delay": 3})
+    )
+
     robot_entity = MujocoEntityCfg(
         urdf_path=r.urdf_path,
         init_state=InitialStateCfg(
@@ -142,23 +148,21 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         floating=True,
         articulation=ArticulationCfg(
             actuators=(
-                DelayedPDActuatorCfg(
+                ActuatorCls(
                     target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
                     stiffness=STIFFNESS_HIP,
                     damping=DAMPING_HIP,
                     effort_limit=EFFORT_HIP,
                     armature=ARMATURE_HIP,
-                    min_delay=1,
-                    max_delay=3,
+                    **_delay_kwargs,
                 ),
-                DelayedPDActuatorCfg(
+                ActuatorCls(
                     target_names_expr=(".*_calf_joint",),
                     stiffness=STIFFNESS_KNEE,
                     damping=DAMPING_KNEE,
                     effort_limit=EFFORT_KNEE,
                     armature=ARMATURE_KNEE,
-                    min_delay=1,
-                    max_delay=3,
+                    **_delay_kwargs,
                 ),
             ),
         ),

@@ -17,6 +17,7 @@ class RobotConfig:
 
     name: str = ""
     urdf_path: str | None = ""
+    mjcf_path: str | None = ""
     usd_path: str | None = ""
 
     base_init_height: float = 0.0

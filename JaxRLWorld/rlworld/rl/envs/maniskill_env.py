@@ -5,7 +5,7 @@ import torch
 
 from rlworld.rl.configs import ActionConfig, CommandConfig, EnvConfig, ObservationConfig, RewardConfig, SceneConfig
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
-from rlworld.rl.envs import World
+from rlworld.rl.envs.world import World
 
 
 class ManiSkillEnv(World):

@@ -10,9 +10,9 @@ from rlworld.rl.configs.newton_config_classes import (
     NewtonSceneConfig,
     VisualizationConfig,
 )
-from rlworld.rl.envs import NewtonEnv
 from rlworld.rl.envs.genesis.locomotion_env import _gait_config_to_manager_config
 from rlworld.rl.envs.managers import GaitManager
+from rlworld.rl.envs.newton.newton_env import NewtonEnv
 
 if TYPE_CHECKING:
     pass

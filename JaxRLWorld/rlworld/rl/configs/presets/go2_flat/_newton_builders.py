@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.events import EventTermConfig
@@ -23,6 +23,7 @@ from rlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
     NewtonObservationConfig,
     NewtonSceneConfig,
+    SolverMuJoCoCfg,
     VisualizationConfig,
 )
 from rlworld.rl.configs.rewards import RewardTermConfig
@@ -111,15 +112,23 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
     stiffness_knee = r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
     damping_knee = r.kd_knee_override if r.kd_knee_override is not None else DAMPING_KNEE
 
+    ActuatorCls, _delay_kwargs = (
+        (IdealPDActuatorCfg, {})
+        if cfg.use_ideal_pd_actuator
+        else (DelayedPDActuatorCfg, {"min_delay": 1, "max_delay": 3})
+    )
+
     return NewtonSceneConfig(
         dt=timing["dt"],
         substeps=timing["substeps"],
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
+        solver_cfg=SolverMuJoCoCfg(impratio=1.0, ccd_iterations=10),
         entities={
             "ground": GroundPlaneCfg(),
             "robot": UnifiedNewtonEntityCfg(
-                urdf_path=r.urdf_path,
+                # urdf_path=r.urdf_path,
+                mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
                     pos=(0.0, 0.0, r.base_init_height),
                     rot=(quat[0], quat[1], quat[2], quat[3]),
@@ -129,30 +138,28 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                 enable_self_collisions=True,
                 collapse_fixed_joints=True,
                 links_to_keep=[
-                    "go2_description/FL_foot_joint",
-                    "go2_description/FR_foot_joint",
-                    "go2_description/RL_foot_joint",
-                    "go2_description/RR_foot_joint",
+                    "FL_foot_joint",
+                    "FR_foot_joint",
+                    "RL_foot_joint",
+                    "RR_foot_joint",
                 ],
                 articulation=ArticulationCfg(
                     actuators=(
-                        DelayedPDActuatorCfg(
+                        ActuatorCls(
                             target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
                             stiffness=stiffness_hip,
                             damping=damping_hip,
                             effort_limit=EFFORT_HIP,
                             armature=ARMATURE_HIP,
-                            min_delay=1,
-                            max_delay=3,
+                            **_delay_kwargs,
                         ),
-                        DelayedPDActuatorCfg(
+                        ActuatorCls(
                             target_names_expr=(".*_calf_joint",),
                             stiffness=stiffness_knee,
                             damping=damping_knee,
                             effort_limit=EFFORT_KNEE,
                             armature=ARMATURE_KNEE,
-                            min_delay=1,
-                            max_delay=3,
+                            **_delay_kwargs,
                         ),
                     ),
                 ),
@@ -329,7 +336,7 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
             params={
                 "mass_range": (0.9, 1.1),
                 "operation": "scale",
-                "body_patterns": "base",
+                "body_patterns": cfg.robot.base_link_name,
             },
         ),
     }

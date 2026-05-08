@@ -126,6 +126,13 @@ class Go2FlatConfig:
     # Run name (None → auto from sim_type)
     run_name: str | None = None
 
+    # Actuator class selection
+    use_ideal_pd_actuator: bool = True
+    """If True, swap the default DelayedPDActuator pair for
+    IdealPDActuator (no command delay). Default preserves the
+    trained-policy behaviour; SysID collect flips this to True to
+    remove actuator-delay as an identification nuisance."""
+
     # ── Build entry point ─────────────────────────────────────────────
 
     def build(self):

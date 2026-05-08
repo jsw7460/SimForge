@@ -11,7 +11,6 @@ delegates live in ``newton/mjlab_rewards.py``.
 import torch
 import warp as wp
 
-from rlworld.rl.envs import NewtonLocomotionEnv
 from rlworld.rl.envs.mdp.observations.newton.body_utils import (
     get_bodies_height_with_contact,
     get_bodies_pos,
@@ -20,6 +19,7 @@ from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     get_leg_xy_signs,
     penalize_contact_force_count,
 )
+from rlworld.rl.envs.newton.locomotion_env import NewtonLocomotionEnv
 from rlworld.rl.envs.utils.newton.body_cache import get_cache
 from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 

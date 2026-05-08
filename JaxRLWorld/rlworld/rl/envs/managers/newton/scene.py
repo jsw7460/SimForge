@@ -465,7 +465,35 @@ class NewtonSceneManager(BaseManager):
            ``NewtonEntityCfg.sites``.
         """
         if cfg.collapse_fixed_joints:
-            builder.collapse_fixed_joints(joints_to_keep=cfg.links_to_keep)
+            # Newton's ``collapse_fixed_joints`` uses literal string
+            # equality for ``joints_to_keep`` (builder.collapse_fixed_joints
+            # → ``joint["label"] in joints_to_keep``), with no
+            # wildcard / regex support. We widen bare leaf names to
+            # ``*/<name>`` (a no-op for patterns already containing
+            # '/' or glob metachars) and expand against the loaded
+            # ``builder.joint_label`` set via ``fnmatch``, then hand
+            # Newton the resolved literal labels. This mirrors how
+            # actuator ``target_names_expr`` (``apply_joint_params_by_pattern``
+            # canonicalises via ``leaf_name``) and sensor body patterns
+            # (scene.py sensor block uses ``fnmatch``) already resolve
+            # cross-format labels — so the same bare leaf pattern in
+            # cfg works for URDF flat labels (``entity/joint``) and
+            # MJCF XPath labels (``entity/.../joint``) uniformly.
+            if cfg.links_to_keep:
+                from fnmatch import fnmatch
+
+                patterns = as_leaf_globs(list(cfg.links_to_keep))
+                all_labels = list(builder.joint_label)
+                expanded = sorted({label for pat in patterns for label in all_labels if fnmatch(label, pat)})
+                if not expanded:
+                    raise ValueError(
+                        f"links_to_keep={cfg.links_to_keep!r} (widened to "
+                        f"{patterns!r}) matched zero joint labels. "
+                        f"Sample available labels: {all_labels[:8]}"
+                    )
+            else:
+                expanded = []
+            builder.collapse_fixed_joints(joints_to_keep=expanded)
 
         prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
@@ -501,7 +529,7 @@ class NewtonSceneManager(BaseManager):
 
             if isinstance(act_cfg.armature, dict):
                 armature_map.update(act_cfg.armature)
-            elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
+            elif isinstance(act_cfg.armature, int | float) and act_cfg.armature > 0:
                 for pattern in act_cfg.target_names_expr:
                     armature_map[pattern] = act_cfg.armature
 
@@ -509,14 +537,14 @@ class NewtonSceneManager(BaseManager):
             # joint.actfrcrange in Newton's MuJoCo solver).
             if isinstance(act_cfg.effort_limit, dict):
                 effort_limit_map.update(act_cfg.effort_limit)
-            elif isinstance(act_cfg.effort_limit, (int, float)) and act_cfg.effort_limit > 0:
+            elif isinstance(act_cfg.effort_limit, int | float) and act_cfg.effort_limit > 0:
                 for pattern in act_cfg.target_names_expr:
                     effort_limit_map[pattern] = float(act_cfg.effort_limit)
 
             # Frictionloss — overrides XML-declared joint frictionloss.
             # Mirrors MuJoCo's dof_frictionloss / Genesis' set_dofs_frictionloss
             # so the three sims share one authoritative value at build time.
-            if isinstance(act_cfg.frictionloss, (int, float)) and act_cfg.frictionloss > 0:
+            if isinstance(act_cfg.frictionloss, int | float) and act_cfg.frictionloss > 0:
                 for pattern in act_cfg.target_names_expr:
                     friction_map[pattern] = float(act_cfg.frictionloss)
 
@@ -586,9 +614,9 @@ class NewtonSceneManager(BaseManager):
                     kd_map[pattern] = act_cfg.damping
                 if act_cfg.armature > 0:
                     armature_map[pattern] = act_cfg.armature
-                if isinstance(act_cfg.effort_limit, (int, float)) and act_cfg.effort_limit > 0:
+                if isinstance(act_cfg.effort_limit, int | float) and act_cfg.effort_limit > 0:
                     effort_limit_map[pattern] = float(act_cfg.effort_limit)
-                if isinstance(act_cfg.frictionloss, (int, float)) and act_cfg.frictionloss > 0:
+                if isinstance(act_cfg.frictionloss, int | float) and act_cfg.frictionloss > 0:
                     friction_map[pattern] = float(act_cfg.frictionloss)
 
         if ke_map or kd_map or armature_map or effort_limit_map or friction_map:
