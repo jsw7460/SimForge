@@ -20,3 +20,12 @@
 - 커밋 메시지는 descriptive하게, 미래 참조에 유용하도록
 - MonoRepo: `SimForge/` 안에 `JaxRLWorld/` (git tracked), 시뮬레이터들(`Genesis/`, `Newton/`, `Mjlab/` 등)은 `.gitignore`로 제외
 - `.gitignore`에서 시뮬레이터 경로는 root-relative (`/Genesis/`, `/Newton/`) -- macOS case-insensitive 이슈 방지
+- Keep commits focused and atomic—one logical change per commit.
+- Reference related issues in commit messages when applicable.
+- **Do not include AI attribution or co-authorship lines** (e.g., "Co-Authored-By: Claude...") in commit messages. Commits should represent human contributions without explicit AI attribution.
+- **Commit message format**:
+  - Separate subject from body with a blank line
+  - Subject: imperative mood, capitalized, ~50 chars, no trailing period
+    - Write as a command: "Fix bug" not "Fixed bug" or "Fixes bug"
+    - Test: "If applied, this commit will _[your subject]_"
+  - Body: wrap at 72 chars, explain _what_ and _why_ (not _how_—the diff shows that)
