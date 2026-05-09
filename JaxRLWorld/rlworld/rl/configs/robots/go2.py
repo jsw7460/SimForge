@@ -48,7 +48,8 @@ class Go2Config(RobotConfig):
 
     name: str = "go2"
     urdf_path: str = "Genesis/genesis/assets/urdf/go2/urdf/go2.urdf"
-    mjcf_path: str = "Mjlab/src/mjlab/asset_zoo/robots/unitree_go2/xmls/go2.xml"
+    # mjcf_path: str = "Mjlab/src/mjlab/asset_zoo/robots/unitree_go2/xmls/go2.xml"
+    mjcf_path: str = "JaxRLWorld/rlworld/assets/unitree_go2/xmls/go2.xml"
 
     base_init_height: float = 0.278
     # base_link_name: str = "base"
@@ -111,4 +112,4 @@ class Go2Config(RobotConfig):
     kp_knee_override: float | None = None
     kd_knee_override: float | None = None
     joint_frictionloss_override: float | None = None
-    foot_friction_override: float | None = 0.3
+    foot_friction_override: float | None = None

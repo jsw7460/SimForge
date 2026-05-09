@@ -25,7 +25,7 @@ repos:
 
       # File-system sanity
       - id: check-added-large-files
-        args: [--maxkb=2000]
+        args: [--maxkb=8000]
       - id: check-case-conflict
       - id: check-merge-conflict
       - id: check-symlinks
