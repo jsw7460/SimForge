@@ -176,12 +176,20 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                 entity_name="robot",
                 sensor_name="foot_contact",
                 sensing_obj_bodies=list(r.foot_names),
+                # Restrict to robot ↔ ground contacts (mirrors mjlab's
+                # secondary=ContactMatch(mode="body", pattern="terrain")
+                # and Genesis's secondary_entity="base_entity"). Newton's
+                # add_ground_plane() registers the floor as a single
+                # shape labeled "ground_plane" with no parent body, so
+                # we filter via counterpart_shapes (not counterpart_bodies).
+                counterpart_shapes=["ground_plane"],
             ),
             NewtonContactSensorConfig(
                 entity_name="robot",
                 sensor_name="body_ground_contact",
                 sensing_obj_bodies=["*"],
                 exclude_bodies=("*foot*", "*calf*"),
+                counterpart_shapes=["ground_plane"],
             ),
         ],
         add_ground=True,
@@ -336,6 +344,35 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
                 "mass_range": (0.8, 1.2),
                 "operation": "scale",
                 "body_patterns": cfg.robot.base_link_name,
+            },
+        ),
+        # mjlab parity foot-friction DR: same range / abs / shared_random
+        # pattern as mjlab's randomize_friction in _mujoco_builders. The
+        # ``*/<name>`` leaf-glob form matches Newton's MJCF XPath labels
+        # (``go2/worldbody/.../FR_foot/FR_foot_collision`` etc.).
+        "randomize_friction": EventTermConfig(
+            func=newton_dr.randomize_friction,
+            mode="reset_dr",
+            params={
+                "friction_range": (0.3, 1.2),
+                "operation": "abs",
+                "shape_patterns": (
+                    "*/FR_foot_collision",
+                    "*/FL_foot_collision",
+                    "*/RR_foot_collision",
+                    "*/RL_foot_collision",
+                ),
+                "shared_random": True,
+            },
+        ),
+        # mjlab parity joint-friction DR: same abs (0.0, 0.05) range and
+        # whole-DOF scope as mjlab's randomize_joint_friction term.
+        "randomize_joint_friction": EventTermConfig(
+            func=newton_dr.randomize_joint_friction,
+            mode="reset_dr",
+            params={
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
             },
         ),
     }

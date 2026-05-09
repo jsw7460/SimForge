@@ -299,7 +299,18 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         "randomize_friction": EventTermConfig(
             func=genesis_dr.randomize_friction,
             mode="reset_dr",
-            params={"friction_range": (0.3, 1.2)},
+            params={
+                # mjlab parity: mjlab abs (0.3, 1.2) divided by the mjcf
+                # class-default foot friction 0.4 → ratio (0.75, 3.0).
+                # Genesis's set_friction_ratio multiplies the mjcf-derived
+                # default by this ratio, so the effective contact friction
+                # range matches mjlab's abs DR. foot 4 link only,
+                # shared_random so all four feet get the same ratio
+                # within an env (mjlab shared_random=True parity).
+                "friction_range": (0.75, 3.0),
+                "link_names": tuple(cfg.robot.foot_names),
+                "shared_random": True,
+            },
         ),
         "randomize_joint_friction": EventTermConfig(
             func=genesis_dr.randomize_joint_friction,
