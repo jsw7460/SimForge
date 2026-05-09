@@ -7,7 +7,6 @@ ported from mjlab's MDP module.
 # MuJoCo-specific reward functions
 from .reward_terms import (
     # Action-based penalties
-    action_rate_l2,
     body_angular_velocity_penalty,
     # Utility
     # Contact/feet rewards
@@ -43,8 +42,6 @@ __all__ = [
     "joint_vel_l2",
     "joint_acc_l2",
     "joint_pos_limits",
-    # Action-based penalties
-    "action_rate_l2",
     # Orientation rewards
     "flat_orientation_l2",
     "flat_orientation",
