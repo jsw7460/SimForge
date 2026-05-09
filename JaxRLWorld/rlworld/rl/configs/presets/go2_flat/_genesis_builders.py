@@ -110,7 +110,8 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         entities={
             "base_entity": GroundPlaneCfg(),
             "robot": GenesisEntityCfg(
-                urdf_path=r.urdf_path,
+                # urdf_path=r.urdf_path,
+                mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
                     pos=(1.5, 1.5, r.base_init_height),
                     joint_pos=r.default_joint_angles,
@@ -142,7 +143,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             ),
         },
         sensors=[
-            SensorConfig(entity_name="robot", link_name="base", sensor_class=gs.sensors.IMU),
+            SensorConfig(entity_name="robot", link_name=r.base_link_name, sensor_class=gs.sensors.IMU),
         ],
         contact_sensors=[
             GenesisContactSensorCfg(
@@ -153,10 +154,10 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             GenesisContactSensorCfg(
                 name="body_ground_contact",
                 primary_links=[".*"],
-                exclude_links=(".*foot.*",),
+                exclude_links=(".*foot.*", ".*calf.*"),
                 entity_name="robot",
-                exclude_self_contact=False,
-                secondary_entity=None,
+                exclude_self_contact=True,
+                secondary_entity="base_entity",
             ),
         ],
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
@@ -290,7 +291,10 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         "randomize_base_mass": EventTermConfig(
             func=genesis_dr.randomize_body_mass,
             mode="reset_dr",
-            params={"mass_ratio_range": (0.8, 1.2)},
+            params={
+                "mass_ratio_range": (0.8, 1.2),
+                "link_names": cfg.robot.base_link_name,
+            },
         ),
         "randomize_friction": EventTermConfig(
             func=genesis_dr.randomize_friction,

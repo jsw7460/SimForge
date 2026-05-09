@@ -70,11 +70,19 @@ class _MujocoEnvAdapter:
         return self._env.scene_manager.sim
 
 
-def _to_scene_entity_cfg(entity_cfg: EntityCfg):
-    """Convert EntityCfg to mjlab's SceneEntityCfg."""
+def _to_scene_entity_cfg(entity_cfg: EntityCfg, scene):
+    """Convert EntityCfg to mjlab's SceneEntityCfg and resolve names → ids.
+
+    The ``resolve(scene)`` call is essential. mjlab's
+    ``_get_entity_indices`` only consults the ``*_ids`` slice (which
+    defaults to ``slice(None)`` → all entities); ``*_names`` are silently
+    ignored unless ``resolve`` has populated the matching ``*_ids``
+    field. Without this, ``EntityCfg(body_names=("trunk",))`` would
+    randomize every body in the entity instead of just the trunk.
+    """
     from mjlab.managers.scene_entity_config import SceneEntityCfg
 
-    return SceneEntityCfg(
+    cfg = SceneEntityCfg(
         name=entity_cfg.name,
         joint_ids=entity_cfg.joint_ids,
         body_ids=entity_cfg.body_ids,
@@ -85,6 +93,8 @@ def _to_scene_entity_cfg(entity_cfg: EntityCfg):
         geom_names=entity_cfg.geom_names,
         site_names=entity_cfg.site_names,
     )
+    cfg.resolve(scene)
+    return cfg
 
 
 # =============================================================================
@@ -114,11 +124,12 @@ def randomize_friction(
     from mjlab.envs.mdp.dr import geom_friction
 
     entity_cfg = entity_cfg or EntityCfg()
+    adapter = _MujocoEnvAdapter(env)
     geom_friction(
-        env=_MujocoEnvAdapter(env),
+        env=adapter,
         env_ids=env_ids,
         ranges=ranges,
-        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        asset_cfg=_to_scene_entity_cfg(entity_cfg, adapter.scene),
         operation=operation,
         axes=axes,
         shared_random=shared_random,
@@ -143,11 +154,12 @@ def randomize_body_com_offset(
     from mjlab.envs.mdp.dr import body_com_offset
 
     entity_cfg = entity_cfg or EntityCfg()
+    adapter = _MujocoEnvAdapter(env)
     body_com_offset(
-        env=_MujocoEnvAdapter(env),
+        env=adapter,
         env_ids=env_ids,
         ranges=ranges,
-        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        asset_cfg=_to_scene_entity_cfg(entity_cfg, adapter.scene),
         operation=operation,
         axes=axes,
         shared_random=shared_random,
@@ -164,11 +176,12 @@ def randomize_encoder_bias(
     from mjlab.envs.mdp.dr import encoder_bias
 
     entity_cfg = entity_cfg or EntityCfg()
+    adapter = _MujocoEnvAdapter(env)
     encoder_bias(
-        env=_MujocoEnvAdapter(env),
+        env=adapter,
         env_ids=env_ids,
         bias_range=bias_range,
-        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        asset_cfg=_to_scene_entity_cfg(entity_cfg, adapter.scene),
     )
 
 
@@ -184,11 +197,12 @@ def randomize_body_mass(
     from mjlab.envs.mdp.dr import body_mass
 
     entity_cfg = entity_cfg or EntityCfg()
+    adapter = _MujocoEnvAdapter(env)
     body_mass(
-        env=_MujocoEnvAdapter(env),
+        env=adapter,
         env_ids=env_ids,
         ranges=ranges,
-        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        asset_cfg=_to_scene_entity_cfg(entity_cfg, adapter.scene),
         operation=operation,
         shared_random=shared_random,
     )
@@ -207,12 +221,13 @@ def randomize_pd_gains(
     from mjlab.envs.mdp.dr import pd_gains
 
     entity_cfg = entity_cfg or EntityCfg()
+    adapter = _MujocoEnvAdapter(env)
     pd_gains(
-        env=_MujocoEnvAdapter(env),
+        env=adapter,
         env_ids=env_ids,
         kp_range=kp_range,
         kd_range=kd_range,
-        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        asset_cfg=_to_scene_entity_cfg(entity_cfg, adapter.scene),
         distribution=distribution,
         operation=operation,
     )
@@ -230,11 +245,12 @@ def randomize_joint_armature(
     from mjlab.envs.mdp.dr import joint_armature
 
     entity_cfg = entity_cfg or EntityCfg()
+    adapter = _MujocoEnvAdapter(env)
     joint_armature(
-        env=_MujocoEnvAdapter(env),
+        env=adapter,
         env_ids=env_ids,
         ranges=ranges,
-        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        asset_cfg=_to_scene_entity_cfg(entity_cfg, adapter.scene),
         operation=operation,
         shared_random=shared_random,
     )
@@ -252,11 +268,12 @@ def randomize_joint_friction(
     from mjlab.envs.mdp.dr import joint_friction
 
     entity_cfg = entity_cfg or EntityCfg()
+    adapter = _MujocoEnvAdapter(env)
     joint_friction(
-        env=_MujocoEnvAdapter(env),
+        env=adapter,
         env_ids=env_ids,
         ranges=ranges,
-        asset_cfg=_to_scene_entity_cfg(entity_cfg),
+        asset_cfg=_to_scene_entity_cfg(entity_cfg, adapter.scene),
         operation=operation,
         shared_random=shared_random,
     )

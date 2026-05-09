@@ -123,7 +123,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         substeps=timing["substeps"],
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
-        solver_cfg=SolverMuJoCoCfg(impratio=1.0, ccd_iterations=10),
+        solver_cfg=SolverMuJoCoCfg(impratio=10.0, ccd_iterations=50, cone="elliptic"),
         entities={
             "ground": GroundPlaneCfg(),
             "robot": UnifiedNewtonEntityCfg(
@@ -163,7 +163,6 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                         ),
                     ),
                 ),
-                body_label_prefix=r.name,
                 sites={"imu_site_base": r.base_link_name},
             ),
         },
@@ -182,7 +181,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                 entity_name="robot",
                 sensor_name="body_ground_contact",
                 sensing_obj_bodies=["*"],
-                exclude_bodies=("*foot*",),
+                exclude_bodies=("*foot*", "*calf*"),
             ),
         ],
         add_ground=True,
@@ -334,7 +333,7 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
             func=newton_dr.randomize_body_mass,
             mode="reset_dr",
             params={
-                "mass_range": (0.9, 1.1),
+                "mass_range": (0.8, 1.2),
                 "operation": "scale",
                 "body_patterns": cfg.robot.base_link_name,
             },

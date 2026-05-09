@@ -495,6 +495,17 @@ class NewtonSceneManager(BaseManager):
                 expanded = []
             builder.collapse_fixed_joints(joints_to_keep=expanded)
 
+        # Auto-extract ``body_label_prefix`` from the loaded labels when the
+        # user did not pin it explicitly. URDF body labels start with the
+        # robot's ``<robot name="...">`` (e.g. ``go2_description/base``) while
+        # MJCF labels start with the ``add_mjcf`` ``name`` argument plus the
+        # XPath hierarchy (e.g. ``go2/worldbody/trunk``). Hardcoding a single
+        # prefix in user config silently breaks one of the two formats —
+        # sensor pattern ``"X/*"`` matches zero labels when the actual prefix
+        # is ``"Y"``, leaving sensing_bodies=[] and the contact reward at 0.
+        if getattr(cfg, "body_label_prefix", None) is None and builder.body_label:
+            cfg.body_label_prefix = builder.body_label[0].split("/")[0]
+
         prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
@@ -1127,11 +1138,12 @@ class NewtonSceneManager(BaseManager):
         # against Newton's reference.
         need_state_copy = self.use_cuda_graph and self.config.substeps % 2 == 1
         last_idx = self.config.substeps - 1
-        self.contacts = self.model.collide(
-            self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
-        )
+
         for i in range(self.config.substeps):
             self.state_0.clear_forces()
+            self.contacts = self.model.collide(
+                self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
+            )
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
 
             if need_state_copy and i == last_idx:

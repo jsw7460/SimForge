@@ -13,13 +13,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
 from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
-from mjlab.asset_zoo.robots.unitree_go2.go2_constants import (
-    FULL_COLLISION,
-    get_spec as go2_get_spec,
-)
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
+from rlworld.assets.unitree_go2.go2_constants import (
+    FULL_COLLISION,
+    get_spec as go2_get_spec,
+)
 from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
@@ -54,7 +54,6 @@ from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
 
 if TYPE_CHECKING:
     from .base import Go2FlatConfig
-
 
 # ── Module-level constants exposed to base.Go2FlatConfig.build() ─────
 
@@ -318,6 +317,7 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     from rlworld.rl.envs.mdp.events import mujoco as ef
     from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
 
+    r = cfg.robot
     foot_geom_names = (
         "FR_foot_collision",
         "FL_foot_collision",
@@ -342,7 +342,7 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
             params={
                 "ranges": (0.8, 1.2),
                 "operation": "scale",
-                "entity_cfg": EntityCfg(name="robot", body_names=("base",)),
+                "entity_cfg": EntityCfg(name="robot", body_names=(r.base_link_name,)),
             },
         ),
         "randomize_joint_friction": EventTermConfig(
