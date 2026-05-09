@@ -34,6 +34,8 @@ def randomize_friction(
     friction_range: tuple[float, float] = (0.6, 1.4),
     distribution: str = "uniform",
     entity_name: str = "robot",
+    link_names: tuple[str, ...] | None = None,
+    shared_random: bool = False,
 ) -> None:
     """Randomize friction ratio for robot links.
 
@@ -46,19 +48,38 @@ def randomize_friction(
         friction_range: ``(min_ratio, max_ratio)`` multiplier on default friction.
         distribution: ``"uniform"`` | ``"log_uniform"`` | ``"gaussian"``.
         entity_name: Name of the robot entity in the scene.
+        link_names: Optional link-name patterns (regex). When ``None``, every
+            link is randomized (legacy behavior). When set, only matched
+            links are touched — used to mirror mjlab's foot-only friction
+            DR via ``cfg.robot.foot_names``.
+        shared_random: When ``True``, draw a single ratio per env and
+            broadcast it across all matched links. Mirrors mjlab's
+            ``shared_random=True`` so the four feet receive the same
+            friction ratio within an env.
     """
     if len(env_ids) == 0:
         return
 
     entity = env.scene_manager[entity_name]
-    n_links = entity.n_links
-    shape = (len(env_ids), n_links)
 
-    ratios = sample(shape, *friction_range, env.device, distribution)
+    if link_names is None:
+        links_idx = list(range(entity.n_links))
+    else:
+        links_idx, _ = eu.find_links(entity, list(link_names), global_ids=False)
+    n_target = len(links_idx)
+
+    if shared_random:
+        ratios = (
+            sample((len(env_ids), 1), *friction_range, env.device, distribution)
+            .expand(len(env_ids), n_target)
+            .contiguous()
+        )
+    else:
+        ratios = sample((len(env_ids), n_target), *friction_range, env.device, distribution)
 
     entity.set_friction_ratio(
         friction_ratio=ratios,
-        links_idx_local=list(range(n_links)),
+        links_idx_local=links_idx,
         envs_idx=env_ids,
     )
 

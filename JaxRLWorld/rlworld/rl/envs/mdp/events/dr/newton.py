@@ -9,6 +9,7 @@ They are meant to be used with :class:`EventTermConfig` in preset configs.
 
 from __future__ import annotations
 
+from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 import torch
@@ -34,6 +35,8 @@ def randomize_friction(
     friction_range: tuple[float, float] = (0.3, 1.2),
     operation: str = "abs",
     distribution: str = "uniform",
+    shape_patterns: tuple[str, ...] | None = None,
+    shared_random: bool = False,
 ) -> None:
     """Randomize friction for the robot's shapes via ArticulationView.
 
@@ -48,6 +51,17 @@ def randomize_friction(
             ``"add"`` — additive offset to default value.
         operation: ``"abs"`` | ``"scale"`` | ``"add"``.
         distribution: ``"uniform"`` | ``"log_uniform"`` | ``"gaussian"``.
+        shape_patterns: Optional fnmatch globs against ``model.shape_label``
+            (full XPath labels, e.g. ``"go2/worldbody/.../FR_foot_collision"``).
+            When ``None``, every robot shape is randomized (legacy behavior).
+            When set, only matched shapes are touched — used to mirror
+            mjlab's foot-only friction DR via patterns like
+            ``("*/FR_foot_collision", "*/FL_foot_collision", ...)``.
+        shared_random: When ``True``, draw a single sample per env and
+            broadcast it across all matched shapes. Mirrors mjlab's
+            ``shared_random=True`` so the four foot geoms receive the
+            same friction value within an env (rather than independent
+            samples). Default ``False`` preserves legacy per-shape sampling.
     """
     if len(env_ids) == 0:
         return
@@ -56,16 +70,69 @@ def randomize_friction(
     model = env.scene_manager.model
 
     mu = wp.to_torch(view.get_attribute("shape_material_mu", model))
+    # Newton stores ``shape_material_mu`` as
+    # ``(num_worlds, n_axes, n_shapes_per_world)`` — the axis dim sits
+    # in the middle (slide-only here, torsional / rolling live on
+    # separate attributes). Earlier the reverse layout
+    # ``(num_worlds, n_shapes, n_axes)`` was assumed and produced
+    # device-side asserts on shape mismatch.
+    n_axes = mu.shape[1]
+    n_shapes_per_env = mu.shape[-1]
 
-    shape = (len(env_ids), mu.shape[1], mu.shape[-1])
-    sampled = sample(shape, *friction_range, env.device, distribution)
-
-    if operation == "abs":
-        mu[env_ids] = sampled
+    # Resolve shape indices. Newton stores ``shape_label`` as a flat
+    # ``world_count * n_shapes_per_env`` list (the same per-shape labels
+    # repeated for each world); slicing the first world is enough since
+    # the per-shape ordering is identical across worlds.
+    if shape_patterns is None:
+        shape_indices = None
+        n_target = n_shapes_per_env
     else:
-        defaults = _defaults.get_or_cache("friction", mu.clone())
-        mu[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+        all_labels = list(model.shape_label)
+        world_count = model.world_count
+        labels_per_env = len(all_labels) // world_count
+        first_env_labels = all_labels[:labels_per_env]
+        matched = [i for i, l in enumerate(first_env_labels) if any(fnmatch(l, p) for p in shape_patterns)]
+        if not matched:
+            raise ValueError(
+                f"shape_patterns={shape_patterns} matched 0 shapes. " f"Sample labels: {first_env_labels[:6]}"
+            )
+        shape_indices = torch.tensor(matched, device=env.device, dtype=torch.long)
+        n_target = len(matched)
 
+    # Sample. Layout matches mu: (num_envs, n_axes, n_target).
+    if shared_random:
+        sampled = (
+            sample((len(env_ids), n_axes, 1), *friction_range, env.device, distribution)
+            .expand(len(env_ids), n_axes, n_target)
+            .contiguous()
+        )
+    else:
+        sampled = sample(
+            (len(env_ids), n_axes, n_target),
+            *friction_range,
+            env.device,
+            distribution,
+        )
+
+    # Apply.
+    if shape_indices is None:
+        if operation == "abs":
+            mu[env_ids] = sampled
+        else:
+            defaults = _defaults.get_or_cache("friction", mu.clone())
+            mu[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+    else:
+        env_grid, shape_grid = torch.meshgrid(env_ids, shape_indices, indexing="ij")
+        # mu is (num_envs, n_axes, n_shapes_per_env): iterate over the
+        # axis dim so the (env, shape) advanced indexing stays clean.
+        if operation == "abs":
+            for axis_idx in range(n_axes):
+                mu[env_grid, axis_idx, shape_grid] = sampled[:, axis_idx, :]
+        else:
+            defaults = _defaults.get_or_cache("friction", mu.clone())
+            for axis_idx in range(n_axes):
+                base = defaults[env_grid, axis_idx, shape_grid]
+                mu[env_grid, axis_idx, shape_grid] = apply_operation(base, sampled[:, axis_idx, :], operation)
     view.set_attribute("shape_material_mu", model, mu)
     env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
 
