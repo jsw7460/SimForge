@@ -51,7 +51,8 @@ class Go2Config(RobotConfig):
     # mjcf_path: str = "Mjlab/src/mjlab/asset_zoo/robots/unitree_go2/xmls/go2.xml"
     mjcf_path: str = "JaxRLWorld/rlworld/assets/unitree_go2/xmls/go2.xml"
 
-    base_init_height: float = 0.278
+    # base_init_height: float = 0.278
+    base_init_height: float = 0.30
     # base_link_name: str = "base"
     base_link_name: str = "trunk"
 

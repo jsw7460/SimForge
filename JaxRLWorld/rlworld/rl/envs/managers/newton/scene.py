@@ -1139,11 +1139,11 @@ class NewtonSceneManager(BaseManager):
         need_state_copy = self.use_cuda_graph and self.config.substeps % 2 == 1
         last_idx = self.config.substeps - 1
 
+        self.contacts = self.model.collide(
+            self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
+        )
         for i in range(self.config.substeps):
             self.state_0.clear_forces()
-            self.contacts = self.model.collide(
-                self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
-            )
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
 
             if need_state_copy and i == last_idx:

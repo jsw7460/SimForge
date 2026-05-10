@@ -65,8 +65,14 @@ def get_foot_names(robot) -> tuple[str, ...]:
 
 
 def _initial_quat() -> Any:
-    """Initial yaw of the robot at reset (90° about world Z)."""
-    return wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), wp.pi * 0.5)
+    """Identity quaternion at reset (no yaw applied).
+
+    Newton's wp.quat layout is xyzw, so (0, 0, 0, 1) is the identity.
+    Removing the previous 90° yaw aligns Newton's reset frame with the
+    other simulators (Genesis / mjlab) so per-step quantities like
+    foot xy velocity are directly comparable.
+    """
+    return wp.quat(0.0, 0.0, 0.0, 1.0)
 
 
 # ── Builders ─────────────────────────────────────────────────────────
@@ -123,7 +129,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         substeps=timing["substeps"],
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
-        solver_cfg=SolverMuJoCoCfg(impratio=10.0, ccd_iterations=50, cone="elliptic"),
+        solver_cfg=SolverMuJoCoCfg(impratio=100.0, ccd_iterations=50, cone="elliptic", ls_iterations=20, iterations=10),
         entities={
             "ground": GroundPlaneCfg(),
             "robot": UnifiedNewtonEntityCfg(
