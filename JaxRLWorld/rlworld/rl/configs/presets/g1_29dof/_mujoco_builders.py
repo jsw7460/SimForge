@@ -333,7 +333,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
 
         # Action rate
         raw_action_rate_l2 = RewardTermConfig(
-            func=rf.raw_action_rate_l2,
+            func=rf_common.raw_action_rate_l2,
             weight=0.1,
         )
 

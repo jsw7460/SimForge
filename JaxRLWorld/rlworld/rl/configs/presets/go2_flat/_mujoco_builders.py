@@ -178,6 +178,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         entities={"robot": robot_entity},
         sensors=(feet_ground_cfg, body_ground_cfg),
         terrain_type="plane",
+        cone="elliptic",
         solver_iterations=10,
         solver_ls_iterations=20,
         ccd_iterations=50,
@@ -256,7 +257,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
         )
 
         raw_action_rate_l2 = RewardTermConfig(
-            func=rf.raw_action_rate_l2,
+            func=rf_common.raw_action_rate_l2,
             weight=0.1,
         )
 
