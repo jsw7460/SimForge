@@ -38,7 +38,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     NewtonEntityCfg,
 )
-from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, NewtonIMUSensorConfig
 from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -145,20 +145,17 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
                 sensor_name="imu_base",
                 site_names=["imu_site_base"],
             ),
-            NewtonContactSensorConfig(
-                entity_name="robot",
-                sensor_name="feet_ground_contact",
-                sensing_obj_bodies=r.foot_names,
-                counterpart_shapes="ground_plane",
-                use_regex=True,
-                include_total=False,
+        ],
+        contact_sensors=[
+            ContactSensorCfg(
+                name="feet_ground_contact",
+                primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
+                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="ground"),
             ),
-            NewtonContactSensorConfig(
-                entity_name="robot",
-                sensor_name="self_collision",
-                sensing_obj_bodies=["*"],
-                counterpart_bodies=["*"],
-                include_total=False,
+            ContactSensorCfg(
+                name="self_collision",
+                primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="self"),
             ),
         ],
         add_ground=True,

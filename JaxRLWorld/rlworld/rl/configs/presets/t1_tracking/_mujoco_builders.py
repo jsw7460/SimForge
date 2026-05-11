@@ -13,7 +13,6 @@ from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
     FULL_COLLISION as T1_FULL_COLLISION,
     get_spec as t1_get_spec,
 )
-from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.rl.actuators import IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
@@ -38,6 +37,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,

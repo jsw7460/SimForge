@@ -26,7 +26,6 @@ from rlworld.rl.configs.genesis_config_classes import (
     ActionConfig,
     EnvConfig,
     GenesisConfigsForRun,
-    GenesisContactSensorCfg,
     ObservationConfig,
     SceneConfig,
 )
@@ -41,7 +40,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     GroundPlaneCfg,
     InitialStateCfg,
 )
-from rlworld.rl.configs.sensors import SensorConfig
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, SensorConfig
 from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -136,17 +135,19 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             ),
         ],
         contact_sensors=[
-            GenesisContactSensorCfg(
+            ContactSensorCfg(
                 name="feet_ground_contact",
-                primary_links=["left_ankle_roll_link", "right_ankle_roll_link"],
-                secondary_entity=None,
-                exclude_self_contact=True,
+                primary=ContactMatch(
+                    mode="body",
+                    pattern=("left_ankle_roll_link", "right_ankle_roll_link"),
+                    entity="robot",
+                ),
+                secondary=None,
             ),
-            GenesisContactSensorCfg(
+            ContactSensorCfg(
                 name="self_collision",
-                primary_links=[".*"],
-                entity_name="robot",
-                secondary_entity="self",
+                primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="self"),
             ),
         ],
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
