@@ -149,3 +149,16 @@ class ResolvedEntity:
     (the resolved per-shape indices that ``shape_material_mu`` and
     similar arrays are indexed by — distinct from collision geoms in
     mjlab/Genesis terminology)."""
+
+    def __repr__(self) -> str:
+        # The default dataclass repr would dump ``backend_handle``'s full
+        # repr — for a Genesis ``RigidEntity`` that's a huge multi-line
+        # dump (n_qs, n_dofs, n_geoms, ...) which wrecks any table that
+        # prints reward/event ``params`` (e.g. the env-config console
+        # panel). Keep it to a one-liner: name, backend type, and which
+        # id fields were resolved.
+        bh = type(self.backend_handle).__name__ if self.backend_handle is not None else "None"
+        resolved = [
+            f for f in ("joint_ids", "body_ids", "geom_ids", "site_ids", "actuator_ids") if getattr(self, f) is not None
+        ]
+        return f"ResolvedEntity(name={self.name!r}, backend={bh}, resolved={resolved})"
