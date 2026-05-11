@@ -118,13 +118,16 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
     physics_dt = timing["dt"]
     substeps = timing.get("substeps", 1)
 
+    # Per-robot-body net self-collision force, to match the Genesis /
+    # Newton ``self_collision`` group (equivalent sensor output across
+    # sims). mjlab can't express ``secondary.entity="self"``; the
+    # whole-robot subtree of the floating-base root body (trunk) is the
+    # equivalent single secondary.
     self_collision_cfg = ContactSensorCfg(
         name="self_collision",
-        primary=ContactMatch(mode="subtree", pattern=r.trunk_body_name, entity="robot"),
+        primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
         secondary=ContactMatch(mode="subtree", pattern=r.trunk_body_name, entity="robot"),
-        fields=("found", "force"),
-        reduce="none",
-        num_slots=1,
+        reduce="netforce",
         history_length=timing["decimation"],
     )
 

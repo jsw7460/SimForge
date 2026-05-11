@@ -171,6 +171,7 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
                 name="self_collision",
                 primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
                 secondary=ContactMatch(mode="body", pattern=".*", entity="self"),
+                history_length=timing["decimation"],
             ),
         ],
         add_ground=True,
