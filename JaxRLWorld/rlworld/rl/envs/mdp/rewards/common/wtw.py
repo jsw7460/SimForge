@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.utils.quat_utils import (
     quat_from_angle_axis_wxyz,
     quat_mul_wxyz,
@@ -29,6 +30,9 @@ from rlworld.rl.utils.quat_utils import (
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
+
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 
 
 def penalize_action_smoothness_1(env: World) -> torch.Tensor:
@@ -56,7 +60,7 @@ def penalize_action_smoothness_2(env: World) -> torch.Tensor:
     return -torch.sum(diff * mask1 * mask2, dim=1)
 
 
-def penalize_orientation_control(env: World, entity_name: str = "robot") -> torch.Tensor:
+def penalize_orientation_control(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalize deviation from commanded body orientation. WTW: _reward_orientation_control.
 
     Constructs desired body quaternion from body_pitch and body_roll commands,
@@ -78,19 +82,19 @@ def penalize_orientation_control(env: World, entity_name: str = "robot") -> torc
     gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=device).expand(len(body_pitch), -1)
     desired_gravity = quat_rotate_inverse_wxyz(desired_quat, gravity_vec)
 
-    actual_gravity = env.get_robot_data(entity_name).projected_gravity_b
+    actual_gravity = env.get_robot_data(asset_cfg.name).projected_gravity_b
     return -torch.sum(torch.square(actual_gravity[:, :2] - desired_gravity[:, :2]), dim=1)
 
 
 def reward_body_height_cmd(
     env: World,
     base_height_target: float = 0.30,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward for tracking commanded body height. WTW: _reward_jump.
 
     Target height = body_height command + base_height_target.
     """
-    body_height = env.get_robot_data(entity_name).root_link_pos_w[:, 2]
+    body_height = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, 2]
     target = env.command_manager.body_height + base_height_target
     return -torch.square(body_height - target)

@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Dict
 
 import torch
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_inverse  # used by flat_orientation
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
@@ -25,7 +25,18 @@ from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 if TYPE_CHECKING:
     from rlworld.rl.envs.mujoco import MujocoEnv, MujocoLocomotionEnv
 
-_DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
+def _ids_or_slice(ids: torch.Tensor | None):
+    """Return ``ids`` if populated, else ``slice(None)`` for full range.
+
+    Reward function bodies in this file use mjlab-native indexing into
+    ``robot.data.X``; mjlab's convention was ``slice(None)`` to mean
+    "all components", whereas our ResolvedEntity uses ``None``.  This
+    bridges the two without forcing every accessor to branch.
+    """
+    return ids if ids is not None else slice(None)
 
 
 def is_alive(env: MujocoEnv) -> torch.Tensor:
@@ -41,7 +52,7 @@ def is_terminated(env: MujocoEnv) -> torch.Tensor:
 def track_linear_velocity(
     env: MujocoEnv,
     std: float,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward for tracking the commanded base linear velocity.
 
@@ -61,7 +72,7 @@ def track_linear_velocity(
 def track_angular_velocity(
     env: MujocoEnv,
     std: float,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward for tracking the commanded base angular velocity.
 
@@ -85,7 +96,7 @@ def track_angular_velocity(
 
 def joint_torques_l2(
     env: MujocoEnv,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint torques applied on the articulation using L2 squared kernel."""
     robot = env.scene_manager.get_entity(asset_cfg.name)
@@ -94,25 +105,25 @@ def joint_torques_l2(
 
 def joint_vel_l2(
     env: MujocoEnv,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint velocities on the articulation using L2 squared kernel."""
     robot = env.scene_manager.get_entity(asset_cfg.name)
-    return torch.sum(torch.square(robot.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
+    return torch.sum(torch.square(robot.data.joint_vel[:, _ids_or_slice(asset_cfg.joint_ids_native)]), dim=1)
 
 
 def joint_acc_l2(
     env: MujocoEnv,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint accelerations on the articulation using L2 squared kernel."""
     robot = env.scene_manager.get_entity(asset_cfg.name)
-    return torch.sum(torch.square(robot.data.joint_acc[:, asset_cfg.joint_ids]), dim=1)
+    return torch.sum(torch.square(robot.data.joint_acc[:, _ids_or_slice(asset_cfg.joint_ids_native)]), dim=1)
 
 
 def joint_pos_limits(
     env: MujocoEnv,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint positions if they cross the soft limits."""
     robot = env.scene_manager.get_entity(asset_cfg.name)
@@ -121,7 +132,7 @@ def joint_pos_limits(
     if soft_joint_pos_limits is None:
         return torch.zeros(env.num_envs, device=env.device)
 
-    joint_ids = asset_cfg.joint_ids if asset_cfg.joint_ids else slice(None)
+    joint_ids = _ids_or_slice(asset_cfg.joint_ids_native)
     joint_pos = robot.data.joint_pos[:, joint_ids]
 
     out_of_limits = -(joint_pos - soft_joint_pos_limits[:, joint_ids, 0]).clip(max=0.0)
@@ -131,20 +142,21 @@ def joint_pos_limits(
 
 def flat_orientation_l2(
     env: MujocoEnv,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize non-flat base orientation.
 
     Delegates to ``common.flat_orientation(std=None)`` which computes
     the same ``-sum(projected_gravity_xy²)`` penalty.
     """
-    return flat_orientation_l2_common(env, entity_name=asset_cfg.name)
+    common_cfg = env.resolve_selector(SceneEntitySelector(name=asset_cfg.name))
+    return flat_orientation_l2_common(env, asset_cfg=common_cfg)
 
 
 def flat_orientation(
     env: MujocoEnv,
     std: float,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward flat base orientation (robot being upright).
 
@@ -172,7 +184,7 @@ def flat_orientation(
 
 def body_angular_velocity_penalty(
     env: MujocoEnv,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
 
@@ -194,7 +206,8 @@ def body_angular_velocity_penalty(
 
     # Active path: a concrete body was specified. Delegate to common.
     body_name = asset_cfg.body_names[0]
-    return penalize_body_ang_vel_xy(env, body_name=body_name, entity_name=asset_cfg.name)
+    common_cfg = env.resolve_selector(SceneEntitySelector(name=asset_cfg.name))
+    return penalize_body_ang_vel_xy(env, body_name=body_name, asset_cfg=common_cfg)
 
 
 def angular_momentum_penalty(
@@ -262,7 +275,7 @@ def feet_clearance(
     env: MujocoEnv,
     target_height: float,
     command_threshold: float = 0.01,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_feet_clearance``.
 
@@ -285,7 +298,7 @@ def feet_slip(
     env: MujocoEnv,
     contact_group: str = "feet_ground_contact",
     command_threshold: float = 0.01,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_feet_slip``.
 
@@ -350,7 +363,7 @@ class variable_posture:
     def __init__(
         self,
         env: MujocoEnv,
-        asset_cfg: SceneEntityCfg,
+        asset_cfg: ResolvedEntity,
         std_standing: Dict[str, float],
         std_walking: Dict[str, float],
         std_running: Dict[str, float],
@@ -362,7 +375,7 @@ class variable_posture:
         assert default_joint_pos is not None
 
         _, joint_names = robot.find_joints(asset_cfg.joint_names)
-        joint_ids = asset_cfg.joint_ids
+        joint_ids = _ids_or_slice(asset_cfg.joint_ids_native)
         entity_name = asset_cfg.name
 
         sliced_default = default_joint_pos[:, joint_ids]
@@ -407,7 +420,7 @@ class feet_swing_height:
         contact_group: str = "feet_ground_contact",
         target_height: float = 0.08,
         command_threshold: float = 0.01,
-        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     ):
         self._impl = FeetSwingHeightTracker(
             env=env,
@@ -433,18 +446,14 @@ class posture:
         self,
         env: MujocoEnv,
         std: float | Dict[str, float],
-        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     ):
         robot = env.scene_manager.get_entity(asset_cfg.name)
         default_joint_pos = robot.data.default_joint_pos
         assert default_joint_pos is not None
         self.default_joint_pos = default_joint_pos
 
-        joint_ids = (
-            asset_cfg.joint_ids
-            if asset_cfg.joint_ids is not None and not isinstance(asset_cfg.joint_ids, slice)
-            else slice(None)
-        )
+        joint_ids = _ids_or_slice(asset_cfg.joint_ids_native)
         self._joint_ids = joint_ids
 
         if isinstance(std, dict):
@@ -493,18 +502,19 @@ def _contact_order_matching_gait(env: MujocoLocomotionEnv, contact_group: str) -
     return out
 
 
-def _site_ids_matching_gait(env: MujocoLocomotionEnv, asset_cfg: SceneEntityCfg) -> list[int]:
+def _site_ids_matching_gait(env: MujocoLocomotionEnv, asset_cfg: ResolvedEntity) -> list[int]:
     """Permute ``asset_cfg.site_ids`` so column ``i`` is the same foot
     as column ``i`` of ``env.gait_manager.foot_names``. Matches site
     names to gait foot names by substring (either direction), so
     ``("FR","FL","RR","RL")`` matches ``("FR_foot","FL_foot","RR_foot","RL_foot")``.
 
     Independent of the preset's ``preserve_order`` setting: even if
-    SceneEntityCfg.resolve() reordered ``site_ids`` away from the
-    user-supplied tuple, this helper maps it back to gait order.
+    the resolver reordered ``site_ids`` away from the user-supplied
+    tuple, this helper maps it back to gait order.
     """
     gait_order = list(env.gait_manager.foot_names)
-    site_pairs = list(zip(asset_cfg.site_names, asset_cfg.site_ids))
+    site_ids_list = asset_cfg.site_ids.tolist() if asset_cfg.site_ids is not None else []
+    site_pairs = list(zip(asset_cfg.site_names or [], site_ids_list))
     out: list[int] = []
     for g in gait_order:
         candidates = [i for sn, i in site_pairs if sn in g or g in sn]
@@ -517,7 +527,7 @@ def _site_ids_matching_gait(env: MujocoLocomotionEnv, asset_cfg: SceneEntityCfg)
 def wtw_feet_slip(
     env: MujocoLocomotionEnv,
     contact_group: str = "feet_ground_contact",
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW feet slip: penalize foot xy velocity when in contact OR was in contact.
 
@@ -561,7 +571,7 @@ def wtw_tracking_contacts_shaped_force(
 def wtw_tracking_contacts_shaped_vel(
     env: MujocoLocomotionEnv,
     gait_vel_sigma: float = 10.0,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW: penalize foot velocity when foot should be in stance.
 
@@ -582,7 +592,7 @@ def wtw_tracking_contacts_shaped_vel(
 def wtw_feet_clearance_cmd_linear(
     env: MujocoLocomotionEnv,
     foot_radius: float = 0.02,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW: penalize foot height error during swing, scaled by commanded footswing height.
 
@@ -607,7 +617,7 @@ def wtw_feet_clearance_cmd_linear(
 
 def wtw_raibert_heuristic(
     env: MujocoLocomotionEnv,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW: penalize footstep placement error vs Raibert heuristic."""
     feet_names = env.gait_manager.foot_names

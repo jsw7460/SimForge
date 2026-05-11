@@ -7,6 +7,7 @@ while following rlworld's World interface and manager pattern.
 from __future__ import annotations
 
 import torch
+from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
 
 from rlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
 from rlworld.rl.configs.common_config_classes import VisualizationConfig
@@ -16,6 +17,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
     MujocoObservationConfig,
     MujocoSceneConfig,
 )
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
@@ -117,6 +119,56 @@ class MujocoEnv(World):
         ``managers/common/robot_state_writer_protocol.py``).
         """
         return self._robot_state_writer_cache[entity_name]
+
+    def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        # Build a transient mjlab SceneEntityCfg purely so we can reuse
+        # mjlab's resolver — never expose this object to JaxRLWorld
+        # callers (the mjlab type is an internal backend detail).
+        mjlab_cfg = _MjlabSceneEntityCfg(
+            name=selector.name,
+            joint_names=tuple(selector.joint_names) if selector.joint_names else None,
+            body_names=tuple(selector.body_names) if selector.body_names else None,
+            geom_names=tuple(selector.geom_names) if selector.geom_names else None,
+            site_names=tuple(selector.site_names) if selector.site_names else None,
+            actuator_names=(tuple(selector.actuator_names) if selector.actuator_names else None),
+            preserve_order=selector.preserve_order,
+        )
+        mjlab_cfg.resolve(self.scene_manager.scene)
+
+        joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
+            selector.joint_names, preserve_order=selector.preserve_order
+        )
+
+        def _to_tensor(ids, requested) -> torch.Tensor | None:
+            if not requested:
+                return None
+            if isinstance(ids, slice):
+                return None
+            return torch.as_tensor(list(ids), device=self.device, dtype=torch.long)
+
+        def _names(attr_value, requested) -> list[str] | None:
+            """mjlab populates ``names_attr`` after resolve when requested."""
+            if not requested:
+                return None
+            if attr_value is None:
+                return None
+            return list(attr_value)
+
+        return ResolvedEntity(
+            name=selector.name,
+            backend_handle=self.scene_manager.get_entity(selector.name),
+            joint_ids=joint_ids,
+            joint_ids_native=_to_tensor(mjlab_cfg.joint_ids, selector.joint_names),
+            body_ids=_to_tensor(mjlab_cfg.body_ids, selector.body_names),
+            geom_ids=_to_tensor(mjlab_cfg.geom_ids, selector.geom_names),
+            site_ids=_to_tensor(mjlab_cfg.site_ids, selector.site_names),
+            actuator_ids=_to_tensor(mjlab_cfg.actuator_ids, selector.actuator_names),
+            joint_names=joint_names_resolved if selector.joint_names is not None else None,
+            body_names=_names(mjlab_cfg.body_names, selector.body_names),
+            geom_names=_names(mjlab_cfg.geom_names, selector.geom_names),
+            site_names=_names(mjlab_cfg.site_names, selector.site_names),
+            actuator_names=_names(mjlab_cfg.actuator_names, selector.actuator_names),
+        )
 
     def _build_scene(self) -> None:
         """Create MuJoCo/mjlab scene via ManagerRegistry."""

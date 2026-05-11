@@ -1,4 +1,5 @@
 from .entity_config import EntityConfig, GenesisSceneInitConfig
+from .entity_selector import ResolvedEntity, SceneEntitySelector
 from .newton_entity_config import (
     NewtonBoxConfig,
     NewtonEntityConfig,

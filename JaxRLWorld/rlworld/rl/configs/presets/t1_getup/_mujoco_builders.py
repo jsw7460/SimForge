@@ -190,6 +190,7 @@ def build_observation(cfg: T1GetupConfig) -> MujocoObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
+        enable_corruption = False
         base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
         projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -308,8 +309,8 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
     MuJoCo's solver natively uses the 3-vector ``geom_friction`` so
     this is applied via mjlab's ``dr.geom_friction`` under the hood.
     """
-    from rlworld.rl.envs.mdp.events import mujoco as ef
-    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
+    from rlworld.rl.configs.scene import SceneEntitySelector
+    from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 
     r = cfg.robot
     # mjlab asset_zoo T1 has explicit collision geom names that survive
@@ -319,56 +320,53 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
         # Encoder bias DR intentionally omitted — see _newton_builders
         # for the rationale (unbiased obs + unbiased action = symmetric).
         "randomize_body_com": EventTermConfig(
-            func=ef.randomize_body_com_offset,
+            func=unified_dr.randomize_body_com_offset,
             mode="startup",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.trunk_body_name,)),
                 "ranges": {
                     0: (-0.025, 0.025),
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
                 "operation": "add",
-                "entity_cfg": EntityCfg(name="robot", body_names=(r.trunk_body_name,)),
             },
         ),
-        # Slide randomization: mjlab's ``geom_names=(".*_collision",)``
-        # selector matches every collision geom on the robot. Pass
-        # None (unset) for geom_names so mjlab's default asset_cfg
-        # covers the full entity — equivalent to the regex and cheaper
-        # to resolve than a regex list.
+        # Slide randomization: covers every robot geom (no
+        # body/geom filter on the selector means "all components").
         "geom_friction_slide": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (0.8, 1.5),
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.8, 1.5),
                 "operation": "abs",
                 "axes": [0],
                 "distribution": "uniform",
-                "entity_cfg": EntityCfg(name="robot"),
                 "shared_random": True,
             },
         ),
         "foot_friction_spin": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-4, 2e-2),
+                "asset_cfg": SceneEntitySelector(name="robot", geom_names=foot_geom_names),
+                "friction_range": (1e-4, 2e-2),
                 "operation": "abs",
                 "axes": [1],
                 "distribution": "log_uniform",
-                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
                 "shared_random": True,
             },
         ),
         "foot_friction_roll": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-5, 5e-3),
+                "asset_cfg": SceneEntitySelector(name="robot", geom_names=foot_geom_names),
+                "friction_range": (1e-5, 5e-3),
                 "operation": "abs",
                 "axes": [2],
                 "distribution": "log_uniform",
-                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
                 "shared_random": True,
             },
         ),

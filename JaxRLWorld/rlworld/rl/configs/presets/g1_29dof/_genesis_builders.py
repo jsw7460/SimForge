@@ -34,6 +34,7 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.robots.g1_29dof import G1_ACTION_SCALE
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
@@ -41,7 +42,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
@@ -177,6 +178,7 @@ def build_observation(cfg: G1FlatConfig) -> ObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
+        enable_corruption = False
         base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
         projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         command = ObservationTermConfig(func=command_obs, scale=1.0)
@@ -341,20 +343,25 @@ def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """Genesis-specific domain randomization terms."""
     return {
         "randomize_body_com": EventTermConfig(
-            func=genesis_dr.randomize_body_com_offset,
+            func=unified_dr.randomize_body_com_offset,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",)),
                 "ranges": {
                     0: (-0.025, 0.025),
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
-                "link_names": ("torso_link",),
+                "operation": "add",
             },
         ),
         "randomize_joint_friction": EventTermConfig(
-            func=genesis_dr.randomize_joint_friction,
+            func=unified_dr.randomize_joint_friction,
             mode="reset_dr",
-            params={"friction_range": (0.0, 0.05)},
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
+            },
         ),
     }

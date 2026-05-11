@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 import torch
@@ -7,6 +8,7 @@ import torch
 from rlworld.rl.configs.base_config import iter_terms
 from rlworld.rl.configs.common_config_classes import RewardConfig
 from rlworld.rl.configs.rewards import RewardTermConfig, get_weight_value
+from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from rlworld.rl.envs.managers.base import BaseManager
 
 # Backward-compatible alias (used by ManagerRegistry and imports)
@@ -20,6 +22,14 @@ class RewardManager(BaseManager):
     """Manages reward computation from configurable reward terms.
 
     Terms are discovered via :func:`iter_terms` on the ``RewardConfig`` instance.
+
+    Setup-time selector resolution: any
+    :class:`~rlworld.rl.configs.scene.entity_selector.SceneEntitySelector`
+    found inside a term's ``params`` dict is replaced **once** with a
+    pre-resolved :class:`ResolvedEntity` before the term function is
+    ever called.  This mirrors mjlab's ``manager_base._resolve_common_term_cfg``
+    pattern and means reward terms pay zero per-step resolution cost
+    even when the selector targets specific bodies/joints.
     """
 
     def __init__(self, env: World, config: RewardConfig):
@@ -35,9 +45,52 @@ class RewardManager(BaseManager):
         for name, reward_term in self.reward_terms.items():
             func = reward_term.resolved_func
             self._resolved_fns[name] = func
+            # Replace any SceneEntitySelector in params with its resolved
+            # form *before* class instantiation / function binding.  In
+            # place mutation is safe because RewardTermConfig.params is
+            # term-local and never re-shared.
+            self._resolve_selectors_in_place(func, reward_term.params)
             # Check if func is a class (stateful reward)
             if isinstance(func, type):
                 self._instances[name] = func(env=self.env, **reward_term.params)
+
+    def _resolve_selectors_in_place(self, func, params: dict) -> None:
+        """Substitute any ``SceneEntitySelector`` with its resolved
+        :class:`ResolvedEntity` so reward functions never see the raw
+        selector at step time.
+
+        Two cases handled:
+
+        1. **User-provided selector** in ``params`` — resolved and
+           swapped in place (e.g. ``params["asset_cfg"] = SceneEntitySelector(...)``).
+        2. **Function default selector** that the preset did NOT
+           override — discovered via :func:`inspect.signature` on
+           ``func`` (or its ``__init__`` for class-based terms) and
+           injected into ``params`` after resolution.  Lets common
+           reward functions declare ``def f(env, asset_cfg = _DEFAULT_SELECTOR)``
+           without forcing every preset to repeat the selector.
+
+        Backward-compatible: parameters whose value/default is **not**
+        a :class:`SceneEntitySelector` are left untouched, so legacy
+        terms (e.g. ``entity_name="robot"``) keep working until they're
+        migrated.
+        """
+        # Case 1: user-provided selectors.
+        for key, value in list(params.items()):
+            if isinstance(value, SceneEntitySelector):
+                params[key] = self.env.resolve_selector(value)
+
+        # Case 2: function-default selectors not yet in params.
+        target = func.__init__ if isinstance(func, type) else func
+        try:
+            sig = inspect.signature(target)
+        except (TypeError, ValueError):
+            return
+        for param_name, param in sig.parameters.items():
+            if param_name in params:
+                continue
+            if isinstance(param.default, SceneEntitySelector):
+                params[param_name] = self.env.resolve_selector(param.default)
 
     def get_term_cfg(self, name: str) -> RewardTermConfig:
         """Return the live RewardTermConfig for a registered term.

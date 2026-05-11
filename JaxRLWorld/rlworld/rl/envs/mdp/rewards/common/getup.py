@@ -2,8 +2,8 @@
 
 These terms mirror the fall-recovery reward shaping used by
 ``mjlab_playground/getup/mdp/rewards.py``. They read state exclusively
-through ``env.get_robot_data(entity_name)`` and ``env.act_manager``, so
-they work uniformly on Newton, Genesis, and MuJoCo.
+through ``env.get_robot_data(asset_cfg.name)`` and ``env.act_manager``,
+so they work uniformly on Newton, Genesis, and MuJoCo.
 
 Exposed symbols:
   - :func:`orientation_upright`     — full 3D upright orientation reward
@@ -18,16 +18,20 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
 def power_penalty(
     env: World,
     skip_steps: int = 0,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Negative mechanical power ``-Σ|τ · q̇|`` for actuated joints.
 
@@ -49,12 +53,12 @@ def power_penalty(
         env: Any environment with ``get_robot_data``.
         skip_steps: Post-reset control steps during which the penalty
             is suppressed (typically ``act_manager.settle_steps``).
-        entity_name: Entity to query.
+        asset_cfg: Selector identifying the robot entity.
 
     Returns:
         Tensor of shape ``(num_envs,)``, always ``<= 0``.
     """
-    rd = env.get_robot_data(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
     power = torch.sum(torch.abs(rd.applied_torque * rd.joint_vel), dim=-1)
     if skip_steps > 0:
         mask = (env.episode_length_buf >= skip_steps).float()
@@ -65,7 +69,7 @@ def power_penalty(
 def orientation_upright(
     env: World,
     std: float = 0.707,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward for full-3D upright orientation (all axes, not just xy).
 
@@ -88,12 +92,12 @@ def orientation_upright(
             ``0.707 ≈ 1/sqrt(2)`` matches the common ``exp(-2 * err)``
             form from mjlab_playground when err is the squared L2
             distance to the upright target.
-        entity_name: Name of the entity to query.
+        asset_cfg: Selector identifying the robot entity.
 
     Returns:
         Tensor of shape ``(num_envs,)``, in ``[0, 1]``.
     """
-    gravity_b = env.get_robot_data(entity_name).projected_gravity_b
+    gravity_b = env.get_robot_data(asset_cfg.name).projected_gravity_b
     up = torch.tensor([0.0, 0.0, -1.0], device=gravity_b.device)
     err = torch.sum(torch.square(up - gravity_b), dim=-1)
     return torch.exp(-err / (std**2))
@@ -103,7 +107,7 @@ def height_to_target(
     env: World,
     desired_height: float,
     body_name: str | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Exponential ramp reward for raising a body towards a target height.
 
@@ -125,12 +129,12 @@ def height_to_target(
             name for a humanoid; for T1 the getup task uses both
             ``"Trunk"`` (0.67 m) and ``"Waist"`` (0.55 m) with separate
             term instances to break the "sit-down" local minimum.
-        entity_name: Name of the entity to query.
+        asset_cfg: Selector identifying the robot entity.
 
     Returns:
         Tensor of shape ``(num_envs,)``, in ``[0, 1]``.
     """
-    rd = env.get_robot_data(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
     if body_name is None:
         h = rd.root_link_pos_w[:, 2]
     else:
@@ -178,10 +182,10 @@ class GatedPostureTracker:
         env: World,
         std_dict: dict[str, float],
         gate_threshold: float = 0.01,
-        entity_name: str = "robot",
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     ) -> None:
         self._env = env
-        self._entity_name = entity_name
+        self._entity_name = asset_cfg.name
         self._gate_threshold = gate_threshold
 
         joint_names = list(env.act_manager.actuated_joint_names)
@@ -246,14 +250,14 @@ class GetupSuccessTracker:
         body_name: str | None = None,
         orient_threshold: float = 0.05,
         height_tolerance: float = 0.02,
-        entity_name: str = "robot",
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     ) -> None:
         self._env = env
         self._desired_height = desired_height
         self._body_name = body_name
         self._orient_threshold = orient_threshold
         self._height_tolerance = height_tolerance
-        self._entity_name = entity_name
+        self._entity_name = asset_cfg.name
         self.success = torch.zeros((env.num_envs,), device=env.device, dtype=torch.float32)
 
     def __call__(self, env: World) -> torch.Tensor:

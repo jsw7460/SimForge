@@ -38,6 +38,7 @@ from rlworld.rl.configs.robots.go2 import (
     STIFFNESS_HIP,
     STIFFNESS_KNEE,
 )
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GroundPlaneCfg,
@@ -45,6 +46,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg as UnifiedNewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
@@ -344,39 +346,43 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     r = cfg.robot
     terms: Dict[str, EventTermConfig] = {
         "randomize_body_mass": EventTermConfig(
-            func=newton_dr.randomize_body_mass,
+            func=unified_dr.randomize_body_mass,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(cfg.robot.base_link_name,)),
                 "mass_range": (0.8, 1.2),
                 "operation": "scale",
-                "body_patterns": cfg.robot.base_link_name,
             },
         ),
         # mjlab parity foot-friction DR: same range / abs / shared_random
         # pattern as mjlab's randomize_friction in _mujoco_builders. The
-        # ``*/<name>`` leaf-glob form matches Newton's MJCF XPath labels
-        # (``go2/worldbody/.../FR_foot/FR_foot_collision`` etc.).
+        # ``.*/<name>`` leaf-regex form matches Newton's MJCF XPath
+        # labels (``go2/worldbody/.../FR_foot/FR_foot_collision`` etc.).
         "randomize_friction": EventTermConfig(
-            func=newton_dr.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(
+                    name="robot",
+                    geom_names=(
+                        ".*/FR_foot_collision",
+                        ".*/FL_foot_collision",
+                        ".*/RR_foot_collision",
+                        ".*/RL_foot_collision",
+                    ),
+                ),
                 "friction_range": (0.3, 1.2),
                 "operation": "abs",
-                "shape_patterns": (
-                    "*/FR_foot_collision",
-                    "*/FL_foot_collision",
-                    "*/RR_foot_collision",
-                    "*/RL_foot_collision",
-                ),
                 "shared_random": True,
             },
         ),
         # mjlab parity joint-friction DR: same abs (0.0, 0.05) range and
         # whole-DOF scope as mjlab's randomize_joint_friction term.
         "randomize_joint_friction": EventTermConfig(
-            func=newton_dr.randomize_joint_friction,
+            func=unified_dr.randomize_joint_friction,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.0, 0.05),
                 "operation": "abs",
             },

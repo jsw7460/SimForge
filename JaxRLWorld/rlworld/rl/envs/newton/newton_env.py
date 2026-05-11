@@ -1,3 +1,4 @@
+import torch
 import warp as wp
 
 from rlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
@@ -8,13 +9,14 @@ from rlworld.rl.configs.newton_config_classes import (
     NewtonSceneConfig,
     VisualizationConfig,
 )
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.managers.newton import (
     NewtonVisualizationManager,
     NewtonVisualizationManagerConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
-from rlworld.rl.utils import set_seed
+from rlworld.rl.utils import set_seed, string as _su
 
 
 class NewtonEnv(World):
@@ -84,6 +86,80 @@ class NewtonEnv(World):
         currently supports a single entity only.
         """
         return self._robot_state_writer
+
+    def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        view = self.scene_manager.articulation_views[selector.name]
+
+        joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
+            selector.joint_names, preserve_order=selector.preserve_order
+        )
+
+        body_ids: torch.Tensor | None = None
+        body_names_resolved: list[str] | None = None
+        if selector.body_names is not None:
+            link_idx, link_names_matched = _su.resolve_matching_names(
+                list(selector.body_names),
+                list(view.link_names),
+                preserve_order=selector.preserve_order,
+            )
+            body_ids = torch.tensor(link_idx, device=self.device, dtype=torch.long)
+            body_names_resolved = list(link_names_matched)
+
+        # In Newton, "geom" maps to a per-shape entry under
+        # ``ArticulationView.shape_names`` (bare names) /
+        # ``model.shape_label`` (XPath).
+        geom_ids: torch.Tensor | None = None
+        geom_names_resolved: list[str] | None = None
+        if selector.geom_names is not None:
+            shape_names = list(view.shape_names)
+            try:
+                shape_idx, shape_names_matched = _su.resolve_matching_names(
+                    list(selector.geom_names),
+                    shape_names,
+                    preserve_order=selector.preserve_order,
+                )
+            except ValueError:
+                # Fall back to full XPath labels.
+                all_labels = list(self.scene_manager.model.shape_label)
+                world_count = self.scene_manager.model.world_count
+                per_world = len(all_labels) // world_count
+                first_env_labels = all_labels[:per_world]
+                shape_idx, shape_names_matched = _su.resolve_matching_names(
+                    list(selector.geom_names),
+                    first_env_labels,
+                    preserve_order=selector.preserve_order,
+                )
+            geom_ids = torch.tensor(shape_idx, device=self.device, dtype=torch.long)
+            geom_names_resolved = list(shape_names_matched)
+
+        # Newton actuators are 1:1 with act_manager.actuated_joint_names.
+        actuator_ids: torch.Tensor | None = None
+        actuator_names_resolved: list[str] | None = None
+        if selector.actuator_names is not None:
+            actuator_ids, actuator_names_resolved = self._resolve_canonical_joint_ids(
+                selector.actuator_names, preserve_order=selector.preserve_order
+            )
+
+        if selector.site_names is not None:
+            raise NotImplementedError(
+                "Newton does not expose sites as a first-class concept; "
+                "use SceneEntitySelector.body_names or geom_names instead."
+            )
+
+        return ResolvedEntity(
+            name=selector.name,
+            backend_handle=view,
+            joint_ids=joint_ids,
+            joint_ids_native=None,
+            body_ids=body_ids,
+            geom_ids=geom_ids,
+            site_ids=None,
+            actuator_ids=actuator_ids,
+            joint_names=joint_names_resolved if selector.joint_names is not None else None,
+            body_names=body_names_resolved,
+            geom_names=geom_names_resolved,
+            actuator_names=actuator_names_resolved,
+        )
 
     def _build_scene(self) -> None:
         """Create Newton scene and visualization manager."""

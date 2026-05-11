@@ -1,4 +1,5 @@
 import genesis as gs
+import torch
 
 from rlworld.rl.configs import (
     ActionConfig,
@@ -11,13 +12,14 @@ from rlworld.rl.configs import (
     SceneConfig,
     VisualizationConfig,
 )
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.managers import (
     VisualizationManager,
     VisualizationManagerConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
-from rlworld.rl.utils import set_seed
+from rlworld.rl.utils import entity_utils as _eu, set_seed
 
 
 class GenesisEnv(World):
@@ -86,6 +88,57 @@ class GenesisEnv(World):
         ``managers/common/robot_state_writer_protocol.py``).
         """
         return self._robot_state_writer_cache[entity_name]
+
+    def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        entity = self.scene_manager[selector.name]
+
+        joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
+            selector.joint_names, preserve_order=selector.preserve_order
+        )
+
+        body_ids = None
+        body_names_resolved = None
+        if selector.body_names is not None:
+            link_ids_local, link_names_matched = _eu.find_links(
+                entity,
+                list(selector.body_names),
+                global_ids=False,
+                preserve_order=selector.preserve_order,
+            )
+            body_ids = torch.tensor(link_ids_local, device=self.device, dtype=torch.long)
+            body_names_resolved = list(link_names_matched)
+
+        # Genesis has no first-class actuator concept; act_manager owns
+        # the actuator ↔ joint mapping (1:1 with actuated joints), so
+        # actuator_ids reuses the canonical joint resolution.
+        actuator_ids = None
+        actuator_names_resolved = None
+        if selector.actuator_names is not None:
+            actuator_ids, actuator_names_resolved = self._resolve_canonical_joint_ids(
+                selector.actuator_names, preserve_order=selector.preserve_order
+            )
+
+        if selector.geom_names is not None:
+            raise NotImplementedError(
+                "Genesis geoms have no names; use SceneEntitySelector.body_names "
+                "and let the backend expand to the link's collision geoms."
+            )
+        if selector.site_names is not None:
+            raise NotImplementedError("Genesis has no site concept; use body_names instead.")
+
+        return ResolvedEntity(
+            name=selector.name,
+            backend_handle=entity,
+            joint_ids=joint_ids,
+            joint_ids_native=None,
+            body_ids=body_ids,
+            geom_ids=None,
+            site_ids=None,
+            actuator_ids=actuator_ids,
+            joint_names=joint_names_resolved if selector.joint_names is not None else None,
+            body_names=body_names_resolved,
+            actuator_names=actuator_names_resolved,
+        )
 
     @property
     def scene(self) -> gs.Scene:

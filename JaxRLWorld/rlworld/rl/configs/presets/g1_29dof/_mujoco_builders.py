@@ -17,7 +17,6 @@ from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
     FULL_COLLISION as G1_FULL_COLLISION,
     get_spec as g1_get_spec,
 )
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
@@ -38,6 +37,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     InitialStateCfg,
@@ -186,6 +186,7 @@ def build_observation(cfg: G1FlatConfig) -> MujocoObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
+        enable_corruption = False
         base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
         projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         command = ObservationTermConfig(func=command_obs, scale=1.0)
@@ -246,7 +247,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=1.0,
             params={
                 "std": math.sqrt(0.2),
-                "asset_cfg": SceneEntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     body_names=("torso_link",),
                 ),
@@ -264,7 +265,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             func=rf.variable_posture,
             weight=1.0,
             params={
-                "asset_cfg": SceneEntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     joint_names=(".*",),
                 ),
@@ -311,7 +312,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             func=rf.body_angular_velocity_penalty,
             weight=0.05,
             params={
-                "asset_cfg": SceneEntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     body_names=("torso_link",),
                 ),
@@ -342,7 +343,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             func=rf.feet_clearance,
             weight=2.0,
             params={
-                "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -354,7 +355,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.25,
             params={
                 "contact_group": "feet_ground_contact",
-                "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -366,7 +367,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.1,
             params={
                 "contact_group": "feet_ground_contact",
-                "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
                 "command_threshold": 0.05,
             },
         )
@@ -386,34 +387,37 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
 
 def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
-    from rlworld.rl.envs.mdp.events import mujoco as ef
-    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
+    from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 
     return {
         "randomize_encoder_bias": EventTermConfig(
-            func=ef.randomize_encoder_bias,
+            func=unified_dr.randomize_encoder_bias,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
                 "bias_range": (-0.015, 0.015),
-                "entity_cfg": EntityCfg(name="robot"),
             },
         ),
         "randomize_body_com": EventTermConfig(
-            func=ef.randomize_body_com_offset,
+            func=unified_dr.randomize_body_com_offset,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",)),
                 "ranges": {
                     0: (-0.025, 0.025),
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
                 "operation": "add",
-                "entity_cfg": EntityCfg(name="robot", body_names=("torso_link",)),
             },
         ),
         "randomize_joint_friction": EventTermConfig(
-            func=ef.randomize_joint_friction,
+            func=unified_dr.randomize_joint_friction,
             mode="reset_dr",
-            params={"ranges": (0.0, 0.05), "operation": "abs"},
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
+            },
         ),
     }

@@ -201,6 +201,7 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
 
         @dataclass
         class _CriticObsCfg(_ActorObsCfg):
+            enable_corruption = False
             base_lin_vel = ObservationTermConfig(func=base_lin_vel, scale=2.0)
             base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
 

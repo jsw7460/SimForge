@@ -30,6 +30,7 @@ from rlworld.rl.configs.newton_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GroundPlaneCfg,
@@ -37,7 +38,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
-from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -223,6 +224,7 @@ class _ActorObsCfg(ObservationGroupConfig):
 
 @dataclass
 class _CriticObsCfg(ObservationGroupConfig):
+    enable_corruption = False
     base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
     base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
     projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -388,36 +390,36 @@ def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
     r = cfg.robot
     return {
         "geom_friction_slide": EventTermConfig(
-            func=newton_dr.randomize_geom_friction_axis,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (0.8, 1.5),
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.8, 1.5),
                 "axes": [0],
                 "operation": "abs",
                 "distribution": "uniform",
-                "body_patterns": None,
             },
         ),
         "foot_friction_spin": EventTermConfig(
-            func=newton_dr.randomize_geom_friction_axis,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-4, 2e-2),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.foot_body_pattern_newton,)),
+                "friction_range": (1e-4, 2e-2),
                 "axes": [1],
                 "operation": "abs",
                 "distribution": "log_uniform",
-                "body_patterns": r.foot_body_pattern_newton,
             },
         ),
         "foot_friction_roll": EventTermConfig(
-            func=newton_dr.randomize_geom_friction_axis,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-5, 5e-3),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.foot_body_pattern_newton,)),
+                "friction_range": (1e-5, 5e-3),
                 "axes": [2],
                 "operation": "abs",
                 "distribution": "log_uniform",
-                "body_patterns": r.foot_body_pattern_newton,
             },
         ),
     }

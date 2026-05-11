@@ -29,6 +29,7 @@ from rlworld.rl.configs.newton_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GroundPlaneCfg,
@@ -36,7 +37,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
-from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -198,6 +199,7 @@ def build_observation(cfg: G1TrackingConfig) -> NewtonObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
+        enable_corruption = False
         base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
         projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -315,20 +317,25 @@ def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
     r = cfg.robot
     return {
         "randomize_body_com": EventTermConfig(
-            func=newton_dr.randomize_body_com_offset,
+            func=unified_dr.randomize_body_com_offset,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",)),
                 "ranges": {
                     0: (-0.025, 0.025),
                     1: (-0.05, 0.05),
                     2: (-0.05, 0.05),
                 },
-                "body_patterns": ("torso_link",),
+                "operation": "add",
             },
         ),
         "randomize_joint_friction": EventTermConfig(
-            func=newton_dr.randomize_joint_friction,
+            func=unified_dr.randomize_joint_friction,
             mode="reset_dr",
-            params={"friction_range": (0.0, 0.05)},
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
+            },
         ),
     }

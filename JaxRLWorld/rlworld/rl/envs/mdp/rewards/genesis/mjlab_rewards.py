@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import torch
 from genesis.utils.geom import inv_quat, transform_by_quat
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     VariablePostureTracker,
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
 
 
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
 # ============================================================
 # track_lin_vel_mjlab
 # ============================================================
@@ -33,7 +37,7 @@ if TYPE_CHECKING:
 def track_lin_vel_mjlab(
     env: GenesisEnv,
     std: float,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward for tracking commanded base linear velocity.
 
@@ -76,7 +80,7 @@ def track_lin_vel_mjlab(
 def track_ang_vel_mjlab(
     env: GenesisEnv,
     std: float,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     base_name: str = "base",
 ) -> torch.Tensor:
     """Reward for tracking commanded angular velocity.
@@ -97,7 +101,7 @@ def track_ang_vel_mjlab(
     command_z = env.command_manager.ang_vel  # (num_envs,)
 
     # Get actual angular velocity in body frame
-    actual = env.get_robot_data(entity_name).root_link_ang_vel_b  # (num_envs, 3)
+    actual = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b  # (num_envs, 3)
 
     # z error + xy error (xy command assumed zero)
     z_error = torch.square(command_z - actual[:, 2])
@@ -116,7 +120,7 @@ def flat_orientation_mjlab(
     env: GenesisEnv,
     std: float,
     body_name: str | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward for flat base orientation (robot being upright).
 
@@ -135,7 +139,7 @@ def flat_orientation_mjlab(
     """
     if body_name is not None:
         # Get specific body quaternion in world frame
-        entity = env.scene_manager[entity_name]
+        entity = env.scene_manager[asset_cfg.name]
         link = entity.get_link(name=body_name)
         body_quat_w = entity.get_links_quat(links_idx_local=[link.idx_local])  # (num_envs, 1, 4)
         body_quat_w = body_quat_w.squeeze(1)  # (num_envs, 4)
@@ -146,7 +150,7 @@ def flat_orientation_mjlab(
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
     else:
         # Use root link projected gravity (unit gravity vector via robot_data)
-        projected_gravity_b = env.get_robot_data(entity_name).projected_gravity_b  # (num_envs, 3)
+        projected_gravity_b = env.get_robot_data(asset_cfg.name).projected_gravity_b  # (num_envs, 3)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
 
     return torch.exp(-xy_squared / (std**2))
@@ -204,7 +208,7 @@ class variable_posture:
 def body_ang_vel_penalty_mjlab(
     env: GenesisEnv,
     body_name: str,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
 
@@ -223,7 +227,7 @@ def body_ang_vel_penalty_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return penalize_body_ang_vel_xy(env, body_name=body_name, entity_name=entity_name)
+    return penalize_body_ang_vel_xy(env, body_name=body_name, asset_cfg=asset_cfg)
 
 
 # ============================================================
@@ -286,7 +290,7 @@ def feet_clearance_mjlab(
     feet_links: str | list[str],
     target_height: float,
     command_threshold: float = 0.01,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_feet_clearance``.
 
@@ -300,7 +304,7 @@ def feet_clearance_mjlab(
         target_height=target_height,
         command_threshold=command_threshold,
         body_names=names,
-        entity_name=entity_name,
+        entity_name=asset_cfg.name,
     )
 
 
@@ -324,7 +328,7 @@ class feet_swing_height_mjlab:
         feet_links: str | list[str],
         target_height: float,
         command_threshold: float = 0.05,
-        entity_name: str = "robot",
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
         contact_group: str = "feet_ground_contact",
     ):
         names = [feet_links] if isinstance(feet_links, str) else list(feet_links)
@@ -334,7 +338,7 @@ class feet_swing_height_mjlab:
             target_height=target_height,
             command_threshold=command_threshold,
             body_names=names,
-            entity_name=entity_name,
+            entity_name=asset_cfg.name,
             use_squared_error=True,
             reset_mode="zero",
         )
@@ -355,7 +359,7 @@ def feet_slip_mjlab(
     env: GenesisEnv,
     feet_links: str | list[str],
     command_threshold: float = 0.05,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_feet_slip``.
@@ -370,7 +374,7 @@ def feet_slip_mjlab(
         contact_group=contact_group,
         command_threshold=command_threshold,
         body_names=names,
-        entity_name=entity_name,
+        entity_name=asset_cfg.name,
     )
 
 
@@ -404,7 +408,7 @@ def soft_landing_mjlab(
 def joint_pos_limits_mjlab(
     env: GenesisEnv,
     soft_limit_factor: float = 1.0,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits.
 
@@ -423,7 +427,7 @@ def joint_pos_limits_mjlab(
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return penalize_joint_pos_limits_l1(env, soft_limit_factor=soft_limit_factor, entity_name=entity_name)
+    return penalize_joint_pos_limits_l1(env, soft_limit_factor=soft_limit_factor, asset_cfg=asset_cfg)
 
 
 # ============================================================

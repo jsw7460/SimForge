@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     get_leg_xy_signs,
     penalize_contact_force_count,
@@ -24,6 +25,9 @@ from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv, GenesisLocomotionEnv
+
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 
 
 def wtw_collision(
@@ -40,12 +44,12 @@ def wtw_collision(
 
 def wtw_feet_slip(
     env: GenesisLocomotionEnv,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
     """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
     feet_links = tuple(env.gait_manager.foot_names)
-    entity = env.scene_manager[entity_name]
+    entity = env.scene_manager[asset_cfg.name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
     feet_vel = entity.get_links_vel(links_idx_local=links_idx_local, ref="link_com")
 
@@ -75,11 +79,11 @@ def wtw_tracking_contacts_shaped_force(
 def wtw_tracking_contacts_shaped_vel(
     env: GenesisLocomotionEnv,
     gait_vel_sigma: float = 10.0,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW: penalize foot velocity when foot should be in stance."""
     feet_links = tuple(env.gait_manager.foot_names)
-    entity = env.scene_manager[entity_name]
+    entity = env.scene_manager[asset_cfg.name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
     feet_vel = entity.get_links_vel(links_idx_local=links_idx_local)
 
@@ -93,11 +97,11 @@ def wtw_tracking_contacts_shaped_vel(
 def wtw_feet_clearance_cmd_linear(
     env: GenesisLocomotionEnv,
     foot_radius: float = 0.02,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW: penalize foot height error during swing."""
     feet_links = tuple(env.gait_manager.foot_names)
-    entity = env.scene_manager[entity_name]
+    entity = env.scene_manager[asset_cfg.name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
     feet_pos = entity.get_links_pos(links_idx_local=links_idx_local)
     foot_height = feet_pos[..., 2]
@@ -115,16 +119,16 @@ def wtw_feet_clearance_cmd_linear(
 
 def wtw_raibert_heuristic(
     env: GenesisLocomotionEnv,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW: penalize footstep placement error vs Raibert heuristic."""
     feet_links = tuple(env.gait_manager.foot_names)
-    entity = env.scene_manager[entity_name]
+    entity = env.scene_manager[asset_cfg.name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
 
     foot_positions = entity.get_links_pos(links_idx_local=links_idx_local)
-    base_pos = env.get_robot_data(entity_name).root_link_pos_w
-    base_quat = env.get_robot_data(entity_name).root_link_quat_w
+    base_pos = env.get_robot_data(asset_cfg.name).root_link_pos_w
+    base_quat = env.get_robot_data(asset_cfg.name).root_link_quat_w
 
     num_feet = foot_positions.shape[1]
     cur_footsteps_translated = foot_positions - base_pos.unsqueeze(1)

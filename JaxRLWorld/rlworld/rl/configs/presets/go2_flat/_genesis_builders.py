@@ -41,6 +41,7 @@ from rlworld.rl.configs.robots.go2 import (
     STIFFNESS_HIP,
     STIFFNESS_KNEE,
 )
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
@@ -48,7 +49,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
@@ -289,15 +290,16 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """Genesis-specific domain randomization terms."""
     return {
         "randomize_base_mass": EventTermConfig(
-            func=genesis_dr.randomize_body_mass,
+            func=unified_dr.randomize_body_mass,
             mode="reset_dr",
             params={
-                "mass_ratio_range": (0.8, 1.2),
-                "link_names": cfg.robot.base_link_name,
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(cfg.robot.base_link_name,)),
+                "mass_range": (0.8, 1.2),
+                "operation": "scale",
             },
         ),
         "randomize_friction": EventTermConfig(
-            func=genesis_dr.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="reset_dr",
             params={
                 # mjlab parity: mjlab abs (0.3, 1.2) divided by the mjcf
@@ -307,14 +309,19 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
                 # range matches mjlab's abs DR. foot 4 link only,
                 # shared_random so all four feet get the same ratio
                 # within an env (mjlab shared_random=True parity).
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=tuple(cfg.robot.foot_names)),
                 "friction_range": (0.75, 3.0),
-                "link_names": tuple(cfg.robot.foot_names),
+                "operation": "scale",
                 "shared_random": True,
             },
         ),
         "randomize_joint_friction": EventTermConfig(
-            func=genesis_dr.randomize_joint_friction,
+            func=unified_dr.randomize_joint_friction,
             mode="reset_dr",
-            params={"friction_range": (0.0, 0.05)},
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
+            },
         ),
     }

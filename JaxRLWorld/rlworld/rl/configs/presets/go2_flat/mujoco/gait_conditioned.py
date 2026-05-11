@@ -6,14 +6,13 @@ See genesis/gait_conditioned.py for detailed documentation.
 
 from dataclasses import dataclass, field
 
-from mjlab.managers.scene_entity_config import SceneEntityCfg
-
 from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
 from rlworld.rl.configs.mujoco_config_classes import MujocoObservationConfig as ObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.envs.managers.common.command_term import (
     GaitCommandTermCfg,
     VelocityCommandTermCfg,
@@ -89,7 +88,7 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
         # per-reward _gait_aligned_site_indices helper still reorders
         # to gait_manager order regardless.
         site_names = ("FR", "FL", "RR", "RL")
-        foot_asset_cfg = SceneEntityCfg(
+        foot_asset_cfg = SceneEntitySelector(
             name="robot",
             site_names=site_names,
             preserve_order=False,
@@ -197,6 +196,7 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
 
         @dataclass
         class _CriticObsCfg(_ActorObsCfg):
+            enable_corruption = False
             base_lin_vel = ObservationTermConfig(func=base_lin_vel, scale=2.0)
             base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
 

@@ -12,6 +12,7 @@ from gymnasium import spaces
 from rlworld.rl.envs.lifecycle import LifecycleEvent, LifecycleManager
 
 if TYPE_CHECKING:
+    from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
     from rlworld.rl.envs.managers.common.robot_state_writer_protocol import RobotStateWriterProtocol
     from rlworld.rl.envs.robot_data import RobotData
 
@@ -149,6 +150,54 @@ class World(ABC):
             An object satisfying the ``RobotData`` protocol.
         """
         pass
+
+    def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        """Resolve a sim-agnostic selector against this world's scene.
+
+        Joint indices in the returned :class:`ResolvedEntity` are in
+        canonical (``act_manager.actuated_joint_names``) order so they
+        align with ``RobotData.joint_pos`` and friends.  Body / geom /
+        site indices follow each backend's native ordering — those have
+        no canonical concept.
+
+        Physics-backend Worlds (Genesis / Newton / MuJoCo) override
+        this; gymnasium / ManiSkill wrappers leave the base
+        implementation in place because they have no scene-entity
+        concept.  Backends also raise ``NotImplementedError`` for
+        component kinds they cannot resolve (e.g. Genesis has no geom
+        names; Newton/Genesis have no sites).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement resolve_selector "
+            f"(no scene-entity concept on this World subclass)."
+        )
+
+    def _resolve_canonical_joint_ids(
+        self,
+        joint_name_patterns: tuple[str, ...] | None,
+        preserve_order: bool = False,
+    ) -> tuple[torch.Tensor, list[str]]:
+        """Resolve joint regex patterns against ``actuated_joint_names``.
+
+        Used by every backend's :meth:`resolve_selector` to fill the
+        canonical-order ``joint_ids`` field.  When ``joint_name_patterns``
+        is ``None`` returns an arange covering all actuated joints.
+
+        ``preserve_order`` mirrors mjlab's ``find_*`` semantics — when
+        True the result follows the order of the regex patterns; when
+        False (default) the result follows the canonical actuated-joint
+        order.
+        """
+        from rlworld.rl.utils import string as _su
+
+        all_names = list(self.act_manager.actuated_joint_names)
+        if joint_name_patterns is None:
+            return (
+                torch.arange(len(all_names), device=self.device, dtype=torch.long),
+                all_names,
+            )
+        idx, names = _su.resolve_matching_names(list(joint_name_patterns), all_names, preserve_order=preserve_order)
+        return torch.tensor(idx, device=self.device, dtype=torch.long), names
 
     def _resolve_default_joint_pos(self) -> torch.Tensor:
         """Resolve ``init_state.joint_pos`` dict into a per-joint tensor.

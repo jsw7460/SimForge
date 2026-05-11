@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import warp as wp
 
 from rlworld.rl.actuators import ImplicitActuatorCfg
-from rlworld.rl.configs import RewardConfig, TerminationTermConfig
+from rlworld.rl.configs import RewardConfig, SolverMuJoCoCfg, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -36,6 +36,7 @@ from rlworld.rl.configs.newton_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GroundPlaneCfg,
@@ -43,7 +44,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
-from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
@@ -117,6 +118,13 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
         robot_cfg=r,
+        solver_cfg=SolverMuJoCoCfg(
+            impratio=10.0,
+            cone="elliptic",
+            iterations=10,
+            ls_iterations=20,
+            ccd_iterations=50,
+        ),
         entities={
             "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
@@ -177,6 +185,7 @@ def build_observation(cfg: T1GetupConfig) -> NewtonObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
+        enable_corruption = False
         base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
         projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -316,58 +325,61 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
         # policy's action from the physical state. See build_observation
         # for the matching decision to use unbiased dof_pos.
         "randomize_body_com": EventTermConfig(
-            func=newton_dr.randomize_body_com_offset,
+            func=unified_dr.randomize_body_com_offset,
             mode="startup",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(f".*{r.trunk_body_name}",)),
                 "ranges": {
                     0: (-0.025, 0.025),
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
-                "body_patterns": (f".*{r.trunk_body_name}",),
+                "operation": "add",
             },
         ),
-        # Slide: randomize across all robot shapes (body_patterns=None).
-        # Matches mjlab's ``geom_names=(".*_collision",)`` which in
-        # practice covers every collision geom on the robot — Newton's
-        # URDF-loaded shapes don't have per-geom names, so we simply
-        # skip the filter (touching every robot shape) instead.
+        # Slide: randomize across every robot shape (selector with no
+        # body/geom filter falls through to the full set).  Matches
+        # mjlab's ``geom_names=(".*_collision",)`` which covers all
+        # collision geoms.
         "geom_friction_slide": EventTermConfig(
-            func=newton_dr.randomize_geom_friction_axis,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (0.8, 1.5),
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.8, 1.5),
                 "axes": [0],
                 "operation": "abs",
                 "distribution": "uniform",
-                "body_patterns": None,
+                "shared_random": True,
             },
         ),
         # Spin/roll: filter by foot body name so only the foot shapes
-        # pick up the log-uniform low-range friction. Body-name
-        # filtering is needed because Newton's URDF loader drops geom
-        # names; ``model.body_shapes[foot_body_idx]`` resolves to the
-        # shape indices attached to the foot links.
+        # pick up the log-uniform low-range friction.  body_names is a
+        # regex tuple — the resolver runs ``re.fullmatch`` against
+        # ``view.link_names`` and the Newton backend then expands each
+        # matched body to its collision shapes.
         "foot_friction_spin": EventTermConfig(
-            func=newton_dr.randomize_geom_friction_axis,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-4, 2e-2),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.foot_body_pattern_newton,)),
+                "friction_range": (1e-4, 2e-2),
                 "axes": [1],
                 "operation": "abs",
                 "distribution": "log_uniform",
-                "body_patterns": r.foot_body_pattern_newton,
+                "shared_random": True,
             },
         ),
         "foot_friction_roll": EventTermConfig(
-            func=newton_dr.randomize_geom_friction_axis,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-5, 5e-3),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.foot_body_pattern_newton,)),
+                "friction_range": (1e-5, 5e-3),
                 "axes": [2],
                 "operation": "abs",
                 "distribution": "log_uniform",
-                "body_patterns": r.foot_body_pattern_newton,
+                "shared_random": True,
             },
         ),
     }

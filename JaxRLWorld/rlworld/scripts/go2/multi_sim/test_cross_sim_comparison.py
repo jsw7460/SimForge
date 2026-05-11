@@ -213,9 +213,10 @@ def _newton_reward_terms():
 
 
 def _mujoco_reward_terms():
-    from mjlab.managers.scene_entity_config import SceneEntityCfg
-
     from rlworld.rl.configs.rewards import RewardTermConfig
+    from rlworld.rl.configs.scene import (
+        SceneEntitySelector as SceneEntityCfg,  # alias for minimal diff in this diag script
+    )
     from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
     from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_m
 

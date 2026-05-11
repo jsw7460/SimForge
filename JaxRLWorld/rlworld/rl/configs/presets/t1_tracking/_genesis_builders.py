@@ -31,6 +31,7 @@ from rlworld.rl.configs.genesis_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
@@ -38,7 +39,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -213,6 +214,7 @@ class _ActorObsCfg(ObservationGroupConfig):
 
 @dataclass
 class _CriticObsCfg(ObservationGroupConfig):
+    enable_corruption = False
     base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
     base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
     projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -362,8 +364,12 @@ def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
     """Scalar friction DR only — Genesis can't do per-axis 3-vector friction."""
     return {
         "randomize_friction_scalar": EventTermConfig(
-            func=genesis_dr.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="reset_dr",
-            params={"friction_range": (0.8, 1.5)},
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.8, 1.5),
+                "operation": "scale",
+            },
         ),
     }

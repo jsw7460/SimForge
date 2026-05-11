@@ -32,6 +32,7 @@ from rlworld.rl.configs.genesis_config_classes import (
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
@@ -39,7 +40,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
-from rlworld.rl.envs.mdp.events.dr import genesis as genesis_dr
+from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
@@ -150,6 +151,8 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
             dt=sim_dt,
             constraint_solver=gs.constraint_solver.Newton,
             constraint_timeconst=0.02,
+            iterations=10,
+            ls_iterations=20,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
@@ -173,6 +176,7 @@ def build_observation(cfg: T1GetupConfig) -> ObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
+        enable_corruption = False
         base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
         projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -304,20 +308,25 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
         # Encoder bias DR intentionally omitted — see _newton_builders
         # for the rationale (unbiased obs + unbiased action = symmetric).
         "randomize_body_com": EventTermConfig(
-            func=genesis_dr.randomize_body_com_offset,
+            func=unified_dr.randomize_body_com_offset,
             mode="reset_dr",
             params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.trunk_body_name,)),
                 "ranges": {
                     0: (-0.025, 0.025),
                     1: (-0.025, 0.025),
                     2: (-0.03, 0.03),
                 },
-                "link_names": (r.trunk_body_name,),
+                "operation": "add",
             },
         ),
         "randomize_friction_scalar": EventTermConfig(
-            func=genesis_dr.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="reset_dr",
-            params={"friction_range": (0.8, 1.5)},
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.8, 1.5),
+                "operation": "scale",
+            },
         ),
     }

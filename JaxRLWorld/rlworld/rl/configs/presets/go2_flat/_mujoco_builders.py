@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
 from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.assets.unitree_go2.go2_constants import (
@@ -43,6 +42,7 @@ from rlworld.rl.configs.robots.go2 import (
     STIFFNESS_HIP,
     STIFFNESS_KNEE,
 )
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     InitialStateCfg,
@@ -230,7 +230,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             func=rf.variable_posture,
             weight=1.0,
             params={
-                "asset_cfg": SceneEntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     joint_names=(".*",),
                 ),
@@ -265,7 +265,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             func=rf.feet_clearance,
             weight=2.0,
             params={
-                "asset_cfg": SceneEntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     site_names=site_names,
                 ),
@@ -279,7 +279,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             weight=0.25,
             params={
                 "contact_group": "feet_ground_contact",
-                "asset_cfg": SceneEntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     site_names=site_names,
                 ),
@@ -293,7 +293,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             weight=0.1,
             params={
                 "contact_group": "feet_ground_contact",
-                "asset_cfg": SceneEntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     site_names=site_names,
                 ),
@@ -315,8 +315,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
 
 def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
-    from rlworld.rl.envs.mdp.events import mujoco as ef
-    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
+    from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 
     r = cfg.robot
     foot_geom_names = (
@@ -328,27 +327,31 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
 
     return {
         "randomize_friction": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="reset_dr",
             params={
-                "ranges": (0.3, 1.2),
+                "asset_cfg": SceneEntitySelector(name="robot", geom_names=foot_geom_names),
+                "friction_range": (0.3, 1.2),
                 "operation": "abs",
                 "shared_random": True,
-                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
             },
         ),
         "randomize_base_mass": EventTermConfig(
-            func=ef.randomize_body_mass,
+            func=unified_dr.randomize_body_mass,
             mode="reset_dr",
             params={
-                "ranges": (0.8, 1.2),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.base_link_name,)),
+                "mass_range": (0.8, 1.2),
                 "operation": "scale",
-                "entity_cfg": EntityCfg(name="robot", body_names=(r.base_link_name,)),
             },
         ),
         "randomize_joint_friction": EventTermConfig(
-            func=ef.randomize_joint_friction,
+            func=unified_dr.randomize_joint_friction,
             mode="reset_dr",
-            params={"ranges": (0.0, 0.05), "operation": "abs"},
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
+            },
         ),
     }

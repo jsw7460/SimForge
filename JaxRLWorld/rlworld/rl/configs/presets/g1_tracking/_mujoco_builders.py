@@ -59,7 +59,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.rewards.common import motion_tracking as rf_motion
+from rlworld.rl.envs.mdp.rewards.common import motion_tracking as rf_motion, reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.common import motion_tracking as tt_motion
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
@@ -203,6 +203,7 @@ def build_observation(cfg: G1TrackingConfig) -> MujocoObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
+        enable_corruption = False
         base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
         base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
         projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -289,7 +290,7 @@ def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
             params=motion_params_std(cfg.body_ang_vel_std),
         )
         raw_action_rate_l2 = RewardTermConfig(
-            func=rf.raw_action_rate_l2,
+            func=rf_common.raw_action_rate_l2,
             weight=cfg.action_rate_l2_weight,
         )
         joint_pos_limits = RewardTermConfig(
@@ -306,25 +307,25 @@ def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
 
 
 def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
-    """MuJoCo DR — 3-axis friction (Mjlab G1 tracking foot_friction)."""
-    from rlworld.rl.envs.mdp.events import mujoco as ef
-    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
+    """MuJoCo DR — slide-axis friction over G1's foot collision geoms."""
+    from rlworld.rl.configs.scene import SceneEntitySelector
+    from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 
     return {
         # Foot friction over all of G1's foot collision geoms.
         # Mjlab G1 tracking uses ``^(left|right)_foot[1-7]_collision$``.
         "foot_friction": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (0.3, 1.2),
-                "operation": "abs",
-                "axes": [0],
-                "distribution": "uniform",
-                "entity_cfg": EntityCfg(
+                "asset_cfg": SceneEntitySelector(
                     name="robot",
                     geom_names=tuple(f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)),
                 ),
+                "friction_range": (0.3, 1.2),
+                "operation": "abs",
+                "axes": [0],
+                "distribution": "uniform",
                 "shared_random": True,
             },
         ),

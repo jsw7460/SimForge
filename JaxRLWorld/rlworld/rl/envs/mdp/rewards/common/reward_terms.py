@@ -1,7 +1,14 @@
 """Unified reward terms using the RobotData interface.
 
 All functions accept any ``World`` subclass and read state exclusively
-through ``env.get_robot_data(entity_name)``, making them simulator-agnostic.
+through ``env.get_robot_data(asset_cfg.name)``, making them simulator-agnostic.
+
+Selector convention: every term takes
+:class:`~rlworld.rl.configs.scene.entity_selector.ResolvedEntity` as
+``asset_cfg``.  The default is :data:`_DEFAULT_SELECTOR` which points at
+the ``"robot"`` entity with no subset filter — RewardManager auto-resolves
+the default at setup time, so presets only need to specify ``asset_cfg``
+when they want a non-default selector (e.g. specific joints/bodies).
 """
 
 from __future__ import annotations
@@ -10,10 +17,14 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
+
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 
 
 # ── Quadruped leg geometry helpers ───────────────────────────────────────
@@ -48,22 +59,11 @@ def track_lin_vel(
     env: World,
     std: float = 0.25,
     penalize_z: bool = False,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Reward for tracking commanded linear velocity in xy plane.
-
-    Args:
-        env: Any environment with ``get_robot_data``.
-        std: Standard deviation for exponential kernel.
-        penalize_z: If True, include z-velocity penalty (assumes commanded z is zero).
-            Matches mjlab ``track_linear_velocity`` behavior.
-        entity_name: Name of the entity to query.
-
-    Returns:
-        Tensor of shape (num_envs,).
-    """
+    """Reward for tracking commanded linear velocity in xy plane."""
     target = torch.stack([env.command_manager.lin_vel_x, env.command_manager.lin_vel_y], dim=1)
-    actual = env.get_robot_data(entity_name).root_link_lin_vel_b
+    actual = env.get_robot_data(asset_cfg.name).root_link_lin_vel_b
     xy_error = torch.sum(torch.square(target - actual[:, :2]), dim=1)
     if penalize_z:
         xy_error = xy_error + torch.square(actual[:, 2])
@@ -74,21 +74,10 @@ def track_ang_vel(
     env: World,
     std: float = 0.25,
     penalize_xy: bool = False,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Reward for tracking commanded angular velocity (yaw).
-
-    Args:
-        env: Any environment with ``get_robot_data``.
-        std: Standard deviation for exponential kernel.
-        penalize_xy: If True, include xy angular velocity penalty (assumes
-            commanded xy is zero). Matches mjlab ``track_angular_velocity``.
-        entity_name: Name of the entity to query.
-
-    Returns:
-        Tensor of shape (num_envs,).
-    """
-    actual = env.get_robot_data(entity_name).root_link_ang_vel_b
+    """Reward for tracking commanded angular velocity (yaw)."""
+    actual = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b
     z_error = torch.square(env.command_manager.ang_vel - actual[:, 2])
     if penalize_xy:
         z_error = z_error + torch.sum(torch.square(actual[:, :2]), dim=1)
@@ -110,21 +99,10 @@ def action_rate_l2(env: World) -> torch.Tensor:
 def flat_orientation(
     env: World,
     std: float | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Penalty for non-flat orientation (roll/pitch deviation from upright).
-
-    Args:
-        env: Any environment with ``get_robot_data``.
-        std: If provided, use exponential kernel ``exp(-xy² / std²)`` returning
-            a positive reward (matches mjlab behavior). If None, return
-            ``-sum(xy²)`` as a negative penalty.
-        entity_name: Name of the entity to query.
-
-    Returns:
-        Tensor of shape (num_envs,).
-    """
-    gravity_b = env.get_robot_data(entity_name).projected_gravity_b
+    """Penalty for non-flat orientation (roll/pitch deviation from upright)."""
+    gravity_b = env.get_robot_data(asset_cfg.name).projected_gravity_b
     xy_squared = torch.sum(torch.square(gravity_b[:, :2]), dim=1)
     if std is not None:
         return torch.exp(-xy_squared / (std**2))
@@ -134,30 +112,29 @@ def flat_orientation(
 # ── Walk-These-Ways reward terms ─────────────────────────────────────────
 
 
-def penalize_lin_vel_z(env: World, entity_name: str = "robot") -> torch.Tensor:
+def penalize_lin_vel_z(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalize z-axis base linear velocity. WTW: _reward_lin_vel_z."""
-    vel_z = env.get_robot_data(entity_name).root_link_lin_vel_b[:, 2]
+    vel_z = env.get_robot_data(asset_cfg.name).root_link_lin_vel_b[:, 2]
     return -torch.square(vel_z)
 
 
-def penalize_ang_vel_xy(env: World, entity_name: str = "robot") -> torch.Tensor:
+def penalize_ang_vel_xy(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalize xy-axis base angular velocity. WTW: _reward_ang_vel_xy."""
-    ang_vel_xy = env.get_robot_data(entity_name).root_link_ang_vel_b[:, :2]
+    ang_vel_xy = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b[:, :2]
     return -torch.sum(torch.square(ang_vel_xy), dim=1)
 
 
-def penalize_dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
+def penalize_dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalize joint velocities. WTW: _reward_dof_vel."""
-    return -torch.sum(torch.square(env.get_robot_data(entity_name).joint_vel), dim=1)
+    return -torch.sum(torch.square(env.get_robot_data(asset_cfg.name).joint_vel), dim=1)
 
 
-def similar_to_default(env: World, entity_name: str = "robot") -> torch.Tensor:
-    """Penalty for deviating from default joint positions.
-
-    Returns:
-        Tensor of shape (num_envs,).
-    """
-    return -torch.sum(torch.abs(env.get_robot_data(entity_name).joint_pos - env.act_manager.offset), dim=1)
+def similar_to_default(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Penalty for deviating from default joint positions."""
+    return -torch.sum(
+        torch.abs(env.get_robot_data(asset_cfg.name).joint_pos - env.act_manager.offset),
+        dim=1,
+    )
 
 
 def reward_alive(env: World) -> torch.Tensor:
@@ -170,23 +147,16 @@ def reward_alive(env: World) -> torch.Tensor:
     return torch.ones((env.num_envs,))
 
 
-def base_height_penalty(env: World, entity_name: str = "robot") -> torch.Tensor:
-    """Penalty for deviating from target base height.
-
-    Returns negative squared error between actual base z and the desired
-    height stored in ``env.command_manager.base_height``.
-
-    Returns:
-        Tensor of shape (num_envs,).
-    """
-    height_z = env.get_robot_data(entity_name).root_link_pos_w[:, 2]
+def base_height_penalty(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Penalty for deviating from target base height."""
+    height_z = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, 2]
     return -torch.square(height_z - env.command_manager.base_height)
 
 
 def penalize_angular_momentum_l2(
     env: World,
     sensor_name: str | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize whole-body angular momentum (L2 squared, sim-agnostic).
 
@@ -212,12 +182,12 @@ def penalize_angular_momentum_l2(
             ``angular_momentum_w``.
         sensor_name: Sensor identifier for sims that need one (mjlab).
             Required for mjlab; ignored by Newton.
-        entity_name: Name of the entity to query. Default ``"robot"``.
+        asset_cfg: Selector identifying the robot entity.
 
     Returns:
         Tensor of shape ``(num_envs,)``.
     """
-    angmom = env.get_robot_data(entity_name).angular_momentum_w(sensor_name=sensor_name)
+    angmom = env.get_robot_data(asset_cfg.name).angular_momentum_w(sensor_name=sensor_name)
     return -torch.sum(torch.square(angmom), dim=-1)
 
 
@@ -241,7 +211,7 @@ def raw_action_rate_l2(env: World) -> torch.Tensor:
 def penalize_body_ang_vel_xy(
     env: World,
     body_name: str,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize roll/pitch angular velocity of a single body (sim-agnostic).
 
@@ -260,12 +230,12 @@ def penalize_body_ang_vel_xy(
             naming convention (Newton uses prefixed names like
             ``"g1_29dof/torso_link"``, Genesis and mjlab use bare names
             like ``"torso_link"``).
-        entity_name: Name of the entity. Default ``"robot"``.
+        asset_cfg: Selector identifying the robot entity.
 
     Returns:
         Tensor of shape ``(num_envs,)``.
     """
-    rd = env.get_robot_data(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
     body_idx = rd.find_body_index(body_name)
     ang_vel = rd.body_ang_vel_w(body_idx)
     return -torch.sum(torch.square(ang_vel[:, :2]), dim=1)
@@ -273,14 +243,14 @@ def penalize_body_ang_vel_xy(
 
 # ── Feet rewards (mjlab-style) ───────────────────────────────────────────
 #
-# These functions accept either ``body_names`` or ``site_names`` (XOR) so
-# that Newton/Genesis can pass body/link names while MuJoCo passes site
-# names. The contact-aware variants take an explicit ``contact_group`` and
-# (optionally) ``contact_order`` for reordering the contact-manager output
-# to align with the foot ordering. ``contact_order`` defaults to
-# ``body_names`` when bodies are used; for sites it defaults to ``None``
-# (rely on the contact group's natural ordering, which mjlab presets are
-# expected to align with the site list).
+# NOTE (PR3a+b scope): these functions still take ``body_names`` /
+# ``site_names`` / ``entity_name`` because the underlying RobotData
+# accessors (``body_pos_w(names)``, ``site_pos_w(names)``) require
+# *name* lists, not the *id* tensors that ``ResolvedEntity`` carries.
+# Migrating them to the selector pattern requires either extending
+# ResolvedEntity with resolved name lists or teaching RobotData to
+# accept ids — both are out of scope for this PR.  Tracked as a
+# follow-up under the reward-side selector adoption work.
 
 
 def _command_active(env: World, command_threshold: float) -> torch.Tensor:
@@ -660,7 +630,7 @@ class VariablePostureTracker:
 def penalize_joint_pos_limits_l1(
     env: World,
     soft_limit_factor: float = 1.0,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits (L1, sim-agnostic).
 
@@ -683,13 +653,13 @@ def penalize_joint_pos_limits_l1(
         soft_limit_factor: Multiplicative factor on the hard limits.
             ``1.0`` (the active default in current presets) means
             penalize whenever the joint exceeds its hard limit.
-        entity_name: Name of the entity to query. Default ``"robot"``.
+        asset_cfg: Selector identifying the robot entity.
 
     Returns:
         Tensor of shape ``(num_envs,)`` — negative sum of soft-limit
         violations across joints.
     """
-    rd = env.get_robot_data(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
     dof_pos = rd.joint_pos
     lower, upper = rd.joint_pos_limits
     lower = lower * soft_limit_factor

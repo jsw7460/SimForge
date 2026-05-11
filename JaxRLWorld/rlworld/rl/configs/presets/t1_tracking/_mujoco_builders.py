@@ -213,6 +213,7 @@ class _ActorObsCfg(ObservationGroupConfig):
 
 @dataclass
 class _CriticObsCfg(ObservationGroupConfig):
+    enable_corruption = False
     base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
     base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
     projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -361,45 +362,45 @@ def build_reward(cfg: T1TrackingConfig) -> RewardConfig:
 
 def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo DR (3-axis friction)."""
-    from rlworld.rl.envs.mdp.events import mujoco as ef
-    from rlworld.rl.envs.mdp.events.mujoco import EntityCfg
+    from rlworld.rl.configs.scene import SceneEntitySelector
+    from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 
     r = cfg.robot
     foot_geom_names = r.foot_geom_names_mjlab
     return {
         "geom_friction_slide": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (0.8, 1.5),
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.8, 1.5),
                 "operation": "abs",
                 "axes": [0],
                 "distribution": "uniform",
-                "entity_cfg": EntityCfg(name="robot"),
                 "shared_random": True,
             },
         ),
         "foot_friction_spin": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-4, 2e-2),
+                "asset_cfg": SceneEntitySelector(name="robot", geom_names=foot_geom_names),
+                "friction_range": (1e-4, 2e-2),
                 "operation": "abs",
                 "axes": [1],
                 "distribution": "log_uniform",
-                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
                 "shared_random": True,
             },
         ),
         "foot_friction_roll": EventTermConfig(
-            func=ef.randomize_friction,
+            func=unified_dr.randomize_friction,
             mode="startup",
             params={
-                "ranges": (1e-5, 5e-3),
+                "asset_cfg": SceneEntitySelector(name="robot", geom_names=foot_geom_names),
+                "friction_range": (1e-5, 5e-3),
                 "operation": "abs",
                 "axes": [2],
                 "distribution": "log_uniform",
-                "entity_cfg": EntityCfg(name="robot", geom_names=foot_geom_names),
                 "shared_random": True,
             },
         ),
