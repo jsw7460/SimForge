@@ -71,17 +71,16 @@ class NewtonBodyCache:
 
         key = tuple(body_patterns)
         if key not in self._contact_cache:
-            contact_indices = self.env.contact_manager.get_indices(
-                "feet_ground_contact", list(body_patterns), preserve_order=True
-            )
+            group = "feet_ground_contact"
+            contact_indices = self.env.contact_manager.get_indices(group, list(body_patterns), preserve_order=True)
 
             if not contact_indices:
-                tracked = self.env.contact_manager.tracked_names("feet_ground_contact")
+                tracked = self.env.contact_manager.tracked_names(group)
                 raise ValueError(
-                    f"No bodies matching '{body_patterns}' in contact group 'contact'. Available: {tracked}"
+                    f"No bodies matching '{body_patterns}' in contact group '{group}'. Available: {tracked}"
                 )
 
-            tracked_names = self.env.contact_manager.tracked_names("feet_ground_contact")
+            tracked_names = self.env.contact_manager.tracked_names(group)
             body_names = [tracked_names[i] for i in contact_indices]
             body_indices = [self.body_names.index(name) for name in body_names]
             self._contact_cache[key] = (body_indices, contact_indices)
