@@ -8,14 +8,16 @@ native sensor:
 1. **Declarative resolution.** ``ContactSensorCfg.primary`` /
    ``secondary`` (regex patterns, entity scoping) are resolved here
    against the Newton model's ``body_label`` / ``shape_label``, then the
-   matched *full labels* are handed to ``SensorContact``. Patterns are
-   matched with ``re.fullmatch`` against the **leaf** segment of each
-   label (IsaacLab convention) — so a bare ``"FR_foot"`` or a regex
-   ``".*foot"`` resolves identically on URDF-flat labels
-   (``go2/FR_foot``) and MJCF-XPath labels
-   (``go2/worldbody/.../FR_foot``). This is *deliberately not* fnmatch —
-   Newton's ``SensorContact`` itself fnmatch-es, but we never let the
-   user's regex reach it; we resolve to concrete labels first.
+   matched *model indices* are handed to ``SensorContact`` as a
+   ``list[int]`` — that takes the index fast-path in ``match_labels``.
+   Handing it the expanded *label strings* instead would make
+   ``match_labels`` do an O(n_labels x n_patterns) ``fnmatch`` sweep
+   (minutes once num_bodies x num_worlds reaches a few tens of
+   thousands). Patterns are matched here with ``re.fullmatch`` against
+   the **leaf** segment of each label (IsaacLab convention) — so a bare
+   ``"FR_foot"`` or a regex ``".*foot"`` resolves identically on
+   URDF-flat labels (``go2/FR_foot``) and MJCF-XPath labels
+   (``go2/worldbody/.../FR_foot``).
 
 2. **Substep history.** Newton's ``SensorContact`` has no ring buffer,
    so when ``cfg.history_length > 0`` this wrapper keeps one of shape
@@ -34,11 +36,11 @@ Secondary → counterpart mapping (NO inversion — Newton's
 * ``secondary is None`` → no counterpart args; ``total_force`` reports
   the force on the primary from *all* contacts.
 * ``secondary.mode == "geom"`` → ``counterpart_shapes`` = the resolved
-  full shape labels of ``secondary`` (e.g. ``["ground_plane"]`` for the
-  Newton ground plane, which is a single global shape with no parent
-  body — so it is reached via shapes, not bodies).
+  shape indices of ``secondary`` (e.g. the single global ``ground_plane``
+  shape, which has no parent body — so it is reached via shapes, not
+  bodies).
 * ``secondary.mode == "body"`` → ``counterpart_bodies`` = the resolved
-  full body labels of ``secondary``. ``secondary.entity == "self"`` is
+  body indices of ``secondary``. ``secondary.entity == "self"`` is
   just an alias for ``cfg.primary.entity`` (self-collision: counterpart
   is another body of the same robot) — Newton's whitelist handles it
   with no special path.
@@ -130,7 +132,7 @@ class NewtonContactSensor:
         primary_patterns = (
             (cfg.primary.pattern,) if isinstance(cfg.primary.pattern, str) else tuple(cfg.primary.pattern)
         )
-        primary_labels = self._resolve_full_labels(
+        primary_indices = self._resolve_indices(
             entity_name=primary_entity,
             mode=cfg.primary.mode,
             patterns=primary_patterns,
@@ -138,15 +140,15 @@ class NewtonContactSensor:
             what=f"ContactSensorCfg {cfg.name!r} primary",
         )
 
-        sensing_kwargs: dict[str, list[str]] = {}
+        sensing_kwargs: dict[str, list[int]] = {}
         if cfg.primary.mode == "body":
-            sensing_kwargs["sensing_obj_bodies"] = primary_labels
+            sensing_kwargs["sensing_obj_bodies"] = primary_indices
         else:
-            sensing_kwargs["sensing_obj_shapes"] = primary_labels
+            sensing_kwargs["sensing_obj_shapes"] = primary_indices
 
         # ---- resolve secondary → counterpart whitelist (NO inversion) ----
         self._has_counterpart = cfg.secondary is not None
-        counterpart_kwargs: dict[str, list[str]] = {}
+        counterpart_kwargs: dict[str, list[int]] = {}
         sec = cfg.secondary
         if sec is not None:
             if sec.mode == "subtree":
@@ -166,7 +168,7 @@ class NewtonContactSensor:
                 )
             sec_entity = primary_entity if sec.entity == "self" else sec.entity
             sec_patterns = (sec.pattern,) if isinstance(sec.pattern, str) else tuple(sec.pattern)
-            sec_labels = self._resolve_full_labels(
+            sec_indices = self._resolve_indices(
                 entity_name=sec_entity,
                 mode=sec.mode,
                 patterns=sec_patterns,
@@ -174,9 +176,9 @@ class NewtonContactSensor:
                 what=f"ContactSensorCfg {cfg.name!r} secondary",
             )
             if sec.mode == "body":
-                counterpart_kwargs["counterpart_bodies"] = sec_labels
+                counterpart_kwargs["counterpart_bodies"] = sec_indices
             else:
-                counterpart_kwargs["counterpart_shapes"] = sec_labels
+                counterpart_kwargs["counterpart_shapes"] = sec_indices
 
         # ---- build native sensor ------------------------------------
         # ``measure_total`` is only needed when there is no counterpart
@@ -217,7 +219,7 @@ class NewtonContactSensor:
     # label resolution
     # ------------------------------------------------------------------
 
-    def _resolve_full_labels(
+    def _resolve_indices(
         self,
         *,
         entity_name: str,
@@ -225,8 +227,8 @@ class NewtonContactSensor:
         patterns: tuple[str, ...],
         exclude: tuple[str, ...],
         what: str,
-    ) -> list[str]:
-        """Resolve ``patterns`` to a list of full Newton labels (across all worlds).
+    ) -> list[int]:
+        """Resolve ``patterns`` to Newton model indices (across all worlds).
 
         Patterns are matched via ``re.fullmatch`` against the *leaf* of
         each candidate label; ``exclude`` entries are dropped via
@@ -236,6 +238,12 @@ class NewtonContactSensor:
         entities); unscoped (whole model) for prefix-less entities such as
         ``GroundPlaneCfg``, which contributes a single global
         ``ground_plane`` shape.
+
+        Returns ``model.body_label`` / ``model.shape_label`` indices in
+        ascending (world-major) order. These go to ``SensorContact`` as a
+        ``list[int]`` (the ``match_labels`` index fast-path); passing the
+        expanded label strings instead triggers an O(n_labels x
+        n_patterns) ``fnmatch`` sweep that costs minutes at scene-build.
         """
         model = self._model
         all_labels = list(model.body_label if mode == "body" else model.shape_label)
@@ -285,15 +293,15 @@ class NewtonContactSensor:
             )
         matched_set = set(matched_leaves)
 
-        # Expand to full labels across every world (SensorContact then
-        # fnmatch-es each full label against itself → exact match). Iterate
-        # ``scoped`` in index order so the resulting list — and hence the
-        # sensor's ``sensing_obj_idx`` — stays world-major with a stable
+        # Collect model indices across every world. Iterate ``scoped`` in
+        # index order so the result — and hence the sensor's
+        # ``sensing_obj_idx`` (``SensorContact`` preserves the order of a
+        # ``list[int]`` input) — stays world-major with a stable
         # within-world order.
-        full_labels = [lbl for _, lbl in scoped if leaf_name(lbl) in matched_set]
-        if not full_labels:
+        indices = [i for i, lbl in scoped if leaf_name(lbl) in matched_set]
+        if not indices:
             raise ValueError(f"Newton backend: {what}: resolved leaf names {sorted(matched_set)} to zero labels.")
-        return full_labels
+        return indices
 
     # ------------------------------------------------------------------
     # properties
