@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     )
     from rlworld.rl.configs.robots.base import RobotConfig
     from rlworld.rl.configs.scene import NewtonEntityConfig
+    from rlworld.rl.configs.sensors.contact_sensor_config import ContactSensorCfg
     from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
 
 
@@ -104,6 +105,8 @@ class NewtonSceneConfig(BaseConfig):
     solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
     entities: dict[str, Union["NewtonEntityConfig", "GroundPlaneCfg"]] = field(default_factory=list)
     sensors: list["NewtonSensorConfig"] | None = None
+    # Simulator-agnostic contact sensors (shared with Genesis / mjlab).
+    contact_sensors: "list[ContactSensorCfg] | None" = None
     add_ground: bool = True
     env_spacing: tuple[float, float, float] = (2.0, 2.0, 0.0)
     robot_cfg: Union["RobotConfig", None] = None

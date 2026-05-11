@@ -24,6 +24,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     GroundPlaneCfg,
     NewtonEntityCfg,
 )
+from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.configs.sensors.newton_sensor_config import (
     NewtonContactSensorConfig,
     NewtonFrameTransformSensorConfig,
@@ -33,6 +34,7 @@ from rlworld.rl.configs.sensors.newton_sensor_config import (
 from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
+from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.utils import string as string_utils
 
@@ -219,6 +221,11 @@ class NewtonSceneManagerConfig:
     # Entity and sensor configurations
     entities: list[NewtonEntityConfig] | dict[str, EntityCfg | GroundPlaneCfg] = field(default_factory=dict)
     sensors: list[NewtonSensorConfig] | None = None
+    # Simulator-agnostic contact sensors (ContactSensorCfg). Handled
+    # separately from ``sensors`` (which only holds NewtonSensorConfig
+    # subclasses); each becomes a ``NewtonContactSensor`` wrapper around a
+    # native ``SensorContact``, with optional substep history.
+    contact_sensors: list[ContactSensorCfg] | None = None
 
     # Ground plane
     add_ground: bool = True
@@ -279,6 +286,10 @@ class NewtonSceneManager(BaseManager):
 
         # Sensor tracking
         self.sensors: dict[str, Any] = {}  # sensor_name -> sensor object
+        # ContactSensorCfg-backed wrappers (subset of ``self.sensors`` —
+        # the wrapper objects are also stored under their ``cfg.name`` in
+        # ``self.sensors`` so generic sensor iteration sees them).
+        self._contact_sensor_wrappers: dict[str, Any] = {}
 
         # Kinematic trees (for observation functions)
         self.trees: dict[str, Any] = {}
@@ -756,11 +767,34 @@ class NewtonSceneManager(BaseManager):
         # view (bare leaf names) instead of raw ``model.body_label``.
         self._build_robot_view()
 
-        # Create sensors
+        # Create sensors (legacy NewtonSensorConfig path)
         self._create_sensors()
 
+        # Create simulator-agnostic ContactSensorCfg wrappers. Each builds
+        # its own native ``SensorContact`` (which requests the ``force``
+        # contact attribute on construction), so this MUST run before the
+        # ``newton.Contacts`` allocation below. The wrapper is stored under
+        # ``cfg.name`` in ``self.sensors`` (generic iteration, pretty
+        # print) AND in ``self._contact_sensor_wrappers`` (per-step history
+        # push, allocation gating).
+        if self.config.contact_sensors:
+            for cs_cfg in self.config.contact_sensors:
+                if not isinstance(cs_cfg, ContactSensorCfg):
+                    raise TypeError(
+                        f"NewtonSceneManagerConfig.contact_sensors expects ContactSensorCfg, "
+                        f"got {type(cs_cfg).__name__}"
+                    )
+                if cs_cfg.name in self.sensors:
+                    raise ValueError(f"Sensor '{cs_cfg.name}' already exists")
+                wrapper = NewtonContactSensor(self, cs_cfg)
+                self.sensors[cs_cfg.name] = wrapper
+                self._contact_sensor_wrappers[cs_cfg.name] = wrapper
+
         # Create sensor-specific contacts with extended attributes
-        if any(isinstance(s, SensorContact) for s in self.sensors.values()):
+        has_contact_sensor = any(isinstance(s, SensorContact) for s in self.sensors.values()) or bool(
+            self._contact_sensor_wrappers
+        )
+        if has_contact_sensor:
             self.sensor_contacts = newton.Contacts(
                 self.solver.get_max_contact_count(),
                 0,
@@ -1159,13 +1193,25 @@ class NewtonSceneManager(BaseManager):
                 self.state_0, self.state_1 = self.state_1, self.state_0
 
     def _update_sensors(self) -> None:
-        """Update all sensors after physics step."""
-        has_contact_sensor = any(isinstance(s, SensorContact) for s in self.sensors.values())
+        """Update all sensors after physics step.
+
+        Called once per ``scene.step()`` — i.e. once per physics step,
+        ``decimation`` times per control step (and never from inside the
+        captured CUDA graph, so dynamic torch ops in the ContactSensorCfg
+        wrappers are safe here). The wrappers also push one substep frame
+        into their ring buffer on every call (see ``NewtonContactSensor``).
+        """
+        has_contact_sensor = any(isinstance(s, SensorContact) for s in self.sensors.values()) or bool(
+            self._contact_sensor_wrappers
+        )
         if has_contact_sensor:
             self.solver.update_contacts(self.sensor_contacts, self.state_0)
 
         for sensor_name, sensor in self.sensors.items():
-            if isinstance(sensor, SensorContact):
+            if isinstance(sensor, NewtonContactSensor):
+                # Wrapper: refreshes its native SensorContact + pushes history.
+                sensor.update(self.state_0, self.sensor_contacts)
+            elif isinstance(sensor, SensorContact):
                 sensor.update(self.state_0, self.sensor_contacts)  # Contact sensor takes Contacts
             elif hasattr(sensor, "update"):
                 sensor.update(self.state_0)  # IMU takes State

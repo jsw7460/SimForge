@@ -45,7 +45,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     NewtonEntityCfg as UnifiedNewtonEntityCfg,
 )
-from rlworld.rl.configs.sensors import NewtonContactSensorConfig, NewtonIMUSensorConfig
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, NewtonIMUSensorConfig
 from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
@@ -180,24 +180,37 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                 sensor_name="imu_base",
                 site_names=["imu_site_base"],
             ),
-            NewtonContactSensorConfig(
-                entity_name="robot",
-                sensor_name="foot_contact",
-                sensing_obj_bodies=list(r.foot_names),
-                # Restrict to robot ↔ ground contacts (mirrors mjlab's
-                # secondary=ContactMatch(mode="body", pattern="terrain")
-                # and Genesis's secondary_entity="base_entity"). Newton's
-                # add_ground_plane() registers the floor as a single
-                # shape labeled "ground_plane" with no parent body, so
-                # we filter via counterpart_shapes (not counterpart_bodies).
-                counterpart_shapes=["ground_plane"],
+        ],
+        # Simulator-agnostic contact sensors (same ContactSensorCfg the
+        # Genesis / mjlab go2_flat builders use). Newton resolves the
+        # ``secondary`` whitelist directly (no inversion). The Newton
+        # ground plane is a single global *shape* named "ground_plane"
+        # with no parent body, so the ground secondary uses mode="geom".
+        # ``exclude`` patterns here are regex (the simulator-agnostic
+        # convention) — the Newton backend resolves them against the
+        # model labels itself rather than handing them to SensorContact's
+        # fnmatch. ``history_length=decimation`` keeps one policy step of
+        # substep contact forces for ``penalize_contact_force_count``.
+        contact_sensors=[
+            ContactSensorCfg(
+                name="foot_contact",
+                # Foot names ("FL_foot", ...) have no regex metacharacters
+                # → matched as exact leaf names.
+                primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
+                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="ground"),
+                history_length=timing["decimation"],
+                track_air_time=True,
             ),
-            NewtonContactSensorConfig(
-                entity_name="robot",
-                sensor_name="body_ground_contact",
-                sensing_obj_bodies=["*"],
-                exclude_bodies=("*foot*", "*calf*"),
-                counterpart_shapes=["ground_plane"],
+            ContactSensorCfg(
+                name="body_ground_contact",
+                primary=ContactMatch(
+                    mode="body",
+                    pattern=".*",
+                    entity="robot",
+                    exclude=(".*foot.*", ".*calf.*"),
+                ),
+                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="ground"),
+                history_length=timing["decimation"],
             ),
         ],
         add_ground=True,
