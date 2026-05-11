@@ -17,7 +17,6 @@ from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
     FULL_COLLISION as G1_FULL_COLLISION,
     get_spec as g1_get_spec,
 )
-from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
@@ -43,6 +42,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,

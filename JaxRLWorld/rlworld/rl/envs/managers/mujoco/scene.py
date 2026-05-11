@@ -11,6 +11,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     GroundPlaneCfg,
     MujocoEntityCfg,
 )
+from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 
@@ -20,6 +21,34 @@ if TYPE_CHECKING:
     from mjlab.sim import Simulation
 
     from rlworld.rl.envs import World
+
+
+def _to_mjlab_sensor_cfg(cfg: Any) -> Any:
+    """Convert a sim-agnostic ContactSensorCfg to mjlab's ContactSensorCfg.
+
+    Other sensor-config types are returned unchanged (the mjlab scene
+    only needs ContactSensorCfg conversion today). The ``mjlab`` import
+    stays function-local: ``mujoco/scene.py`` imports mjlab lazily
+    everywhere so the module loads without mjlab installed.
+    """
+    if not isinstance(cfg, ContactSensorCfg):
+        return cfg
+    from mjlab.sensor import ContactMatch as MjContactMatch, ContactSensorCfg as MjContactSensorCfg
+
+    def _match(m):
+        return None if m is None else MjContactMatch(mode=m.mode, pattern=m.pattern, entity=m.entity, exclude=m.exclude)
+
+    return MjContactSensorCfg(
+        name=cfg.name,
+        primary=_match(cfg.primary),
+        secondary=_match(cfg.secondary),
+        fields=cfg.fields,
+        reduce=cfg.reduce,
+        num_slots=cfg.num_slots,
+        track_air_time=cfg.track_air_time,
+        global_frame=cfg.global_frame,
+        history_length=cfg.history_length,
+    )
 
 
 @dataclass
@@ -41,8 +70,10 @@ class MujocoSceneManagerConfig:
     # Entities — unified EntityCfg dict (auto-converted to mjlab)
     entities: dict[str, EntityCfg | GroundPlaneCfg] | None = None
 
-    # Sensors — mjlab sensor configs (passed through)
-    sensors: tuple = ()
+    # Sensors — sim-agnostic rlworld.rl.configs.sensors.ContactSensorCfg
+    # objects, converted to mjlab sensor configs in
+    # MujocoSceneManager.build_scene.
+    sensors: tuple[ContactSensorCfg, ...] = ()
 
     # Terrain
     terrain_type: str = "plane"
@@ -168,7 +199,7 @@ class MujocoSceneManager(BaseManager):
                 env_spacing=self.config.env_spacing,
                 terrain=TerrainEntityCfg(terrain_type=self.config.terrain_type),
                 entities={},
-                sensors=self.config.sensors,
+                sensors=tuple(_to_mjlab_sensor_cfg(s) for s in self.config.sensors),
             )
             self.config.mjlab_scene_cfg = scene_cfg
 
@@ -256,7 +287,7 @@ class MujocoSceneManager(BaseManager):
                 """Resolve scalar-or-dict to a single scalar for one pattern."""
                 if isinstance(value, dict):
                     return value.get(pattern, fallback)
-                if isinstance(value, (int, float)):
+                if isinstance(value, int | float):
                     return value
                 return fallback
 
@@ -277,10 +308,10 @@ class MujocoSceneManager(BaseManager):
                                 )
                             )
                     else:
-                        stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, (int, float)) else 0.0
-                        damping = act_cfg.damping if isinstance(act_cfg.damping, (int, float)) else 0.0
-                        armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
-                        effort_limit = act_cfg.effort_limit if isinstance(act_cfg.effort_limit, (int, float)) else None
+                        stiffness = act_cfg.stiffness if isinstance(act_cfg.stiffness, int | float) else 0.0
+                        damping = act_cfg.damping if isinstance(act_cfg.damping, int | float) else 0.0
+                        armature = act_cfg.armature if isinstance(act_cfg.armature, int | float) else 0.0
+                        effort_limit = act_cfg.effort_limit if isinstance(act_cfg.effort_limit, int | float) else None
                         mjlab_actuators.append(
                             BuiltinPositionActuatorCfg(
                                 target_names_expr=act_cfg.target_names_expr,
@@ -305,10 +336,8 @@ class MujocoSceneManager(BaseManager):
                                 )
                             )
                     else:
-                        armature = act_cfg.armature if isinstance(act_cfg.armature, (int, float)) else 0.0
-                        effort_limit = (
-                            act_cfg.effort_limit if isinstance(act_cfg.effort_limit, (int, float)) else 1000.0
-                        )
+                        armature = act_cfg.armature if isinstance(act_cfg.armature, int | float) else 0.0
+                        effort_limit = act_cfg.effort_limit if isinstance(act_cfg.effort_limit, int | float) else 1000.0
                         mjlab_actuators.append(
                             BuiltinMotorActuatorCfg(
                                 target_names_expr=act_cfg.target_names_expr,

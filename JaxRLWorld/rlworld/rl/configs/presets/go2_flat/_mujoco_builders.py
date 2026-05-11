@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
 from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
-from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from rlworld.assets.unitree_go2.go2_constants import (
     FULL_COLLISION,
@@ -48,6 +47,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
 )
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf

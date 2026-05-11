@@ -56,7 +56,9 @@ class MujocoSceneConfig(BaseConfig):
     # Entities — unified EntityCfg dict (scene manager converts to mjlab)
     entities: Any = None  # dict[str, EntityCfg | GroundPlaneCfg]
 
-    # Sensors — mjlab sensor config objects (passed through to SceneCfg)
+    # Sensors — sim-agnostic rlworld.rl.configs.sensors.ContactSensorCfg
+    # objects, converted to mjlab sensor configs in
+    # MujocoSceneManager.build_scene.
     sensors: tuple = ()
 
     # Terrain
