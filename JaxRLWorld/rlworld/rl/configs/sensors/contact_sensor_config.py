@@ -18,7 +18,7 @@ Backend support matrix
 field / value             mjlab   Genesis    Newton
 ========================  ======  =========  ========
 primary mode="body"        yes     yes        yes
-primary mode="geom"        yes     yes        yes
+primary mode="geom"        yes     no         yes
 primary mode="subtree"     yes     no         no
 primary pattern/exclude    yes     yes        yes
 secondary (entity-scoped)  yes     yes        yes
@@ -27,17 +27,21 @@ fields w/ torque/dist/...  yes     no         no
 reduce="netforce"          yes     yes        yes
 reduce="none/mindist/..."  yes     no         no
 num_slots > 1              yes     no         no
-track_air_time             yes     yes (*)    yes (*)
 global_frame               yes     yes        yes (already world)
-history_length > 0         yes     yes        not yet
+history_length > 0         yes     yes        yes
 ========================  ======  =========  ========
 
-(*) air-time accumulators are maintained by ``BaseContactManager``, not
-by the simulator, so they work uniformly regardless of backend.
+Air-time / contact-time accumulators are maintained by
+``BaseContactManager`` for every group on every backend, so they are
+always available (there is no opt-in flag).
 
 The Genesis / Newton backends raise ``NotImplementedError`` for the
-combinations they do not support (subtree mode, ``reduce`` other than
-``netforce``, ``num_slots > 1``, fields beyond ``{"found", "force"}``).
+combinations they do not support (Genesis: ``primary.mode`` of
+``"geom"`` / ``"subtree"``; both: ``reduce`` other than ``netforce``,
+``num_slots > 1``, fields beyond ``{"found", "force"}``). On Genesis a
+``secondary.entity="self"`` sensor takes the ``get_contacts`` path,
+which does not keep substep history, so ``history_length`` is ignored
+for it.
 """
 
 from __future__ import annotations
@@ -114,11 +118,6 @@ class ContactSensorCfg:
             be ``1`` on the Genesis / Newton backends (and is the
             sensible default everywhere — pattern expansion already
             gives many primaries).
-        track_air_time: Allocate per-primary air-time / contact-time
-            accumulators (useful for gait rewards). The accumulators
-            live on ``ContactGroup`` and are advanced by
-            ``BaseContactManager`` each control step, so this works
-            uniformly across backends.
         global_frame: Report ``force`` in the global (world) frame
             rather than the contact / link-local frame. Newton already
             reports world-frame contact force; Genesis rotates the
@@ -136,7 +135,6 @@ class ContactSensorCfg:
     fields: tuple[str, ...] = ("found", "force")
     reduce: Literal["none", "mindist", "maxforce", "netforce"] = "netforce"
     num_slots: int = 1
-    track_air_time: bool = False
     global_frame: bool = False
     history_length: int = 0
 

@@ -199,7 +199,6 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
                 secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="ground"),
                 history_length=timing["decimation"],
-                track_air_time=True,
             ),
             ContactSensorCfg(
                 name="body_ground_contact",

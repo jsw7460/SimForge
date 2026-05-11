@@ -116,7 +116,6 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         fields=("found", "force"),
         reduce="netforce",
         num_slots=1,
-        track_air_time=True,
     )
 
     # Self-collision sensor — per-robot-body net self-collision force, to

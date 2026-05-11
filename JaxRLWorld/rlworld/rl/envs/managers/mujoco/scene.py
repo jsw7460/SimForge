@@ -45,7 +45,6 @@ def _to_mjlab_sensor_cfg(cfg: Any) -> Any:
         fields=cfg.fields,
         reduce=cfg.reduce,
         num_slots=cfg.num_slots,
-        track_air_time=cfg.track_air_time,
         global_frame=cfg.global_frame,
         history_length=cfg.history_length,
     )
