@@ -13,10 +13,12 @@ from rlworld.rl.configs import (
     VisualizationConfig,
 )
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.managers import (
     VisualizationManager,
     VisualizationManagerConfig,
 )
+from rlworld.rl.envs.managers.genesis.contact_sensor import GenesisContactSensor
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import entity_utils as _eu, set_seed
@@ -185,6 +187,20 @@ class GenesisEnv(World):
         )
 
         self.scene_manager.register_entities()
+        # Native Genesis contact sensors (gs.sensors.Contact / ContactForce) must be
+        # added to the scene *before* scene.build() (scene.add_sensor is
+        # @gs.assert_unbuilt). ContactManager.register_sensor() runs post-build, so we
+        # pre-create the ContactSensorCfg-backed sensors here and stash them for the
+        # contact manager to adopt. Legacy GenesisContactSensorCfg entries are skipped
+        # (their get_contacts()-based wrapper is build-agnostic, created post-build).
+        self._genesis_contact_sensors: dict = {}
+        contact_sensors = getattr(self.scene_cfg, "contact_sensors", None)
+        if contact_sensors:
+            for sensor_cfg in contact_sensors:
+                if isinstance(sensor_cfg, ContactSensorCfg):
+                    sensor = GenesisContactSensor(self, sensor_cfg)
+                    sensor.create_native_sensors()
+                    self._genesis_contact_sensors[sensor_cfg.name] = sensor
         self.scene_manager.build_scene()
 
         # Replace with unified Viser viewer after scene is built.

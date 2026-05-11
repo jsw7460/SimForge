@@ -19,6 +19,7 @@ from .sensors import SensorConfig
 if TYPE_CHECKING:
     from rlworld.rl.configs import CurriculumManagerConfig
     from rlworld.rl.configs.robots.base import RobotConfig
+    from rlworld.rl.configs.sensors import ContactSensorCfg
 
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
@@ -55,7 +56,9 @@ class SceneConfig(BaseConfig):
     env_spacing: tuple[float, float] = (20.0, 20.0)
     entities: dict = field(default_factory=dict)
     sensors: list[SensorConfig] | None = field(default_factory=list)
-    contact_sensors: list["GenesisContactSensorCfg"] | None = None
+    # Either the simulator-agnostic ``ContactSensorCfg`` (preferred) or the
+    # legacy ``GenesisContactSensorCfg`` (still used by g1 / t1 presets).
+    contact_sensors: "list[ContactSensorCfg | GenesisContactSensorCfg] | None" = None
     robot_cfg: Union["RobotConfig", None] = None
 
 

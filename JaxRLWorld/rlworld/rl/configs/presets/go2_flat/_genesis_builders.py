@@ -25,7 +25,6 @@ from rlworld.rl.configs.genesis_config_classes import (
     ActionConfig,
     EnvConfig,
     GenesisConfigsForRun,
-    GenesisContactSensorCfg,
     ObservationConfig,
     SceneConfig,
 )
@@ -48,7 +47,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     GroundPlaneCfg,
     InitialStateCfg,
 )
-from rlworld.rl.configs.sensors import SensorConfig
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, SensorConfig
 from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
@@ -147,18 +146,25 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             SensorConfig(entity_name="robot", link_name=r.base_link_name, sensor_class=gs.sensors.IMU),
         ],
         contact_sensors=[
-            GenesisContactSensorCfg(
+            ContactSensorCfg(
                 name="feet_ground_contact",
-                primary_links=r.foot_names,
-                secondary_entity="base_entity",
+                # foot names ("FL_foot", ...) have no regex metacharacters, so
+                # find_links treats each as an exact-match pattern.
+                primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="base_entity"),
+                history_length=timing["decimation"],
+                track_air_time=True,
             ),
-            GenesisContactSensorCfg(
+            ContactSensorCfg(
                 name="body_ground_contact",
-                primary_links=[".*"],
-                exclude_links=(".*foot.*", ".*calf.*"),
-                entity_name="robot",
-                exclude_self_contact=True,
-                secondary_entity="base_entity",
+                primary=ContactMatch(
+                    mode="body",
+                    pattern=".*",
+                    entity="robot",
+                    exclude=(".*foot.*", ".*calf.*"),
+                ),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="base_entity"),
+                history_length=timing["decimation"],
             ),
         ],
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
