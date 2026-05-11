@@ -137,12 +137,8 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         contact_sensors=[
             ContactSensorCfg(
                 name="feet_ground_contact",
-                primary=ContactMatch(
-                    mode="body",
-                    pattern=("left_ankle_roll_link", "right_ankle_roll_link"),
-                    entity="robot",
-                ),
-                secondary=None,
+                primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="base_entity"),
             ),
             ContactSensorCfg(
                 name="self_collision",
