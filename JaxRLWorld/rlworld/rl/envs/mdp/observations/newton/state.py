@@ -118,14 +118,14 @@ def base_ang_vel_world(env: NewtonEnv) -> torch.Tensor:
 def feet_air_time(env: NewtonEnv, feet_bodies: str | list[str]) -> torch.Tensor:
     """Air time for each foot. Shape: [num_envs, num_feet]."""
     result = get_bodies_height_with_contact(env, feet_bodies)
-    return env.contact_manager.last_air_time("foot_contact")[:, result.contact_indices]
+    return env.contact_manager.last_air_time("feet_ground_contact")[:, result.contact_indices]
 
 
 @EnvStepCache()
 def feet_contact_indicator(env: NewtonEnv, feet_bodies: str | list[str]) -> torch.Tensor:
     """Binary contact indicator for each foot. Shape: [num_envs, num_feet]."""
     result = get_bodies_height_with_contact(env, feet_bodies)
-    return env.contact_manager.is_contact("foot_contact")[:, result.contact_indices].float()
+    return env.contact_manager.is_contact("feet_ground_contact")[:, result.contact_indices].float()
 
 
 @EnvStepCache()
@@ -139,7 +139,7 @@ def feet_height(env: NewtonEnv, feet_bodies: str | list[str]) -> torch.Tensor:
 def feet_contact_force(env: NewtonEnv, feet_bodies: str | list[str]) -> torch.Tensor:
     """Contact force magnitude for each foot. Shape: [num_envs, num_feet]."""
     result = get_bodies_height_with_contact(env, feet_bodies)
-    force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]
+    force = env.contact_manager.contact_force("feet_ground_contact")[:, result.contact_indices]
     return torch.norm(force, dim=-1)
 
 
@@ -147,6 +147,6 @@ def feet_contact_force(env: NewtonEnv, feet_bodies: str | list[str]) -> torch.Te
 def feet_contact_force_3d(env: NewtonEnv, feet_bodies: str | list[str]) -> torch.Tensor:
     """3D contact force vector for each foot (log-scaled, flattened). Shape: [num_envs, num_feet * 3]."""
     result = get_bodies_height_with_contact(env, feet_bodies)
-    force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]
+    force = env.contact_manager.contact_force("feet_ground_contact")[:, result.contact_indices]
     flat = force.reshape(env.num_envs, -1)
     return torch.sign(flat) * torch.log1p(torch.abs(flat))

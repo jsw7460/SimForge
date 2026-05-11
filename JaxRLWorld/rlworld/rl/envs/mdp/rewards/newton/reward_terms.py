@@ -38,8 +38,8 @@ def wtw_feet_slip(env: "NewtonLocomotionEnv") -> torch.Tensor:
     feet_vel_xy = body_qd[:, result.body_indices, :2]
     vel_sq = torch.sum(torch.square(feet_vel_xy), dim=-1)
 
-    contact = env.contact_manager.is_contact("foot_contact", order=result.body_names)
-    prev_contact = env.contact_manager.prev_is_contact("foot_contact", order=result.body_names)
+    contact = env.contact_manager.is_contact("feet_ground_contact", order=result.body_names)
+    prev_contact = env.contact_manager.prev_is_contact("feet_ground_contact", order=result.body_names)
     contact_filt = contact | prev_contact
     return -torch.sum(contact_filt.float() * vel_sq, dim=-1)
 
@@ -51,7 +51,7 @@ def wtw_tracking_contacts_shaped_force(
     """WTW: penalize foot contact force when foot should be in swing."""
     feet_bodies = env.gait_manager.foot_names
     result = get_bodies_height_with_contact(env, feet_bodies)
-    contact_force = env.contact_manager.contact_force("foot_contact")[:, result.contact_indices]
+    contact_force = env.contact_manager.contact_force("feet_ground_contact")[:, result.contact_indices]
     foot_forces = torch.norm(contact_force, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states

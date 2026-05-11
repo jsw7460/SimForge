@@ -193,7 +193,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         # substep contact forces for ``penalize_contact_force_count``.
         contact_sensors=[
             ContactSensorCfg(
-                name="foot_contact",
+                name="feet_ground_contact",
                 # Foot names ("FL_foot", ...) have no regex metacharacters
                 # → matched as exact leaf names.
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),

@@ -190,7 +190,7 @@ def feet_air_time_mjlab(
     result = get_bodies_height_with_contact(env, feet_bodies)
     contact_indices = result.contact_indices
 
-    current_air_time = env.contact_manager.current_air_time("foot_contact")[:, contact_indices]
+    current_air_time = env.contact_manager.current_air_time("feet_ground_contact")[:, contact_indices]
 
     in_range = (current_air_time > threshold_min) & (current_air_time < threshold_max)
     reward = torch.sum(in_range.float(), dim=1)
@@ -252,13 +252,13 @@ def feet_slip_mjlab(
     """Thin redirect to ``common.penalize_feet_slip``.
 
     Bit-identical: the common helper passes ``order=feet_bodies`` to the
-    contact manager, which reorders ``is_contact("foot_contact")`` by
+    contact manager, which reorders ``is_contact("feet_ground_contact")`` by
     name — equivalent to the legacy ``contact_indices`` cache lookup.
     """
     names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
     return penalize_feet_slip(
         env,
-        contact_group="foot_contact",
+        contact_group="feet_ground_contact",
         command_threshold=command_threshold,
         body_names=names,
     )
@@ -285,7 +285,7 @@ def soft_landing_mjlab(
     names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
     return penalize_soft_landing(
         env,
-        contact_group="foot_contact",
+        contact_group="feet_ground_contact",
         command_threshold=command_threshold,
         contact_order=names,
     )
@@ -417,7 +417,7 @@ class feet_swing_height_mjlab:
         names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
         self._impl = FeetSwingHeightTracker(
             env=env,
-            contact_group="foot_contact",
+            contact_group="feet_ground_contact",
             target_height=target_height,
             command_threshold=command_threshold,
             body_names=names,
@@ -457,7 +457,7 @@ class feet_swing_height:
         names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
         self._impl = FeetSwingHeightTracker(
             env=env,
-            contact_group="foot_contact",
+            contact_group="feet_ground_contact",
             target_height=target_height,
             command_threshold=command_threshold,
             body_names=names,

@@ -147,7 +147,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             ),
             NewtonContactSensorConfig(
                 entity_name="robot",
-                sensor_name="foot_contact",
+                sensor_name="feet_ground_contact",
                 sensing_obj_bodies=r.foot_names,
                 counterpart_shapes="ground_plane",
                 use_regex=True,
@@ -194,7 +194,7 @@ def build_observation(cfg: G1FlatConfig) -> NewtonObservationConfig:
             func=foot_air_time,
             scale=1.0,
             params={
-                "contact_group": "foot_contact",
+                "contact_group": "feet_ground_contact",
                 "body_names": feet_bodies,
                 "use_last": True,
             },
@@ -202,12 +202,12 @@ def build_observation(cfg: G1FlatConfig) -> NewtonObservationConfig:
         foot_contact_obs = ObservationTermConfig(
             func=foot_contact_indicator,
             scale=1.0,
-            params={"contact_group": "foot_contact", "body_names": feet_bodies},
+            params={"contact_group": "feet_ground_contact", "body_names": feet_bodies},
         )
         foot_contact_forces_obs = ObservationTermConfig(
             func=foot_contact_forces,
             scale=0.01,
-            params={"contact_group": "foot_contact", "body_names": feet_bodies},
+            params={"contact_group": "feet_ground_contact", "body_names": feet_bodies},
         )
 
     @dataclass
