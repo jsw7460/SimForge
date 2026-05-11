@@ -7,57 +7,41 @@ import torch
 from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
 from rlworld.rl.envs.managers.genesis.contact_sensor import GenesisContactSensor
-from rlworld.rl.envs.managers.genesis.legacy_contact_sensor import LegacyGenesisContactSensor
 
 if TYPE_CHECKING:
-    from rlworld.rl.configs.genesis_config_classes import GenesisContactSensorCfg
     from rlworld.rl.envs import GenesisEnv
 
 
 class ContactManager(BaseContactManager):
     """Named-group contact manager for Genesis environments.
 
-    Each contact sensor config becomes a named group. Two config types
-    are accepted for backward compatibility:
-
-    - :class:`rlworld.rl.configs.sensors.ContactSensorCfg` — the
-      simulator-agnostic config (go2_flat and newer presets). Backed by
-      :class:`GenesisContactSensor`, which prefers Genesis's native link
-      sensors. Those native sensors must be created *before*
-      ``scene.build()``, so they are pre-built by
-      ``GenesisEnv._build_scene`` and merely *adopted* here (see
-      ``env._genesis_contact_sensors``); only when no pre-built sensor is
-      found do we construct one on the spot (e.g. the ``get_contacts``
-      self-collision path, which is build-agnostic).
-    - the legacy :class:`GenesisContactSensorCfg` (g1 / t1 presets),
-      backed by :class:`LegacyGenesisContactSensor` (the old
-      ``entity.get_contacts``-based wrapper, untouched).
+    Each :class:`rlworld.rl.configs.sensors.ContactSensorCfg` becomes a
+    named group, backed by :class:`GenesisContactSensor` (which prefers
+    Genesis's native link sensors). Those native sensors must be created
+    *before* ``scene.build()``, so they are pre-built by
+    ``GenesisEnv._build_scene`` and merely *adopted* here (see
+    ``env._genesis_contact_sensors``).
     """
 
     def __init__(self, env: GenesisEnv):
         super().__init__(env=env)
-        self._sensors: dict[str, GenesisContactSensor | LegacyGenesisContactSensor] = {}
+        self._sensors: dict[str, GenesisContactSensor] = {}
 
-    def register_sensor(self, cfg: ContactSensorCfg | GenesisContactSensorCfg) -> None:
+    def register_sensor(self, cfg: ContactSensorCfg) -> None:
         """Register a contact sensor config as a named group.
 
-        ``ContactSensorCfg`` sensors are pre-built (and, for the native
-        path, their ``gs.sensors.*`` objects added to the still-unbuilt
-        scene) by ``GenesisEnv._build_scene``; here we just adopt them.
-        Legacy ``GenesisContactSensorCfg`` sensors are build-agnostic
-        and constructed on the spot.
+        The sensor (and, for the native path, its ``gs.sensors.*``
+        objects added to the still-unbuilt scene) is pre-built by
+        ``GenesisEnv._build_scene``; here we just adopt it.
         """
-        if isinstance(cfg, ContactSensorCfg):
-            pre_built = getattr(self.env, "_genesis_contact_sensors", {})
-            sensor = pre_built.get(cfg.name)
-            if sensor is None:
-                raise RuntimeError(
-                    f"ContactSensorCfg {cfg.name!r} was not pre-registered before "
-                    "scene.build(); ensure GenesisEnv._build_scene() iterates "
-                    "scene_cfg.contact_sensors and calls create_native_sensors()."
-                )
-        else:
-            sensor = LegacyGenesisContactSensor(self.env, cfg)
+        pre_built = getattr(self.env, "_genesis_contact_sensors", {})
+        sensor = pre_built.get(cfg.name)
+        if sensor is None:
+            raise RuntimeError(
+                f"ContactSensorCfg {cfg.name!r} was not pre-registered before "
+                "scene.build(); ensure GenesisEnv._build_scene() iterates "
+                "scene_cfg.contact_sensors and calls create_native_sensors()."
+            )
         self._sensors[cfg.name] = sensor
         self._register_group(cfg.name, sensor.tracked_names)
 
@@ -88,15 +72,12 @@ class ContactManager(BaseContactManager):
         for gname, group in self._groups.items():
             sensor = self._sensors[gname]
             cfg = sensor.cfg
-            if isinstance(cfg, ContactSensorCfg):
-                if cfg.secondary is None:
-                    sec = "any"
-                elif cfg.secondary.entity:
-                    sec = cfg.secondary.entity
-                else:
-                    sec = str(cfg.secondary.pattern)
+            if cfg.secondary is None:
+                sec = "any"
+            elif cfg.secondary.entity:
+                sec = cfg.secondary.entity
             else:
-                sec = cfg.secondary_entity or "any"
+                sec = str(cfg.secondary.pattern)
             for idx, name in enumerate(group.tracked_names):
                 rows.append([gname, idx, name, sec])
 

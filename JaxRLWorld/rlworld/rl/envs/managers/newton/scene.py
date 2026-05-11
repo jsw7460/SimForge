@@ -11,7 +11,6 @@ import torch
 import warp as wp
 from newton import ShapeFlags
 from newton.selection import ArticulationView
-from newton.sensors import SensorContact
 
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.newton_config_classes import SolverMuJoCoCfg
@@ -26,7 +25,6 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.configs.sensors.newton_sensor_config import (
-    NewtonContactSensorConfig,
     NewtonFrameTransformSensorConfig,
     NewtonIMUSensorConfig,
     NewtonSensorConfig,
@@ -767,7 +765,7 @@ class NewtonSceneManager(BaseManager):
         # view (bare leaf names) instead of raw ``model.body_label``.
         self._build_robot_view()
 
-        # Create sensors (legacy NewtonSensorConfig path)
+        # Create NewtonSensorConfig sensors (IMU / FrameTransform).
         self._create_sensors()
 
         # Create simulator-agnostic ContactSensorCfg wrappers. Each builds
@@ -791,9 +789,7 @@ class NewtonSceneManager(BaseManager):
                 self._contact_sensor_wrappers[cs_cfg.name] = wrapper
 
         # Create sensor-specific contacts with extended attributes
-        has_contact_sensor = any(isinstance(s, SensorContact) for s in self.sensors.values()) or bool(
-            self._contact_sensor_wrappers
-        )
+        has_contact_sensor = bool(self._contact_sensor_wrappers)
         if has_contact_sensor:
             self.sensor_contacts = newton.Contacts(
                 self.solver.get_max_contact_count(),
@@ -997,58 +993,6 @@ class NewtonSceneManager(BaseManager):
             sensor = newton.sensors.SensorIMU(self.model, all_site_indices)
             self.sensors[config.sensor_name] = sensor
 
-        elif isinstance(config, NewtonContactSensorConfig):
-            entity_name = config.entity_name
-            # Widen bare leaf-name body patterns (e.g. ``"left_ankle_roll_link"``)
-            # to ``*/<name>`` BEFORE prefix injection, so SensorContact's
-            # internal fnmatch hits both URDF flat labels
-            # (``<entity>/<name>``) and MJCF XPath labels
-            # (``<entity>/<ancestor>/.../<name>``). Order matters:
-            # ``_prefix_names`` skips patterns that already contain ``/``,
-            # so widening first keeps bare-name configs (like
-            # ``r.foot_names = ["left_ankle_roll_link"]``) working on both
-            # loaders, while pre-scoped or glob / regex patterns pass
-            # through unchanged.
-            sensing_bodies = self._prefix_names(entity_name, as_leaf_globs(config.sensing_obj_bodies))
-            sensing_shapes = self._prefix_names(entity_name, config.sensing_obj_shapes)
-            counterpart_bodies = self._prefix_names(entity_name, as_leaf_globs(config.counterpart_bodies))
-
-            # Apply exclude filter. Matching happens against world-0
-            # slice of ``model.body_label`` (full labels — both the
-            # entity prefix already injected by ``_prefix_names`` and
-            # any XPath segments produced by Newton's MJCF loader).
-            # ``sensing_bodies`` stays as a list of full labels so
-            # SensorContact's internal fnmatch resolves them directly
-            # against ``model.body_label``.
-            if config.exclude_bodies and sensing_bodies is not None:
-                from fnmatch import fnmatch
-
-                all_labels = self.model.body_label
-                world_count = self.model.world_count
-                bodies_per_env = len(all_labels) // world_count
-                first_env_labels = all_labels[:bodies_per_env]
-
-                patterns = [sensing_bodies] if isinstance(sensing_bodies, str) else sensing_bodies
-                matched_indices = [
-                    idx for idx, label in enumerate(first_env_labels) if any(fnmatch(label, p) for p in patterns)
-                ]
-                matched_indices = [
-                    idx
-                    for idx in matched_indices
-                    if not any(fnmatch(first_env_labels[idx], exc) for exc in config.exclude_bodies)
-                ]
-                sensing_bodies = [first_env_labels[idx] for idx in matched_indices]
-
-            sensor = SensorContact(
-                self.model,
-                sensing_obj_bodies=sensing_bodies,
-                sensing_obj_shapes=sensing_shapes,
-                counterpart_bodies=counterpart_bodies,
-                counterpart_shapes=config.counterpart_shapes,
-                measure_total=config.include_total,
-            )
-            self.sensors[config.sensor_name] = sensor
-
         elif isinstance(config, NewtonFrameTransformSensorConfig):
             site_indices = [idx for idx, key in enumerate(self.model.shape_label) if key in config.site_names]
 
@@ -1201,9 +1145,7 @@ class NewtonSceneManager(BaseManager):
         wrappers are safe here). The wrappers also push one substep frame
         into their ring buffer on every call (see ``NewtonContactSensor``).
         """
-        has_contact_sensor = any(isinstance(s, SensorContact) for s in self.sensors.values()) or bool(
-            self._contact_sensor_wrappers
-        )
+        has_contact_sensor = bool(self._contact_sensor_wrappers)
         if has_contact_sensor:
             self.solver.update_contacts(self.sensor_contacts, self.state_0)
 
@@ -1211,8 +1153,6 @@ class NewtonSceneManager(BaseManager):
             if isinstance(sensor, NewtonContactSensor):
                 # Wrapper: refreshes its native SensorContact + pushes history.
                 sensor.update(self.state_0, self.sensor_contacts)
-            elif isinstance(sensor, SensorContact):
-                sensor.update(self.state_0, self.sensor_contacts)  # Contact sensor takes Contacts
             elif hasattr(sensor, "update"):
                 sensor.update(self.state_0)  # IMU takes State
 

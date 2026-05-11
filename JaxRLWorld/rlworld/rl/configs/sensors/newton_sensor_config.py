@@ -19,7 +19,6 @@ class NewtonSensorType(Enum):
     """Available sensor types in Newton."""
 
     IMU = "imu"
-    CONTACT = "contact"
     FRAME_TRANSFORM = "frame_transform"
     RAYCAST = "raycast"
     TILED_CAMERA = "tiled_camera"
@@ -76,48 +75,6 @@ class NewtonIMUSensorConfig(NewtonSensorConfig):
         import newton
 
         return newton.sensors.SensorIMU(model, site_indices)
-
-
-@dataclass
-class NewtonContactSensorConfig(NewtonSensorConfig):
-    """Configuration for Newton Contact sensor.
-
-    Contact sensors detect contacts between specified geometries.
-    Exactly one of sensing_obj_bodies or sensing_obj_shapes must be specified.
-
-    Example:
-        # Body-based (recommended for URDF)
-        contact_config = NewtonContactSensorConfig(
-            sensor_name="foot_contacts",
-            entity_name="robot",
-            sensing_obj_bodies=".*_foot",
-            use_regex=True,
-        )
-
-        # Shape-based (for USD or custom shapes)
-        contact_config = NewtonContactSensorConfig(
-            sensor_name="foot_contacts",
-            entity_name="robot",
-            sensing_obj_shapes=".*_foot.*",
-            use_regex=True,
-        )
-    """
-
-    sensor_type: NewtonSensorType = NewtonSensorType.CONTACT
-
-    # Sensing objects (exactly one must be specified)
-    sensing_obj_bodies: str | list[str] | None = None
-    sensing_obj_shapes: str | list[str] | None = None
-
-    # Exclude patterns (regex) — matched bodies/shapes are removed from sensing_obj
-    exclude_bodies: tuple[str, ...] = ()
-
-    # Counterparts (optional, at most one)
-    counterpart_bodies: str | list[str] | None = None
-    counterpart_shapes: str | list[str] | None = None
-
-    include_total: bool = True
-    use_regex: bool = False
 
 
 @dataclass

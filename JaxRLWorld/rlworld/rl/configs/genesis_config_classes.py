@@ -56,38 +56,9 @@ class SceneConfig(BaseConfig):
     env_spacing: tuple[float, float] = (20.0, 20.0)
     entities: dict = field(default_factory=dict)
     sensors: list[SensorConfig] | None = field(default_factory=list)
-    # Either the simulator-agnostic ``ContactSensorCfg`` (preferred) or the
-    # legacy ``GenesisContactSensorCfg`` (still used by g1 / t1 presets).
-    contact_sensors: "list[ContactSensorCfg | GenesisContactSensorCfg] | None" = None
+    # Simulator-agnostic contact sensor configs (``ContactSensorCfg``).
+    contact_sensors: "list[ContactSensorCfg] | None" = None
     robot_cfg: Union["RobotConfig", None] = None
-
-
-@dataclass
-class GenesisContactSensorCfg:
-    """Declarative contact sensor for Genesis, matching MuJoCo ContactSensorCfg pattern.
-
-    Wraps ``entity.get_contacts()`` with primary/secondary link filtering
-    and per-primary-link force aggregation.
-
-    Args:
-        name: Group name (e.g. "feet_ground_contact"). Used as ContactManager group key.
-        primary_links: Link name patterns for the primary side (regex supported).
-        exclude_links: Link name patterns to exclude from primary matches (regex supported).
-        entity_name: Entity these links belong to.
-        secondary_entity: Counterpart filter.
-            ``None`` — any counterpart (ground + self + other).
-            ``"self"`` — self-collision only.
-            An entity name (e.g. ``"ground"``) — contacts with that entity only.
-        exclude_self_contact: If True, exclude self-collision from results.
-            Ignored when ``secondary_entity="self"``.
-    """
-
-    name: str
-    primary_links: list[str] = field(default_factory=list)
-    exclude_links: tuple[str, ...] = ()
-    entity_name: str = "robot"
-    secondary_entity: str | None = None
-    exclude_self_contact: bool = True
 
 
 @dataclass
