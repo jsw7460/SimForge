@@ -2,8 +2,8 @@
 
 Functions that rely on Genesis-only APIs (e.g. ``rigid_solver``) and
 have no cross-sim equivalent. General-purpose reset / push functions
-live in ``common.py``; domain-randomization functions live
-in ``dr/genesis.py``.
+live in ``common.py``; cross-sim domain-randomization terms live in
+``dr/unified.py``.
 """
 
 from __future__ import annotations

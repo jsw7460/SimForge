@@ -15,9 +15,10 @@ Currently exposed:
 * :func:`randomize_joint_friction`   — joint Coulomb friction
 * :func:`randomize_encoder_bias`     — joint encoder bias (MuJoCo only)
 
-The legacy per-sim DR functions (``events/dr/genesis.py``,
-``events/dr/newton.py``, ``events/mujoco.py``) remain in place; this
-module is the unified replacement that new presets should target.
+These are the sole DR entry points presets should target.  Newton
+keeps a couple of *non-randomised* SysID-aligned setters in
+``events/dr/newton.py`` (``set_joint_friction`` / ``set_foot_friction``)
+that have no cross-sim counterpart.
 """
 
 from __future__ import annotations
