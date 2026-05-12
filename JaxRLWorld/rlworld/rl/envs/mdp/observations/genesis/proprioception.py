@@ -6,9 +6,7 @@ import torch
 from genesis.utils.geom import inv_quat, transform_by_quat
 
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
-from rlworld.rl.envs.mdp.observations.genesis import state
 from rlworld.rl.envs.utils import EnvStepCache
-from rlworld.rl.utils import entity_utils as eu
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv, LocomotionEnv
@@ -68,42 +66,6 @@ def raw_actions(env: GenesisEnv):
 @EnvStepCache()
 def prev_processed_actions(env: GenesisEnv):
     return env.act_manager.processed_actions.clone()
-
-
-@EnvStepCache()
-def relative_links_pos(
-    env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, base_name: str = "base", links: tuple[str] = None
-):
-    """Get link positions relative to base in body frame.
-
-    Args:
-        env: Genesis environment.
-        entity_name: Name of the robot entity.
-        base_name: Name of the base link.
-        links: Link names to query.
-
-    Returns:
-        Tensor of shape (num_envs, num_links * 3).
-    """
-    entity = env.scene_manager[asset_cfg.name]
-
-    if links is None:
-        links_pos = entity.get_links_pos(links)
-    else:
-        links_ids, _ = eu.find_links(entity, links, global_ids=False)
-        links_pos = entity.get_links_pos(links_ids)
-
-    base_link = entity.get_link(base_name)
-    base_pos = base_link.get_pos().unsqueeze(1)  # (num_envs, 1, 3)
-    base_quat = state.base_quat(env)  # (num_envs, 4)
-
-    # Relative position in world frame
-    rel_pos_world = links_pos - base_pos  # (num_envs, num_links, 3)
-
-    # Transform to body frame
-    rel_pos_body = transform_by_quat(rel_pos_world, inv_quat(base_quat).unsqueeze(1))
-
-    return rel_pos_body.reshape(env.num_envs, -1)
 
 
 @EnvStepCache()
