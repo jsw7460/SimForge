@@ -10,6 +10,7 @@ import torch
 from gymnasium import spaces
 
 from rlworld.rl.envs.lifecycle import LifecycleEvent, LifecycleManager
+from rlworld.rl.envs.utils.step_profiler import StepProfiler
 
 if TYPE_CHECKING:
     from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
@@ -83,6 +84,9 @@ class World(ABC):
 
         self._env_step_counter = 0
         self.lifecycle = LifecycleManager()
+
+        # Per-section step timing — no-op unless JAXRLWORLD_PROFILE_STEP is set.
+        self._step_profiler = StepProfiler(label=self.sim_name)
 
     def _init_buffers(self) -> None:
         """Initialize common buffers. Call after setting num_envs and device."""
@@ -433,37 +437,47 @@ class World(ABC):
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Execute one environment step."""
+        prof = self._step_profiler
+
         # Process and apply actions
-        self.act_manager.process_actions(actions)
+        with prof.section("process_actions"):
+            self.act_manager.process_actions(actions)
 
         # Step physics (simulator-specific)
-        self._step_physics()
+        with prof.section("step_physics"):
+            self._step_physics()
         self._invalidate_cache()
 
         # Update contact info
-        self.contact_manager.advance()
+        with prof.section("contact_manager.advance"):
+            self.contact_manager.advance()
 
         # Apply interval events
-        if hasattr(self, "event_manager") and self.event_manager is not None:
-            if "interval" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="interval", dt=self.control_dt)
+        with prof.section("interval_events"):
+            if hasattr(self, "event_manager") and self.event_manager is not None:
+                if "interval" in self.event_manager.available_modes:
+                    self.event_manager.apply(mode="interval", dt=self.control_dt)
 
         # Pre-reward hook (e.g., gait advance that rewards depend on)
-        self._pre_reward_hook()
+        with prof.section("pre_reward_hook"):
+            self._pre_reward_hook()
 
         # Compute rewards
-        self.rew_buf[:] = 0.0
-        self.reward_manager.set_rewards(
-            reward_buffer=self.rew_buf, episode_sums=self.episode_sums, reward_buffer_per_type=self.rew_buf_per_type
-        )
+        with prof.section("reward_manager.set_rewards"):
+            self.rew_buf[:] = 0.0
+            self.reward_manager.set_rewards(
+                reward_buffer=self.rew_buf, episode_sums=self.episode_sums, reward_buffer_per_type=self.rew_buf_per_type
+            )
 
         # Pre-termination hook
-        self._pre_termination_hook()
+        with prof.section("pre_termination_hook"):
+            self._pre_termination_hook()
 
         # Check termination
-        terminated, truncated = self.termination_manager.check_termination()
-        reset_buf = terminated | truncated
-        reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
+        with prof.section("check_termination"):
+            terminated, truncated = self.termination_manager.check_termination()
+            reset_buf = terminated | truncated
+            reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
 
         # Handle terminal observations.
         #
@@ -479,43 +493,52 @@ class World(ABC):
         # ones.
         final_observation = None
         final_info = None
-        if len(reset_env_ids) > 0:
-            self.obs_manager.process_observations(update_history=True)
-            final_observation = {key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()}
-            self.obs_manager.rollback_last_history_append()
-            final_info = {
-                "episode_reward_sums": deepcopy(self.episode_sums),
-            }
+        with prof.section("terminal_obs"):
+            if len(reset_env_ids) > 0:
+                self.obs_manager.process_observations(update_history=True)
+                final_observation = {key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()}
+                self.obs_manager.rollback_last_history_append()
+                final_info = {
+                    "episode_reward_sums": deepcopy(self.episode_sums),
+                }
 
         # Reset terminated environments
-        self._reset_idx(reset_env_ids)
+        with prof.section("reset_idx"):
+            self._reset_idx(reset_env_ids)
         self._invalidate_cache()
 
         # Post-reset forward pass — refresh derived quantities (xpos,
         # xquat, site positions, sensor data, ...) so the upcoming
         # observation sees fresh kinematics. Override in backends that
         # need an explicit FK pass (mjlab: sim.forward()).
-        self._post_reset_forward()
+        with prof.section("post_reset_forward"):
+            self._post_reset_forward()
 
         # Advance commands (timer-based resampling + per-step post-processing)
-        self.command_manager.compute(self.control_dt)
+        with prof.section("command_manager.compute"):
+            self.command_manager.compute(self.control_dt)
 
         # Advance managers
-        self._advance_managers()
+        with prof.section("advance_managers"):
+            self._advance_managers()
 
         self._update_num_step_calls()
 
         # Build extras
-        self.extras = {
-            "final_observation": final_observation,
-            "final_info": final_info,
-            "terminal_env_ids": reset_env_ids if len(reset_env_ids) > 0 else None,
-            "rewards_per_type": self.rew_buf_per_type,
-            "episode_reward_sums": deepcopy(self.episode_sums),
-            **self.obs_manager.extras,
-            **self.termination_manager.extras,
-        }
-        return self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras
+        with prof.section("build_extras+get_obs"):
+            self.extras = {
+                "final_observation": final_observation,
+                "final_info": final_info,
+                "terminal_env_ids": reset_env_ids if len(reset_env_ids) > 0 else None,
+                "rewards_per_type": self.rew_buf_per_type,
+                "episode_reward_sums": deepcopy(self.episode_sums),
+                **self.obs_manager.extras,
+                **self.termination_manager.extras,
+            }
+            result = (self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras)
+
+        prof.step_done()
+        return result
 
     def _pre_reward_hook(self) -> None:
         """Override in subclass for logic that must run before reward computation.
