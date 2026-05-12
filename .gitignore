@@ -85,3 +85,4 @@ checkpoints/
 *.log
 .claude/
 CLAUDE.local.md
+TODO.local.md
