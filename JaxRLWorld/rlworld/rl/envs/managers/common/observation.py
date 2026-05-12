@@ -58,6 +58,9 @@ class ObservationManager(BaseManager):
         # needs ``env.act_manager``.  We instead resolve lazily on first use
         # — by which point every manager exists.  The guard makes it
         # idempotent so it's safe to call from multiple entry points.
+        # Per-(group, term) {param_name: ResolvedEntity} overrides, merged
+        # over the (config-owned, untouched) term params at call time.
+        self._group_term_overrides: dict[str, dict[str, dict]] = {}
         self._selectors_resolved = False
 
         # History buffers
@@ -69,7 +72,7 @@ class ObservationManager(BaseManager):
         self._is_term_indices_built = False
 
     def _ensure_selectors_resolved(self) -> None:
-        """Lazily replace SceneEntitySelector params with ResolvedEntity.
+        """Lazily compute per-term selector overrides.
 
         Idempotent.  Called before the first obs evaluation (dummy or
         real), once every manager — in particular ``act_manager`` — has
@@ -77,10 +80,15 @@ class ObservationManager(BaseManager):
         """
         if self._selectors_resolved:
             return
-        for terms in self._group_terms.values():
-            for t in terms.values():
-                self._resolve_term_selectors(t.resolved_func, t.params)
+        for group_name, terms in self._group_terms.items():
+            self._group_term_overrides[group_name] = {
+                name: self._selector_overrides(t.resolved_func, t.params) for name, t in terms.items()
+            }
         self._selectors_resolved = True
+
+    def _term_kwargs(self, group_name: str, term_name: str, obs_term) -> dict:
+        """Term params merged with resolved selector overrides."""
+        return {**obs_term.params, **self._group_term_overrides[group_name][term_name]}
 
     @property
     def num_envs(self) -> int:
@@ -106,7 +114,7 @@ class ObservationManager(BaseManager):
             current_idx = 0
             for term_name, obs_term in terms.items():
                 resolved_fn = self._resolved_fns[group_name][term_name]
-                dummy_value = resolved_fn(self.env, **obs_term.params)
+                dummy_value = resolved_fn(self.env, **self._term_kwargs(group_name, term_name, obs_term))
                 base_dim = dummy_value.shape[-1]
 
                 history_length = obs_term.history_length
@@ -183,7 +191,7 @@ class ObservationManager(BaseManager):
                 func = self._resolved_fns[group_name][term_name]
                 scale = obs_term.scale
 
-                obs_value = func(self.env, **obs_term.params)
+                obs_value = func(self.env, **self._term_kwargs(group_name, term_name, obs_term))
 
                 if apply_group_noise and obs_term.noise is not None:
                     obs_value = apply_noise(obs_value, obs_term.noise)
@@ -237,7 +245,7 @@ class ObservationManager(BaseManager):
                 func_name = getattr(resolved_fn, "__name__", term_name)
 
                 try:
-                    dummy = resolved_fn(self.env, **obs_term.params)
+                    dummy = resolved_fn(self.env, **self._term_kwargs(group_name, term_name, obs_term))
                     base_dim = dummy.shape[-1]
                 except Exception:
                     base_dim = "?"

@@ -31,10 +31,13 @@ class EventManager(BaseManager):
         # Discover named terms and resolve callables
         self._all_terms: dict[str, EventTermConfig] = iter_terms(config, EventTermConfig)
         self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
-        # Pre-resolve SceneEntitySelector params (and selector-typed
-        # defaults) so event functions receive a ResolvedEntity directly.
-        for term in self._all_terms.values():
-            self._resolve_term_selectors(term.resolved_func, term.params)
+        # Per-term {param_name: ResolvedEntity} overrides, merged over the
+        # (config-owned, untouched) term params at call time — see
+        # RewardManager / BaseManager._selector_overrides for why we don't
+        # mutate the config tree.
+        self._term_overrides: dict[str, dict] = {
+            name: self._selector_overrides(term.resolved_func, term.params) for name, term in self._all_terms.items()
+        }
 
         # Group by mode
         self._terms_by_mode: dict[str, list[tuple[str, EventTermConfig]]] = defaultdict(list)
@@ -80,7 +83,7 @@ class EventManager(BaseManager):
             self._interval_timers[idx][env_ids] = new_intervals
 
     def _call_event_fn(self, name: str, term: EventTermConfig, env_ids: torch.Tensor) -> None:
-        self._resolved_fns[name](env=self.env, env_ids=env_ids, **term.params)
+        self._resolved_fns[name](env=self.env, env_ids=env_ids, **{**term.params, **self._term_overrides[name]})
 
     def _apply_startup(self) -> None:
         env_ids = torch.arange(self.num_envs, device=self.device)

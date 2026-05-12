@@ -31,9 +31,11 @@ class TerminationManager(BaseManager):
         # Discover named terms
         self._all_terms: dict[str, TerminationTermConfig] = iter_terms(config, TerminationTermConfig)
         self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
-        # Pre-resolve SceneEntitySelector params (and selector-typed defaults).
-        for term in self._all_terms.values():
-            self._resolve_term_selectors(term.resolved_func, term.params)
+        # Per-term {param_name: ResolvedEntity} overrides, merged over the
+        # (config-owned, untouched) term params at call time.
+        self._term_overrides: dict[str, dict] = {
+            name: self._selector_overrides(term.resolved_func, term.params) for name, term in self._all_terms.items()
+        }
 
         self.reset_buf = torch.ones(env.num_envs, device=self.device, dtype=torch.bool)
         self.episode_count = torch.zeros(env.num_envs, device=self.device, dtype=torch.long)
@@ -140,7 +142,9 @@ class TerminationManager(BaseManager):
         truncated = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
 
         for name, term_config in self._all_terms.items():
-            result: TerminationResult = self._resolved_fns[name](self.env, **term_config.params)
+            result: TerminationResult = self._resolved_fns[name](
+                self.env, **{**term_config.params, **self._term_overrides[name]}
+            )
 
             self._term_dones[name] = result.reset
             self._episode_fires[name] += result.reset.long()
