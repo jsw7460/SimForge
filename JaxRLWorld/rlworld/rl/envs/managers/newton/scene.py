@@ -699,14 +699,32 @@ class NewtonSceneManager(BaseManager):
         # Create scene builder and replicate entities
         scene_builder = newton.ModelBuilder()
 
+        # When the scene has more than one (non-ground) robot, namespace each
+        # robot's labels with its entities={...} dict-key name so that
+        # per-entity scoping (ArticulationView pattern, NewtonContactSensor
+        # _resolve_indices, _prefix_names, find_body_names — all keyed on
+        # cfg.body_label_prefix) stays unambiguous even when the robots are
+        # loaded from the same MJCF/URDF (which would otherwise give them an
+        # identical model-name prefix). Single-robot scenes are left untouched
+        # (prefix stays the auto-extracted model name). The label *leaves* are
+        # unchanged either way, so leaf-name-based matching is unaffected.
+        n_robot_entities = sum(
+            1 for n in self._entity_builders if not isinstance(self.entities[n]["config"], GroundPlaneCfg)
+        )
         for entity_name, entity_builder in self._entity_builders.items():
             cfg = self.entities[entity_name]["config"]
             if isinstance(cfg, GroundPlaneCfg):
-                # Ground plane: add once (global)
+                # Ground plane: add once (global). No label prefix — the ground
+                # is resolved via the unscoped fallback in _resolve_indices.
                 scene_builder.add_builder(entity_builder)
             else:
-                # Other entities: replicate
-                scene_builder.replicate(entity_builder, self.config.num_worlds)
+                label_prefix = entity_name if n_robot_entities > 1 else None
+                # ModelBuilder.replicate(builder, N) == N×add_world(builder) with
+                # no prefix; do the loop ourselves so we can pass label_prefix.
+                for _ in range(self.config.num_worlds):
+                    scene_builder.add_world(entity_builder, label_prefix=label_prefix)
+                if label_prefix is not None:
+                    cfg.body_label_prefix = label_prefix
 
         # Finalize model
         self.model = scene_builder.finalize()
