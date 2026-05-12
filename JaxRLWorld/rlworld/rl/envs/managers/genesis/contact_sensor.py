@@ -1,29 +1,22 @@
 """Genesis contact sensor — simulator-agnostic ``ContactSensorCfg`` backend.
 
-Two code paths, chosen at construction time from the resolved
-``secondary``:
+Backed by Genesis's first-class link sensors (``gs.sensors.Contact`` +
+``gs.sensors.ContactForce``), one pair per primary link. Both sensors
+carry the same native ``filter_link_idx`` blacklist, so ``found`` and
+``force`` are counterpart-filtered consistently, and both keep a substep
+ring buffer when ``cfg.history_length > 0``. Native sensors must be
+added to the scene before ``scene.build()`` (``scene.add_sensor`` is
+``@gs.assert_unbuilt``), so :meth:`create_native_sensors` is invoked
+from the env's pre-build phase (``GenesisEnv._build_scene``) rather than
+from ``ContactManager.register_sensor`` (which runs post-build).
 
-``native``
-    Uses Genesis's first-class link sensors (``gs.sensors.Contact`` +
-    ``gs.sensors.ContactForce``), one pair per primary link.
-    ``Contact`` carries a native blacklist ``filter_link_idx`` so the
-    ``found`` flag is already counterpart-filtered; ``ContactForce`` has
-    no filter, so the per-link force is masked by ``found`` after the
-    fact (see :meth:`GenesisContactSensor.compute`). Native sensors keep
-    a ring buffer when ``cfg.history_length > 0`` — that is the only
-    reason to prefer this path. **Native sensors must be added to the
-    scene before ``scene.build()``**, so :meth:`create_native_sensors`
-    is invoked from the env's pre-build phase
-    (``GenesisEnv._build_scene``) rather than from
-    ``ContactManager.register_sensor`` (which runs post-build).
+The agnostic config's positive ``secondary`` is inverted into the
+blacklist:
 
-``get_contacts``
-    Used only when ``secondary.entity == "self"`` (self-collision):
-    Genesis has no native "contact with another link of the same
-    entity" filter, so we keep the legacy ``entity.get_contacts(...)``
-    query + per-primary-link force aggregation. This path is a runtime
-    query, so it works post-build and needs no pre-registration. It has
-    no substep history (``compute_history()`` returns ``None``).
+* ``secondary is None``          → no filter (every contact counts)
+* ``secondary.entity == <name>`` → blacklist every link not in that entity
+* ``secondary.entity == "self"`` → blacklist every link not in the primary
+  entity (keeps robot↔robot contacts only)
 """
 
 from __future__ import annotations
@@ -63,9 +56,9 @@ class GenesisContactSensor:
     """Runtime contact sensor backing one ``ContactManager`` group.
 
     Resolution + validation happen in ``__init__`` (safe pre- or
-    post-build). For the ``native`` path the actual Genesis sensor
-    objects are created later via :meth:`create_native_sensors`, which
-    must run while the scene is still unbuilt.
+    post-build). The actual Genesis sensor objects are created via
+    :meth:`create_native_sensors`, which must run while the scene is
+    still unbuilt.
     """
 
     def __init__(self, env: GenesisEnv, cfg: ContactSensorCfg):
@@ -142,53 +135,33 @@ class GenesisContactSensor:
         self._tracked_names: list[str] = link_names
         self._num_primary = len(link_names)
 
-        # ---- resolve secondary → choose code path -------------------
-        # ``native``: Contact sensor's ``filter_link_idx`` is a BLACKLIST.
-        #   - secondary is None  → no filter (everything counts).
-        #   - secondary.entity == <name> (e.g. "base_entity") → only
-        #     contacts with that entity should count. Native has no
-        #     whitelist, so invert: blacklist every link NOT belonging to
-        #     the secondary entity.
-        # ``get_contacts``: secondary.entity == "self" only.
-        self._mode: str
+        # ---- resolve secondary → native filter_link_idx (BLACKLIST) -------
+        # ``gs.sensors.Contact`` / ``ContactForce`` take a ``filter_link_idx``
+        # blacklist: contacts whose *other* participant is in this list are
+        # ignored. Invert the agnostic config's positive ``secondary``:
+        #   - secondary is None          → no filter
+        #   - secondary.entity == <name> → blacklist every link not in that entity
+        #   - secondary.entity == "self" → blacklist every link not in the primary
+        #     entity (so only robot↔robot contacts survive)
         self._filter_link_idx: tuple[int, ...] = ()
-        # get_contacts-path state (only used when _mode == "get_contacts")
-        self._with_entity = None
-        self._primary_link_ids_global: torch.Tensor | None = None
-
         sec = cfg.secondary
-        if sec is None:
-            self._mode = "native"
-            self._filter_link_idx = ()
-        elif sec.entity == "self":
-            self._mode = "get_contacts"
-            self._with_entity = entity
-            # Global (solver) link ids for the resolved primary links, in the
-            # same order/count as ``self._tracked_names``.
-            global_ids = [entity.link_start + lid for lid in self._link_ids_local]
-            self._primary_link_ids_global = torch.tensor(global_ids, dtype=torch.int64, device=self.device)
-        elif sec.entity:
-            self._mode = "native"
-            sec_entity = env.scene_manager[sec.entity]
+        if sec is not None:
+            if not sec.entity:
+                # secondary.entity is None/"" but a literal pattern was given — out of scope.
+                raise NotImplementedError(
+                    f"Genesis backend: ContactSensorCfg {cfg.name!r} secondary with a literal "
+                    "pattern (no entity scope) is not supported; use secondary.entity=<name> "
+                    "or secondary.entity='self'."
+                )
+            sec_entity = entity if sec.entity == "self" else env.scene_manager[sec.entity]
             sec_links = set(range(sec_entity.link_start, sec_entity.link_end))
             n_links = env.scene_manager.scene.sim.rigid_solver.n_links
             self._filter_link_idx = tuple(sorted(set(range(n_links)) - sec_links))
-        else:
-            # secondary.entity is None/"" but a literal pattern was given — out of scope.
-            raise NotImplementedError(
-                f"Genesis backend: ContactSensorCfg {cfg.name!r} secondary with a literal "
-                "pattern (no entity scope) is not supported yet; use secondary.entity=<name> "
-                "or secondary.entity='self'."
-            )
 
         # Native sensor objects, created later in create_native_sensors().
         self._contact_sensors: list = []
         self._force_sensors: list = []
         self._native_created = False
-
-        # Pre-allocated zero buffers for empty / no-contact early returns.
-        self._zeros_found = torch.zeros(self.num_envs, self._num_primary, dtype=torch.bool, device=self.device)
-        self._zeros_force = torch.zeros(self.num_envs, self._num_primary, 3, device=self.device)
 
     # ------------------------------------------------------------------
     # native sensor creation (must be called while scene is unbuilt)
@@ -197,12 +170,10 @@ class GenesisContactSensor:
     def create_native_sensors(self) -> None:
         """Add ``gs.sensors.Contact`` / ``gs.sensors.ContactForce`` to the scene.
 
-        Only meaningful for ``_mode == 'native'``; a no-op otherwise.
         Must be called before ``scene.build()`` — ``scene.add_sensor`` is
-        ``@gs.assert_unbuilt``.
+        ``@gs.assert_unbuilt`` — so the env's pre-build phase
+        (``GenesisEnv._build_scene``) invokes it.
         """
-        if self._mode != "native":
-            return
         if self._native_created:
             return
 
@@ -229,6 +200,7 @@ class GenesisContactSensor:
                 gs.sensors.ContactForce(
                     entity_idx=entity_idx,
                     link_idx_local=l,
+                    filter_link_idx=self._filter_link_idx,
                     history_length=hist,
                 )
             )
@@ -264,11 +236,6 @@ class GenesisContactSensor:
         return t
 
     def compute(self) -> ContactSensorData:
-        if self._mode == "native":
-            return self._compute_native()
-        return self._compute_get_contacts()
-
-    def _compute_native(self) -> ContactSensorData:
         if not self._native_created:
             raise RuntimeError(
                 f"Genesis backend: ContactSensorCfg {self.cfg.name!r}: native sensors were "
@@ -280,10 +247,8 @@ class GenesisContactSensor:
         found_cols: list[torch.Tensor] = []
         force_cols: list[torch.Tensor] = []
         for cs, fs in zip(self._contact_sensors, self._force_sensors):
-            # Contact: per-element payload dim 1 → current frame (n, 1) / (1,)
-            c = self._current_frame(cs.read_ground_truth(), has_history, n)
-            # ContactForce: per-element payload dim 3 → current frame (n, 3) / (3,)
-            f = self._current_frame(fs.read_ground_truth(), has_history, n)
+            c = self._current_frame(cs.read_ground_truth(), has_history, n)  # Contact: payload dim 1
+            f = self._current_frame(fs.read_ground_truth(), has_history, n)  # ContactForce: payload dim 3
             if n == 0:
                 c = c.unsqueeze(0)  # (1, 1)
                 f = f.unsqueeze(0)  # (1, 3)
@@ -292,78 +257,22 @@ class GenesisContactSensor:
 
         found = torch.stack(found_cols, dim=1)  # (num_envs, N) bool
         force = torch.stack(force_cols, dim=1)  # (num_envs, N, 3)
-
-        # ContactForce has no counterpart filter, so its force is the
-        # *total* force on the link (ground + self + anything). Contact's
-        # ``found`` IS counterpart-filtered, so mask the force by it.
-        # Limitation: a link simultaneously touching the secondary entity
-        # AND something else still reports the combined force — accepted
-        # for now (it only matters when ``found`` is true).
-        force = force * found.unsqueeze(-1).to(force.dtype)
-
-        return ContactSensorData(found=found, force=force, tracked_names=self._tracked_names)
-
-    def _compute_get_contacts(self) -> ContactSensorData:
-        """Legacy self-collision path via ``entity.get_contacts``."""
-        raw = self._entity.get_contacts(
-            with_entity=self._with_entity,
-            exclude_self_contact=False,
-        )
-        if raw is None:
-            return ContactSensorData(
-                found=self._zeros_found.clone(),
-                force=self._zeros_force.clone(),
-                tracked_names=self._tracked_names,
-            )
-
-        link_a = raw["link_a"]
-        link_b = raw["link_b"]
-        force_a = raw["force_a"]
-        force_b = raw["force_b"]
-        valid_mask = raw.get("valid_mask")
-
-        if link_a.numel() == 0:
-            return ContactSensorData(
-                found=self._zeros_found.clone(),
-                force=self._zeros_force.clone(),
-                tracked_names=self._tracked_names,
-            )
-
-        if link_a.dim() == 1:
-            link_a = link_a.unsqueeze(0)
-            link_b = link_b.unsqueeze(0)
-            force_a = force_a.unsqueeze(0)
-            force_b = force_b.unsqueeze(0)
-            if valid_mask is not None:
-                valid_mask = valid_mask.unsqueeze(0)
-
-        primary_ids = self._primary_link_ids_global  # (N,)
-        match_a = link_a.unsqueeze(-1) == primary_ids  # (B, C, N) — primary is link_a
-        match_b = link_b.unsqueeze(-1) == primary_ids  # (B, C, N) — primary is link_b
-        if valid_mask is not None:
-            vm = valid_mask.unsqueeze(-1)
-            match_a = match_a & vm
-            match_b = match_b & vm
-
-        found = (match_a | match_b).any(dim=1)  # (B, N)
-        force_from_a = torch.einsum("bci,bcn->bni", force_a, match_a.float())
-        force_from_b = torch.einsum("bci,bcn->bni", force_b, match_b.float())
-        force = force_from_a + force_from_b  # (B, N, 3)
-
+        # ``Contact`` and ``ContactForce`` carry the same ``filter_link_idx``
+        # blacklist, so ``force`` is already counterpart-filtered (matches ``found``).
         return ContactSensorData(found=found, force=force, tracked_names=self._tracked_names)
 
     # ------------------------------------------------------------------
-    # substep history (only native + history_length > 0)
+    # substep history (only when history_length > 0)
     # ------------------------------------------------------------------
 
     def compute_history(self) -> torch.Tensor | None:
-        """Return ``(num_envs, N, H, 3)`` contact-force history, or ``None``.
+        """Return ``(num_envs, N, H, 3)`` counterpart-filtered contact-force history, or ``None``.
 
         Newest-first along the H axis (Genesis ring layout). The only
         consumer (``penalize_contact_force_count``) reduces over H with
         ``.any(dim=2)``, so the order does not matter.
         """
-        if self._mode != "native" or self.cfg.history_length <= 0:
+        if self.cfg.history_length <= 0:
             return None
         if not self._native_created:
             raise RuntimeError(

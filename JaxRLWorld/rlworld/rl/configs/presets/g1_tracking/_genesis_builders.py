@@ -151,6 +151,7 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> SceneConfig:
                 name="self_collision",
                 primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
                 secondary=ContactMatch(mode="body", pattern=".*", entity="self"),
+                history_length=timing["decimation"],
             ),
         ],
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),

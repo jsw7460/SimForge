@@ -38,10 +38,7 @@ always available (there is no opt-in flag).
 The Genesis / Newton backends raise ``NotImplementedError`` for the
 combinations they do not support (Genesis: ``primary.mode`` of
 ``"geom"`` / ``"subtree"``; both: ``reduce`` other than ``netforce``,
-``num_slots > 1``, fields beyond ``{"found", "force"}``). On Genesis a
-``secondary.entity="self"`` sensor takes the ``get_contacts`` path,
-which does not keep substep history, so ``history_length`` is ignored
-for it.
+``num_slots > 1``, fields beyond ``{"found", "force"}``).
 """
 
 from __future__ import annotations
