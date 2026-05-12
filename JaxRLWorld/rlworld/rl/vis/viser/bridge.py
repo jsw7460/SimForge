@@ -53,6 +53,18 @@ class SimulatorBridge(Protocol):
         """Extract all visual geometry from the simulator (called once at setup)."""
         ...
 
+    def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """Body poses for one environment in a *single* read.
+
+        Returns ``(positions, quaternions)`` where ``positions`` is
+        ``(num_bodies, 3)`` and ``quaternions`` is ``(num_bodies, 4)`` in
+        wxyz order.  This is the per-frame hot path — implementations
+        must do exactly one GPU→CPU transfer per simulated entity, not
+        one per body.  ``ViserScene.update`` calls only this (the
+        tracked-body position is sliced from the result).
+        """
+        ...
+
     def get_body_positions(self, env_idx: int) -> np.ndarray:
         """Body positions for one environment. Returns (num_bodies, 3)."""
         ...

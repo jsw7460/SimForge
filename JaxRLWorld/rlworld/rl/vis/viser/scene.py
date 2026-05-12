@@ -188,14 +188,14 @@ class ViserScene:
 
     def update(self) -> None:
         """Update all dynamic body transforms from the bridge."""
-        positions = self.bridge.get_body_positions(self.env_idx)
-        quaternions = self.bridge.get_body_quaternions(self.env_idx)
+        # Single GPU→CPU read per frame; the tracked-body position is sliced
+        # from the result rather than re-queried.
+        positions, quaternions = self.bridge.get_body_transforms(self.env_idx)
 
         # Compute scene offset for camera tracking.
         scene_offset = np.zeros(3)
         if self.camera_tracking_enabled and self.geometry.tracked_body_id is not None:
-            tracked_pos = self.bridge.get_tracked_position(self.env_idx)
-            scene_offset = -tracked_pos
+            scene_offset = -positions[self.geometry.tracked_body_id].astype(np.float64)
             # Only offset XY; keep Z so the ground stays at Z=0.
             scene_offset[2] = 0.0
         self._scene_offset = scene_offset
@@ -218,7 +218,9 @@ class ViserScene:
                 continue
 
             body_pos = positions[group.body_id] + scene_offset
-            body_quat = quaternions[group.body_id]  # wxyz
+            # ``quaternions`` is a buffer the bridge reuses across frames — copy
+            # the slice before handing it to viser handles.
+            body_quat = quaternions[group.body_id].copy()  # wxyz
 
             for mesh_idx, handle in enumerate(handles):
                 if group.local_positions and group.local_quaternions:

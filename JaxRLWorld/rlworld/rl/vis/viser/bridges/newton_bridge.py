@@ -94,37 +94,31 @@ class NewtonBridge:
             tracked_body_name="base",
         )
 
+    def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """Body poses for one environment — one GPU→CPU read total.
+
+        Returns ``(positions, quaternions)`` of shapes ``(num_bodies, 3)`` /
+        ``(num_bodies, 4)`` (wxyz; Newton stores xyzw).
+        """
+        body_q = self._scene_manager.state_0.body_q.numpy()  # (total_bodies, 7) — one transfer
+        start = env_idx * self._bodies_per_world
+        end = start + self._bodies_per_world
+        block = body_q[start:end]
+        positions = block[:, :3].copy()
+        quaternions = block[:, [6, 3, 4, 5]].copy()  # xyzw -> wxyz
+        return positions, quaternions
+
     def get_body_positions(self, env_idx: int) -> np.ndarray:
         """Get body positions for one environment. Returns (num_bodies, 3)."""
-        state = self._scene_manager.state_0
-        body_q = state.body_q.numpy()  # (total_bodies, 7)
-
-        start = env_idx * self._bodies_per_world
-        end = start + self._bodies_per_world
-        return body_q[start:end, :3].copy()
+        return self.get_body_transforms(env_idx)[0]
 
     def get_body_quaternions(self, env_idx: int) -> np.ndarray:
-        """Get body orientations for one environment.
-
-        Returns (num_bodies, 4) in wxyz format.
-        Newton stores quaternions as [qx, qy, qz, qw], we convert to [qw, qx, qy, qz].
-        """
-        state = self._scene_manager.state_0
-        body_q = state.body_q.numpy()  # (total_bodies, 7)
-
-        start = env_idx * self._bodies_per_world
-        end = start + self._bodies_per_world
-        quats_xyzw = body_q[start:end, 3:7]  # (N, 4) xyzw
-
-        # Convert xyzw -> wxyz.
-        quats_wxyz = np.empty_like(quats_xyzw)
-        quats_wxyz[:, 0] = quats_xyzw[:, 3]  # w
-        quats_wxyz[:, 1:] = quats_xyzw[:, :3]  # xyz
-        return quats_wxyz
+        """Get body orientations for one environment. Returns (num_bodies, 4) wxyz."""
+        return self.get_body_transforms(env_idx)[1]
 
     def get_tracked_position(self, env_idx: int) -> np.ndarray:
         """Get tracked body position. Returns (3,)."""
-        positions = self.get_body_positions(env_idx)
+        positions = self.get_body_transforms(env_idx)[0]
         if self._tracked_body_local is not None:
             return positions[self._tracked_body_local]
         return positions[0]

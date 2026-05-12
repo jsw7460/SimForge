@@ -28,9 +28,18 @@ class GenesisBridge:
         # Cache link ordering for consistent body_id mapping.
         # We enumerate links across all entities to assign body_ids.
         self._link_map: list[tuple] = []  # [(entity, link, global_body_id), ...]
+        # Per-entity contiguous body_id ranges, so the per-frame read is one
+        # ``entity.get_links_pos()`` / ``get_links_quat()`` per entity (not per link).
+        self._entity_ranges: list[tuple] = []  # [(entity, start_body_id, n_links), ...]
         self._tracked_body_id: int | None = None
 
         self._build_link_map()
+
+        # Pre-allocated per-frame buffers (filled in place by get_body_transforms).
+        n = len(self._link_map)
+        self._pos_buf = np.zeros((n, 3), dtype=np.float32)
+        self._quat_buf = np.zeros((n, 4), dtype=np.float32)
+        self._quat_buf[:, 0] = 1.0  # identity default
 
     @property
     def num_envs(self) -> int:
@@ -70,6 +79,7 @@ class GenesisBridge:
             # Skip ground plane — ViserScene adds its own checkerboard.
             if self._is_ground_entity(entity):
                 continue
+            start = body_id
             for link in entity.links:
                 self._link_map.append((entity, link, body_id))
                 # Track robot base.
@@ -77,6 +87,10 @@ class GenesisBridge:
                 if self._tracked_body_id is None and ("base" in name.lower() or "pelvis" in name.lower()):
                     self._tracked_body_id = body_id
                 body_id += 1
+            if body_id > start:
+                # ``entity.get_links_pos()`` returns links in this same order
+                # (``idx_local``), so body_ids [start, body_id) line up with it.
+                self._entity_ranges.append((entity, start, body_id - start))
 
         # Default to first link if no base found.
         if self._tracked_body_id is None and self._link_map:
@@ -127,34 +141,30 @@ class GenesisBridge:
             tracked_body_name="base",
         )
 
+    def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """Link poses for one environment — one GPU→CPU read per entity.
+
+        Returns ``(positions, quaternions)`` of shapes ``(num_bodies, 3)`` /
+        ``(num_bodies, 4)`` (wxyz). The returned arrays are reused across
+        calls (filled in place), so callers must not retain them.
+        """
+        for entity, start, n in self._entity_ranges:
+            # (n_envs, n_links, 3) / (n_envs, n_links, 4) — one transfer each.
+            self._pos_buf[start : start + n] = entity.get_links_pos()[env_idx].cpu().numpy()
+            self._quat_buf[start : start + n] = entity.get_links_quat()[env_idx].cpu().numpy()
+        return self._pos_buf, self._quat_buf
+
     def get_body_positions(self, env_idx: int) -> np.ndarray:
         """Get link positions for one environment. Returns (num_bodies, 3)."""
-        positions = np.zeros((len(self._link_map), 3), dtype=np.float32)
-
-        for entity, link, body_id in self._link_map:
-            pos = link.get_pos()  # (n_envs, 3) torch tensor
-            positions[body_id] = pos[env_idx].cpu().numpy()
-
-        return positions
+        return self.get_body_transforms(env_idx)[0]
 
     def get_body_quaternions(self, env_idx: int) -> np.ndarray:
-        """Get link orientations for one environment.
-
-        Returns (num_bodies, 4) in wxyz format.
-        Genesis stores quaternions as wxyz.
-        """
-        quaternions = np.zeros((len(self._link_map), 4), dtype=np.float32)
-        quaternions[:, 0] = 1.0  # Identity quaternion default.
-
-        for entity, link, body_id in self._link_map:
-            quat = link.get_quat()  # (n_envs, 4) wxyz torch tensor
-            quaternions[body_id] = quat[env_idx].cpu().numpy()
-
-        return quaternions
+        """Get link orientations for one environment. Returns (num_bodies, 4) wxyz."""
+        return self.get_body_transforms(env_idx)[1]
 
     def get_tracked_position(self, env_idx: int) -> np.ndarray:
         """Get tracked body position. Returns (3,)."""
-        positions = self.get_body_positions(env_idx)
+        positions = self.get_body_transforms(env_idx)[0]
         if self._tracked_body_id is not None:
             return positions[self._tracked_body_id]
         return positions[0]
