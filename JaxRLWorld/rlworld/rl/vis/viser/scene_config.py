@@ -22,14 +22,17 @@ class ViserSceneConfig:
     """
 
     # ── Ground ──────────────────────────────────────────────────────
-    ground_kind: Literal["plane", "checkerboard", "none"] = "plane"
+    ground_kind: Literal["plane", "checkerboard", "none"] = "checkerboard"
+    """``"checkerboard"`` (default — a subtle near-white grid, like mjlab's
+    ground), ``"plane"`` (one flat color), or ``"none"``."""
     ground_color: tuple[int, int, int] = (245, 245, 245)
     """Plain-ground color (RGB 0-255). Also the light cell of the checkerboard."""
-    ground_color_alt: tuple[int, int, int] = (210, 210, 210)
-    """Dark cell color for ``ground_kind="checkerboard"``."""
+    ground_color_alt: tuple[int, int, int] = (225, 225, 225)
+    """Dark cell color for ``ground_kind="checkerboard"`` (keep it close to
+    ``ground_color`` for a faint-grid look; spread them apart for a chessboard)."""
     ground_size: float = 50.0
-    ground_divisions: int = 50
-    """Number of cells per side for the checkerboard."""
+    ground_divisions: int = 100
+    """Cells per side for the checkerboard (50 m / 100 = 0.5 m cells)."""
     ground_metalness: float = 0.0
     ground_roughness: float = 0.95
 
