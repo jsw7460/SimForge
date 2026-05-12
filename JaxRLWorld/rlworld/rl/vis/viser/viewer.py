@@ -19,6 +19,7 @@ import viser
 from .bridge import SimulatorBridge
 from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .scene import ViserScene
+from .scene_config import ViserSceneConfig
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
@@ -109,6 +110,9 @@ class ViserViewerConfig:
     enable_debug_viz: bool = False
     enable_command_arrows: bool = True
     enable_actual_vel_arrow: bool = True
+    scene: ViserSceneConfig | None = None
+    """Look of the 3D scene (ground / robot material / shadows). ``None`` →
+    :class:`ViserSceneConfig` defaults (near-white ground, dark metallic robot)."""
 
 
 class ViserVisualizationManager:
@@ -139,7 +143,7 @@ class ViserVisualizationManager:
             self.server.request_share_url()
 
         # Create scene.
-        self.scene = ViserScene.create(self.server, self.bridge)
+        self.scene = ViserScene.create(self.server, self.bridge, scene_config=self.config.scene)
 
         # Arrow handles: each is a (shaft_handle, head_handle) tuple or None.
         self._cmd_arrow_handles: tuple | None = None

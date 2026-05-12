@@ -63,7 +63,8 @@ class GenesisInitializer(SimInitializer):
         from rlworld.rl.vis.viser.bridges import GenesisBridge
         from rlworld.rl.vis.viser.play_scene import BridgePlayScene
 
-        return BridgePlayScene(GenesisBridge(env.scene_manager))
+        scene_cfg = getattr(getattr(env, "visualization_cfg", None), "viser_scene", None)
+        return BridgePlayScene(GenesisBridge(env.scene_manager), scene_config=scene_cfg)
 
     def try_stop_mid_episode_recording(self, env: Any, target_steps: int) -> bool:
         # Genesis writes the video file frame-by-frame, so we have to

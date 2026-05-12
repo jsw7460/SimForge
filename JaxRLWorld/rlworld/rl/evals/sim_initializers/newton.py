@@ -66,7 +66,8 @@ class NewtonInitializer(SimInitializer):
         from rlworld.rl.vis.viser.bridges import NewtonBridge
         from rlworld.rl.vis.viser.play_scene import BridgePlayScene
 
-        return BridgePlayScene(NewtonBridge(env.scene_manager))
+        scene_cfg = getattr(getattr(env, "visualization_cfg", None), "viser_scene", None)
+        return BridgePlayScene(NewtonBridge(env.scene_manager), scene_config=scene_cfg)
 
     def start_recording(self, env: Any) -> None:
         # Newton ViewerFile records automatically

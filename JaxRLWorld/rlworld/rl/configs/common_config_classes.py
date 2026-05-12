@@ -5,6 +5,7 @@ from .base_config import BaseConfig
 
 if TYPE_CHECKING:
     from rlworld.rl.vis.overlays.hud_items.items import HUDItem
+    from rlworld.rl.vis.viser.scene_config import ViserSceneConfig
 
 
 @dataclass
@@ -316,7 +317,7 @@ class RunnerConfig(BaseConfig):
 class VisualizationConfig(BaseConfig):
     """Visualization configuration (shared)."""
 
-    _EXCLUDE_FROM_SERIALIZATION = ("extra_hud_items",)
+    _EXCLUDE_FROM_SERIALIZATION = ("extra_hud_items", "viser_scene")
 
     show_viewer: bool = False
     record_video: bool = False
@@ -346,6 +347,10 @@ class VisualizationConfig(BaseConfig):
     viser_port: int = 8080
     viser_share: bool = True
     rerun_web_port: int = 9191
+
+    # Look of the unified Viser scene (Genesis/Newton bridge path). ``None``
+    # → ViserSceneConfig defaults (near-white ground, dark metallic robot).
+    viser_scene: "ViserSceneConfig | None" = None
 
     # Unified Viser viewer (SimForge custom)
     viser_enable_reward_plots: bool = True

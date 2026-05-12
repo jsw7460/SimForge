@@ -218,6 +218,7 @@ class GenesisEnv(World):
                 share=self.visualization_cfg.viser_share,
                 enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
                 enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
+                scene=self.visualization_cfg.viser_scene,
             )
             self.vis_manager = ViserVisualizationManager(env=self, bridge=bridge, config=viser_cfg)
 

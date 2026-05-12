@@ -16,10 +16,12 @@ from typing import Any
 import numpy as np
 import trimesh
 import trimesh.visual
+import trimesh.visual.material
 import viser
 import viser.transforms as vtf
 
 from .bridge import SimulatorBridge, SimulatorGeometry
+from .scene_config import ViserSceneConfig
 
 
 def _quaternion_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
@@ -36,20 +38,57 @@ def _quaternion_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     )
 
 
-# Ground plane settings.
-_GROUND_SIZE = 50.0
-_GROUND_DIVISIONS = 50
-_GROUND_COLOR_A = (220, 220, 220, 255)
-_GROUND_COLOR_B = (180, 180, 180, 255)
+def _pbr_visual(
+    rgb: tuple[int, int, int],
+    metalness: float,
+    roughness: float,
+    opacity: float = 1.0,
+) -> trimesh.visual.TextureVisuals:
+    """A texture-less PBR visual (baseColorFactor + metallic/roughness).
+
+    Exported to GLB by ``add_mesh_trimesh`` so viser renders it with a
+    Three.js MeshStandardMaterial — i.e. real metalness/roughness.
+    """
+    a = float(np.clip(opacity, 0.0, 1.0))
+    material = trimesh.visual.material.PBRMaterial(
+        baseColorFactor=[c / 255.0 for c in rgb] + [a],
+        metallicFactor=float(np.clip(metalness, 0.0, 1.0)),
+        roughnessFactor=float(np.clip(roughness, 0.0, 1.0)),
+        alphaMode="BLEND" if a < 1.0 else "OPAQUE",
+        doubleSided=True,
+    )
+    return trimesh.visual.TextureVisuals(material=material)
+
+
+def _create_plain_ground(
+    color: tuple[int, int, int],
+    size: float,
+    metalness: float,
+    roughness: float,
+) -> trimesh.Trimesh:
+    """A single large square ground quad with a flat PBR material."""
+    half = size / 2.0
+    vertices = np.array(
+        [[-half, -half, 0.0], [half, -half, 0.0], [half, half, 0.0], [-half, half, 0.0]],
+        dtype=np.float32,
+    )
+    faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    mesh.visual = _pbr_visual(color, metalness, roughness)
+    return mesh
 
 
 def _create_checkerboard_ground(
-    size: float = _GROUND_SIZE,
-    divisions: int = _GROUND_DIVISIONS,
+    size: float,
+    divisions: int,
+    color_a: tuple[int, int, int],
+    color_b: tuple[int, int, int],
 ) -> trimesh.Trimesh:
     """Create a checkerboard ground plane mesh."""
     cell = size / divisions
     half = size / 2.0
+    rgba_a = (*color_a, 255)
+    rgba_b = (*color_b, 255)
 
     vertices = []
     faces = []
@@ -73,7 +112,7 @@ def _create_checkerboard_ground(
             )
             faces.extend([[vi, vi + 1, vi + 2], [vi, vi + 2, vi + 3]])
 
-            color = _GROUND_COLOR_A if (i + j) % 2 == 0 else _GROUND_COLOR_B
+            color = rgba_a if (i + j) % 2 == 0 else rgba_b
             face_colors.extend([color, color])
 
     mesh = trimesh.Trimesh(
@@ -117,10 +156,12 @@ class ViserScene:
         server: viser.ViserServer,
         bridge: SimulatorBridge,
         geometry: SimulatorGeometry,
+        scene_config: ViserSceneConfig | None = None,
     ):
         self.server = server
         self.bridge = bridge
         self.geometry = geometry
+        self.scene_config = scene_config or ViserSceneConfig()
 
         # State.
         self.env_idx: int = 0
@@ -153,14 +194,16 @@ class ViserScene:
         cls,
         server: viser.ViserServer,
         bridge: SimulatorBridge,
+        scene_config: ViserSceneConfig | None = None,
     ) -> ViserScene:
         """Factory method."""
         geometry = bridge.extract_geometry()
-        return cls(server=server, bridge=bridge, geometry=geometry)
+        return cls(server=server, bridge=bridge, geometry=geometry, scene_config=scene_config)
 
     def _create_mesh_handles(self) -> None:
         """Create Viser mesh handles from geometry."""
         self._fixed_frame = self.server.scene.add_frame("/fixed_bodies")
+        cfg = self.scene_config
 
         for group in self.geometry.mesh_groups:
             handles = []
@@ -169,9 +212,19 @@ class ViserScene:
                 if group.is_fixed:
                     name = f"/fixed_bodies/body_{group.body_id}/mesh_{mesh_idx}"
 
+                if cfg.robot_color is not None:
+                    mesh = mesh.copy()
+                    # Fresh material per mesh — sharing a TextureVisuals would
+                    # fight over its back-reference to ``mesh``.
+                    mesh.visual = _pbr_visual(
+                        cfg.robot_color, cfg.robot_metalness, cfg.robot_roughness, cfg.robot_opacity
+                    )
+
                 handle = self.server.scene.add_mesh_trimesh(
                     name=name,
                     mesh=mesh,
+                    cast_shadow=cfg.cast_shadow,
+                    receive_shadow=cfg.receive_shadow,
                 )
                 handles.append(handle)
 
@@ -179,11 +232,24 @@ class ViserScene:
                 self._body_handles[group.body_id] = handles
 
     def _create_ground_plane(self) -> None:
-        """Add a checkerboard ground plane to the scene."""
-        ground_mesh = _create_checkerboard_ground()
+        """Add the ground plane to the scene (kind/look from ViserSceneConfig)."""
+        cfg = self.scene_config
+        if cfg.ground_kind == "none":
+            self._ground_handle = None
+            return
+        if cfg.ground_kind == "checkerboard":
+            ground_mesh = _create_checkerboard_ground(
+                cfg.ground_size, cfg.ground_divisions, cfg.ground_color, cfg.ground_color_alt
+            )
+        else:  # "plane"
+            ground_mesh = _create_plain_ground(
+                cfg.ground_color, cfg.ground_size, cfg.ground_metalness, cfg.ground_roughness
+            )
         self._ground_handle = self.server.scene.add_mesh_trimesh(
             name="/ground_plane",
             mesh=ground_mesh,
+            cast_shadow=False,
+            receive_shadow=cfg.receive_shadow,
         )
 
     def update(self) -> None:
