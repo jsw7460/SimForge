@@ -234,6 +234,49 @@ class RobotData(Protocol):
         """
         ...
 
+    # ── Per-id body / site reads ─────────────────────────────────────
+    #
+    # Same as the per-name accessors above, but take pre-resolved index
+    # tensors (``ResolvedEntity.body_ids`` / ``site_ids``) instead of
+    # name lists — no per-step name lookup. The ids index the same space
+    # as ``body_*_w_all`` (bodies) / the implementation's site tensor.
+
+    def body_pos_w_by_ids(self, body_ids: Tensor) -> Tensor:
+        """World-frame positions of the bodies at ``body_ids``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(body_ids), 3)``.
+        """
+        ...
+
+    def body_lin_vel_w_by_ids(self, body_ids: Tensor) -> Tensor:
+        """World-frame linear velocities of the bodies at ``body_ids``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(body_ids), 3)``.
+        """
+        ...
+
+    def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
+        """World-frame positions of the sites at ``site_ids``.
+
+        Sites are MuJoCo-only. Newton and Genesis raise ``NotImplementedError``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(site_ids), 3)``.
+        """
+        ...
+
+    def site_lin_vel_w_by_ids(self, site_ids: Tensor) -> Tensor:
+        """World-frame linear velocities of the sites at ``site_ids``.
+
+        Sites are MuJoCo-only. Newton and Genesis raise ``NotImplementedError``.
+
+        Returns:
+            Tensor of shape ``(num_envs, len(site_ids), 3)``.
+        """
+        ...
+
     # ── Aggregate quantities ─────────────────────────────────────────
 
     def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:

@@ -219,6 +219,24 @@ class GenesisRobotData:
             "no equivalent of MuJoCo sites — use body_lin_vel_w with link names."
         )
 
+    def body_pos_w_by_ids(self, body_ids: Tensor) -> Tensor:
+        return self.body_pos_w_all[:, body_ids, :]
+
+    def body_lin_vel_w_by_ids(self, body_ids: Tensor) -> Tensor:
+        return self.body_lin_vel_w_all[:, body_ids, :]
+
+    def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
+        raise NotImplementedError(
+            "GenesisRobotData does not implement site_pos_w_by_ids. Genesis has "
+            "no equivalent of MuJoCo sites — use body_pos_w_by_ids with link ids."
+        )
+
+    def site_lin_vel_w_by_ids(self, site_ids: Tensor) -> Tensor:
+        raise NotImplementedError(
+            "GenesisRobotData does not implement site_lin_vel_w_by_ids. Genesis has "
+            "no equivalent of MuJoCo sites — use body_lin_vel_w_by_ids with link ids."
+        )
+
     # ------------------------------------------------------------------
     # Aggregate quantities
     # ------------------------------------------------------------------

@@ -343,6 +343,24 @@ class NewtonRobotData:
             "no equivalent of MuJoCo sites — use body_lin_vel_w with body names."
         )
 
+    def body_pos_w_by_ids(self, body_ids: Tensor) -> Tensor:
+        return self.body_pos_w_all[:, body_ids, :]
+
+    def body_lin_vel_w_by_ids(self, body_ids: Tensor) -> Tensor:
+        return self.body_lin_vel_w_all[:, body_ids, :]
+
+    def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
+        raise NotImplementedError(
+            "NewtonRobotData does not implement site_pos_w_by_ids. Newton has "
+            "no equivalent of MuJoCo sites — use body_pos_w_by_ids with body ids."
+        )
+
+    def site_lin_vel_w_by_ids(self, site_ids: Tensor) -> Tensor:
+        raise NotImplementedError(
+            "NewtonRobotData does not implement site_lin_vel_w_by_ids. Newton has "
+            "no equivalent of MuJoCo sites — use body_lin_vel_w_by_ids with body ids."
+        )
+
     # ------------------------------------------------------------------
     # Aggregate quantities
     # ------------------------------------------------------------------
