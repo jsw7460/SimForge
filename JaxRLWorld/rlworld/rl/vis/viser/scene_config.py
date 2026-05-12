@@ -34,7 +34,13 @@ class ViserSceneConfig:
     ground_divisions: int = 100
     """Cells per side for the checkerboard (50 m / 100 = 0.5 m cells)."""
     ground_metalness: float = 0.0
-    ground_roughness: float = 0.95
+    ground_roughness: float = 0.92
+    ground_texture: str | None = "default"
+    """When set, the ground is a tiled image (overrides ``ground_kind``).
+    ``"default"`` → the bundled earthy ``ground_texture.png``; a file path →
+    use that image; ``None`` → no texture, fall back to ``ground_kind`` + colors."""
+    ground_texture_tiles: float = 25.0
+    """How many times the texture repeats across ``ground_size`` (50 m / 25 = 2 m tile)."""
 
     # ── Robot ───────────────────────────────────────────────────────
     robot_color: tuple[int, int, int] | None = (35, 35, 35)

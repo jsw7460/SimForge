@@ -9,6 +9,7 @@ The user can freely orbit/pan/zoom around the origin.
 
 from __future__ import annotations
 
+import os
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -19,9 +20,12 @@ import trimesh.visual
 import trimesh.visual.material
 import viser
 import viser.transforms as vtf
+from PIL import Image
 
 from .bridge import SimulatorBridge, SimulatorGeometry
 from .scene_config import ViserSceneConfig
+
+_BUNDLED_GROUND_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "ground_texture.png")
 
 
 def _quaternion_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
@@ -60,6 +64,17 @@ def _pbr_visual(
     return trimesh.visual.TextureVisuals(material=material)
 
 
+_GROUND_QUAD_FACES = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
+
+
+def _ground_quad_vertices(size: float) -> np.ndarray:
+    half = size / 2.0
+    return np.array(
+        [[-half, -half, 0.0], [half, -half, 0.0], [half, half, 0.0], [-half, half, 0.0]],
+        dtype=np.float64,
+    )
+
+
 def _create_plain_ground(
     color: tuple[int, int, int],
     size: float,
@@ -67,14 +82,33 @@ def _create_plain_ground(
     roughness: float,
 ) -> trimesh.Trimesh:
     """A single large square ground quad with a flat PBR material."""
-    half = size / 2.0
-    vertices = np.array(
-        [[-half, -half, 0.0], [half, -half, 0.0], [half, half, 0.0], [-half, half, 0.0]],
-        dtype=np.float32,
-    )
-    faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    mesh = trimesh.Trimesh(vertices=_ground_quad_vertices(size), faces=_GROUND_QUAD_FACES, process=False)
     mesh.visual = _pbr_visual(color, metalness, roughness)
+    return mesh
+
+
+def _create_textured_ground(
+    texture_path: str,
+    size: float,
+    tiles: float,
+    metalness: float,
+    roughness: float,
+) -> trimesh.Trimesh:
+    """A large ground quad with a tiled image texture (PBR baseColorTexture).
+
+    UVs run 0..``tiles`` so the texture repeats ``tiles`` times across the
+    ground (GLTF samplers wrap by default).
+    """
+    img = Image.open(texture_path).convert("RGB")
+    uv = np.array([[0.0, 0.0], [tiles, 0.0], [tiles, tiles], [0.0, tiles]], dtype=np.float64)
+    material = trimesh.visual.material.PBRMaterial(
+        baseColorTexture=img,
+        metallicFactor=float(np.clip(metalness, 0.0, 1.0)),
+        roughnessFactor=float(np.clip(roughness, 0.0, 1.0)),
+        doubleSided=True,
+    )
+    mesh = trimesh.Trimesh(vertices=_ground_quad_vertices(size), faces=_GROUND_QUAD_FACES, process=False)
+    mesh.visual = trimesh.visual.TextureVisuals(uv=uv, image=img, material=material)
     return mesh
 
 
@@ -232,12 +266,23 @@ class ViserScene:
                 self._body_handles[group.body_id] = handles
 
     def _create_ground_plane(self) -> None:
-        """Add the ground plane to the scene (kind/look from ViserSceneConfig)."""
+        """Add the ground plane to the scene (look from ViserSceneConfig)."""
         cfg = self.scene_config
-        if cfg.ground_kind == "none":
+        if cfg.ground_texture is not None:
+            path = _BUNDLED_GROUND_TEXTURE if cfg.ground_texture == "default" else cfg.ground_texture
+            if not os.path.isfile(path):
+                raise FileNotFoundError(
+                    f"ViserSceneConfig.ground_texture points at a missing file: {path!r}. "
+                    "For the bundled texture, run rlworld/rl/vis/viser/_texture_gen.py to (re)bake it; "
+                    "or set ground_texture=None to use a flat color / checkerboard ground."
+                )
+            ground_mesh = _create_textured_ground(
+                path, cfg.ground_size, cfg.ground_texture_tiles, cfg.ground_metalness, cfg.ground_roughness
+            )
+        elif cfg.ground_kind == "none":
             self._ground_handle = None
             return
-        if cfg.ground_kind == "checkerboard":
+        elif cfg.ground_kind == "checkerboard":
             ground_mesh = _create_checkerboard_ground(
                 cfg.ground_size, cfg.ground_divisions, cfg.ground_color, cfg.ground_color_alt
             )
