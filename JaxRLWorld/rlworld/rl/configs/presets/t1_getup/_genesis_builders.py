@@ -155,7 +155,7 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
-            max_collision_pairs=100,
+            max_collision_pairs=150,
             batch_dofs_info=True,
         ),
         robot_cfg=r,
