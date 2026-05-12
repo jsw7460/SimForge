@@ -43,9 +43,11 @@ class BaseRunner(ABC):
         from gymnasium.vector import AutoresetMode, SyncVectorEnv
 
         from rlworld.rl import envs
-        from rlworld.rl.envs import GymnasiumEnv
 
         env_class_name = cfgs.env.env_name
+        # ``envs.__getattr__`` lazily imports the matching sim package only
+        # when the class is actually requested — no other simulator gets
+        # dragged in.
         env_class = getattr(envs, env_class_name)
 
         sim_type = getattr(cfgs, "sim_type", None)
@@ -94,6 +96,7 @@ class BaseRunner(ABC):
             )
 
         elif env_class.sim_name == "Gymnasium":
+            from rlworld.rl.envs import GymnasiumEnv
 
             def make_env(seed):
                 def _init():
@@ -327,7 +330,7 @@ class BaseRunner(ABC):
                     if not isinstance(field_dict, dict):
                         continue
                     for field_name, value in field_dict.items():
-                        if not isinstance(value, (int, float)):
+                        if not isinstance(value, int | float):
                             continue
                         if not _math.isfinite(value):
                             continue
