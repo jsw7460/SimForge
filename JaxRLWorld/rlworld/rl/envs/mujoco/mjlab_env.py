@@ -263,16 +263,22 @@ class MujocoEnv(World):
 
         viewer_type = getattr(self.visualization_cfg, "viewer_type", None)
         if viewer_type == "viser":
-            from rlworld.rl.envs.managers.mujoco.visualization import (
-                MujocoVisualizationManager,
-                MujocoVisualizationManagerConfig,
-            )
+            # Same unified ViserScene path as Genesis/Newton (so ViserSceneConfig
+            # applies to MuJoCo too — configurable ground + robot material).
+            from rlworld.rl.vis.viser import ViserVisualizationManager
+            from rlworld.rl.vis.viser.bridges import MujocoBridge
+            from rlworld.rl.vis.viser.viewer import ViserViewerConfig
 
-            viz_config = MujocoVisualizationManagerConfig(
-                viewer_type="viser",
-                viser_port=self.visualization_cfg.viser_port,
+            viser_cfg = ViserViewerConfig(
+                port=self.visualization_cfg.viser_port,
+                share=self.visualization_cfg.viser_share,
+                enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
+                enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
+                scene=self.visualization_cfg.viser_scene,
             )
-            self.visualization_manager = MujocoVisualizationManager(env=self, config=viz_config)
+            self.visualization_manager = ViserVisualizationManager(
+                env=self, bridge=MujocoBridge(self.scene_manager), config=viser_cfg
+            )
             self.visualization_manager.setup()
         else:
             self.visualization_manager = None

@@ -64,9 +64,13 @@ class MujocoInitializer(SimInitializer):
         return env_class(**kw)
 
     def create_play_scene(self, env: Any):
-        from rlworld.rl.vis.viser.play_scene import MujocoPlayScene
+        # Route MuJoCo through the same unified ViserScene path as Genesis/Newton
+        # so the configurable ground + robot material apply here too.
+        from rlworld.rl.vis.viser.bridges import MujocoBridge
+        from rlworld.rl.vis.viser.play_scene import BridgePlayScene
 
-        return MujocoPlayScene(env.scene_manager)
+        scene_cfg = getattr(getattr(env, "visualization_cfg", None), "viser_scene", None)
+        return BridgePlayScene(MujocoBridge(env.scene_manager), scene_config=scene_cfg)
 
     def cleanup(self, env: Any) -> None:
         if hasattr(env, "visualization_manager"):
