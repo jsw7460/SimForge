@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.observations.newton.body_utils import (
     get_bodies_height_with_contact,
     get_bodies_quat,
@@ -30,6 +31,9 @@ from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
+
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 
 
 # ============================================================
@@ -140,25 +144,21 @@ def flat_orientation_mjlab(
 
 def body_ang_vel_penalty_mjlab(
     env: NewtonEnv,
-    body_name: str,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
 
-    Delegates to ``common.penalize_body_ang_vel_xy``. The Newton
-    implementation of ``RobotData.find_body_index`` calls the same
-    ``body_cache.get_body_indices(body_name)`` that the legacy code
-    used, and ``RobotData.body_ang_vel_w`` reads the same
-    ``state.body_qd[:, body_idx, 3:6]`` slice — so the result is
-    bit-identical to the legacy direct-access path.
+    Delegates to ``common.penalize_body_ang_vel_xy`` — ``asset_cfg`` must
+    select the body via ``body_names``.
 
     Args:
         env: Newton environment.
-        body_name: Name of the body to penalize.
+        asset_cfg: Selector identifying the body (``body_names``).
 
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return penalize_body_ang_vel_xy(env, body_name=body_name)
+    return penalize_body_ang_vel_xy(env, asset_cfg=asset_cfg)
 
 
 # ============================================================
@@ -219,23 +219,16 @@ def feet_air_time_mjlab(
 
 def feet_clearance_mjlab(
     env: NewtonEnv,
-    feet_bodies: str | list[str],
     target_height: float,
     command_threshold: float = 0.01,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_feet_clearance``.
-
-    Bit-identical to the legacy direct-access path: the common helper
-    reads ``RobotData.body_pos_w/body_lin_vel_w`` which on Newton both
-    pull from the same ``state.body_q/body_qd`` views the legacy code
-    used. ``feet_bodies`` is forwarded as the ``body_names`` list.
-    """
-    names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+    """Thin redirect to ``common.penalize_feet_clearance`` (feet via ``asset_cfg.body_names``)."""
     return penalize_feet_clearance(
         env,
         target_height=target_height,
         command_threshold=command_threshold,
-        body_names=names,
+        asset_cfg=asset_cfg,
     )
 
 
@@ -246,21 +239,15 @@ def feet_clearance_mjlab(
 
 def feet_slip_mjlab(
     env: NewtonEnv,
-    feet_bodies: str | list[str],
     command_threshold: float = 0.05,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_feet_slip``.
-
-    Bit-identical: the common helper passes ``order=feet_bodies`` to the
-    contact manager, which reorders ``is_contact("feet_ground_contact")`` by
-    name — equivalent to the legacy ``contact_indices`` cache lookup.
-    """
-    names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+    """Thin redirect to ``common.penalize_feet_slip`` (feet via ``asset_cfg.body_names``)."""
     return penalize_feet_slip(
         env,
         contact_group="feet_ground_contact",
         command_threshold=command_threshold,
-        body_names=names,
+        asset_cfg=asset_cfg,
     )
 
 
@@ -410,17 +397,16 @@ class feet_swing_height_mjlab:
     def __init__(
         self,
         env: NewtonEnv,
-        feet_bodies: str | list[str],
         target_height: float,
         command_threshold: float = 0.05,
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     ):
-        names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
         self._impl = FeetSwingHeightTracker(
             env=env,
             contact_group="feet_ground_contact",
             target_height=target_height,
             command_threshold=command_threshold,
-            body_names=names,
+            asset_cfg=asset_cfg,
             use_squared_error=True,
             reset_mode="current_foot_height",
         )
@@ -450,17 +436,16 @@ class feet_swing_height:
     def __init__(
         self,
         env: NewtonEnv,
-        feet_bodies: str | list[str],
         target_height: float,
         command_threshold: float = 0.05,
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     ):
-        names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
         self._impl = FeetSwingHeightTracker(
             env=env,
             contact_group="feet_ground_contact",
             target_height=target_height,
             command_threshold=command_threshold,
-            body_names=names,
+            asset_cfg=asset_cfg,
             use_squared_error=False,
             reset_mode="current_foot_height",
         )

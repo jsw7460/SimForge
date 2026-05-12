@@ -42,16 +42,11 @@ def base_lin_vel(env: GenesisEnv):
 
 
 @EnvStepCache()
-def feet_height(env: GenesisEnv, links: tuple[str, ...], asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR):
-    entity = env.scene_manager[asset_cfg.name]
-
-    if isinstance(links, str):
-        links = [links]
-
-    links_idx_local, _ = eu.find_links(entity, list(links), global_ids=False, preserve_order=True)
-    foot_pos = entity.get_links_pos(links_idx_local=links_idx_local)  # (num_envs, num_feet, 3)
-    foot_z = foot_pos[:, :, 2]
-    return foot_z
+def feet_height(env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR):
+    """World-frame z of the bodies selected by ``asset_cfg.body_names``. Shape (num_envs, num_feet)."""
+    if asset_cfg.body_ids is None:
+        raise ValueError("feet_height requires asset_cfg with body_names (got none).")
+    return env.get_robot_data(asset_cfg.name).body_pos_w_by_ids(asset_cfg.body_ids)[:, :, 2]
 
 
 @EnvStepCache()

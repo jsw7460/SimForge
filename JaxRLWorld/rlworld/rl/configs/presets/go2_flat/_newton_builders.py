@@ -271,11 +271,12 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
                 "running_threshold": 1.5,
             },
         )
+        feet_selector = SceneEntitySelector(name="robot", body_names=tuple(feet), preserve_order=True)
         feet_swing_height = RewardTermConfig(
             func=rf_mjlab.feet_swing_height_mjlab,
             weight=0.25,
             params={
-                "feet_bodies": feet,
+                "asset_cfg": feet_selector,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -284,7 +285,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             func=rf_mjlab.feet_clearance_mjlab,
             weight=2.0,
             params={
-                "feet_bodies": feet,
+                "asset_cfg": feet_selector,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -293,7 +294,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             func=rf_mjlab.feet_slip_mjlab,
             weight=0.1,
             params={
-                "feet_bodies": feet,
+                "asset_cfg": feet_selector,
                 "command_threshold": 0.05,
             },
         )

@@ -210,47 +210,45 @@ def raw_action_rate_l2(env: World) -> torch.Tensor:
 
 def penalize_body_ang_vel_xy(
     env: World,
-    body_name: str,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Penalize roll/pitch angular velocity of a single body (sim-agnostic).
+    """Penalize roll/pitch angular velocity of the selected bodies (sim-agnostic).
 
-    Reads world-frame angular velocity for the named body via
-    ``RobotData.find_body_index`` and ``RobotData.body_ang_vel_w``, then
-    returns ``-sum(square(ang_vel[:, :2]))``. The yaw component (index 2)
-    is intentionally NOT penalized — only roll/pitch are.
+    Reads world-frame angular velocity for the bodies named by
+    ``asset_cfg.body_names`` and returns ``-sum(square(ang_vel[..., :2]))``
+    over the selected bodies. The yaw component (index 2) is intentionally
+    NOT penalized — only roll/pitch are.
 
     Matches the behavior of mjlab's ``body_angular_velocity_penalty``
-    exactly, which the legacy sim-specific implementations also matched.
+    exactly (single-body case), which the legacy sim-specific
+    implementations also matched.
 
     Args:
         env: Any environment whose RobotData implements the body-level
             accessors (Newton, Genesis, MuJoCo).
-        body_name: Name of the body. Format depends on the simulator's
-            naming convention (Newton uses prefixed names like
-            ``"g1_29dof/torso_link"``, Genesis and mjlab use bare names
-            like ``"torso_link"``).
-        asset_cfg: Selector identifying the robot entity.
+        asset_cfg: Selector identifying the robot entity; must specify
+            ``body_names`` (the default ``robot`` selector has none and
+            will raise).
 
     Returns:
         Tensor of shape ``(num_envs,)``.
     """
-    rd = env.get_robot_data(asset_cfg.name)
-    body_idx = rd.find_body_index(body_name)
-    ang_vel = rd.body_ang_vel_w(body_idx)
-    return -torch.sum(torch.square(ang_vel[:, :2]), dim=1)
+    if asset_cfg.body_ids is None:
+        raise ValueError("penalize_body_ang_vel_xy requires asset_cfg with body_names (got none).")
+    ang_vel = env.get_robot_data(asset_cfg.name).body_ang_vel_w_all[:, asset_cfg.body_ids, :2]
+    return -torch.sum(torch.square(ang_vel), dim=(1, 2))
 
 
 # ── Feet rewards (mjlab-style) ───────────────────────────────────────────
 #
-# NOTE (PR3a+b scope): these functions still take ``body_names`` /
-# ``site_names`` / ``entity_name`` because the underlying RobotData
-# accessors (``body_pos_w(names)``, ``site_pos_w(names)``) require
-# *name* lists, not the *id* tensors that ``ResolvedEntity`` carries.
-# Migrating them to the selector pattern requires either extending
-# ResolvedEntity with resolved name lists or teaching RobotData to
-# accept ids — both are out of scope for this PR.  Tracked as a
-# follow-up under the reward-side selector adoption work.
+# These take an ``asset_cfg: ResolvedEntity`` and use the pre-resolved
+# ``body_ids`` (Newton / Genesis) or ``site_ids`` (MuJoCo) — exactly one
+# of which the selector must populate (``SceneEntitySelector(name="robot",
+# body_names=(...))`` or ``site_names=(...)``).  The matched-name list
+# (``asset_cfg.body_names``) drives the default ``contact_order`` so the
+# contact tensor columns line up with the foot tensor columns; pass a
+# ``preserve_order=True`` selector when that ordering matters (it does
+# for the feet contact groups).
 
 
 def _command_active(env: World, command_threshold: float) -> torch.Tensor:
@@ -265,30 +263,49 @@ def _command_active(env: World, command_threshold: float) -> torch.Tensor:
     return (total > command_threshold).float()
 
 
-def _foot_pos_vel(
-    env: World,
-    body_names: list[str] | None,
-    site_names: list[str] | None,
-    entity_name: str,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return (foot_pos_w, foot_lin_vel_w) for either body or site names."""
-    if (body_names is None) == (site_names is None):
+def _foot_ids(asset_cfg: ResolvedEntity) -> tuple[bool, torch.Tensor]:
+    """Return ``(use_bodies, ids)`` from a resolved feet selector.
+
+    Exactly one of ``body_ids`` / ``site_ids`` must be populated (bodies
+    for Newton / Genesis, sites for MuJoCo).
+    """
+    has_body = asset_cfg.body_ids is not None
+    has_site = asset_cfg.site_ids is not None
+    if has_body == has_site:
         raise ValueError(
-            f"Pass exactly one of body_names or site_names (got body_names={body_names!r}, site_names={site_names!r})"
+            "Feet rewards need a selector with exactly one of body_names / site_names "
+            f"(got body_ids={asset_cfg.body_ids!r}, site_ids={asset_cfg.site_ids!r})."
         )
-    rd = env.get_robot_data(entity_name)
-    if body_names is not None:
-        return rd.body_pos_w(body_names), rd.body_lin_vel_w(body_names)
-    return rd.site_pos_w(site_names), rd.site_lin_vel_w(site_names)
+    return (has_body, asset_cfg.body_ids if has_body else asset_cfg.site_ids)
+
+
+def _foot_pos_vel(env: World, asset_cfg: ResolvedEntity) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return (foot_pos_w, foot_lin_vel_w) for the feet selected by ``asset_cfg``."""
+    use_bodies, ids = _foot_ids(asset_cfg)
+    rd = env.get_robot_data(asset_cfg.name)
+    if use_bodies:
+        return rd.body_pos_w_by_ids(ids), rd.body_lin_vel_w_by_ids(ids)
+    return rd.site_pos_w_by_ids(ids), rd.site_lin_vel_w_by_ids(ids)
+
+
+def _feet_contact_order(asset_cfg: ResolvedEntity, contact_order: list[str] | None) -> list[str] | None:
+    """Default the contact reorder list to the resolved body-name list.
+
+    For sites (MuJoCo) the caller relies on the contact group's natural
+    order, so ``None`` is left as-is.
+    """
+    if contact_order is not None:
+        return list(contact_order)
+    if asset_cfg.body_ids is not None and asset_cfg.body_names is not None:
+        return list(asset_cfg.body_names)
+    return None
 
 
 def penalize_feet_clearance(
     env: World,
     target_height: float,
     command_threshold: float = 0.01,
-    body_names: list[str] | None = None,
-    site_names: list[str] | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize deviation from target foot clearance, weighted by foot xy speed.
 
@@ -299,11 +316,10 @@ def penalize_feet_clearance(
         env: Any environment with a RobotData implementation.
         target_height: Target foot clearance during swing.
         command_threshold: Minimum command magnitude to activate.
-        body_names: Foot body / link names (Newton, Genesis).
-        site_names: Foot site names (MuJoCo).
-        entity_name: Entity to query.
+        asset_cfg: Selector identifying the feet — ``body_names`` for
+            Newton / Genesis, ``site_names`` for MuJoCo (exactly one).
     """
-    foot_pos, foot_vel = _foot_pos_vel(env, body_names, site_names, entity_name)
+    foot_pos, foot_vel = _foot_pos_vel(env, asset_cfg)
     foot_z = foot_pos[..., 2]
     vel_norm = torch.norm(foot_vel[..., :2], dim=-1)
     delta = torch.abs(foot_z - target_height)
@@ -315,34 +331,29 @@ def penalize_feet_slip(
     env: World,
     contact_group: str,
     command_threshold: float = 0.05,
-    body_names: list[str] | None = None,
-    site_names: list[str] | None = None,
     contact_order: list[str] | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize foot xy speed while in contact with the ground.
 
     Matches mjlab's ``feet_slip`` reward exactly. The contact tensor and
     foot velocity tensor are aligned column-wise via ``contact_order``;
-    if ``contact_order`` is not given it defaults to ``body_names``
-    (Newton/Genesis case). For sites the caller must ensure the contact
-    group's natural order matches ``site_names``.
+    if not given it defaults to the resolved body-name list (Newton /
+    Genesis). For sites (MuJoCo) the caller relies on the contact group's
+    natural order matching the resolved sites.
 
     Args:
         env: Any environment with a RobotData + contact_manager.
         contact_group: Name of the registered contact group.
         command_threshold: Minimum command magnitude to activate.
-        body_names: Foot body / link names (Newton, Genesis).
-        site_names: Foot site names (MuJoCo).
         contact_order: Optional explicit contact reorder list.
-        entity_name: Entity to query.
+        asset_cfg: Selector identifying the feet (``body_names`` xor
+            ``site_names``).
     """
-    _, foot_vel = _foot_pos_vel(env, body_names, site_names, entity_name)
+    _, foot_vel = _foot_pos_vel(env, asset_cfg)
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
 
-    if contact_order is None and body_names is not None:
-        contact_order = list(body_names)
-    is_contact = env.contact_manager.is_contact(contact_group, order=contact_order)
+    is_contact = env.contact_manager.is_contact(contact_group, order=_feet_contact_order(asset_cfg, contact_order))
 
     cost = torch.sum(vel_xy_norm_sq * is_contact.float(), dim=1)
     return -cost * _command_active(env, command_threshold)
@@ -426,11 +437,10 @@ class FeetSwingHeightTracker:
         contact_group: Name of the registered contact group.
         target_height: Target swing peak height.
         command_threshold: Minimum command magnitude to activate.
-        body_names: Foot body / link names (Newton, Genesis).
-        site_names: Foot site names (MuJoCo).
+        asset_cfg: Selector identifying the feet — ``body_names`` for
+            Newton / Genesis, ``site_names`` for MuJoCo (exactly one).
         contact_order: Optional explicit contact reorder list. Defaults
-            to ``body_names`` when bodies are used.
-        entity_name: Entity to query.
+            to the resolved body-name list when bodies are used.
         use_squared_error: ``True`` for ``error**2`` (mjlab); ``False``
             for ``abs(error)`` (older WTW variant).
         reset_mode: Per-env reset behavior. ``"zero"`` (Genesis legacy),
@@ -446,41 +456,34 @@ class FeetSwingHeightTracker:
         contact_group: str,
         target_height: float,
         command_threshold: float = 0.05,
-        body_names: list[str] | None = None,
-        site_names: list[str] | None = None,
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
         contact_order: list[str] | None = None,
-        entity_name: str = "robot",
         use_squared_error: bool = True,
         reset_mode: str = "zero",
     ) -> None:
-        if (body_names is None) == (site_names is None):
-            raise ValueError(
-                f"Pass exactly one of body_names or site_names (got body_names={body_names!r}, site_names={site_names!r})"
-            )
+        use_bodies, ids = _foot_ids(asset_cfg)
         self._env = env
         self._contact_group = contact_group
         self._target_height = target_height
         self._command_threshold = command_threshold
-        self._body_names = list(body_names) if body_names is not None else None
-        self._site_names = list(site_names) if site_names is not None else None
-        self._entity_name = entity_name
+        self._asset_cfg = asset_cfg
+        self._use_bodies = use_bodies
+        self._foot_ids = ids
         self._use_squared_error = use_squared_error
         if reset_mode not in ("zero", "current_foot_height", "none"):
             raise ValueError(f"reset_mode must be one of 'zero', 'current_foot_height', 'none' (got {reset_mode!r})")
         self._reset_mode = reset_mode
 
-        if contact_order is None and self._body_names is not None:
-            contact_order = list(self._body_names)
-        self._contact_order = list(contact_order) if contact_order is not None else None
+        self._contact_order = _feet_contact_order(asset_cfg, contact_order)
 
-        num_feet = len(self._body_names if self._body_names is not None else self._site_names)
+        num_feet = len(ids)
         self.peak_heights = torch.zeros((env.num_envs, num_feet), device=env.device, dtype=torch.float32)
 
     def _foot_heights(self, env: World) -> torch.Tensor:
-        rd = env.get_robot_data(self._entity_name)
-        if self._body_names is not None:
-            return rd.body_pos_w(self._body_names)[..., 2]
-        return rd.site_pos_w(self._site_names)[..., 2]
+        rd = env.get_robot_data(self._asset_cfg.name)
+        if self._use_bodies:
+            return rd.body_pos_w_by_ids(self._foot_ids)[..., 2]
+        return rd.site_pos_w_by_ids(self._foot_ids)[..., 2]
 
     def __call__(self, env: World) -> torch.Tensor:
         foot_heights = self._foot_heights(env)

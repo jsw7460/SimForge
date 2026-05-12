@@ -207,27 +207,21 @@ class variable_posture:
 
 def body_ang_vel_penalty_mjlab(
     env: GenesisEnv,
-    body_name: str,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
 
-    Delegates to ``common.penalize_body_ang_vel_xy``. The Genesis
-    implementation of ``RobotData.find_body_index`` calls the same
-    ``entity.get_link(name).idx_local`` that the legacy code used, and
-    ``RobotData.body_ang_vel_w`` calls the same
-    ``entity.get_links_ang(links_idx_local=[idx]).squeeze(1)`` — so the
-    result is bit-identical to the legacy direct-access path.
+    Delegates to ``common.penalize_body_ang_vel_xy`` — ``asset_cfg`` must
+    select the body via ``body_names``.
 
     Args:
         env: Genesis environment.
-        body_name: Name of the body to penalize.
-        entity_name: Name of the robot entity.
+        asset_cfg: Selector identifying the body (``body_names``).
 
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return penalize_body_ang_vel_xy(env, body_name=body_name, asset_cfg=asset_cfg)
+    return penalize_body_ang_vel_xy(env, asset_cfg=asset_cfg)
 
 
 # ============================================================
@@ -287,24 +281,16 @@ def feet_air_time_mjlab(
 
 def feet_clearance_mjlab(
     env: GenesisEnv,
-    feet_links: str | list[str],
     target_height: float,
     command_threshold: float = 0.01,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_feet_clearance``.
-
-    Bit-identical: ``RobotData.body_pos_w/body_lin_vel_w`` for Genesis
-    call ``entity.get_links_pos/get_links_vel`` with the same
-    ``links_idx_local`` the legacy code resolved via ``eu.find_links``.
-    """
-    names = [feet_links] if isinstance(feet_links, str) else list(feet_links)
+    """Thin redirect to ``common.penalize_feet_clearance`` (feet via ``asset_cfg.body_names``)."""
     return penalize_feet_clearance(
         env,
         target_height=target_height,
         command_threshold=command_threshold,
-        body_names=names,
-        entity_name=asset_cfg.name,
+        asset_cfg=asset_cfg,
     )
 
 
@@ -325,20 +311,17 @@ class feet_swing_height_mjlab:
     def __init__(
         self,
         env: GenesisEnv,
-        feet_links: str | list[str],
         target_height: float,
         command_threshold: float = 0.05,
         asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
         contact_group: str = "feet_ground_contact",
     ):
-        names = [feet_links] if isinstance(feet_links, str) else list(feet_links)
         self._impl = FeetSwingHeightTracker(
             env=env,
             contact_group=contact_group,
             target_height=target_height,
             command_threshold=command_threshold,
-            body_names=names,
-            entity_name=asset_cfg.name,
+            asset_cfg=asset_cfg,
             use_squared_error=True,
             reset_mode="zero",
         )
@@ -357,24 +340,16 @@ class feet_swing_height_mjlab:
 
 def feet_slip_mjlab(
     env: GenesisEnv,
-    feet_links: str | list[str],
     command_threshold: float = 0.05,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_feet_slip``.
-
-    Bit-identical: the legacy code already passed ``order=feet_links``
-    to ``contact_manager.is_contact``, which is exactly what the common
-    helper does (defaulting ``contact_order`` to ``body_names``).
-    """
-    names = [feet_links] if isinstance(feet_links, str) else list(feet_links)
+    """Thin redirect to ``common.penalize_feet_slip`` (feet via ``asset_cfg.body_names``)."""
     return penalize_feet_slip(
         env,
         contact_group=contact_group,
         command_threshold=command_threshold,
-        body_names=names,
-        entity_name=asset_cfg.name,
+        asset_cfg=asset_cfg,
     )
 
 

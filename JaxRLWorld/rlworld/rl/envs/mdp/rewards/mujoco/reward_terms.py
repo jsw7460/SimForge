@@ -188,26 +188,15 @@ def body_angular_velocity_penalty(
 ) -> torch.Tensor:
     """Penalize excessive body angular velocities (xy only).
 
-    Thin wrapper that translates the mjlab ``asset_cfg`` parameter
-    convention into the sim-agnostic ``body_name`` convention used by
-    ``common.penalize_body_ang_vel_xy``. When ``asset_cfg.body_ids`` is
-    a concrete index list (the active-preset path), we extract the
-    first body name from ``asset_cfg.body_names`` and delegate. The
-    legacy fallback path that uses ``robot.data.root_link_ang_vel_w``
-    when ``body_ids is None`` is preserved here as a direct accessor
-    call to keep mjlab's API surface intact.
+    Delegates to ``common.penalize_body_ang_vel_xy`` when ``asset_cfg``
+    selects a body via ``body_names``.  When no body is selected (the
+    default ``robot`` selector) it falls back to penalising the root
+    angular velocity directly — the original mjlab behavior.
     """
-    if asset_cfg.body_ids is None or isinstance(asset_cfg.body_ids, slice):
-        # Legacy fallback: penalize root angular velocity directly.
-        robot = env.scene_manager.get_entity(asset_cfg.name)
-        ang_vel = robot.data.root_link_ang_vel_w
-        ang_vel_xy = ang_vel[:, :2]
+    if asset_cfg.body_ids is None:
+        ang_vel_xy = env.scene_manager.get_entity(asset_cfg.name).data.root_link_ang_vel_w[:, :2]
         return -torch.sum(torch.square(ang_vel_xy), dim=1)
-
-    # Active path: a concrete body was specified. Delegate to common.
-    body_name = asset_cfg.body_names[0]
-    common_cfg = env.resolve_selector(SceneEntitySelector(name=asset_cfg.name))
-    return penalize_body_ang_vel_xy(env, body_name=body_name, asset_cfg=common_cfg)
+    return penalize_body_ang_vel_xy(env, asset_cfg=asset_cfg)
 
 
 def angular_momentum_penalty(
@@ -277,20 +266,12 @@ def feet_clearance(
     command_threshold: float = 0.01,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_feet_clearance``.
-
-    Bit-identical: ``RobotData.site_pos_w/site_lin_vel_w`` for MuJoCo
-    call ``entity.find_sites`` and read the same ``data.site_pos_w /
-    data.site_lin_vel_w`` arrays the legacy code accessed via
-    ``asset_cfg.site_ids``. The site name list is taken straight from
-    ``asset_cfg.site_names`` to preserve the same column ordering.
-    """
+    """Thin redirect to ``common.penalize_feet_clearance`` (feet via ``asset_cfg.site_names``)."""
     return penalize_feet_clearance(
         env,
         target_height=target_height,
         command_threshold=command_threshold,
-        site_names=list(asset_cfg.site_names),
-        entity_name=asset_cfg.name,
+        asset_cfg=asset_cfg,
     )
 
 
@@ -300,19 +281,16 @@ def feet_slip(
     command_threshold: float = 0.01,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_feet_slip``.
+    """Thin redirect to ``common.penalize_feet_slip`` (feet via ``asset_cfg.site_names``).
 
-    Bit-identical: site velocities pulled via ``RobotData.site_lin_vel_w``
-    (which uses the same ``data.site_lin_vel_w`` array indexed by the
-    same site_ids), and contact tensor reads the natural group order
-    (``contact_order=None``) — matching the legacy MuJoCo path.
+    Contact tensor uses the natural group order (``contact_order=None``) —
+    the legacy MuJoCo path.
     """
     return penalize_feet_slip(
         env,
         contact_group=contact_group,
         command_threshold=command_threshold,
-        site_names=list(asset_cfg.site_names),
-        entity_name=asset_cfg.name,
+        asset_cfg=asset_cfg,
     )
 
 
@@ -427,8 +405,7 @@ class feet_swing_height:
             contact_group=contact_group,
             target_height=target_height,
             command_threshold=command_threshold,
-            site_names=list(asset_cfg.site_names),
-            entity_name=asset_cfg.name,
+            asset_cfg=asset_cfg,
             use_squared_error=True,
             reset_mode="none",
         )

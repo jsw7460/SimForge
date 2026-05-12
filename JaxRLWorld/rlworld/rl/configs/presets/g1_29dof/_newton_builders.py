@@ -309,7 +309,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
         body_angular_velocity_penalty = RewardTermConfig(
             func=rf_mjlab.body_ang_vel_penalty_mjlab,
             weight=0.05,
-            params={"body_name": "torso_link"},
+            params={"asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",))},
         )
         angular_momentum_penalty = RewardTermConfig(
             func=rf_mjlab.angular_momentum_penalty,
@@ -325,11 +325,12 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
         )
 
         # Feet rewards
+        feet_selector = SceneEntitySelector(name="robot", body_names=tuple(r.foot_names), preserve_order=True)
         feet_clearance = RewardTermConfig(
             func=rf_mjlab.feet_clearance_mjlab,
             weight=2.0,
             params={
-                "feet_bodies": r.foot_names,
+                "asset_cfg": feet_selector,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -338,7 +339,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             func=rf_mjlab.feet_swing_height_mjlab,
             weight=0.25,
             params={
-                "feet_bodies": r.foot_names,
+                "asset_cfg": feet_selector,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -347,7 +348,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             func=rf_mjlab.feet_slip_mjlab,
             weight=0.1,
             params={
-                "feet_bodies": r.foot_names,
+                "asset_cfg": feet_selector,
                 "command_threshold": 0.05,
             },
         )
