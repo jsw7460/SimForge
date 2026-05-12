@@ -108,7 +108,7 @@ def _create_textured_ground(
         doubleSided=True,
     )
     mesh = trimesh.Trimesh(vertices=_ground_quad_vertices(size), faces=_GROUND_QUAD_FACES, process=False)
-    mesh.visual = trimesh.visual.TextureVisuals(uv=uv, image=img, material=material)
+    mesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=material)
     return mesh
 
 
