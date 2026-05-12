@@ -578,20 +578,25 @@ class World(ABC):
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
         if len(env_ids) == 0:
             return
+        prof = self._step_profiler
 
         # State initialization via event manager
-        self.event_manager.reset(env_ids)
-        if "reset" in self.event_manager.available_modes:
-            self.event_manager.apply(mode="reset", env_ids=env_ids)
-        if "reset_dr" in self.event_manager.available_modes:
-            self.event_manager.apply(mode="reset_dr", env_ids=env_ids)
+        with prof.section("  reset:event_manager.reset"):
+            self.event_manager.reset(env_ids)
+        with prof.section("  reset:events[reset]"):
+            if "reset" in self.event_manager.available_modes:
+                self.event_manager.apply(mode="reset", env_ids=env_ids)
+        with prof.section("  reset:events[reset_dr]"):
+            if "reset_dr" in self.event_manager.available_modes:
+                self.event_manager.apply(mode="reset_dr", env_ids=env_ids)
 
-        self.termination_manager.reset(env_ids)
-        self.command_manager.reset(env_ids)
-        self.act_manager.reset(env_ids)
-        self.obs_manager.reset(env_ids)
-        self.contact_manager.reset(env_ids)
-        self.reward_manager.reset(env_ids)
+        with prof.section("  reset:managers"):
+            self.termination_manager.reset(env_ids)
+            self.command_manager.reset(env_ids)
+            self.act_manager.reset(env_ids)
+            self.obs_manager.reset(env_ids)
+            self.contact_manager.reset(env_ids)
+            self.reward_manager.reset(env_ids)
 
         # Curriculum: apply stage updates (reads env.env_step_counter)
         # and forward reset to any stateful curriculum terms. Runs at
@@ -605,8 +610,9 @@ class World(ABC):
         # polluted the "Rewards" breakdown in wandb. The runner logs
         # the latest state under a ``Curriculum/`` namespace directly
         # in :meth:`BaseRunner.log_training_data`.
-        self.curriculum_manager.compute(env_ids=env_ids)
-        self.curriculum_manager.reset(env_ids)
+        with prof.section("  reset:curriculum"):
+            self.curriculum_manager.compute(env_ids=env_ids)
+            self.curriculum_manager.reset(env_ids)
 
         # Reset episode sums
         keys = list(self.episode_sums.keys())

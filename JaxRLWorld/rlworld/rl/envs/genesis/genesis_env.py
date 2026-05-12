@@ -286,7 +286,11 @@ class GenesisEnv(World):
         For position control without an actuator, re-applying the same
         target each substep is a harmless no-op.
         """
+        prof = self._step_profiler
         for _ in range(self.decimation):
-            self.act_manager.apply_actions(self.act_manager.processed_actions)
-            self.scene_manager.step()
-        self.vis_manager.advance()
+            with prof.section("  phys:apply_actions"):
+                self.act_manager.apply_actions(self.act_manager.processed_actions)
+            with prof.section("  phys:scene.step"):
+                self.scene_manager.step()
+        with prof.section("  phys:vis_manager.advance"):
+            self.vis_manager.advance()
