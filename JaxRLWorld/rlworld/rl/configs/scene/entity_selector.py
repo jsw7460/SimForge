@@ -74,13 +74,20 @@ class SceneEntitySelector:
     indices) requires a specific ordering and must opt in."""
 
 
-@dataclass
+@dataclass(eq=False)
 class ResolvedEntity:
     """Sim-agnostic resolved view of a :class:`SceneEntitySelector`.
 
     Returned by ``World.resolve_selector``.  Reward and event functions
     consume this struct directly, so they no longer need to know which
     backend they are running against.
+
+    ``eq=False`` keeps the default identity-based ``__eq__`` / ``__hash__``
+    — important because instances carry ``torch.Tensor`` fields (which are
+    unhashable) yet need to be hashable for ``@EnvStepCache``-decorated
+    observation functions.  Managers resolve a selector **once** at setup
+    and stash the resulting instance in the term's ``params``, so the same
+    object is reused every step and its identity hash is stable.
     """
 
     name: str

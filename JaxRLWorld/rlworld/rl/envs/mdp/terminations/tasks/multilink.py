@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
 
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 from rlworld.rl.configs.terminations import TerminationResult
 
 
 def end_effector_below_ground(
-    env: GenesisEnv, entity_name: str = "robot", link_name: str = None, z_threshold: float = 0.0
+    env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, link_name: str = None, z_threshold: float = 0.0
 ) -> TerminationResult:
     """Terminate if the end effector (last link) goes below ground.
 
@@ -22,7 +26,7 @@ def end_effector_below_ground(
     Returns:
         TerminationResult indicating which environments should be terminated.
     """
-    entity = env.scene_manager[entity_name]
+    entity = env.scene_manager[asset_cfg.name]
 
     if link_name is not None:
         link = entity.get_link(link_name)

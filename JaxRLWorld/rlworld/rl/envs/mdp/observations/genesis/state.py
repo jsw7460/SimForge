@@ -5,11 +5,15 @@ from typing import TYPE_CHECKING
 import torch
 from genesis.utils.geom import inv_quat, quat_to_xyz, transform_by_quat
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils import entity_utils as eu
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
+
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 
 
 @EnvStepCache()
@@ -38,8 +42,8 @@ def base_lin_vel(env: GenesisEnv):
 
 
 @EnvStepCache()
-def feet_height(env: GenesisEnv, links: tuple[str, ...], entity_name: str = "robot"):
-    entity = env.scene_manager[entity_name]
+def feet_height(env: GenesisEnv, links: tuple[str, ...], asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR):
+    entity = env.scene_manager[asset_cfg.name]
 
     if isinstance(links, str):
         links = [links]
@@ -92,8 +96,10 @@ def contact_force_3d(
 
 
 @EnvStepCache()
-def links_acc(env: GenesisEnv, entity_name: str = "robot", links: tuple[str, ...] | None = None) -> torch.Tensor:
-    entity = env.scene_manager[entity_name]
+def links_acc(
+    env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, links: tuple[str, ...] | None = None
+) -> torch.Tensor:
+    entity = env.scene_manager[asset_cfg.name]
     if links is None:
         links_idx_local = None
     else:
@@ -106,13 +112,13 @@ def links_acc(env: GenesisEnv, entity_name: str = "robot", links: tuple[str, ...
 @EnvStepCache()
 def dof_force(
     env: GenesisEnv,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     dof_names: tuple[str, ...] | None = None,
 ) -> torch.Tensor:
     """
     Output: [num_envs, n_dofs]
     """
-    entity = env.scene_manager[entity_name]
+    entity = env.scene_manager[asset_cfg.name]
     if dof_names is None:
         dofs_idx_local = None
     else:

@@ -50,6 +50,10 @@ class ObservationManager(BaseManager):
         for group_name, group_cfg in self._groups.items():
             terms = iter_terms(group_cfg, ObservationTermConfig)
             self._group_terms[group_name] = terms
+            # Pre-resolve SceneEntitySelector params (and selector-typed
+            # defaults) before any dummy-obs evaluation in _build_term_indices.
+            for t in terms.values():
+                self._resolve_term_selectors(t.resolved_func, t.params)
             self._resolved_fns[group_name] = {name: t.resolved_func for name, t in terms.items()}
 
         # History buffers

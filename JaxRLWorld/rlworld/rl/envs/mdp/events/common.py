@@ -25,11 +25,14 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.utils.quat_utils import quat_from_angle_axis_wxyz, quat_mul_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 
 # ── Sampling utility ─────────────────────────────────────────────────
 
@@ -50,7 +53,7 @@ def push_by_setting_velocity(
     env: World,
     env_ids: torch.Tensor,
     velocity_range: dict[str, tuple[float, float]],
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
     """Add a random velocity perturbation to the robot's root link.
 
@@ -63,8 +66,8 @@ def push_by_setting_velocity(
     if len(env_ids) == 0:
         return
 
-    rd = env.get_robot_data(entity_name)
-    writer = env.get_robot_state_writer(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
+    writer = env.get_robot_state_writer(asset_cfg.name)
     device = env.device
     n = len(env_ids)
 
@@ -95,7 +98,7 @@ def reset_root_state_uniform(
     velocity_range: dict[str, tuple[float, float]] | None = None,
     default_pos: tuple[float, ...] = (0.0, 0.0, 0.34),
     default_quat_wxyz: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0),
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
     """Reset root pose + velocity with uniform random perturbations.
 
@@ -126,7 +129,7 @@ def reset_root_state_uniform(
     if len(env_ids) == 0:
         return
 
-    writer = env.get_robot_state_writer(entity_name)
+    writer = env.get_robot_state_writer(asset_cfg.name)
     device = env.device
     n = len(env_ids)
 
@@ -185,7 +188,7 @@ def reset_joints_by_offset(
     env_ids: torch.Tensor,
     position_range: tuple[float, float],
     velocity_range: tuple[float, float] = (0.0, 0.0),
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
     """Reset actuated joint positions/velocities with uniform noise.
 
@@ -206,7 +209,7 @@ def reset_joints_by_offset(
     if len(env_ids) == 0:
         return
 
-    writer = env.get_robot_state_writer(entity_name)
+    writer = env.get_robot_state_writer(asset_cfg.name)
     device = env.device
     n = len(env_ids)
 
@@ -303,7 +306,7 @@ def reset_fallen_or_standing(
     default_pos: tuple[float, ...] = (0.0, 0.0, 0.665),
     default_quat_wxyz: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0),
     default_joint_pos_dict: dict[str, float] | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
     """Reset robots to a mix of fallen (random orientation) and standing poses.
 
@@ -370,7 +373,7 @@ def reset_fallen_or_standing(
     if len(env_ids) == 0:
         return
 
-    writer = env.get_robot_state_writer(entity_name)
+    writer = env.get_robot_state_writer(asset_cfg.name)
     device = env.device
     n = len(env_ids)
 
@@ -414,7 +417,7 @@ def reset_fallen_or_standing(
     # action offset, so relying on it produces an all-zero home
     # pose instead of the real standing configuration.
     if default_joint_pos_dict is not None:
-        rd = env.get_robot_data(entity_name)
+        rd = env.get_robot_data(asset_cfg.name)
         default_joint_pos = rd.default_joint_pos.unsqueeze(0).expand(n, -1).clone()
     else:
         default_joint_pos = env.act_manager.offset[env_ids].clone()
@@ -427,7 +430,7 @@ def reset_fallen_or_standing(
         # full soft joint limit range so fallen poses span the whole
         # reachable configuration space. Requires
         # ``rd.soft_joint_pos_limits`` (all 3 sims implement it).
-        rd = env.get_robot_data(entity_name)
+        rd = env.get_robot_data(asset_cfg.name)
         jp_lo, jp_hi = rd.soft_joint_pos_limits
         u = torch.rand((n, num_joints), device=device)
         fallen_joint_pos = jp_lo + u * (jp_hi - jp_lo)

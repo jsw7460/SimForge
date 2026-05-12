@@ -1,8 +1,12 @@
 """Unified proprioception observations using the RobotData interface.
 
 All functions accept any ``World`` subclass and read state exclusively
-through ``env.get_robot_data(entity_name)`` or
-``env.contact_manager``, making them simulator-agnostic.
+through ``env.get_robot_data(asset_cfg.name)`` or ``env.contact_manager``,
+making them simulator-agnostic.  ``asset_cfg`` is a
+:class:`~rlworld.rl.configs.scene.entity_selector.ResolvedEntity` —
+ObservationManager pre-resolves the :data:`_DEFAULT_SELECTOR` default at
+setup time, so presets only specify ``asset_cfg`` for a non-default
+entity.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils.quat_utils import quat_to_euler_wxyz
 
@@ -18,38 +23,41 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
 @EnvStepCache()
-def base_lin_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
+def base_lin_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Base linear velocity in body frame.
 
     Returns:
         Tensor of shape (num_envs, 3).
     """
-    return env.get_robot_data(entity_name).root_link_lin_vel_b
+    return env.get_robot_data(asset_cfg.name).root_link_lin_vel_b
 
 
 @EnvStepCache()
-def base_ang_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
+def base_ang_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Base angular velocity in body frame.
 
     Returns:
         Tensor of shape (num_envs, 3).
     """
-    return env.get_robot_data(entity_name).root_link_ang_vel_b
+    return env.get_robot_data(asset_cfg.name).root_link_ang_vel_b
 
 
 @EnvStepCache()
-def projected_gravity(env: World, entity_name: str = "robot") -> torch.Tensor:
+def projected_gravity(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Gravity vector projected into the body frame.
 
     Returns:
         Tensor of shape (num_envs, 3).
     """
-    return env.get_robot_data(entity_name).projected_gravity_b
+    return env.get_robot_data(asset_cfg.name).projected_gravity_b
 
 
 @EnvStepCache()
-def base_quat(env: World, entity_name: str = "robot") -> torch.Tensor:
+def base_quat(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Base quaternion in world frame, **wxyz** convention.
 
     Returns:
@@ -62,22 +70,22 @@ def base_quat(env: World, entity_name: str = "robot") -> torch.Tensor:
         mjlab, and the ``RobotData`` protocol — old Newton checkpoints
         whose critic obs included ``base_quat`` will need to retrain.
     """
-    return env.get_robot_data(entity_name).root_link_quat_w
+    return env.get_robot_data(asset_cfg.name).root_link_quat_w
 
 
 @EnvStepCache()
-def base_euler(env: World, entity_name: str = "robot", degrees: bool = False) -> torch.Tensor:
+def base_euler(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, degrees: bool = False) -> torch.Tensor:
     """Base orientation as Euler angles ``(roll, pitch, yaw)`` in radians.
 
     Args:
         env: Any environment with a ``RobotData``.
-        entity_name: Entity to query.
+        asset_cfg: Selector identifying the robot entity.
         degrees: If True, return angles in degrees instead of radians.
 
     Returns:
         Tensor of shape (num_envs, 3) — ``[roll, pitch, yaw]``.
     """
-    quat_wxyz = env.get_robot_data(entity_name).root_link_quat_w
+    quat_wxyz = env.get_robot_data(asset_cfg.name).root_link_quat_w
     euler = quat_to_euler_wxyz(quat_wxyz)
     if degrees:
         euler = euler * (180.0 / torch.pi)
@@ -97,18 +105,18 @@ def _actuated_joint_ids(env: World) -> torch.Tensor | None:
 
 
 @EnvStepCache()
-def dof_pos(env: World, entity_name: str = "robot") -> torch.Tensor:
+def dof_pos(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Actuated joint positions in act_manager order.
 
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    pos = env.get_robot_data(entity_name).joint_pos
+    pos = env.get_robot_data(asset_cfg.name).joint_pos
     return pos
 
 
 @EnvStepCache()
-def dof_pos_biased(env: World, entity_name: str = "robot") -> torch.Tensor:
+def dof_pos_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Actuated joint positions plus per-env encoder bias.
 
     Same as :func:`dof_pos` but adds ``env.act_manager.encoder_bias``
@@ -118,22 +126,22 @@ def dof_pos_biased(env: World, entity_name: str = "robot") -> torch.Tensor:
     actor observation group when ``randomize_encoder_bias`` is
     active; the critic typically keeps the unbiased ``dof_pos``.
     """
-    return dof_pos(env, entity_name) + env.act_manager.encoder_bias
+    return dof_pos(env, asset_cfg) + env.act_manager.encoder_bias
 
 
 @EnvStepCache()
-def dof_vel(env: World, entity_name: str = "robot") -> torch.Tensor:
+def dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Actuated joint velocities in act_manager order.
 
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    vel = env.get_robot_data(entity_name).joint_vel
+    vel = env.get_robot_data(asset_cfg.name).joint_vel
     return vel
 
 
 @EnvStepCache()
-def dof_pos_nominal_difference(env: World, entity_name: str = "robot") -> torch.Tensor:
+def dof_pos_nominal_difference(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Joint positions relative to nominal (default) positions, in act_manager order.
 
     Mirrors mjlab's ``joint_pos_rel(biased=False)``:
@@ -147,7 +155,7 @@ def dof_pos_nominal_difference(env: World, entity_name: str = "robot") -> torch.
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    rd = env.get_robot_data(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
     return rd.joint_pos - rd.default_joint_pos.unsqueeze(0)
 
 
@@ -156,7 +164,7 @@ def foot_height(
     env: World,
     body_names: tuple[str, ...] | None = None,
     site_names: tuple[str, ...] | None = None,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Z-coordinate of each foot above the world origin.
 
@@ -167,7 +175,7 @@ def foot_height(
     Returns:
         Tensor of shape ``(num_envs, num_feet)``.
     """
-    rd = env.get_robot_data(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
     if body_names is not None:
         return rd.body_pos_w(list(body_names))[:, :, 2]
     elif site_names is not None:
@@ -176,13 +184,13 @@ def foot_height(
 
 
 @EnvStepCache()
-def base_height(env: World, entity_name: str = "robot") -> torch.Tensor:
+def base_height(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Base height (z-coordinate) above world origin.
 
     Returns:
         Tensor of shape (num_envs, 1).
     """
-    return env.get_robot_data(entity_name).root_link_pos_w[:, 2:3]
+    return env.get_robot_data(asset_cfg.name).root_link_pos_w[:, 2:3]
 
 
 @EnvStepCache()
@@ -199,7 +207,7 @@ def prev_processed_actions(env: World) -> torch.Tensor:
 
 
 @EnvStepCache()
-def prev_raw_actions(env: World, entity_name: str = "robot") -> torch.Tensor:
+def prev_raw_actions(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Previous step's raw actions."""
     return env.act_manager.prev_raw_actions
 

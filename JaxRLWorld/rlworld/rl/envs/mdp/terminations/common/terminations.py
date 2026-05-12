@@ -1,7 +1,7 @@
 """Unified termination conditions using the RobotData interface.
 
 All functions accept any ``World`` subclass and read state exclusively
-through ``env.get_robot_data(entity_name)``, making them simulator-agnostic.
+through ``env.get_robot_data(asset_cfg.name)``, making them simulator-agnostic.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.configs.terminations import TerminationResult
 from rlworld.rl.utils.quat_utils import quat_to_euler_wxyz
 
@@ -17,11 +18,14 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
 def energy_termination(
     env: World,
     threshold: float = float("inf"),
     skip_steps: int = 0,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> TerminationResult:
     """Terminate when instantaneous mechanical power exceeds a threshold.
 
@@ -56,7 +60,7 @@ def energy_termination(
     Returns:
         TerminationResult indicating which envs exceeded the threshold.
     """
-    rd = env.get_robot_data(entity_name)
+    rd = env.get_robot_data(asset_cfg.name)
     power = torch.sum(torch.abs(rd.applied_torque * rd.joint_vel), dim=-1)
     exceeded = power > threshold
     if skip_steps > 0:
@@ -68,7 +72,7 @@ def roll_pitch_violation(
     env: World,
     roll_threshold_degree: float = 15.0,
     pitch_threshold_degree: float = 15.0,
-    entity_name: str = "robot",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> TerminationResult:
     """Terminate if robot's roll or pitch exceeds safe thresholds.
 
@@ -81,7 +85,7 @@ def roll_pitch_violation(
     Returns:
         TerminationResult indicating which envs should reset.
     """
-    quat_wxyz = env.get_robot_data(entity_name).root_link_quat_w
+    quat_wxyz = env.get_robot_data(asset_cfg.name).root_link_quat_w
     euler = quat_to_euler_wxyz(quat_wxyz)  # (num_envs, 3) radians
 
     roll_deg = torch.abs(euler[:, 0]) * (180.0 / torch.pi)

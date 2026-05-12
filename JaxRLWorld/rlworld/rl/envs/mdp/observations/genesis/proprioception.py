@@ -5,12 +5,16 @@ from typing import TYPE_CHECKING
 import torch
 from genesis.utils.geom import inv_quat, transform_by_quat
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.observations.genesis import state
 from rlworld.rl.envs.utils import EnvStepCache
 from rlworld.rl.utils import entity_utils as eu
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv, LocomotionEnv
+
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 
 
 @EnvStepCache()
@@ -48,10 +52,12 @@ def dof_pos_nominal_difference(env: GenesisEnv) -> torch.Tensor:
 
 
 @EnvStepCache()
-def dof_vel(env: GenesisEnv, entity_name: str = "robot", dofs_idx_local: torch.Tensor | None = None) -> torch.Tensor:
+def dof_vel(
+    env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, dofs_idx_local: torch.Tensor | None = None
+) -> torch.Tensor:
     if dofs_idx_local is None:
         dofs_idx_local = env.act_manager.actuated_dof_ids  # To remove base 6-dof joint
-    return env.scene_manager[entity_name].get_dofs_velocity(dofs_idx_local)
+    return env.scene_manager[asset_cfg.name].get_dofs_velocity(dofs_idx_local)
 
 
 @EnvStepCache()
@@ -65,7 +71,9 @@ def prev_processed_actions(env: GenesisEnv):
 
 
 @EnvStepCache()
-def relative_links_pos(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base", links: tuple[str] = None):
+def relative_links_pos(
+    env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, base_name: str = "base", links: tuple[str] = None
+):
     """Get link positions relative to base in body frame.
 
     Args:
@@ -77,7 +85,7 @@ def relative_links_pos(env: GenesisEnv, entity_name: str = "robot", base_name: s
     Returns:
         Tensor of shape (num_envs, num_links * 3).
     """
-    entity = env.scene_manager[entity_name]
+    entity = env.scene_manager[asset_cfg.name]
 
     if links is None:
         links_pos = entity.get_links_pos(links)
@@ -99,8 +107,8 @@ def relative_links_pos(env: GenesisEnv, entity_name: str = "robot", base_name: s
 
 
 @EnvStepCache()
-def imu(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base"):
-    sensor = env.scene_manager.sensors[entity_name][base_name]["IMUSensor"]
+def imu(env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, base_name: str = "base"):
+    sensor = env.scene_manager.sensors[asset_cfg.name][base_name]["IMUSensor"]
 
     value = sensor.read()
     lin_acc = value.lin_acc
@@ -109,14 +117,14 @@ def imu(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base"):
 
 
 @EnvStepCache()
-def imu_lin_acc(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base"):
-    imu_val = imu(env, entity_name, base_name)
+def imu_lin_acc(env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, base_name: str = "base"):
+    imu_val = imu(env, asset_cfg, base_name)
     return imu_val[..., :3]
 
 
 @EnvStepCache()
-def imu_ang_vel(env: GenesisEnv, entity_name: str = "robot", base_name: str = "base"):
-    imu_val = imu(env, entity_name, base_name)
+def imu_ang_vel(env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, base_name: str = "base"):
+    imu_val = imu(env, asset_cfg, base_name)
     return imu_val[..., 3:]
 
 

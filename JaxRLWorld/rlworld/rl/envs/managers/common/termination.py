@@ -31,6 +31,9 @@ class TerminationManager(BaseManager):
         # Discover named terms
         self._all_terms: dict[str, TerminationTermConfig] = iter_terms(config, TerminationTermConfig)
         self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
+        # Pre-resolve SceneEntitySelector params (and selector-typed defaults).
+        for term in self._all_terms.values():
+            self._resolve_term_selectors(term.resolved_func, term.params)
 
         self.reset_buf = torch.ones(env.num_envs, device=self.device, dtype=torch.bool)
         self.episode_count = torch.zeros(env.num_envs, device=self.device, dtype=torch.long)

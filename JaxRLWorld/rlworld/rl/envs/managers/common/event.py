@@ -8,6 +8,7 @@ import torch
 from rlworld.rl.configs.base_config import iter_terms
 from rlworld.rl.configs.common_config_classes import EventConfig
 from rlworld.rl.configs.events.event_term_config import EventTermConfig
+from rlworld.rl.envs.managers.base import BaseManager
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -16,21 +17,24 @@ if TYPE_CHECKING:
 EventManagerConfig = EventConfig
 
 
-class EventManager:
+class EventManager(BaseManager):
     """Manages event execution for domain randomization and disturbances.
 
     Terms are discovered via :func:`iter_terms` on the ``EventConfig`` instance.
     """
 
     def __init__(self, env: World, config: EventConfig):
-        self.env = env
+        super().__init__(env=env)
         self.config = config
-        self.device = env.device
         self.num_envs = env.num_envs
 
         # Discover named terms and resolve callables
         self._all_terms: dict[str, EventTermConfig] = iter_terms(config, EventTermConfig)
         self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
+        # Pre-resolve SceneEntitySelector params (and selector-typed
+        # defaults) so event functions receive a ResolvedEntity directly.
+        for term in self._all_terms.values():
+            self._resolve_term_selectors(term.resolved_func, term.params)
 
         # Group by mode
         self._terms_by_mode: dict[str, list[tuple[str, EventTermConfig]]] = defaultdict(list)
