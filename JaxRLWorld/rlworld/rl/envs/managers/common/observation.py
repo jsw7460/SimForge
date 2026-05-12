@@ -50,11 +50,15 @@ class ObservationManager(BaseManager):
         for group_name, group_cfg in self._groups.items():
             terms = iter_terms(group_cfg, ObservationTermConfig)
             self._group_terms[group_name] = terms
-            # Pre-resolve SceneEntitySelector params (and selector-typed
-            # defaults) before any dummy-obs evaluation in _build_term_indices.
-            for t in terms.values():
-                self._resolve_term_selectors(t.resolved_func, t.params)
             self._resolved_fns[group_name] = {name: t.resolved_func for name, t in terms.items()}
+
+        # SceneEntitySelector resolution is deferred (not done here): some
+        # sim envs build the ObservationManager *before* the ActionManager
+        # (Genesis does), and resolve_selector → _resolve_canonical_joint_ids
+        # needs ``env.act_manager``.  We instead resolve lazily on first use
+        # — by which point every manager exists.  The guard makes it
+        # idempotent so it's safe to call from multiple entry points.
+        self._selectors_resolved = False
 
         # History buffers
         self._group_obs_term_history_buffer: dict[str, dict[str, CircularBuffer]] = {}
@@ -63,6 +67,20 @@ class ObservationManager(BaseManager):
         # Term index mapping for extraction
         self._group_term_indices: dict[str, dict[str, tuple[int, int]]] = {}
         self._is_term_indices_built = False
+
+    def _ensure_selectors_resolved(self) -> None:
+        """Lazily replace SceneEntitySelector params with ResolvedEntity.
+
+        Idempotent.  Called before the first obs evaluation (dummy or
+        real), once every manager — in particular ``act_manager`` — has
+        been constructed.
+        """
+        if self._selectors_resolved:
+            return
+        for terms in self._group_terms.values():
+            for t in terms.values():
+                self._resolve_term_selectors(t.resolved_func, t.params)
+        self._selectors_resolved = True
 
     @property
     def num_envs(self) -> int:
@@ -82,6 +100,7 @@ class ObservationManager(BaseManager):
                     )
 
     def _build_term_indices(self) -> None:
+        self._ensure_selectors_resolved()
         for group_name, terms in self._group_terms.items():
             self._group_term_indices[group_name] = {}
             current_idx = 0
@@ -153,6 +172,7 @@ class ObservationManager(BaseManager):
     # ========== Core Processing ==========
 
     def process_observations(self, update_history: bool = True) -> None:
+        self._ensure_selectors_resolved()
         self.obs_dict = {}
 
         for group_name, terms in self._group_terms.items():
@@ -204,6 +224,7 @@ class ObservationManager(BaseManager):
     def __str__(self) -> str:
         from rlworld.rl.utils.pretty import create_manager_table, format_shape, table_to_string
 
+        self._ensure_selectors_resolved()
         output_parts = []
 
         for group_name, terms in self._group_terms.items():
