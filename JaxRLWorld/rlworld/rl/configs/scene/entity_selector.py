@@ -4,20 +4,28 @@ joints / bodies / geoms / sites).
 This is **not** the same as :class:`EntityCfg` in
 :mod:`unified_entity_config` — that one is a *spawn spec* (recipe used
 at scene-build time), whereas :class:`SceneEntitySelector` is a
-*runtime pointer* used by event/reward terms to address parts of an
-entity that already lives in the scene.
+*runtime pointer* used by event/reward/observation/termination terms to
+address parts of an entity that already lives in the scene.
 
 Pattern syntax: ``joint_names`` / ``body_names`` / ``geom_names`` /
-``site_names`` accept regular expressions (the same convention used by
-mjlab and IsaacLab — :func:`re.fullmatch` against each candidate name).
-``"FR_foot_collision"`` matches exactly; ``".*foot.*"`` matches any
-name containing ``foot``; ``".*/FR_foot_collision"`` matches Newton's
-``shape_label`` paths.
+``site_names`` / ``actuator_names`` accept regular expressions (the same
+convention used by mjlab and IsaacLab — :func:`re.fullmatch` against
+each candidate name).  ``"FR_foot_collision"`` matches exactly;
+``".*foot.*"`` matches any name containing ``foot``;
+``".*/FR_foot_collision"`` matches Newton's ``shape_label`` paths.
 
-Resolution is performed by ``World.resolve_selector(selector)`` which
-returns a :class:`ResolvedEntity` containing both canonical-order joint
-indices (aligned with ``RobotData.joint_pos``) and any sim-native
-indices needed by backend-level event terms.
+Lifecycle
+---------
+Presets put a :class:`SceneEntitySelector` (or rely on a term function's
+``_DEFAULT_SELECTOR`` default) in a term's ``params``.  When the owning
+manager is constructed it calls ``World.resolve_selector(selector)``
+once and replaces the selector in ``params`` with the returned
+:class:`ResolvedEntity` — so every term invocation receives a fully
+resolved struct with no per-step resolution cost.  ``ResolvedEntity``
+holds only ``name`` / index tensors / matched-name lists, so it stays
+deep-copyable (the config is cloned for the eval env) and re-fetching the
+backend entity is a cheap ``env.scene_manager[name]`` /
+``env.get_robot_data(name)`` away.
 """
 
 from __future__ import annotations
@@ -78,63 +86,52 @@ class SceneEntitySelector:
 class ResolvedEntity:
     """Sim-agnostic resolved view of a :class:`SceneEntitySelector`.
 
-    Returned by ``World.resolve_selector``.  Reward and event functions
-    consume this struct directly, so they no longer need to know which
-    backend they are running against.
+    Returned by ``World.resolve_selector``.  Reward / observation /
+    termination / event functions consume this directly; sim-specific
+    backends re-fetch the actual entity via ``env.scene_manager[name]``
+    or ``env.get_robot_data(name)`` when they need to write to it.
 
     ``eq=False`` keeps the default identity-based ``__eq__`` / ``__hash__``
     — important because instances carry ``torch.Tensor`` fields (which are
-    unhashable) yet need to be hashable for ``@EnvStepCache``-decorated
-    observation functions.  Managers resolve a selector **once** at setup
-    and stash the resulting instance in the term's ``params``, so the same
-    object is reused every step and its identity hash is stable.
+    unhashable) yet must be hashable for ``@EnvStepCache``-decorated
+    observation functions.  A selector is resolved once at setup and the
+    same instance is reused every step, so the identity hash is stable.
     """
 
     name: str
-    """Echo of the selector's entity name."""
-
-    backend_handle: Any
-    """Sim-native entity handle (Genesis ``RigidEntity``, mjlab
-    ``Entity``, Newton ``ArticulationView``).  Use only in backend-level
-    code that already knows the sim type — common code should ignore."""
+    """Echo of the selector's entity name (key into ``scene_manager.entities``)."""
 
     joint_ids: torch.Tensor | None
     """Joint indices in **canonical** (``act_manager.actuated_joint_names``)
-    order.  Use this to slice ``RobotData.joint_pos`` / ``joint_vel`` /
-    ``applied_torque``.  ``None`` when the selector did not request
-    joints (``selector.joint_names is None`` and the field is unused)."""
+    order — use to slice ``RobotData.joint_pos`` / ``joint_vel`` /
+    ``applied_torque``.  ``None`` when joints were not requested."""
 
     joint_ids_native: torch.Tensor | None
-    """Joint indices in the **sim-native** ordering (whatever the
-    backend uses for raw API calls).  ``None`` when the backend has not
-    populated this yet — friction / mass / geom-level DR does not need
-    joints, so most backends can leave this unfilled in the PoC."""
+    """Joint indices in the **sim-native** ordering used by raw backend
+    APIs (e.g. mjlab's ``robot.data.joint_pos`` columns).  ``None`` when
+    not requested or not populated by the backend."""
 
     body_ids: torch.Tensor | None
-    """Body/link indices in **sim-native** order.  ``None`` when the
-    selector did not request bodies."""
+    """Body / link indices in **sim-native** order.  ``None`` when bodies
+    were not requested."""
 
     geom_ids: torch.Tensor | None
-    """Geom indices in **sim-native** order.  ``None`` when the
-    selector did not request geoms or the backend does not expose
-    geoms (e.g. Genesis)."""
+    """Geom / shape indices in **sim-native** order.  ``None`` when geoms
+    were not requested or the backend has no named geoms (Genesis)."""
 
     site_ids: torch.Tensor | None
-    """Site indices in **sim-native** order.  ``None`` when the
-    selector did not request sites or the backend does not expose
-    sites (Genesis, Newton)."""
+    """Site indices in **sim-native** order.  ``None`` when sites were not
+    requested or the backend has no sites (Genesis, Newton)."""
 
     actuator_ids: torch.Tensor | None
-    """Actuator indices.  On Genesis/Newton this equals
-    :attr:`joint_ids` (canonical actuator==joint mapping).  On MuJoCo
-    this is mjlab's actuator id space.  ``None`` when the selector
-    did not request actuators."""
+    """Actuator indices.  On Genesis/Newton this equals :attr:`joint_ids`
+    (canonical actuator==joint mapping); on MuJoCo it is mjlab's actuator
+    id space.  ``None`` when actuators were not requested."""
 
     # ── Resolved names (matched against the entity's name list) ──────
-    # Populated alongside the corresponding ``*_ids`` field so reward /
-    # event terms that need name strings (e.g. mjlab-style accessors
-    # that take a list of names) can read them directly without
-    # re-resolving.
+    # Populated alongside the corresponding ``*_ids`` field so terms that
+    # need name strings (e.g. mjlab-style accessors taking a name list)
+    # read them directly without re-resolving.
 
     joint_names: list[str] | None = None
     """Joint names matched (canonical actuated-joint order)."""
@@ -158,20 +155,14 @@ class ResolvedEntity:
     ``mjlab.envs.mdp.dr.*``) read the original regex patterns from here."""
 
     extras: dict[str, Any] = field(default_factory=dict)
-    """Per-backend escape hatch.  Newton stores ``shape_ids`` here
-    (the resolved per-shape indices that ``shape_material_mu`` and
-    similar arrays are indexed by — distinct from collision geoms in
-    mjlab/Genesis terminology)."""
+    """Per-backend escape hatch for the rare cases that need more than the
+    fields above."""
 
     def __repr__(self) -> str:
-        # The default dataclass repr would dump ``backend_handle``'s full
-        # repr — for a Genesis ``RigidEntity`` that's a huge multi-line
-        # dump (n_qs, n_dofs, n_geoms, ...) which wrecks any table that
-        # prints reward/event ``params`` (e.g. the env-config console
-        # panel). Keep it to a one-liner: name, backend type, and which
-        # id fields were resolved.
-        bh = type(self.backend_handle).__name__ if self.backend_handle is not None else "None"
+        # The default dataclass repr would dump every tensor; keep it to a
+        # one-liner so it doesn't wreck the env-config console panel that
+        # prints reward/event ``params``.
         resolved = [
             f for f in ("joint_ids", "body_ids", "geom_ids", "site_ids", "actuator_ids") if getattr(self, f) is not None
         ]
-        return f"ResolvedEntity(name={self.name!r}, backend={bh}, resolved={resolved})"
+        return f"ResolvedEntity(name={self.name!r}, resolved={resolved})"

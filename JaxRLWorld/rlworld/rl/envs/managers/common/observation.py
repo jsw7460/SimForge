@@ -44,24 +44,20 @@ class ObservationManager(BaseManager):
             if isinstance(val, ObservationGroupConfig):
                 self._groups[attr_name] = val
 
-        # Discover terms within each group and resolve callables
+        # Discover terms within each group, resolve callables, and resolve
+        # any SceneEntitySelector in each term's params in place.  Every
+        # sim builds the ActionManager before the ObservationManager (see
+        # the per-sim ``_build_sim_managers``), so ``env.act_manager`` —
+        # which resolve_selector needs for canonical joint names — already
+        # exists here.
         self._group_terms: dict[str, dict[str, ObservationTermConfig]] = {}
         self._resolved_fns: dict[str, dict[str, callable]] = {}
         for group_name, group_cfg in self._groups.items():
             terms = iter_terms(group_cfg, ObservationTermConfig)
             self._group_terms[group_name] = terms
             self._resolved_fns[group_name] = {name: t.resolved_func for name, t in terms.items()}
-
-        # SceneEntitySelector resolution is deferred (not done here): some
-        # sim envs build the ObservationManager *before* the ActionManager
-        # (Genesis does), and resolve_selector → _resolve_canonical_joint_ids
-        # needs ``env.act_manager``.  We instead resolve lazily on first use
-        # — by which point every manager exists.  The guard makes it
-        # idempotent so it's safe to call from multiple entry points.
-        # Per-(group, term) {param_name: ResolvedEntity} overrides, merged
-        # over the (config-owned, untouched) term params at call time.
-        self._group_term_overrides: dict[str, dict[str, dict]] = {}
-        self._selectors_resolved = False
+            for t in terms.values():
+                self._resolve_term_selectors(t.resolved_func, t.params)
 
         # History buffers
         self._group_obs_term_history_buffer: dict[str, dict[str, CircularBuffer]] = {}
@@ -70,25 +66,6 @@ class ObservationManager(BaseManager):
         # Term index mapping for extraction
         self._group_term_indices: dict[str, dict[str, tuple[int, int]]] = {}
         self._is_term_indices_built = False
-
-    def _ensure_selectors_resolved(self) -> None:
-        """Lazily compute per-term selector overrides.
-
-        Idempotent.  Called before the first obs evaluation (dummy or
-        real), once every manager — in particular ``act_manager`` — has
-        been constructed.
-        """
-        if self._selectors_resolved:
-            return
-        for group_name, terms in self._group_terms.items():
-            self._group_term_overrides[group_name] = {
-                name: self._selector_overrides(t.resolved_func, t.params) for name, t in terms.items()
-            }
-        self._selectors_resolved = True
-
-    def _term_kwargs(self, group_name: str, term_name: str, obs_term) -> dict:
-        """Term params merged with resolved selector overrides."""
-        return {**obs_term.params, **self._group_term_overrides[group_name][term_name]}
 
     @property
     def num_envs(self) -> int:
@@ -108,13 +85,12 @@ class ObservationManager(BaseManager):
                     )
 
     def _build_term_indices(self) -> None:
-        self._ensure_selectors_resolved()
         for group_name, terms in self._group_terms.items():
             self._group_term_indices[group_name] = {}
             current_idx = 0
             for term_name, obs_term in terms.items():
                 resolved_fn = self._resolved_fns[group_name][term_name]
-                dummy_value = resolved_fn(self.env, **self._term_kwargs(group_name, term_name, obs_term))
+                dummy_value = resolved_fn(self.env, **obs_term.params)
                 base_dim = dummy_value.shape[-1]
 
                 history_length = obs_term.history_length
@@ -180,7 +156,6 @@ class ObservationManager(BaseManager):
     # ========== Core Processing ==========
 
     def process_observations(self, update_history: bool = True) -> None:
-        self._ensure_selectors_resolved()
         self.obs_dict = {}
 
         for group_name, terms in self._group_terms.items():
@@ -191,7 +166,7 @@ class ObservationManager(BaseManager):
                 func = self._resolved_fns[group_name][term_name]
                 scale = obs_term.scale
 
-                obs_value = func(self.env, **self._term_kwargs(group_name, term_name, obs_term))
+                obs_value = func(self.env, **obs_term.params)
 
                 if apply_group_noise and obs_term.noise is not None:
                     obs_value = apply_noise(obs_value, obs_term.noise)
@@ -232,7 +207,6 @@ class ObservationManager(BaseManager):
     def __str__(self) -> str:
         from rlworld.rl.utils.pretty import create_manager_table, format_shape, table_to_string
 
-        self._ensure_selectors_resolved()
         output_parts = []
 
         for group_name, terms in self._group_terms.items():
@@ -245,7 +219,7 @@ class ObservationManager(BaseManager):
                 func_name = getattr(resolved_fn, "__name__", term_name)
 
                 try:
-                    dummy = resolved_fn(self.env, **self._term_kwargs(group_name, term_name, obs_term))
+                    dummy = resolved_fn(self.env, **obs_term.params)
                     base_dim = dummy.shape[-1]
                 except Exception:
                     base_dim = "?"

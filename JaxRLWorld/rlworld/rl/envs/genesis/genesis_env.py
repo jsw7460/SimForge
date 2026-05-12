@@ -91,11 +91,6 @@ class GenesisEnv(World):
         return self._robot_state_writer_cache[entity_name]
 
     def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
-        # Idempotent: managers pre-resolve selectors in term params, so a
-        # DR/reward term that re-calls resolve_selector may pass the already-
-        # resolved object back in.
-        if isinstance(selector, ResolvedEntity):
-            return selector
         entity = self.scene_manager[selector.name]
 
         joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
@@ -135,7 +130,6 @@ class GenesisEnv(World):
         return ResolvedEntity(
             source_selector=selector,
             name=selector.name,
-            backend_handle=entity,
             joint_ids=joint_ids,
             joint_ids_native=None,
             body_ids=body_ids,
@@ -222,13 +216,14 @@ class GenesisEnv(World):
             self.vis_manager = ViserVisualizationManager(env=self, bridge=bridge, config=viser_cfg)
 
     def _build_sim_managers(self) -> None:
-        """Create Genesis-specific managers via ManagerRegistry."""
-        ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
-        self.obs_manager = ObsCls(
-            env=self,
-            config=self.obs_cfg,
-        )
+        """Create Genesis-specific managers via ManagerRegistry.
 
+        Order matters: the ActionManager must exist before the
+        ObservationManager because the latter resolves SceneEntitySelector
+        params in ``__init__`` and ``resolve_selector`` needs
+        ``act_manager.actuated_joint_names`` for the canonical joint order.
+        (Newton / MuJoCo already build act → obs.)
+        """
         ActCls = ManagerRegistry.get_class(self.sim_type, "action")
         ActCfgCls = ManagerRegistry.get_config_class(self.sim_type, "action")
         self.act_manager = ActCls(
@@ -241,6 +236,12 @@ class GenesisEnv(World):
                 settle_steps=self.act_cfg.settle_steps,
                 action_terms=self.act_cfg.action_terms,
             ),
+        )
+
+        ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
+        self.obs_manager = ObsCls(
+            env=self,
+            config=self.obs_cfg,
         )
 
         ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")

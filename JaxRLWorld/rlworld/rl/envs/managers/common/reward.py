@@ -40,20 +40,15 @@ class RewardManager(BaseManager):
         # Resolve func (callable or string) → actual callable, cached at init
         self._resolved_fns: dict[str, object] = {}
         self._instances: dict[str, object] = {}
-        # Per-term {param_name: ResolvedEntity} overrides — merged over the
-        # term's (config-owned, untouched) params at call time.  Keeping the
-        # config tree free of ResolvedEntity matters: it carries sim-native
-        # ctypes-backed handles that break ``deepcopy`` (used to clone the
-        # config for the eval env).
-        self._term_overrides: dict[str, dict] = {}
         for name, reward_term in self.reward_terms.items():
             func = reward_term.resolved_func
             self._resolved_fns[name] = func
-            overrides = self._selector_overrides(func, reward_term.params)
-            self._term_overrides[name] = overrides
+            # Replace any SceneEntitySelector in params with its resolved
+            # ResolvedEntity, before class instantiation / function binding.
+            self._resolve_term_selectors(func, reward_term.params)
             # Check if func is a class (stateful reward)
             if isinstance(func, type):
-                self._instances[name] = func(env=self.env, **{**reward_term.params, **overrides})
+                self._instances[name] = func(env=self.env, **reward_term.params)
 
     def get_term_cfg(self, name: str) -> RewardTermConfig:
         """Return the live RewardTermConfig for a registered term.
@@ -145,7 +140,7 @@ class RewardManager(BaseManager):
         if name in self._instances:
             raw_reward = self._instances[name](self.env)
         else:
-            raw_reward = self._resolved_fns[name](self.env, **{**reward_term.params, **self._term_overrides[name]})
+            raw_reward = self._resolved_fns[name](self.env, **reward_term.params)
 
         weight = get_weight_value(reward_term.weight, self.env_step_calls)
         return raw_reward * weight * self.env.control_dt

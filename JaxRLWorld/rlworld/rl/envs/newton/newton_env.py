@@ -88,11 +88,6 @@ class NewtonEnv(World):
         return self._robot_state_writer
 
     def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
-        # Idempotent: managers pre-resolve selectors in term params, so a
-        # DR/reward term that re-calls resolve_selector may pass the already-
-        # resolved object back in.
-        if isinstance(selector, ResolvedEntity):
-            return selector
         view = self.scene_manager.articulation_views[selector.name]
 
         joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
@@ -154,7 +149,6 @@ class NewtonEnv(World):
         return ResolvedEntity(
             source_selector=selector,
             name=selector.name,
-            backend_handle=view,
             joint_ids=joint_ids,
             joint_ids_native=None,
             body_ids=body_ids,

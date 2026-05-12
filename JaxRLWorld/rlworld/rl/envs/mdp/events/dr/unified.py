@@ -1,9 +1,12 @@
 """Sim-agnostic domain-randomization terms.
 
-Each public function in this module accepts a
-:class:`~rlworld.rl.configs.scene.entity_selector.SceneEntitySelector`
-instead of sim-specific name/pattern parameters, then dispatches to a
-private backend based on ``env.sim_type``.
+Each public function takes an ``asset_cfg`` selector — a preset writes a
+:class:`~rlworld.rl.configs.scene.entity_selector.SceneEntitySelector`,
+which the owning EventManager resolves once at setup into a
+:class:`~rlworld.rl.configs.scene.entity_selector.ResolvedEntity` (the
+``_DEFAULT_SELECTOR`` default is resolved the same way).  The function
+then dispatches to a private per-sim backend based on ``env.sim_type``;
+backends re-fetch the actual entity via ``env.scene_manager[...]``.
 
 Currently exposed:
 
@@ -117,7 +120,7 @@ def randomize_friction(
         _genesis_friction_backend(
             env,
             env_ids,
-            env.resolve_selector(asset_cfg),
+            asset_cfg,
             friction_range,
             operation,
             distribution,
@@ -128,7 +131,7 @@ def randomize_friction(
         _newton_friction_backend(
             env,
             env_ids,
-            env.resolve_selector(asset_cfg),
+            asset_cfg,
             friction_range,
             operation,
             distribution,
@@ -178,7 +181,7 @@ def _genesis_friction_backend(
             f"as separate writable attributes."
         )
 
-    entity = resolved.backend_handle
+    entity = env.scene_manager[resolved.name]
     if resolved.body_ids is None:
         links_idx = list(range(entity.n_links))
     else:
@@ -214,7 +217,7 @@ def _newton_friction_backend(
     import warp as wp
     from newton.solvers import SolverNotifyFlags
 
-    view = resolved.backend_handle
+    view = env.scene_manager.articulation_views[resolved.name]
     model = env.scene_manager.model
 
     # Resolve target shape indices once for all axes.
@@ -299,7 +302,7 @@ def _newton_friction_backend(
 def _mujoco_friction_backend(
     env: World,
     env_ids: torch.Tensor,
-    asset_cfg: SceneEntitySelector,
+    asset_cfg: ResolvedEntity,
     friction_range: tuple[float, float],
     operation: str,
     distribution: str,
@@ -390,9 +393,9 @@ def randomize_body_mass(
         return
 
     if env.sim_type == "genesis":
-        _genesis_body_mass_backend(env, env_ids, env.resolve_selector(asset_cfg), mass_range, operation, distribution)
+        _genesis_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_body_mass_backend(env, env_ids, env.resolve_selector(asset_cfg), mass_range, operation, distribution)
+        _newton_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution)
     elif env.sim_type == "mujoco":
         _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution, shared_random)
     else:
@@ -405,7 +408,7 @@ def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, di
             f"Genesis body mass DR only supports operation='scale' "
             f"(got {operation!r}); set_mass_shift is a multiplier."
         )
-    entity = resolved.backend_handle
+    entity = env.scene_manager[resolved.name]
     if resolved.body_ids is None:
         raise ValueError(
             "Genesis randomize_body_mass requires asset_cfg.body_names; " "got selector with no body subset."
@@ -438,7 +441,7 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
         # ``view.link_names`` is a subset (the robot articulation), so resolve
         # the names back to bodies via NewtonBodyCache for consistency with
         # legacy ``body_patterns`` path.
-        view = resolved.backend_handle
+        view = env.scene_manager.articulation_views[resolved.name]
         names = [view.link_names[i] for i in resolved.body_ids.tolist()]
         body_indices = cache.get_body_indices(names)
         if hasattr(body_indices, "tolist"):
@@ -495,9 +498,9 @@ def randomize_body_com_offset(
         return
 
     if env.sim_type == "genesis":
-        _genesis_body_com_offset_backend(env, env_ids, env.resolve_selector(asset_cfg), ranges, operation)
+        _genesis_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation)
     elif env.sim_type == "newton":
-        _newton_body_com_offset_backend(env, env_ids, env.resolve_selector(asset_cfg), ranges, operation)
+        _newton_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation)
     elif env.sim_type == "mujoco":
         _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, axes, shared_random)
     else:
@@ -510,7 +513,7 @@ def _genesis_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
             f"Genesis body COM offset DR only supports operation='add' "
             f"(got {operation!r}); set_COM_shift is purely additive."
         )
-    entity = resolved.backend_handle
+    entity = env.scene_manager[resolved.name]
     if resolved.body_ids is None:
         raise ValueError("Genesis randomize_body_com_offset requires asset_cfg.body_names.")
     links_idx = resolved.body_ids.tolist()
@@ -540,7 +543,7 @@ def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
     if resolved.body_ids is None:
         body_indices = torch.arange(cache.bodies_per_env, device=env.device)
     else:
-        view = resolved.backend_handle
+        view = env.scene_manager.articulation_views[resolved.name]
         names = [view.link_names[i] for i in resolved.body_ids.tolist()]
         body_indices = cache.get_body_indices(names)
         if hasattr(body_indices, "tolist"):
@@ -602,9 +605,7 @@ def randomize_pd_gains(
         return
 
     if env.sim_type == "genesis":
-        _genesis_pd_gains_backend(
-            env, env_ids, env.resolve_selector(asset_cfg), kp_range, kd_range, operation, distribution
-        )
+        _genesis_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
     elif env.sim_type == "newton":
         _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution)
     elif env.sim_type == "mujoco":
@@ -619,7 +620,7 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
             f"Genesis pd_gains DR only supports operation='scale' "
             f"(got {operation!r}); set_dofs_kp/kv take absolute values."
         )
-    entity = resolved.backend_handle
+    entity = env.scene_manager[resolved.name]
     n_dofs = entity.n_dofs
     if kp_range is not None:
         current_kp = entity.get_dofs_kp()
@@ -705,9 +706,7 @@ def randomize_joint_armature(
         return
 
     if env.sim_type == "genesis":
-        _genesis_armature_backend(
-            env, env_ids, env.resolve_selector(asset_cfg), armature_range, operation, distribution
-        )
+        _genesis_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution)
     elif env.sim_type == "newton":
         _newton_armature_backend(env, env_ids, armature_range, operation, distribution)
     elif env.sim_type == "mujoco":
@@ -719,7 +718,7 @@ def randomize_joint_armature(
 def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(f"Genesis joint_armature DR only supports operation='scale' (got {operation!r}).")
-    entity = resolved.backend_handle
+    entity = env.scene_manager[resolved.name]
     n_dofs = entity.n_dofs
     current = entity.get_dofs_armature()
     ratios = sample((len(env_ids), n_dofs), *armature_range, env.device, distribution)
@@ -787,9 +786,7 @@ def randomize_joint_friction(
         return
 
     if env.sim_type == "genesis":
-        _genesis_joint_friction_backend(
-            env, env_ids, env.resolve_selector(asset_cfg), friction_range, operation, distribution
-        )
+        _genesis_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution)
     elif env.sim_type == "newton":
         _newton_joint_friction_backend(env, env_ids, friction_range, operation, distribution)
     elif env.sim_type == "mujoco":
@@ -804,7 +801,7 @@ def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, oper
             f"Genesis joint_friction DR only supports operation='abs' "
             f"(got {operation!r}); set_dofs_frictionloss takes absolute values."
         )
-    entity = resolved.backend_handle
+    entity = env.scene_manager[resolved.name]
     n_dofs = entity.n_dofs
     values = sample((len(env_ids), n_dofs), *friction_range, env.device, distribution)
     entity.set_dofs_frictionloss(frictionloss=values.cpu().numpy(), envs_idx=env_ids)
