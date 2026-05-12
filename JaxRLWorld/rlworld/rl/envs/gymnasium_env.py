@@ -382,6 +382,11 @@ class GymnasiumEnv(World):
     ):
         from rlworld.rl.utils import set_seed
 
+        # Initialise the Genesis runtime on first use (kept out of package
+        # import so Newton-/MuJoCo-only processes never touch Genesis).
+        if not gs._initialized:
+            gs.init(logging_level="warning")
+
         set_seed(seed)
         super().__init__()
         # Check if vectorized or not

@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 from collections.abc import Iterable
 from itertools import chain
-from typing import Sequence
-
-from genesis.engine.entities import RigidEntity
+from typing import TYPE_CHECKING, Sequence
 
 from rlworld.rl.utils import string as string_utils
+
+if TYPE_CHECKING:
+    # ``genesis.engine.entities`` evaluates ``gs.qd_float`` at module load, so
+    # importing it eagerly would require ``genesis.init()`` to have run first.
+    # It is only needed here for type hints — keep it out of the runtime path.
+    from genesis.engine.entities import RigidEntity
 
 
 def find_joints(

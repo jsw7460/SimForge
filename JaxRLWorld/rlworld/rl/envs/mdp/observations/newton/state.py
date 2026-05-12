@@ -9,10 +9,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from genesis.utils.geom import quat_to_xyz
 
 from rlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_height_with_contact
 from rlworld.rl.envs.utils.utils import EnvStepCache
+from rlworld.rl.utils.quat_utils import quat_to_xyz_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -73,7 +73,7 @@ def base_euler(env: NewtonEnv, rpy: bool = True, degrees: bool = False) -> torch
     """Base orientation as Euler angles. Shape: [num_envs, 3]."""
     quat_xyzw = base_quat(env)
     quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
-    return quat_to_xyz(quat_wxyz, rpy=rpy, degrees=degrees)
+    return quat_to_xyz_wxyz(quat_wxyz, rpy=rpy, degrees=degrees)
 
 
 @EnvStepCache()

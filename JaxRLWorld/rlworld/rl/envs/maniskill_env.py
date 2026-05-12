@@ -25,6 +25,11 @@ class ManiSkillEnv(World):
         max_episode_length: int = 1000,
         seed: int = 0,
     ):
+        # Initialise the Genesis runtime on first use (kept out of package
+        # import so Newton-/MuJoCo-only processes never touch Genesis).
+        if not gs._initialized:
+            gs.init(logging_level="warning")
+
         super().__init__()
         # Check if vectorized or not
         self.gym_env = gym_env

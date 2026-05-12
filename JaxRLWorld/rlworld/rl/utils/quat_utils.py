@@ -171,6 +171,60 @@ def quat_to_euler_wxyz(q: Tensor) -> Tensor:
     return torch.stack([roll, pitch, yaw], dim=-1)
 
 
+def quat_to_xyz_wxyz(q: Tensor, rpy: bool = False, degrees: bool = False) -> Tensor:
+    """Convert a wxyz quaternion to XYZ Euler angles.
+
+    Faithful torch port of Genesis' ``genesis.utils.geom.quat_to_xyz`` (the
+    ``torch.Tensor`` branch), kept here so simulator-agnostic / Newton code
+    can do the conversion without importing ``genesis``.  ``rpy``/``degrees``
+    mirror the Genesis arguments.
+
+    Args:
+        q: Quaternion in (w, x, y, z) format, shape (..., 4).
+        rpy: If True, use the roll-pitch-yaw sign convention; otherwise the
+            default Genesis "xyz" convention.
+        degrees: If True, return degrees instead of radians.
+
+    Returns:
+        Euler angles, shape (..., 3).
+    """
+    eps = 1e-7  # mirrors ``gs.EPS`` (only used for the near-gimbal-lock branch)
+
+    q_w, q_x, q_y, q_z = q[..., 0:1], q[..., 1:2], q[..., 2:3], q[..., 3:4]
+    q_ww, q_wx, q_wy, q_wz = q_w * q_w, q_w * q_x, q_w * q_y, q_w * q_z
+    q_xx, q_xy, q_xz = q_x * q_x, q_x * q_y, q_x * q_z
+    q_yy, q_yz = q_y * q_y, q_y * q_z
+    q_zz = q_z * q_z
+
+    if rpy:
+        sinp = q_wy - q_xz
+        sinrcosp = q_wx + q_yz
+        sinycosp = q_wz + q_xy
+    else:
+        sinp = q_xz + q_wy
+        sinrcosp = q_wx - q_yz
+        sinycosp = q_wz - q_xy
+    cosrcosp = (q_ww - q_xx - q_yy + q_zz) / 2
+    cosycosp = (q_ww + q_xx - q_yy - q_zz) / 2
+    cosp = torch.sqrt(cosycosp**2 + sinycosp**2)
+
+    roll = torch.atan2(sinrcosp, cosrcosp)
+    pitch = torch.atan2(sinp, cosp)
+    yaw = torch.atan2(sinycosp, cosycosp)
+
+    # Special treatment of nearly singular rotations (pitch ≈ ±90°).
+    cosp_mask = cosp < eps
+    sinycosp_sing = (q_wz - q_xy) if rpy else (q_wz + q_xy)
+    cosycosp_sing = (q_ww - q_xx + q_yy - q_zz) / 2
+    roll = roll.masked_fill(cosp_mask, 0.0)
+    yaw = torch.where(cosp_mask, torch.atan2(sinycosp_sing, cosycosp_sing), yaw)
+
+    xyz = torch.cat([roll, pitch, yaw], dim=-1)
+    if degrees:
+        xyz = torch.rad2deg(xyz)
+    return xyz
+
+
 def quat_from_euler_xyz_wxyz(roll: Tensor, pitch: Tensor, yaw: Tensor) -> Tensor:
     """Convert XYZ-convention Euler angles to quaternion (wxyz convention).
 

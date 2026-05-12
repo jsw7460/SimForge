@@ -10,8 +10,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
     MujocoObservationConfig,
     MujocoSceneConfig,
 )
-from rlworld.rl.envs.genesis.locomotion_env import _gait_config_to_manager_config
-from rlworld.rl.envs.managers import GaitManager
+from rlworld.rl.envs.managers import GaitManager, gait_config_to_manager_config
 from rlworld.rl.envs.mujoco.mjlab_env import MujocoEnv
 
 if TYPE_CHECKING:
@@ -57,7 +56,7 @@ class MujocoLocomotionEnv(MujocoEnv):
     def _post_setup(self):
         super()._post_setup()
         if self._gait_cfg is not None:
-            manager_cfg = _gait_config_to_manager_config(self._gait_cfg, self.num_envs)
+            manager_cfg = gait_config_to_manager_config(self._gait_cfg, self.num_envs)
             self.gait_manager = GaitManager(env=self, config=manager_cfg)
 
     def _pre_reward_hook(self):

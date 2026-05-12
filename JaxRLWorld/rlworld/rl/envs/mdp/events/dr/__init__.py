@@ -25,11 +25,16 @@ Usage in preset configs::
     )
 """
 
-from . import newton, unified
+from . import unified
 from ._utils import DefaultCache, apply_operation, resolve_patterns, sample
 
+# NOTE: the ``newton`` submodule (``set_joint_friction`` / ``set_foot_friction``)
+# is *not* re-exported here -- it does ``import warp`` / ``from newton...`` at
+# module load, so importing it eagerly would drag the Newton stack into
+# Genesis-/MuJoCo-only processes.  Call sites that need it import the submodule
+# directly: ``from rlworld.rl.envs.mdp.events.dr import newton as newton_dr``.
+
 __all__ = [
-    "newton",
     "unified",
     "DefaultCache",
     "apply_operation",

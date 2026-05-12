@@ -15,26 +15,10 @@ from rlworld.rl.configs import (
     VisualizationConfig,
 )
 from rlworld.rl.envs.genesis.genesis_env import GenesisEnv
-from rlworld.rl.envs.managers import GaitManager, GaitManagerConfig
+from rlworld.rl.envs.managers import GaitManager, gait_config_to_manager_config
 
 if TYPE_CHECKING:
     pass
-
-
-def _gait_config_to_manager_config(gait_cfg: GaitConfig, num_envs: int) -> GaitManagerConfig:
-    """Convert high-level GaitConfig to internal GaitManagerConfig."""
-    return GaitManagerConfig(
-        num_envs=num_envs,
-        foot_names=gait_cfg.foot_names,
-        offset_mode=gait_cfg.offset_mode,
-        gait_period=gait_cfg.gait_period,
-        default_freq=gait_cfg.default_freq,
-        default_duration=gait_cfg.default_duration,
-        freq_command=gait_cfg.freq_command,
-        duration_command=gait_cfg.duration_command,
-        foot_offset_provider=gait_cfg.foot_offset_provider,
-        contact_smoothing_sigma=gait_cfg.contact_smoothing_sigma,
-    )
 
 
 class GenesisLocomotionEnv(GenesisEnv):
@@ -76,7 +60,7 @@ class GenesisLocomotionEnv(GenesisEnv):
     def _post_setup(self):
         super()._post_setup()
         if self._gait_cfg is not None:
-            manager_cfg = _gait_config_to_manager_config(self._gait_cfg, self.num_envs)
+            manager_cfg = gait_config_to_manager_config(self._gait_cfg, self.num_envs)
             self.gait_manager = GaitManager(env=self, config=manager_cfg)
 
     def _pre_reward_hook(self):

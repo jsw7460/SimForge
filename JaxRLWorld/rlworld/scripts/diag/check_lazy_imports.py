@@ -17,19 +17,26 @@ Usage::
     # pick the preset (default: t1_getup):
     python -m rlworld.scripts.diag.check_lazy_imports --sim genesis --preset go2_flat
 
+    # on a leak, print the stack trace of the first import of each sim pkg:
+    python -m rlworld.scripts.diag.check_lazy_imports --sim genesis --trace
+
 Exit code is 0 when clean, 1 when an other-sim package leaked.
 """
 
 from __future__ import annotations
 
 import argparse
+import builtins
 import sys
+import traceback
 
-# Top-level package names for each backend.
+# Top-level package names for each backend.  ``warp`` is listed for both
+# Newton (it builds on Warp directly) and MuJoCo (``mjlab`` depends on
+# ``mujoco_warp`` → ``warp``), so loading it is expected for either backend.
 _SIM_PKGS: dict[str, tuple[str, ...]] = {
     "genesis": ("genesis",),
     "newton": ("warp", "newton"),
-    "mujoco": ("mjlab",),
+    "mujoco": ("mjlab", "warp"),
 }
 
 # preset key -> "rlworld.rl.configs.presets.<...>.base" module + config class
@@ -48,11 +55,38 @@ def _loaded_sim_pkgs() -> set[str]:
     return {m.split(".")[0] for m in sys.modules if m.split(".")[0] in wanted}
 
 
+def _install_import_tracer(watch: set[str]) -> None:
+    """Print a stack trace the first time each name in ``watch`` is imported."""
+    seen: set[str] = set()
+    orig_import = builtins.__import__
+
+    def traced(name, _globals=None, _locals=None, fromlist=(), level=0):
+        top = name.split(".")[0]
+        if top in watch and top not in seen and top not in sys.modules:
+            seen.add(top)
+            print(f"\n>>> first import of {top!r} (via {name!r}) — stack:")
+            traceback.print_stack()
+            print()
+        return orig_import(name, _globals, _locals, fromlist, level)
+
+    builtins.__import__ = traced
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--sim", choices=sorted(_SIM_PKGS), default="genesis")
     ap.add_argument("--preset", choices=sorted(_PRESETS), default="t1_getup")
+    ap.add_argument(
+        "--trace",
+        action="store_true",
+        help="print the stack trace of the first import of every sim package",
+    )
     args = ap.parse_args()
+
+    if args.trace:
+        own = set(_SIM_PKGS[args.sim])
+        watch = {p for pkgs in _SIM_PKGS.values() for p in pkgs} - own
+        _install_import_tracer(watch)
 
     # 1) what a training script imports first
     import importlib

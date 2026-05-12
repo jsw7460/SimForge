@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Dict, Literal
 from .base_config import BaseConfig
 
 if TYPE_CHECKING:
-    pass
+    from rlworld.rl.vis.overlays.hud_items.items import HUDItem
 
 
 @dataclass
@@ -312,9 +312,6 @@ class RunnerConfig(BaseConfig):
     eval_disable_interval_events: bool = True
 
 
-from rlworld.rl.vis.overlays.hud_items.items import HUDItem
-
-
 @dataclass
 class VisualizationConfig(BaseConfig):
     """Visualization configuration (shared)."""
@@ -342,7 +339,7 @@ class VisualizationConfig(BaseConfig):
     show_feet_height: bool = True
     show_episode_info: bool = True
     feet_names: tuple[str, ...] = ("FL", "FR", "RL", "RR")
-    extra_hud_items: list[HUDItem] = field(default_factory=list)
+    extra_hud_items: "list[HUDItem]" = field(default_factory=list)
 
     # Viewer type
     viewer_type: Literal["gl", "viser", "rerun", "usd", "file"] = "gl"

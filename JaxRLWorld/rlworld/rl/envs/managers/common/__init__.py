@@ -10,7 +10,7 @@ from .command_term import (
 from .contact import BaseContactManager
 from .curriculum import CurriculumManager
 from .event import EventManager, EventManagerConfig
-from .gait import GaitManager, GaitManagerConfig
+from .gait import GaitManager, GaitManagerConfig, gait_config_to_manager_config
 from .observation import ObservationManager, ObsManagerConfig
 from .reward import RewardManager, RewardManagerConfig
 from .termination import TerminationConfig, TerminationManager
@@ -34,6 +34,7 @@ __all__ = [
     "CurriculumManager",
     "GaitManager",
     "GaitManagerConfig",
+    "gait_config_to_manager_config",
     "ObservationManager",
     "ObsManagerConfig",
 ]

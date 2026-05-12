@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import genesis as gs
 import torch
-from genesis.engine.entities import RigidEntity
-from genesis.engine.sensors.base_sensor import Sensor
 
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
@@ -20,6 +20,12 @@ from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.utils import entity_utils, string as string_utils
 
 if TYPE_CHECKING:
+    # ``genesis.engine.entities`` / ``genesis.engine.sensors`` evaluate
+    # ``gs.qd_float`` at module load (i.e. need ``genesis.init()``), so they
+    # are imported for type hints only — not on the runtime import path.
+    from genesis.engine.entities import RigidEntity
+    from genesis.engine.sensors.base_sensor import Sensor
+
     from rlworld.rl.envs import World
 
 
@@ -40,7 +46,7 @@ class SceneManagerConfig:
 class SceneManager(BaseManager):
     """Manages scene creation and configuration"""
 
-    def __init__(self, env: "World", config: SceneManagerConfig):
+    def __init__(self, env: World, config: SceneManagerConfig):
         BaseManager.__init__(self, env=env)
         self.config = config
         self.scene = None
@@ -244,7 +250,7 @@ class SceneManager(BaseManager):
                     if sub_ids:
                         _, _, vals = string_utils.resolve_matching_names_values(act_cfg.armature, sub_names)
                         entity.set_dofs_armature(vals, sub_ids)
-                elif isinstance(act_cfg.armature, (int, float)) and act_cfg.armature > 0:
+                elif isinstance(act_cfg.armature, int | float) and act_cfg.armature > 0:
                     entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 
                 # Effort limit — symmetric force range [-limit, +limit]. Applied

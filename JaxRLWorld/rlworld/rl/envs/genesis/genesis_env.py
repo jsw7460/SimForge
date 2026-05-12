@@ -40,6 +40,12 @@ class GenesisEnv(World):
         event_cfg: EventConfig,
         curriculum_cfg: CurriculumManagerConfig,
     ):
+        # Initialise the Genesis runtime on first use.  Kept here (rather than
+        # at package import) so a Newton-/MuJoCo-only process never imports or
+        # initialises Genesis.
+        if not gs._initialized:
+            gs.init(logging_level="warning")
+
         set_seed(env_cfg.seed)
         super().__init__()
 
