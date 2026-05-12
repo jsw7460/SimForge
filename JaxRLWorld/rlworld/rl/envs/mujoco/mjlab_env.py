@@ -121,6 +121,11 @@ class MujocoEnv(World):
         return self._robot_state_writer_cache[entity_name]
 
     def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        # Idempotent: managers pre-resolve selectors in term params, so a
+        # DR/reward term that re-calls resolve_selector may pass the already-
+        # resolved object back in.
+        if isinstance(selector, ResolvedEntity):
+            return selector
         # Build a transient mjlab SceneEntityCfg purely so we can reuse
         # mjlab's resolver — never expose this object to JaxRLWorld
         # callers (the mjlab type is an internal backend detail).
@@ -155,6 +160,7 @@ class MujocoEnv(World):
             return list(attr_value)
 
         return ResolvedEntity(
+            source_selector=selector,
             name=selector.name,
             backend_handle=self.scene_manager.get_entity(selector.name),
             joint_ids=joint_ids,

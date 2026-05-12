@@ -91,6 +91,11 @@ class GenesisEnv(World):
         return self._robot_state_writer_cache[entity_name]
 
     def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        # Idempotent: managers pre-resolve selectors in term params, so a
+        # DR/reward term that re-calls resolve_selector may pass the already-
+        # resolved object back in.
+        if isinstance(selector, ResolvedEntity):
+            return selector
         entity = self.scene_manager[selector.name]
 
         joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
@@ -128,6 +133,7 @@ class GenesisEnv(World):
             raise NotImplementedError("Genesis has no site concept; use body_names instead.")
 
         return ResolvedEntity(
+            source_selector=selector,
             name=selector.name,
             backend_handle=entity,
             joint_ids=joint_ids,

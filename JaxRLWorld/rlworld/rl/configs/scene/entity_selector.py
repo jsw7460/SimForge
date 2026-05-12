@@ -151,6 +151,12 @@ class ResolvedEntity:
     actuator_names: list[str] | None = None
     """Actuator names matched."""
 
+    source_selector: SceneEntitySelector | None = None
+    """The :class:`SceneEntitySelector` this was resolved from.  Backends
+    that must re-derive a sim-native selector spec (e.g. the MuJoCo DR
+    backends, which rebuild an mjlab ``SceneEntityCfg`` to delegate to
+    ``mjlab.envs.mdp.dr.*``) read the original regex patterns from here."""
+
     extras: dict[str, Any] = field(default_factory=dict)
     """Per-backend escape hatch.  Newton stores ``shape_ids`` here
     (the resolved per-shape indices that ``shape_material_mu`` and

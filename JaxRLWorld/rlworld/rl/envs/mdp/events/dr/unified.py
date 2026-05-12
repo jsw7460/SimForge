@@ -340,13 +340,19 @@ def _mujoco_friction_backend(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector, scene):
+def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scene):
     """Build a resolved mjlab ``SceneEntityCfg`` from our selector.
 
-    Used by every MuJoCo backend; mjlab import is local because the
-    module-level rule says simulator deps are optional extras.
+    Accepts either a raw :class:`SceneEntitySelector` or a
+    :class:`ResolvedEntity` (in which case the original selector is read
+    from ``asset_cfg.source_selector``).  Used by every MuJoCo backend;
+    mjlab import is local because the module-level rule says simulator
+    deps are optional extras.
     """
     from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
+
+    if isinstance(asset_cfg, ResolvedEntity):
+        asset_cfg = asset_cfg.source_selector
 
     cfg = _MjlabSceneEntityCfg(
         name=asset_cfg.name,
