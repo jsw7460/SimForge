@@ -1,31 +1,36 @@
 # SimForge / JaxRLWorld Development Guide
 
 ## Language
-- 대화: 한국어, 코드/커밋/주석: 영어
+
+* Code, commits, and comments: English
 
 ## Response Format
-- MUST: 파일을 수정했으면 답변 마지막에 수정된 파일 경로 목록을 보고
+
+* MUST: After modifying files, report the list of modified file paths at the end of the response.
 
 ## Code Style
-- NEVER: 함수 내부에서 import 하지 말 것. 유일한 예외: 순환 참조(circular import)
-- NEVER: silent fallback. 실패하면 즉시 crash. `except: pass`나 빈 fallback 금지
-- MUST: top-level import를 제거하기 전에 grep으로 re-export 여부 확인
+
+* NEVER: Import inside functions. The only exception is circular imports.
+* NEVER: Silent fallback. Crash immediately on failure. No `except: pass` or empty fallbacks.
+* MUST: Before removing a top-level import, grep to check whether it is re-exported.
 
 ## Architecture Principles
-- NEVER: 원본 동작에 없던 기능 추가. 리팩토링은 동작 보존이 원칙
-- MUST: dead code 제거 전 grep으로 caller 전수 조사 (legacy preset 포함)
-- 시뮬레이터를 다루다가 헷갈리는 부분은 Genesis/, Newton/, Mjlab/ 폴더를 들어가서 직접 탐색하고 이해한 다음 구현
+
+* NEVER: Add functionality not present in the original behavior. Refactoring must preserve behavior.
+* MUST: Before removing dead code, grep for all callers exhaustively (including legacy presets).
+* When unsure about simulator behavior, explore the `Genesis/`, `Newton/`, or `Mjlab/` directories directly to understand the source before implementing.
 
 ## Git / Workflow
-- 커밋 메시지는 descriptive하게, 미래 참조에 유용하도록
-- MonoRepo: `SimForge/` 안에 `JaxRLWorld/` (git tracked), 시뮬레이터들(`Genesis/`, `Newton/`, `Mjlab/` 등)은 `.gitignore`로 제외
-- `.gitignore`에서 시뮬레이터 경로는 root-relative (`/Genesis/`, `/Newton/`) -- macOS case-insensitive 이슈 방지
-- Keep commits focused and atomic—one logical change per commit.
-- Reference related issues in commit messages when applicable.
-- **Do not include AI attribution or co-authorship lines** (e.g., "Co-Authored-By: Claude...") in commit messages. Commits should represent human contributions without explicit AI attribution.
-- **Commit message format**:
-  - Separate subject from body with a blank line
-  - Subject: imperative mood, capitalized, ~50 chars, no trailing period
-    - Write as a command: "Fix bug" not "Fixed bug" or "Fixes bug"
-    - Test: "If applied, this commit will _[your subject]_"
-  - Body: wrap at 72 chars, explain _what_ and _why_ (not _how_—the diff shows that)
+
+* Write descriptive commit messages useful for future reference.
+* MonoRepo: `JaxRLWorld/` lives inside `SimForge/` (git tracked); simulators (`Genesis/`, `Newton/`, `Mjlab/`, etc.) are excluded via `.gitignore`.
+* In `.gitignore`, simulator paths must be root-relative (`/Genesis/`, `/Newton/`) to avoid macOS case-insensitivity issues.
+* Keep commits focused and atomic — one logical change per commit.
+* Reference related issues in commit messages when applicable.
+* Do not include AI attribution or co-authorship lines (e.g., "Co-Authored-By: Claude...") in commit messages. Commits should represent human contributions without explicit AI attribution.
+* Commit message format:
+  * Separate subject from body with a blank line.
+  * Subject: imperative mood, capitalized, ~50 chars, no trailing period.
+    * Write as a command: "Fix bug" not "Fixed bug" or "Fixes bug".
+    * Test: "If applied, this commit will [your subject]".
+  * Body: wrap at 72 chars, explain what and why (not how — the diff shows that).

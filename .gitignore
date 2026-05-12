@@ -84,3 +84,4 @@ checkpoints/
 # --- Misc ---
 *.log
 .claude/
+CLAUDE.local.md
