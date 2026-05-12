@@ -42,6 +42,51 @@ def _quaternion_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     )
 
 
+def _quat_shortest_arc(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """wxyz quaternion that rotates unit vector ``a`` to unit vector ``b``."""
+    a = a / max(float(np.linalg.norm(a)), 1e-12)
+    b = b / max(float(np.linalg.norm(b)), 1e-12)
+    d = float(np.dot(a, b))
+    if d > 1.0 - 1e-8:
+        return np.array([1.0, 0.0, 0.0, 0.0])
+    if d < -1.0 + 1e-8:  # opposite — any perpendicular axis
+        axis = np.cross(a, np.array([1.0, 0.0, 0.0]))
+        if float(np.linalg.norm(axis)) < 1e-6:
+            axis = np.cross(a, np.array([0.0, 1.0, 0.0]))
+        axis /= np.linalg.norm(axis)
+        return np.array([0.0, *axis])
+    c = np.cross(a, b)
+    q = np.array([1.0 + d, c[0], c[1], c[2]])
+    return q / np.linalg.norm(q)
+
+
+def _make_sky_image(
+    top_rgb: tuple[int, int, int],
+    horizon_rgb: tuple[int, int, int],
+    sun_rgb: tuple[int, int, int] | None,
+    size: int = 512,
+) -> np.ndarray:
+    """A flat sky backdrop: vertical gradient (sky → horizon haze) + optional sun glow."""
+    top = np.asarray(top_rgb, dtype=np.float64)
+    horizon = np.asarray(horizon_rgb, dtype=np.float64)
+    horizon_y = int(size * 0.62)
+    img = np.empty((size, size, 3), dtype=np.float64)
+    for y in range(size):
+        if y < horizon_y:
+            t = y / max(horizon_y - 1, 1)
+            img[y] = top * (1.0 - t) + horizon * t
+        else:
+            t = (y - horizon_y) / max(size - horizon_y - 1, 1)
+            img[y] = horizon * (1.0 - 0.16 * t)
+    if sun_rgb is not None:
+        sun = np.asarray(sun_rgb, dtype=np.float64)
+        sx, sy = int(size * 0.28), int(size * 0.20)  # upper-left-ish
+        yy, xx = np.mgrid[0:size, 0:size]
+        glow = np.exp(-((xx - sx) ** 2 + (yy - sy) ** 2) / (2.0 * (size * 0.18) ** 2))
+        img += glow[..., None] * (sun - img) * 0.6
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
 def _pbr_visual(
     rgb: tuple[int, int, int],
     metalness: float,
@@ -222,6 +267,8 @@ class ViserScene:
         # Build scene.
         self._create_mesh_handles()
         self._create_ground_plane()
+        self._setup_lighting()
+        self._setup_sky()
 
     @classmethod
     def create(
@@ -296,6 +343,44 @@ class ViserScene:
             cast_shadow=False,
             receive_shadow=cfg.receive_shadow,
         )
+
+    def _setup_lighting(self) -> None:
+        """Outdoor light rig: ambient floor + hemisphere + a shadow-casting sun."""
+        cfg = self.scene_config
+        if not cfg.lighting:
+            return
+        scene = self.server.scene
+        try:
+            scene.enable_default_lights(False)
+        except TypeError:
+            pass  # API drift — our lights add on top of the defaults instead
+        scene.add_light_ambient("/lights/ambient", intensity=float(cfg.ambient_intensity))
+        # Hemisphere light's "up" is its local +Y; rotate +Y → world +Z (Z-up scene).
+        scene.add_light_hemisphere(
+            "/lights/hemisphere",
+            sky_color=cfg.sky_color,
+            ground_color=cfg.hemisphere_ground_color,
+            intensity=float(cfg.hemisphere_intensity),
+            wxyz=(0.7071067811865476, 0.7071067811865476, 0.0, 0.0),
+        )
+        # Directional "sun": its shine axis is local -Z; rotate -Z → sun_direction.
+        sun_dir = np.asarray(cfg.sun_direction, dtype=np.float64)
+        wxyz = _quat_shortest_arc(np.array([0.0, 0.0, -1.0]), sun_dir)
+        scene.add_light_directional(
+            "/lights/sun",
+            color=cfg.sun_color,
+            intensity=float(cfg.sun_intensity),
+            cast_shadow=bool(cfg.sun_cast_shadow),
+            wxyz=tuple(float(v) for v in wxyz),
+        )
+
+    def _setup_sky(self) -> None:
+        """Set a procedural sky-gradient image as the (flat) canvas background."""
+        cfg = self.scene_config
+        if not cfg.sky_background:
+            return
+        img = _make_sky_image(cfg.sky_color, cfg.sky_horizon_color, cfg.sun_color if cfg.sky_sun_glow else None)
+        self.server.scene.set_background_image(img)
 
     def update(self) -> None:
         """Update all dynamic body transforms from the bridge."""

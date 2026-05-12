@@ -53,3 +53,29 @@ class ViserSceneConfig:
     # ── Shadows ─────────────────────────────────────────────────────
     cast_shadow: bool = True
     receive_shadow: bool = True
+
+    # ── Lighting (outdoor rig) ──────────────────────────────────────
+    lighting: bool = True
+    """Replace viser's default lights with an outdoor rig: an ambient floor +
+    a hemisphere light (sky tint above, ground bounce below) + a shadow-casting
+    directional "sun". ``False`` keeps viser's default lights."""
+    sun_direction: tuple[float, float, float] = (-0.5, -0.35, -0.85)
+    """Direction the sunlight *travels* (will be normalized) — down + from a corner."""
+    sun_color: tuple[int, int, int] = (255, 246, 230)
+    sun_intensity: float = 1.7
+    sun_cast_shadow: bool = True
+    ambient_intensity: float = 0.45
+    hemisphere_intensity: float = 0.55
+    hemisphere_ground_color: tuple[int, int, int] = (150, 140, 120)
+    """Hemisphere-light bounce color from the ground (sky side uses ``sky_color``)."""
+
+    # ── Sky background ──────────────────────────────────────────────
+    sky_background: bool = True
+    """Set a procedural sky-gradient image as the canvas background (a flat
+    backdrop — it does not rotate with the camera)."""
+    sky_color: tuple[int, int, int] = (138, 184, 235)
+    """Top-of-sky color (also the hemisphere light's sky color)."""
+    sky_horizon_color: tuple[int, int, int] = (226, 234, 240)
+    """Hazy color near the horizon."""
+    sky_sun_glow: bool = True
+    """Add a soft warm glow in the upper part of the sky backdrop."""
