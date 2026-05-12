@@ -93,7 +93,7 @@ class G1MujocoConfig(RobotConfig):
     # mjcf_path: str | None = "./Mjlab/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml"
 
     base_init_height: float = 0.74
-    base_link_name: str = "torso_link"
+    base_link_name: str = "pelvis"
 
     default_joint_angles: Dict[str, float] = field(
         default_factory=lambda: {

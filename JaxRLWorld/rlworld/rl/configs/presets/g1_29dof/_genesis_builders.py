@@ -131,7 +131,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         sensors=[
             SensorConfig(
                 entity_name="robot",
-                link_name="pelvis",
+                link_name=r.base_link_name,
                 sensor_class=gs.sensors.IMU,
             ),
         ],
@@ -210,7 +210,6 @@ def build_action(cfg: G1FlatConfig) -> ActionConfig:
 
 
 def build_reward(cfg: G1FlatConfig) -> RewardConfig:
-    r = cfg.robot
     feet_links = ["left_ankle_roll_link", "right_ankle_roll_link"]
 
     @dataclass
@@ -288,7 +287,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
         body_angular_velocity_penalty = RewardTermConfig(
             func=rf_mjlab.body_ang_vel_penalty_mjlab,
             weight=0.05,
-            params={"body_name": r.base_link_name},
+            params={"body_name": "torso_link"},
         )
         joint_pos_limits = RewardTermConfig(
             func=rf_mjlab.joint_pos_limits_mjlab,
