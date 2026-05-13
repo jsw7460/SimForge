@@ -14,6 +14,7 @@ from rlworld.rl.algorithms.base import ActInput, RLAlgorithm
 from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.envs import EpisodeStatsCollector, World
+from rlworld.rl.envs.utils.lazy_import_check import assert_single_sim_loaded
 from rlworld.rl.runners.iteration_data import EpisodeStats, IterationData
 from rlworld.rl.utils import setup_log_dir
 from rlworld.rl.utils.console import GREEN, RESET
@@ -132,6 +133,10 @@ class BaseRunner(ABC):
 
         runner_cls = get_runner_class(configs.algorithm.algorithm_name)
         env = cls._create_env_from_config(configs)
+        # Guard the per-process single-backend invariant — see
+        # ``lazy_import_check`` for context. Set JAXRLWORLD_ALLOW_MULTI_SIM=1
+        # in diag/cross-sim scripts that build multiple backends on purpose.
+        assert_single_sim_loaded()
 
         if configs.runner.resume_path is None:
             return runner_cls(env, configs, use_wandb=use_wandb, seed=seed)

@@ -33,6 +33,11 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
+
+# This diag builds multiple sim backends sequentially in one process — bypass
+# the single-backend guard in BaseRunner.create_with_env.
+os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import numpy as np
 
