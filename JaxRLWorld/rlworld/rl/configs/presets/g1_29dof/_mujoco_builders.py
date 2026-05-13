@@ -49,6 +49,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_quat,
     command as command_obs,
     dof_pos,
+    dof_pos_biased,
     dof_vel,
     foot_air_time,
     foot_contact_forces,
@@ -182,7 +183,12 @@ def build_observation(cfg: G1FlatConfig) -> MujocoObservationConfig:
         base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
         projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         command = ObservationTermConfig(func=command_obs, scale=1.0)
-        dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+        # ``dof_pos_biased`` = robot_data.joint_pos + act_manager.encoder_bias
+        # (per-episode static offset from randomize_encoder_bias DR). Critic
+        # below keeps unbiased ``dof_pos``. Note: this bypasses mjlab's own
+        # action-side bias subtraction (entity.data.encoder_bias is left at
+        # zero), unifying with Newton/Genesis on the obs-bias mechanism.
+        dof_pos = ObservationTermConfig(func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01))
         dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 

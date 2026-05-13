@@ -16,7 +16,7 @@ Currently exposed:
 * :func:`randomize_pd_gains`         — joint PD controller gains (kp/kd)
 * :func:`randomize_joint_armature`   — reflected rotor inertia
 * :func:`randomize_joint_friction`   — joint Coulomb friction
-* :func:`randomize_encoder_bias`     — joint encoder bias (MuJoCo only)
+* :func:`randomize_encoder_bias`     — joint encoder bias (sim-agnostic, obs-side)
 
 These are the sole DR entry points presets should target.  Newton
 keeps a couple of *non-randomised* SysID-aligned setters in
@@ -841,7 +841,7 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
 
 
 # ══════════════════════════════════════════════════════════════════════
-# randomize_encoder_bias  (MuJoCo only)
+# randomize_encoder_bias  (sim-agnostic, obs-side)
 # ══════════════════════════════════════════════════════════════════════
 
 
@@ -851,27 +851,29 @@ def randomize_encoder_bias(
     bias_range: tuple[float, float],
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
 ) -> None:
-    """Randomize joint encoder bias.
+    """Randomize per-joint encoder bias (sim-agnostic, obs-side).
 
-    MuJoCo-only — Genesis/Newton do not expose an encoder bias hook
-    on their PD controllers and raise ``NotImplementedError``.
+    Samples ``bias ~ U(bias_range)`` per (env, joint) and writes to
+    ``env.act_manager._encoder_bias`` via ``set_encoder_bias``. The biased
+    value is consumed by the ``dof_pos_biased`` observation
+    (``q + encoder_bias``); the underlying physics state is unchanged.
+
+    To activate, the actor observation group must register
+    ``dof_pos_biased`` (not plain ``dof_pos``); otherwise the bias has no
+    effect. Critic typically keeps the unbiased ``dof_pos``.
+
+    NOTE: This path bypasses mjlab's own ``entity.data.encoder_bias``
+    (which mjlab subtracts from PD targets in
+    ``Mjlab/src/mjlab/envs/mdp/actions/actions.py``). The two mechanisms
+    are duals (obs-bias vs action-bias) but not identical; using the
+    sim-agnostic obs-bias for all three sims gives consistent behavior
+    across Genesis / Newton / mjlab.
     """
     if len(env_ids) == 0:
         return
 
-    if env.sim_type == "mujoco":
-        from mjlab.envs.mdp.dr import encoder_bias as _mjlab_encoder_bias
-
-        adapter = _MujocoEnvAdapter(env)
-        mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-        _mjlab_encoder_bias(
-            env=adapter,
-            env_ids=env_ids,
-            bias_range=bias_range,
-            asset_cfg=mjlab_cfg,
-        )
-    else:
-        raise NotImplementedError(
-            f"randomize_encoder_bias is MuJoCo-only; sim_type={env.sim_type!r} "
-            f"does not implement an encoder bias hook."
-        )
+    n_envs = len(env_ids)
+    n_joints = env.act_manager._encoder_bias.shape[1]
+    lo, hi = bias_range
+    bias_samples = torch.empty(n_envs, n_joints, device=env.device).uniform_(lo, hi)
+    env.act_manager.set_encoder_bias(bias_samples, env_ids=env_ids)

@@ -46,6 +46,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_quat,
     command as command_obs,
     dof_pos,
+    dof_pos_biased,
     dof_vel,
     foot_air_time,
     foot_contact_forces,
@@ -185,7 +186,10 @@ def build_observation(cfg: G1FlatConfig) -> NewtonObservationConfig:
         base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
         projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         command = ObservationTermConfig(func=command_obs, scale=1.0)
-        dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+        # ``dof_pos_biased`` = robot_data.joint_pos + act_manager.encoder_bias
+        # (per-episode static offset from randomize_encoder_bias DR). Critic
+        # below keeps unbiased ``dof_pos``.
+        dof_pos_obs = ObservationTermConfig(func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01))
         dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
@@ -392,6 +396,14 @@ def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """Newton-specific domain randomization terms."""
     r = cfg.robot
     return {
+        "randomize_encoder_bias": EventTermConfig(
+            func=unified_dr.randomize_encoder_bias,
+            mode="reset_dr",
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "bias_range": (-0.015, 0.015),
+            },
+        ),
         "randomize_body_com": EventTermConfig(
             func=unified_dr.randomize_body_com_offset,
             mode="reset_dr",
