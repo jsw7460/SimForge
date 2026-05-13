@@ -48,6 +48,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_quat,
     command as command_obs,
     dof_pos,
+    dof_pos_biased,
     dof_vel,
     foot_air_time,
     foot_contact_forces,
@@ -105,7 +106,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         entities={
             "base_entity": GroundPlaneCfg(),
             "robot": GenesisEntityCfg(
-                urdf_path=r.urdf_path,
+                mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
                     pos=(0, 0, r.base_init_height),
                     joint_pos=r.default_joint_angles,
@@ -156,7 +157,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
-            max_collision_pairs=30,
+            max_collision_pairs=20,
             batch_dofs_info=True,
         ),
         robot_cfg=r,
@@ -171,7 +172,10 @@ def build_observation(cfg: G1FlatConfig) -> ObservationConfig:
         base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
         projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         command = ObservationTermConfig(func=command_obs, scale=1.0)
-        dof_pos = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+        # ``dof_pos_biased`` = robot_data.joint_pos + act_manager.encoder_bias
+        # (per-episode static offset from randomize_encoder_bias DR). Critic
+        # below keeps unbiased ``dof_pos``.
+        dof_pos = ObservationTermConfig(func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01))
         dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
@@ -289,6 +293,10 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.05,
             params={"asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",))},
         )
+        angular_momentum_penalty = RewardTermConfig(
+            func=rf_mjlab.angular_momentum_penalty,
+            weight=0.02,
+        )
         joint_pos_limits = RewardTermConfig(
             func=rf_mjlab.joint_pos_limits_mjlab,
             weight=1.0,
@@ -298,8 +306,17 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.1,
         )
 
-        # Feet rewards
-        feet_selector = SceneEntitySelector(name="robot", body_names=tuple(feet_links), preserve_order=True)
+        # Feet rewards — position/velocity reads use the foot-pad frame body
+        # (welded child of ankle_roll_link at +0.04m fore / -0.037m sole;
+        # matches mjlab's `left_foot` site so values agree across sims).
+        # Contacts still come from ankle_roll_link (the frame body has no
+        # collision geom), so we pass contact_order explicitly.
+        feet_selector = SceneEntitySelector(
+            name="robot",
+            body_names=("left_foot_frame", "right_foot_frame"),
+            preserve_order=True,
+        )
+        feet_contact_order = list(feet_links)
         feet_clearance = RewardTermConfig(
             func=rf_mjlab.feet_clearance_mjlab,
             weight=2.0,
@@ -316,6 +333,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
                 "asset_cfg": feet_selector,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
+                "contact_order": feet_contact_order,
             },
         )
         feet_slip = RewardTermConfig(
@@ -324,6 +342,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             params={
                 "asset_cfg": feet_selector,
                 "command_threshold": 0.05,
+                "contact_order": feet_contact_order,
             },
         )
         soft_landing = RewardTermConfig(
@@ -341,6 +360,14 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
 def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """Genesis-specific domain randomization terms."""
     return {
+        "randomize_encoder_bias": EventTermConfig(
+            func=unified_dr.randomize_encoder_bias,
+            mode="reset_dr",
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "bias_range": (-0.015, 0.015),
+            },
+        ),
         "randomize_body_com": EventTermConfig(
             func=unified_dr.randomize_body_com_offset,
             mode="reset_dr",

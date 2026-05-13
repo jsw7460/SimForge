@@ -14,6 +14,7 @@ from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntity
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     VariablePostureTracker,
+    penalize_angular_momentum_l2,
     penalize_body_ang_vel_xy,
     penalize_feet_clearance,
     penalize_feet_slip,
@@ -315,6 +316,7 @@ class feet_swing_height_mjlab:
         command_threshold: float = 0.05,
         asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
         contact_group: str = "feet_ground_contact",
+        contact_order: list[str] | None = None,
     ):
         self._impl = FeetSwingHeightTracker(
             env=env,
@@ -322,6 +324,7 @@ class feet_swing_height_mjlab:
             target_height=target_height,
             command_threshold=command_threshold,
             asset_cfg=asset_cfg,
+            contact_order=contact_order,
             use_squared_error=True,
             reset_mode="zero",
         )
@@ -338,17 +341,31 @@ class feet_swing_height_mjlab:
 # ============================================================
 
 
+def angular_momentum_penalty(env: GenesisEnv) -> torch.Tensor:
+    """Penalize whole-body angular momentum (König-decomposed, world frame).
+
+    Delegates to ``common.penalize_angular_momentum_l2`` → reads
+    ``GenesisRobotData.angular_momentum_w()`` which computes
+    ``sum_i [m_i (r_i - r_c) x v_i + R_i I_i R_i^T omega_i]`` — the same
+    physical quantity as MuJoCo's ``subtreeangmom`` and Newton's manual
+    sum. ``sensor_name`` is unused (Genesis has no built-in sensor).
+    """
+    return penalize_angular_momentum_l2(env)
+
+
 def feet_slip_mjlab(
     env: GenesisEnv,
     command_threshold: float = 0.05,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     contact_group: str = "feet_ground_contact",
+    contact_order: list[str] | None = None,
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_feet_slip`` (feet via ``asset_cfg.body_names``)."""
     return penalize_feet_slip(
         env,
         contact_group=contact_group,
         command_threshold=command_threshold,
+        contact_order=contact_order,
         asset_cfg=asset_cfg,
     )
 

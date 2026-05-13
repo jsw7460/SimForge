@@ -161,21 +161,24 @@ def penalize_angular_momentum_l2(
     """Penalize whole-body angular momentum (L2 squared, sim-agnostic).
 
     Reads ``RobotData.angular_momentum_w(sensor_name)`` and returns
-    ``-sum(square(...))``. Each simulator implements
-    ``angular_momentum_w`` differently:
+    ``-sum(square(...))``. The per-sim implementations of
+    ``angular_momentum_w`` all compute the **same physical quantity** —
+    König's decomposition of the system's angular momentum about its CoM:
 
-    - Newton: manual ``sum_i I_i @ omega_i`` over all bodies
-      (``sensor_name`` ignored).
-    - mjlab: reads MuJoCo's built-in ``subtreeangmom`` sensor data,
-      identified by ``sensor_name``.
+        L = sum_i [ m_i * (r_i - r_c) x v_i  +  R_i @ I_i_local @ R_i^T @ omega_i ]
+
+    - mjlab: reads MuJoCo's built-in ``subtreeangmom`` sensor data
+      (sensor is registered in the robot XML as
+      ``<subtreeangmom body="pelvis"/>`` — subtree of the floating-base
+      root = whole robot).
+    - Newton: computes the orbital + spin sum manually from
+      ``model.body_mass`` / ``model.body_inertia`` + per-body state.
     - Genesis: not implemented (raises NotImplementedError).
 
-    The two implementations are NOT bit-identical to each other —
-    they compute physically related but mathematically distinct
-    quantities (manual sum-of-body-momenta vs subtree angular momentum
-    via the composite mass matrix). Each was already in use by its own
-    sim's preset before this migration; the unification preserves
-    those values exactly within each sim.
+    The Newton path previously summed only the spin term and
+    underestimated by 1-2 orders of magnitude vs mjlab; ``8d11.. .``
+    added the orbital term so the two now agree (up to solver-state
+    divergence in independent runs).
 
     Args:
         env: Any environment whose RobotData implements

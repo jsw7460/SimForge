@@ -462,22 +462,23 @@ class NewtonRobotData:
     # ------------------------------------------------------------------
 
     def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:
-        """Whole-body angular momentum (world frame) via manual ``sum_i I_i @ omega_i``.
+        """Whole-body angular momentum (world frame) about the system CoM.
 
-        Reads ``model.body_inertia`` (per-body 3x3 in body-local frame)
-        and the current state's per-body world quaternion + angular
-        velocity. For each body:
+        Matches MuJoCo's ``subtreeangmom`` sensor (subtree rooted at the
+        floating-base root = whole robot). König's decomposition:
 
-            omega_body = quat_inverse_rotate(quat_world, omega_world)
-            L_body = I_body @ omega_body
-            L_world = quat_rotate(quat_world, L_body)
+            L = sum_i [ m_i * (r_i - r_c) x v_i              # orbital
+                        +  R_i @ I_i_local @ R_i^T @ omega_i ]  # spin
 
-        then sums L_world across all bodies.
+        where r_i, v_i are body CoMs / CoM velocities, r_c is the system
+        CoM, R_i / omega_i / I_i are the body world rotation, world
+        angular velocity, and body-frame inertia. ``sensor_name`` is
+        ignored (no Newton sensor to read from).
 
-        The body-frame quat rotation uses Newton's native xyzw helper to
-        be bit-identical to the legacy ``angular_momentum_penalty`` reward
-        in ``mdp/rewards/newton/mjlab_rewards.py``. ``sensor_name`` is
-        ignored (Newton has no built-in angular momentum sensor).
+        Before this, Newton returned only the spin sum. The orbital term
+        is dominant when limbs swing out from the body CoM, which is why
+        the previous version underestimated by 1-2 orders of magnitude
+        relative to ``subtreeangmom``.
         """
         from rlworld.rl.envs.mdp.observations.newton.state import (
             _quat_rotate,
@@ -487,21 +488,34 @@ class NewtonRobotData:
 
         cache = get_cache(self._env)
         num_envs = self._env.num_envs
+        bodies_per_env = cache.bodies_per_env
+        model = self._env.scene_manager.model
 
-        # Reshape model.body_inertia (flat) -> (num_envs, bodies_per_env, 3, 3)
-        body_inertia = wp.to_torch(self._env.scene_manager.model.body_inertia).view(
-            num_envs, cache.bodies_per_env, 3, 3
-        )
+        # Per-body, per-env model arrays (flat -> (W, B, ...)).
+        body_inertia = wp.to_torch(model.body_inertia).view(num_envs, bodies_per_env, 3, 3)
+        body_mass = wp.to_torch(model.body_mass).view(num_envs, bodies_per_env)  # (W, B)
 
-        # Body quat (xyzw, native Newton order) and ang vel from the state.
         body_q = self._body_q_view()
         body_qd = self._body_qd_view()
         body_quat_xyzw = body_q[:, :, 3:7]
-        ang_vel_world = body_qd[:, :, 3:6]
+        ang_vel_world = body_qd[:, :, 3:6]  # (W, B, 3)
+        # Newton's ``body_qd[:, :, 0:3]`` is linear velocity AT each body's CoM
+        # — exactly what the orbital term wants. No transfer needed.
+        v_com_w = body_qd[:, :, 0:3]  # (W, B, 3)
 
-        # I @ omega in body frame, then rotate back to world.
+        # Spin: sum_i R_i @ I_i_local @ R_i^T @ omega_i.
         ang_vel_body = _quat_rotate_inverse(body_quat_xyzw, ang_vel_world)
-        ang_momentum_body = torch.einsum("nbij,nbj->nbi", body_inertia, ang_vel_body)
-        ang_momentum_world = _quat_rotate(body_quat_xyzw, ang_momentum_body)
+        spin_body = torch.einsum("nbij,nbj->nbi", body_inertia, ang_vel_body)
+        spin_world = _quat_rotate(body_quat_xyzw, spin_body)  # (W, B, 3)
 
-        return torch.sum(ang_momentum_world, dim=1)  # (num_envs, 3)
+        # Orbital: sum_i m_i * (r_i - r_c) x v_i.
+        r_com_w = self.body_com_pos_w_all  # (W, B, 3) — body CoM in world
+        total_mass = body_mass.sum(dim=1)  # (W,)
+        # Guard against the degenerate case (no massive bodies in env) — should
+        # not happen with a real robot but keeps the divide explicit.
+        r_c = (body_mass.unsqueeze(-1) * r_com_w).sum(dim=1) / total_mass.unsqueeze(-1)  # (W, 3)
+        r_rel = r_com_w - r_c.unsqueeze(1)  # (W, B, 3)
+        orbital_per_body = body_mass.unsqueeze(-1) * torch.cross(r_rel, v_com_w, dim=-1)
+        orbital = orbital_per_body.sum(dim=1)  # (W, 3)
+
+        return spin_world.sum(dim=1) + orbital  # (W, 3)

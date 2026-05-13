@@ -10,9 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+from genesis.utils.misc import qd_to_torch
 from torch import Tensor
 
-from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_to_euler_wxyz
+from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_rotate_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
     from genesis.engine.entities import RigidEntity
@@ -284,21 +285,47 @@ class GenesisRobotData:
     # ------------------------------------------------------------------
 
     def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:
-        """Whole-body angular momentum — not implemented for Genesis.
+        """Whole-body angular momentum (world frame) about the system CoM.
 
-        Genesis does not expose a batched per-link inertia tensor (only
-        scalar mass via ``get_links_inertial_mass``), and there is no
-        active reward in JaxRLWorld that uses Genesis angular momentum.
-        Implementing this would require either reading the static
-        ``link.inertial_i`` per link and rotating to the body frame
-        manually, or adding a Genesis sensor abstraction. Defer until a
-        consumer actually needs it.
+        Matches Newton and MuJoCo's ``subtreeangmom`` via König's
+        decomposition:
+
+            L = sum_i [ m_i * (r_i - r_c) x v_i              # orbital
+                        +  R_i @ I_i_local @ R_i^T @ omega_i ]  # spin
+
+        Reads ``solver.links_info.inertial_mass`` / ``inertial_i`` for
+        per-body model values and the existing
+        ``body_com_pos_w_all`` / ``body_com_lin_vel_w_all`` /
+        ``body_ang_vel_w_all`` / ``body_quat_w_all`` accessors for state.
+        ``sensor_name`` is ignored.
         """
-        raise NotImplementedError(
-            "GenesisRobotData.angular_momentum_w is not implemented. "
-            "Genesis has no batched per-link inertia accessor and no "
-            "JaxRLWorld preset currently uses angular_momentum_penalty "
-            "with Genesis. If you need this, either implement the manual "
-            "I @ omega path using static link.inertial_i values or add a "
-            "Genesis sensor wrapper."
-        )
+        solver = self._entity._solver
+        link_ids = self._global_link_ids
+
+        # Per-body mass: (W, B) if batch_links_info else (B,) → broadcast to (W, B).
+        m = qd_to_torch(solver.links_info.inertial_mass, None, link_ids, transpose=True, copy=True)
+        if m.dim() == 1:
+            m = m.unsqueeze(0).expand(self._num_envs, -1)
+        # Per-body local inertia 3x3: (W, B, 3, 3) if batched else (B, 3, 3) → broadcast.
+        I_body = qd_to_torch(solver.links_info.inertial_i, None, link_ids, transpose=True, copy=True)
+        if I_body.dim() == 3:
+            I_body = I_body.unsqueeze(0).expand(self._num_envs, -1, -1, -1)
+
+        # Per-body state.
+        r_i = self.body_com_pos_w_all  # (W, B, 3)
+        v_i = self.body_com_lin_vel_w_all  # (W, B, 3)
+        omega_i = self.body_ang_vel_w_all  # (W, B, 3)
+        q_i = self.body_quat_w_all  # (W, B, 4) wxyz
+
+        # Spin: sum_i R_i @ I_i_local @ R_i^T @ omega_i.
+        omega_body = quat_rotate_inverse_wxyz(q_i, omega_i)
+        spin_body = torch.einsum("nbij,nbj->nbi", I_body, omega_body)
+        spin = quat_rotate_wxyz(q_i, spin_body).sum(dim=1)  # (W, 3)
+
+        # Orbital: sum_i m_i * (r_i - r_c) x v_i.
+        total_mass = m.sum(dim=1)  # (W,)
+        r_c = (m.unsqueeze(-1) * r_i).sum(dim=1) / total_mass.unsqueeze(-1)  # (W, 3)
+        r_rel = r_i - r_c.unsqueeze(1)  # (W, B, 3)
+        orbital = (m.unsqueeze(-1) * torch.cross(r_rel, v_i, dim=-1)).sum(dim=1)  # (W, 3)
+
+        return spin + orbital
