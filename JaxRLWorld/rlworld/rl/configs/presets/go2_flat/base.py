@@ -379,7 +379,7 @@ class Go2FlatConfig:
             resume_path=None,
             run_name=run_name,
             logger="wandb",
-            wandb_project="RLArchitecture",
+            wandb_project="Go2_Flat",
             save_interval=250,
             output_dir="auto",
         )

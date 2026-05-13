@@ -316,7 +316,7 @@ class G1FlatConfig:
             resume_path=None,
             run_name=run_name,
             logger="wandb",
-            wandb_project="RLArchitecture",
+            wandb_project="G1_29Dof",
             save_interval=overrides["save_interval"],
             output_dir="auto",
         )
