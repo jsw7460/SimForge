@@ -83,6 +83,24 @@ class MujocoRobotData:
     def root_link_ang_vel_b(self) -> Tensor:
         return self._entity.data.root_link_ang_vel_b
 
+    # ── Root center-of-mass variants ─────────────────────────────────
+    # mjlab's EntityData already exposes both: ``root_link_*`` uses
+    # ``data.xpos`` (body frame origin) + cvel transferred there;
+    # ``root_com_*`` uses ``data.xipos`` (the inertial / CoM frame origin)
+    # + cvel transferred to xipos. We just forward them.
+
+    @property
+    def root_com_pos_w(self) -> Tensor:
+        return self._entity.data.root_com_pos_w
+
+    @property
+    def root_com_lin_vel_w(self) -> Tensor:
+        return self._entity.data.root_com_lin_vel_w
+
+    @property
+    def root_com_lin_vel_b(self) -> Tensor:
+        return self._entity.data.root_com_lin_vel_b
+
     @property
     def projected_gravity_b(self) -> Tensor:
         quat = self.root_link_quat_w
@@ -209,8 +227,21 @@ class MujocoRobotData:
 
     @property
     def body_lin_vel_w_all(self) -> Tensor:
-        """World-frame linear velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
+        """World-frame linear velocities of all bodies at their link frame origins. Shape ``(num_envs, num_bodies, 3)``."""
         return self._entity.data.body_link_lin_vel_w
+
+    @property
+    def body_com_pos_w_all(self) -> Tensor:
+        """World-frame positions of all bodies' centers of mass. Shape ``(num_envs, num_bodies, 3)``.
+
+        Reads mjlab's ``entity.data.body_com_pos_w`` (= ``data.xipos``).
+        """
+        return self._entity.data.body_com_pos_w
+
+    @property
+    def body_com_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all bodies at their centers of mass. Shape ``(num_envs, num_bodies, 3)``."""
+        return self._entity.data.body_com_lin_vel_w
 
     @property
     def body_ang_vel_w_all(self) -> Tensor:

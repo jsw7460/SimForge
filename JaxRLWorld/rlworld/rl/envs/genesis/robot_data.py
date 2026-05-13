@@ -35,6 +35,12 @@ class GenesisRobotData:
         self._num_envs = num_envs
         self._device = device
         self._default_joint_pos = default_joint_pos
+        # Global solver link indices for this entity, in local order — the
+        # exact list ``RigidEntity.get_links_pos(None)`` uses internally
+        # (``_get_global_idx(None, n_links, link_start)``).  Needed to query
+        # the ``ref="link_com"`` variant via the solver (RigidEntity's own
+        # get_links_* don't expose ``ref``).
+        self._global_link_ids = list(range(entity._link_start, entity._link_start + entity.n_links))
 
     def _get_gravity_vec(self) -> Tensor:
         if self._gravity_vec is None:
@@ -72,6 +78,28 @@ class GenesisRobotData:
     @property
     def root_link_ang_vel_b(self) -> Tensor:
         return quat_rotate_inverse_wxyz(self.root_link_quat_w, self.root_link_ang_vel_w)
+
+    # ── Root center-of-mass variants ─────────────────────────────────
+    # Genesis' solver computes link quantities at a chosen reference point.
+    # ``RigidEntity.get_pos`` / ``get_vel`` (used above) call the solver with
+    # the default ``ref="link_origin"``.  For the CoM we go straight to the
+    # solver with ``ref="link_com"`` (RigidEntity's wrappers don't pass ``ref``).
+    #   get_links_pos(ref="link_com") = links_state.i_pos + links_state.root_COM   (link CoM, world)
+    #   get_links_vel(ref="link_com") = cd_vel + cd_ang x links_state.i_pos        (vel at link CoM, world)
+
+    @property
+    def root_com_pos_w(self) -> Tensor:
+        return self._entity._solver.get_links_pos(self._entity.base_link_idx, ref="link_com")[..., 0, :]
+
+    @property
+    def root_com_lin_vel_w(self) -> Tensor:
+        return self._entity._solver.get_links_vel(self._entity.base_link_idx, ref="link_com")[..., 0, :]
+
+    @property
+    def root_com_lin_vel_b(self) -> Tensor:
+        # Expressed in the *link* frame (same orientation reference as
+        # root_link_lin_vel_b — the body has one orientation).
+        return quat_rotate_inverse_wxyz(self.root_link_quat_w, self.root_com_lin_vel_w)
 
     @property
     def projected_gravity_b(self) -> Tensor:
@@ -190,6 +218,20 @@ class GenesisRobotData:
     def body_ang_vel_w_all(self) -> Tensor:
         """World-frame angular velocities of all links. Shape ``(num_envs, num_links, 3)``."""
         return self._entity.get_links_ang()
+
+    @property
+    def body_com_pos_w_all(self) -> Tensor:
+        """World-frame positions of all links' centers of mass. Shape ``(num_envs, num_links, 3)``.
+
+        Same link order as ``body_pos_w_all`` (``_global_link_ids`` is the
+        same index list ``RigidEntity.get_links_pos(None)`` uses).
+        """
+        return self._entity._solver.get_links_pos(self._global_link_ids, ref="link_com")
+
+    @property
+    def body_com_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all links at their centers of mass. Shape ``(num_envs, num_links, 3)``."""
+        return self._entity._solver.get_links_vel(self._global_link_ids, ref="link_com")
 
     # ------------------------------------------------------------------
     # Per-name body/site reads

@@ -7,6 +7,29 @@ that lazily compute each property from their native APIs.
 
 All quaternions are **wxyz**.  All velocities labelled ``_b`` are in the
 **body frame**.
+
+Reference point — read carefully (this matters for sim-to-sim transfer):
+
+  * ``root_link_*`` / ``body_pos_w_all`` / ``body_lin_vel_w_all`` etc. are
+    taken at the **link / body frame origin** — i.e. the origin of the
+    ``<body>`` / ``<link>`` frame as authored in the MJCF/URDF (this is the
+    IsaacLab convention, and what mjlab's ``*_link_*`` and Genesis'
+    ``ref="link_origin"`` give natively).
+  * ``root_com_*`` / ``body_com_pos_w_all`` / ``body_com_lin_vel_w_all`` are
+    taken at the **center of mass** of that link/body.
+
+For a body whose CoM is offset from its frame origin (``c`` = CoM offset in
+the body frame, ``R`` = body→world rotation, ``omega`` = body angular
+velocity in world frame):
+
+    com_pos_w      = link_pos_w + R @ c
+    com_lin_vel_w  = link_lin_vel_w + omega x (R @ c)
+    link_lin_vel_w = com_lin_vel_w - omega x (R @ c)
+
+Quaternions and angular velocities are reference-point-invariant (a rigid
+body has one orientation and one angular velocity), so there is no
+``*_com_quat`` / ``*_com_ang_vel`` — use ``*_link_quat`` / ``*_link_ang_vel``
+(or ``body_quat_w_all`` / ``body_ang_vel_w_all``) for both cases.
 """
 
 from __future__ import annotations
@@ -25,7 +48,7 @@ class RobotData(Protocol):
 
     @property
     def root_link_pos_w(self) -> Tensor:
-        """Root link position in world frame. Shape (num_envs, 3)."""
+        """Root **link frame origin** position in world frame. Shape (num_envs, 3)."""
         ...
 
     @property
@@ -35,7 +58,7 @@ class RobotData(Protocol):
 
     @property
     def root_link_lin_vel_w(self) -> Tensor:
-        """Root link linear velocity in **world** frame. Shape (num_envs, 3)."""
+        """Linear velocity of the root **link frame origin**, in the **world** frame. Shape (num_envs, 3)."""
         ...
 
     @property
@@ -45,12 +68,31 @@ class RobotData(Protocol):
 
     @property
     def root_link_lin_vel_b(self) -> Tensor:
-        """Root link linear velocity in body frame. Shape (num_envs, 3)."""
+        """Linear velocity of the root **link frame origin**, in the body frame. Shape (num_envs, 3)."""
         ...
 
     @property
     def root_link_ang_vel_b(self) -> Tensor:
         """Root link angular velocity in body frame. Shape (num_envs, 3)."""
+        ...
+
+    # ── Root center-of-mass variants ─────────────────────────────────
+    # Same quantities but taken at the root body's center of mass instead
+    # of its frame origin (see the module docstring for the relation).
+
+    @property
+    def root_com_pos_w(self) -> Tensor:
+        """Root **center-of-mass** position in world frame. Shape (num_envs, 3)."""
+        ...
+
+    @property
+    def root_com_lin_vel_w(self) -> Tensor:
+        """Linear velocity of the root **center of mass**, in the **world** frame. Shape (num_envs, 3)."""
+        ...
+
+    @property
+    def root_com_lin_vel_b(self) -> Tensor:
+        """Linear velocity of the root **center of mass**, in the body frame. Shape (num_envs, 3)."""
         ...
 
     @property
@@ -154,7 +196,7 @@ class RobotData(Protocol):
 
     @property
     def body_pos_w_all(self) -> Tensor:
-        """World-frame positions of all bodies.
+        """World-frame positions of all bodies' **link frame origins**.
 
         Returns:
             Tensor of shape ``(num_envs, num_bodies, 3)``.
@@ -172,7 +214,7 @@ class RobotData(Protocol):
 
     @property
     def body_lin_vel_w_all(self) -> Tensor:
-        """World-frame linear velocities of all bodies.
+        """World-frame linear velocities of all bodies, at each body's **link frame origin**.
 
         Returns:
             Tensor of shape ``(num_envs, num_bodies, 3)``.
@@ -182,6 +224,24 @@ class RobotData(Protocol):
     @property
     def body_ang_vel_w_all(self) -> Tensor:
         """World-frame angular velocities of all bodies.
+
+        Returns:
+            Tensor of shape ``(num_envs, num_bodies, 3)``.
+        """
+        ...
+
+    @property
+    def body_com_pos_w_all(self) -> Tensor:
+        """World-frame positions of all bodies' **centers of mass**.
+
+        Returns:
+            Tensor of shape ``(num_envs, num_bodies, 3)``.
+        """
+        ...
+
+    @property
+    def body_com_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all bodies, at each body's **center of mass**.
 
         Returns:
             Tensor of shape ``(num_envs, num_bodies, 3)``.

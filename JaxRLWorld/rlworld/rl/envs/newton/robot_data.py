@@ -17,7 +17,7 @@ import torch
 import warp as wp
 from torch import Tensor
 
-from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_to_euler_wxyz
+from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_rotate_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
     from newton import State
@@ -39,6 +39,12 @@ class NewtonRobotData:
         self._view = view
         self._gravity_vec: Tensor | None = None
         self._default_joint_pos = default_joint_pos
+        # Per-body CoM offset *in the body frame* (model.body_com), shape
+        # (bodies_per_env, 3) — constant; lazily fetched once. Same per-world
+        # layout as state.body_q / body_qd (parallel Model/State arrays), so it
+        # broadcasts against _body_q_view() / _body_qd_view() and its row 0 is
+        # the floating-base root body.
+        self._body_com_local: Tensor | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -97,7 +103,15 @@ class NewtonRobotData:
         return self._root_transform_floats(state)[:, 3:7]
 
     def root_lin_vel_w(self, state: State) -> Tensor:
-        """Root linear velocity in world frame. Shape: (W, 3)."""
+        """Root linear velocity in world frame, **at the body center of mass**. Shape: (W, 3).
+
+        This is the raw ``joint_qd[0:3]`` of the floating base, which by
+        Newton's documented ``body_qd`` convention is ``(v_com_world, ...)``
+        — i.e. the velocity of the *CoM*, not of the link frame origin.
+        The RobotData properties below split this: ``root_com_lin_vel_w``
+        returns this value as-is, ``root_link_lin_vel_w`` transfers it to
+        the link frame origin.
+        """
         return self._root_velocity_floats(state)[:, 0:3]
 
     def root_ang_vel_w(self, state: State) -> Tensor:
@@ -119,7 +133,18 @@ class NewtonRobotData:
 
     @property
     def root_link_lin_vel_w(self) -> Tensor:
-        return self.root_lin_vel_w(self._state)
+        # Newton's joint_qd[0:3] is the velocity AT the CoM. Transfer it to the
+        # link frame origin O:  v_O = v_C - omega x (R @ c)
+        #   c = body_com[root] (CoM offset in the body frame),
+        #   R = body->world rotation (from the root quaternion),
+        #   omega = root angular velocity in world frame.
+        state = self._state
+        v_com = self.root_lin_vel_w(state)  # (W, 3) — at CoM
+        omega = self.root_ang_vel_w(state)  # (W, 3) — world frame
+        quat_wxyz = self.root_quat_wxyz(state)  # (W, 4)
+        c = self._body_com_local_view()[0]  # (3,) — root body's CoM offset, body frame
+        r_world = quat_rotate_wxyz(quat_wxyz, c.expand_as(v_com))  # R @ c, world
+        return v_com - torch.cross(omega, r_world, dim=-1)
 
     @property
     def root_link_ang_vel_w(self) -> Tensor:
@@ -134,6 +159,26 @@ class NewtonRobotData:
     def root_link_ang_vel_b(self) -> Tensor:
         quat_wxyz = self.root_quat_wxyz(self._state)
         return quat_rotate_inverse_wxyz(quat_wxyz, self.root_link_ang_vel_w)
+
+    # ── Root center-of-mass variants ─────────────────────────────────
+    # Newton's body_qd is already CoM-referenced (and body_q + body_com gives
+    # the CoM position), so these are the "native" reads.
+
+    @property
+    def root_com_pos_w(self) -> Tensor:
+        # r_C = r_O + R @ c
+        quat_wxyz = self.root_quat_wxyz(self._state)
+        c = self._body_com_local_view()[0]  # (3,)
+        link_pos = self.root_link_pos_w  # (W, 3) — link frame origin
+        return link_pos + quat_rotate_wxyz(quat_wxyz, c.expand_as(link_pos))
+
+    @property
+    def root_com_lin_vel_w(self) -> Tensor:
+        return self.root_lin_vel_w(self._state)  # raw joint_qd[0:3] = v at CoM
+
+    @property
+    def root_com_lin_vel_b(self) -> Tensor:
+        return quat_rotate_inverse_wxyz(self.root_quat_wxyz(self._state), self.root_com_lin_vel_w)
 
     @property
     def projected_gravity_b(self) -> Tensor:
@@ -263,8 +308,11 @@ class NewtonRobotData:
         """Helper: state.body_qd reshaped to (num_envs, bodies_per_env, 6).
 
         Newton stores body_qd as flat ``wp.array[wp.spatial_vector]``.
-        Each spatial_vector is ``(lin.x, lin.y, lin.z, ang.x, ang.y, ang.z)``
-        — linear velocity first, then angular, both world frame.
+        Each spatial_vector is ``(lin.x, lin.y, lin.z, ang.x, ang.y, ang.z)``,
+        both in the world frame — but per Newton's documented convention the
+        **linear** part is the velocity AT THE BODY CoM (not the link frame
+        origin). ``body_lin_vel_w_all`` transfers it to the link origin;
+        ``body_com_lin_vel_w_all`` returns it as-is.
         """
         from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
@@ -272,9 +320,30 @@ class NewtonRobotData:
         state = self._env.scene_manager.state
         return wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
 
+    def _body_com_local_view(self) -> Tensor:
+        """``model.body_com`` for one world: (bodies_per_env, 3) — each body's CoM
+        offset *expressed in that body's link frame*. Constant; fetched once.
+
+        ``model.body_com`` is a parallel array to ``state.body_q`` (same
+        per-world layout), so taking the first ``bodies_per_env`` rows yields
+        world 0's bodies in the same order ``_body_q_view`` / ``_body_qd_view``
+        use, and row 0 is the floating-base root body.
+        """
+        if self._body_com_local is None:
+            from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
+            cache = get_cache(self._env)
+            model = self._env.scene_manager.model
+            self._body_com_local = wp.to_torch(model.body_com)[: cache.bodies_per_env].contiguous()
+        return self._body_com_local
+
     @property
     def body_pos_w_all(self) -> Tensor:
-        """World-frame positions of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
+        """World-frame positions of all bodies' link frame origins. Shape ``(num_envs, num_bodies, 3)``.
+
+        ``state.body_q`` is the link frame transform, so its translation IS
+        the link frame origin.
+        """
         return self._body_q_view()[:, :, 0:3]
 
     @property
@@ -291,13 +360,40 @@ class NewtonRobotData:
 
     @property
     def body_lin_vel_w_all(self) -> Tensor:
-        """World-frame linear velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
-        return self._body_qd_view()[:, :, 0:3]
+        """World-frame linear velocities of all bodies, at their link frame origins. Shape ``(num_envs, num_bodies, 3)``.
+
+        ``body_qd[:, 0:3]`` is the velocity at each body's CoM; transfer it to
+        the link frame origin O:  v_O = v_C - omega x (R @ c).
+        """
+        qd = self._body_qd_view()
+        v_com = qd[:, :, 0:3]  # (W, B, 3) — at CoM
+        omega = qd[:, :, 3:6]  # (W, B, 3) — world frame
+        c = self._body_com_local_view()  # (B, 3) — CoM offset, body frame
+        r_world = quat_rotate_wxyz(self.body_quat_w_all, c.expand_as(v_com))  # R @ c, world
+        return v_com - torch.cross(omega, r_world, dim=-1)
 
     @property
     def body_ang_vel_w_all(self) -> Tensor:
         """World-frame angular velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
         return self._body_qd_view()[:, :, 3:6]
+
+    @property
+    def body_com_pos_w_all(self) -> Tensor:
+        """World-frame positions of all bodies' centers of mass. Shape ``(num_envs, num_bodies, 3)``.
+
+        r_C = r_O + R @ c, where r_O = link frame origin (``state.body_q[:, 0:3]``).
+        """
+        link_pos = self._body_q_view()[:, :, 0:3]  # (W, B, 3)
+        c = self._body_com_local_view()  # (B, 3)
+        return link_pos + quat_rotate_wxyz(self.body_quat_w_all, c.expand_as(link_pos))
+
+    @property
+    def body_com_lin_vel_w_all(self) -> Tensor:
+        """World-frame linear velocities of all bodies at their centers of mass. Shape ``(num_envs, num_bodies, 3)``.
+
+        Newton's native ``body_qd[:, 0:3]`` — already CoM-referenced.
+        """
+        return self._body_qd_view()[:, :, 0:3]
 
     # ------------------------------------------------------------------
     # Per-name body/site reads
