@@ -22,6 +22,7 @@ Examples:
 import argparse
 
 from rlworld.rl.evals import PolicyEvaluator
+from rlworld.rl.vis.viser import get_look, list_looks
 
 
 def main():
@@ -34,9 +35,17 @@ def main():
     parser.add_argument("--record_video", action="store_true")
     parser.add_argument("--eval", action="store_true", help="Run batch evaluation instead of interactive viewer")
     parser.add_argument("--port", type=int, default=2026, help="Viser viewer port")
+    parser.add_argument(
+        "--look",
+        type=str,
+        default=None,
+        choices=list_looks(),
+        help="Viser scene 'look' (robot material / ground / lighting). See rlworld/rl/vis/viser/looks.py. "
+        "Omit to use the preset's default (near-black metallic robot, earthy ground, outdoor sun).",
+    )
     args = parser.parse_args()
 
-    overrides = {
+    overrides: dict = {
         "env": {
             "num_envs": 1,
             "episode_length_s": 10e9,
@@ -50,6 +59,10 @@ def main():
             "viser_port": args.port,
             "viewer_type": "viser",
         }
+    if args.look is not None:
+        # Flows through to both the eval-mode env viewer and the play-mode
+        # PlayViewer (both read VisualizationConfig.viser_scene).
+        overrides.setdefault("visualization", {})["viser_scene"] = get_look(args.look)
 
     evaluator = PolicyEvaluator(
         policy_path=args.policy_path,
