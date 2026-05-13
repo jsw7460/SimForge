@@ -241,12 +241,14 @@ def feet_slip_mjlab(
     env: NewtonEnv,
     command_threshold: float = 0.05,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+    contact_order: list[str] | None = None,
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_feet_slip`` (feet via ``asset_cfg.body_names``)."""
     return penalize_feet_slip(
         env,
         contact_group="feet_ground_contact",
         command_threshold=command_threshold,
+        contact_order=contact_order,
         asset_cfg=asset_cfg,
     )
 
@@ -400,6 +402,7 @@ class feet_swing_height_mjlab:
         target_height: float,
         command_threshold: float = 0.05,
         asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+        contact_order: list[str] | None = None,
     ):
         self._impl = FeetSwingHeightTracker(
             env=env,
@@ -407,6 +410,7 @@ class feet_swing_height_mjlab:
             target_height=target_height,
             command_threshold=command_threshold,
             asset_cfg=asset_cfg,
+            contact_order=contact_order,
             use_squared_error=True,
             reset_mode="current_foot_height",
         )
@@ -439,6 +443,7 @@ class feet_swing_height:
         target_height: float,
         command_threshold: float = 0.05,
         asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+        contact_order: list[str] | None = None,
     ):
         self._impl = FeetSwingHeightTracker(
             env=env,
@@ -446,6 +451,7 @@ class feet_swing_height:
             target_height=target_height,
             command_threshold=command_threshold,
             asset_cfg=asset_cfg,
+            contact_order=contact_order,
             use_squared_error=False,
             reset_mode="current_foot_height",
         )

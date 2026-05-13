@@ -89,8 +89,7 @@ class G1MujocoConfig(RobotConfig):
 
     name: str = "g1_29dof"
     urdf_path: str | None = "./JaxRLWorld/rlworld/assets/g1_description/g1_29dof.urdf"
-    mjcf_path: str | None = "./JaxRLWorld/rlworld/assets/mujoco_menagerie/unitree_g1/g1.xml"
-    # mjcf_path: str | None = "./Mjlab/src/mjlab/asset_zoo/robots/unitree_g1/xmls/g1.xml"
+    mjcf_path: str | None = "./JaxRLWorld/rlworld/assets/g1/g1.xml"
 
     base_init_height: float = 0.74
     base_link_name: str = "pelvis"
@@ -110,8 +109,10 @@ class G1MujocoConfig(RobotConfig):
 
     actuated_dof_patterns: List[str] = field(
         default_factory=lambda: [
-            r"left_(?!hand_palm_joint).*",
-            r"right_(?!hand_palm_joint).*",
+            # Exclude hand_palm_joint (legacy) and foot_frame_joint
+            # (welded dummy bodies for the foot-pad kinematic frame in g1.xml).
+            r"left_(?!hand_palm_joint|foot_frame_joint).*",
+            r"right_(?!hand_palm_joint|foot_frame_joint).*",
             r"waist_(?!support_joint).*",
         ]
     )

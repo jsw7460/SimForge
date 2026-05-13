@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import warp as wp
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
-from rlworld.rl.configs import RewardConfig, TerminationTermConfig
+from rlworld.rl.configs import RewardConfig, SolverMuJoCoCfg, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -110,10 +110,16 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
         robot_cfg=r,
+        solver_cfg=SolverMuJoCoCfg(
+            iterations=10,
+            ls_iterations=20,
+            ccd_iterations=50,
+            njmax=1500,
+            nconmax=35,
+        ),
         entities={
             "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
-                # urdf_path=r.urdf_path,
                 mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
                     pos=(0.0, 0.0, r.base_init_height),
@@ -122,6 +128,13 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
                 ),
                 floating=True,
                 collapse_fixed_joints=True,
+                # Preserve the dummy foot-pad frame bodies (welded children of
+                # left/right ankle_roll_link in g1.xml). Without this Newton's
+                # collapse_fixed_joints merges them into the parent and the
+                # feet rewards can't read them. ``links_to_keep`` matches
+                # against Newton joint labels — Newton's MJCF importer auto-
+                # names the implicit fixed joint ``<body_name>_joint``.
+                links_to_keep=("left_foot_frame_joint", "right_foot_frame_joint"),
                 articulation=ArticulationCfg(
                     actuators=(
                         DelayedPDActuatorCfg(
@@ -324,8 +337,17 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.1,
         )
 
-        # Feet rewards
-        feet_selector = SceneEntitySelector(name="robot", body_names=tuple(r.foot_names), preserve_order=True)
+        # Feet rewards — position/velocity reads use the foot-pad frame body
+        # (welded child of ankle_roll_link at +0.04m fore / -0.037m sole;
+        # matches mjlab's `left_foot` site so values agree across sims).
+        # Contacts still come from ankle_roll_link (the frame body has no
+        # collision geom), so we pass contact_order explicitly.
+        feet_selector = SceneEntitySelector(
+            name="robot",
+            body_names=("left_foot_frame", "right_foot_frame"),
+            preserve_order=True,
+        )
+        feet_contact_order = list(r.foot_names)
         feet_clearance = RewardTermConfig(
             func=rf_mjlab.feet_clearance_mjlab,
             weight=2.0,
@@ -342,6 +364,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
                 "asset_cfg": feet_selector,
                 "target_height": 0.1,
                 "command_threshold": 0.05,
+                "contact_order": feet_contact_order,
             },
         )
         feet_slip = RewardTermConfig(
@@ -350,6 +373,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             params={
                 "asset_cfg": feet_selector,
                 "command_threshold": 0.05,
+                "contact_order": feet_contact_order,
             },
         )
         soft_landing = RewardTermConfig(

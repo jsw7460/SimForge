@@ -227,7 +227,15 @@ def build_action(cfg: G1FlatConfig) -> MujocoActionConfig:
 
 def build_reward(cfg: G1FlatConfig) -> RewardConfig:
     """Build reward configuration matching mjlab G1 velocity task."""
-    site_names = ("left_foot", "right_foot")
+    # Foot-pad frame bodies welded as children of left/right ankle_roll_link
+    # in g1.xml at the +0.04m fore / -0.037m sole offset. Newton/Genesis read
+    # these same frames so feet_clearance / feet_swing_height / feet_slip
+    # agree across sims (previously this builder read mjlab sites at the
+    # same offset — values are identical, this just unifies the API).
+    feet_bodies = ("left_foot_frame", "right_foot_frame")
+    # Contacts still come from the ankle_roll_link (the frame bodies have no
+    # collision geom), so explicitly pass the contact-tracking names.
+    feet_contact_order = ["left_ankle_roll_link", "right_ankle_roll_link"]
 
     @dataclass
     class _RewardsCfg(RewardConfig):
@@ -345,7 +353,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             func=rf.feet_clearance,
             weight=2.0,
             params={
-                "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=feet_bodies),
                 "target_height": 0.1,
                 "command_threshold": 0.05,
             },
@@ -357,9 +365,10 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.25,
             params={
                 "contact_group": "feet_ground_contact",
-                "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=feet_bodies),
                 "target_height": 0.1,
                 "command_threshold": 0.05,
+                "contact_order": feet_contact_order,
             },
         )
 
@@ -369,8 +378,9 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.1,
             params={
                 "contact_group": "feet_ground_contact",
-                "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=feet_bodies),
                 "command_threshold": 0.05,
+                "contact_order": feet_contact_order,
             },
         )
 

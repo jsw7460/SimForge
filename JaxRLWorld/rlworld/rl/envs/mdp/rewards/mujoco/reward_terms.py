@@ -280,16 +280,21 @@ def feet_slip(
     contact_group: str = "feet_ground_contact",
     command_threshold: float = 0.01,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+    contact_order: list[str] | None = None,
 ) -> torch.Tensor:
-    """Thin redirect to ``common.penalize_feet_slip`` (feet via ``asset_cfg.site_names``).
+    """Thin redirect to ``common.penalize_feet_slip``.
 
-    Contact tensor uses the natural group order (``contact_order=None``) —
-    the legacy MuJoCo path.
+    ``asset_cfg`` selects the feet bodies/sites for position/velocity reads.
+    ``contact_order`` (optional) reorders the contact tensor columns when
+    the contact-tracked names differ from the position selector — e.g.
+    position from ``left_foot_frame`` but contacts from
+    ``left_ankle_roll_link``. ``None`` keeps the natural group order.
     """
     return penalize_feet_slip(
         env,
         contact_group=contact_group,
         command_threshold=command_threshold,
+        contact_order=contact_order,
         asset_cfg=asset_cfg,
     )
 
@@ -399,6 +404,7 @@ class feet_swing_height:
         target_height: float = 0.08,
         command_threshold: float = 0.01,
         asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+        contact_order: list[str] | None = None,
     ):
         self._impl = FeetSwingHeightTracker(
             env=env,
@@ -406,6 +412,7 @@ class feet_swing_height:
             target_height=target_height,
             command_threshold=command_threshold,
             asset_cfg=asset_cfg,
+            contact_order=contact_order,
             use_squared_error=True,
             reset_mode="none",
         )
