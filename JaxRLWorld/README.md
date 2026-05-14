@@ -46,27 +46,33 @@ trained and evaluated end-to-end with PPO.
 ## Installation
 
 JaxRLWorld pins specific versions of [Genesis][genesis], [Newton][newton],
-and [mjlab][mjlab] as git submodules under the parent `SimForge/` repo,
-so installation is a three-step process: clone with submodules, install
-each simulator, then install JaxRLWorld itself.
+and [mjlab][mjlab] as git submodules under the parent `SimForge/` repo.
 
 ### 1. Clone with submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/jsw7460/SimForge.git
 cd SimForge
+# or, if already cloned: git submodule update --init
 ```
 
-If you already cloned without `--recurse-submodules`:
+### 2. Create a conda env
+
+Python 3.10–3.12 is required.
 
 ```bash
-git submodule update --init
+conda create -n jrw python=3.11 -y
+conda activate jrw
 ```
 
-### 2. Install the simulators
+Any other env manager (`venv`, `uv`, `pyenv`) works too — just make
+sure you are running inside a clean, isolated Python and that the
+later steps install into that same env.
 
-Each simulator is a sibling directory under `SimForge/` and has its
-own install procedure (see its README). Typically:
+### 3. Install the simulators (editable, from submodules)
+
+Each simulator has its own install notes — consult its README for CUDA
+and system prerequisites. Typically:
 
 ```bash
 pip install -e Mjlab/
@@ -74,16 +80,15 @@ pip install -e Newton/
 pip install -e Genesis/
 ```
 
-### 3. Install JaxRLWorld
+### 4. Install JaxRLWorld and JAX-CUDA
 
 ```bash
-cd JaxRLWorld
-uv sync --extra all
+pip install -e "JaxRLWorld/[all]"
+pip install -U "jax[cuda12]"   # match your system CUDA
 ```
 
-> All training assumes a CUDA GPU. CUDA versions across JAX, Genesis,
-> and Newton's [Warp][warp] backend must be compatible — consult each
-> simulator's docs.
+> CUDA versions across JAX, Genesis, and Newton's [Warp][warp] backend
+> must be mutually compatible — consult each simulator's docs.
 
 ## Quickstart
 

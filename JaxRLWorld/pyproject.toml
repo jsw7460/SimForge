@@ -30,17 +30,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-genesis = ["genesis-world>=0.3.0"]
-newton = ["warp>=1.0.0"]
+# Genesis, Newton, and mjlab are installed from git submodules (see
+# README), not via PyPI extras. Only wandb is a real optional PyPI dep.
 wandb = ["wandb>=0.16.0"]
 dev = [
     "pytest",
     "ruff",
     "pre-commit",
 ]
-all = [
-    "rlworld[genesis,newton,wandb]",
-]
+all = ["rlworld[wandb]"]
 
 [project.urls]
 Homepage = "https://github.com/jsw7460/SimForge"
