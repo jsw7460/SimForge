@@ -1,12 +1,12 @@
 [submodule "Mjlab"]
 	path = Mjlab
-	url = git@github.com:jsw7460/mjlab.git
+	url = https://github.com/jsw7460/mjlab.git
 	branch = main
 [submodule "Newton"]
 	path = Newton
-	url = git@github.com:jsw7460/newton.git
+	url = https://github.com/jsw7460/newton.git
 	branch = main
 [submodule "Genesis"]
 	path = Genesis
-	url = git@github.com:jsw7460/Genesis.git
+	url = https://github.com/jsw7460/Genesis.git
 	branch = main
