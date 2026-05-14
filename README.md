@@ -1,14 +1,165 @@
 # SimForge
 
-A modular reinforcement learning framework for legged-robot locomotion that runs the **same** policy / observation / reward stack across **Newton**, **Genesis**, and **mjlab (MuJoCo)** physics backends. Train on one simulator, evaluate on another, or train on several at once and let the policy see the union of their dynamics.
+A JAX-based reinforcement learning framework for legged-robot locomotion,
+with first-class support for training and evaluating **one policy across
+three simulators** — [Genesis][genesis], [Newton][newton], and MuJoCo
+(via [mjlab][mjlab]) — using a single sim-agnostic API. The framework
+itself is `rlworld/` inside [`JaxRLWorld/`](JaxRLWorld); `SimForge/` is the
+umbrella repo that pins specific simulator versions as git submodules so
+external users can clone a single, reproducible stack.
 
-## Overview
+<!--
+  TODO(release): drop a cross-sim split-screen GIF here. Once `docs/demo.gif`
+  exists, uncomment the block below to display it.
 
-SimForge separates "what the task is" from "which simulator runs it". A task is defined once as a tree of dataclass configs (env, scene, observation, reward, action, command, event, algorithm, runner) and a small per-simulator builder module supplies the few sim-native pieces (entity construction, contact sensors, terrain). Everything downstream — observation functions, reward functions, event terms, runners, neural networks — is sim-agnostic and reads / writes the simulator only through narrow protocol interfaces.
+  <p align="center">
+    <img src="docs/demo.gif" alt="Cross-sim demo" width="720"/>
+  </p>
+-->
 
-The result is that the **bit-identical reward function** defines `feet_clearance` for all three backends, the **same `dof_pos`/`base_ang_vel`/`projected_gravity`** observation feeds the policy regardless of which sim the rollout came from, and a checkpoint trained under Newton can be loaded into a Genesis or mjlab environment without any conversion step.
+## Highlights
+
+- **Sim-to-sim out of the box.** A policy trained in one simulator can be
+  evaluated in the other two without code changes. The same task config
+  drives all three backends.
+- **5 task presets × 3 simulators = 15 ready combinations** covering
+  Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and the
+  Booster T1 humanoid.
+- **PPO is the default for all locomotion tasks** across the three
+  simulators. **SAC, TD3, FastTD3, and TDMPC2** are validated on a
+  small subset of a Gymnasium-based benchmark suite (see
+  `JaxRLWorld/rlworld/scripts/benchmark/`), with FastTD3 additionally
+  validated on [mujoco_playground][mjpg].
+- **2 actor/critic architectures**: MLP and Space-Time Transformer.
+- **Domain randomization, motion tracking, and viser-based 3-D
+  visualization** are wired up across all simulators.
+
+## Supported tasks
+
+The table below lists (task, simulator) combinations that have been
+trained and evaluated end-to-end with PPO.
+
+|              | Robot        | Genesis | Newton | MuJoCo |
+| ------------ | ------------ | :-----: | :----: | :----: |
+| `g1_29dof`   | Unitree G1   | ✓       | ✓      | ✓      |
+| `g1_tracking`| Unitree G1   | ✓       | ✓      | ✓      |
+| `go2_flat`   | Unitree Go2  | ✓       | ✓      | ✓      |
+| `t1_getup`   | Booster T1   | ✓       | ✓      | ✓      |
+| `t1_tracking`| Booster T1   | ✓       | ✓      | ✓      |
+
+## Installation
+
+JaxRLWorld pins specific versions of [Genesis][genesis], [Newton][newton],
+and [mjlab][mjlab] as git submodules under this `SimForge/` repo.
+
+### 1. Clone with submodules
+
+```bash
+git clone --recurse-submodules https://github.com/jsw7460/SimForge.git
+cd SimForge
+# or, if already cloned: git submodule update --init
+```
+
+### 2. Create a conda env
+
+Python 3.10–3.12 is required.
+
+```bash
+conda create -n jrw python=3.11 -y
+conda activate jrw
+```
+
+Any other env manager (`venv`, `uv`, `pyenv`) works too — just make
+sure you are running inside a clean, isolated Python and that the
+later steps install into that same env.
+
+### 3. Install the simulators (editable, from submodules)
+
+Each simulator has its own install notes — consult its README for CUDA
+and system prerequisites. Typically:
+
+```bash
+pip install -e Mjlab/
+pip install -e Newton/
+pip install -e Genesis/
+```
+
+### 4. Install JaxRLWorld and JAX-CUDA
+
+```bash
+pip install -e "JaxRLWorld/[all]"
+pip install -U "jax[cuda12]"   # match your system CUDA
+```
+
+> CUDA versions across JAX, Genesis, and Newton's [Warp][warp] backend
+> must be mutually compatible — consult each simulator's docs.
+
+## Quickstart
+
+Train PPO on G1 29-DOF flat locomotion in Genesis:
+
+```bash
+python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py
+```
+
+The same task in Newton or MuJoCo:
+
+```bash
+python JaxRLWorld/rlworld/scripts/g1_29dof/newton/mlp.py
+python JaxRLWorld/rlworld/scripts/g1_29dof/mujoco/mlp.py
+```
+
+## Cross-sim evaluation
+
+`eval_cross_sim.py` is the single entry point for evaluating any
+checkpoint on any simulator. The robot, observation, algorithm, and
+network configs are auto-detected from the checkpoint, so you only
+specify which simulator to roll out on. Without `--eval`, the script
+launches an interactive viser-based viewer; with `--eval`, it runs
+batched statistics.
+
+Training writes checkpoints to
+`./outputs/models/<date>/<time>/checkpoint_latest/` by default. Pass
+that directory to `--policy_path`:
+
+```bash
+python JaxRLWorld/rlworld/scripts/evaluation/eval_cross_sim.py \
+    --policy_path outputs/models/<date>/<time>/checkpoint_latest/ \
+    --eval_sim mujoco
+```
+
+To pull a checkpoint from W&B instead, set `--policy_path None` and
+provide `--wandb_run_path`:
+
+```bash
+python JaxRLWorld/rlworld/scripts/evaluation/eval_cross_sim.py \
+    --policy_path None \
+    --wandb_run_path <entity>/<task>/<run-id> \
+    --eval_sim mujoco \
+    --eval
+```
+
+The W&B path is only resolvable if the training run uploaded its
+checkpoint. Enable that either in your runner config or as a CLI
+override:
+
+```bash
+python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py \
+    runner.upload_checkpoint=True
+```
+
+`--eval_sim` accepts `genesis`, `newton`, or `mujoco`.
 
 ## Architecture
+
+JaxRLWorld separates "what the task is" from "which simulator runs it".
+A task is defined once as a tree of dataclass configs (env, scene,
+observation, reward, action, command, event, algorithm, runner) and a
+small per-simulator builder module supplies the few sim-native pieces
+(entity construction, contact sensors, terrain). Everything downstream
+— observation functions, reward functions, event terms, runners, neural
+networks — is sim-agnostic and reads/writes the simulator only through
+narrow protocol interfaces.
 
 ```
                   ┌──────────────────────────────────────────┐
@@ -51,269 +202,115 @@ The result is that the **bit-identical reward function** defines `feet_clearance
                                      │
                                      ▼
             ┌────────────────────────────────────────────────────┐
-            │   Runner (PPO / SAC / TD3 / FastTD3 / TDMPC2 /     │
-            │           SimMPC) ─ no simulator-specific code     │
+            │   Runner (PPO / SAC / TD3 / FastTD3 / TDMPC2) ─    │
+            │   no simulator-specific code                       │
             └────────────────────────────────────────────────────┘
 ```
 
 Key design decisions:
 
-- **Single preset, three backends.** `Go2FlatConfig(sim_type="newton").build()` and `Go2FlatConfig(sim_type="genesis").build()` produce two `ConfigsForRun` objects that share every cross-sim field (reward weights, command ranges, network sizes, etc.) and only diverge in the small set of bits that *must* be sim-native (entity URDF/MJCF, contact sensors, solver tolerances).
-- **`RobotData` protocol.** A read-only `Protocol` (`rl/envs/robot_data.py`) declares a small set of properties — `joint_pos`, `joint_vel`, `root_link_pos_w`, `body_pos_w(names)`, `site_pos_w(names)`, `angular_momentum_w(...)`, etc. Each backend supplies a thin wrapper (`NewtonRobotData`, `GenesisRobotData`, `MujocoRobotData`) that satisfies the protocol structurally. Reward and observation code reads `env.get_robot_data().joint_pos` and never knows which simulator it is on.
-- **`RobotStateWriter`.** Mutation API (`set_dof_positions`, `set_root_state`, `eval_fk`) lives in a separate writer class (currently Newton-only — Genesis and mjlab event terms write through their native APIs and gain a writer when reset/event terms are unified).
-- **Manager-based environment.** The same `World` ABC is shared by all backends. Observations, rewards, actions, commands, events, contacts, and terminations are independent managers; the env just orchestrates them.
-- **`MultiSimWorld`.** Stacks multiple sim envs into a single vectorized interface for the algorithm. Joint-order permutation (canonical ↔ per-sim) is built automatically from the action manager so the policy sees a stable joint layout even when each sim's URDF parsed joints in a different order.
-- **Sim-agnostic reward/observation library.** `mdp/rewards/common/reward_terms.py` and `mdp/observations/common/` hold the canonical implementations. Per-sim modules (`mdp/rewards/newton/`, etc.) exist mainly as thin redirect wrappers that preserve historical names for older presets.
+- **Single preset, three backends.** `Go2FlatConfig(sim_type="newton").build()`
+  and `Go2FlatConfig(sim_type="genesis").build()` produce two
+  `ConfigsForRun` objects that share every cross-sim field (reward
+  weights, command ranges, network sizes, etc.) and only diverge in the
+  small set of bits that *must* be sim-native (entity URDF/MJCF, contact
+  sensors, solver tolerances).
+- **`RobotData` protocol.** A read-only `Protocol`
+  (`rl/envs/robot_data.py`) declares a small set of properties —
+  `joint_pos`, `joint_vel`, `root_link_pos_w`, `body_pos_w(names)`,
+  `site_pos_w(names)`, `angular_momentum_w(...)`, etc. Each backend
+  supplies a thin wrapper (`NewtonRobotData`, `GenesisRobotData`,
+  `MujocoRobotData`) that satisfies the protocol structurally. Reward
+  and observation code reads `env.get_robot_data().joint_pos` and never
+  knows which simulator it is on.
+- **`RobotStateWriter`.** Mutation API (`set_dof_positions`,
+  `set_root_state`, `eval_fk`) lives in a separate writer class.
+- **Manager-based environment.** The same `World` ABC is shared by all
+  backends. Observations, rewards, actions, commands, events, contacts,
+  and terminations are independent managers; the env just orchestrates
+  them.
+- **`MultiSimWorld`.** Stacks multiple sim envs into a single vectorized
+  interface for the algorithm. Joint-order permutation (canonical ↔
+  per-sim) is built automatically from the action manager so the policy
+  sees a stable joint layout even when each sim's URDF parses joints in
+  a different order.
+- **Sim-agnostic reward/observation library.**
+  `mdp/rewards/common/reward_terms.py` and `mdp/observations/common/`
+  hold the canonical implementations. Per-sim modules
+  (`mdp/rewards/newton/`, etc.) exist mainly as thin redirect wrappers
+  that preserve historical names for older presets.
 
-## Installation
-
-### Prerequisites
-- Python 3.11+
-- CUDA-compatible GPU
-- Linux (recommended; macOS works for development but the simulators target Linux)
-
-### Setup
-
-```bash
-conda create -n rl python=3.11
-conda activate rl
-
-# PyTorch (pick the index URL for your CUDA version)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-
-# JAX with CUDA (optional — only some algorithms use it)
-pip install --upgrade "jax[cuda13]"
-
-# Simulators (install whichever you intend to use)
-pip install genesis-world                          # Genesis
-pip install mjlab                                  # mjlab (MuJoCo wrapper)
-# Newton: see https://github.com/newton-physics/newton
-
-# SimForge
-cd SimForge
-pip install -e .
-```
-
-## Supported Platforms
-
-### Robots
-
-| Robot | Type      | DOF | Backends                |
-|-------|-----------|-----|-------------------------|
-| Go2   | Quadruped | 12  | Newton · Genesis · mjlab |
-| G1    | Humanoid  | 29  | Newton · Genesis · mjlab |
-
-(Older `go1` / `g1_12dof` presets were removed during the unification cleanup.)
-
-### Backends
-
-| Backend | Substrate           | GPU | Multi-env       |
-|---------|---------------------|-----|-----------------|
-| Newton  | MuJoCo-Warp + warp  | yes | thousands       |
-| Genesis | Taichi              | yes | thousands       |
-| mjlab   | MuJoCo-Warp wrapper | yes | thousands       |
-
-### Algorithms
-
-| Algorithm | Family       | Runner                      |
-|-----------|--------------|-----------------------------|
-| PPO       | on-policy    | `OnPolicyRunner`            |
-| SAC       | off-policy   | `OffPolicyRunner`           |
-| TD3       | off-policy   | `OffPolicyRunner`           |
-| FastTD3   | off-policy   | `OffPolicyRunner`           |
-| TDMPC2    | model-based  | `ModelBasedRunner`          |
-| SimMPC    | sim-based MPC| `SimMPCRunner`              |
-
-### Network Architectures
-
-MLP, ABA (Articulated Body Algorithm), ABA + GNN, Transformer, Body Transformer, CRBA, Rodrigues, DR3.
-
-## Quick Start
-
-### Training a single backend
-
-```python
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config
-from rlworld.rl.runners import BaseRunner
-
-cfg = get_config(sim="newton").with_cli_overrides()
-runner = BaseRunner.create_with_env(cfg)
-runner.learn(num_learning_iterations=cfg.runner.max_iterations)
-```
-
-The `sim=` argument is the only thing you change to switch backends — `"newton"`, `"genesis"`, and `"mujoco"` all return a `ConfigsForRun` of the corresponding sim-specific subtype (`NewtonConfigsForRun`, `GenesisConfigsForRun`, `MujocoConfigsForRun`).
-
-Pre-baked launchers live under `rlworld/scripts/`:
-
-```bash
-python rlworld/scripts/go2/newton/mlp.py
-python rlworld/scripts/go2/genesis/mlp.py
-python rlworld/scripts/go2/mujoco/ppo_mlp.py
-
-python rlworld/scripts/g1_29dof/newton/mlp.py
-python rlworld/scripts/g1_29dof/genesis/mlp.py
-python rlworld/scripts/g1_29dof/mujoco/ppo_mlp.py
-```
-
-CLI overrides go through the standard dotted-key form:
-
-```bash
-python rlworld/scripts/go2/newton/mlp.py env.num_envs=2048 algorithm.actor_lr=3e-4
-```
-
-### Multi-simulator training
-
-`MultiSimWorld` runs Newton + Genesis (and / or mjlab) side by side, with one policy seeing batches from both. The script handles per-sim env counts and joint permutation:
-
-```bash
-python rlworld/scripts/go2/multi_sim/ppo_mlp.py \
-    --genesis_num_envs 2048 --newton_num_envs 2048
-```
-
-### Evaluation
-
-Each backend has a thin entry script under `rlworld/scripts/evaluation/`. They all share the same `PolicyEvaluator` underneath; the only differences are the viser viewer setup and any sim-specific overrides:
-
-```bash
-python rlworld/scripts/evaluation/eval_newton.py
-python rlworld/scripts/evaluation/eval_genesis.py
-python rlworld/scripts/evaluation/eval_mujoco.py
-```
-
-Edit `policy_path` (or `wandb_run_path`) inside the script to point at the checkpoint you want to visualize. By default the script opens an interactive viser viewer; pass `--eval` to run a batch evaluation with statistics instead.
-
-For cross-simulator evaluation (train on one backend, evaluate on another), use `eval_target`:
-
-```python
-from rlworld.rl.evals import PolicyEvaluator
-
-evaluator = PolicyEvaluator(
-    policy_path="outputs/models/.../checkpoint_latest/",
-    eval_target="newton",   # or "genesis" / "mujoco"
-)
-evaluator.play()       # interactive viser viewer
-# evaluator.evaluate() # batch eval with statistics
-```
-
-The evaluator automatically resolves the right preset class from the checkpoint metadata (`preset_class_name` + `preset_kwargs`) so you do not need to remember which config the policy was trained with.
-
-## Project Structure
+## Repository layout
 
 ```
-JaxRLWorld/rlworld/
-├── assets/                              # Robot URDFs, MJCFs, meshes
-├── rl/
-│   ├── algorithms/                      # PPO, SAC, TD3, FastTD3, TDMPC2, SimMPC, ...
-│   ├── configs/
-│   │   ├── presets/
-│   │   │   ├── go2_flat/                # Unified Go2 preset
-│   │   │   │   ├── base.py              #   Go2FlatConfig dataclass
-│   │   │   │   ├── mlp.py               #   get_config(sim=...) entry point
-│   │   │   │   ├── _newton_builders.py  #   per-sim scene / event / reward
-│   │   │   │   ├── _genesis_builders.py #     builders that the base class
-│   │   │   │   ├── _mujoco_builders.py  #     dispatches to at build()
-│   │   │   │   ├── newton/              #   Variants: gait_conditioned, ...
-│   │   │   │   ├── genesis/             #     (one file per variant)
-│   │   │   │   └── mujoco/
-│   │   │   └── g1_29dof/                # Same layout for G1 29-DOF
-│   │   └── robots/                      # Go2Config, G1Config, kinematic tree
-│   ├── envs/
-│   │   ├── world.py                     # World ABC + manager orchestration
-│   │   ├── robot_data.py                # RobotData protocol (read API)
-│   │   ├── multi_sim_world.py           # MultiSimWorld + joint permutation
-│   │   ├── newton/
-│   │   │   ├── newton_env.py            # NewtonEnv (subclass of World)
-│   │   │   ├── robot_data.py            # NewtonRobotData (read impl)
-│   │   │   └── robot_state_writer.py    # NewtonRobotStateWriter (write API)
-│   │   ├── genesis/
-│   │   │   ├── genesis_env.py
-│   │   │   └── robot_data.py            # GenesisRobotData
-│   │   ├── mujoco/
-│   │   │   ├── mjlab_env.py
-│   │   │   └── robot_data.py            # MujocoRobotData
-│   │   ├── managers/
-│   │   │   ├── common/                  # Cross-sim manager bases
-│   │   │   │   ├── action.py            #   BaseActionManager
-│   │   │   │   ├── command.py           #   CommandManager
-│   │   │   │   ├── command_term.py      #   VelocityCommandTerm, ...
-│   │   │   │   ├── contact.py           #   BaseContactManager (named groups)
-│   │   │   │   ├── event.py             #   EventManager
-│   │   │   │   ├── observation.py       #   ObservationManager
-│   │   │   │   ├── reward.py            #   RewardManager
-│   │   │   │   ├── termination.py       #   TerminationManager
-│   │   │   │   ├── gait.py              #   GaitManager
-│   │   │   │   ├── scene_helpers.py     #   build_kinematic_trees, ...
-│   │   │   │   └── scene_protocol.py    #   SceneManagerProtocol
-│   │   │   ├── newton/                  # Sim-specific subclasses
-│   │   │   ├── genesis/                 # (mostly scene + contact + visualization)
-│   │   │   └── mujoco/
-│   │   └── mdp/
-│   │       ├── observations/
-│   │       │   ├── common/              # Sim-agnostic obs functions
-│   │       │   ├── newton/ genesis/ mujoco/   # Thin redirects
-│   │       ├── rewards/
-│   │       │   ├── common/reward_terms.py     # Canonical reward library
-│   │       │   ├── newton/mjlab_rewards.py    # Thin redirect wrappers
-│   │       │   ├── genesis/mjlab_rewards.py
-│   │       │   └── mujoco/reward_terms.py
-│   │       ├── events/                  # Reset / startup / interval terms
-│   │       ├── reset/                   # Per-sim reset helpers
-│   │       ├── terminations/
-│   │       └── commands/
-│   ├── evals/
-│   │   ├── evaluator.py                 # PolicyEvaluator
-│   │   └── sim_initializers/            # Per-sim eval setup (strategy pattern)
-│   ├── modules/
-│   │   ├── architectures/               # MLP, ABA, GNN, Transformer, ...
-│   │   ├── policies/                    # PPO/SAC/TD3/TDMPC2 actor-critics
-│   │   └── dynamics/                    # World models
-│   ├── runners/                         # On-policy, off-policy, model-based, ...
-│   ├── storages/                        # Rollout / replay buffers
-│   ├── utils/                           # Quaternions, string matching, ...
-│   └── vis/viser/                       # Viser viewer + sim bridges + overlays
-└── scripts/
-    ├── go2/{newton,genesis,mujoco,multi_sim}/
-    ├── g1_29dof/{newton,genesis,mujoco,multi_sim,playground}/
-    ├── evaluation/                      # eval_newton, eval_genesis, eval_mujoco, eval_cross_sim
-    ├── benchmark/
-    ├── gymnasium/
-    └── maniskill/
+SimForge/                       # this repo
+├── Genesis/                    # submodule — Genesis physics simulator
+├── Newton/                     # submodule — Newton (NVIDIA Warp)
+├── Mjlab/                      # submodule — MuJoCo (MJX) framework
+└── JaxRLWorld/                 # the framework
+    ├── pyproject.toml
+    ├── LICENSE
+    └── rlworld/
+        ├── rl/
+        │   ├── algorithms/     # PPO, SAC, TD3, FastTD3, TDMPC2
+        │   ├── configs/        # Task presets + algorithm configs
+        │   ├── envs/           # Sim-agnostic env + per-sim adapters
+        │   ├── modules/        # Network architectures
+        │   ├── runners/        # On-policy / Off-policy / Model-based
+        │   ├── evals/          # Policy evaluation + cross-sim transfer
+        │   └── vis/            # viser-based visualization
+        └── scripts/            # Launch scripts per (task, simulator)
 ```
 
-## Configuration
+## Acknowledgements
 
-Configs are dataclasses, composable from Python or overridable from CLI:
+JaxRLWorld would not exist without prior open-source work; we are
+indebted to the authors for releasing high-quality, well-documented
+code. In particular:
 
-```python
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config
+- **Environment / scene design** — the manager, scene, observation,
+  command, event, and randomization abstractions follow conventions
+  established by [IsaacLab][isaaclab] and [mjlab][mjlab]. We borrowed
+  liberally from their designs while porting the runtime to JAX.
+- **RL framework backbone and PPO** — adapted from
+  [RSL_RL][rsl_rl] (ETH Robotic Systems Lab), which served as the
+  reference implementation for our on-policy training loop and PPO
+  update.
+- **FastTD3** — JAX port adapted from the authors' original
+  implementation: [FastTD3][fasttd3].
+- **TDMPC2** — JAX port adapted from the authors' original
+  implementation: [TD-MPC2][tdmpc2].
 
-cfg = get_config(sim="newton")
-cfg.env.num_envs = 2048
-cfg.algorithm.actor_lr = 3e-4
-cfg.runner.max_iterations = 10000
+If you build on JaxRLWorld, please also cite the upstream projects
+above.
+
+## Citation
+
+If you use JaxRLWorld in academic work, please cite it as:
+
+```bibtex
+@misc{shin2026jaxrlworld,
+  author       = {Sangwoo Shin},
+  title        = {{JaxRLWorld}: A JAX-based RL framework for
+                  cross-simulator legged locomotion},
+  year         = {2026},
+  howpublished = {\url{https://github.com/jsw7460/SimForge}},
+}
 ```
 
-CLI overrides use dotted keys:
+## License
 
-```bash
-python rlworld/scripts/go2/newton/mlp.py env.num_envs=2048 algorithm.actor_lr=3e-4
-```
+JaxRLWorld is released under the MIT License. See
+[JaxRLWorld/LICENSE](JaxRLWorld/LICENSE) for details. Note that the
+upstream projects we build on carry their own licenses; please consult
+each one when redistributing.
 
-A preset's `build()` method stamps `preset_module`, `preset_class_name`, and `preset_kwargs` onto the resulting `ConfigsForRun`. At checkpoint reload time the evaluator uses these to re-instantiate the exact same preset, so non-serializable fields (mjlab `EntityCfg`, Newton solver options, etc.) are reconstructed from code rather than YAML.
-
-## Visualization
-
-All viewers use [Viser](https://viser.studio/) — a web-based 3D viewer that works over SSH without port forwarding (it can serve a public share URL).
-
-- **PlayViewer** (`evaluator.play()`): real-time pacing with budget accumulator. Play/Pause, Speed (1/32× — 8×), Single Step, Reset. Command-velocity arrows, reward plots, and HUD overlays.
-- **Passive viewer** (`evaluator.evaluate()` with `viewer_type="viser"`): runs during batch evaluation at full speed.
-
-## Logging
-
-Training metrics are logged to [Weights & Biases](https://wandb.ai/) when `use_wandb=True`:
-
-```python
-runner = OnPolicyRunner(env=env, cfgs=cfg, use_wandb=True)
-```
-
-Checkpoints are saved to `outputs/models/{date}/{time}/` together with the full config metadata so they can be reloaded for cross-sim evaluation.
+[genesis]: https://github.com/Genesis-Embodied-AI/Genesis
+[newton]: https://github.com/newton-physics/newton
+[mjlab]: https://github.com/mujocolab/mjlab
+[isaaclab]: https://github.com/isaac-sim/IsaacLab
+[rsl_rl]: https://github.com/leggedrobotics/rsl_rl
+[fasttd3]: https://github.com/younggyoseo/FastTD3
+[tdmpc2]: https://github.com/nicklashansen/tdmpc2
+[mjpg]: https://github.com/google-deepmind/mujoco_playground
+[warp]: https://github.com/NVIDIA/warp
