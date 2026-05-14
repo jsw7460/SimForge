@@ -158,10 +158,6 @@ python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py \
 
 ## Acknowledgements
 
-JaxRLWorld would not exist without prior open-source work; we are
-indebted to the authors for releasing high-quality, well-documented
-code. In particular:
-
 - **Environment / scene design** — the manager, scene, observation,
   command, event, and randomization abstractions follow conventions
   established by [IsaacLab][isaaclab] and [mjlab][mjlab]. We borrowed
@@ -175,8 +171,6 @@ code. In particular:
 - **TDMPC2** — JAX port adapted from the authors' original
   implementation: [TD-MPC2][tdmpc2].
 
-If you build on JaxRLWorld, please also cite the upstream projects
-above.
 
 [genesis]: https://github.com/Genesis-Embodied-AI/Genesis
 [newton]: https://github.com/newton-physics/newton
