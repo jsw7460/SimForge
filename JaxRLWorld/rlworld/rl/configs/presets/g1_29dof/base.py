@@ -17,8 +17,8 @@ Usage:
     from rlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
     cfgs_for_run = G1FlatConfig(sim_type="newton").build()
 
-Variants (e.g. ``newton/abdnet.py``) inherit ``G1FlatConfig`` directly
-and pin ``sim_type`` themselves.
+Per-simulator variants inherit ``G1FlatConfig`` directly and pin
+``sim_type`` themselves.
 """
 
 from __future__ import annotations

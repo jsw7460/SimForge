@@ -2,10 +2,7 @@ from enum import Enum
 
 from .fast_td3 import FastTD3
 from .ppo import PPO
-from .ppo_dr3 import PPODR3
 from .sac import SAC
-from .scaffolded_tdmpc2 import ScaffoldedTDMPC2
-from .sim_mpc import SimMPC
 from .td3 import TD3
 from .tdmpc2 import TDMPC2
 
@@ -20,10 +17,6 @@ class PolicyType(Enum):
 ALGORITHM_REGISTRY = {
     "PPO": {
         "class": "rlworld.rl.algorithms.ppo.PPO",
-        "policy_type": PolicyType.ON_POLICY,
-    },
-    "PPODR3": {
-        "class": "rlworld.rl.algorithms.ppo_dr3.PPODR3",
         "policy_type": PolicyType.ON_POLICY,
     },
     "SAC": {
@@ -42,26 +35,12 @@ ALGORITHM_REGISTRY = {
         "class": "rlworld.rl.algorithms.tdmpc2.TDMPC2",
         "policy_type": PolicyType.MODEL_BASED,
     },
-    "ScaffoldedTDMPC2": {
-        "class": "rlworld.rl.algorithms.scaffolded_tdmpc2.ScaffoldedTDMPC2",
-        "policy_type": PolicyType.MODEL_BASED,
-    },
-    "SimMPC": {
-        "class": "rlworld.rl.algorithms.sim_mpc.SimMPC",
-        "policy_type": PolicyType.MODEL_BASED,
-    },
 }
 
 RUNNER_MAP = {
     PolicyType.ON_POLICY: "rlworld.rl.runners.on_policy_runner.OnPolicyRunner",
     PolicyType.OFF_POLICY: "rlworld.rl.runners.off_policy_runner.OffPolicyRunner",
     PolicyType.MODEL_BASED: "rlworld.rl.runners.model_based_runner.ModelBasedRunner",
-}
-
-# Algorithm-specific runner overrides (takes priority over RUNNER_MAP)
-ALGORITHM_RUNNER_OVERRIDES = {
-    "ScaffoldedTDMPC2": "rlworld.rl.runners.privileged_model_based_runner.PrivilegedModelBasedRunner",
-    "SimMPC": "rlworld.rl.runners.sim_mpc_runner.SimMPCRunner",
 }
 
 
@@ -76,12 +55,8 @@ def get_policy_type(algorithm_name: str) -> PolicyType:
 
 
 def get_runner_class(algorithm_name: str):
-    # Check algorithm-specific override first
-    if algorithm_name in ALGORITHM_RUNNER_OVERRIDES:
-        runner_path = ALGORITHM_RUNNER_OVERRIDES[algorithm_name]
-    else:
-        policy_type = get_policy_type(algorithm_name)
-        runner_path = RUNNER_MAP[policy_type]
+    policy_type = get_policy_type(algorithm_name)
+    runner_path = RUNNER_MAP[policy_type]
 
     module_path, class_name = runner_path.rsplit(".", 1)
     module = __import__(module_path, fromlist=[class_name])

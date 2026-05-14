@@ -20,7 +20,7 @@ class PolicyWrapper(ABC):
 
     Subclasses implement get_action for different algorithm families:
     - ModelPolicyWrapper: PPO / SAC / FastTD3 (JIT-compiled model inference)
-    - MPCPolicyWrapper:   TD-MPC2 / ScaffoldedTDMPC2 (MPPI planning)
+    - MPCPolicyWrapper:   TD-MPC2 (MPPI planning)
 
     Use PolicyWrapper.from_runner() factory to create the appropriate subclass.
     """
@@ -109,7 +109,7 @@ class ModelPolicyWrapper(PolicyWrapper):
 
 
 class MPCPolicyWrapper(PolicyWrapper):
-    """MPPI planning for TD-MPC2 / ScaffoldedTDMPC2."""
+    """MPPI planning for TD-MPC2."""
 
     def __init__(
         self,

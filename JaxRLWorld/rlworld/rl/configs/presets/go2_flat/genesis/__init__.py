@@ -1,5 +1,4 @@
-"""Genesis-specific Go2 flat preset variants (e.g. ``gait_conditioned``,
-``scaffolded_tdmpc2``).
+"""Genesis-specific Go2 flat preset variants (e.g. ``gait_conditioned``).
 
 The unified ``Go2FlatConfig`` lives in
 ``rlworld.rl.configs.presets.go2_flat.base``. This package is reserved

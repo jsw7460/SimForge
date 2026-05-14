@@ -10,8 +10,8 @@ Usage:
     from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
     cfgs_for_run = Go2FlatConfig(sim_type="newton").build()
 
-Variants (``gait_conditioned``, ``scaffolded_tdmpc2``) inherit
-``Go2FlatConfig`` directly and pin ``sim_type`` themselves; see
+Variants (``gait_conditioned``) inherit ``Go2FlatConfig`` directly and
+pin ``sim_type`` themselves; see
 ``presets/go2_flat/{newton,genesis,mujoco}/`` for the variant files.
 """
 

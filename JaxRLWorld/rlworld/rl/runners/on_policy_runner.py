@@ -7,12 +7,10 @@ import numpy as np
 import torch
 
 from rlworld.rl.algorithms.ppo import PPO
-from rlworld.rl.algorithms.ppo_dr3 import PPODR3
 from rlworld.rl.configs import ConfigsForRun
-from rlworld.rl.configs.algorithms import PPOConfig, PPODR3Config
+from rlworld.rl.configs.algorithms import PPOConfig
 from rlworld.rl.envs import World
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
-from rlworld.rl.modules.policies.ppo_dr3_ac import PPODR3ActorCritic
 from rlworld.rl.modules.utils import count_parameters, print_model_summary
 from rlworld.rl.runners.base_runner import BaseRunner
 from rlworld.rl.runners.iteration_data import IterationData
@@ -29,8 +27,8 @@ class OnPolicyRunner(BaseRunner):
     - Checkpoint save/load support
     """
 
-    alg: PPO | PPODR3
-    actor_critic: PPOActorCritic | PPODR3ActorCritic
+    alg: PPO
+    actor_critic: PPOActorCritic
     is_distributed_runner: bool = False
 
     def __init__(
@@ -55,33 +53,25 @@ class OnPolicyRunner(BaseRunner):
 
         self.key, subkey = jax.random.split(self.key)
 
-        if self.algorithm_name == "PPODR3":
-            self._init_ppodr3_actor_critic(policy_cfg, subkey)
-        else:  # PPO
-            self._init_ppo_actor_critic(policy_cfg, subkey)
+        self._init_ppo_actor_critic(policy_cfg, subkey)
 
         self.training_modules = {"actor_critic": self.actor_critic}
 
         self.squash_output = self.actor_critic.is_squashed
         self._init_action_scaling()
 
-        # Print model info
-        model_name = "PPODR3ActorCritic" if self.algorithm_name == "PPODR3" else "PPOActorCritic"
-        print_model_summary(self.actor_critic, model_name)
+        print_model_summary(self.actor_critic, "PPOActorCritic")
 
         if self.use_wandb:
             self._log_model_parameters()
 
-    def _init_algorithm(self) -> PPO | PPODR3:
+    def _init_algorithm(self) -> PPO:
         """Initialize algorithm based on type."""
         alg_cfg = self.cfgs.algorithm
 
         self.key, subkey = jax.random.split(self.key)
 
-        if self.algorithm_name == "PPODR3":
-            self.alg = self._init_ppodr3_algorithm(alg_cfg, subkey)
-        else:  # PPO
-            self.alg = self._init_ppo_algorithm(alg_cfg, subkey)
+        self.alg = self._init_ppo_algorithm(alg_cfg, subkey)
 
         return self.alg
 
@@ -105,29 +95,6 @@ class OnPolicyRunner(BaseRunner):
             use_value_normalization=alg_cfg.use_value_normalization,
             use_early_stop=alg_cfg.use_early_stop,
             normalize_advantage_per_minibatch=alg_cfg.normalize_advantage_per_minibatch,
-            key=key,
-        )
-
-    def _init_ppodr3_algorithm(self, alg_cfg: PPODR3Config, key: jax.Array) -> PPODR3:
-        """Initialize PPO-DR3 algorithm."""
-        return PPODR3(
-            actor_critic=self.actor_critic,
-            num_learning_epochs=alg_cfg.num_learning_epochs,
-            num_mini_batches=alg_cfg.num_mini_batches,
-            clip_param=alg_cfg.clip_param,
-            gamma=alg_cfg.gamma,
-            lam=alg_cfg.lam,
-            value_loss_coef=alg_cfg.value_loss_coef,
-            entropy_coef=alg_cfg.entropy_coef,
-            dr3_coef=alg_cfg.dr3_coef,
-            actor_lr=alg_cfg.actor_lr,
-            critic_lr=alg_cfg.critic_lr,
-            max_grad_norm=alg_cfg.max_grad_norm,
-            use_clipped_value_loss=alg_cfg.use_clipped_value_loss,
-            schedule=alg_cfg.schedule,
-            desired_kl=alg_cfg.desired_kl,
-            use_value_normalization=alg_cfg.use_value_normalization,
-            use_early_stop=alg_cfg.use_early_stop,
             key=key,
         )
 
@@ -160,28 +127,6 @@ class OnPolicyRunner(BaseRunner):
             obs_normalization=self.cfgs.algorithm.obs_normalization,
         )
 
-    def _init_ppodr3_actor_critic(self, policy_cfg, key: jax.Array) -> None:
-        """Initialize PPO-DR3 actor-critic with DR3Critic."""
-
-        if hasattr(self.env, "scene_manager"):
-            kinematic_tree = self.env.scene_manager.trees.get("robot", None)
-        else:
-            kinematic_tree = None
-
-        self.actor_critic = PPODR3ActorCritic(
-            num_actor_obs=self.actor_obs_dim,
-            num_critic_obs=self.critic_obs_dim,
-            num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg.actor_class_name,
-            init_noise_std=policy_cfg.init_noise_std,
-            std_type=policy_cfg.std_type,
-            distribution_type=policy_cfg.distribution_type,
-            kinematic_tree=kinematic_tree,
-            key=key,
-            actor_kwargs=policy_cfg.actor_kwargs,
-            critic_kwargs=policy_cfg.critic_kwargs,
-        )
-
     def _log_model_parameters(self) -> None:
         """Log model parameters to wandb."""
         import wandb
@@ -194,9 +139,6 @@ class OnPolicyRunner(BaseRunner):
         wandb.summary["model/critic_parameters"] = critic_params
         wandb.summary["model/std_parameters"] = std_params
         wandb.summary["model/total_parameters"] = actor_params + critic_params + std_params
-
-        if self.algorithm_name == "PPODR3":
-            wandb.summary["model/critic_feature_dim"] = self.actor_critic.critic_feature_dim
 
     def _init_storage(self):
         """Initialize the experience storage."""
