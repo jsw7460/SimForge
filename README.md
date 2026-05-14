@@ -16,11 +16,19 @@ external users can clone a single, reproducible stack.
   <em>One PPO policy trained on <code>go2/newton/gait_conditioned</code>, evaluated across all three simulators.</em>
 </p>
 
+<p align="center">
+  <img src="docs/demo_t1_getup.gif" alt="A single PPO policy trained on t1_getup in Genesis, evaluated in Genesis, Newton, and MuJoCo" width="900"/>
+</p>
+
+<p align="center">
+  <em>One PPO policy trained on <code>t1_getup</code> in Genesis, evaluated across all three simulators.</em>
+</p>
+
 ## Highlights
 
-- **Sim-to-sim out of the box.** A policy trained in one simulator can be
-  evaluated in the other two without code changes. The same task config
-  drives all three backends.
+- **Proxy for sim-to-real research.** Cross-sim provides a
+  hardware-free testbed for sim2real-style experiments (e.g., system
+  identification). The same task config drives all three backends.
 - **5 task presets × 3 simulators = 15 ready combinations** covering
   Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and the
   Booster T1 humanoid.
@@ -29,7 +37,6 @@ external users can clone a single, reproducible stack.
   small subset of a Gymnasium-based benchmark suite (see
   `JaxRLWorld/rlworld/scripts/benchmark/`), with FastTD3 additionally
   validated on [mujoco_playground][mjpg].
-- **2 actor/critic architectures**: MLP and Space-Time Transformer.
 - **Domain randomization, motion tracking, and viser-based 3-D
   visualization** are wired up across all simulators.
 
@@ -149,118 +156,6 @@ python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py \
 
 `--eval_sim` accepts `genesis`, `newton`, or `mujoco`.
 
-## Architecture
-
-JaxRLWorld separates "what the task is" from "which simulator runs it".
-A task is defined once as a tree of dataclass configs (env, scene,
-observation, reward, action, command, event, algorithm, runner) and a
-small per-simulator builder module supplies the few sim-native pieces
-(entity construction, contact sensors, terrain). Everything downstream
-— observation functions, reward functions, event terms, runners, neural
-networks — is sim-agnostic and reads/writes the simulator only through
-narrow protocol interfaces.
-
-```
-                  ┌──────────────────────────────────────────┐
-                  │  Preset (Go2FlatConfig / G1FlatConfig)   │
-                  │   ─ env, scene, obs, reward, ...         │
-                  │   ─ build()  →  ConfigsForRun            │
-                  └──────────────────────┬───────────────────┘
-                                         │
-              ┌──────────────────────────┴──────────────────────────┐
-              │                                                     │
-              ▼                                                     ▼
-  ┌──────────────────────┐                              ┌──────────────────────┐
-  │  _newton_builders.py │                              │  _genesis_builders   │
-  │  _genesis_builders   │  ── per-sim pieces only ──▶  │  _mujoco_builders    │
-  │  _mujoco_builders    │                              │  (entities, sensors, │
-  └──────────────────────┘                              │   gait, terrain...)  │
-                                                        └──────────────────────┘
-                                         │
-                                         ▼
-            ┌────────────────────────────────────────────────────┐
-            │            World (NewtonEnv / GenesisEnv /         │
-            │                    MujocoEnv)                      │
-            │  ┌──────────────────────────────────────────────┐  │
-            │  │  Managers (Scene, Action, Observation,       │  │
-            │  │   Reward, Command, Event, Contact, ...)      │  │
-            │  └──────────────────────────────────────────────┘  │
-            │  ┌──────────────────────────────────────────────┐  │
-            │  │  RobotData protocol  +  RobotStateWriter     │  │
-            │  │  (reads / writes robot state through one     │  │
-            │  │   stable interface, regardless of backend)   │  │
-            │  └──────────────────────────────────────────────┘  │
-            └────────────────────────┬───────────────────────────┘
-                                     │
-                                     ▼
-            ┌────────────────────────────────────────────────────┐
-            │   mdp/{observations,rewards,events,...}/common/    │
-            │   ─ sim-agnostic functions, called identically     │
-            │     by every backend                               │
-            └────────────────────────────────────────────────────┘
-                                     │
-                                     ▼
-            ┌────────────────────────────────────────────────────┐
-            │   Runner (PPO / SAC / TD3 / FastTD3 / TDMPC2) ─    │
-            │   no simulator-specific code                       │
-            └────────────────────────────────────────────────────┘
-```
-
-Key design decisions:
-
-- **Single preset, three backends.** `Go2FlatConfig(sim_type="newton").build()`
-  and `Go2FlatConfig(sim_type="genesis").build()` produce two
-  `ConfigsForRun` objects that share every cross-sim field (reward
-  weights, command ranges, network sizes, etc.) and only diverge in the
-  small set of bits that *must* be sim-native (entity URDF/MJCF, contact
-  sensors, solver tolerances).
-- **`RobotData` protocol.** A read-only `Protocol`
-  (`rl/envs/robot_data.py`) declares a small set of properties —
-  `joint_pos`, `joint_vel`, `root_link_pos_w`, `body_pos_w(names)`,
-  `site_pos_w(names)`, `angular_momentum_w(...)`, etc. Each backend
-  supplies a thin wrapper (`NewtonRobotData`, `GenesisRobotData`,
-  `MujocoRobotData`) that satisfies the protocol structurally. Reward
-  and observation code reads `env.get_robot_data().joint_pos` and never
-  knows which simulator it is on.
-- **`RobotStateWriter`.** Mutation API (`set_dof_positions`,
-  `set_root_state`, `eval_fk`) lives in a separate writer class.
-- **Manager-based environment.** The same `World` ABC is shared by all
-  backends. Observations, rewards, actions, commands, events, contacts,
-  and terminations are independent managers; the env just orchestrates
-  them.
-- **`MultiSimWorld`.** Stacks multiple sim envs into a single vectorized
-  interface for the algorithm. Joint-order permutation (canonical ↔
-  per-sim) is built automatically from the action manager so the policy
-  sees a stable joint layout even when each sim's URDF parses joints in
-  a different order.
-- **Sim-agnostic reward/observation library.**
-  `mdp/rewards/common/reward_terms.py` and `mdp/observations/common/`
-  hold the canonical implementations. Per-sim modules
-  (`mdp/rewards/newton/`, etc.) exist mainly as thin redirect wrappers
-  that preserve historical names for older presets.
-
-## Repository layout
-
-```
-SimForge/                       # this repo
-├── Genesis/                    # submodule — Genesis physics simulator
-├── Newton/                     # submodule — Newton (NVIDIA Warp)
-├── Mjlab/                      # submodule — MuJoCo (MJX) framework
-└── JaxRLWorld/                 # the framework
-    ├── pyproject.toml
-    ├── LICENSE
-    └── rlworld/
-        ├── rl/
-        │   ├── algorithms/     # PPO, SAC, TD3, FastTD3, TDMPC2
-        │   ├── configs/        # Task presets + algorithm configs
-        │   ├── envs/           # Sim-agnostic env + per-sim adapters
-        │   ├── modules/        # Network architectures
-        │   ├── runners/        # On-policy / Off-policy / Model-based
-        │   ├── evals/          # Policy evaluation + cross-sim transfer
-        │   └── vis/            # viser-based visualization
-        └── scripts/            # Launch scripts per (task, simulator)
-```
-
 ## Acknowledgements
 
 JaxRLWorld would not exist without prior open-source work; we are
@@ -282,27 +177,6 @@ code. In particular:
 
 If you build on JaxRLWorld, please also cite the upstream projects
 above.
-
-## Citation
-
-If you use JaxRLWorld in academic work, please cite it as:
-
-```bibtex
-@misc{shin2026jaxrlworld,
-  author       = {Sangwoo Shin},
-  title        = {{JaxRLWorld}: A JAX-based RL framework for
-                  cross-simulator legged locomotion},
-  year         = {2026},
-  howpublished = {\url{https://github.com/jsw7460/SimForge}},
-}
-```
-
-## License
-
-JaxRLWorld is released under the MIT License. See
-[JaxRLWorld/LICENSE](JaxRLWorld/LICENSE) for details. Note that the
-upstream projects we build on carry their own licenses; please consult
-each one when redistributing.
 
 [genesis]: https://github.com/Genesis-Embodied-AI/Genesis
 [newton]: https://github.com/newton-physics/newton
