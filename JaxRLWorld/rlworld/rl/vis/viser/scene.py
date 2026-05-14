@@ -26,6 +26,17 @@ from .bridge import SimulatorBridge, SimulatorGeometry
 from .scene_config import ViserSceneConfig
 
 _BUNDLED_GROUND_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "ground_texture.png")
+_BUNDLED_MARBLE_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "marble_texture.png")
+_BUNDLED_CONCRETE_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "concrete_texture.png")
+_BUNDLED_CONSTRUCTION_BACKDROP = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "assets", "construction_backdrop.png"
+)
+_GROUND_TEXTURE_ALIASES = {
+    "default": _BUNDLED_GROUND_TEXTURE,
+    "marble": _BUNDLED_MARBLE_TEXTURE,
+    "concrete": _BUNDLED_CONCRETE_TEXTURE,
+}
+_SKY_IMAGE_ALIASES = {"construction": _BUNDLED_CONSTRUCTION_BACKDROP}
 
 
 def _quaternion_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
@@ -267,6 +278,7 @@ class ViserScene:
         # Build scene.
         self._create_mesh_handles()
         self._create_ground_plane()
+        self._setup_environment()
         self._setup_lighting()
         self._setup_sky()
 
@@ -316,11 +328,11 @@ class ViserScene:
         """Add the ground plane to the scene (look from ViserSceneConfig)."""
         cfg = self.scene_config
         if cfg.ground_texture is not None:
-            path = _BUNDLED_GROUND_TEXTURE if cfg.ground_texture == "default" else cfg.ground_texture
+            path = _GROUND_TEXTURE_ALIASES.get(cfg.ground_texture, cfg.ground_texture)
             if not os.path.isfile(path):
                 raise FileNotFoundError(
                     f"ViserSceneConfig.ground_texture points at a missing file: {path!r}. "
-                    "For the bundled texture, run rlworld/rl/vis/viser/_texture_gen.py to (re)bake it; "
+                    "For a bundled texture, run rlworld/rl/vis/viser/_texture_gen.py to (re)bake it; "
                     "or set ground_texture=None to use a flat color / checkerboard ground."
                 )
             ground_mesh = _create_textured_ground(
@@ -344,8 +356,36 @@ class ViserScene:
             receive_shadow=cfg.receive_shadow,
         )
 
+    def _setup_environment(self) -> None:
+        """Apply image-based lighting (HDRI env map) for glossy reflections.
+
+        Driven by ``ViserSceneConfig.env_map`` (e.g. ``"studio"``).  When set,
+        this is what makes low-roughness ground / robot show clean specular
+        reflections — the "polished floor" look.  Also doubles as the canvas
+        backdrop when ``env_map_as_background=True``.
+        """
+        cfg = self.scene_config
+        if cfg.env_map is None:
+            return
+        try:
+            self.server.scene.configure_environment_map(
+                hdri=cfg.env_map,
+                background=bool(cfg.env_map_as_background),
+                background_blurriness=float(cfg.env_map_blurriness),
+                environment_intensity=float(cfg.env_map_intensity),
+            )
+        except (TypeError, ValueError):
+            # API drift / unsupported HDRI preset — fall back to the explicit
+            # light rig + procedural sky (still gives a reasonable look).
+            pass
+
     def _setup_lighting(self) -> None:
-        """Outdoor light rig: ambient floor + hemisphere + a shadow-casting sun."""
+        """Explicit light rig: ambient floor + hemisphere + a shadow-casting sun.
+
+        Layered on top of any HDRI env map; with IBL on, the ambient /
+        hemisphere intensities are typically kept low so the env map drives
+        the diffuse and the sun provides the hard shadow.
+        """
         cfg = self.scene_config
         if not cfg.lighting:
             return
@@ -375,11 +415,26 @@ class ViserScene:
         )
 
     def _setup_sky(self) -> None:
-        """Set a procedural sky-gradient image as the (flat) canvas background."""
+        """Set a flat canvas-background image (gradient / construction / file).
+
+        Skipped when an HDRI env map is already serving as the background
+        (``env_map`` set + ``env_map_as_background=True``)."""
         cfg = self.scene_config
         if not cfg.sky_background:
             return
-        img = _make_sky_image(cfg.sky_color, cfg.sky_horizon_color, cfg.sun_color if cfg.sky_sun_glow else None)
+        if cfg.env_map is not None and cfg.env_map_as_background:
+            return
+        if cfg.sky_kind == "gradient":
+            img = _make_sky_image(cfg.sky_color, cfg.sky_horizon_color, cfg.sun_color if cfg.sky_sun_glow else None)
+        else:
+            path = _SKY_IMAGE_ALIASES.get(cfg.sky_kind, cfg.sky_kind)
+            if not os.path.isfile(path):
+                raise FileNotFoundError(
+                    f"ViserSceneConfig.sky_kind points at a missing file: {path!r}. "
+                    "For a bundled backdrop, run rlworld/rl/vis/viser/_texture_gen.py to (re)bake it; "
+                    "or set sky_kind='gradient' for the procedural sky."
+                )
+            img = np.array(Image.open(path).convert("RGB"))
         self.server.scene.set_background_image(img)
 
     def update(self) -> None:

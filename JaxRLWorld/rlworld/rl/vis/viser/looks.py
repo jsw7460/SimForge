@@ -18,23 +18,19 @@ from .scene_config import ViserSceneConfig
 # name -> ViserSceneConfig.  Keep these as plain instances; ``get_look``
 # hands out a fresh copy so callers can't mutate the shared template.
 VISER_LOOKS: dict[str, ViserSceneConfig] = {
-    # The package default: dark glossy slate ground + near-black metallic
-    # robot, lit by the "studio" HDRI (image-based reflections + crisp sun).
-    # The polished/wet specular comes from the low ``ground_roughness``.
+    # The package default: dark veined marble under glass-polished specular
+    # + carbon-finish robot, lit by the "studio" HDRI.  The marble texture
+    # shows through the gloss so the floor reads as a real surface rather
+    # than a featureless mirror.
     "default": ViserSceneConfig(),
-    "metal_dark": ViserSceneConfig(),
-    # Push the gloss to near-mirror — the ground reads as a wet/lacquered
-    # surface, the robot reflects the studio HDRI sharply.
-    "polished": ViserSceneConfig(
-        ground_kind="plane",
-        ground_color=(18, 22, 28),
-        ground_metalness=0.35,
-        ground_roughness=0.08,
-        robot_metalness=0.95,
-        robot_roughness=0.22,
-        env_map="studio",
-        env_map_blurriness=0.25,
-        sun_intensity=1.2,
+    # Aliases of the default — kept for discoverability under intuitive names.
+    "polished": ViserSceneConfig(),
+    "carbon": ViserSceneConfig(),
+    # Dark metal finish on the same polished marble (no carbon tint).
+    "metal_dark": ViserSceneConfig(
+        robot_color=(35, 35, 35),
+        robot_metalness=0.9,
+        robot_roughness=0.3,
     ),
     # Polished light metal — chrome / brushed-aluminium showpiece.
     "metal_polished": ViserSceneConfig(
@@ -56,8 +52,6 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
     ),
     # Satin / eggshell — soft sheen, mid-grey.
     "satin": ViserSceneConfig(robot_color=(120, 124, 130), robot_metalness=0.05, robot_roughness=0.5),
-    # Carbon-fibre-ish dark with a faint sheen.
-    "carbon": ViserSceneConfig(robot_color=(34, 38, 42), robot_metalness=0.25, robot_roughness=0.4),
     # Industrial warehouse: dark concrete-feel ground + the "warehouse" HDRI.
     "warehouse": ViserSceneConfig(
         ground_color=(46, 48, 52),

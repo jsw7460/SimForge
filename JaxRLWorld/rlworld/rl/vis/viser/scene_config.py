@@ -16,46 +16,49 @@ from typing import Literal
 class ViserSceneConfig:
     """Tweakable look of the Viser eval viewer (Genesis/Newton).
 
-    Default look is a "studio product render": dark glossy slate ground +
-    near-black metallic robot, lit by an image-based ``"studio"`` HDRI
-    (so low-roughness surfaces show clean specular reflections — the
-    glass / polished-stone look) plus a crisp shadow-casting sun.
+    Default look is a "polished gallery": dark veined marble under glass-
+    like polish (the bundled ``marble_texture.png`` shows through the
+    gloss so the floor is never featureless) + a carbon-finish robot,
+    lit by the built-in ``"studio"`` HDRI for clean specular reflections
+    plus a soft directional sun for shadow.
 
     Override any field to taste; ``robot_color=None`` keeps the
     simulator's own mesh colors instead.  See ``looks.py`` for ready-
-    made alternatives (``"earthy"``, ``"polished"``, ``"construction"`` …).
+    made alternatives (``"earthy"``, ``"warehouse"``, ``"construction"`` …).
     """
 
     # ── Ground ──────────────────────────────────────────────────────
-    ground_kind: Literal["plane", "checkerboard", "none"] = "checkerboard"
-    """``"checkerboard"`` (default — subtle dark-slate grid so the floor has
-    visible structure even when the HDRI reflection is faint),
-    ``"plane"`` (one flat colour), or ``"none"``."""
-    ground_color: tuple[int, int, int] = (44, 50, 58)
+    ground_kind: Literal["plane", "checkerboard", "none"] = "plane"
+    """Fallback ground when ``ground_texture`` is ``None``.  ``"plane"``
+    (one flat colour), ``"checkerboard"`` (a subtle grid), or ``"none"``."""
+    ground_color: tuple[int, int, int] = (28, 32, 38)
     """Plain-ground color (RGB 0-255). Also the light cell of the checkerboard."""
-    ground_color_alt: tuple[int, int, int] = (24, 28, 34)
+    ground_color_alt: tuple[int, int, int] = (22, 26, 32)
     """Dark cell color for ``ground_kind="checkerboard"`` (keep it close to
     ``ground_color`` for a faint-grid look; spread them apart for a chessboard)."""
     ground_size: float = 50.0
     ground_divisions: int = 100
     """Cells per side for the checkerboard (50 m / 100 = 0.5 m cells)."""
-    ground_metalness: float = 0.25
-    ground_roughness: float = 0.16
-    """Low roughness + the HDRI ``env_map`` → polished / wet-floor specular."""
-    ground_texture: str | None = None
+    ground_metalness: float = 0.35
+    ground_roughness: float = 0.08
+    """Very low roughness + the HDRI ``env_map`` → glass-polished specular.
+    The bundled ``marble_texture.png`` shows through so the floor still
+    has a pattern (it would otherwise read as a featureless mirror)."""
+    ground_texture: str | None = "marble"
     """When set, the ground is a tiled image (overrides ``ground_kind``).
-    ``"default"`` → the bundled earthy ``ground_texture.png``; ``"concrete"``
-    → the bundled cool-gray ``concrete_texture.png``; a file path → use that
-    image; ``None`` (default) → no texture, fall back to ``ground_kind`` + colors."""
+    ``"default"`` → the bundled earthy ``ground_texture.png``; ``"marble"``
+    (default) → the bundled dark veined ``marble_texture.png``; ``"concrete"``
+    → the bundled cool-gray ``concrete_texture.png``; a file path → use
+    that image; ``None`` → no texture, fall back to ``ground_kind`` + colors."""
     ground_texture_tiles: float = 25.0
     """How many times the texture repeats across ``ground_size`` (50 m / 25 = 2 m tile)."""
 
     # ── Robot ───────────────────────────────────────────────────────
-    robot_color: tuple[int, int, int] | None = (35, 35, 35)
-    """Override color for every robot mesh (RGB 0-255). ``None`` → keep the
-    simulator's own mesh colors."""
-    robot_metalness: float = 0.9
-    robot_roughness: float = 0.3
+    robot_color: tuple[int, int, int] | None = (34, 38, 42)
+    """Override color for every robot mesh (RGB 0-255). Default is a dark
+    carbon-fibre finish.  ``None`` → keep the simulator's own mesh colors."""
+    robot_metalness: float = 0.25
+    robot_roughness: float = 0.4
     robot_opacity: float = 1.0
 
     # ── Shadows ─────────────────────────────────────────────────────
@@ -75,7 +78,7 @@ class ViserSceneConfig:
     env_map_as_background: bool = True
     """Show the HDRI itself as the canvas background (rotates with the
     camera).  When ``True``, the procedural ``sky_*`` backdrop is skipped."""
-    env_map_blurriness: float = 0.35
+    env_map_blurriness: float = 0.25
     """0 = sharp HDRI behind the robot; 1 = heavily blurred (good when you
     don't want the backdrop competing for attention)."""
 

@@ -142,7 +142,7 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> SceneConfig:
         sensors=[
             SensorConfig(
                 entity_name="robot",
-                link_name="pelvis",
+                link_name=r.base_link_name,
                 sensor_class=gs.sensors.IMU,
             ),
         ],
@@ -158,11 +158,11 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> SceneConfig:
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
             constraint_solver=gs.constraint_solver.Newton,
-            constraint_timeconst=0.01,
+            constraint_timeconst=0.02,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
-            max_collision_pairs=150,
+            max_collision_pairs=30,
             batch_dofs_info=True,
         ),
         robot_cfg=r,

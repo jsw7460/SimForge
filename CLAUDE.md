@@ -12,6 +12,7 @@
 
 * NEVER: Import inside functions. The only exception is circular imports.
 * NEVER: Silent fallback. Crash immediately on failure. No `except: pass` or empty fallbacks.
+* NEVER: Defensive coding for statically-known attributes. No `getattr(obj, "attr", default)` or `hasattr` checks when the attribute's presence is guaranteed by the type/class. Access directly and let `AttributeError` surface real bugs.
 * MUST: Before removing a top-level import, grep to check whether it is re-exported.
 
 ## Architecture Principles

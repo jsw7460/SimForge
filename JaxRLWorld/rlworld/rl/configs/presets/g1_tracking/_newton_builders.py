@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import warp as wp
 
 from rlworld.rl.actuators import IdealPDActuatorCfg
-from rlworld.rl.configs import RewardConfig, TerminationTermConfig
+from rlworld.rl.configs import RewardConfig, SolverMuJoCoCfg, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     TerminationsConfig,
@@ -123,6 +123,13 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
         robot_cfg=r,
+        solver_cfg=SolverMuJoCoCfg(
+            iterations=10,
+            ls_iterations=20,
+            ccd_iterations=50,
+            njmax=1500,
+            nconmax=35,
+        ),
         entities={
             "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(

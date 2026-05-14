@@ -45,7 +45,7 @@ class StepProfiler:
         try:
             self.interval = max(1, int(os.environ.get("JAXRLWORLD_PROFILE_STEP_INTERVAL", "200")))
         except ValueError:
-            self.interval = 200
+            self.interval = 10
         self._sync = self.enabled and torch.cuda.is_available()
         self._totals: dict[str, float] = {}
         self._order: list[str] = []
