@@ -18,6 +18,7 @@
 /unitree_rl_mjlab/
 /SysID/
 /third_party/
+/JaxRLWorld-research/
 
 # --- Root-level files not needed ---
 setup.py

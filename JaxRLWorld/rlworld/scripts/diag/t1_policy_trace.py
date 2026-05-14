@@ -4,7 +4,7 @@ settle boundary for T1 getup sim2sim audit.
 Usage:
     uv run python JaxRLWorld/rlworld/scripts/diag/t1_policy_trace.py \
         --sim newton --scenario standing \
-        --wandb jsw7460/T1_Getup/ihdt0ykj
+        --wandb <entity>/T1_Getup/<run-id>
 
 Two scenarios, identical initial state enforced via the robot state
 writer so all three sims start from byte-identical conditions:

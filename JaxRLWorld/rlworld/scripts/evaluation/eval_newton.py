@@ -88,7 +88,7 @@ if __name__ == "__main__":
 
     evaluator = PolicyEvaluator(
         policy_path="./outputs/models/2026-04-22/22-26-13/checkpoint_latest/",
-        # wandb_run_path="jsw7460/T1_Tracking/gx62rsbe",
+        # wandb_run_path="<entity>/T1_Tracking/<run-id>",
         seed=42,
         num_evals=100000000,
         record_video=args.record_video,
