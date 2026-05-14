@@ -8,14 +8,13 @@ itself is `rlworld/` inside [`JaxRLWorld/`](JaxRLWorld); `SimForge/` is the
 umbrella repo that pins specific simulator versions as git submodules so
 external users can clone a single, reproducible stack.
 
-<!--
-  TODO(release): drop a cross-sim split-screen GIF here. Once `docs/demo.gif`
-  exists, uncomment the block below to display it.
+<p align="center">
+  <img src="docs/demo.gif" alt="A single PPO policy trained in Newton, evaluated in Genesis, Newton, and MuJoCo" width="900"/>
+</p>
 
-  <p align="center">
-    <img src="docs/demo.gif" alt="Cross-sim demo" width="720"/>
-  </p>
--->
+<p align="center">
+  <em>One PPO policy trained on <code>go2/newton/gait_conditioned</code>, evaluated across all three simulators.</em>
+</p>
 
 ## Highlights
 
@@ -96,17 +95,17 @@ pip install -U "jax[cuda12]"   # match your system CUDA
 
 ## Quickstart
 
-Train PPO on G1 29-DOF flat locomotion in Genesis:
+Train PPO on Go2 gait-conditioned locomotion in Newton:
 
 ```bash
-python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py
+python JaxRLWorld/rlworld/scripts/go2/newton/gait_conditioned.py
 ```
 
-The same task in Newton or MuJoCo:
+The same task in Genesis or MuJoCo:
 
 ```bash
-python JaxRLWorld/rlworld/scripts/g1_29dof/newton/mlp.py
-python JaxRLWorld/rlworld/scripts/g1_29dof/mujoco/mlp.py
+python JaxRLWorld/rlworld/scripts/go2/genesis/gait_conditioned.py
+python JaxRLWorld/rlworld/scripts/go2/mujoco/gait_conditioned.py
 ```
 
 ## Cross-sim evaluation

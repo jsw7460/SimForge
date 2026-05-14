@@ -84,6 +84,7 @@ checkpoints/
 
 # --- Misc ---
 *.log
+*.mov
 .claude/
 CLAUDE.local.md
 TODO.local.md
