@@ -31,6 +31,7 @@ from rlworld.rl.configs.sensors.newton_sensor_config import (
 )
 from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
+from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
@@ -38,6 +39,81 @@ from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
+
+
+def _canonical_joint_order_newton(model, num_worlds: int) -> list[str]:
+    """Canonical joint name list — DFS walk of Newton's world-0 body tree with
+    siblings sorted alphabetically by bare body name at each node, collecting
+    each body's inbound joint when visited.
+
+    Newton's ``Model`` does NOT carry a ``body_parent`` array, so we
+    reconstruct the body tree from the joint arrays: each joint records
+    ``joint_parent[j]`` (parent body) and ``joint_child[j]`` (child body),
+    which makes ``parent_of(child_body) = joint_parent[j]`` where ``j`` is
+    the inbound joint of ``child_body``. Bodies that never appear as a
+    joint child are roots.
+
+    Returns bare joint leaf names (entity / XPath prefixes stripped) in
+    canonical DFS order.
+    """
+    body_labels = list(getattr(model, "body_label", []))
+    n_total = len(body_labels)
+    bodies_per_world = n_total // num_worlds if num_worlds > 0 else n_total
+    if bodies_per_world == 0:
+        return []
+
+    body_labels_w0 = body_labels[:bodies_per_world]
+    bare_body_names = [leaf_name(b) for b in body_labels_w0]
+
+    # Reconstruct parent_of(body) from joint_parent + joint_child arrays.
+    joint_labels_all = list(getattr(model, "joint_label", None) or getattr(model, "joint_key", []))
+    joints_per_world = len(joint_labels_all) // num_worlds if num_worlds > 0 else len(joint_labels_all)
+    joint_labels_w0 = joint_labels_all[:joints_per_world]
+    joint_parent_arr = (
+        wp.to_torch(model.joint_parent).cpu().numpy()
+        if hasattr(model.joint_parent, "numpy")
+        else np.asarray(model.joint_parent)
+    )
+    joint_child_arr = (
+        wp.to_torch(model.joint_child).cpu().numpy()
+        if hasattr(model.joint_child, "numpy")
+        else np.asarray(model.joint_child)
+    )
+    joint_parent_w0 = joint_parent_arr[:joints_per_world]
+    joint_child_w0 = joint_child_arr[:joints_per_world]
+
+    parent_of: dict[int, int] = {}
+    body_to_joint: dict[int, int] = {}
+    for j in range(joints_per_world):
+        c = int(joint_child_w0[j])
+        p = int(joint_parent_w0[j])
+        if 0 <= c < bodies_per_world:
+            parent_of[c] = p  # may be -1 for a free-base joint connecting to world.
+            body_to_joint[c] = j
+
+    children: dict[int, list[int]] = {}
+    roots: list[int] = []
+    for i in range(bodies_per_world):
+        p = parent_of.get(i, -1)
+        if p < 0 or p >= bodies_per_world:
+            roots.append(i)
+        else:
+            children.setdefault(p, []).append(i)
+    roots.sort(key=lambda i: bare_body_names[i])
+    for k in children:
+        children[k].sort(key=lambda i: bare_body_names[i])
+
+    out: list[str] = []
+    stack = list(reversed(roots))
+    while stack:
+        i = stack.pop()
+        j = body_to_joint.get(i)
+        if j is not None:
+            out.append(leaf_name(joint_labels_w0[j]))
+        kids = children.get(i, [])
+        for kid in reversed(kids):
+            stack.append(kid)
+    return out
 
 
 def apply_joint_params_by_pattern(
@@ -1033,34 +1109,28 @@ class NewtonSceneManager(BaseManager):
         self.graph = capture.graph
 
     def build_articulation_indexing(self, actuated_dof_names: list[str]):
-        """Build ArticulationIndexing for the Newton model.
+        """Build ArticulationIndexing for the Newton model in canonical joint order.
+
+        Joint order is computed by a DFS walk of the kinematic body tree
+        (siblings sorted alphabetically by bare body name at each level),
+        emitting each body's inbound joint when visited. This pins the order
+        to the kinematic structure + names so it agrees with Genesis / mjlab
+        for the same robot regardless of how each backend's parser flattened
+        the tree internally. ``actuated_dof_names`` then filters that
+        canonical list in canonical (not query) order.
 
         Args:
-            actuated_dof_names: Regex patterns for actuated joints (may include prefix).
+            actuated_dof_names: Regex patterns for actuated joints (bare names).
 
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-        # Source joint names from ArticulationView, which already emits
-        # bare leaf names (``left_hip_pitch_joint``) with entity prefix
-        # and XPath ancestors stripped — IsaacLab convention.
         view = self.articulation_views.get("robot")
         if view is None:
             raise ValueError(
                 "build_articulation_indexing called before _build_robot_view; "
                 "ArticulationView must be created before action-manager init."
             )
-        # Use ``view.joint_names`` (one entry per JOINT) rather than
-        # ``view.joint_dof_names`` (one entry per DOF, with ``:N``
-        # suffixes for multi-DOF joints like free / spherical).
-        # ``flat_world0`` lookups resolve one entry per joint, so the
-        # DOF-level expansion would break the ``.index(n)`` below for
-        # free-joint entries like ``"floating_base:0"``. User actuator
-        # regexes match bare joint names (``"FR_hip_joint"``) so
-        # multi-DOF joints are filtered out naturally by ``fullmatch``.
-        all_names = list(view.joint_names)
-        # Raw Newton joint-label list over all worlds is still needed
-        # to recover q / qd indices into the flat model arrays.
         joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
         if not joint_names_raw:
             raise ValueError("Newton model has no joint labels")
@@ -1068,33 +1138,32 @@ class NewtonSceneManager(BaseManager):
         joints_per_world = len(joint_names_raw) // num_worlds
         flat_world0 = [leaf_name(n) for n in joint_names_raw[:joints_per_world]]
 
-        # Indices of actuatable joints within world-0 of the flat array.
-        # All of ``all_names`` entries must exist in ``flat_world0``.
-        actuatable_names = all_names
-        actuatable_indices = [flat_world0.index(n) for n in all_names]
+        # Canonical joint order from a DFS walk of the kinematic body tree.
+        # Filtered to joints that ArticulationView surfaced (multi-DOF roots
+        # like ``floating_base`` are excluded by ``view.joint_names``).
+        actuatable_names = list(view.joint_names)
+        canonical_full = _canonical_joint_order_newton(self.model, num_worlds=num_worlds)
+        canonical_actuatable = [n for n in canonical_full if n in set(actuatable_names)]
+        matched_names, _ = filter_canonical_to_actuated(canonical_actuatable, actuated_dof_names)
+        if not matched_names:
+            raise ValueError(
+                f"build_articulation_indexing matched no joints. "
+                f"canonical_actuatable={canonical_actuatable}, actuated_dof_names={actuated_dof_names}"
+            )
 
-        matched_indices, matched_names = string_utils.resolve_matching_names(
-            actuated_dof_names, actuatable_names, preserve_order=True
-        )
-        original_indices = [actuatable_indices[i] for i in matched_indices]
+        # Map matched bare names → world-0 joint indices (for q/qd lookup).
+        original_indices = [flat_world0.index(n) for n in matched_names]
 
-        # Compute q and qd indices
         joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
         joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
-
         q_indices = torch.tensor([int(joint_q_start[j]) for j in original_indices], device=self.device)
         qd_indices = torch.tensor([int(joint_qd_start[j]) for j in original_indices], device=self.device)
-
-        # sim_indices = qd_indices (used for _apply_force / _apply_position)
         sim_indices = qd_indices
 
-        # sim_to_canonical: maps qd-space positions back to canonical
-        # For Newton, RobotData uses q_indices/qd_indices directly
         sim_to_canonical = torch.zeros_like(sim_indices)
-        for canonical_i, sim_i in enumerate(sim_indices):
-            sim_to_canonical[canonical_i] = canonical_i  # identity since we index directly
+        for canonical_i, _sim_i in enumerate(sim_indices):
+            sim_to_canonical[canonical_i] = canonical_i  # identity since RobotData indexes via sim_indices.
 
-        # Joint limits (in qd space)
         dofs_per_world = self.model.joint_dof_count // num_worlds
         lower_all = wp.to_torch(self.model.joint_limit_lower)[:dofs_per_world]
         upper_all = wp.to_torch(self.model.joint_limit_upper)[:dofs_per_world]

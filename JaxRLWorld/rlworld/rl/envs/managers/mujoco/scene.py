@@ -13,6 +13,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.managers.base import BaseManager
+from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 
 if TYPE_CHECKING:
@@ -21,6 +22,54 @@ if TYPE_CHECKING:
     from mjlab.sim import Simulation
 
     from rlworld.rl.envs import World
+
+
+def _canonical_joint_order_mujoco(mj_model) -> list[str]:
+    """Canonical joint name list — DFS walk of the MjModel body tree with
+    siblings sorted alphabetically by bare body name at each node, collecting
+    each body's joints (sorted alphabetically when a body owns multiple) when
+    visited.
+
+    Returns bare joint names (entity prefix stripped); the world body (id 0)
+    is skipped.
+    """
+    import mujoco
+
+    n = mj_model.nbody
+    raw_body_names = [mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, i) or "" for i in range(n)]
+
+    def _bare(name: str) -> str:
+        return name.rsplit("/", 1)[-1] if "/" in name else name
+
+    bare_body_names = [_bare(b) for b in raw_body_names]
+    children: dict[int, list[int]] = {}
+    for i in range(n):
+        p = int(mj_model.body_parentid[i])
+        if p == i:  # world body: parent is itself (id 0).
+            continue
+        children.setdefault(p, []).append(i)
+    for k in children:
+        children[k].sort(key=lambda i: bare_body_names[i])
+    roots = list(children.get(0, []))  # already sorted by the loop above.
+
+    out: list[str] = []
+    stack = list(reversed(roots))
+    while stack:
+        i = stack.pop()
+        adr = int(mj_model.body_jntadr[i])
+        num = int(mj_model.body_jntnum[i])
+        if num > 0:
+            joint_pairs = []
+            for j in range(adr, adr + num):
+                jn = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_JOINT, j) or ""
+                joint_pairs.append((j, _bare(jn)))
+            joint_pairs.sort(key=lambda pair: pair[1])
+            for _j_id, jn in joint_pairs:
+                out.append(jn)
+        kids = children.get(i, [])
+        for kid in reversed(kids):
+            stack.append(kid)
+    return out
 
 
 def _to_mjlab_sensor_cfg(cfg: Any) -> Any:
@@ -382,7 +431,15 @@ class MujocoSceneManager(BaseManager):
         actuated_dof_names: list[str],
         entity_name: str = "robot",
     ):
-        """Build ArticulationIndexing for the given entity.
+        """Build ArticulationIndexing for the given entity in canonical joint order.
+
+        Joint order is computed by a DFS walk of the kinematic body tree
+        (siblings sorted alphabetically by bare body name at each level),
+        emitting each body's inbound joint(s) when visited. This pins the
+        order to the kinematic structure + names so it agrees with Genesis
+        and Newton for the same robot, regardless of how each backend's
+        parser flattened the tree internally. ``actuated_dof_names`` then
+        filters that canonical list in canonical (not query) order.
 
         Args:
             actuated_dof_names: Regex patterns for actuated joints.
@@ -394,28 +451,38 @@ class MujocoSceneManager(BaseManager):
         from rlworld.rl.envs.indexing import ArticulationIndexing
 
         entity = self._scene[entity_name]
+        all_entity_joint_names = list(entity.joint_names)
+        canonical_full = _canonical_joint_order_mujoco(self._sim.mj_model)
+        # Restrict canonical list to joints the entity actually exposes.
+        entity_joint_set = set(all_entity_joint_names)
+        canonical_actuatable = [n for n in canonical_full if n in entity_joint_set]
 
         if actuated_dof_names:
-            indices, names = entity.find_joints(actuated_dof_names, preserve_order=True)
+            matched_names, _ = filter_canonical_to_actuated(canonical_actuatable, actuated_dof_names)
         else:
-            names = list(entity.joint_names)
-            indices = list(range(len(names)))
+            matched_names = list(canonical_actuatable)
+
+        if not matched_names:
+            raise ValueError(
+                f"build_articulation_indexing matched no joints. "
+                f"canonical_actuatable={canonical_actuatable}, actuated_dof_names={actuated_dof_names}"
+            )
+
+        # Look up each matched name's index within the entity's joint list.
+        indices = [all_entity_joint_names.index(n) for n in matched_names]
 
         sim_indices = torch.tensor(indices, device=self.config.device, dtype=torch.long)
-
-        # sim_to_canonical: inverse permutation
         num_joints = len(indices)
         sim_to_canonical = torch.zeros(num_joints, device=self.config.device, dtype=torch.long)
-        for canonical_i, sim_i in enumerate(sim_indices):
-            sim_to_canonical[canonical_i] = canonical_i  # Will be used via sim_indices gather
+        for canonical_i, _sim_i in enumerate(sim_indices):
+            sim_to_canonical[canonical_i] = canonical_i  # identity: RobotData indexes via sim_indices.
 
-        # Joint limits
         soft_limits = entity.data.soft_joint_pos_limits
         lower = soft_limits[0, sim_indices, 0]
         upper = soft_limits[0, sim_indices, 1]
 
         return ArticulationIndexing(
-            joint_names=tuple(names),
+            joint_names=tuple(matched_names),
             sim_indices=sim_indices,
             sim_to_canonical=sim_to_canonical,
             joint_limits_lower=lower,

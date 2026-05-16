@@ -16,6 +16,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
+from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.utils import entity_utils, string as string_utils
 
@@ -27,6 +28,50 @@ if TYPE_CHECKING:
     from genesis.engine.sensors.base_sensor import Sensor
 
     from rlworld.rl.envs import World
+
+
+def _canonical_joint_order_genesis(entity: RigidEntity) -> list[str]:
+    """Canonical joint name list — DFS walk of ``entity.links`` with
+    siblings sorted alphabetically by bare link name at each node,
+    collecting each link's inbound joint(s) when visited.
+
+    Genesis enumerates bodies in BFS-by-depth internally, which gave a
+    different action order than Newton/mjlab for humanoids that mix arm
+    and leg chains at the same depth. This DFS-with-sorted-siblings walk
+    pins the canonical order solely to the kinematic structure + names,
+    independent of any sim's parser order.
+    """
+    links = list(entity.links)
+    if not links:
+        return []
+    by_idx = {link.idx: link for link in links}
+    roots: list = []
+    children: dict[int, list] = {}
+    for link in links:
+        p = link.parent_idx
+        if p == -1 or p not in by_idx:
+            roots.append(link)
+        else:
+            children.setdefault(p, []).append(link)
+    # Sort siblings alphabetically at every level (roots included).
+    roots.sort(key=lambda lk: lk.name)
+    for k in children:
+        children[k].sort(key=lambda lk: lk.name)
+
+    out: list[str] = []
+    stack = list(reversed(roots))
+    while stack:
+        link = stack.pop()
+        # ``link.joints`` are the joints connecting this link to its parent.
+        # Sort by name for determinism when a body has multiple inbound joints
+        # (rare — typically zero or one).
+        for joint in sorted(link.joints, key=lambda j: j.name):
+            if joint.n_dofs > 0:
+                out.append(joint.name)
+        kids = children.get(link.idx, [])
+        for kid in reversed(kids):
+            stack.append(kid)
+    return out
 
 
 @dataclass
@@ -288,7 +333,17 @@ class SceneManager(BaseManager):
         actuated_dof_names: list[str],
         entity_name: str = "robot",
     ):
-        """Build ArticulationIndexing for the given entity.
+        """Build ArticulationIndexing for the given entity in canonical joint order.
+
+        Joint order is computed by a DFS walk of the kinematic body tree
+        (siblings sorted alphabetically by bare body name at each level),
+        emitting each body's inbound joint when visited. This order depends
+        only on the kinematic structure + joint/body names, so it is identical
+        across simulators when the same robot is loaded — regardless of how
+        Genesis / Newton / mjlab happen to enumerate bodies internally
+        (Genesis uses BFS by depth, Newton/mjlab follow MJCF declaration
+        order, etc.). The user's ``actuated_dof_names`` regexes filter that
+        canonical list while preserving canonical order.
 
         Args:
             actuated_dof_names: Regex patterns for actuated joints.
@@ -297,20 +352,34 @@ class SceneManager(BaseManager):
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-
         entity = self.entities[entity_name]
-        dof_ids, joint_names = entity_utils.find_dofs(entity=entity, name_keys=actuated_dof_names)
+        canonical_names = _canonical_joint_order_genesis(entity)
+        matched_names, _ = filter_canonical_to_actuated(canonical_names, actuated_dof_names)
+        if not matched_names:
+            raise ValueError(
+                f"build_articulation_indexing matched no joints. "
+                f"canonical_names={canonical_names}, actuated_dof_names={actuated_dof_names}"
+            )
+
+        # Resolve each matched joint name to its Genesis-local DOF id(s).
+        dof_ids: list[int] = []
+        for name in matched_names:
+            joint = entity.get_joint(name)
+            ids = joint.dofs_idx_local
+            if hasattr(ids, "__iter__"):
+                dof_ids.extend(int(i) for i in ids)
+            else:
+                dof_ids.append(int(ids))
         sim_indices = torch.tensor(dof_ids, device=self.env.device)
 
-        # sim_to_canonical: for each canonical index i, sim_to_canonical[i] = i
-        # (used by RobotData which already indexes by sim_indices)
+        # sim_to_canonical: identity since RobotData indexes by sim_indices.
         sim_to_canonical = torch.arange(len(dof_ids), device=self.env.device)
 
-        # Joint limits
+        # Joint limits in canonical order.
         dof_lower, dof_upper = entity.get_dofs_limit(dofs_idx_local=sim_indices)
 
         return ArticulationIndexing(
-            joint_names=tuple(joint_names),
+            joint_names=tuple(matched_names),
             sim_indices=sim_indices,
             sim_to_canonical=sim_to_canonical,
             joint_limits_lower=dof_lower[0],
