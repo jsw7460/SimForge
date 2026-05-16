@@ -315,14 +315,13 @@ def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
 
 
 def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
-    """Newton DR — base_com + joint_friction (matches g1_29dof locomotion DR).
+    """Newton DR — body CoM offset + joint friction + foot-link friction.
 
-    Mjlab's G1 tracking also randomizes foot friction, but G1MujocoConfig
-    doesn't expose ``foot_body_pattern_newton`` yet; keep the DR minimal
-    for first pass (matches what g1_29dof locomotion already uses, so we
-    know Newton handles it correctly on this robot).
+    Mirrors the unified set across Genesis / mjlab for g1_tracking. Newton's
+    ``randomize_friction`` resolves ``body_names`` to the matched links'
+    collision shapes, so passing the foot link names here scopes the
+    friction-scale DR to the foot collision shapes only.
     """
-    r = cfg.robot
     return {
         "randomize_body_com": EventTermConfig(
             func=unified_dr.randomize_body_com_offset,
@@ -344,6 +343,19 @@ def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
                 "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.0, 0.05),
                 "operation": "abs",
+            },
+        ),
+        "foot_friction": EventTermConfig(
+            func=unified_dr.randomize_friction,
+            mode="reset_dr",
+            params={
+                "asset_cfg": SceneEntitySelector(
+                    name="robot",
+                    body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
+                ),
+                "friction_range": (0.3, 1.2),
+                "operation": "scale",
+                "shared_random": True,
             },
         ),
     }

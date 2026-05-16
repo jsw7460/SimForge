@@ -299,20 +299,51 @@ def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
 
 
 def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
-    """Genesis DR — scalar friction randomization only.
+    """Genesis DR — body CoM offset + joint friction + foot-link friction.
 
-    Genesis lacks the 3-axis geom friction that Mjlab uses for G1 tracking
-    (slide/spin/roll); fall back to scalar friction range matching the
-    slide axis.
+    Mirrors the unified set across Newton / mjlab for g1_tracking:
+      * ``randomize_body_com``     — torso CoM offset (additive)
+      * ``randomize_joint_friction`` — per-joint frictionloss (abs)
+      * ``foot_friction``           — slide friction on the foot links
+        (Genesis applies friction per *link* via ``set_friction_ratio``;
+        ``operation="scale"`` is the only supported mode, ``axes=[0]``
+        is the only axis. Use foot ``body_names`` to scope it to the
+        feet — Genesis geoms have no names.)
     """
     return {
-        "randomize_friction_scalar": EventTermConfig(
-            func=unified_dr.randomize_friction,
+        "randomize_body_com": EventTermConfig(
+            func=unified_dr.randomize_body_com_offset,
+            mode="reset_dr",
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",)),
+                "ranges": {
+                    0: (-0.025, 0.025),
+                    1: (-0.05, 0.05),
+                    2: (-0.05, 0.05),
+                },
+                "operation": "add",
+            },
+        ),
+        "randomize_joint_friction": EventTermConfig(
+            func=unified_dr.randomize_joint_friction,
             mode="reset_dr",
             params={
                 "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
+            },
+        ),
+        "foot_friction": EventTermConfig(
+            func=unified_dr.randomize_friction,
+            mode="reset_dr",
+            params={
+                "asset_cfg": SceneEntitySelector(
+                    name="robot",
+                    body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
+                ),
                 "friction_range": (0.3, 1.2),
                 "operation": "scale",
+                "shared_random": True,
             },
         ),
     }

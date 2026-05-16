@@ -310,23 +310,48 @@ def build_reward(cfg: G1TrackingConfig) -> RewardConfig:
 
 
 def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
-    """MuJoCo DR — slide-axis friction over G1's foot collision geoms."""
+    """MuJoCo DR — body CoM offset + joint friction + foot-collision friction.
+
+    Mirrors the unified set across Genesis / Newton for g1_tracking. mjlab's
+    geom_friction DR is scoped to the foot collision geom names that the
+    G1 MJCF defines (``^(left|right)_foot[1-7]_collision$``).
+    """
     from rlworld.rl.configs.scene import SceneEntitySelector
     from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 
     return {
-        # Foot friction over all of G1's foot collision geoms.
-        # Mjlab G1 tracking uses ``^(left|right)_foot[1-7]_collision$``.
+        "randomize_body_com": EventTermConfig(
+            func=unified_dr.randomize_body_com_offset,
+            mode="reset_dr",
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",)),
+                "ranges": {
+                    0: (-0.025, 0.025),
+                    1: (-0.05, 0.05),
+                    2: (-0.05, 0.05),
+                },
+                "operation": "add",
+            },
+        ),
+        "randomize_joint_friction": EventTermConfig(
+            func=unified_dr.randomize_joint_friction,
+            mode="reset_dr",
+            params={
+                "asset_cfg": SceneEntitySelector(name="robot"),
+                "friction_range": (0.0, 0.05),
+                "operation": "abs",
+            },
+        ),
         "foot_friction": EventTermConfig(
             func=unified_dr.randomize_friction,
-            mode="startup",
+            mode="reset_dr",
             params={
                 "asset_cfg": SceneEntitySelector(
                     name="robot",
                     geom_names=tuple(f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)),
                 ),
                 "friction_range": (0.3, 1.2),
-                "operation": "abs",
+                "operation": "scale",
                 "axes": [0],
                 "distribution": "uniform",
                 "shared_random": True,
