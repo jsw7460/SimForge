@@ -47,9 +47,6 @@ class ContactManager(BaseContactManager):
 
     # -- abstract impl --
 
-    def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
-        return self._sensors[group.name].compute().found
-
     def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
         return self._sensors[group.name].compute().force
 

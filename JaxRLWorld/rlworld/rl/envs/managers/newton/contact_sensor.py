@@ -69,11 +69,6 @@ from rlworld.rl.utils import string as string_utils
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.newton.scene import NewtonSceneManager
 
-# ``found`` threshold (N) on the filtered net force magnitude. Matches the
-# legacy ``NewtonContactManager._compute_group_is_contact`` (``> 1.0``) so
-# air-time tracking / contact rewards behave consistently after migration.
-_CONTACT_FORCE_EPS = 1.0
-
 
 def _matches_any_search(name: str, patterns: tuple[str, ...]) -> bool:
     """Whether ``name`` matches any of ``patterns`` (regex search). Mirrors Genesis."""
@@ -329,10 +324,6 @@ class NewtonContactSensor:
         else:
             net = wp.to_torch(self._native.total_force)  # (n_obj, 3)
         return net.reshape(self.num_envs, self._n_per_env, 3)
-
-    def compute_found(self) -> torch.Tensor:
-        """Contact present per primary (``‖filtered net force‖ > eps``). Shape ``(num_envs, N)`` bool."""
-        return torch.norm(self.compute_force(), dim=-1) > _CONTACT_FORCE_EPS
 
     # ------------------------------------------------------------------
     # substep history (only when history_length > 0)

@@ -44,9 +44,6 @@ class NewtonContactManager(BaseContactManager):
     def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
         return self._group_sensors[group.name].compute_force()
 
-    def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
-        return self._group_sensors[group.name].compute_found()
-
     def _compute_group_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
         return self._group_sensors[group.name].compute_history()  # (num_envs, N, H, 3) or None
 

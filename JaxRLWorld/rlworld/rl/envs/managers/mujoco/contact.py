@@ -35,15 +35,6 @@ class MujocoContactManager(BaseContactManager):
 
     # -- abstract impl --
 
-    def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
-        sensor = self._group_sensors[group.name]
-        found = sensor.data.found
-        if found is None:
-            return torch.zeros(self.num_envs, group.num_tracked, dtype=torch.bool, device=self.device)
-        if found.dim() == 3:
-            found = found.squeeze(-1)
-        return found > 0
-
     def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
         sensor = self._group_sensors[group.name]
         return sensor.data.force

@@ -25,6 +25,14 @@ from rlworld.rl.utils import string as string_utils
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
+# Sim-agnostic threshold on ``‖net contact force‖`` (N) for ``is_contact``.
+# Centralised here so every backend (Genesis/Newton/mjlab) classifies "in
+# contact" identically; sub-N forces (e.g. mjlab's compliant-contact spring
+# tail right after liftoff) are treated as "no contact". 33 kg G1 carries
+# ~160 N per foot in stance, so 1 N is a 0.6 % noise floor — well below
+# any real touchdown event.
+_IS_CONTACT_FORCE_EPS: float = 1.0
+
 
 @dataclass
 class ContactGroup:
@@ -46,8 +54,11 @@ class BaseContactManager(BaseManager, ABC):
     """Base class for contact managers across all simulator backends.
 
     Subclasses must implement:
-        - ``_compute_group_is_contact(group)``  → ``(num_envs, N)`` bool
         - ``_compute_group_contact_force(group)`` → ``(num_envs, N, 3)`` or ``None``
+
+    ``is_contact`` is derived in the base class as
+    ``‖force‖ > _IS_CONTACT_FORCE_EPS`` (1.0 N) so the classification is
+    identical across sims.
     """
 
     def __init__(self, env: World):
@@ -80,10 +91,16 @@ class BaseContactManager(BaseManager, ABC):
     # Abstract — subclass must implement per-group
     # ------------------------------------------------------------------
 
-    @abstractmethod
     def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
-        """Return contact state ``(num_envs, group.num_tracked)`` as bool tensor."""
-        ...
+        """Return contact state ``(num_envs, group.num_tracked)`` as bool tensor.
+
+        Sim-agnostic: a primary is "in contact" iff its filtered net contact
+        force magnitude exceeds ``_IS_CONTACT_FORCE_EPS``.
+        """
+        force = self._compute_group_contact_force(group)
+        if force is None:
+            return torch.zeros(self.num_envs, group.num_tracked, dtype=torch.bool, device=self.device)
+        return torch.norm(force, dim=-1) > _IS_CONTACT_FORCE_EPS
 
     @abstractmethod
     def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
