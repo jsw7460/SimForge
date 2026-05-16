@@ -7,6 +7,7 @@ while following rlworld's World interface and manager pattern.
 from __future__ import annotations
 
 import torch
+import warp as wp
 from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
 
 from rlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
@@ -67,6 +68,12 @@ class MujocoEnv(World):
         curriculum_cfg: CurriculumManagerConfig,
     ):
         set_seed(env_cfg.seed)
+        # Seed warp's kernel RNG (mjwarp uses it). We don't go through
+        # mjlab's ``ManagerBasedRlEnv`` so its ``seed_rng`` never fires;
+        # match its warp-seeding step here. NB: mjwarp itself still has
+        # known non-determinism (mujoco_warp#562) — this only pins the
+        # RNG, not the solver's parallel reductions.
+        wp.rand_init(wp.int32(env_cfg.seed))
         super().__init__()
 
         self.seed = env_cfg.seed

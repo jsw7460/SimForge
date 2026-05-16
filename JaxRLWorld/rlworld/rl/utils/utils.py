@@ -1,8 +1,10 @@
 import functools
 import os
+import random
 import warnings
 from typing import Any, Callable, Type
 
+import numpy as np
 import torch
 
 
@@ -11,11 +13,21 @@ def gs_rand_float(lower, upper, shape, device):
 
 
 def set_seed(seed: int):
-    """Set random seeds for reproducibility"""
-    import random
+    """Seed Python / NumPy / Torch RNGs for reproducibility.
 
-    import numpy as np
-    import torch
+    Also sets the hash and cuBLAS workspace env vars that PyTorch needs
+    for deterministic kernels — ``CUBLAS_WORKSPACE_CONFIG`` must be set
+    before the first CUDA op, so ``set_seed`` is the right place. We do
+    NOT call ``torch.use_deterministic_algorithms`` here because that
+    has a measurable perf cost; turn it on per-experiment if residual
+    drift remains after seeding warp / Genesis natively (see
+    ``GenesisEnv``/``NewtonEnv``/``MujocoEnv`` init).
+    """
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    # ``setdefault`` so the user can override the workspace size via env
+    # without us clobbering it. 8 × 4 KiB workspaces is the recommended
+    # minimum for deterministic cuBLAS; memory cost is negligible.
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
     random.seed(seed)
     np.random.seed(seed)

@@ -1,5 +1,6 @@
 import genesis as gs
 import torch
+from genesis.utils.misc import set_random_seed as _gs_set_random_seed
 
 from rlworld.rl.configs import (
     ActionConfig,
@@ -43,8 +44,15 @@ class GenesisEnv(World):
         # Initialise the Genesis runtime on first use.  Kept here (rather than
         # at package import) so a Newton-/MuJoCo-only process never imports or
         # initialises Genesis.
+        #
+        # ``gs.init(seed=...)`` seeds Python/NumPy/Torch RNGs *and* the
+        # Quadrants (warp) kernel RNG. We also want to reseed on every
+        # subsequent env construction (curriculum / re-init paths), so
+        # call ``set_random_seed`` directly when Genesis is already up.
         if not gs._initialized:
-            gs.init(logging_level="warning")
+            gs.init(logging_level="warning", seed=env_cfg.seed)
+        else:
+            _gs_set_random_seed(env_cfg.seed)
 
         set_seed(env_cfg.seed)
         super().__init__()

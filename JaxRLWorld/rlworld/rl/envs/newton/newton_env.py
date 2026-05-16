@@ -37,6 +37,11 @@ class NewtonEnv(World):
         curriculum_cfg: CurriculumManagerConfig,
     ):
         set_seed(env_cfg.seed)
+        # Seed warp's kernel RNG too. Newton's solvers don't sample
+        # randoms themselves, but anything else running through warp
+        # (e.g. user-side terrain / control perturbation) does, and we
+        # want a single ``--seed`` to pin both.
+        wp.rand_init(wp.int32(env_cfg.seed))
         super().__init__()
 
         self.seed = env_cfg.seed
