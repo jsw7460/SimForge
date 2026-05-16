@@ -9,7 +9,7 @@
       <default class="collision">
         <geom group="3" rgba=".2 .6 .2 .3" type="capsule" contype="1" conaffinity="1"/>
         <default class="foot_capsule">
-          <geom type="capsule" size="0.01"/>
+          <geom type="capsule" size="0.01" priority="1" friction="0.6" condim="3"/>
         </default>
       </default>
       <site group="5" rgba="1 0 0 1"/>
@@ -29,7 +29,7 @@
     <mesh name="left_ankle_pitch_link" file="left_ankle_pitch_link.STL"/>
     <mesh name="left_ankle_roll_link" file="left_ankle_roll_link.STL"/>
     <mesh name="right_hip_pitch_link" file="right_hip_pitch_link.STL"/>
-    <mesh name="right_hip_roll_link" file="right_hip_roll_link.STL"/>
+    <mesh name="right_hip_roll_link" file="right_hip_roll_link.STL"/>m
     <mesh name="right_hip_yaw_link" file="right_hip_yaw_link.STL"/>
     <mesh name="right_knee_link" file="right_knee_link.STL"/>
     <mesh name="right_ankle_pitch_link" file="right_ankle_pitch_link.STL"/>
