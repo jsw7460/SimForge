@@ -48,6 +48,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
+from rlworld.rl.envs.mdp.events.dr import mujoco as mujoco_dr, unified as unified_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
@@ -136,6 +137,16 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         else (DelayedPDActuatorCfg, {"min_delay": 1, "max_delay": 3})
     )
 
+    # SysID-result PD overrides — fall back to module-level defaults
+    # when the corresponding ``Go2Config.*_override`` is None (i.e.
+    # vanilla training); when set the identified value is baked into
+    # the actuator config from step 0 of training, mirroring the
+    # Newton builder's pattern.
+    stiffness_hip = r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
+    damping_hip = r.kd_hip_override if r.kd_hip_override is not None else DAMPING_HIP
+    stiffness_knee = r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
+    damping_knee = r.kd_knee_override if r.kd_knee_override is not None else DAMPING_KNEE
+
     robot_entity = MujocoEntityCfg(
         urdf_path=r.urdf_path,
         init_state=InitialStateCfg(
@@ -147,16 +158,16 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
             actuators=(
                 ActuatorCls(
                     target_names_expr=(".*_hip_joint", ".*_thigh_joint"),
-                    stiffness=STIFFNESS_HIP,
-                    damping=DAMPING_HIP,
+                    stiffness=stiffness_hip,
+                    damping=damping_hip,
                     effort_limit=EFFORT_HIP,
                     armature=ARMATURE_HIP,
                     **_delay_kwargs,
                 ),
                 ActuatorCls(
                     target_names_expr=(".*_calf_joint",),
-                    stiffness=STIFFNESS_KNEE,
-                    damping=DAMPING_KNEE,
+                    stiffness=stiffness_knee,
+                    damping=damping_knee,
                     effort_limit=EFFORT_KNEE,
                     armature=ARMATURE_KNEE,
                     **_delay_kwargs,
@@ -313,8 +324,6 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
 
 def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
-    from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
-
     r = cfg.robot
     foot_geom_names = (
         "FR_foot_collision",
@@ -323,7 +332,7 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         "RL_foot_collision",
     )
 
-    return {
+    terms: Dict[str, EventTermConfig] = {
         "randomize_friction": EventTermConfig(
             func=unified_dr.randomize_friction,
             mode="reset_dr",
@@ -353,3 +362,34 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
             },
         ),
     }
+
+    # SysID-aligned setters — installed only when the corresponding
+    # ``Go2Config.*_override`` is non-None. Mirrors the Newton builder
+    # exactly so a mujoco-trained "with-SysID" policy sees the same
+    # identified physics every reset that the newton-trained one did.
+    if r.foot_friction_override is not None:
+        terms["set_foot_friction"] = EventTermConfig(
+            func=mujoco_dr.set_foot_friction,
+            mode="reset_dr",
+            params={
+                "value": float(r.foot_friction_override),
+                "dr_scale": (0.9, 1.1),
+            },
+        )
+        # Drop the wide friction-range randomisation when an identified
+        # value is being pinned — otherwise the two terms race on the
+        # same geoms.
+        terms.pop("randomize_friction", None)
+
+    if r.joint_frictionloss_override is not None:
+        terms["set_joint_friction"] = EventTermConfig(
+            func=mujoco_dr.set_joint_friction,
+            mode="reset_dr",
+            params={
+                "value": float(r.joint_frictionloss_override),
+                "dr_scale": (0.9, 1.1),
+            },
+        )
+        terms.pop("randomize_joint_friction", None)
+
+    return terms
