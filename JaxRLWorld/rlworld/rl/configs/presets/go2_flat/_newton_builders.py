@@ -109,12 +109,12 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
     quat = _initial_quat()
 
     # Resolve PD constants — fall back to module-level defaults from
-    # ``rl/configs/robots/go2.py`` when the corresponding SysID-result
-    # override on ``Go2Config`` is unset (``None``). When set, the
-    # override takes precedence so PPO sees the identified PD gains
-    # from step 0 of training. friction overrides are applied via
-    # event terms (see ``build_dr_terms`` below) since neither the
-    # actuator nor the scene config exposes friction fields.
+    # ``rl/configs/robots/go2.py`` when the corresponding override on
+    # ``Go2Config`` is unset (``None``). When set, the override takes
+    # precedence so PPO sees the configured PD gains from step 0 of
+    # training. Friction overrides are applied via event terms (see
+    # ``build_dr_terms`` below) since neither the actuator nor the
+    # scene config exposes friction fields.
     stiffness_hip = r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
     damping_hip = r.kd_hip_override if r.kd_hip_override is not None else DAMPING_HIP
     stiffness_knee = r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
@@ -336,22 +336,15 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     Layered scheme:
 
     1. ``randomize_body_mass`` always installed — mass DR'd ±10 %
-       around the URDF's base body value (which equals the identified
-       value when used with the SysID-aligned training script's
-       ``URDF_PATH``).
+       around the URDF's base body value.
     2. ``set_foot_friction`` / ``set_joint_friction`` installed only
        when the matching ``Go2Config.*_override`` is set. Each runs
        every reset with a multiplicative ``dr_scale=(0.9, 1.1)`` band
-       so the friction axes also get ±10 % DR centered on their
-       identified value.
+       so the friction axes also get ±10 % DR centered on the
+       configured value.
 
-    The legacy ``randomize_friction`` and ``randomize_joint_friction``
-    DR terms (with absolute ranges ``(0.3, 1.2)`` / ``(0.0, 0.05)``) are
-    no longer installed — when SysID overrides are active the friction
-    center is the identified value, and when they aren't, friction is
-    left at URDF defaults rather than randomly scattered. This keeps
-    the DR scope tight enough that downstream sim2real comparisons
-    actually reflect the SysID center rather than a wide random band.
+    When either friction override is set, the corresponding wide DR
+    term below is dropped so the two don't race on the same arrays.
     """
     r = cfg.robot
     terms: Dict[str, EventTermConfig] = {
@@ -399,11 +392,11 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         ),
     }
 
-    # SysID-aligned friction terms — each fixes its axis at the
-    # identified value with ±10 % multiplicative DR. Installed only
+    # Fixed-value friction terms — each pins its axis at the
+    # configured value with ±10 % multiplicative DR. Installed only
     # when the corresponding override field is set, so vanilla
-    # training runs (no SysID injection) get only the body_mass DR
-    # above and otherwise inherit URDF defaults.
+    # training runs (no override) get only the body_mass DR above
+    # plus the wide friction-range terms.
     if r.foot_friction_override is not None:
         terms["set_foot_friction"] = EventTermConfig(
             func=newton_dr.set_foot_friction,

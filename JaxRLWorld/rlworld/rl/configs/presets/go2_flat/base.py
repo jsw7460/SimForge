@@ -130,8 +130,8 @@ class Go2FlatConfig:
     use_ideal_pd_actuator: bool = True
     """If True, swap the default DelayedPDActuator pair for
     IdealPDActuator (no command delay). Default preserves the
-    trained-policy behaviour; SysID collect flips this to True to
-    remove actuator-delay as an identification nuisance."""
+    trained-policy behaviour; flip to True when actuator delay
+    needs to be removed (e.g. for offline data collection)."""
 
     # ── Build entry point ─────────────────────────────────────────────
 

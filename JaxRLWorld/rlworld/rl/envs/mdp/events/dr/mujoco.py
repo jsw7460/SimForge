@@ -1,15 +1,15 @@
-"""SysID-aligned setters for mjlab/MuJoCo.
+"""Fixed-value friction setters for mjlab/MuJoCo.
 
 Counterparts to ``dr/newton.py``'s ``set_joint_friction`` /
-``set_foot_friction``. Each writes a fixed identified value (optionally
+``set_foot_friction``. Each writes a fixed configured value (optionally
 with a narrow DR band) into the live mjwarp model arrays at every
 reset, so a Newton-trained-then-MuJoCo-deployed policy sees the same
-identified physics as the Stage 1b SysID inferred.
+contact / dof friction values it trained against.
 
 The mjwarp model exposes ``geom_friction`` / ``dof_frictionloss`` as
 torch tensors of shape ``(num_envs, ...)``; we index into ``env_ids``
 the same way ``unified`` DR terms do. The foot-friction setter also
-mirrors the identified value onto every ground geom by name so
+mirrors the configured value onto every ground geom by name so
 MuJoCo's max() contact-friction combine rule yields the foot's value
 (not the ground's higher default) at every robot-foot contact pair.
 """
@@ -32,19 +32,19 @@ def set_joint_friction(
     value: float,
     dr_scale: tuple[float, float] | None = None,
 ) -> None:
-    """Write identified joint Coulomb friction to every actuated DOF.
+    """Write a configured joint Coulomb friction to every actuated DOF.
 
-    SysID-aligned counterpart to ``newton.set_joint_friction``. The
-    mjwarp ``model.dof_frictionloss`` is a per-env torch tensor of
-    shape ``(num_envs, ndof)``; we overwrite the rows in ``env_ids``
-    each reset.
+    mjlab counterpart to ``newton.set_joint_friction``. The mjwarp
+    ``model.dof_frictionloss`` is a per-env torch tensor of shape
+    ``(num_envs, ndof)``; we overwrite the rows in ``env_ids`` each
+    reset.
 
     Args:
-        value: Identified joint Coulomb friction (the SysID center).
+        value: Joint Coulomb friction to pin (the DR center).
         dr_scale: Optional ``(lo, hi)`` multiplicative band. ``None``
             writes the value exactly; otherwise every reset writes
             ``value * uniform(lo, hi)`` per env (e.g. ``(0.9, 1.1)``
-            for ±10 % margin around the identified value).
+            for ±10 % margin around ``value``).
     """
     if len(env_ids) == 0:
         return
@@ -76,24 +76,21 @@ def set_foot_friction(
     ground_name_tokens: tuple[str, ...] = ("terrain", "ground", "plane"),
     dr_scale: tuple[float, float] | None = None,
 ) -> None:
-    """Write identified foot-slide friction onto foot geoms AND every
+    """Write a configured foot-slide friction onto foot geoms AND every
     ground geom (max() combine-rule workaround).
 
-    SysID-aligned counterpart to ``newton.set_foot_friction``. Lifted
-    almost verbatim from the collect-side
-    ``Go2GaitConditionedSysIDCollectConfig.runtime_setup`` so the
-    training-time and collect-time foot mu are bit-identical.
+    mjlab counterpart to ``newton.set_foot_friction``.
 
     Args:
-        value: Identified foot slide friction (mu) — the SysID center.
+        value: Foot slide friction (mu) to pin (the DR center).
         foot_geom_names: Robot foot collision geom names to override.
         ground_name_tokens: Substrings used to detect ground/terrain
-            geoms by name (case-insensitive). The identified value is
-            mirrored onto all matching geoms so the MuJoCo max() rule
-            doesn't let the ground's default mu dominate the contact.
+            geoms by name (case-insensitive). ``value`` is mirrored
+            onto all matching geoms so the MuJoCo max() rule doesn't
+            let the ground's default mu dominate the contact.
         dr_scale: Optional ``(lo, hi)`` multiplicative band, applied
             uniformly across all foot+ground geoms touched. ``None``
-            writes the exact identified value.
+            writes the exact configured value.
     """
     if len(env_ids) == 0:
         return

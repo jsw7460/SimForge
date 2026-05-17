@@ -1,9 +1,9 @@
-"""Newton-specific event terms — SysID-aligned friction setters.
+"""Newton-specific event terms — fixed-value friction setters.
 
 Cross-sim domain randomization (friction, body mass, COM offset, PD
 gains, armature, joint friction) lives in :mod:`.unified`.  What
-remains here are the *non-randomised* counterparts used to drive the
-Newton env to a single SysID-identified value (optionally with a
+remains here are the *non-randomised* counterparts used to pin the
+Newton env to a single configured friction value (optionally with a
 narrow DR band): :func:`set_joint_friction` and :func:`set_foot_friction`.
 
 Both follow the standard event-term signature
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 # ------------------------------------------------------------------ #
-#  Deterministic SysID-aligned setters                                #
+#  Fixed-value setters (with optional narrow DR band)                  #
 # ------------------------------------------------------------------ #
 # ``mode="reset_dr"`` matches the unified randomise_* terms so the
 # value is re-applied on every reset (equivalent to writing to the
@@ -42,22 +42,21 @@ def set_joint_friction(
     dr_scale: tuple[float, float] | None = None,
 ) -> None:
     """Set joint Coulomb friction across every actuated DOF, optionally
-    with narrow domain randomization centered on the identified value.
+    with narrow domain randomization centered on the configured value.
 
-    SysID-aligned counterpart to ``unified.randomize_joint_friction``:
+    Deterministic counterpart to ``unified.randomize_joint_friction``:
     when ``cfg.robot.joint_frictionloss_override`` is set on the preset,
     this term is installed in the event config so every reset writes the
-    identified value to ``model.joint_friction``.  Args mirror the
-    SysID-side ``apply_joint_friction_scalar``, plus an optional
-    ``dr_scale``.
+    configured value to ``model.joint_friction``, plus an optional
+    ``dr_scale`` for a narrow band around it.
 
     Args:
-        value: Identified joint Coulomb friction (the SysID center).
+        value: Joint Coulomb friction to pin (the DR center).
         dr_scale: Optional ``(lo, hi)`` multiplicative band. When
-            ``None`` the value is written exactly each reset (pure
-            identified). When set, every reset writes
-            ``value * uniform(lo, hi)`` per env — narrow DR centered on
-            the identified value, e.g. ``(0.9, 1.1)`` gives ±10 % margin.
+            ``None`` the value is written exactly each reset. When set,
+            every reset writes ``value * uniform(lo, hi)`` per env —
+            narrow DR centered on ``value``, e.g. ``(0.9, 1.1)`` gives
+            ±10 % margin.
     """
     if len(env_ids) == 0:
         return
@@ -89,21 +88,17 @@ def set_foot_friction(
     foot_pattern: str = ".*foot$",
     dr_scale: tuple[float, float] | None = None,
 ) -> None:
-    """Set foot-shape contact mu *and* ground geom mu around a SysID-
-    identified value, optionally with narrow domain randomization.
+    """Set foot-shape contact mu *and* ground geom mu around a configured
+    value, optionally with narrow domain randomization.
 
-    SysID-aligned counterpart to ``unified.randomize_friction``, but:
-    (a) targets only the foot-pattern bodies (matching the SysID
-    identification scope on ``foot_friction``), and (b) also patches the
+    Deterministic counterpart to ``unified.randomize_friction``, but:
+    (a) targets only the foot-pattern bodies, and (b) also patches the
     ground/terrain ``geom_friction`` directly on the MuJoCo solver so
-    the max-of-pair friction rule resolves to the identified foot value
-    rather than the ground default. Mirrors
-    ``consysid.sysid.param_terms.newton.apply_contact_friction`` so
-    identification ↔ training contact behaviour is identical, plus an
-    optional ``dr_scale`` band for narrow DR centered on ``value``.
+    the max-of-pair friction rule resolves to the configured foot value
+    rather than the ground default.
 
     Args:
-        value: Identified foot-ground friction coefficient (SysID center).
+        value: Foot-ground friction coefficient to pin (the DR center).
         foot_pattern: Regex for foot bodies (default ``".*foot$"``).
         dr_scale: Optional ``(lo, hi)`` multiplicative band. ``None`` →
             write ``value`` exactly each reset. ``(0.9, 1.1)`` → write

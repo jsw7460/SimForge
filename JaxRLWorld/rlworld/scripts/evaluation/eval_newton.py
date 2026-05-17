@@ -97,43 +97,6 @@ if __name__ == "__main__":
         extra_overrides=overrides,
     )
 
-    # apply_contact_friction(
-    #     env=evaluator.env,
-    #     values=np.array([[0.1],]),
-    #     env_ids=torch.tensor([0]),
-    #     body_pattern=".*foot$"
-    # )
-
-    #
-    # # ============================== DEBUG ==============================
-    # # Direct Newton model write via the same SysID apply functions, so the
-    # # visual behaviour matches exactly what Stage 1 sees during CMA-ES.
-    # env = evaluator.env
-    # num_envs = env.num_envs
-    # env_ids = torch.arange(num_envs, device=env.device)
-    #
-    # # Foot contact friction: (B, 1).
-    # foot_mu = np.full((num_envs, 1), 0.3, dtype=np.float32)
-    # apply_contact_friction(env, foot_mu, env_ids, body_pattern=".*foot$")
-    #
-    # # Leg-joint Coulomb friction: (B, 12). The default regex targets
-    # # every joint whose name ends in "_joint" which on Go2 is exactly
-    # # the 12 actuated leg joints (floating_base is skipped).
-    # joint_tau = np.full((num_envs, 12), 0.8, dtype=np.float32)
-    # apply_joint_friction(
-    #     env, joint_tau, env_ids,
-    #     joint_patterns=(r".*_joint$",),
-    # )
-    #
-    # # Sanity read-back from the robot_view so we know the write landed.
-    # import warp as wp
-    # view = env.scene_manager.robot_view
-    # jf_back = wp.to_torch(view.get_attribute("joint_friction", env.scene_manager.model))
-    # print(f"[DEBUG] joint_friction view shape = {tuple(jf_back.shape)}")
-    # print(f"[DEBUG] joint_friction[env0] = {jf_back[0, 0].tolist()}")
-    # print(f"[DEBUG] joint_dof_names      = {view.joint_dof_names}")
-    # # ============================== /DEBUG =============================
-
     if args.eval:
         evaluator.evaluate()
     else:

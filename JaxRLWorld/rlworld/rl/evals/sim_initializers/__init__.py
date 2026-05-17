@@ -83,9 +83,9 @@ class SimInitializer(ABC):
 def _detect_robot_key(metadata: dict) -> str:
     """Best-effort robot identifier from checkpoint metadata.
 
-    Purely for labelling (SysID tags trajectories with this key) — the
-    cross-sim config resolver does NOT use this; it resolves via the
-    ``preset_module`` / ``preset_class_name`` fields instead.
+    Purely for labelling — the cross-sim config resolver does NOT use
+    this; it resolves via the ``preset_module`` / ``preset_class_name``
+    fields instead.
     """
     config = metadata.get("config", {})
     task_name = config.get("env", {}).get("task_name", "").lower()

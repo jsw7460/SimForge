@@ -3,9 +3,9 @@
 Cross-sim DR terms live in :mod:`.unified` and dispatch on
 ``env.sim_type`` — preset configs should target those.
 
-Newton keeps a small set of *non-randomised* SysID-aligned setters
+Newton keeps a small set of *non-randomised* fixed-value setters
 (``set_joint_friction`` / ``set_foot_friction``) in :mod:`.newton`;
-these write a fixed identified value (optionally with a narrow DR band)
+these write a fixed configured value (optionally with a narrow DR band)
 and have no cross-sim counterpart.
 
 Shared utilities (``DefaultCache``, ``sample``, etc.) are in ``_utils``.

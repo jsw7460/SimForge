@@ -137,9 +137,9 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         else (DelayedPDActuatorCfg, {"min_delay": 1, "max_delay": 3})
     )
 
-    # SysID-result PD overrides — fall back to module-level defaults
+    # Optional PD overrides — fall back to module-level defaults
     # when the corresponding ``Go2Config.*_override`` is None (i.e.
-    # vanilla training); when set the identified value is baked into
+    # vanilla training); when set the configured value is baked into
     # the actuator config from step 0 of training, mirroring the
     # Newton builder's pattern.
     stiffness_hip = r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
@@ -363,10 +363,11 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         ),
     }
 
-    # SysID-aligned setters — installed only when the corresponding
-    # ``Go2Config.*_override`` is non-None. Mirrors the Newton builder
-    # exactly so a mujoco-trained "with-SysID" policy sees the same
-    # identified physics every reset that the newton-trained one did.
+    # Fixed-value friction setters — installed only when the
+    # corresponding ``Go2Config.*_override`` is non-None. Mirrors the
+    # Newton builder exactly so a mujoco-trained "with-override"
+    # policy sees the same configured friction every reset that the
+    # newton-trained one did.
     if r.foot_friction_override is not None:
         terms["set_foot_friction"] = EventTermConfig(
             func=mujoco_dr.set_foot_friction,

@@ -246,8 +246,7 @@ class T1Config(RobotConfig):
     # loader drops collision-geom names (every shape becomes
     # ``shape_N``). So the Newton builder filters by *body name*
     # instead, using ``model.body_shapes`` to resolve the attached
-    # shape indices — this is the same path SysID's
-    # ``apply_contact_friction`` uses.
+    # shape indices.
     # Newton-side foot-body regex. The Newton scene manager canonicalises
     # body labels to bare leaf names (IsaacLab convention), so this
     # pattern matches e.g. ``left_foot_link`` / ``right_foot_link``
