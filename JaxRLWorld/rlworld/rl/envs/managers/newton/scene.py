@@ -9,7 +9,7 @@ import newton
 import numpy as np
 import torch
 import warp as wp
-from newton import ShapeFlags
+from newton import JointTargetMode, ShapeFlags
 from newton.selection import ArticulationView
 
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
@@ -123,6 +123,7 @@ def apply_joint_params_by_pattern(
     armature_map: Dict[str, float] | None = None,
     effort_limit_map: Dict[str, float] | None = None,
     friction_map: Dict[str, float] | None = None,
+    target_mode_map: Dict[str, int] | None = None,
 ) -> None:
     """Apply joint parameters (target gains, armature, effort limit) using
     regex pattern matching.
@@ -143,8 +144,24 @@ def apply_joint_params_by_pattern(
     XML-declared ``actuatorfrcrange`` when the scene-file values disagree
     with the motor spec that training actually assumes (e.g. menagerie
     T1's 15/20 Nm ankle vs booster_t1's 50 Nm).
+
+    ``target_mode_map`` writes ``builder.joint_target_mode`` per DOF —
+    typically ``int(JointTargetMode.POSITION)`` for joints driven by
+    an ``ImplicitActuatorCfg`` so ``SolverMuJoCo`` creates an internal
+    mjwarp actuator (it iterates per-DOF and calls ``spec.add_actuator``
+    for every DOF whose mode is not ``NONE``). Without this, an MJCF
+    that ships without an ``<actuator>`` block leaves every mode at
+    NONE, ``nu=0``, and the simulator never runs PD — the implicit
+    actuator silently does nothing.
     """
-    if ke_map is None and kd_map is None and armature_map is None and effort_limit_map is None and friction_map is None:
+    if (
+        ke_map is None
+        and kd_map is None
+        and armature_map is None
+        and effort_limit_map is None
+        and friction_map is None
+        and target_mode_map is None
+    ):
         return
 
     ke_map = ke_map or {}
@@ -152,6 +169,7 @@ def apply_joint_params_by_pattern(
     armature_map = armature_map or {}
     effort_limit_map = effort_limit_map or {}
     friction_map = friction_map or {}
+    target_mode_map = target_mode_map or {}
     num_joints = len(builder.joint_label)
 
     for joint_idx, joint_label_raw in enumerate(builder.joint_label):
@@ -201,6 +219,14 @@ def apply_joint_params_by_pattern(
             if re.fullmatch(pattern, joint_name):
                 for d in range(dof_count):
                     builder.joint_friction[dof_start + d] = value
+                break
+
+        # Apply joint_target_mode — usually POSITION for ImplicitActuatorCfg
+        # so SolverMuJoCo creates an internal mjwarp position actuator.
+        for pattern, value in target_mode_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_target_mode[dof_start + d] = value
                 break
 
 
@@ -597,6 +623,13 @@ class NewtonSceneManager(BaseManager):
         armature_map: dict[str, float] = {}
         effort_limit_map: dict[str, float] = {}
         friction_map: dict[str, float] = {}
+        # Per-DOF ``joint_target_mode``: only populated for joints
+        # driven by an ``ImplicitActuatorCfg`` (mode = POSITION so
+        # ``SolverMuJoCo`` creates a position actuator). Explicit
+        # actuators stay at the NONE default — they write torques
+        # directly via ``control.joint_f`` and don't need an mjwarp
+        # actuator entry.
+        target_mode_map: dict[str, int] = {}
 
         # ``apply_joint_params_by_pattern`` canonicalises candidate
         # joint labels via ``leaf_name()`` before regex-matching, so
@@ -623,6 +656,11 @@ class NewtonSceneManager(BaseManager):
                     for pattern in act_cfg.target_names_expr:
                         kd_map[pattern] = act_cfg.damping
 
+                # Implicit actuator → flip mode to POSITION so mjwarp
+                # builds a position actuator for these joints.
+                for pattern in act_cfg.target_names_expr:
+                    target_mode_map[pattern] = int(JointTargetMode.POSITION)
+
             if isinstance(act_cfg.armature, dict):
                 armature_map.update(act_cfg.armature)
             elif isinstance(act_cfg.armature, int | float) and act_cfg.armature > 0:
@@ -644,7 +682,7 @@ class NewtonSceneManager(BaseManager):
                 for pattern in act_cfg.target_names_expr:
                     friction_map[pattern] = float(act_cfg.frictionloss)
 
-        if ke_map or kd_map or armature_map or effort_limit_map or friction_map:
+        if ke_map or kd_map or armature_map or effort_limit_map or friction_map or target_mode_map:
             apply_joint_params_by_pattern(
                 builder,
                 ke_map=ke_map or None,
@@ -652,7 +690,33 @@ class NewtonSceneManager(BaseManager):
                 armature_map=armature_map or None,
                 effort_limit_map=effort_limit_map or None,
                 friction_map=friction_map or None,
+                target_mode_map=target_mode_map or None,
             )
+
+        # Sanity check: every ``ImplicitActuatorCfg`` must resolve to ≥1
+        # joint. Catches typo'd ``target_names_expr`` patterns that would
+        # silently leave ``joint_target_mode`` at NONE — mjwarp then
+        # builds no actuator and the simulator never runs PD, even
+        # though we wrote ke/kd. The original Implicit-vs-DelayedPD
+        # divergence on g1_29dof + Newton (asset has no ``<actuator>``
+        # block) hit this exact silent-fail.
+        if target_mode_map:
+            joint_leaves = {leaf_name(label) for label in builder.joint_label}
+            for act_cfg in cfg.articulation.actuators:
+                if not isinstance(act_cfg, ImplicitActuatorCfg):
+                    continue
+                matched_any = False
+                for pattern in act_cfg.target_names_expr:
+                    if any(re.fullmatch(pattern, j) for j in joint_leaves):
+                        matched_any = True
+                        break
+                if not matched_any:
+                    raise ValueError(
+                        f"ImplicitActuatorCfg target_names_expr={list(act_cfg.target_names_expr)!r} "
+                        f"matched 0 joints in the loaded entity — mjwarp will not build a position "
+                        f"actuator and the simulator's PD will be inert. "
+                        f"Available joint leaf names (first 16): {sorted(joint_leaves)[:16]}"
+                    )
         # Workaround: force ``geom_priority=1`` on every collision shape of this
         # entity. Newton's MJCF parser loses the XML-declared ``priority``
         # attribute on most geoms when ``parse_visuals=True`` (only ~4/12
@@ -1145,10 +1209,20 @@ class NewtonSceneManager(BaseManager):
         canonical_full = _canonical_joint_order_newton(self.model, num_worlds=num_worlds)
         canonical_actuatable = [n for n in canonical_full if n in set(actuatable_names)]
         matched_names, _ = filter_canonical_to_actuated(canonical_actuatable, actuated_dof_names)
+        # An entity with zero actuated joints (e.g. a free-flying drone)
+        # is a legitimate case — return an empty ArticulationIndexing
+        # so the action manager can still operate via term-based actions.
         if not matched_names:
-            raise ValueError(
-                f"build_articulation_indexing matched no joints. "
-                f"canonical_actuatable={canonical_actuatable}, actuated_dof_names={actuated_dof_names}"
+            empty_long = torch.zeros(0, device=self.device, dtype=torch.long)
+            empty_float = torch.zeros(0, device=self.device, dtype=torch.float32)
+            return ArticulationIndexing(
+                joint_names=(),
+                sim_indices=empty_long,
+                sim_to_canonical=empty_long.clone(),
+                joint_limits_lower=empty_float,
+                joint_limits_upper=empty_float.clone(),
+                newton_q_indices=empty_long.clone(),
+                newton_qd_indices=empty_long.clone(),
             )
 
         # Map matched bare names → world-0 joint indices (for q/qd lookup).
@@ -1208,7 +1282,18 @@ class NewtonSceneManager(BaseManager):
             self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
         )
         for i in range(self.config.substeps):
-            self.state_0.clear_forces()
+            # NOTE: ``state_0.clear_forces()`` USED to live here. Moved
+            # out to ``NewtonEnv._step_physics`` so that callers writing
+            # to ``state_0.body_f`` (e.g. PropellerThrustAction's body
+            # wrench dispatch) can do so AFTER the clear but BEFORE the
+            # solver runs — matches Newton's example convention
+            # (``clear_forces → user wrench write → solver.step``) seen
+            # in every newton/examples/*/example_*.py. Existing JaxRLWorld
+            # newton presets only write ``control.joint_f`` (never
+            # ``state.body_f``), so removing the per-substep clear here
+            # has no effect on go2/g1/t1 tasks — body_f simply stays at
+            # whatever the enclosing _step_physics wrote (zero for
+            # legacy tasks, the propeller wrench for drone tasks).
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
 
             if need_state_copy and i == last_idx:
