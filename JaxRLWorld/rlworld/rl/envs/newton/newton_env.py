@@ -267,11 +267,23 @@ class NewtonEnv(World):
     def _step_physics(self) -> None:
         """Newton physics step with decimation.
 
-        Each decimation iteration recomputes actuator torques using the
-        latest joint state, then runs scene_manager.step() which
-        executes the internal substep loop (potentially via CUDA graph).
+        Each decimation iteration:
+          1. Clears Newton's external-wrench buffer (``state_0.body_f``
+             and ``particle_f``). Newton's solver does NOT clear these
+             itself; the per-substep clear that used to live inside
+             ``NewtonSceneManager.step`` was moved out so that callers
+             writing external wrenches can do so AFTER the clear but
+             BEFORE the solver runs (matches the convention used in
+             every ``newton/examples/*/example_*.py``).
+          2. Calls ``act_manager.apply_actions``, which recomputes
+             actuator joint torques (``control.joint_f``) AND lets
+             non-joint action terms (e.g. ``PropellerThrustAction``)
+             write to ``state_0.body_f``.
+          3. Runs ``scene_manager.step()``, which now ONLY runs the
+             solver substep loop — no clear inside.
         """
         for _ in range(self.decimation):
+            self.scene_manager.state_0.clear_forces()
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             self.scene_manager.step()
 

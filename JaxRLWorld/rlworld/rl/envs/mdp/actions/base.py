@@ -66,14 +66,22 @@ class ActionTermCfg:
 class ActionTerm(ABC):
     """Abstract base for action terms.
 
-    Each term owns a subset of the full actuated joint space. The
-    manager orchestrates multiple terms (for now always single-term
-    for our existing tasks) and owns the actuator-compute path.
+    Each term owns a subset of the action space (typically a subset of
+    actuated joints, but non-joint terms — e.g. propeller thrust on a
+    floating-base drone — are also supported). The manager dispatches
+    each term's :meth:`apply_actions` once per control step; the term
+    is itself responsible for writing its contribution to the
+    simulator (joint torques via the actuator path, body wrenches via
+    a sim-specific link API, etc.).
 
     Subclasses must implement :meth:`process_actions` and
-    :meth:`compute_target_positions`. The default :meth:`reset`
-    zeroes the term's own buffers for the given envs; override for
-    stateful terms that need extra reset behaviour.
+    :meth:`apply_actions`. The default :meth:`reset` zeroes the
+    term's own buffers for the given envs; override for stateful
+    terms that need extra reset behaviour.
+
+    This abstraction mirrors IsaacLab's ``ActionTerm.apply_actions``
+    and mjlab's ``ActionTerm.apply_actions``: the manager does not
+    assume the term's output is a joint position target.
     """
 
     __name__: str = "ActionTerm"
@@ -145,13 +153,23 @@ class ActionTerm(ABC):
         """
 
     @abstractmethod
-    def compute_target_positions(self) -> torch.Tensor:
-        """Return absolute joint position targets for this term's
-        joints. Shape: ``(num_envs, action_dim)``.
+    def apply_actions(self) -> None:
+        """Write this term's contribution to the simulator.
 
-        The manager calls this once per ``apply_actions`` to build
-        the full-robot target tensor that gets routed through the
-        actuator models.
+        Called once per control step by the action manager (after all
+        terms' :meth:`process_actions`). The term decides how to
+        translate its ``processed_actions`` into a sim-level write:
+
+        * Joint-space terms (see :class:`JointAction` subclasses)
+          compute an absolute joint position target via
+          :meth:`compute_target_positions`, then dispatch through the
+          manager's actuator-compute path. The manager exposes
+          ``_apply_joint_target_via_actuators(target, joint_ids)`` as
+          the entry point.
+        * Non-joint terms (e.g. propeller thrust on a drone) compute
+          a body-level wrench themselves and write it directly to a
+          sim-specific link API (``data.xfrc_applied`` for MuJoCo,
+          ``set_links_external_force/torque`` for Genesis, etc.).
         """
 
     # ── Hooks ─────────────────────────────────────────────────────

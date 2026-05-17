@@ -355,10 +355,18 @@ class SceneManager(BaseManager):
         entity = self.entities[entity_name]
         canonical_names = _canonical_joint_order_genesis(entity)
         matched_names, _ = filter_canonical_to_actuated(canonical_names, actuated_dof_names)
+        # An entity with zero actuated joints (e.g. a free-flying drone)
+        # is a legitimate case — return an empty ArticulationIndexing
+        # so the action manager can still operate via term-based actions.
         if not matched_names:
-            raise ValueError(
-                f"build_articulation_indexing matched no joints. "
-                f"canonical_names={canonical_names}, actuated_dof_names={actuated_dof_names}"
+            empty_long = torch.zeros(0, device=self.env.device, dtype=torch.long)
+            empty_float = torch.zeros(0, device=self.env.device, dtype=torch.float32)
+            return ArticulationIndexing(
+                joint_names=(),
+                sim_indices=empty_long,
+                sim_to_canonical=empty_long.clone(),
+                joint_limits_lower=empty_float,
+                joint_limits_upper=empty_float.clone(),
             )
 
         # Resolve each matched joint name to its Genesis-local DOF id(s).

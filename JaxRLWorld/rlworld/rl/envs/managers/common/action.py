@@ -100,7 +100,15 @@ class ActionManagerBase(BaseManager):
         self._indexing = self._build_indexing()
         self._actuated_joint_names = list(self._indexing.joint_names)
         self._actuated_joint_indices = self._indexing.sim_indices.tolist()
-        self._total_action_dim = self._indexing.num_joints
+        # Total policy output dim: term-based path sums each term's
+        # action_dim; legacy path uses the actuated joint count.
+        # Mirrors IsaacLab's ActionManager: terms own their own
+        # action_dim, allowing non-joint terms (propeller thrust,
+        # body-wrench, etc.) to participate in the action space.
+        if config.action_terms:
+            self._total_action_dim = sum(self._estimate_term_action_dim(c) for c in config.action_terms.values())
+        else:
+            self._total_action_dim = self._indexing.num_joints
 
         # Action history buffers: index 0 = current (t), 1 = t-1, 2 = t-2, ...
         self._action_history_len = 3
@@ -180,6 +188,38 @@ class ActionManagerBase(BaseManager):
             actuated_dof_names=self.config.actuated_dof_names,
         )
 
+    def _estimate_term_action_dim(self, term_cfg) -> int:
+        """Pre-instantiation estimate of a term's action_dim.
+
+        Called before the term itself is built (we need the total
+        action dim to allocate raw/processed buffers). Resolution
+        order:
+
+        1. Explicit ``num_actions`` field on the cfg (used by
+           non-joint terms like ``PropellerThrustActionCfg`` where
+           the action dim isn't derivable from joint names).
+        2. Joint-name regex match against the actuated-joint name
+           list (matches the JointAction-style flow at
+           :meth:`JointAction.__init__`). This must produce the same
+           count as ``len(term._joint_ids)`` post-instantiation,
+           otherwise the buffer sizes will mismatch and the
+           coverage sanity check below will trip.
+        """
+        explicit = getattr(term_cfg, "num_actions", None)
+        if explicit is not None:
+            return int(explicit)
+        joint_names = getattr(term_cfg, "joint_names", None)
+        if joint_names is not None:
+            matched, _ = string_utils.resolve_matching_names(
+                joint_names, self._actuated_joint_names, preserve_order=True
+            )
+            return len(matched)
+        raise ValueError(
+            f"ActionTermCfg {type(term_cfg).__name__} cannot determine "
+            f"action_dim: provide either a ``num_actions`` field or a "
+            f"``joint_names`` regex list."
+        )
+
     def _get_joint_limits(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Get joint limits from indexing (canonical order)."""
         return self._indexing.joint_limits_lower, self._indexing.joint_limits_upper
@@ -218,7 +258,7 @@ class ActionManagerBase(BaseManager):
         """
         scale = torch.ones(self._total_action_dim, device=self.device)
 
-        if isinstance(self.config.scale, (int, float)):
+        if isinstance(self.config.scale, int | float):
             scale[:] = self.config.scale
         elif isinstance(self.config.scale, dict):
             indices, _, values = string_utils.resolve_matching_names_values(
@@ -259,7 +299,7 @@ class ActionManagerBase(BaseManager):
             clip_low = joint_lower - default_pos
             clip_high = joint_upper - default_pos
 
-        elif isinstance(self.config.clip, (tuple, list)):
+        elif isinstance(self.config.clip, tuple | list):
             clip_low[:] = self.config.clip[0]
             clip_high[:] = self.config.clip[1]
 
@@ -490,58 +530,85 @@ class ActionManagerBase(BaseManager):
     def apply_actions(self, processed_actions: torch.Tensor) -> None:
         """Apply processed actions to the simulator.
 
-        When terms are active, each term's
-        :meth:`ActionTerm.compute_target_positions` returns the
-        absolute joint position target for its joint subset. We
-        scatter those into a full-action-dim target tensor and feed
-        the result into the actuator-compute path (torque
-        computation) or the direct position-target path, unchanged
-        from the legacy behaviour.
+        Two code paths:
 
-        Without terms, ``processed_actions`` is used as the target
-        directly — that's the legacy monolithic path that Go2/G1
-        presets still rely on.
+        1. **Term-based path** (``config.action_terms`` non-empty):
+           dispatch each term's :meth:`ActionTerm.apply_actions`. Each
+           term writes its own contribution to the sim — joint-space
+           terms via :meth:`_apply_joint_target_via_actuators`,
+           non-joint terms (e.g. propeller thrust) via direct sim
+           link-wrench APIs. This mirrors IsaacLab's / mjlab's
+           ``ActionManager.apply_actions`` and removes the
+           joint-position assumption from the manager.
+
+        2. **Legacy path** (no terms): ``processed_actions`` is the
+           absolute joint position target; route through the actuator
+           path as a single full-action-dim call. Preserved for
+           existing presets (Go2 flat, G1 flat, …) that declare
+           ``scale``/``clip``/``offset`` directly on the
+           ``*ActionConfig`` instead of using terms.
 
         Args:
-            processed_actions: Tensor of shape (num_envs, num_actuated).
-                Passed in by ``World.step`` as the return value of
-                :meth:`process_actions`; only actually used on the
-                legacy path.
+            processed_actions: Tensor of shape (num_envs, total_action_dim).
+                The return value of :meth:`process_actions`; used only
+                on the legacy path. With terms, each term carries its
+                own ``processed_actions`` internally.
         """
         if self._has_action_terms:
-            # Build the full-action-dim target from each term.
-            target = torch.zeros_like(processed_actions)
             for term in self._terms.values():
-                term_target = term.compute_target_positions()
-                target[:, term.joint_ids] = term_target
-        else:
-            # Legacy path: ``processed_actions`` is already the
-            # absolute target.
-            target = processed_actions
+                term.apply_actions()
+            return
 
+        # Legacy non-term path: processed_actions is the full target.
+        target = processed_actions
         if not self._has_explicit_actuators:
             self._apply_position(target)
             return
+        self._apply_joint_target_full(target)
 
-        # Get current joint state once (shared by all actuator groups)
+    def _apply_joint_target_via_actuators(
+        self,
+        term_target: torch.Tensor,
+        joint_ids: torch.Tensor,
+    ) -> None:
+        """Helper for :meth:`JointAction.apply_actions`.
+
+        Scatter the term's joint-position target into the full
+        action space and route through the actuator-compute path
+        (or the direct position path if no explicit actuators are
+        configured).
+
+        Args:
+            term_target: shape ``(num_envs, len(joint_ids))`` — target
+                position for the term's joint subset.
+            joint_ids: shape ``(len(joint_ids),)`` — indices into the
+                full actuated joint space.
+        """
+        full_target = torch.zeros(
+            (term_target.shape[0], self._total_action_dim),
+            dtype=term_target.dtype,
+            device=term_target.device,
+        )
+        full_target[:, joint_ids] = term_target
+        if not self._has_explicit_actuators:
+            self._apply_position(full_target)
+            return
+        self._apply_joint_target_full(full_target)
+
+    def _apply_joint_target_full(self, target: torch.Tensor) -> None:
+        """Run actuator compute + sim force apply on a
+        full-action-dim joint position target. Internal helper used
+        by the legacy path and by :meth:`_apply_joint_target_via_actuators`.
+        """
         joint_pos = self._get_joint_pos()
         joint_vel = self._get_joint_vel()
-
-        # Build full-size force tensor; scatter each group's torques
         full_torques = torch.zeros_like(target)
-
         for actuator, joint_idx in self._actuators:
-            # Extract this group's subset
             target_subset = target[:, joint_idx]
             pos_subset = joint_pos[:, joint_idx]
             vel_subset = joint_vel[:, joint_idx]
-
-            # Compute torques for this group only
             torques = actuator.compute(target_subset, pos_subset, vel_subset)
-
-            # Scatter back into full array
             full_torques[:, joint_idx] = torques
-
         self._applied_torque = full_torques
         self._apply_force(full_torques)
 

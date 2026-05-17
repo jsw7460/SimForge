@@ -112,7 +112,7 @@ class JointAction(ActionTerm):
             device=self._env.device,
             dtype=torch.float32,
         )
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             out[:] = float(value)
         elif isinstance(value, dict):
             indices, _, values = string_utils.resolve_matching_names_values(value, self._joint_names_local)
@@ -130,6 +130,29 @@ class JointAction(ActionTerm):
             actions = torch.clamp(actions, lo, hi)
         self._raw_actions[:] = actions
         self._processed_actions = actions * self._scale + self._offset
+
+    def compute_target_positions(self) -> torch.Tensor:
+        """Return absolute joint position targets for this term's joints.
+
+        Shape: ``(num_envs, action_dim)``. JointAction subclasses
+        implement this to translate ``processed_actions`` into the
+        actual sim-level joint target. :meth:`apply_actions` calls
+        this and routes the result through the manager's
+        actuator-compute path.
+        """
+        raise NotImplementedError(f"{type(self).__name__} must override compute_target_positions")
+
+    def apply_actions(self) -> None:
+        """Compute the joint target and dispatch through the
+        manager's actuator-compute path.
+
+        Common to every JointAction subclass; the only thing that
+        varies between Absolute / Relative / Settle / MotionResidual
+        is what :meth:`compute_target_positions` returns, so the
+        dispatch logic lives here once.
+        """
+        target = self.compute_target_positions()
+        self._manager._apply_joint_target_via_actuators(target, self._joint_ids)
 
 
 # ── Absolute ────────────────────────────────────────────────────────
