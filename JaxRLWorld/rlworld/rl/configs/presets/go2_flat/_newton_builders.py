@@ -46,7 +46,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg as UnifiedNewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, NewtonIMUSensorConfig
-from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
+from rlworld.rl.envs.mdp.events.dr import newton as newton_dr, unified as unified_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
@@ -353,8 +353,6 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     the DR scope tight enough that downstream sim2real comparisons
     actually reflect the SysID center rather than a wide random band.
     """
-    from rlworld.rl.envs.mdp.events.dr import newton as newton_dr
-
     r = cfg.robot
     terms: Dict[str, EventTermConfig] = {
         "randomize_body_mass": EventTermConfig(
