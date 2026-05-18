@@ -4,6 +4,14 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rlworld.rl.configs.common_config_classes import (
+    ActorCfg,
+    CriticCfg,
+    DistributionType,
+    MLPActorCfg,
+    MLPCriticCfg,
+)
+from rlworld.rl.modules.architectures.actor_registry import build_actor
 from rlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
 from rlworld.rl.modules.normalization import EmpiricalNormalization
 from rlworld.rl.modules.utils import get_activation
@@ -190,8 +198,9 @@ class SACActorCritic(BaseActorCritic):
         num_actor_obs: int,
         num_critic_obs: int,
         num_actions: int,
-        actor_class_name: str = "MLPActor",
-        distribution_type: str = "squashed_gaussian",
+        actor_cfg: ActorCfg,
+        critic_cfg: CriticCfg,
+        distribution_type: DistributionType = DistributionType.SQUASHED_GAUSSIAN,
         init_noise_std: float = 1.0,
         log_std_min: float = -20.0,
         log_std_max: float = 2.0,
@@ -199,49 +208,90 @@ class SACActorCritic(BaseActorCritic):
         obs_normalization: bool = False,
         *,
         key: jax.Array,
-        **kwargs,
     ):
         """
         Args:
             num_actor_obs: Actor observation dimension
             num_critic_obs: Critic observation dimension
             num_actions: Action dimension
-            actor_class_name: Name of actor class ("MLPActor", etc.)
-            distribution_type: "gaussian" or "squashed_gaussian"
+            actor_cfg: Typed actor cfg (MLPActorCfg / ...)
+            critic_cfg: Typed critic cfg (MLPCriticCfg / ...). SAC uses
+                this for the twin critics' shared hyperparameters
+                (hidden_dims, activation); only MLPCriticCfg is supported
+                since SACQNetwork is MLP-only.
+            distribution_type: DistributionType enum
             init_noise_std: Initial noise standard deviation (not log)
             log_std_min: Minimum log_std (clipping)
             log_std_max: Maximum log_std (clipping)
             kinematic_tree: Optional kinematic tree for dynamics-aware actors
             obs_normalization: Whether to enable observation normalization
             key: JAX random key
-            **kwargs: Must contain "actor_kwargs" and "critic_kwargs"
         """
         self.actor_obs_dim = num_actor_obs
         self.critic_obs_dim = num_critic_obs
         self.num_actions = num_actions
         self.distribution_type = distribution_type
-        self.is_squashed = distribution_type == "squashed_gaussian"
+        self.is_squashed = distribution_type == DistributionType.SQUASHED_GAUSSIAN
         self.init_noise_std = init_noise_std
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
         self.is_recurrent = False
 
+        if not isinstance(critic_cfg, MLPCriticCfg):
+            raise TypeError(f"SACActorCritic only supports MLPCriticCfg; got {type(critic_cfg).__name__}")
+
         # Split keys
         key, key_actor, key_log_std, key_critic1, key_critic2 = jax.random.split(key, 5)
 
-        # Build networks
-        self._build_networks(
-            actor_class_name=actor_class_name,
+        # Build actor via cfg-type-keyed builder.
+        self.actor = build_actor(
+            actor_cfg,
+            num_obs=num_actor_obs,
+            num_actions=num_actions,
+            key=key_actor,
             kinematic_tree=kinematic_tree,
-            key_actor=key_actor,
-            key_log_std=key_log_std,
-            key_critic1=key_critic1,
-            key_critic2=key_critic2,
-            **kwargs,
         )
 
-        # Placeholder critic (not used, but required by BaseActorCritic)
-        # We use critic1 and critic2 instead
+        # Build separate log_std network (uses actor MLP topology when
+        # actor_cfg is MLP; falls back to (256, 256) / elu for other
+        # actor types, which historically matched the dict default).
+        if isinstance(actor_cfg, MLPActorCfg):
+            log_std_hidden = list(actor_cfg.hidden_dims)
+            log_std_activation = actor_cfg.activation.value
+        else:
+            log_std_hidden = [256, 256]
+            log_std_activation = "elu"
+        self.log_std_net = SACLogStdNetwork(
+            num_inputs=self.actor_obs_dim,
+            num_outputs=self.num_actions,
+            hidden_dims=log_std_hidden,
+            activation=log_std_activation,
+            init_noise_std=self.init_noise_std,
+            log_std_min=self.log_std_min,
+            log_std_max=self.log_std_max,
+            key=key_log_std,
+        )
+
+        # Build twin critics from the MLPCriticCfg.
+        critic_hidden = list(critic_cfg.hidden_dims)
+        critic_activation = critic_cfg.activation.value
+        self.critic1 = SACQNetwork(
+            obs_dim=self.critic_obs_dim,
+            action_dim=self.num_actions,
+            hidden_dims=critic_hidden,
+            activation=critic_activation,
+            key=key_critic1,
+        )
+        self.critic2 = SACQNetwork(
+            obs_dim=self.critic_obs_dim,
+            action_dim=self.num_actions,
+            hidden_dims=critic_hidden,
+            activation=critic_activation,
+            key=key_critic2,
+        )
+
+        # Placeholder critic (not used, but required by BaseActorCritic);
+        # we use critic1 and critic2 instead.
         self.critic = self.critic1
 
         # Observation normalization
@@ -253,60 +303,8 @@ class SACActorCritic(BaseActorCritic):
             self.critic_obs_normalizer = None
 
         print(f"🎭 SAC Actor-Critic: distribution={distribution_type}")
-        print(f"🤖 Actor: {actor_class_name}")
+        print(f"🤖 Actor: {type(actor_cfg).__name__}")
         print(f"📏 Obs normalization: {obs_normalization}")
-
-    def _build_networks(
-        self,
-        actor_class_name: str,
-        kinematic_tree: "KinematicTree | None",
-        key_actor: jax.Array,
-        key_log_std: jax.Array,
-        key_critic1: jax.Array,
-        key_critic2: jax.Array,
-        **kwargs,
-    ):
-        """Build actor, log_std network, and twin critics."""
-        actor_kwargs = kwargs.get("actor_kwargs", {})
-        critic_kwargs = kwargs.get("critic_kwargs", {})
-
-        # Build actor
-        self.actor = self._build_actor_common(
-            actor_class_name=actor_class_name,
-            actor_obs_dim=self.actor_obs_dim,
-            num_actions=self.num_actions,
-            actor_kwargs=actor_kwargs,
-            kinematic_tree=kinematic_tree,
-            key=key_actor,
-        )
-        # Build separate log_std network
-        self.log_std_net = SACLogStdNetwork(
-            num_inputs=self.actor_obs_dim,
-            num_outputs=self.num_actions,
-            hidden_dims=actor_kwargs.get("hidden_dims", [256, 256]),
-            activation=actor_kwargs.get("activation", "elu"),
-            init_noise_std=self.init_noise_std,
-            log_std_min=self.log_std_min,
-            log_std_max=self.log_std_max,
-            key=key_log_std,
-        )
-
-        # Build twin critics
-        self.critic1 = SACQNetwork(
-            obs_dim=self.critic_obs_dim,
-            action_dim=self.num_actions,
-            hidden_dims=critic_kwargs.get("hidden_dims", [256, 256]),
-            activation=critic_kwargs.get("activation", "elu"),
-            key=key_critic1,
-        )
-
-        self.critic2 = SACQNetwork(
-            obs_dim=self.critic_obs_dim,
-            action_dim=self.num_actions,
-            hidden_dims=critic_kwargs.get("hidden_dims", [256, 256]),
-            activation=critic_kwargs.get("activation", "elu"),
-            key=key_critic2,
-        )
 
     def _get_actor_distribution(
         self,

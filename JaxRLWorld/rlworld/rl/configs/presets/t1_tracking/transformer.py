@@ -24,7 +24,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from rlworld.rl.configs.common_config_classes import NNConfig, PPOPolicyConfig
+from rlworld.rl.configs.common_config_classes import (
+    DistributionType,
+    NNConfig,
+    PPOPolicyConfig,
+    SpaceTimeTransformerActorCfg,
+    SpaceTimeTransformerCriticCfg,
+    StdType,
+)
 
 from .base import T1TrackingConfig
 
@@ -103,34 +110,51 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
                 "Set future_offsets to a tuple of motion-frame offsets, e.g. "
                 "(1, 2, 4, 8, 16), or use T1TrackingConfig (MLP baseline) instead."
             )
-        transformer_kwargs = {
-            "tracked_body_names": self.body_names,
-            "future_offsets": self.future_offsets,
-            "ref_feature_dim": self.ref_feature_dim,
-            "embed_dim": self.transformer_embed_dim,
-            "num_heads": self.transformer_num_heads,
-            "num_layers": self.transformer_num_layers,
-            "dim_feedforward": self.transformer_dim_feedforward,
-            "bottleneck_dim": self.transformer_bottleneck_dim,
-            "decoder_hidden_dim": self.transformer_decoder_hidden_dim,
-            "use_kinematic_mask": True,
-            "pe_type": self.pe_type,
-            "use_relational_bias": self.use_relational_bias,
-            "re_use_laplacian": self.re_use_laplacian,
-            "re_use_spd": self.re_use_spd,
-            "re_use_ppr": self.re_use_ppr,
-            "re_ppr_alpha": self.re_ppr_alpha,
-            "attention_mode": self.attention_mode,
-        }
+        # Shared transformer hyperparameters; actor adds bottleneck +
+        # decoder fields that the critic doesn't take.
+        actor_cfg = SpaceTimeTransformerActorCfg(
+            tracked_body_names=self.body_names,
+            future_offsets=self.future_offsets,
+            ref_feature_dim=self.ref_feature_dim,
+            embed_dim=self.transformer_embed_dim,
+            num_heads=self.transformer_num_heads,
+            num_layers=self.transformer_num_layers,
+            dim_feedforward=self.transformer_dim_feedforward,
+            bottleneck_dim=self.transformer_bottleneck_dim,
+            decoder_hidden_dim=self.transformer_decoder_hidden_dim,
+            use_kinematic_mask=True,
+            pe_type=self.pe_type,
+            use_relational_bias=self.use_relational_bias,
+            re_use_laplacian=self.re_use_laplacian,
+            re_use_spd=self.re_use_spd,
+            re_use_ppr=self.re_use_ppr,
+            re_ppr_alpha=self.re_ppr_alpha,
+            attention_mode=self.attention_mode,
+        )
+        critic_cfg = SpaceTimeTransformerCriticCfg(
+            tracked_body_names=self.body_names,
+            future_offsets=self.future_offsets,
+            ref_feature_dim=self.ref_feature_dim,
+            embed_dim=self.transformer_embed_dim,
+            num_heads=self.transformer_num_heads,
+            num_layers=self.transformer_num_layers,
+            dim_feedforward=self.transformer_dim_feedforward,
+            use_kinematic_mask=True,
+            pe_type=self.pe_type,
+            use_relational_bias=self.use_relational_bias,
+            re_use_laplacian=self.re_use_laplacian,
+            re_use_spd=self.re_use_spd,
+            re_use_ppr=self.re_use_ppr,
+            re_ppr_alpha=self.re_ppr_alpha,
+            attention_mode=self.attention_mode,
+        )
         return NNConfig(
             policy=PPOPolicyConfig(
-                actor_class_name="SpaceTimeTransformerActor",
-                critic_class_name="SpaceTimeTransformerCritic",
-                actor_kwargs=transformer_kwargs,
-                critic_kwargs=transformer_kwargs,
+                actor=actor_cfg,
+                critic=critic_cfg,
                 init_noise_std=1.0,
-                distribution_type="gaussian",
-                std_type="state_independent",
+                distribution_type=DistributionType.GAUSSIAN,
+                std_type=StdType.STATE_INDEPENDENT,
             ),
         )
 

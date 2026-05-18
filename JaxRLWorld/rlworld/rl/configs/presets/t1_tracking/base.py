@@ -34,11 +34,17 @@ from typing import Any, Dict, Literal
 
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
+    Activation,
     CommandConfig,
+    DistributionType,
     EventConfig,
+    MLPActorCfg,
+    MLPCriticCfg,
     NNConfig,
+    OrthoInit,
     PPOPolicyConfig,
     RunnerConfig,
+    StdType,
 )
 from rlworld.rl.configs.curriculums import CurriculumManagerConfig
 from rlworld.rl.configs.robots.t1 import T1Config
@@ -339,22 +345,19 @@ class T1TrackingConfig:
         # override this method to swap in a different actor/critic.
         return NNConfig(
             policy=PPOPolicyConfig(
-                actor_class_name="MLPActor",
-                actor_kwargs={
-                    "activation": "elu",
-                    "ortho_init": True,
-                    "output_gain": 1.0,
-                    "hidden_dims": [512, 256, 128],
-                },
-                critic_kwargs={
-                    "activation": "elu",
-                    "ortho_init": True,
-                    "output_gain": 1.0,
-                    "hidden_dims": [512, 256, 128],
-                },
+                actor=MLPActorCfg(
+                    activation=Activation.ELU,
+                    init=OrthoInit(output_gain=1.0),
+                    hidden_dims=[512, 256, 128],
+                ),
+                critic=MLPCriticCfg(
+                    activation=Activation.ELU,
+                    init=OrthoInit(output_gain=1.0),
+                    hidden_dims=[512, 256, 128],
+                ),
                 init_noise_std=1.0,
-                distribution_type="gaussian",
-                std_type="state_independent",
+                distribution_type=DistributionType.GAUSSIAN,
+                std_type=StdType.STATE_INDEPENDENT,
             ),
         )
 

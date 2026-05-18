@@ -13,6 +13,12 @@ import gymnasium as gym
 
 from rlworld.rl.configs import GenesisConfigsForRun, SACPolicyConfig
 from rlworld.rl.configs.algorithms.sac import SACConfig
+from rlworld.rl.configs.common_config_classes import (
+    Activation,
+    DistributionType,
+    MLPActorCfg,
+    MLPCriticCfg,
+)
 from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.runners import OffPolicyRunner
 
@@ -38,9 +44,15 @@ def main():
     cfgs_for_run.runner.run_name = "SACBenchmarkInvertedDoublePendulum"
 
     cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(SACPolicyConfig)
-    cfgs_for_run.nn.policy.distribution_type = "gaussian"
-    cfgs_for_run.nn.policy.actor_kwargs.update({"hidden_dims": [128, 128], "activation": "tanh"})
-    cfgs_for_run.nn.policy.critic_kwargs.update({"hidden_dims": [256, 128], "activation": "tanh"})
+    cfgs_for_run.nn.policy.distribution_type = DistributionType.GAUSSIAN
+    cfgs_for_run.nn.policy.actor = MLPActorCfg(
+        hidden_dims=[128, 128],
+        activation=Activation.TANH,
+    )
+    cfgs_for_run.nn.policy.critic = MLPCriticCfg(
+        hidden_dims=[256, 128],
+        activation=Activation.TANH,
+    )
 
     from gymnasium.vector import SyncVectorEnv
 

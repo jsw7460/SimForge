@@ -26,6 +26,12 @@ from mujoco_playground import registry, wrapper_torch
 
 from rlworld.rl.algorithms.base import ActInput
 from rlworld.rl.algorithms.fast_td3.fast_td3 import FastTD3
+from rlworld.rl.configs.common_config_classes import (
+    Activation,
+    MLPActorCfg,
+    MLPCriticCfg,
+    OrthoInit,
+)
 from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
 
 # ===================== Config (matches original G1JoystickFlatTerrain exactly) =====================
@@ -160,24 +166,22 @@ def main():
         num_actor_obs=n_obs,
         num_critic_obs=n_critic_obs,
         num_actions=n_act,
+        actor_cfg=MLPActorCfg(
+            hidden_dims=list(ACTOR_HIDDEN),
+            activation=Activation.RELU,
+            init=OrthoInit(output_gain=INIT_SCALE),
+        ),
+        critic_cfg=MLPCriticCfg(
+            hidden_dims=list(CRITIC_HIDDEN),
+            activation=Activation.RELU,
+            init=OrthoInit(output_gain=INIT_SCALE),
+        ),
         num_atoms=NUM_ATOMS,
         v_min=V_MIN,
         v_max=V_MAX,
         is_squashed=True,
         obs_normalization=True,
         key=model_key,
-        actor_kwargs={
-            "hidden_dims": ACTOR_HIDDEN,
-            "ortho_init": True,
-            "activation": "relu",
-            "output_gain": INIT_SCALE,
-        },
-        critic_kwargs={
-            "hidden_dims": CRITIC_HIDDEN,
-            "ortho_init": True,
-            "activation": "relu",
-            "output_gain": INIT_SCALE,
-        },
     )
 
     alg = FastTD3(

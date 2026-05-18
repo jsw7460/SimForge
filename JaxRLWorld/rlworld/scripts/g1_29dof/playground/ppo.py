@@ -25,6 +25,14 @@ from mujoco_playground import registry, wrapper_torch
 
 from rlworld.rl.algorithms.base import ActInput
 from rlworld.rl.algorithms.ppo.ppo import PPO
+from rlworld.rl.configs.common_config_classes import (
+    Activation,
+    DistributionType,
+    MLPActorCfg,
+    MLPCriticCfg,
+    OrthoInit,
+    StdType,
+)
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 
 # ===================== Config =====================
@@ -163,23 +171,21 @@ def main():
         num_actor_obs=n_obs,
         num_critic_obs=n_critic_obs,
         num_actions=n_act,
-        actor_class_name="MLPActor",
+        actor_cfg=MLPActorCfg(
+            hidden_dims=list(ACTOR_HIDDEN),
+            activation=Activation.ELU,
+            init=OrthoInit(output_gain=0.01),
+        ),
+        critic_cfg=MLPCriticCfg(
+            hidden_dims=list(CRITIC_HIDDEN),
+            activation=Activation.ELU,
+            init=OrthoInit(output_gain=1.0),
+        ),
         init_noise_std=INIT_NOISE_STD,
-        std_type="state_dependent",
-        distribution_type="squashed_gaussian",
+        std_type=StdType.STATE_DEPENDENT,
+        distribution_type=DistributionType.SQUASHED_GAUSSIAN,
         obs_normalization=OBS_NORMALIZATION,
         key=model_key,
-        actor_kwargs={
-            "hidden_dims": ACTOR_HIDDEN,
-            "activation": "elu",
-            "ortho_init": True,
-            "output_gain": 0.01,
-        },
-        critic_kwargs={
-            "hidden_dims": CRITIC_HIDDEN,
-            "activation": "elu",
-            "ortho_init": True,
-        },
     )
 
     alg = PPO(

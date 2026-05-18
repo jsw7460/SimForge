@@ -23,13 +23,19 @@ from typing import Any, Dict, List
 
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
+    Activation,
     CommandConfig,
+    DistributionType,
     EventConfig,
     GaitConfig,
+    MLPActorCfg,
+    MLPCriticCfg,
     NNConfig,
     ObservationGroupConfig,
+    OrthoInit,
     PPOPolicyConfig,
     RunnerConfig,
+    StdType,
 )
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
@@ -121,7 +127,6 @@ class Go2FlatConfig:
     algorithm_name: str = "PPO"
     max_iterations: int = 6000
     actor_hidden_dims: List[int] = field(default_factory=lambda: [256, 128, 64])
-    actor_class_name: str = "MLPActor"
 
     # Run name (None → auto from sim_type)
     run_name: str | None = None
@@ -351,20 +356,19 @@ class Go2FlatConfig:
     def _build_nn_config(self) -> NNConfig:
         return NNConfig(
             policy=PPOPolicyConfig(
-                actor_class_name=self.actor_class_name,
-                actor_kwargs={
-                    "activation": "elu",
-                    "ortho_init": True,
-                    "hidden_dims": self.actor_hidden_dims,
-                },
-                critic_kwargs={
-                    "activation": "elu",
-                    "ortho_init": True,
-                    "hidden_dims": self.actor_hidden_dims,
-                },
+                actor=MLPActorCfg(
+                    activation=Activation.ELU,
+                    init=OrthoInit(output_gain=1.0),
+                    hidden_dims=list(self.actor_hidden_dims),
+                ),
+                critic=MLPCriticCfg(
+                    activation=Activation.ELU,
+                    init=OrthoInit(output_gain=1.0),
+                    hidden_dims=list(self.actor_hidden_dims),
+                ),
                 init_noise_std=1.0,
-                distribution_type="gaussian",
-                std_type="state_independent",
+                distribution_type=DistributionType.GAUSSIAN,
+                std_type=StdType.STATE_INDEPENDENT,
             ),
         )
 

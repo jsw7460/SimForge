@@ -58,6 +58,12 @@ class PlayScene(Protocol):
     def clear_debug(self) -> None: ...
     def cleanup(self) -> None: ...
     def get_tracked_body_data(self) -> TrackedBodyData | None: ...
+    def add_sphere(
+        self,
+        position: np.ndarray,
+        radius: float = 0.05,
+        color: tuple[int, int, int] = (255, 80, 80),
+    ) -> None: ...
 
 
 # ── BridgePlayScene (Newton / Genesis) ─────────────────────────
@@ -99,6 +105,16 @@ class BridgePlayScene:
 
     def clear_debug(self) -> None:
         self._scene.clear_debug()
+
+    def add_sphere(
+        self,
+        position: np.ndarray,
+        radius: float = 0.05,
+        color: tuple[int, int, int] = (255, 80, 80),
+    ) -> None:
+        # Forward to ViserScene.add_sphere (RGB int 0-255, queued and
+        # rendered by _sync_debug_visuals during the next update()).
+        self._scene.add_sphere(position=position, radius=radius, color=color)
 
     def cleanup(self) -> None:
         self._scene.cleanup()
@@ -162,6 +178,17 @@ class MujocoPlayScene:
 
     def clear_debug(self) -> None:
         pass
+
+    def add_sphere(
+        self,
+        position: np.ndarray,
+        radius: float = 0.05,
+        color: tuple[int, int, int] = (255, 80, 80),
+    ) -> None:
+        # MjlabViserScene.add_sphere takes RGBA float [0,1]; convert.
+        r, g, b = color
+        rgba = (r / 255.0, g / 255.0, b / 255.0, 1.0)
+        self._mj_scene.add_sphere(center=position, radius=radius, color=rgba)
 
     def cleanup(self) -> None:
         pass

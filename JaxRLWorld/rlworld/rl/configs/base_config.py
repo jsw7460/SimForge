@@ -131,6 +131,16 @@ def _convert_value(v: Any) -> Any:
 
     Callables are automatically converted to ``"module:qualname"`` strings.
     """
+    # StrEnum / IntEnum / Enum: collapse to the underlying primitive value
+    # *before* the str/int isinstance check below — otherwise
+    # ``isinstance(StrEnum.MEMBER, str)`` returns True and we'd pass the
+    # enum instance straight through to ``yaml.dump``, which then emits
+    # ``!!python/object/apply:...`` tags that ``yaml.safe_load`` refuses
+    # to construct (post-strict-typed-NN-config migration symptom).
+    from enum import Enum
+
+    if isinstance(v, Enum):
+        return v.value
     if isinstance(v, _YAML_SAFE_TYPES):
         return v
     if isinstance(v, BaseConfig):
@@ -139,11 +149,11 @@ def _convert_value(v: Any) -> Any:
         return _dataclass_to_dict(v)
     if isinstance(v, dict):
         return {str(dk): _convert_value(dv) for dk, dv in v.items()}
-    if isinstance(v, (list, tuple)):
+    if isinstance(v, list | tuple):
         return [_convert_value(item) for item in v]
     if isinstance(v, np.ndarray):
         return v.tolist()
-    if isinstance(v, (np.integer, np.floating, np.bool_)):
+    if isinstance(v, np.integer | np.floating | np.bool_):
         return v.item()
     if callable(v):
         from rlworld.rl.utils.resolve import callable_to_string
@@ -177,7 +187,7 @@ def _recursive_to_dict(obj: "BaseConfig") -> Dict:
             if k.startswith("_") or k in exclude or k in result:
                 continue
             # Skip methods, properties, classmethods, ClassVar-like things
-            if isinstance(v, (property, classmethod, staticmethod)):
+            if isinstance(v, property | classmethod | staticmethod):
                 continue
             if callable(v) and not dataclasses.is_dataclass(v):
                 # Skip plain methods but keep callable term configs (dataclasses are callable)
@@ -350,7 +360,7 @@ class BaseConfig:
 
         # Handle serialization of complex objects
         def json_serializer(o):
-            if isinstance(o, (set, frozenset)):
+            if isinstance(o, set | frozenset):
                 return list(o)
             return str(o)
 

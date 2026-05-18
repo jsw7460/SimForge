@@ -4,10 +4,13 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from rlworld.rl.modules.architectures.mlp import MLPCritic
-from rlworld.rl.modules.architectures.space_time_transformer.critic import (
-    SpaceTimeTransformerCritic,
+from rlworld.rl.configs.common_config_classes import (
+    ActorCfg,
+    CriticCfg,
+    DistributionType,
+    StdType,
 )
+from rlworld.rl.modules.architectures.actor_registry import build_actor, build_critic
 from rlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
 from rlworld.rl.modules.normalization import EmpiricalNormalization
 
@@ -126,8 +129,8 @@ class PPOActorCritic(BaseActorCritic):
 
     std_module: StdNetwork | ConstantStd | LearnableLogStd | LearnableStd
 
-    distribution_type: str = eqx.field(static=True)
-    std_type: str = eqx.field(static=True)
+    distribution_type: DistributionType = eqx.field(static=True)
+    std_type: StdType = eqx.field(static=True)
     init_noise_std: float = eqx.field(static=True)
 
     def __init__(
@@ -135,52 +138,56 @@ class PPOActorCritic(BaseActorCritic):
         num_actor_obs: int,
         num_critic_obs: int,
         num_actions: int,
-        actor_class_name: str = "MLPActor",
-        critic_class_name: str = "MLPCritic",
+        actor_cfg: ActorCfg,
+        critic_cfg: CriticCfg,
         init_noise_std: float = 1.0,
-        std_type: str = "state_dependent",
-        distribution_type: str = "gaussian",
+        std_type: StdType = StdType.STATE_DEPENDENT,
+        distribution_type: DistributionType = DistributionType.GAUSSIAN,
         kinematic_tree: Union["KinematicTree", None] = None,
         actuated_joint_names: "list[str] | None" = None,
         obs_normalization: bool = False,
         *,
         key: jax.Array,
-        **kwargs,
     ):
         """
         Args:
             num_actor_obs: Actor observation dimension
             num_critic_obs: Critic observation dimension
             num_actions: Action dimension
-            actor_class_name: Name of actor class ("MLPActor", "SpaceTimeTransformerActor", etc.)
+            actor_cfg: Typed actor cfg (MLPActorCfg / SpaceTimeTransformerActorCfg / ...)
+            critic_cfg: Typed critic cfg
             init_noise_std: Initial action standard deviation
-            std_type: "state_dependent", "state_independent", or "fixed"
-            distribution_type: "gaussian" or "squashed_gaussian"
+            std_type: StdType enum
+            distribution_type: DistributionType enum
             kinematic_tree: Optional kinematic tree for dynamics-aware actors
             obs_normalization: If true, normalize observations
             key: JAX random key
-            **kwargs: Must contain "actor_kwargs" and "critic_kwargs"
         """
         self.actor_obs_dim = num_actor_obs
         self.critic_obs_dim = num_critic_obs
         self.num_actions = num_actions
         self.distribution_type = distribution_type
-        self.is_squashed = distribution_type == "squashed_gaussian"
+        self.is_squashed = distribution_type == DistributionType.SQUASHED_GAUSSIAN
         self.std_type = std_type
         self.init_noise_std = init_noise_std
         self.is_recurrent = False
 
         key_actor, key_critic, key_std = jax.random.split(key, 3)
 
-        # Build networks
-        self._build_networks(
-            actor_class_name,
-            critic_class_name,
-            kinematic_tree,
-            actuated_joint_names,
-            key_actor,
-            key_critic,
-            **kwargs,
+        # Build actor + critic via the cfg-type-keyed builders.
+        self.actor = build_actor(
+            actor_cfg,
+            num_obs=num_actor_obs,
+            num_actions=num_actions,
+            key=key_actor,
+            kinematic_tree=kinematic_tree,
+            actuated_joint_names=actuated_joint_names,
+        )
+        self.critic = build_critic(
+            critic_cfg,
+            num_obs=num_critic_obs,
+            key=key_critic,
+            kinematic_tree=kinematic_tree,
         )
 
         # Initialize std
@@ -194,54 +201,11 @@ class PPOActorCritic(BaseActorCritic):
             self.actor_obs_normalizer = None
             self.critic_obs_normalizer = None
 
-        print(f"🎲 PPO Actor-Critic: actor={actor_class_name}, distribution={distribution_type}, std={std_type}")
-        print(f"📏 Obs normalization: {obs_normalization}")
-
-    def _build_networks(
-        self,
-        actor_class_name: str,
-        critic_class_name: str,
-        kinematic_tree: "KinematicTree | None",
-        actuated_joint_names: "list[str] | None",
-        key_actor: jax.Array,
-        key_critic: jax.Array,
-        **kwargs,
-    ):
-        """Build actor and critic networks."""
-        critic_kwargs = kwargs["critic_kwargs"]
-        if critic_class_name == "MLPCritic":
-            self.critic = MLPCritic(
-                num_obs=self.critic_obs_dim,
-                hidden_dims=critic_kwargs["hidden_dims"],
-                activation=critic_kwargs["activation"],
-                use_layer_norm=critic_kwargs.get("use_layer_norm", False),
-                ortho_init=critic_kwargs["ortho_init"],
-                key=key_critic,
-            )
-        elif critic_class_name == "SpaceTimeTransformerCritic":
-            if kinematic_tree is None:
-                raise ValueError("SpaceTimeTransformerCritic requires kinematic_tree.")
-            stc_kwargs = {k: v for k, v in critic_kwargs.items() if k not in ("num_obs", "key", "kinematic_tree")}
-            self.critic = SpaceTimeTransformerCritic(
-                kinematic_tree=kinematic_tree,
-                num_obs=self.critic_obs_dim,
-                key=key_critic,
-                **stc_kwargs,
-            )
-        else:
-            raise ValueError(f"Unknown critic_class_name: {critic_class_name!r}")
-
-        # Build actor using common logic
-        actor_kwargs = kwargs.get("actor_kwargs", {})
-        self.actor = self._build_actor_common(
-            actor_class_name=actor_class_name,
-            actor_obs_dim=self.actor_obs_dim,
-            num_actions=self.num_actions,
-            actor_kwargs=actor_kwargs,
-            kinematic_tree=kinematic_tree,
-            actuated_joint_names=actuated_joint_names,
-            key=key_actor,
+        print(
+            f"🎲 PPO Actor-Critic: actor={type(actor_cfg).__name__}, "
+            f"distribution={distribution_type}, std={std_type}"
         )
+        print(f"📏 Obs normalization: {obs_normalization}")
 
     def _initialize_std(self, key: jax.Array):
         """Initialize the standard deviation based on the selected type."""

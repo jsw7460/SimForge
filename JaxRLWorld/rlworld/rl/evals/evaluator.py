@@ -305,8 +305,12 @@ class PolicyEvaluator:
         # Try to read training obs dims from nn/policy config
         nn_cfg = train_config.get("nn", {})
         policy_cfg = nn_cfg.get("policy", {})
-        actor_kwargs = policy_cfg.get("actor_kwargs", {})
-        critic_kwargs = policy_cfg.get("critic_kwargs", {})
+        # New typed NN config (post-migration): policy_cfg holds
+        # ``actor`` and ``critic`` sub-dicts (one of MLPActorCfg /
+        # SpaceTimeTransformerActorCfg / ... serialized form, with
+        # ``_type`` discriminator).
+        actor_cfg_dict = policy_cfg.get("actor", {})
+        critic_cfg_dict = policy_cfg.get("critic", {})
 
         # For off-policy (SAC/TD3), input_dim is stored directly
         # For on-policy (PPO), first layer shape = num_actor_obs
@@ -691,7 +695,7 @@ class PolicyEvaluator:
 
         # Convert numpy types to Python native types
         def convert_to_native(obj):
-            if isinstance(obj, (np.floating, np.integer)):
+            if isinstance(obj, np.floating | np.integer):
                 return obj.item()
             elif isinstance(obj, np.ndarray):
                 return obj.tolist()

@@ -13,6 +13,11 @@ import gymnasium as gym
 
 from rlworld.rl.configs import GenesisConfigsForRun, TD3PolicyConfig
 from rlworld.rl.configs.algorithms import TD3Config
+from rlworld.rl.configs.common_config_classes import (
+    Activation,
+    MLPActorCfg,
+    MLPCriticCfg,
+)
 from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.runners import OffPolicyRunner
 
@@ -32,8 +37,14 @@ def main():
     cfgs_for_run.algorithm.batch_size = 256
     cfgs_for_run.algorithm.tau = 0.005
     cfgs_for_run.algorithm.num_steps_per_env = 1
-    cfgs_for_run.nn.policy.actor_kwargs.update({"hidden_dims": [256, 256], "activation": "relu"})
-    cfgs_for_run.nn.policy.critic_kwargs.update({"hidden_dims": [256, 256], "activation": "relu"})
+    cfgs_for_run.nn.policy.actor = MLPActorCfg(
+        hidden_dims=[256, 256],
+        activation=Activation.RELU,
+    )
+    cfgs_for_run.nn.policy.critic = MLPCriticCfg(
+        hidden_dims=[256, 256],
+        activation=Activation.RELU,
+    )
     cfgs_for_run.runner.log_interval = 100
     cfgs_for_run.runner.max_iterations = 1000000
     cfgs_for_run.runner.save_interval = 100000

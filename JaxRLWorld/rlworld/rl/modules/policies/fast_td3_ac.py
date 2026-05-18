@@ -5,6 +5,13 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rlworld.rl.configs.common_config_classes import (
+    ActorCfg,
+    CriticCfg,
+    MLPCriticCfg,
+    OrthoInit,
+)
+from rlworld.rl.modules.architectures.actor_registry import build_actor
 from rlworld.rl.modules.normalization import EmpiricalNormalization
 from rlworld.rl.modules.policies.base_ac import BaseActorCritic
 from rlworld.rl.modules.utils import MLP, orthogonal_init_mlp
@@ -337,30 +344,31 @@ class FastTD3ActorCritic(BaseActorCritic):
         num_actor_obs: int,
         num_critic_obs: int,
         num_actions: int,
+        actor_cfg: ActorCfg,
+        critic_cfg: CriticCfg,
         num_atoms: int = 51,
         v_min: float = -10.0,
         v_max: float = 10.0,
         is_squashed: bool = True,
-        actor_class_name: str = "MLPActor",
         kinematic_tree: "KinematicTree | None" = None,
         obs_normalization: bool = False,
         *,
         key: jax.Array,
-        **kwargs,
     ):
         """
         Args:
             num_actor_obs: Actor observation dimension
             num_critic_obs: Critic observation dimension
             num_actions: Action dimension
+            actor_cfg: Typed actor cfg.
+            critic_cfg: Typed critic cfg (must be MLPCriticCfg —
+                DistributionalQNetwork is MLP-only).
             num_atoms: Number of atoms for C51
             v_min: Minimum value support
             v_max: Maximum value support
-            actor_class_name: Name of actor class
             kinematic_tree: Optional kinematic tree
             obs_normalization: Whether to enable observation normalization
             key: JAX random key
-            **kwargs: Must contain "actor_kwargs" and "critic_kwargs"
         """
         self.actor_obs_dim = num_actor_obs
         self.critic_obs_dim = num_critic_obs
@@ -373,17 +381,50 @@ class FastTD3ActorCritic(BaseActorCritic):
         self.v_min = v_min
         self.v_max = v_max
 
+        if not isinstance(critic_cfg, MLPCriticCfg):
+            raise TypeError(f"FastTD3ActorCritic only supports MLPCriticCfg; got {type(critic_cfg).__name__}")
+
         # Split keys
         key, key_actor, key_critic1, key_critic2 = jax.random.split(key, 4)
 
-        # Build networks
-        self._build_networks(
-            actor_class_name=actor_class_name,
+        # Deterministic actor via cfg-type-keyed builder.
+        self.actor = build_actor(
+            actor_cfg,
+            num_obs=num_actor_obs,
+            num_actions=num_actions,
+            key=key_actor,
             kinematic_tree=kinematic_tree,
-            key_actor=key_actor,
-            key_critic1=key_critic1,
-            key_critic2=key_critic2,
-            **kwargs,
+        )
+
+        # Distributional twin critics from MLPCriticCfg.
+        critic_hidden = list(critic_cfg.hidden_dims)
+        critic_activation = critic_cfg.activation.value
+        ortho_init = isinstance(critic_cfg.init, OrthoInit)
+        output_gain = critic_cfg.init.output_gain if isinstance(critic_cfg.init, OrthoInit) else 1.0
+
+        self.critic1 = DistributionalQNetwork(
+            obs_dim=self.critic_obs_dim,
+            action_dim=self.num_actions,
+            hidden_dims=critic_hidden,
+            num_atoms=self.num_atoms,
+            v_min=self.v_min,
+            v_max=self.v_max,
+            activation=critic_activation,
+            ortho_init=ortho_init,
+            output_gain=output_gain,
+            key=key_critic1,
+        )
+        self.critic2 = DistributionalQNetwork(
+            obs_dim=self.critic_obs_dim,
+            action_dim=self.num_actions,
+            hidden_dims=critic_hidden,
+            num_atoms=self.num_atoms,
+            v_min=self.v_min,
+            v_max=self.v_max,
+            activation=critic_activation,
+            ortho_init=ortho_init,
+            output_gain=output_gain,
+            key=key_critic2,
         )
 
         # Placeholder critic (required by BaseActorCritic)
@@ -398,64 +439,9 @@ class FastTD3ActorCritic(BaseActorCritic):
             self.critic_obs_normalizer = None
 
         print("🎭 FastTD3 Actor-Critic: deterministic policy + distributional critics")
-        print(f"🤖 Actor: {actor_class_name}")
+        print(f"🤖 Actor: {type(actor_cfg).__name__}")
         print(f"📊 C51: {num_atoms} atoms, support [{v_min}, {v_max}]")
         print(f"📏 Obs normalization: {obs_normalization}")
-
-    def _build_networks(
-        self,
-        actor_class_name: str,
-        kinematic_tree: "KinematicTree | None",
-        key_actor: jax.Array,
-        key_critic1: jax.Array,
-        key_critic2: jax.Array,
-        **kwargs,
-    ):
-        """Build deterministic actor and distributional twin critics."""
-        actor_kwargs = kwargs["actor_kwargs"]
-        critic_kwargs = kwargs["critic_kwargs"]
-
-        # Build actor (deterministic)
-        self.actor = self._build_actor_common(
-            actor_class_name=actor_class_name,
-            actor_obs_dim=self.actor_obs_dim,
-            num_actions=self.num_actions,
-            actor_kwargs=actor_kwargs,
-            kinematic_tree=kinematic_tree,
-            key=key_actor,
-        )
-
-        # Build distributional twin critics
-        critic_hidden = critic_kwargs.get("hidden_dims", [1024, 512, 256])
-        critic_activation = critic_kwargs.get("activation", "relu")
-        ortho_init = critic_kwargs.get("ortho_init", True)
-        output_gain = critic_kwargs.get("output_gain", 1.0)
-
-        self.critic1 = DistributionalQNetwork(
-            obs_dim=self.critic_obs_dim,
-            action_dim=self.num_actions,
-            hidden_dims=critic_hidden,
-            num_atoms=self.num_atoms,
-            v_min=self.v_min,
-            v_max=self.v_max,
-            activation=critic_activation,
-            ortho_init=ortho_init,
-            output_gain=output_gain,
-            key=key_critic1,
-        )
-
-        self.critic2 = DistributionalQNetwork(
-            obs_dim=self.critic_obs_dim,
-            action_dim=self.num_actions,
-            hidden_dims=critic_hidden,
-            num_atoms=self.num_atoms,
-            v_min=self.v_min,
-            v_max=self.v_max,
-            activation=critic_activation,
-            ortho_init=ortho_init,
-            output_gain=output_gain,
-            key=key_critic2,
-        )
 
     def act(
         self,

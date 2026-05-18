@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Literal
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Dict, Literal, Sequence, Union
 
 from .base_config import BaseConfig
 
@@ -159,39 +160,346 @@ def disable_corruption(observation_cfg) -> None:
             val.enable_corruption = False
 
 
+# ════════════════════════════════════════════════════════════════════
+# Neural network configuration — strict-typed
+# ════════════════════════════════════════════════════════════════════
+#
+# Design (long-term clean, no legacy shims):
+#   • StrEnum for closed value sets (Activation, DistributionType, StdType)
+#       — IDE-rename refactorable, mypy strict, single source of truth.
+#   • Union dataclass for mutually-exclusive init schemes
+#       (OrthoInit | DefaultInit) — invariant strangler ("ortho gain
+#       only meaningful with OrthoInit"), trivially extensible to
+#       KaimingInit / XavierInit later.
+#   • One dataclass per actor / critic class (MLPActorCfg,
+#       SpaceTimeTransformerActorCfg, ...). The cfg type *is* the
+#       actor-class identity — no string ``actor_class_name`` field
+#       (registry is keyed by cfg type). isinstance-based dispatch.
+#   • Backward compat with old `actor_kwargs`-style dict configs is
+#       NOT preserved; every preset / benchmark gets migrated in one
+#       pass. Checkpoints saved under the old schema cannot be loaded
+#       (acceptable per design decision).
+
+
+# ── Enums ───────────────────────────────────────────────────────────
+
+
+class Activation(StrEnum):
+    """Activation functions supported by MLP / decoder layers."""
+
+    RELU = "relu"
+    ELU = "elu"
+    TANH = "tanh"
+    SIGMOID = "sigmoid"
+    SELU = "selu"
+    GELU = "gelu"
+
+
+class DistributionType(StrEnum):
+    """Action-distribution families for stochastic policies."""
+
+    GAUSSIAN = "gaussian"
+    SQUASHED_GAUSSIAN = "squashed_gaussian"
+
+
+class StdType(StrEnum):
+    """How the policy parameterizes the action-distribution std."""
+
+    # NN outputs a per-state std vector.
+    STATE_DEPENDENT = "state_dependent"
+    # Learnable per-dimension log-std vector (state-independent).
+    STATE_INDEPENDENT = "state_independent"
+    # Frozen constant std (not learned).
+    FIXED = "fixed"
+    # Learnable single scalar std (no log transform, shared across dims).
+    SCALAR = "scalar"
+
+
+# ── Init schemes (mutually-exclusive Union) ─────────────────────────
+
+
+@dataclass
+class OrthoInit(BaseConfig):
+    """Orthogonal initialization.
+
+    Hidden-layer gain is auto-derived from the activation (sqrt(2) for
+    relu/elu, 1.0 for tanh/sigmoid/selu). Only ``output_gain`` is
+    user-controllable: actor heads typically use a small value
+    (e.g. 0.01) so the policy starts near zero; critic heads ignore
+    this and always use 1.0.
+    """
+
+    output_gain: float = 1.0
+
+
+@dataclass
+class DefaultInit(BaseConfig):
+    """Framework default init (Equinox's Glorot / Lecun)."""
+
+    pass
+
+
+InitScheme = Union[OrthoInit, DefaultInit]
+
+
+_INIT_CFG_CLASSES: Dict[str, type] = {
+    "OrthoInit": OrthoInit,
+    "DefaultInit": DefaultInit,
+}
+
+
+def _hydrate_init_scheme(val: Any) -> InitScheme:
+    """Convert a dict (deserialized form) back to the right Init dataclass."""
+    if isinstance(val, dict):
+        cls_name = val.pop("_type", "OrthoInit")
+        cls = _INIT_CFG_CLASSES[cls_name]
+        return cls(**val)
+    return val
+
+
+# ── Actor configs (one dataclass per actor class) ───────────────────
+
+
+@dataclass
+class MLPActorCfg(BaseConfig):
+    """Config for ``MLPActor`` (rlworld/rl/modules/architectures/mlp/actor.py).
+
+    The cfg type itself identifies the actor class — there is no
+    separate ``actor_class_name`` string. Dispatch happens by
+    ``isinstance(cfg.actor, MLPActorCfg)`` (or a cfg-type-keyed
+    registry lookup).
+    """
+
+    hidden_dims: list[int] = field(default_factory=lambda: [256, 128, 64])
+    activation: Activation = Activation.ELU
+    use_layer_norm: bool = False
+    init: InitScheme = field(default_factory=OrthoInit)
+
+    def __post_init__(self):
+        if isinstance(self.activation, str):
+            self.activation = Activation(self.activation)
+        self.init = _hydrate_init_scheme(self.init)
+
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        result["_type"] = type(self).__name__
+        if isinstance(result.get("init"), dict):
+            result["init"]["_type"] = type(self.init).__name__
+        return result
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        # Need to hydrate ``init`` (Union dataclass) manually because
+        # BaseConfig.update_from_dict can't switch a Union member's
+        # type. Then re-run __post_init__ so string → Enum coercion
+        # picks up the value yaml.safe_load left as a plain string.
+        from .base_config import update_from_dict
+
+        d = dict(config_dict)
+        init_dict = d.pop("init", None)
+        obj = cls()
+        update_from_dict(obj, d)
+        if init_dict is not None:
+            obj.init = _hydrate_init_scheme(dict(init_dict))
+        obj.__post_init__()
+        return obj
+
+
+@dataclass
+class SpaceTimeTransformerActorCfg(BaseConfig):
+    """Config for ``SpaceTimeTransformerActor``."""
+
+    tracked_body_names: Sequence[str] = field(default_factory=tuple)
+    future_offsets: Sequence[int] = field(default_factory=tuple)
+    actuated_joint_names: Sequence[str] | None = None
+    ref_feature_dim: int = 9
+    embed_dim: int = 128
+    num_heads: int = 4
+    num_layers: int = 3
+    dim_feedforward: int = 256
+    dropout: float = 0.0
+    bottleneck_dim: int = 32
+    tokenizer_hidden_dim: int | None = None
+    decoder_hidden_dim: int | None = None
+    decoder_activation: Activation = Activation.ELU
+    use_kinematic_mask: bool = True
+    pe_type: str = "learned"
+    use_relational_bias: bool = False
+    re_use_laplacian: bool = True
+    re_use_spd: bool = True
+    re_use_ppr: bool = True
+    re_ppr_alpha: float = 0.15
+    attention_mode: str = "factorized"
+
+    def __post_init__(self):
+        if isinstance(self.decoder_activation, str):
+            self.decoder_activation = Activation(self.decoder_activation)
+
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        result["_type"] = type(self).__name__
+        return result
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        # Re-run __post_init__ so decoder_activation gets coerced
+        # str → Enum after yaml.safe_load.
+        obj = super().from_dict(config_dict)
+        obj.__post_init__()
+        return obj
+
+
+ActorCfg = Union[MLPActorCfg, SpaceTimeTransformerActorCfg]
+
+_ACTOR_CFG_CLASSES: Dict[str, type] = {
+    "MLPActorCfg": MLPActorCfg,
+    "SpaceTimeTransformerActorCfg": SpaceTimeTransformerActorCfg,
+}
+
+
+def _hydrate_actor_cfg(val: Any) -> ActorCfg:
+    if isinstance(val, dict):
+        cls_name = val.pop("_type", "MLPActorCfg")
+        cls = _ACTOR_CFG_CLASSES[cls_name]
+        return cls.from_dict(val)
+    return val
+
+
+# ── Critic configs (one dataclass per critic class) ─────────────────
+
+
+@dataclass
+class MLPCriticCfg(BaseConfig):
+    """Config for ``MLPCritic``."""
+
+    hidden_dims: list[int] = field(default_factory=lambda: [256, 128, 64])
+    activation: Activation = Activation.ELU
+    use_layer_norm: bool = False
+    init: InitScheme = field(default_factory=OrthoInit)
+
+    def __post_init__(self):
+        if isinstance(self.activation, str):
+            self.activation = Activation(self.activation)
+        self.init = _hydrate_init_scheme(self.init)
+
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        result["_type"] = type(self).__name__
+        if isinstance(result.get("init"), dict):
+            result["init"]["_type"] = type(self.init).__name__
+        return result
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        # See MLPActorCfg.from_dict for rationale.
+        from .base_config import update_from_dict
+
+        d = dict(config_dict)
+        init_dict = d.pop("init", None)
+        obj = cls()
+        update_from_dict(obj, d)
+        if init_dict is not None:
+            obj.init = _hydrate_init_scheme(dict(init_dict))
+        obj.__post_init__()
+        return obj
+
+
+@dataclass
+class SpaceTimeTransformerCriticCfg(BaseConfig):
+    """Config for ``SpaceTimeTransformerCritic`` (no decoder fields)."""
+
+    tracked_body_names: Sequence[str] = field(default_factory=tuple)
+    future_offsets: Sequence[int] = field(default_factory=tuple)
+    ref_feature_dim: int = 9
+    embed_dim: int = 128
+    num_heads: int = 4
+    num_layers: int = 3
+    dim_feedforward: int = 256
+    dropout: float = 0.0
+    tokenizer_hidden_dim: int | None = None
+    use_kinematic_mask: bool = True
+    pe_type: str = "learned"
+    use_relational_bias: bool = False
+    re_use_laplacian: bool = True
+    re_use_spd: bool = True
+    re_use_ppr: bool = True
+    re_ppr_alpha: float = 0.15
+    attention_mode: str = "factorized"
+
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        result["_type"] = type(self).__name__
+        return result
+
+
+CriticCfg = Union[MLPCriticCfg, SpaceTimeTransformerCriticCfg]
+
+_CRITIC_CFG_CLASSES: Dict[str, type] = {
+    "MLPCriticCfg": MLPCriticCfg,
+    "SpaceTimeTransformerCriticCfg": SpaceTimeTransformerCriticCfg,
+}
+
+
+def _hydrate_critic_cfg(val: Any) -> CriticCfg:
+    if isinstance(val, dict):
+        cls_name = val.pop("_type", "MLPCriticCfg")
+        cls = _CRITIC_CFG_CLASSES[cls_name]
+        return cls.from_dict(val)
+    return val
+
+
+# ── Policy configs ──────────────────────────────────────────────────
+
+
 @dataclass
 class PolicyConfig(BaseConfig):
     """Base policy network configuration — common to all algorithms."""
 
-    actor_class_name: str = "MLPActor"
-    critic_class_name: str = "MLPCritic"
-    actor_kwargs: Dict[str, Any] = field(
-        default_factory=lambda: {
-            "activation": "elu",
-            "ortho_init": True,
-            "hidden_dims": [256, 128, 64],
-        }
-    )
-    critic_kwargs: Dict[str, Any] = field(
-        default_factory=lambda: {
-            "activation": "elu",
-            "ortho_init": True,
-            "hidden_dims": [256, 128, 64],
-        }
-    )
+    actor: ActorCfg = field(default_factory=MLPActorCfg)
+    critic: CriticCfg = field(default_factory=MLPCriticCfg)
+
+    def __post_init__(self):
+        self.actor = _hydrate_actor_cfg(self.actor)
+        self.critic = _hydrate_critic_cfg(self.critic)
 
     def to(self, target_cls: type) -> "PolicyConfig":
-        """Convert to another PolicyConfig subclass, copying common fields."""
-        import dataclasses as dc
-
-        base_field_names = {f.name for f in dc.fields(PolicyConfig)}
-        kwargs = {k: getattr(self, k) for k in base_field_names}
-        return target_cls(**kwargs)
+        """Convert to another PolicyConfig subclass, copying common fields
+        (actor + critic). Subclass-specific fields (init_noise_std,
+        distribution_type, etc.) keep the target's defaults.
+        """
+        return target_cls(actor=self.actor, critic=self.critic)
 
     def recursive_to_dict(self) -> Dict:
         result = super().recursive_to_dict()
         result["_type"] = self.__class__.__name__
         return result
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        """Hydrate actor / critic Union members from dict form.
+
+        The base ``BaseConfig.from_dict`` builds a default instance then
+        does an in-place ``update_from_dict``. That works for scalar /
+        nested-dict fields but cannot switch the *type* of a Union
+        field (e.g. default ``actor`` is :class:`MLPActorCfg` but the
+        serialized dict describes a :class:`SpaceTimeTransformerActorCfg`).
+        We extract ``actor`` / ``critic`` ahead of the update and
+        rebuild them via the ``_type`` discriminator.
+        """
+        from .base_config import update_from_dict
+
+        d = dict(config_dict)
+        actor_dict = d.pop("actor", None)
+        critic_dict = d.pop("critic", None)
+        obj = cls()
+        update_from_dict(obj, d)
+        if actor_dict is not None:
+            obj.actor = _hydrate_actor_cfg(dict(actor_dict))
+        if critic_dict is not None:
+            obj.critic = _hydrate_critic_cfg(dict(critic_dict))
+        # Re-run post_init for fresh enum / actor / critic coercion.
+        obj.__post_init__()
+        return obj
 
 
 @dataclass
@@ -199,8 +507,15 @@ class PPOPolicyConfig(PolicyConfig):
     """PPO policy settings."""
 
     init_noise_std: float = 1.0
-    distribution_type: str = "gaussian"
-    std_type: str = "state_independent"
+    distribution_type: DistributionType = DistributionType.GAUSSIAN
+    std_type: StdType = StdType.STATE_INDEPENDENT
+
+    def __post_init__(self):
+        super().__post_init__()
+        if isinstance(self.distribution_type, str):
+            self.distribution_type = DistributionType(self.distribution_type)
+        if isinstance(self.std_type, str):
+            self.std_type = StdType(self.std_type)
 
 
 @dataclass
@@ -208,9 +523,14 @@ class SACPolicyConfig(PolicyConfig):
     """SAC policy settings."""
 
     init_noise_std: float = 0.05
-    distribution_type: str = "squashed_gaussian"
+    distribution_type: DistributionType = DistributionType.SQUASHED_GAUSSIAN
     log_std_min: float = -20.0
     log_std_max: float = 2.0
+
+    def __post_init__(self):
+        super().__post_init__()
+        if isinstance(self.distribution_type, str):
+            self.distribution_type = DistributionType(self.distribution_type)
 
 
 @dataclass
@@ -228,7 +548,7 @@ class FastTD3PolicyConfig(PolicyConfig):
 
 
 # Registry for deserialization
-_POLICY_CONFIG_CLASSES = {
+_POLICY_CONFIG_CLASSES: Dict[str, type] = {
     "PolicyConfig": PolicyConfig,
     "PPOPolicyConfig": PPOPolicyConfig,
     "SACPolicyConfig": SACPolicyConfig,
@@ -242,18 +562,36 @@ class NNConfig(BaseConfig):
     """Neural network configuration (shared)."""
 
     policy: PolicyConfig = field(default_factory=PPOPolicyConfig)
-    state_estimator: Dict[str, Any] = field(
-        default_factory=lambda: {
-            "activation": "relu",
-            "hidden_dims": [256, 128, 64],
-        }
-    )
+    # ``state_estimator`` removed: there were no read sites for it in
+    # the framework or any preset. Re-introduce as a typed dataclass
+    # if/when actually consumed.
 
     def __post_init__(self):
         if isinstance(self.policy, dict):
             cls_name = self.policy.pop("_type", "PPOPolicyConfig")
-            cls = _POLICY_CONFIG_CLASSES.get(cls_name, PPOPolicyConfig)
+            cls = _POLICY_CONFIG_CLASSES[cls_name]
             self.policy = cls.from_dict(self.policy)
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        """Hydrate ``policy`` (PolicyConfig subclass + Union actor/critic)
+        from dict form. Required because ``BaseConfig.from_dict`` 's
+        in-place update cannot switch the policy *subclass* nor the
+        Union actor/critic *types* — both must be discriminated by
+        ``_type`` ahead of the update.
+        """
+        from .base_config import update_from_dict
+
+        d = dict(config_dict)
+        policy_dict = d.pop("policy", None)
+        obj = cls()
+        update_from_dict(obj, d)
+        if policy_dict is not None:
+            pd = dict(policy_dict)
+            cls_name = pd.pop("_type", "PPOPolicyConfig")
+            policy_cls = _POLICY_CONFIG_CLASSES[cls_name]
+            obj.policy = policy_cls.from_dict(pd)
+        return obj
 
 
 @dataclass

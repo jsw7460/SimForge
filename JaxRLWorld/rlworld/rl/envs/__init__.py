@@ -49,7 +49,6 @@ if TYPE_CHECKING:  # let type checkers / IDEs see the lazy names
     from .newton.locomotion_env import NewtonLocomotionEnv
     from .newton.newton_env import NewtonEnv
 
-
 __all__ = [
     "World",
     "LifecycleEvent",

@@ -30,7 +30,6 @@ def get_config(sim: str = "newton"):
     sim = sim.lower()
     cfg = G1FlatConfig(
         sim_type=sim,
-        actor_class_name="MLPActor",
         run_name=_DEFAULT_RUN_NAMES[sim],
     )
     return cfg.build()

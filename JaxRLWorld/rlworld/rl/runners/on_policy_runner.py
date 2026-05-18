@@ -114,16 +114,14 @@ class OnPolicyRunner(BaseRunner):
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg.actor_class_name,
-            critic_class_name=policy_cfg.critic_class_name,
+            actor_cfg=policy_cfg.actor,
+            critic_cfg=policy_cfg.critic,
             init_noise_std=policy_cfg.init_noise_std,
             std_type=policy_cfg.std_type,
             distribution_type=policy_cfg.distribution_type,
             kinematic_tree=kinematic_tree,
             actuated_joint_names=actuated_joint_names,
             key=key,
-            actor_kwargs=policy_cfg.actor_kwargs,
-            critic_kwargs=policy_cfg.critic_kwargs,
             obs_normalization=self.cfgs.algorithm.obs_normalization,
         )
 

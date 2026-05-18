@@ -25,7 +25,6 @@ def get_config(sim: str = "newton"):
     run_name_suffix = {"newton": "Newton", "genesis": "Genesis", "mujoco": "Mujoco"}[sim]
     cfg = Go2FlatConfig(
         sim_type=sim,
-        actor_class_name="MLPActor",
         run_name=f"Go2_{run_name_suffix}_MLP",
     )
     return cfg.build()

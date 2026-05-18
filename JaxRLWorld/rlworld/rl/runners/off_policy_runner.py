@@ -86,15 +86,14 @@ class OffPolicyRunner(BaseRunner):
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
+            actor_cfg=policy_cfg.actor,
+            critic_cfg=policy_cfg.critic,
             num_atoms=alg_cfg.num_atoms,
             v_min=alg_cfg.v_min,
             v_max=alg_cfg.v_max,
-            actor_class_name=policy_cfg.actor_class_name,
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
             key=key,
             is_squashed=alg_cfg.is_squashed,
-            actor_kwargs=policy_cfg.actor_kwargs,
-            critic_kwargs=policy_cfg.critic_kwargs,
             obs_normalization=alg_cfg.obs_normalization,
         )
 
@@ -104,7 +103,8 @@ class OffPolicyRunner(BaseRunner):
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg.actor_class_name,
+            actor_cfg=policy_cfg.actor,
+            critic_cfg=policy_cfg.critic,
             distribution_type=policy_cfg.distribution_type,
             init_noise_std=policy_cfg.init_noise_std,
             log_std_min=policy_cfg.log_std_min,
@@ -112,8 +112,6 @@ class OffPolicyRunner(BaseRunner):
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
             obs_normalization=self.cfgs.algorithm.obs_normalization,
             key=key,
-            actor_kwargs=policy_cfg.actor_kwargs,
-            critic_kwargs=policy_cfg.critic_kwargs,
         )
 
     def _init_td3_actor_critic(self, policy_cfg, key: jax.Array) -> None:
@@ -122,12 +120,11 @@ class OffPolicyRunner(BaseRunner):
             num_actor_obs=self.actor_obs_dim,
             num_critic_obs=self.critic_obs_dim,
             num_actions=self.num_actions_dim,
-            actor_class_name=policy_cfg.actor_class_name,
+            actor_cfg=policy_cfg.actor,
+            critic_cfg=policy_cfg.critic,
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
             obs_normalization=self.cfgs.algorithm.obs_normalization,
             key=key,
-            actor_kwargs=policy_cfg.actor_kwargs,
-            critic_kwargs=policy_cfg.critic_kwargs,
         )
 
     def _log_model_parameters(self) -> None:

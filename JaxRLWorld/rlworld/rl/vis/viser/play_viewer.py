@@ -268,6 +268,10 @@ class ViserPlayViewer(PlayViewerBase):
             try:
                 with self._sim_lock:
                     with self._server.atomic():
+                        # Queue debug visuals BEFORE update() so the same
+                        # frame's _sync_debug_visuals (called inside update)
+                        # picks them up — otherwise they lag by one frame.
+                        self._update_target_position_marker()
                         self._play_scene.update()
                         self._update_command_arrows()
                         self._server.flush()
@@ -331,6 +335,37 @@ class ViserPlayViewer(PlayViewerBase):
                 arrow_origin,
                 float(cmd_ang[env_idx]),
                 self._ang_vel_handle,
+            )
+
+    # ── Target position marker ──────────────────────────────────────
+    #
+    # Generic hook: if the command manager exposes any 3D-position term
+    # (e.g. drone hover ``target_position``), render it as a small
+    # pinkish sphere at the world-frame target. Uses the existing
+    # debug-sphere infra (ViserScene.add_sphere) which auto-applies the
+    # camera-tracking scene offset so the marker stays consistent with
+    # the rendered robot frame.
+    _TARGET_TERM_NAMES = ("target_position",)
+    _TARGET_MARKER_RADIUS = 0.05
+    _TARGET_MARKER_COLOR = (255, 80, 80)
+
+    def _update_target_position_marker(self) -> None:
+        cmd_manager = getattr(self.env, "command_manager", None)
+        if cmd_manager is None:
+            return
+        for name in self._TARGET_TERM_NAMES:
+            try:
+                cmd = cmd_manager.get_command(name)
+            except KeyError:
+                continue
+            if cmd is None or cmd.ndim != 2 or cmd.shape[1] != 3:
+                continue
+            env_idx = self._play_scene.env_idx
+            target_xyz = cmd[env_idx].detach().cpu().numpy()
+            self._play_scene.add_sphere(
+                position=target_xyz,
+                radius=self._TARGET_MARKER_RADIUS,
+                color=self._TARGET_MARKER_COLOR,
             )
 
     def _draw_velocity_arrow(

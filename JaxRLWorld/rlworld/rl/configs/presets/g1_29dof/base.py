@@ -28,11 +28,17 @@ from typing import Any, Dict
 
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
+    Activation,
     CommandConfig,
+    DistributionType,
     EventConfig,
+    MLPActorCfg,
+    MLPCriticCfg,
     NNConfig,
+    OrthoInit,
     PPOPolicyConfig,
     RunnerConfig,
+    StdType,
 )
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.presets._sim_builder_protocol import G1SimBuilderProtocol
@@ -115,7 +121,6 @@ class G1FlatConfig:
     # Algorithm
     algorithm_name: str = "PPO"
     max_iterations: int = 30000
-    actor_class_name: str = "MLPActor"
 
     # Run name (None → auto from sim_type)
     run_name: str | None = None
@@ -285,22 +290,19 @@ class G1FlatConfig:
     def _build_nn_config(self) -> NNConfig:
         return NNConfig(
             policy=PPOPolicyConfig(
-                actor_class_name=self.actor_class_name,
-                actor_kwargs={
-                    "activation": "elu",
-                    "ortho_init": True,
-                    "output_gain": 0.01,
-                    "hidden_dims": [512, 256, 128],
-                },
-                critic_kwargs={
-                    "activation": "elu",
-                    "ortho_init": True,
-                    "output_gain": 0.01,
-                    "hidden_dims": [1024, 512, 256],
-                },
+                actor=MLPActorCfg(
+                    activation=Activation.ELU,
+                    init=OrthoInit(output_gain=0.01),
+                    hidden_dims=[512, 256, 128],
+                ),
+                critic=MLPCriticCfg(
+                    activation=Activation.ELU,
+                    init=OrthoInit(output_gain=0.01),
+                    hidden_dims=[1024, 512, 256],
+                ),
                 init_noise_std=1.0,
-                distribution_type="gaussian",
-                std_type="scalar",
+                distribution_type=DistributionType.GAUSSIAN,
+                std_type=StdType.SCALAR,
             ),
         )
 

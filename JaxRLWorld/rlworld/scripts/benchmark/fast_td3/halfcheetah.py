@@ -15,6 +15,12 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 from rlworld.rl.configs import FastTD3PolicyConfig, GenesisConfigsForRun
 from rlworld.rl.configs.algorithms import FastTD3Config
+from rlworld.rl.configs.common_config_classes import (
+    Activation,
+    DefaultInit,
+    MLPActorCfg,
+    MLPCriticCfg,
+)
 from rlworld.rl.configs.presets.go2_flat.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 
@@ -31,11 +37,15 @@ def main():
     cfgs_for_run.env.num_envs = 1
     cfgs_for_run.env.env_name = "GymnasiumEnv"
     cfgs_for_run.env.task_name = "HalfCheetah-v4"
-    cfgs_for_run.nn.policy.actor_kwargs.update(
-        {"hidden_dims": [256, 128, 128], "activation": "relu", "ortho_init": False, "output_gain": 0.1}
+    cfgs_for_run.nn.policy.actor = MLPActorCfg(
+        hidden_dims=[256, 128, 128],
+        activation=Activation.RELU,
+        init=DefaultInit(),
     )
-    cfgs_for_run.nn.policy.critic_kwargs.update(
-        {"hidden_dims": [256, 128, 128], "activation": "relu", "ortho_init": False, "output_gain": 0.1}
+    cfgs_for_run.nn.policy.critic = MLPCriticCfg(
+        hidden_dims=[256, 128, 128],
+        activation=Activation.RELU,
+        init=DefaultInit(),
     )
 
     fast_td3_config = FastTD3Config(
