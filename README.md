@@ -68,7 +68,7 @@ cd SimForge
 
 ### 2. Create a conda env
 
-Python 3.10–3.12 is required.
+Python >= 3.11 is required.
 
 ```bash
 conda create -n jrw python=3.11 -y
