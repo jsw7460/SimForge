@@ -18,7 +18,7 @@
 /unitree_rl_mjlab/
 /SysID/
 /third_party/
-/JaxRLWorld-research/
+/JaxRLWorld-private/
 
 # --- Root-level files not needed ---
 setup.py
@@ -88,3 +88,4 @@ checkpoints/
 .claude/
 CLAUDE.local.md
 TODO.local.md
+MUJOCO_LOG.TXT
