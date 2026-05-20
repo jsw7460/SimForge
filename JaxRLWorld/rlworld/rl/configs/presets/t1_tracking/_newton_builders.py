@@ -209,11 +209,11 @@ class _ActorObsCfg(ObservationGroupConfig):
     # motion clip this env is currently tracking. Lives in the proprio
     # segment (before motion_future_window) so the tokenizer's
     # per-body MLPs absorb it.
-    motion_clip_id = ObservationTermConfig(
-        func=motion_clip_id_onehot,
-        scale=1.0,
-        params=_MOTION_PARAMS,
-    )
+    # motion_clip_id = ObservationTermConfig(
+    #     func=motion_clip_id_onehot,
+    #     scale=1.0,
+    #     params=_MOTION_PARAMS,
+    # )
     # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
     # obs by assuming future window is the trailing segment.
     motion_future_window = ObservationTermConfig(

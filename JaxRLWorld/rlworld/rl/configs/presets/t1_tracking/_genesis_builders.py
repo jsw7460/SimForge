@@ -197,11 +197,11 @@ class _ActorObsCfg(ObservationGroupConfig):
         noise=Unoise(-0.05, 0.05),
     )
     # Multi-clip disambiguation. See newton builder for rationale.
-    motion_clip_id = ObservationTermConfig(
-        func=motion_clip_id_onehot,
-        scale=1.0,
-        params=_MOTION_PARAMS,
-    )
+    # motion_clip_id = ObservationTermConfig(
+    #     func=motion_clip_id_onehot,
+    #     scale=1.0,
+    #     params=_MOTION_PARAMS,
+    # )
     # Must be LAST: SpaceTimeTransformer tokenizer splits the flat
     # obs by assuming future window is the trailing segment.
     motion_future_window = ObservationTermConfig(
