@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Literal
 
+from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
     Activation,
@@ -185,7 +186,7 @@ class G1TrackingConfig:
 
     run_name: str | None = None
 
-    def build(self):
+    def build(self) -> ConfigsForRun:
         if not self.motion_files:
             raise ValueError(
                 "G1TrackingConfig.motion_files is empty. Provide at least "
@@ -320,6 +321,6 @@ class G1TrackingConfig:
             run_name=run_name,
             logger="wandb",
             wandb_project="G1_Tracking",
-            save_interval=500,
+            save_interval=2000,
             output_dir="auto",
         )

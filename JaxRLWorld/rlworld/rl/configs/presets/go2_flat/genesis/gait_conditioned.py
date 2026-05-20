@@ -21,7 +21,7 @@ from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
     RewardConfig,
 )
-from rlworld.rl.configs.genesis_config_classes import ObservationConfig
+from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun, ObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
@@ -212,6 +212,9 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
 
         return _ObsCfg()
 
+    def build(self) -> GenesisConfigsForRun:
+        return super().build()
 
-def get_config():
+
+def get_config() -> GenesisConfigsForRun:
     return Go2GaitConditionedGenesisConfig().build()
