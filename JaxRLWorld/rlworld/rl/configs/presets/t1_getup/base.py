@@ -389,6 +389,6 @@ class T1GetupConfig:
             run_name=run_name,
             logger="wandb",
             wandb_project="T1_Getup",
-            save_interval=500,
+            save_interval=2000,
             output_dir="auto",
         )

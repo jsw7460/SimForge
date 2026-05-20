@@ -374,6 +374,6 @@ class T1TrackingConfig:
             run_name=run_name,
             logger="wandb",
             wandb_project="T1_Tracking",
-            save_interval=500,
+            save_interval=2000,
             output_dir="auto",
         )

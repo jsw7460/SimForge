@@ -385,6 +385,6 @@ class Go2FlatConfig:
             run_name=run_name,
             logger="wandb",
             wandb_project="Go2_Flat",
-            save_interval=250,
+            save_interval=2000,
             output_dir="auto",
         )
