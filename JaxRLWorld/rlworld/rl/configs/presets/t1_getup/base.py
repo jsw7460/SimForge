@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
+from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.algorithms.ppo import PPOConfig
 from rlworld.rl.configs.common_config_classes import (
     Activation,
@@ -198,7 +199,7 @@ class T1GetupConfig:
 
     # ── Build entry point ─────────────────────────────────────────────
 
-    def build(self):
+    def build(self) -> ConfigsForRun:
         """Build the complete typed ConfigsForRun for the configured sim."""
         builders = _get_sim_builders(self.sim_type)
         timing = _SIM_TIMINGS[self.sim_type]

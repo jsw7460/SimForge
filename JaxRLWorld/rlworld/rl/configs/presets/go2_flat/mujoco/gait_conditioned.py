@@ -7,7 +7,7 @@ See genesis/gait_conditioned.py for detailed documentation.
 from dataclasses import dataclass, field
 
 from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
-from rlworld.rl.configs.mujoco_config_classes import MujocoObservationConfig as ObservationConfig
+from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun, MujocoObservationConfig as ObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
@@ -207,6 +207,9 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
 
         return _ObsCfg()
 
+    def build(self) -> MujocoConfigsForRun:
+        return super().build()
 
-def get_config():
+
+def get_config() -> MujocoConfigsForRun:
     return Go2GaitConditionedMujocoConfig().build()
