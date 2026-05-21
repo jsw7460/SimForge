@@ -40,9 +40,6 @@ class BaseRunner(ABC):
         back to ``cfgs.env.env_name`` for backward compatibility and for
         non-physics environments (Gymnasium, ManiSkill).
         """
-        import gymnasium as gym
-        from gymnasium.vector import AutoresetMode, SyncVectorEnv
-
         from rlworld.rl import envs
 
         env_class_name = cfgs.env.env_name
@@ -72,6 +69,7 @@ class BaseRunner(ABC):
             env = env_class(**kwargs)
 
         elif env_class.sim_name == "ManiSkill":
+            import gymnasium as gym
             from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
             from rlworld.rl.envs import ManiSkillEnv
@@ -97,6 +95,9 @@ class BaseRunner(ABC):
             )
 
         elif env_class.sim_name == "Gymnasium":
+            import gymnasium as gym
+            from gymnasium.vector import AutoresetMode, SyncVectorEnv
+
             from rlworld.rl.envs import GymnasiumEnv
 
             def make_env(seed):
