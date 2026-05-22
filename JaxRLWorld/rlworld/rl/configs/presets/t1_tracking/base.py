@@ -89,7 +89,7 @@ class T1TrackingConfig:
     robot: T1Config = field(default_factory=T1Config)
 
     # Environment / training.
-    num_envs: int = 4096
+    num_envs: int = 512
     episode_length_s: float = 10.0
     seed: int = 42
 
@@ -223,7 +223,7 @@ class T1TrackingConfig:
     # use for it). Subclasses such as
     # :class:`T1TrackingTransformerConfig` override to a non-empty tuple
     # so the SpaceTimeTransformer's time axis has real content.
-    future_offsets: tuple[int, ...] = (1, 2, 4)
+    future_offsets: tuple[int, ...] = (1, 2, 4, 8)
     ref_feature_dim: int = 9
 
     # Algorithm.

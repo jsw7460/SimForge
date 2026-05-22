@@ -55,14 +55,14 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
     # ── Transformer hyperparameters ───────────────────────────────────
     transformer_embed_dim: int = 128
     transformer_num_heads: int = 4
-    transformer_num_layers: int = 2
+    transformer_num_layers: int = 4
     transformer_dim_feedforward: int = 512
 
     # NPMP-style information bottleneck. Encoder output is pooled to a
     # ``bottleneck_dim``-wide z and broadcast back to every per-body
     # decoder head. Forces the policy to abstract motion context into
     # a small latent rather than passing per-body features through.
-    transformer_bottleneck_dim: int = 32
+    transformer_bottleneck_dim: int = 8
 
     # Per-joint decoder MLP hidden width. The decoder keeps one head per
     # actuated joint (so morphological prior is preserved), but the
@@ -70,7 +70,7 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
     # large — set this explicitly to keep heads compact. With
     # ``embed_dim=128`` and ``bottleneck_dim=32`` the input is 160; a
     # hidden of 128 gives ~20k params per head (vs ~52k at the default).
-    transformer_decoder_hidden_dim: int = 128
+    transformer_decoder_hidden_dim: int = 32
 
     # ── Body-axis structural priors (SWAT-style) ──────────────────────
     # ``pe_type``: "learned" = single learnable (B, D) table (no
@@ -100,7 +100,7 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
     # time for small ``T*B`` (better fusion), and strictly more
     # expressive (cross-time-and-space dependencies are direct, not
     # mediated by stacking layers).
-    attention_mode: Literal["factorized", "joint"] = "factorized"
+    attention_mode: Literal["factorized", "joint"] = "joint"
 
     # ── Build override ────────────────────────────────────────────────
     def _build_nn_config(self) -> NNConfig:
@@ -122,7 +122,7 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
             dim_feedforward=self.transformer_dim_feedforward,
             bottleneck_dim=self.transformer_bottleneck_dim,
             decoder_hidden_dim=self.transformer_decoder_hidden_dim,
-            use_kinematic_mask=True,
+            use_kinematic_mask=False,
             pe_type=self.pe_type,
             use_relational_bias=self.use_relational_bias,
             re_use_laplacian=self.re_use_laplacian,
@@ -139,7 +139,7 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
             num_heads=self.transformer_num_heads,
             num_layers=self.transformer_num_layers,
             dim_feedforward=self.transformer_dim_feedforward,
-            use_kinematic_mask=True,
+            use_kinematic_mask=False,
             pe_type=self.pe_type,
             use_relational_bias=self.use_relational_bias,
             re_use_laplacian=self.re_use_laplacian,
@@ -172,9 +172,9 @@ class T1TrackingTransformerConfig(T1TrackingConfig):
             critic_lr=1e-3,
             estimator_learning_rate=5e-4,
             max_grad_norm=1.0,
-            num_learning_epochs=4,
+            num_learning_epochs=8,
             num_mini_batches=4,
-            num_steps_per_env=16,
+            num_steps_per_env=24,
             schedule="adaptive",
             use_clipped_value_loss=True,
             value_loss_coef=1.0,
