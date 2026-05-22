@@ -16,6 +16,7 @@ import importlib
 from typing import TYPE_CHECKING
 
 from .entity_selector import ResolvedEntity, SceneEntitySelector
+from .terrain_config import TerrainCfg
 from .unified_entity_config import (
     ArticulationCfg,
     EntityCfg,
@@ -51,6 +52,7 @@ if TYPE_CHECKING:  # let type checkers / IDEs see the lazy names
 __all__ = [
     "ResolvedEntity",
     "SceneEntitySelector",
+    "TerrainCfg",
     "ArticulationCfg",
     "EntityCfg",
     "GenesisEntityCfg",

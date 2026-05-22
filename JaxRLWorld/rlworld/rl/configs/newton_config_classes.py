@@ -20,7 +20,7 @@ if TYPE_CHECKING:
         CurriculumManagerConfig,
     )
     from rlworld.rl.configs.robots.base import RobotConfig
-    from rlworld.rl.configs.scene import NewtonEntityConfig
+    from rlworld.rl.configs.scene import EntityCfg, NewtonEntityConfig, TerrainCfg
     from rlworld.rl.configs.sensors.contact_sensor_config import ContactSensorCfg
     from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
 
@@ -103,13 +103,20 @@ class NewtonSceneConfig(BaseConfig):
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
     solver_type: Literal["mujoco"] = "mujoco"  # Currently, only support mujoco solver
     solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
-    entities: dict[str, Union["NewtonEntityConfig", "GroundPlaneCfg"]] = field(default_factory=list)
+    entities: dict[str, Union["EntityCfg", "NewtonEntityConfig", "GroundPlaneCfg", "TerrainCfg"]] = field(
+        default_factory=list
+    )
     sensors: list["NewtonSensorConfig"] | None = None
     # Simulator-agnostic contact sensors (shared with Genesis / mjlab).
     contact_sensors: "list[ContactSensorCfg] | None" = None
     add_ground: bool = True
     env_spacing: tuple[float, float, float] = (2.0, 2.0, 0.0)
     robot_cfg: Union["RobotConfig", None] = None
+    # Collision broad-phase triangle-pair budget. ``None`` keeps Newton's
+    # default (1e6); rough-terrain scenes set ``num_envs * per_env`` so
+    # heightfield contacts aren't silently dropped (see the Newton scene
+    # manager and the go2 rough preset).
+    collision_max_triangle_pairs: int | None = None
 
 
 @dataclass

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 
 from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
+from rlworld.rl.configs.scene.terrain_config import TerrainCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg,
     GroundPlaneCfg,
@@ -123,8 +124,8 @@ class MujocoSceneManagerConfig:
     # MujocoSceneManager.build_scene.
     sensors: tuple[ContactSensorCfg, ...] = ()
 
-    # Terrain
-    terrain_type: str = "plane"
+    # Terrain (flat plane by default; generator → injected heightfield).
+    terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
     # Solver
     solver_iterations: int = 10
@@ -237,6 +238,25 @@ class MujocoSceneManager(BaseManager):
         from mjlab.sim import MujocoCfg, Simulation, SimulationCfg
         from mjlab.terrains import TerrainEntityCfg
 
+        # Generated terrain → inject our canonical heightfield as an
+        # ``<hfield>`` in a "terrain" body via spec_fn (no mjlab terrain
+        # entity, so env_origins fall back to all-zeros = all envs at the
+        # origin on this single patch). ``self._terrain_data`` is read by
+        # the out-of-bounds termination.
+        # Terrain comes from the unified TerrainCfg. ``"generator"`` injects
+        # our canonical heightfield as an ``<hfield>`` in a "terrain" body
+        # via spec_fn (no mjlab terrain entity, so env_origins fall back to
+        # all-zeros = all envs at the origin on this single patch);
+        # ``"plane"`` uses mjlab's flat plane. ``self._terrain_data`` is read
+        # by the out-of-bounds termination.
+        self._terrain_data = None
+        terrain_cfg = self.config.terrain_cfg
+        terrain_spec_fn = None
+        if terrain_cfg.terrain_type == "generator":
+            from rlworld.rl.envs.managers.mujoco.terrain_importer import build_mujoco_terrain
+
+            terrain_spec_fn, self._terrain_data = build_mujoco_terrain(terrain_cfg)
+
         # Build mjlab SceneCfg
         if self.config.mjlab_scene_cfg is not None:
             # Legacy path — user provided mjlab SceneCfg directly
@@ -245,9 +265,10 @@ class MujocoSceneManager(BaseManager):
             scene_cfg = SceneCfg(
                 num_envs=self.config.num_envs,
                 env_spacing=self.config.env_spacing,
-                terrain=TerrainEntityCfg(terrain_type=self.config.terrain_type),
+                terrain=None if terrain_spec_fn is not None else TerrainEntityCfg(terrain_type="plane"),
                 entities={},
                 sensors=tuple(_to_mjlab_sensor_cfg(s) for s in self.config.sensors),
+                spec_fn=terrain_spec_fn,
             )
             self.config.mjlab_scene_cfg = scene_cfg
 

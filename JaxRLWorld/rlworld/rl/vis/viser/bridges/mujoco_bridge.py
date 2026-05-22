@@ -19,7 +19,7 @@ import trimesh
 import trimesh.visual
 from scipy.spatial.transform import Rotation
 
-from ..bridge import BodyMeshGroup, SimulatorGeometry
+from ..bridge import BodyMeshGroup, SimulatorGeometry, terrain_data_to_trimesh
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.mujoco.scene import MujocoSceneManager
@@ -123,11 +123,30 @@ class MujocoBridge:
             grp.local_positions.append(np.asarray(m.geom_pos[gid], dtype=np.float32))
             grp.local_quaternions.append(np.asarray(m.geom_quat[gid], dtype=np.float32))  # wxyz
 
+        mesh_groups = list(groups.values())
+
+        # Generated terrain is an ``<hfield>`` geom, which ``_geom_to_trimesh``
+        # skips (MuJoCo hfields aren't a renderable vertex mesh). Render the
+        # canonical height grid instead (matches what was injected) as a
+        # fixed body, and suppress the viewer's cosmetic flat ground.
+        terrain_data = getattr(self._scene_manager, "_terrain_data", None)
+        has_ground_mesh = terrain_data is not None
+        if terrain_data is not None:
+            mesh_groups.append(
+                BodyMeshGroup(
+                    body_id=-1,
+                    body_name="terrain",
+                    is_fixed=True,
+                    meshes=[terrain_data_to_trimesh(terrain_data)],
+                )
+            )
+
         return SimulatorGeometry(
-            mesh_groups=list(groups.values()),
+            mesh_groups=mesh_groups,
             num_bodies=m.nbody,
             tracked_body_id=self._tracked_body_id,
             tracked_body_name="base",
+            has_ground_mesh=has_ground_mesh,
         )
 
     def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:

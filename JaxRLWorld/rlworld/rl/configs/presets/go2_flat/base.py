@@ -43,6 +43,7 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets._sim_builder_protocol import Go2SimBuilderProtocol
 from rlworld.rl.configs.robots.go2 import Go2Config
+from rlworld.rl.configs.scene import TerrainCfg
 from rlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
 from rlworld.rl.envs.mdp.events import common as common_ef
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
@@ -55,6 +56,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
+from rlworld.rl.terrains import ROUGH_TERRAINS_CFG
 
 # ── Per-simulator constants ──────────────────────────────────────────
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
@@ -132,6 +134,23 @@ class Go2FlatConfig:
     # Run name (None → auto from sim_type)
     run_name: str | None = None
 
+    # ── Rough terrain ─────────────────────────────────────────────────
+    use_rough_terrain: bool = False
+    """Swap the flat ground for a generated rough terrain (the shared
+    ``ROUGH_TERRAINS_CFG`` height grid, fed identically to Newton, MuJoCo,
+    and Genesis via each one's native heightfield API). Terrain geometry is
+    defined in :mod:`rlworld.rl.terrains`, not here; see
+    :meth:`make_ground_entity`."""
+
+    terrain_collision_pairs_per_env: int = 3000
+    """Newton collision broad-phase budget per env on mesh terrain.
+
+    ``model.collide()`` emits ~2 triangle pairs per terrain triangle under
+    each robot collision shape. The total buffer handed to Newton's
+    ``CollisionPipeline`` is ``num_envs * this`` (set in the Newton
+    builder); too low → contacts silently dropped (robots sink / jitter).
+    Ignored when ``use_rough_terrain`` is False (flat plane emits ~0)."""
+
     # Actuator class selection
     use_ideal_pd_actuator: bool = True
     """If True, swap the default DelayedPDActuator pair for
@@ -198,6 +217,19 @@ class Go2FlatConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Backward-compatible dict output."""
         return self.build().recursive_to_dict()
+
+    def make_ground_entity(self) -> TerrainCfg:
+        """Build the scene ``"ground"`` entity config (flat or rough).
+
+        Called by the per-simulator ``build_scene`` builders so the
+        flat/rough choice lives in one place. Both are the same
+        :class:`TerrainCfg` under the same entity key (``terrain_type``
+        switch), so the rest of the scene config (contact sensors etc.) is
+        unaffected.
+        """
+        if not self.use_rough_terrain:
+            return TerrainCfg(terrain_type="plane")
+        return TerrainCfg(terrain_type="generator", terrain_generator=ROUGH_TERRAINS_CFG)
 
     # ── Shared build methods (variants may override) ──────────────────
 

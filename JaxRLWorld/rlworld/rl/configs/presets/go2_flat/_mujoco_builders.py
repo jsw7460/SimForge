@@ -51,6 +51,7 @@ from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from rlworld.rl.envs.mdp.events.dr import mujoco as mujoco_dr, unified as unified_dr
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
+from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
 
 if TYPE_CHECKING:
@@ -82,6 +83,13 @@ def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
             {"limit_angle": math.radians(30.0)},
         )
         time_out = TerminationTermConfig(tf.time_out)
+
+        # Reset before walking off the finite terrain mesh (rough only).
+        if cfg.use_rough_terrain:
+            out_of_terrain_bounds = TerminationTermConfig(
+                common_tf.terrain_out_of_bounds,
+                {"margin": 0.5},
+            )
 
     return MujocoEnvConfig(
         num_envs=cfg.num_envs,
@@ -186,7 +194,8 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         robot_entity_name="robot",
         entities={"robot": robot_entity},
         sensors=(feet_ground_cfg, body_ground_cfg),
-        terrain_type="plane",
+        # terrain (flat plane or generated) — single source of truth.
+        terrain_cfg=cfg.make_ground_entity(),
         cone="elliptic",
         solver_iterations=10,
         solver_ls_iterations=20,

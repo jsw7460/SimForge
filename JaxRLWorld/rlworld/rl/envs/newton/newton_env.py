@@ -185,6 +185,7 @@ class NewtonEnv(World):
                 solver_type=self.scene_cfg.solver_type,
                 solver_cfg=self.scene_cfg.solver_cfg,
                 env_spacing=self.scene_cfg.env_spacing,
+                collision_max_triangle_pairs=self.scene_cfg.collision_max_triangle_pairs,
             ),
         )
         self.scene_manager.register_entities()

@@ -44,7 +44,6 @@ from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
-    GroundPlaneCfg,
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, SensorConfig
@@ -84,6 +83,13 @@ def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> EnvConfig:
         )
         time_out = TerminationTermConfig(max_episode_exceed)
 
+        # Reset before walking off the finite terrain patch (rough only).
+        if cfg.use_rough_terrain:
+            out_of_terrain_bounds = TerminationTermConfig(
+                common_tf.terrain_out_of_bounds,
+                {"margin": 0.5},
+            )
+
     return EnvConfig(
         env_name="GenesisLocomotionEnv",
         task_name="Go2 Velocity Tracking",
@@ -108,7 +114,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
     return SceneConfig(
         env_spacing=(20.0, 20.0),
         entities={
-            "base_entity": GroundPlaneCfg(),
+            "base_entity": cfg.make_ground_entity(),
             "robot": GenesisEntityCfg(
                 # urdf_path=r.urdf_path,
                 mjcf_path=r.mjcf_path,

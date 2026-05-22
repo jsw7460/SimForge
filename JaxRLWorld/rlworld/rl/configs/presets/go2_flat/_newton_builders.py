@@ -41,7 +41,6 @@ from rlworld.rl.configs.robots.go2 import (
 from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
-    GroundPlaneCfg,
     InitialStateCfg,
     NewtonEntityCfg as UnifiedNewtonEntityCfg,
 )
@@ -93,6 +92,16 @@ def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonEnvConfig:
         )
         max_episode = TerminationTermConfig(max_episode_exceed)
 
+        # On generated (finite) terrain, reset the robot before it walks
+        # off the mesh edge into the void (matches IsaacLab / mjlab). Only
+        # registered for rough so the flat preset's terminations are
+        # unchanged.
+        if cfg.use_rough_terrain:
+            out_of_terrain_bounds = TerminationTermConfig(
+                common_tf.terrain_out_of_bounds,
+                {"margin": 0.5},
+            )
+
     return NewtonEnvConfig(
         env_name="NewtonLocomotionEnv",
         num_envs=cfg.num_envs,
@@ -131,9 +140,26 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         substeps=timing["substeps"],
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
-        solver_cfg=SolverMuJoCoCfg(impratio=100.0, ccd_iterations=50, cone="elliptic", ls_iterations=20, iterations=10),
+        solver_cfg=SolverMuJoCoCfg(
+            impratio=100.0,
+            ccd_iterations=50,
+            cone="elliptic",
+            ls_iterations=20,
+            iterations=10,
+            # Mesh terrain: route contacts through Newton's MPR-based
+            # pipeline instead of mjwarp's internal GJK/EPA collision.
+            # Under use_mujoco_contacts=True mjwarp does its own collision,
+            # which rejects planar mesh colliders, overflows its hardcoded
+            # 24-edge EPA horizon on mesh contacts, and silently zeroes the
+            # contact margin. With False, the solver consumes Newton's
+            # model.collide() contacts (MPR — stable for deep penetration,
+            # honors margin). Matches IsaacLab's Newton terrain setup. Flat
+            # ground keeps the default mjwarp contacts (True) — unchanged.
+            nconmax=300,
+            use_mujoco_contacts=not cfg.use_rough_terrain,
+        ),
         entities={
-            "ground": GroundPlaneCfg(),
+            "ground": cfg.make_ground_entity(),
             "robot": UnifiedNewtonEntityCfg(
                 # urdf_path=r.urdf_path,
                 mjcf_path=r.mjcf_path,
@@ -214,6 +240,13 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         add_ground=True,
         env_spacing=(2.0, 2.0, 0.0),
         robot_cfg=r,
+        # Rough terrain emits many heightfield triangle pairs in
+        # ``model.collide()``; size the broad-phase buffer to the env
+        # count so contacts aren't silently dropped. ``None`` on flat
+        # ground keeps Newton's default.
+        collision_max_triangle_pairs=(
+            cfg.num_envs * cfg.terrain_collision_pairs_per_env if cfg.use_rough_terrain else None
+        ),
     )
 
 

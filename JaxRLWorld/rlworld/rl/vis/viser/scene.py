@@ -327,6 +327,13 @@ class ViserScene:
     def _create_ground_plane(self) -> None:
         """Add the ground plane to the scene (look from ViserSceneConfig)."""
         cfg = self.scene_config
+        # When the simulator provides a real ground/terrain mesh (e.g. a
+        # heightfield), render that alone — the synthetic ground would
+        # otherwise overlap it. This mirrors MuJoCo / IsaacLab, which render
+        # the actual terrain geom rather than a separate decorative ground.
+        if self.geometry.has_ground_mesh:
+            self._ground_handle = None
+            return
         if cfg.ground_texture is not None:
             path = _GROUND_TEXTURE_ALIASES.get(cfg.ground_texture, cfg.ground_texture)
             if not os.path.isfile(path):

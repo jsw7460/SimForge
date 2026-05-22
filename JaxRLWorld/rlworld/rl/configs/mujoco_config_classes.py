@@ -12,6 +12,7 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
+from .scene.terrain_config import TerrainCfg
 
 if TYPE_CHECKING:
     from rlworld.rl.configs import (
@@ -61,8 +62,8 @@ class MujocoSceneConfig(BaseConfig):
     # MujocoSceneManager.build_scene.
     sensors: tuple = ()
 
-    # Terrain
-    terrain_type: str = "plane"
+    # Terrain (flat plane by default; generator → heightfield).
+    terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
     # Solver settings
     solver_iterations: int = 10

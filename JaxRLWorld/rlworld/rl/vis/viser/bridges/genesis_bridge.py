@@ -12,7 +12,7 @@ import numpy as np
 import trimesh
 import trimesh.visual
 
-from ..bridge import BodyMeshGroup, SimulatorGeometry
+from ..bridge import BodyMeshGroup, SimulatorGeometry, terrain_data_to_trimesh
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.genesis.scene import SceneManager
@@ -55,7 +55,12 @@ class GenesisBridge:
                     return True
                 break
 
-        # Check morph type.
+        # Check morph type. A ``Terrain`` entity is skipped here and instead
+        # rendered from the canonical ``_terrain_data`` in ``extract_geometry``
+        # (Genesis terrain mesh vertices are in the entity-local [0,L] frame
+        # and the base-pos offset isn't applied to fixed bodies, so rendering
+        # the entity directly would misplace it; the canonical grid is in
+        # world coords and lines up with the robot).
         morph = getattr(entity, "morph", None)
         if morph is not None:
             morph_cls = type(morph).__name__.lower()
@@ -134,11 +139,26 @@ class GenesisBridge:
                     )
                 )
 
+        # Generated terrain: render the canonical height grid in world
+        # coordinates (the Terrain entity itself is skipped — see
+        # _is_ground_entity) as a fixed body, and suppress the cosmetic ground.
+        terrain_data = getattr(self._scene_manager, "_terrain_data", None)
+        if terrain_data is not None:
+            mesh_groups.append(
+                BodyMeshGroup(
+                    body_id=-1,
+                    body_name="terrain",
+                    is_fixed=True,
+                    meshes=[terrain_data_to_trimesh(terrain_data)],
+                )
+            )
+
         return SimulatorGeometry(
             mesh_groups=mesh_groups,
             num_bodies=len(self._link_map),
             tracked_body_id=self._tracked_body_id,
             tracked_body_name="base",
+            has_ground_mesh=terrain_data is not None,
         )
 
     def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:

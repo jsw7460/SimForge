@@ -168,7 +168,6 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         robot_entity_name="robot",
         entities={"robot": robot_entity},
         sensors=(self_collision_cfg,),
-        terrain_type="plane",
         solver_iterations=10,
         solver_ls_iterations=20,
         ccd_iterations=50,

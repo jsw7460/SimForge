@@ -93,3 +93,42 @@ def roll_pitch_violation(
 
     violated = (roll_deg > roll_threshold_degree) | (pitch_deg > pitch_threshold_degree)
     return TerminationResult(violated)
+
+
+def terrain_out_of_bounds(
+    env: World,
+    margin: float = 0.5,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> TerminationResult:
+    """Terminate when the robot nears the edge of a generated terrain.
+
+    A finite terrain mesh has a cliff at its boundary; without this the
+    robot walks off and falls into the void, polluting training. Mirrors
+    IsaacLab's ``terrain_out_of_bounds`` and mjlab's
+    ``out_of_terrain_bounds``: terminate when ``|root_xy|`` exceeds the
+    terrain half-extent minus ``margin``, so the episode resets (to the
+    terrain centre) *before* the robot reaches the edge.
+
+    No-op when there is no generated terrain (flat plane / no terrain
+    data on the scene manager), so it is safe to register unconditionally.
+
+    Args:
+        env: Any environment with ``get_robot_data`` and a scene manager.
+        margin: Safety distance (m) inside the terrain edge at which to
+            terminate.
+        asset_cfg: Entity whose root position is checked.
+    """
+    # The backend terrain importer stashes the generated terrain (mesh +
+    # origins) here; absent for flat-plane / non-terrain scenes.
+    terrain_data = getattr(env.scene_manager, "_terrain_data", None)
+    if terrain_data is None:
+        return TerminationResult(torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
+
+    # Terrain is centred on the origin, so the half-extent bounds the field.
+    half_x, half_y = terrain_data.half_extent
+    limit_x = max(0.0, half_x - margin)
+    limit_y = max(0.0, half_y - margin)
+
+    root_xy = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, :2]
+    out = (root_xy[:, 0].abs() > limit_x) | (root_xy[:, 1].abs() > limit_y)
+    return TerminationResult(out)

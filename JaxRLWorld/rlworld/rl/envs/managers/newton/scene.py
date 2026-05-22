@@ -18,6 +18,7 @@ from rlworld.rl.configs.scene.newton_entity_config import (
     NewtonEntityConfig,
     NewtonGroundPlaneConfig,
 )
+from rlworld.rl.configs.scene.terrain_config import TerrainCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg,
     GroundPlaneCfg,
@@ -34,6 +35,7 @@ from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
+from rlworld.rl.envs.managers.newton.terrain_importer import import_terrain_newton
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.utils import string as string_utils
 
@@ -319,7 +321,9 @@ class NewtonSceneManagerConfig:
     num_worlds: int
 
     # Entity and sensor configurations
-    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | GroundPlaneCfg] = field(default_factory=dict)
+    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | GroundPlaneCfg | TerrainCfg] = field(
+        default_factory=dict
+    )
     sensors: list[NewtonSensorConfig] | None = None
     # Simulator-agnostic contact sensors (ContactSensorCfg). Handled
     # separately from ``sensors`` (which only holds NewtonSensorConfig
@@ -340,6 +344,16 @@ class NewtonSceneManagerConfig:
     # Solver
     solver_type: Literal["xpbd", "mujoco"] = "mujoco"  # "xpbd" or "mujoco"
     solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
+
+    # Collision broad-phase sizing. ``None`` keeps Newton's default
+    # (1e6 triangle pairs). Rough-terrain scenes need a much larger
+    # buffer: ``model.collide()`` emits two triangle pairs per
+    # heightfield cell under every robot collision shape, summed across
+    # all worlds, so a flat ground plane needs ~0 but a heightfield with
+    # thousands of cells × thousands of worlds overflows 1e6. Setting it
+    # too low silently drops contacts (robots sink / jitter on the
+    # terrain).
+    collision_max_triangle_pairs: int | None = None
 
 
 class NewtonSceneManager(BaseManager):
@@ -461,7 +475,9 @@ class NewtonSceneManager(BaseManager):
         for entity_name, cfg in self.config.entities.items():
             self._register_entity(entity_name, cfg)
 
-    def _register_entity(self, entity_name: str, cfg: EntityCfg | NewtonEntityCfg | GroundPlaneCfg) -> None:
+    def _register_entity(
+        self, entity_name: str, cfg: EntityCfg | NewtonEntityCfg | GroundPlaneCfg | TerrainCfg
+    ) -> None:
         """Register a single entity from its unified config."""
         if entity_name in self.entities:
             raise ValueError(f"Entity '{entity_name}' already registered")
@@ -469,7 +485,10 @@ class NewtonSceneManager(BaseManager):
         builder = newton.ModelBuilder()
         newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
 
-        if isinstance(cfg, GroundPlaneCfg):
+        if isinstance(cfg, TerrainCfg):
+            # Unified flat-or-generated terrain → Newton collider.
+            self._terrain_data = import_terrain_newton(builder, cfg)
+        elif isinstance(cfg, GroundPlaneCfg):
             shape_cfg = newton.ModelBuilder.ShapeConfig(
                 ke=cfg.contact_stiffness,
                 kd=cfg.contact_damping,
@@ -848,13 +867,16 @@ class NewtonSceneManager(BaseManager):
         # identical model-name prefix). Single-robot scenes are left untouched
         # (prefix stays the auto-extracted model name). The label *leaves* are
         # unchanged either way, so leaf-name-based matching is unaffected.
+        # Static global ground entities (flat plane or rough terrain) are
+        # added once, not replicated per-world, and don't count as robots.
+        _global_ground = (GroundPlaneCfg, TerrainCfg)
         n_robot_entities = sum(
-            1 for n in self._entity_builders if not isinstance(self.entities[n]["config"], GroundPlaneCfg)
+            1 for n in self._entity_builders if not isinstance(self.entities[n]["config"], _global_ground)
         )
         for entity_name, entity_builder in self._entity_builders.items():
             cfg = self.entities[entity_name]["config"]
-            if isinstance(cfg, GroundPlaneCfg):
-                # Ground plane: add once (global). No label prefix — the ground
+            if isinstance(cfg, _global_ground):
+                # Ground / terrain: add once (global). No label prefix — it
                 # is resolved via the unscoped fallback in _resolve_indices.
                 scene_builder.add_builder(entity_builder)
             else:
@@ -910,8 +932,16 @@ class NewtonSceneManager(BaseManager):
         # Initial FK with model defaults (will be updated in reset)
         newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
 
-        # Create collision pipeline
-        self.collision_pipeline = newton.CollisionPipeline(self.model)
+        # Create collision pipeline. Pass an enlarged triangle-pair buffer
+        # only when the scene requests it (rough terrain); otherwise keep
+        # Newton's default so flat-ground scenes are unaffected.
+        if self.config.collision_max_triangle_pairs is not None:
+            self.collision_pipeline = newton.CollisionPipeline(
+                self.model,
+                max_triangle_pairs=self.config.collision_max_triangle_pairs,
+            )
+        else:
+            self.collision_pipeline = newton.CollisionPipeline(self.model)
         self.contacts = self.collision_pipeline.contacts()
 
         # Update entity tracking with replicated info
@@ -1056,7 +1086,9 @@ class NewtonSceneManager(BaseManager):
         """
         for entity_name, entity_info in self.entities.items():
             cfg = entity_info["config"]
-            if isinstance(cfg, GroundPlaneCfg):
+            # Static ground entities (flat plane or rough terrain) have no
+            # articulation, so they get no ArticulationView.
+            if isinstance(cfg, GroundPlaneCfg | TerrainCfg):
                 continue
             prefix = getattr(cfg, "body_label_prefix", None)
             pattern = f"{prefix}*" if prefix else "*"

@@ -14,6 +14,30 @@ import numpy as np
 import trimesh
 
 
+def terrain_data_to_trimesh(data) -> trimesh.Trimesh:
+    """Tessellate a canonical ``TerrainData`` height grid into a world-frame mesh.
+
+    The grid is centred on the origin spanning ``size_xy``; ``z`` is the
+    metre height directly, so the surface lines up with the physics terrain
+    in every backend (the terrain group is rendered as a fixed body, so its
+    vertices must already be in world coordinates).
+    """
+    heights = np.asarray(data.heights_m, dtype=np.float32)
+    nrow, ncol = heights.shape
+    lx, ly = data.size_xy
+    xs = np.linspace(-lx / 2.0, lx / 2.0, nrow, dtype=np.float32)  # rows → x
+    ys = np.linspace(-ly / 2.0, ly / 2.0, ncol, dtype=np.float32)  # cols → y
+    xx, yy = np.meshgrid(xs, ys, indexing="ij")
+    vertices = np.stack([xx.ravel(), yy.ravel(), heights.ravel()], axis=1).astype(np.float32)
+    rr, cc = np.meshgrid(np.arange(nrow - 1), np.arange(ncol - 1), indexing="ij")
+    v00 = (rr * ncol + cc).ravel()
+    v01 = (rr * ncol + cc + 1).ravel()
+    v10 = ((rr + 1) * ncol + cc).ravel()
+    v11 = ((rr + 1) * ncol + cc + 1).ravel()
+    faces = np.concatenate([np.stack([v00, v10, v11], axis=1), np.stack([v00, v11, v01], axis=1)], axis=0)
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+
 @dataclass
 class BodyMeshGroup:
     """A group of visual meshes attached to one body/link."""
@@ -38,6 +62,13 @@ class SimulatorGeometry:
     # Index of the body to track with the camera (typically the robot base).
     tracked_body_id: int | None = None
     tracked_body_name: str = "base"
+    # True when the simulator already supplies a real, renderable
+    # ground/terrain mesh (e.g. a heightfield). The viewer then skips its
+    # synthetic fallback ground plane so the two don't overlap — matching
+    # how MuJoCo / IsaacLab render the actual terrain geom. Stays False for
+    # flat analytic ground planes (which have no mesh), so those tasks keep
+    # the cosmetic ground.
+    has_ground_mesh: bool = False
 
 
 @runtime_checkable

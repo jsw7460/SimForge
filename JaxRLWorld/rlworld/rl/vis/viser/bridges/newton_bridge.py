@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import trimesh
 import trimesh.visual
-from newton import ShapeFlags
+from newton import Heightfield, ShapeFlags
 
 from ..bridge import BodyMeshGroup, SimulatorGeometry
 
@@ -67,7 +67,16 @@ class NewtonBridge:
 
             if local_body_idx not in body_meshes:
                 body_meshes[local_body_idx] = []
-                label = model.body_label[body_idx] if body_idx < len(model.body_label) else f"body_{local_body_idx}"
+                # body_idx < 0 marks static world geometry (ground plane,
+                # heightfield terrain) — it has no body, so don't index
+                # ``body_label`` with a negative value (that would grab an
+                # unrelated body's name).
+                if 0 <= body_idx < len(model.body_label):
+                    label = model.body_label[body_idx]
+                elif body_idx < 0:
+                    label = "terrain"
+                else:
+                    label = f"body_{local_body_idx}"
                 body_names[local_body_idx] = label
 
             # Build trimesh from Newton mesh data.
@@ -92,6 +101,11 @@ class NewtonBridge:
             num_bodies=self._bodies_per_world,
             tracked_body_id=self._tracked_body_local,
             tracked_body_name="base",
+            # A fixed mesh group is, by construction of ``_is_ground_body``,
+            # a real ground/terrain mesh (e.g. the heightfield) — flat
+            # analytic ground planes have no mesh and never appear here. Tell
+            # the viewer so it skips its synthetic fallback ground.
+            has_ground_mesh=any(group.is_fixed for group in mesh_groups),
         )
 
     def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
@@ -147,6 +161,10 @@ class NewtonBridge:
         misclassified as ground bodies (the ``worldbody`` prefix is
         just an XPath segment, not the body's own name).
         """
+        # Static world geometry (ground plane, heightfield terrain) is
+        # attached to body -1 — it has no body and is always world-fixed.
+        if body_id < 0:
+            return True
         if body_id >= len(self._model.body_label):
             return False
         # Use the last path segment as the body's own name.
@@ -163,14 +181,47 @@ class NewtonBridge:
         # Default to body 1 (skip ground at 0).
         return min(1, self._bodies_per_world - 1) if self._bodies_per_world > 1 else 0
 
+    @staticmethod
+    def _heightfield_to_vertices_faces(hf: Heightfield) -> tuple[np.ndarray, np.ndarray]:
+        """Tessellate a Newton heightfield grid into (vertices, flat indices).
+
+        Uses the same grid→world mapping as Newton's collision query
+        (X spans columns, Y spans rows, ``z = min_z + data*(max_z-min_z)``)
+        so the rendered surface matches the collision geometry. Extents are
+        unscaled — the caller applies the shape's ``scale`` / ``transform``.
+        """
+        data = np.asarray(hf.data, dtype=np.float32)  # (nrow, ncol), normalised [0, 1]
+        nrow, ncol = int(hf.nrow), int(hf.ncol)
+        z_range = float(hf.max_z) - float(hf.min_z)
+
+        xs = np.linspace(-hf.hx, hf.hx, ncol, dtype=np.float32)
+        ys = np.linspace(-hf.hy, hf.hy, nrow, dtype=np.float32)
+        xx, yy = np.meshgrid(xs, ys)
+        zz = float(hf.min_z) + data * z_range
+        vertices = np.stack([xx.ravel(), yy.ravel(), zz.ravel()], axis=1).astype(np.float32)
+
+        rr, cc = np.meshgrid(np.arange(nrow - 1), np.arange(ncol - 1), indexing="ij")
+        v00 = (rr * ncol + cc).ravel()
+        v01 = (rr * ncol + cc + 1).ravel()
+        v10 = ((rr + 1) * ncol + cc).ravel()
+        v11 = ((rr + 1) * ncol + cc + 1).ravel()
+        tri1 = np.stack([v00, v10, v11], axis=1)
+        tri2 = np.stack([v00, v11, v01], axis=1)
+        indices = np.concatenate([tri1, tri2], axis=0).reshape(-1).astype(np.int32)
+        return vertices, indices
+
     def _newton_mesh_to_trimesh(
         self,
         geo_src,
         shape_idx: int,
     ) -> trimesh.Trimesh | None:
-        """Convert a Newton mesh to trimesh.Trimesh."""
-        vertices = geo_src.vertices  # (N, 3) float32
-        indices = geo_src.indices  # (M,) int32
+        """Convert a Newton mesh or heightfield to trimesh.Trimesh."""
+        if isinstance(geo_src, Heightfield):
+            # Heightfields carry a 2D elevation grid, not a vertex/index mesh.
+            vertices, indices = self._heightfield_to_vertices_faces(geo_src)
+        else:
+            vertices = geo_src.vertices  # (N, 3) float32
+            indices = geo_src.indices  # (M,) int32
 
         if vertices is None or len(vertices) == 0:
             return None
