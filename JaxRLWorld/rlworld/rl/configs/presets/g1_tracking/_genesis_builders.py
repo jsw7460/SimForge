@@ -43,6 +43,7 @@ from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
+    motion_future_reference_window,
     robot_body_ori_b,
     robot_body_pos_b,
 )
@@ -193,6 +194,14 @@ def build_observation(cfg: G1TrackingConfig) -> ObservationConfig:
             params=motion_params,
             noise=Unoise(-0.05, 0.05),
         )
+        # Must be LAST: SpaceTimeTransformer tokenizer assumes the future
+        # window is the trailing obs segment. Width-0 when future_offsets
+        # is empty (MLP baseline), so the MLP observation is unchanged.
+        motion_future_window = ObservationTermConfig(
+            func=motion_future_reference_window,
+            scale=1.0,
+            params=motion_params,
+        )
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
@@ -223,6 +232,12 @@ def build_observation(cfg: G1TrackingConfig) -> ObservationConfig:
         )
         robot_body_ori = ObservationTermConfig(
             func=robot_body_ori_b,
+            scale=1.0,
+            params=motion_params,
+        )
+        # Must be LAST: see _ActorObsCfg.motion_future_window.
+        motion_future_window = ObservationTermConfig(
+            func=motion_future_reference_window,
             scale=1.0,
             params=motion_params,
         )

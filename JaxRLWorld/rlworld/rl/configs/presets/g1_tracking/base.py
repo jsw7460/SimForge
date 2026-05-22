@@ -96,6 +96,14 @@ class G1TrackingConfig:
     motion_files: tuple[str, ...] = ("JaxRLWorld/rlworld/assets/motions/gangnam_style/G1_gangnam_style_V01.npz",)
     motion_weights: tuple[float, ...] | None = None
 
+    # Future motion reference window (sparse frame offsets). Empty for the
+    # MLP baseline (no architectural use); the SpaceTimeTransformer variant
+    # overrides to a non-empty tuple so its time axis carries reference
+    # content. The ``motion_future_reference_window`` obs term emits a
+    # width-0 vector when this is empty, so the MLP observation is unchanged.
+    future_offsets: tuple[int, ...] = ()
+    ref_feature_dim: int = 9
+
     # ── Body list (Mjlab G1 tracking config/g1/env_cfgs.py) ───────────
     # Anchor body is the shared torso link; the first entry of body_names
     # is the floating-base body (pelvis on G1) whose pose/velocity seeds
@@ -256,6 +264,7 @@ class G1TrackingConfig:
                     adaptive_uniform_ratio=self.adaptive_uniform_ratio,
                     adaptive_alpha=self.adaptive_alpha,
                     sampling_mode=self.sampling_mode,
+                    future_offsets=self.future_offsets,
                 ),
             },
         )
