@@ -649,6 +649,14 @@ class RunnerConfig(BaseConfig):
     eval_deterministic: bool = True
     eval_disable_noise: bool = True
     eval_disable_interval_events: bool = True
+    # Optional held-out eval sets, keyed by label, e.g.
+    # ``{"near": ("a.npz", ...), "far": (...)}``. For each non-empty entry
+    # the runner builds a separate deterministic eval env with the motion
+    # command's ``motion_files`` swapped to that set and logs the metrics
+    # under ``Eval/heldout_<label>/``. Empty (default) = no held-out eval.
+    # Only meaningful for motion-tracking presets (those with a "motion"
+    # command term); ignored otherwise.
+    eval_extra_motion_files: dict = field(default_factory=dict)
 
 
 @dataclass

@@ -455,8 +455,11 @@ class BaseRunner(ABC):
         return self._eval_env
 
     def _run_evaluation(self) -> Dict[str, Any]:
-        """Run deterministic evaluation episodes and return statistics."""
-        eval_env = self._get_or_create_eval_env()
+        """Deterministic eval on the default (training-motion) eval env."""
+        return self._evaluate_env(self._get_or_create_eval_env())
+
+    def _evaluate_env(self, eval_env: "World") -> Dict[str, Any]:
+        """Run the deterministic eval loop on ``eval_env`` and return stats."""
         eval_start = time.time()
 
         num_envs = eval_env.num_envs
@@ -569,6 +572,65 @@ class BaseRunner(ABC):
 
         if self.wandb_logger:
             self.wandb_logger.log_eval_data(eval_stats, step=self.total_timesteps)
+
+    def _get_or_create_heldout_eval_envs(self) -> Dict[str, World]:
+        """Lazily build one deterministic eval env per held-out motion set.
+
+        Reads ``runner_cfg.eval_extra_motion_files`` (label -> motion-file
+        tuple). Each env reuses ``_create_eval_configs`` (small num_envs,
+        noise / interval events / viewer off) and only swaps the motion
+        command's ``motion_files`` to the held-out set (uniform sampling,
+        since adaptive is single-motion only). Returns ``{}`` when nothing
+        is configured or the preset has no "motion" command term.
+        """
+        if hasattr(self, "_heldout_eval_envs"):
+            return self._heldout_eval_envs
+
+        self._heldout_eval_envs: Dict[str, World] = {}
+        extra = getattr(self.runner_cfg, "eval_extra_motion_files", None) or {}
+        for label, files in extra.items():
+            if not files:
+                continue
+            cfgs = self._create_eval_configs()
+            motion = cfgs.command.terms.get("motion")
+            if motion is None:
+                continue  # non-tracking preset: nothing to swap
+            motion.motion_files = tuple(files)
+            motion.sampling_mode = "uniform"
+            self._heldout_eval_envs[label] = self._create_env_from_config(cfgs)
+        return self._heldout_eval_envs
+
+    def _log_heldout_eval_stats(self, eval_stats: Dict[str, Any], label: str, it: int) -> None:
+        """Console + wandb logging for one held-out set, under the
+        ``Eval/heldout_<label>/`` namespace (mirrors ``log_eval_data``)."""
+        mean_ret = eval_stats.get("eval/mean_return", 0.0)
+        mean_len = eval_stats.get("eval/mean_episode_length", 0.0)
+        n_eps = eval_stats.get("eval/num_episodes", 0)
+        print(
+            f"  {GREEN}[Eval/heldout_{label} @ iter {it}]{RESET} "
+            f"return={mean_ret:.2f}  length={mean_len:.1f}  episodes={n_eps}"
+        )
+        if not self.wandb_logger:
+            return
+        import wandb
+
+        prefix = f"Eval/heldout_{label}"
+        core = {
+            "eval/mean_return",
+            "eval/std_return",
+            "eval/min_return",
+            "eval/max_return",
+            "eval/mean_episode_length",
+            "eval/num_episodes",
+            "eval/time",
+        }
+        log_dict: Dict[str, Any] = {}
+        for key, val in eval_stats.items():
+            if key in core:
+                log_dict[f"{prefix}/{key.split('eval/', 1)[-1]}"] = val
+            elif key.startswith("eval/reward/"):
+                log_dict[f"{prefix}/Rewards/{key.split('eval/reward/')[1]}"] = val
+        wandb.log(log_dict, step=self.total_timesteps)
 
     # ==================== End Evaluation ====================
 
@@ -733,6 +795,9 @@ class BaseRunner(ABC):
         if eval_interval > 0 and it > 0 and it % eval_interval == 0:
             eval_stats = self._run_evaluation()
             self._log_eval_stats(eval_stats, it=it)
+            # Held-out (generalization) eval on any configured motion sets.
+            for label, hold_env in self._get_or_create_heldout_eval_envs().items():
+                self._log_heldout_eval_stats(self._evaluate_env(hold_env), label, it)
 
         if it % self.runner_cfg.save_interval == 0:
             self.checkpoint(it)
