@@ -89,3 +89,6 @@ checkpoints/
 CLAUDE.local.md
 TODO.local.md
 MUJOCO_LOG.TXT
+
+# Raw retargeted-motion CSVs (intermediate; converted NPZs live in rlworld_private)
+/lafan1_g1_raw/
