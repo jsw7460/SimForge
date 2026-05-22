@@ -41,7 +41,6 @@ from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
-    motion_clip_id_onehot,
     motion_future_reference_window,
     robot_body_ori_b,
     robot_body_pos_b,
@@ -250,12 +249,14 @@ class _CriticObsCfg(ObservationGroupConfig):
         scale=1.0,
         params=_MOTION_PARAMS,
     )
-    # Same multi-clip identifier as the actor.
-    motion_clip_id = ObservationTermConfig(
-        func=motion_clip_id_onehot,
-        scale=1.0,
-        params=_MOTION_PARAMS,
-    )
+    # motion_clip_id disabled (matches actor) so critic obs is motion-count
+    # independent — required for held-out generalization eval where the
+    # eval motion set differs from training. See _ActorObsCfg.motion_clip_id.
+    # motion_clip_id = ObservationTermConfig(
+    #     func=motion_clip_id_onehot,
+    #     scale=1.0,
+    #     params=_MOTION_PARAMS,
+    # )
     # Must be LAST: see _ActorObsCfg.motion_future_window.
     motion_future_window = ObservationTermConfig(
         func=motion_future_reference_window,
