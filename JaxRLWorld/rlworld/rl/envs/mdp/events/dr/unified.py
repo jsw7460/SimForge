@@ -49,6 +49,27 @@ if TYPE_CHECKING:
 _defaults_newton_friction = DefaultCache()
 
 
+def _newton_notify(env: World, flag) -> None:
+    """Notify the Newton solver of a model-property change.
+
+    Each Newton ``solver.notify_model_changed`` triggers a non-trivial GPU
+    state refresh; when multiple DR terms fire in the same reset (e.g. body
+    inertia + joint friction + foot friction), three sequential notifies
+    add up. The event manager wraps the ``reset_dr`` loop with a deferred-
+    flag attribute (``env._dr_pending_notify_flags``); when present, we OR
+    flags into it instead of notifying, and the manager flushes a single
+    combined notify after the loop. Outside that context the call is
+    unchanged (immediate notify). Newton-only — no behavior change for
+    Genesis / MuJoCo backends, which never reach this helper.
+    """
+    pending = getattr(env, "_dr_pending_notify_flags", None)
+    flag_int = int(flag)
+    if pending is None:
+        env.scene_manager.solver.notify_model_changed(flag_int)
+    else:
+        env._dr_pending_notify_flags = pending | flag_int
+
+
 # Newton stores the three friction axes (slide / torsional / rolling)
 # as separate per-shape float arrays.  The MuJoCo solver bridge inside
 # Newton repacks them into ``geom_friction[world, geom]`` whenever
@@ -291,7 +312,7 @@ def _newton_friction_backend(
 
         view.set_attribute(attr, model, values)
 
-    env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
+    _newton_notify(env, SolverNotifyFlags.SHAPE_PROPERTIES)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -455,7 +476,7 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
         defaults[env_ids.unsqueeze(1), body_indices], sampled, operation
     )
     wp.copy(model.body_mass, wp.from_torch(mass.reshape(-1).contiguous(), dtype=wp.float32))
-    env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
+    _newton_notify(env, SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
 
 
 def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution, shared_random):
@@ -558,7 +579,7 @@ def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
         offsets[:, :, axis] = torch.empty(n_envs, n_bodies, device=env.device).uniform_(lo, hi)
     body_com[env_ids.unsqueeze(1), body_indices] = original + offsets
     wp.copy(model.body_com, wp.from_torch(body_com.reshape(-1, 3).contiguous(), dtype=wp.vec3))
-    env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
+    _newton_notify(env, SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
 
 
 def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, axes, shared_random):
@@ -655,7 +676,7 @@ def _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distri
         view.set_attribute(attr_name, model, values)
         notify = True
     if notify:
-        env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+        _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
 def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
@@ -741,7 +762,7 @@ def _newton_armature_backend(env, env_ids, armature_range, operation, distributi
         defaults = _defaults_newton_armature.get_or_cache("joint_armature", armature.clone())
         armature[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
     view.set_attribute("joint_armature", model, armature)
-    env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
 def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution, shared_random):
@@ -822,7 +843,7 @@ def _newton_joint_friction_backend(env, env_ids, friction_range, operation, dist
         defaults = _defaults_newton_joint_friction.get_or_cache("joint_friction", friction.clone())
         friction[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
     view.set_attribute("joint_friction", model, friction)
-    env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
 def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution, shared_random):

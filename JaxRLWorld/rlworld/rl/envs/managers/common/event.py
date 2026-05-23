@@ -91,8 +91,28 @@ class EventManager(BaseManager):
             self._call_event_fn(name, term, env_ids=env_ids)
 
     def _apply_reset_dr(self, env_ids: torch.Tensor) -> None:
-        for name, term in self._terms_by_mode["reset_dr"]:
-            self._call_event_fn(name, term, env_ids=env_ids)
+        # Newton: each ``solver.notify_model_changed`` call triggers a
+        # non-trivial GPU model-state refresh. When multiple DR terms fire
+        # in the same reset (e.g. body inertia + joint friction + foot
+        # friction), per-term notifies stack and dominate the reset path
+        # (~5 ms each, observed ~16 ms at 3 terms in g1_tracking). The
+        # Newton DR backends check for ``env._dr_pending_notify_flags`` and
+        # OR their flags into it instead of notifying immediately; we
+        # flush a single combined notify here after all terms have run.
+        # No-op for Genesis / MuJoCo (their backends never touch the
+        # attribute and ``flags`` stays 0).
+        is_newton = getattr(self.env, "sim_type", None) == "newton"
+        if is_newton:
+            self.env._dr_pending_notify_flags = 0
+        try:
+            for name, term in self._terms_by_mode["reset_dr"]:
+                self._call_event_fn(name, term, env_ids=env_ids)
+        finally:
+            if is_newton:
+                flags = self.env._dr_pending_notify_flags
+                del self.env._dr_pending_notify_flags
+                if flags:
+                    self.env.scene_manager.solver.notify_model_changed(flags)
 
     def _apply_interval(self, dt: float) -> None:
         for local_idx, (name, term) in enumerate(self._terms_by_mode["interval"]):

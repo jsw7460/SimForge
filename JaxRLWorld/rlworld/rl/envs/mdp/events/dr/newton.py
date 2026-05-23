@@ -21,6 +21,7 @@ import warp as wp
 from newton.solvers import SolverNotifyFlags
 
 from ._utils import sample
+from .unified import _newton_notify
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import NewtonEnv
@@ -76,9 +77,7 @@ def set_joint_friction(
         )
         friction[env_ids] = float(value) * scale
     view.set_attribute("joint_friction", model, friction)
-    env.scene_manager.solver.notify_model_changed(
-        SolverNotifyFlags.JOINT_DOF_PROPERTIES,
-    )
+    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
 def set_foot_friction(
@@ -146,9 +145,7 @@ def set_foot_friction(
             shape_mu[env_ids, int(si)] = mu_val
 
     wp.copy(model.shape_material_mu, wp.from_torch(flat_mu, dtype=wp.float32))
-    env.scene_manager.solver.notify_model_changed(
-        SolverNotifyFlags.SHAPE_PROPERTIES,
-    )
+    _newton_notify(env, SolverNotifyFlags.SHAPE_PROPERTIES)
 
     # ── Ground geom mu (MuJoCo solver pair max() rule) ──────────────
     solver = env.scene_manager.solver
