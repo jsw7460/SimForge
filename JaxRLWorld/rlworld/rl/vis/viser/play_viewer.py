@@ -18,6 +18,8 @@ import trimesh
 import trimesh.visual
 import viser
 
+from ._ghost import MotionGhost
+from .command_panel import ViserCommandPanel
 from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .play_scene import PlayScene
 from .play_viewer_base import PlayViewerBase
@@ -72,6 +74,17 @@ class ViserPlayViewer(PlayViewerBase):
         self._cmd_arrow_handles: tuple | None = None
         self._actual_arrow_handles: tuple | None = None
         self._ang_vel_handle = None
+        # One panel per CommandTerm that declares ``get_ui_spec()``. Built
+        # in :meth:`_setup_command_panels`; iterated in
+        # :meth:`_apply_command_override` and :meth:`_on_env_switch`.
+        self._command_panels: list[ViserCommandPanel] = []
+        # Env index the panels are currently locked to. Updated when the
+        # camera switches the followed env so panels can release the old
+        # env and re-lock the new one.
+        self._panel_locked_env: int | None = None
+        # Translucent reference-pose overlay (motion-tracking presets
+        # only; ``MotionGhost.is_active`` is False otherwise).
+        self._motion_ghost: MotionGhost | None = None
 
     # ── Setup ──────────────────────────────────────────────────────
 
@@ -87,12 +100,17 @@ class ViserPlayViewer(PlayViewerBase):
         # Build 3D scene (geometry, ground plane, etc.).
         self._play_scene.create(self._server)
 
+        # Translucent reference-pose overlay (no-op when the env has no
+        # 'motion' command — e.g. locomotion / getup presets).
+        self._motion_ghost = MotionGhost(self._server, self.env)
+
         # GUI.
         tabs = self._server.gui.add_tab_group()
         self._build_controls_tab(tabs)
         self._play_scene.setup_gui(tabs)
         self._play_scene.set_on_env_switch(self._on_env_switch)
         self._setup_overlays(tabs)
+        self._setup_command_panels(tabs)
         # Motion picker (only renders when the env exposes a 'motion' command
         # term — i.e. tracking presets; no-op on locomotion / getup / ...).
         self._build_motion_controls(tabs)
@@ -196,6 +214,38 @@ class ViserPlayViewer(PlayViewerBase):
                         idx = clip_names.index(event.target.value)
                         self.request_set_motion_clip(idx)
 
+            # Reference-pose ghost overlay controls (only visible when
+            # the ghost is active — i.e. MJCF meshes loaded successfully).
+            if self._motion_ghost is not None and self._motion_ghost.is_active:
+                with self._server.gui.add_folder("Reference ghost"):
+                    ghost_cb = self._server.gui.add_checkbox(
+                        "Show",
+                        initial_value=True,
+                        hint=(
+                            "Translucent silhouette of the motion-reference "
+                            "robot pose, drawn alongside the live robot so "
+                            "tracking error is visible at a glance."
+                        ),
+                    )
+
+                    @ghost_cb.on_update
+                    def _on_show_ghost(event) -> None:
+                        if self._motion_ghost is not None:
+                            self._motion_ghost.set_visible(event.target.value)
+
+                    ghost_op = self._server.gui.add_slider(
+                        "Opacity",
+                        min=0.0,
+                        max=1.0,
+                        step=0.05,
+                        initial_value=0.35,
+                    )
+
+                    @ghost_op.on_update
+                    def _on_ghost_opacity(event) -> None:
+                        if self._motion_ghost is not None:
+                            self._motion_ghost.set_opacity(event.target.value)
+
     def _setup_overlays(self, tabs: Any) -> None:
         self._term_overlays = ViserTermOverlays(
             server=self._server,
@@ -206,6 +256,40 @@ class ViserPlayViewer(PlayViewerBase):
 
         self._debug_overlays = ViserDebugOverlays(env=self.env, scene=self._play_scene)
 
+    # ── Command panels ─────────────────────────────────────────────
+
+    def _setup_command_panels(self, tabs: Any) -> None:
+        """Build one :class:`ViserCommandPanel` per command term that declares a UI spec.
+
+        Only terms whose ``get_ui_spec()`` returns non-None get a panel —
+        terms with no interactive knobs (e.g. ``MotionCommand``) are
+        skipped here, and the "Commands" tab is omitted entirely if no
+        term has a spec (no empty tab on tracking / getup presets).
+        """
+        cmd_manager = getattr(self.env, "command_manager", None)
+        if cmd_manager is None:
+            return
+        terms_with_specs: list[tuple[str, Any, Any]] = []
+        for name, term in cmd_manager.iter_terms():
+            spec = term.get_ui_spec()
+            if spec is None:
+                continue
+            terms_with_specs.append((name, term, spec))
+        if not terms_with_specs:
+            return
+        # Initial lock target is whatever env the camera starts on.
+        self._panel_locked_env = int(self._play_scene.env_idx)
+        with tabs.add_tab("Commands"):
+            for name, term, spec in terms_with_specs:
+                self._command_panels.append(
+                    ViserCommandPanel(
+                        server=self._server,
+                        term_name=name,
+                        term=term,
+                        spec=spec,
+                    )
+                )
+
     # ── Callbacks ──────────────────────────────────────────────────
 
     def _on_env_switch(self) -> None:
@@ -214,8 +298,28 @@ class ViserPlayViewer(PlayViewerBase):
             self._term_overlays.on_env_switch()
         if self._debug_overlays:
             self._debug_overlays.on_env_switch()
+        # Release any panel locks held on the previous env. Panels
+        # automatically re-lock the new env on the next ``apply`` tick
+        # if manual override is still ON.
+        new_idx = int(self._play_scene.env_idx)
+        old_idx = self._panel_locked_env if self._panel_locked_env is not None else new_idx
+        for panel in self._command_panels:
+            panel.on_env_switch(old_idx, new_idx)
+        self._panel_locked_env = new_idx
+
+    def _apply_command_override(self) -> None:
+        """Fan out per-tick UI state to every command panel.
+
+        Each panel decides on its own whether to write into the
+        underlying CommandTerm (only when manual override is ON for
+        that panel). Cheap when no panel has manual mode active.
+        """
+        env_idx = int(self._play_scene.env_idx)
+        for panel in self._command_panels:
+            panel.apply(env_idx)
 
     def _process_actions(self) -> None:
+        self._apply_command_override()
         had_actions = bool(self._actions)
         super()._process_actions()
         if had_actions:
@@ -274,6 +378,8 @@ class ViserPlayViewer(PlayViewerBase):
                         self._update_target_position_marker()
                         self._play_scene.update()
                         self._update_command_arrows()
+                        if self._motion_ghost is not None:
+                            self._motion_ghost.update(self._play_scene.env_idx)
                         self._server.flush()
             except Exception:
                 import traceback
@@ -458,6 +564,8 @@ class ViserPlayViewer(PlayViewerBase):
     # ── Lifecycle ──────────────────────────────────────────────────
 
     def close(self) -> None:
+        for panel in self._command_panels:
+            panel.cleanup()
         if self._term_overlays:
             self._term_overlays.cleanup()
         self._play_scene.cleanup()
