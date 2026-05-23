@@ -25,8 +25,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from rlworld.rl.configs.common_config_classes import (
+    Activation,
     DistributionType,
+    MLPCriticCfg,
     NNConfig,
+    OrthoInit,
     PPOPolicyConfig,
     SpaceTimeTransformerActorCfg,
     SpaceTimeTransformerCriticCfg,
@@ -90,6 +93,15 @@ class G1TrackingTransformerConfig(G1TrackingConfig):
     # small T*B, and strictly more expressive).
     attention_mode: Literal["factorized", "joint"] = "joint"
 
+    # Asymmetric actor-critic: the actor is the SpaceTimeTransformer (which
+    # carries the research story), while the critic is a plain MLP over the
+    # critic obs vector. Cheap and standard — value estimation doesn't need
+    # the per-body / future-window structural prior, and dropping the
+    # transformer on the critic side halves the forward/backward cost.
+    # Set False to keep the transformer critic (e.g. for an ablation).
+    use_mlp_critic: bool = True
+    mlp_critic_hidden_dims: tuple[int, ...] = (512, 256, 128)
+
     # ── Build override ────────────────────────────────────────────────
     def _build_nn_config(self) -> NNConfig:
         if not self.future_offsets:
@@ -117,23 +129,30 @@ class G1TrackingTransformerConfig(G1TrackingConfig):
             re_ppr_alpha=self.re_ppr_alpha,
             attention_mode=self.attention_mode,
         )
-        critic_cfg = SpaceTimeTransformerCriticCfg(
-            tracked_body_names=self.body_names,
-            future_offsets=self.future_offsets,
-            ref_feature_dim=self.ref_feature_dim,
-            embed_dim=self.transformer_embed_dim,
-            num_heads=self.transformer_num_heads,
-            num_layers=self.transformer_num_layers,
-            dim_feedforward=self.transformer_dim_feedforward,
-            use_kinematic_mask=False,
-            pe_type=self.pe_type,
-            use_relational_bias=self.use_relational_bias,
-            re_use_laplacian=self.re_use_laplacian,
-            re_use_spd=self.re_use_spd,
-            re_use_ppr=self.re_use_ppr,
-            re_ppr_alpha=self.re_ppr_alpha,
-            attention_mode=self.attention_mode,
-        )
+        if self.use_mlp_critic:
+            critic_cfg = MLPCriticCfg(
+                activation=Activation.ELU,
+                init=OrthoInit(output_gain=1.0),
+                hidden_dims=list(self.mlp_critic_hidden_dims),
+            )
+        else:
+            critic_cfg = SpaceTimeTransformerCriticCfg(
+                tracked_body_names=self.body_names,
+                future_offsets=self.future_offsets,
+                ref_feature_dim=self.ref_feature_dim,
+                embed_dim=self.transformer_embed_dim,
+                num_heads=self.transformer_num_heads,
+                num_layers=self.transformer_num_layers,
+                dim_feedforward=self.transformer_dim_feedforward,
+                use_kinematic_mask=False,
+                pe_type=self.pe_type,
+                use_relational_bias=self.use_relational_bias,
+                re_use_laplacian=self.re_use_laplacian,
+                re_use_spd=self.re_use_spd,
+                re_use_ppr=self.re_use_ppr,
+                re_ppr_alpha=self.re_ppr_alpha,
+                attention_mode=self.attention_mode,
+            )
         return NNConfig(
             policy=PPOPolicyConfig(
                 actor=actor_cfg,
