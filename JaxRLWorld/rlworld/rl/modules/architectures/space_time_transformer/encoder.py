@@ -18,11 +18,19 @@ Two structural priors can be plugged into the body axis:
   scores. Soft, head-specific generalization of the old binary
   ``adjacency_mask`` (which is still supported and can be combined).
 
-When a relational bias is configured, spatial attention is implemented
-manually (still using the ``eqx.nn.MultiheadAttention`` module's
-projection weights) because ``eqx.nn.MultiheadAttention`` only accepts
-boolean masks. Temporal attention always goes through the eqx call
-because it has no graph structure to inject.
+All self-attention (spatial, temporal, joint) routes through
+``jax.nn.dot_product_attention`` via the local :func:`_flash_self_attention`
+helper. With ``implementation="cudnn"`` (default) this fires cuDNN's
+fused FlashAttention kernel (the torch SDPA equivalent), reusing the
+``eqx.nn.MultiheadAttention`` modules' projection weights — so the
+parameterization is unchanged, only the attention-compute path is
+faster. cuDNN flash requires bf16 / fp16 Q/K/V, so the helper casts
+those tensors at the attention boundary and casts the output back to
+the input dtype; weights and every other tensor stay fp32 (mixed
+precision pattern, no master-weights wrapper needed). ``re_bias``
+(from :class:`GraphRelationalEmbedding`) and the kinematic ``bool_mask``
+are passed through to the fused kernel directly, so the previous
+"manual softmax when bias is set" branch is gone.
 """
 
 from __future__ import annotations
@@ -50,51 +58,77 @@ __all__ = [
 ]
 
 
-def _spatial_self_attention_with_bias(
+def _flash_self_attention(
     mha: eqx.nn.MultiheadAttention,
     tokens: jax.Array,
-    re_bias: jax.Array | None,
-    bool_mask: jax.Array | None,
+    re_bias: jax.Array | None = None,
+    bool_mask: jax.Array | None = None,
+    implementation: str = "cudnn",
 ) -> jax.Array:
-    """Manual self-attention reusing ``mha``'s projection weights.
+    """Self-attention via ``jax.nn.dot_product_attention``.
 
-    Adds ``re_bias`` (continuous, ``(H, B, B)``) and/or applies the
-    boolean ``bool_mask`` (``(B, B)``, True = can attend) to the
-    attention scores. Mirrors the pre-softmax math of
-    ``eqx.nn.MultiheadAttention.__call__`` so weights behave identically
-    when both ``re_bias`` and ``bool_mask`` are ``None``.
+    With ``implementation="cudnn"`` this routes through cuDNN's fused
+    FlashAttention kernel (the torch SDPA equivalent). cuDNN flash
+    requires bf16/fp16 Q/K/V, so the helper casts inputs (and the bias
+    if any) to bfloat16 at the attention boundary and casts the output
+    back to the caller's dtype. The mha module's projection weights and
+    every other tensor in the model stay fp32 — standard
+    mixed-precision pattern, no master-weights wrapper needed.
+
+    With ``implementation="xla"`` the attention runs in the input dtype
+    (fp32 in our setup) through the standard XLA matmul + softmax path.
+    No fusion, no dtype restriction — safe fallback when cuDNN's flash
+    can't accept the shape on a given GPU.
+
+    Reuses ``mha``'s Q/K/V/output projection weights — drop-in for the
+    eqx ``mha(query=t, key_=t, value=t, mask=..., inference=...)`` call.
 
     Args:
         mha: parameter-holding attention module.
-        tokens: ``(B, D)`` (unbatched single-time-step token grid).
-        re_bias: ``(H, B, B)`` or ``None``.
-        bool_mask: ``(B, B)`` or ``None``.
+        tokens: ``(S, D)`` token grid (unbatched).
+        re_bias: ``(H, S, S)`` additive attention bias, or ``None``.
+        bool_mask: ``(S, S)`` boolean mask, True = can attend, or
+            ``None`` for full attention.
+        implementation: ``"cudnn"`` (default, flash) or ``"xla"``.
 
     Returns:
-        ``(B, D)``.
+        ``(S, D)``.
     """
     H = mha.num_heads
     qk = mha.qk_size
-    B, D = tokens.shape
+    S, _ = tokens.shape
+    out_dtype = tokens.dtype
 
-    # Linear projections — apply per-row (eqx.nn.Linear is unbatched).
-    q = jax.vmap(mha.query_proj)(tokens).reshape(B, H, qk)
-    k = jax.vmap(mha.key_proj)(tokens).reshape(B, H, qk)
-    v = jax.vmap(mha.value_proj)(tokens).reshape(B, H, qk)
+    # Project per-row using the mha module's existing weights.
+    q = jax.vmap(mha.query_proj)(tokens).reshape(S, H, qk)
+    k = jax.vmap(mha.key_proj)(tokens).reshape(S, H, qk)
+    v = jax.vmap(mha.value_proj)(tokens).reshape(S, H, qk)
 
-    # scores: (H, B, B)
-    scale = jnp.asarray(qk, dtype=q.dtype) ** -0.5
-    scores = jnp.einsum("she,She->hsS", q, k) * scale
+    if implementation == "cudnn":
+        compute_dtype = jnp.bfloat16
+        q = q.astype(compute_dtype)
+        k = k.astype(compute_dtype)
+        v = v.astype(compute_dtype)
+        if re_bias is not None:
+            re_bias = re_bias.astype(compute_dtype)
 
-    if re_bias is not None:
-        scores = scores + re_bias
-    if bool_mask is not None:
-        scores = jnp.where(bool_mask, scores, jnp.finfo(scores.dtype).min)
+    # jax.nn.dot_product_attention expects (B, T, N, H_per_head); add the
+    # batch axis. Bias/mask shapes follow ``(B, N, T, S)`` broadcastable;
+    # ``re_bias[None]`` → ``(1, H, S, S)``, ``bool_mask[None, None]`` →
+    # ``(1, 1, S, S)`` (broadcast over heads).
+    bias = re_bias[None] if re_bias is not None else None
+    mask = bool_mask[None, None] if bool_mask is not None else None
 
-    weights = jax.nn.softmax(scores, axis=-1)
-    # attn: (B, H, qk)
-    attn = jnp.einsum("hsS,She->she", weights, v)
-    attn = attn.reshape(B, H * qk)
+    out = jax.nn.dot_product_attention(
+        q[None],
+        k[None],
+        v[None],
+        bias=bias,
+        mask=mask,
+        implementation=implementation,
+    )  # (1, S, H, qk)
+
+    attn = out[0].astype(out_dtype).reshape(S, H * qk)
     return jax.vmap(mha.output_proj)(attn)
 
 
@@ -169,56 +203,31 @@ class FactorizedAttentionBlock(eqx.Module):
             ``(T, B, D)`` updated tokens.
         """
         T = tokens.shape[0]
-        key_s, key_t, key_ffn = jax.random.split(key, 3)
+        del key  # no dropout anywhere in this codebase; cuDNN flash has no dropout arg
 
-        spatial_keys = jax.random.split(key_s, T)
+        # Spatial attention via cuDNN FlashAttention (drop-in for the
+        # previous eqx-MHA / manual-bias split). The flash helper
+        # supports both ``re_bias`` and ``bool_mask`` natively, so the
+        # two-branch logic collapses to one call.
+        def spatial_step(t_tokens: jax.Array) -> jax.Array:
+            a = _flash_self_attention(
+                self.spatial_attn,
+                t_tokens,
+                re_bias=spatial_re_bias,
+                bool_mask=spatial_mask,
+            )
+            return jax.vmap(self.spatial_norm)(t_tokens + a)
 
-        if spatial_re_bias is None:
-            # Original eqx path — preserves exact pre-existing behavior
-            # when no relational bias is requested.
-            def spatial_step(t_tokens: jax.Array, k: jax.Array) -> jax.Array:
-                a = self.spatial_attn(
-                    query=t_tokens,
-                    key_=t_tokens,
-                    value=t_tokens,
-                    mask=spatial_mask,
-                    inference=False,
-                    key=k,
-                )
-                return jax.vmap(self.spatial_norm)(t_tokens + a)
-        else:
-            # Manual path — we need to inject the continuous bias into
-            # attention scores, which the eqx MHA's bool-only mask
-            # interface can't express.
-            def spatial_step(t_tokens: jax.Array, k: jax.Array) -> jax.Array:
-                del k  # dropout=0 in this codebase
-                a = _spatial_self_attention_with_bias(
-                    self.spatial_attn,
-                    t_tokens,
-                    spatial_re_bias,
-                    spatial_mask,
-                )
-                return jax.vmap(self.spatial_norm)(t_tokens + a)
-
-        tokens = jax.vmap(spatial_step)(tokens, spatial_keys)
+        tokens = jax.vmap(spatial_step)(tokens)
 
         if self.has_temporal and T > 1:
             tokens_bt = jnp.transpose(tokens, (1, 0, 2))
-            B = tokens_bt.shape[0]
-            temporal_keys = jax.random.split(key_t, B)
 
-            def temporal_step(b_tokens: jax.Array, k: jax.Array) -> jax.Array:
-                a = self.temporal_attn(
-                    query=b_tokens,
-                    key_=b_tokens,
-                    value=b_tokens,
-                    mask=None,
-                    inference=False,
-                    key=k,
-                )
+            def temporal_step(b_tokens: jax.Array) -> jax.Array:
+                a = _flash_self_attention(self.temporal_attn, b_tokens)
                 return jax.vmap(self.temporal_norm)(b_tokens + a)
 
-            tokens_bt = jax.vmap(temporal_step)(tokens_bt, temporal_keys)
+            tokens_bt = jax.vmap(temporal_step)(tokens_bt)
             tokens = jnp.transpose(tokens_bt, (1, 0, 2))
 
         def ffn(x: jax.Array) -> jax.Array:
@@ -307,26 +316,17 @@ class JointAttentionBlock(eqx.Module):
         T, B, D = tokens.shape
         S = T * B
         flat = tokens.reshape(S, D)
+        del key  # no dropout; cuDNN flash has no dropout arg
 
         joint_mask = jnp.tile(body_mask, (T, T)) if body_mask is not None else None
         joint_re_bias = jnp.tile(body_re_bias, (1, T, T)) if body_re_bias is not None else None
 
-        if joint_re_bias is None:
-            attn_out = self.attn(
-                query=flat,
-                key_=flat,
-                value=flat,
-                mask=joint_mask,
-                inference=False,
-                key=key,
-            )
-        else:
-            attn_out = _spatial_self_attention_with_bias(
-                self.attn,
-                flat,
-                joint_re_bias,
-                joint_mask,
-            )
+        attn_out = _flash_self_attention(
+            self.attn,
+            flat,
+            re_bias=joint_re_bias,
+            bool_mask=joint_mask,
+        )
         flat = jax.vmap(self.norm)(flat + attn_out)
 
         def ffn(x: jax.Array) -> jax.Array:
