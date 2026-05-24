@@ -1,33 +1,34 @@
 """Translucent "ghost" overlay of a motion-tracking reference robot pose.
 
-Renders the per-body reference pose of the env's active
+Draws the per-body reference pose of the env's active
 :class:`MotionCommand` as a semi-transparent robot silhouette next to
 the live robot in the viser scene — so the user can eyeball tracking
 error (anchor drift, joint deviation) at a glance.
 
-Cross-sim implementation: we pull the **live** ``mujoco.MjModel`` from
-the env's scene manager (mjlab compiles it from its spec; Newton with
-the mujoco-warp solver also keeps one). We do **not** reparse the
-config's ``mjcf_path`` — the live model already reflects any per-env
-spec rewrites (mjlab ``spec_fn``, etc.), so ghost meshes match exactly
-what the policy is controlling. Per tracked body we build a merged
-``trimesh.Trimesh`` in body-local frame (geom-local ``pos``/``quat``
-baked in) and add it as a single viser ``add_mesh_simple`` handle. Per
-viewer tick we pull the body's world transform from
-``MotionCommand.body_pos_w`` / ``body_quat_w`` and update the handle's
-``position``/``wxyz``. Backends without an in-memory ``MjModel``
-accessor (currently Genesis) raise ``RuntimeError`` rather than
-silently rendering nothing — no silent fallback, by project policy.
+Cross-sim, single-robot ``mujoco.MjModel`` is the visual source of
+truth. We pick the right access point per backend:
 
-The Mjlab equivalent is ``mjlab.tasks.tracking.mdp.commands._debug_vis_impl``
-+ ``DebugVisualizer.add_ghost_mesh`` — same intent, but Mjlab deep-copies
-the running ``mj_model`` and zeros alpha on collision geoms, which is
-only available on the MuJoCo backend.
+* **mjlab (mujoco sim)** — ``scene_manager.scene.compile()`` returns a
+  fresh single-robot model from mjlab's spec (entity-prefixed body
+  names, e.g. ``robot/pelvis``).
+* **Newton** — ``solver.mj_model`` is num_envs-replicated and unusable
+  for single-robot visuals, so we re-parse the configured
+  ``entities["robot"].mjcf_path`` (bare body names).
+* Anything else (e.g. Genesis without an mjcf_path) → ``RuntimeError``.
+
+Per tracked body we merge that body's visual geoms (collision-only
+geoms — those with nonzero ``contype``/``conaffinity`` — are dropped,
+matching Mjlab) into one ``trimesh.Trimesh`` in body-local frame and
+register it as a viser ``add_mesh_simple`` handle. Each viewer tick we
+pull the body's world transform from ``MotionCommand.body_pos_w`` /
+``body_quat_w`` and write it to the handle. The Mjlab analogue is
+``mjlab.tasks.tracking.mdp.commands._debug_vis_impl`` +
+``DebugVisualizer.add_ghost_mesh``; ours is sim-agnostic.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import mujoco
 import numpy as np
@@ -39,14 +40,14 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 
-# Pale-cyan ghost, fairly translucent. Tuned to read clearly against both
-# the live robot and the default viser background.
+# Pale-cyan, fairly translucent — reads cleanly against both the live
+# robot and the default viser background.
 _GHOST_COLOR_RGB = (120, 200, 255)
 _GHOST_OPACITY = 0.35
 
 
 class MotionGhost:
-    """Owns the per-body ghost meshes + per-tick transform updates."""
+    """Per-body ghost meshes + per-tick transform updates."""
 
     def __init__(
         self,
@@ -57,38 +58,35 @@ class MotionGhost:
     ) -> None:
         self._server = server
         self._env = env
-        self._handles: dict[str, viser.MeshHandle] = {}
         self._color = color
         self._opacity = opacity
+        self._handles: dict[str, viser.MeshHandle] = {}
 
         cmd = self._motion_command()
         if cmd is None:
-            # Non-tracking preset — nothing to draw.
-            return
+            return  # non-tracking preset — nothing to draw
 
-        model = _get_robot_mj_model(self._env)
-        body_names = tuple(cmd.cfg.body_names)
-        meshes = _build_per_body_meshes(model, body_names)
-
+        model = _get_robot_mj_model(env)
+        meshes = _build_per_body_meshes(model, tuple(cmd.cfg.body_names))
         for name, mesh in meshes.items():
             if mesh is None or len(mesh.vertices) == 0:
                 continue
-            handle = server.scene.add_mesh_simple(
+            self._handles[name] = server.scene.add_mesh_simple(
                 f"/motion_ghost/{name}",
                 vertices=np.asarray(mesh.vertices, dtype=np.float32),
                 faces=np.asarray(mesh.faces, dtype=np.int32),
-                color=self._color,
-                opacity=self._opacity,
+                color=color,
+                opacity=opacity,
                 cast_shadow=False,
                 receive_shadow=False,
             )
-            self._handles[name] = handle
 
     # ── Public API ──────────────────────────────────────────────────
 
     def update(self, env_idx: int) -> None:
-        """Pull current reference poses from the MotionCommand and write
-        them onto the viser handles. Cheap — only sets position/wxyz."""
+        """Pull the reference body transforms for ``env_idx`` from the
+        MotionCommand and write them onto the viser handles. Cheap —
+        only sets ``position`` / ``wxyz`` per handle."""
         cmd = self._motion_command()
         if cmd is None or not self._handles:
             return
@@ -98,17 +96,8 @@ class MotionGhost:
             handle = self._handles.get(name)
             if handle is None:
                 continue
-            handle.position = (
-                float(body_pos[i, 0]),
-                float(body_pos[i, 1]),
-                float(body_pos[i, 2]),
-            )
-            handle.wxyz = (
-                float(body_quat[i, 0]),
-                float(body_quat[i, 1]),
-                float(body_quat[i, 2]),
-                float(body_quat[i, 3]),
-            )
+            handle.position = tuple(body_pos[i].tolist())
+            handle.wxyz = tuple(body_quat[i].tolist())
 
     def set_visible(self, visible: bool) -> None:
         for handle in self._handles.values():
@@ -133,34 +122,25 @@ class MotionGhost:
         return cm.get_term("motion")
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Model resolution + body / geom helpers
+# ─────────────────────────────────────────────────────────────────────
+
+
 def _get_robot_mj_model(env: World):
     """Return a single-robot ``mujoco.MjModel`` for ghost-mesh extraction.
 
-    Source branches by sim because the right access point differs:
-
-    * **mjlab (mujoco sim)** — ``scene_manager.scene.compile()``. The
-      mjlab Scene holds the spec (including any per-env ``spec_fn``
-      rewrites) and ``compile()`` returns a fresh MjModel with the
-      single robot + bare body names. Exact geometry the training
-      sim uses.
-    * **Newton (and any other file-based backend)** — parse
-      ``entities["robot"].mjcf_path`` via ``mujoco.MjModel.from_xml_path``.
-      Newton's ``solver.mj_model`` is *num_envs-replicated*
-      (``env_0/robot/pelvis``, ``env_1/robot/pelvis``, …) and unusable
-      for single-robot visual extraction; the MJCF file is the
-      ground-truth source Newton itself loaded from.
-    * **Anything else** (e.g. Genesis without an mjcf_path on the
-      entity) — raise ``RuntimeError``. No silent fallback per project
-      policy.
+    Branches by sim — see module docstring. Raises ``RuntimeError`` when
+    neither path resolves; no silent fallback.
     """
     sm = env.scene_manager
 
-    # mjlab path: Scene → fresh compiled, single-robot MjModel.
+    # mjlab: Scene → fresh compiled, single-robot MjModel.
     scene = getattr(sm, "scene", None)
     if scene is not None and hasattr(scene, "compile"):
         return scene.compile()
 
-    # Newton / file-based path: parse the configured MJCF.
+    # Newton / file-based: parse the configured MJCF.
     config = getattr(sm, "config", None)
     entities = getattr(config, "entities", None)
     if entities is not None and "robot" in entities:
@@ -172,28 +152,21 @@ def _get_robot_mj_model(env: World):
     raise RuntimeError(
         f"MotionGhost: cannot resolve a single-robot mujoco.MjModel "
         f"(sim_type={sim_type!r}). Tried `scene_manager.scene.compile()` "
-        f"(mjlab path) and `scene_manager.config.entities['robot'].mjcf_path` "
-        f"(file-based path); both unavailable. Backends without either "
+        f"(mjlab) and `scene_manager.config.entities['robot'].mjcf_path` "
+        f"(file-based); both unavailable. Backends without either "
         f"accessor need a dedicated single-robot extraction path."
     )
 
 
-# ─────────────────────────────────────────────────────────────────────
-# MJCF parsing → per-body trimesh.Trimesh
-# ─────────────────────────────────────────────────────────────────────
-
-
 def _find_body_id_scoped(model, bare_name: str) -> int:
-    """Resolve a tracked body's id in ``model`` by bare name first, then
-    by mjlab-style scoped suffix (``<entity>/<bare>``).
+    """Resolve a tracked body's id by bare name, falling back to mjlab's
+    scoped suffix convention (``<entity>/<bare>``, e.g. ``robot/pelvis``).
 
-    mjlab's spec compilation prepends an entity prefix to body names
-    (e.g. ``robot/pelvis``), so a direct ``mj_name2id('pelvis')`` returns
-    -1 even though the body is right there. We try the bare name first
-    (Newton's file-parsed MJCF keeps bare names) and fall back to suffix
-    matching (mjlab path). Crash-early: if neither resolves, raise with
-    a sample of the model's actual body names so the mismatch is
-    immediately legible. No silent skip.
+    Newton's file-parsed MJCF keeps bare names → first match wins;
+    mjlab's compiled spec prepends an entity prefix → suffix match
+    catches it. Raises ``RuntimeError`` when neither resolves, with a
+    sample of actual body names so the mismatch is immediately legible.
+    No silent skip.
     """
     bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, bare_name)
     if bid >= 0:
@@ -205,11 +178,10 @@ def _find_body_id_scoped(model, bare_name: str) -> int:
             return i
     sample = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(min(model.nbody, 8))]
     raise RuntimeError(
-        f"MotionGhost: tracked body name {bare_name!r} not found in the "
-        f"loaded mj_model — tried exact match and scoped suffix "
-        f"'/{bare_name}'. First {len(sample)} bodies in model: {sample}. "
-        f"Either MotionCommand.body_names and the model disagree, or "
-        f"the model uses an unexpected naming scheme."
+        f"MotionGhost: tracked body {bare_name!r} not found in mj_model "
+        f"(tried exact + scoped suffix '/{bare_name}'). First "
+        f"{len(sample)} body names: {sample}. MotionCommand.body_names "
+        f"and the model disagree, or the model uses an unexpected scheme."
     )
 
 
@@ -217,29 +189,23 @@ def _build_per_body_meshes(
     model,
     body_names: tuple[str, ...],
 ) -> dict[str, trimesh.Trimesh | None]:
-    """Walk the live ``mujoco.MjModel`` and return ``{body_name → merged
-    trimesh in body-local frame}``. Skips collision-only geoms (``contype
-    != 0`` or ``conaffinity != 0``) so only the visual silhouette remains.
+    """Merge each body's visual geoms into a single body-local
+    ``trimesh.Trimesh``. Collision-only geoms (``contype != 0`` or
+    ``conaffinity != 0``) are dropped, matching Mjlab's ghost filter.
 
-    Takes the compiled MjModel directly (not an XML path) so the meshes
-    track exactly what the active sim is running — including any per-env
-    spec rewrites mjlab applies through ``spec_fn``."""
+    Returns ``None`` for a body when it has no visual geoms at all
+    (legitimate — e.g. frame-only bodies); a missing body name raises
+    via :func:`_find_body_id_scoped`.
+    """
     out: dict[str, trimesh.Trimesh | None] = {}
     for bname in body_names:
         body_id = _find_body_id_scoped(model, bname)
-
-        parts: list[trimesh.Trimesh] = []
-        for gid in range(model.ngeom):
-            if int(model.geom_bodyid[gid]) != body_id:
-                continue
-            # Skip collision geoms (visual-only filter, matches Mjlab).
-            if int(model.geom_contype[gid]) != 0 or int(model.geom_conaffinity[gid]) != 0:
-                continue
-            mesh = _geom_to_trimesh(model, gid)
-            if mesh is None:
-                continue
-            parts.append(mesh)
-
+        parts = [
+            _geom_to_trimesh(model, gid)
+            for gid in range(model.ngeom)
+            if int(model.geom_bodyid[gid]) == body_id and _is_visual_geom(model, gid)
+        ]
+        parts = [p for p in parts if p is not None]
         if not parts:
             out[bname] = None
         elif len(parts) == 1:
@@ -249,50 +215,80 @@ def _build_per_body_meshes(
     return out
 
 
-def _geom_to_trimesh(model, gid: int) -> trimesh.Trimesh | None:
-    """One MuJoCo geom → trimesh in body-local frame.
+def _is_visual_geom(model, gid: int) -> bool:
+    """A geom is visual-only iff it doesn't participate in collisions."""
+    return int(model.geom_contype[gid]) == 0 and int(model.geom_conaffinity[gid]) == 0
 
-    Bakes the geom's local ``pos``/``quat`` into the vertex coordinates so
-    the caller only needs to push the *body's* world transform to viser
-    per tick. Returns ``None`` for unsupported geom types (we cover the
-    common visual shapes: mesh, sphere, box, capsule, cylinder)."""
+
+# Primitive geom → ``trimesh`` constructor (mesh handled separately).
+_PRIMITIVE_BUILDERS: dict[int, Callable[[np.ndarray], trimesh.Trimesh]] = {
+    int(mujoco.mjtGeom.mjGEOM_SPHERE): lambda size: trimesh.creation.icosphere(radius=float(size[0]), subdivisions=2),
+    int(mujoco.mjtGeom.mjGEOM_BOX): lambda size: trimesh.creation.box(extents=(2.0 * size[:3]).tolist()),
+    int(mujoco.mjtGeom.mjGEOM_CAPSULE): lambda size: trimesh.creation.capsule(
+        radius=float(size[0]), height=2.0 * float(size[1])
+    ),
+    int(mujoco.mjtGeom.mjGEOM_CYLINDER): lambda size: trimesh.creation.cylinder(
+        radius=float(size[0]), height=2.0 * float(size[1])
+    ),
+}
+
+
+def _geom_to_trimesh(model, gid: int) -> trimesh.Trimesh | None:
+    """One MuJoCo geom → ``trimesh.Trimesh`` in *body-local* frame.
+
+    The geom's local ``pos`` / ``quat`` are baked into the vertices so
+    the caller only has to push the body's world transform to viser per
+    tick. Returns ``None`` for geom types we don't draw (e.g. plane,
+    hfield) so the merge step can skip them cleanly.
+    """
     geom_type = int(model.geom_type[gid])
-    size = np.array(model.geom_size[gid], dtype=np.float32)
-    local_pos = np.array(model.geom_pos[gid], dtype=np.float32)
-    local_quat = np.array(model.geom_quat[gid], dtype=np.float32)  # wxyz
+    size = np.asarray(model.geom_size[gid], dtype=np.float32)
 
     if geom_type == int(mujoco.mjtGeom.mjGEOM_MESH):
-        mid = int(model.geom_dataid[gid])
-        v_adr = int(model.mesh_vertadr[mid])
-        v_num = int(model.mesh_vertnum[mid])
-        f_adr = int(model.mesh_faceadr[mid])
-        f_num = int(model.mesh_facenum[mid])
-        verts = np.asarray(model.mesh_vert[v_adr : v_adr + v_num], dtype=np.float32).copy()
-        faces = np.asarray(model.mesh_face[f_adr : f_adr + f_num], dtype=np.int32).copy()
-        mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
-    elif geom_type == int(mujoco.mjtGeom.mjGEOM_SPHERE):
-        mesh = trimesh.creation.icosphere(radius=float(size[0]), subdivisions=2)
-    elif geom_type == int(mujoco.mjtGeom.mjGEOM_BOX):
-        mesh = trimesh.creation.box(extents=(2.0 * size[:3]).tolist())
-    elif geom_type == int(mujoco.mjtGeom.mjGEOM_CAPSULE):
-        mesh = trimesh.creation.capsule(radius=float(size[0]), height=2.0 * float(size[1]))
-    elif geom_type == int(mujoco.mjtGeom.mjGEOM_CYLINDER):
-        mesh = trimesh.creation.cylinder(radius=float(size[0]), height=2.0 * float(size[1]))
+        mesh = _extract_mesh_geom(model, gid)
     else:
-        return None
+        builder = _PRIMITIVE_BUILDERS.get(geom_type)
+        if builder is None:
+            return None
+        mesh = builder(size)
 
-    # Do the transform in fp64 — MuJoCo's ``mesh_vert`` table can include
-    # primitive-derived vertex coords with large magnitudes that overflow
-    # an fp32 matmul. Promote to fp64 for the rotate-and-translate, cast
-    # back to fp32 for viser.
+    return _apply_local_transform(
+        mesh,
+        local_pos=np.asarray(model.geom_pos[gid], dtype=np.float32),
+        local_quat=np.asarray(model.geom_quat[gid], dtype=np.float32),  # wxyz
+    )
+
+
+def _extract_mesh_geom(model, gid: int) -> trimesh.Trimesh:
+    """Build a ``trimesh.Trimesh`` from the model's mesh table entry
+    referenced by ``geom[gid]``."""
+    mid = int(model.geom_dataid[gid])
+    v0, vn = int(model.mesh_vertadr[mid]), int(model.mesh_vertnum[mid])
+    f0, fn = int(model.mesh_faceadr[mid]), int(model.mesh_facenum[mid])
+    return trimesh.Trimesh(
+        vertices=np.asarray(model.mesh_vert[v0 : v0 + vn], dtype=np.float32).copy(),
+        faces=np.asarray(model.mesh_face[f0 : f0 + fn], dtype=np.int32).copy(),
+        process=False,
+    )
+
+
+def _apply_local_transform(
+    mesh: trimesh.Trimesh,
+    local_pos: np.ndarray,
+    local_quat: np.ndarray,
+) -> trimesh.Trimesh:
+    """Bake ``rotate(local_quat) ∘ translate(local_pos)`` into the mesh
+    vertices. Done in fp64 because MuJoCo's mesh_vert table can include
+    primitive-derived vert coords with large magnitudes that overflow an
+    fp32 matmul; result is cast back to fp32 for viser."""
     rot = _quat_wxyz_to_mat(local_quat)
-    verts_64 = np.asarray(mesh.vertices, dtype=np.float64)
-    mesh.vertices = ((rot @ verts_64.T).T + local_pos.astype(np.float64)).astype(np.float32)
+    verts = np.asarray(mesh.vertices, dtype=np.float64)
+    mesh.vertices = ((rot @ verts.T).T + local_pos.astype(np.float64)).astype(np.float32)
     return mesh
 
 
 def _quat_wxyz_to_mat(q: np.ndarray) -> np.ndarray:
-    w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+    w, x, y, z = (float(c) for c in q)
     n = (w * w + x * x + y * y + z * z) ** 0.5
     if n > 0.0:
         w, x, y, z = w / n, x / n, y / n, z / n
