@@ -55,7 +55,6 @@ net force, and only uses ``total_force`` when no counterpart was given.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 import torch
@@ -64,15 +63,9 @@ from newton.sensors import SensorContact
 
 from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.utils.newton.label import leaf_name
-from rlworld.rl.utils import string as string_utils
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.newton.scene import NewtonSceneManager
-
-
-def _matches_any_search(name: str, patterns: tuple[str, ...]) -> bool:
-    """Whether ``name`` matches any of ``patterns`` (regex search). Mirrors Genesis."""
-    return any(re.search(p, name) for p in patterns)
 
 
 class NewtonContactSensor:
@@ -223,87 +216,26 @@ class NewtonContactSensor:
         exclude: tuple[str, ...],
         what: str,
     ) -> list[int]:
-        """Resolve ``patterns`` to Newton model indices (across all worlds).
+        """Resolve ``patterns`` to Newton model indices via the scene
+        manager's :class:`NewtonLabelIndexing` cache.
 
-        Patterns are matched via ``re.fullmatch`` against the *leaf* of
-        each candidate label; ``exclude`` entries are dropped via
-        ``re.search`` on the leaf (Genesis-compatible). The candidate
-        pool is the entity's bodies / shapes — scoped by
-        ``body_label_prefix`` when the entity config has one (articulation
-        entities); unscoped (whole model) otherwise. The terrain
-        contributes a single global ``ground_plane``-labeled shape but is
-        owned by the ``TerrainImporter``, not an entity in the dict.
-
-        Returns ``model.body_label`` / ``model.shape_label`` indices in
-        ascending (world-major) order. These go to ``SensorContact`` as a
-        ``list[int]`` (the ``match_labels`` index fast-path); passing the
-        expanded label strings instead triggers an O(n_labels x
-        n_patterns) ``fnmatch`` sweep that costs minutes at scene-build.
+        The actual prefix-scoping + world-major partition was done once
+        at scene-build time; this is now a thin lookup. ``"terrain"`` is
+        registered as a singleton entry in ``label_indexing`` so the
+        sentinel needs no special-case branch here.
         """
-        model = self._model
-        all_labels = list(model.body_label if mode == "body" else model.shape_label)
-        if not all_labels:
-            raise ValueError(f"Newton backend: {what}: model has no {'body' if mode == 'body' else 'shape'} labels.")
-
-        # Entity scoping by label prefix (best-effort; harmless no-op for
-        # prefix-less entities). ``"terrain"`` is a sentinel for the
-        # ``TerrainImporter``-owned ground (not in ``scene_manager.entities``);
-        # the singleton ground shape carries a prefix-less ``ground_plane``
-        # label, so an unscoped pool combined with a pattern of
-        # ``ground_plane`` resolves it.
-        if entity_name == "terrain":
-            prefix = None
-        else:
-            entity_info = self.scene_manager.entities.get(entity_name)
-            if entity_info is None:
-                raise ValueError(
-                    f"Newton backend: {what}: entity {entity_name!r} not found in scene "
-                    f"(known entities: {list(self.scene_manager.entities)})."
-                )
-            prefix = getattr(entity_info["config"], "body_label_prefix", None)
-        if prefix:
-            scoped = [(i, lbl) for i, lbl in enumerate(all_labels) if lbl == prefix or lbl.startswith(prefix + "/")]
-        else:
-            scoped = list(enumerate(all_labels))
-        if not scoped:
+        try:
+            label_indexing = self.scene_manager.label_indexing[entity_name]
+        except KeyError as e:
             raise ValueError(
-                f"Newton backend: {what}: entity {entity_name!r} (prefix {prefix!r}) matched no "
-                f"{'body' if mode == 'body' else 'shape'} labels. Sample labels: {all_labels[:8]}"
-            )
-
-        # Validate user patterns against the world-0 leaf-name pool (the
-        # canonical per-env name set). ``resolve_matching_names`` raises if
-        # a pattern matches nothing.
-        n_total_scoped = len(scoped)
-        # world_count partitioning of the *scoped* labels — Newton replicates
-        # entities world-major, so the first 1/world_count slice is world 0.
-        if n_total_scoped % self.num_envs == 0:
-            n_per_env = n_total_scoped // self.num_envs
-        else:
-            # Single global entity (e.g. ground plane shape, world=-1): the
-            # whole scoped set IS "world 0".
-            n_per_env = n_total_scoped
-        world0 = scoped[:n_per_env]
-        world0_leaves = [leaf_name(lbl) for _, lbl in world0]
-        _, matched_leaves = string_utils.resolve_matching_names(list(patterns), world0_leaves, preserve_order=True)
-        if exclude:
-            matched_leaves = [n for n in matched_leaves if not _matches_any_search(n, tuple(exclude))]
-        if not matched_leaves:
-            raise ValueError(
-                f"Newton backend: {what}: pattern(s) {list(patterns)} (entity {entity_name!r}, "
-                f"after exclude {tuple(exclude)}) matched no {'bodies' if mode == 'body' else 'shapes'}."
-            )
-        matched_set = set(matched_leaves)
-
-        # Collect model indices across every world. Iterate ``scoped`` in
-        # index order so the result — and hence the sensor's
-        # ``sensing_obj_idx`` (``SensorContact`` preserves the order of a
-        # ``list[int]`` input) — stays world-major with a stable
-        # within-world order.
-        indices = [i for i, lbl in scoped if leaf_name(lbl) in matched_set]
-        if not indices:
-            raise ValueError(f"Newton backend: {what}: resolved leaf names {sorted(matched_set)} to zero labels.")
-        return indices
+                f"Newton backend: {what}: entity {entity_name!r} not found in "
+                f"scene_manager.label_indexing (known: {list(self.scene_manager.label_indexing)})."
+            ) from e
+        finder = label_indexing.find_bodies if mode == "body" else label_indexing.find_shapes
+        try:
+            return finder(patterns=patterns, exclude=exclude)
+        except ValueError as e:
+            raise ValueError(f"Newton backend: {what}: {e}") from e
 
     # ------------------------------------------------------------------
     # properties

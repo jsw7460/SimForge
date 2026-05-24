@@ -33,6 +33,7 @@ from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonic
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.managers.common.visual_mesh import extract_visual_meshes_from_mj_model
 from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
+from rlworld.rl.envs.managers.newton.label_indexing import NewtonLabelIndexing
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.utils import string as string_utils
@@ -388,6 +389,12 @@ class NewtonSceneManager(BaseManager):
 
         # ArticulationView per entity (created in build_scene)
         self.articulation_views: dict[str, ArticulationView] = {}
+
+        # NewtonLabelIndexing per entity (created in build_scene). Cached
+        # entity-scoped slices of model.body_label / shape_label, queried by
+        # the contact-sensor wrapper to resolve ``(entity, pattern)`` → model
+        # indices in O(matches) per call instead of O(model_labels × patterns).
+        self.label_indexing: dict[str, NewtonLabelIndexing] = {}
 
         # Entity tracking
         self.entities: dict[str, Any] = {}  # entity_name -> entity info
@@ -968,6 +975,12 @@ class NewtonSceneManager(BaseManager):
         # view (bare leaf names) instead of raw ``model.body_label``.
         self._build_robot_view()
 
+        # Cache per-entity NewtonLabelIndexing for the contact-sensor
+        # resolver. Articulation entities are looked up by their (auto-
+        # extracted) ``body_label_prefix``; the singleton ``"terrain"``
+        # entry covers the TerrainImporter-owned ``"ground_plane"`` shape.
+        self._build_label_indexing()
+
         # Create NewtonSensorConfig sensors (IMU / FrameTransform).
         self._create_sensors()
 
@@ -1107,6 +1120,40 @@ class NewtonSceneManager(BaseManager):
                 self.model,
                 pattern=pattern,
             )
+
+    def _build_label_indexing(self) -> None:
+        """Cache one :class:`NewtonLabelIndexing` per addressable entity.
+
+        Articulation entities are scoped by ``body_label_prefix``; the
+        terrain (owned by :class:`~rlworld.rl.terrains.TerrainImporter`,
+        not registered in ``self.entities``) is registered as a
+        singleton under the sentinel name ``"terrain"``.
+
+        Done once here so the contact-sensor wrapper (and any future
+        consumer) can resolve patterns in O(matches) instead of
+        re-scanning ``model.body_label`` / ``model.shape_label`` on
+        every sensor construction.
+        """
+        for entity_name, entity_info in self.entities.items():
+            cfg = entity_info["config"]
+            prefix = getattr(cfg, "body_label_prefix", None)
+            self.label_indexing[entity_name] = NewtonLabelIndexing.from_articulation(
+                name=entity_name,
+                model=self.model,
+                prefix=prefix,
+                num_envs=self.model.world_count,
+            )
+
+        # Singleton terrain — the TerrainImporter adds either a flat
+        # ``add_ground_plane`` shape or a ``add_shape_heightfield`` with
+        # label ``"ground_plane"``; both carry that exact label so a
+        # literal equality predicate suffices.
+        self.label_indexing["terrain"] = NewtonLabelIndexing.from_singleton(
+            name="terrain",
+            model=self.model,
+            shape_label_predicate=lambda lbl: lbl == "ground_plane",
+            body_label_predicate=None,
+        )
 
     @property
     def robot_view(self) -> ArticulationView:
