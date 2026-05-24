@@ -140,7 +140,7 @@ class Go2FlatConfig:
     ``ROUGH_TERRAINS_CFG`` height grid, fed identically to Newton, MuJoCo,
     and Genesis via each one's native heightfield API). Terrain geometry is
     defined in :mod:`rlworld.rl.terrains`, not here; see
-    :meth:`make_ground_entity`."""
+    :meth:`make_terrain_cfg`."""
 
     terrain_collision_pairs_per_env: int = 3000
     """Newton collision broad-phase budget per env on mesh terrain.
@@ -218,14 +218,13 @@ class Go2FlatConfig:
         """Backward-compatible dict output."""
         return self.build().recursive_to_dict()
 
-    def make_ground_entity(self) -> TerrainCfg:
-        """Build the scene ``"ground"`` entity config (flat or rough).
+    def make_terrain_cfg(self) -> TerrainCfg:
+        """Build the scene ``terrain_cfg`` (flat or rough).
 
         Called by the per-simulator ``build_scene`` builders so the
-        flat/rough choice lives in one place. Both are the same
-        :class:`TerrainCfg` under the same entity key (``terrain_type``
-        switch), so the rest of the scene config (contact sensors etc.) is
-        unaffected.
+        flat/rough choice lives in one place. Terrain is owned by the
+        per-sim ``TerrainImporter`` the scene manager constructs; it is
+        NOT an entry in the entities dict.
         """
         if not self.use_rough_terrain:
             return TerrainCfg(terrain_type="plane")

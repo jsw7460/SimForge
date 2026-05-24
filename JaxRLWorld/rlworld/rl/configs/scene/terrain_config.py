@@ -28,11 +28,10 @@ if TYPE_CHECKING:
 
 @dataclass
 class TerrainCfg:
-    """Ground entity: flat plane or generated terrain.
+    """Ground specification: flat plane or generated heightfield terrain.
 
-    The contact-material fields mirror the legacy ``GroundPlaneCfg`` so a
-    backend's ``"plane"`` path reproduces the old flat-ground behaviour
-    exactly.
+    Owned by the per-sim ``TerrainImporter`` (constructed inside each
+    ``SceneManager``); not an entry in the ``entities`` dict.
     """
 
     terrain_type: Literal["plane", "generator"] = "plane"
@@ -41,7 +40,7 @@ class TerrainCfg:
     terrain_generator: TerrainGeneratorCfg | None = None
     """Required when ``terrain_type="generator"``; ignored for ``"plane"``."""
 
-    # ── Contact material (mirrors the legacy GroundPlaneCfg) ──────────
+    # ── Contact material ──────────────────────────────────────────────
     contact_stiffness: float = 2.5e3
     contact_damping: float = 100.0
     friction: float = 1.0
@@ -54,3 +53,9 @@ class TerrainCfg:
     """Per-shape collision margin (m) for the Newton backend's mesh
     terrain. IsaacLab flags this as the single most important Newton
     rough-terrain setting; ignored by Genesis / MuJoCo."""
+
+    # ── Curriculum (used by TerrainImporter when terrain_origins exists) ──
+    max_init_terrain_level: int | None = None
+    """Cap on the initial terrain level when sampling env_origins from a
+    sub-terrain grid (mirror of IsaacLab's ``TerrainImporterCfg``). ``None``
+    → use the top row (``num_rows - 1``)."""

@@ -113,13 +113,13 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
 
     return SceneConfig(
         env_spacing=(20.0, 20.0),
+        terrain_cfg=cfg.make_terrain_cfg(),
         entities={
-            "base_entity": cfg.make_ground_entity(),
             "robot": GenesisEntityCfg(
                 # urdf_path=r.urdf_path,
                 mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
-                    pos=(1.5, 1.5, r.base_init_height),
+                    pos=(0.0, 0.0, r.base_init_height),
                     joint_pos=r.default_joint_angles,
                 ),
                 floating=True,
@@ -157,7 +157,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                 # foot names ("FL_foot", ...) have no regex metacharacters, so
                 # find_links treats each as an exact-match pattern.
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
-                secondary=ContactMatch(mode="body", pattern=".*", entity="base_entity"),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="terrain"),
                 history_length=timing["decimation"],
             ),
             ContactSensorCfg(
@@ -168,7 +168,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                     entity="robot",
                     exclude=(".*foot.*", ".*calf.*"),
                 ),
-                secondary=ContactMatch(mode="body", pattern=".*", entity="base_entity"),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="terrain"),
                 history_length=timing["decimation"],
             ),
         ],
@@ -293,12 +293,6 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
         )
 
     return _RewardsCfg()
-
-
-def customize_reset_root_params(cfg: Go2FlatConfig, params: Dict[str, Any]) -> None:
-    """Genesis hook: spawn at (1.5, 1.5) for scene layout reasons."""
-    h = cfg.robot.base_init_height
-    params["default_pos"] = (1.5, 1.5, h)
 
 
 def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:

@@ -230,9 +230,9 @@ class NewtonContactSensor:
         ``re.search`` on the leaf (Genesis-compatible). The candidate
         pool is the entity's bodies / shapes — scoped by
         ``body_label_prefix`` when the entity config has one (articulation
-        entities); unscoped (whole model) for prefix-less entities such as
-        ``GroundPlaneCfg``, which contributes a single global
-        ``ground_plane`` shape.
+        entities); unscoped (whole model) otherwise. The terrain
+        contributes a single global ``ground_plane``-labeled shape but is
+        owned by the ``TerrainImporter``, not an entity in the dict.
 
         Returns ``model.body_label`` / ``model.shape_label`` indices in
         ascending (world-major) order. These go to ``SensorContact`` as a
@@ -246,14 +246,21 @@ class NewtonContactSensor:
             raise ValueError(f"Newton backend: {what}: model has no {'body' if mode == 'body' else 'shape'} labels.")
 
         # Entity scoping by label prefix (best-effort; harmless no-op for
-        # prefix-less entities like GroundPlaneCfg).
-        entity_info = self.scene_manager.entities.get(entity_name)
-        if entity_info is None:
-            raise ValueError(
-                f"Newton backend: {what}: entity {entity_name!r} not found in scene "
-                f"(known entities: {list(self.scene_manager.entities)})."
-            )
-        prefix = getattr(entity_info["config"], "body_label_prefix", None)
+        # prefix-less entities). ``"terrain"`` is a sentinel for the
+        # ``TerrainImporter``-owned ground (not in ``scene_manager.entities``);
+        # the singleton ground shape carries a prefix-less ``ground_plane``
+        # label, so an unscoped pool combined with a pattern of
+        # ``ground_plane`` resolves it.
+        if entity_name == "terrain":
+            prefix = None
+        else:
+            entity_info = self.scene_manager.entities.get(entity_name)
+            if entity_info is None:
+                raise ValueError(
+                    f"Newton backend: {what}: entity {entity_name!r} not found in scene "
+                    f"(known entities: {list(self.scene_manager.entities)})."
+                )
+            prefix = getattr(entity_info["config"], "body_label_prefix", None)
         if prefix:
             scoped = [(i, lbl) for i, lbl in enumerate(all_labels) if lbl == prefix or lbl.startswith(prefix + "/")]
         else:

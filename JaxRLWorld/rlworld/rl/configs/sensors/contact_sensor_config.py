@@ -62,11 +62,12 @@ class ContactMatch:
         entity: Entity name to scope the pattern to. ``None`` / ``""``
             means the pattern is a literal name. For ``secondary`` this
             is how you say "the counterpart must belong to this entity"
-            (e.g. ``entity="base_entity"`` → only contacts with the
-            ground plane count). The special value ``"self"`` means
-            "the counterpart must be another link of the same entity"
-            (self-collision); some backends keep a separate code path
-            for this case.
+            (e.g. ``entity="terrain"`` → only contacts with the ground
+            count). Two sentinels are accepted: ``"self"`` means "the
+            counterpart must be another link of the same entity"
+            (self-collision); ``"terrain"`` resolves to the
+            ``TerrainImporter``-owned ground (which is not in the
+            ``entities`` dict).
         exclude: Names to filter out of the match (blacklist). Each
             entry is treated as a regex if it contains regex
             metacharacters, otherwise as an exact name.

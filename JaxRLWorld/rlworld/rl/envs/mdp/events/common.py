@@ -107,11 +107,12 @@ def reset_root_state_uniform(
     be replaced by thin preset entries that pass the right
     ``default_pos`` / ``default_quat_wxyz`` from the robot config.
 
-    **mjlab env_origins**: if ``env.scene_manager`` has a ``.scene``
-    with an ``env_origins`` tensor (mjlab's multi-env offset), the
-    function adds ``env_origins[env_ids]`` to the position
-    automatically. Newton and Genesis ignore this because their scene
-    managers have no ``scene.env_origins`` attribute.
+    **Per-env origins**: every scene manager exposes
+    ``scene_manager.env_origins`` (``(num_envs, 3)`` tensor) — the
+    ``TerrainImporter`` sub-terrain grid for generator terrain, mjlab's
+    ``env_spacing`` grid for the mjlab plane case, and all-zeros
+    otherwise. The function adds ``env_origins[env_ids]`` to the spawn
+    position uniformly across simulators.
 
     Args:
         env: Any environment satisfying the RobotData + Writer APIs.
@@ -143,11 +144,7 @@ def reset_root_state_uniform(
     default_pos_t = torch.tensor(default_pos, device=device, dtype=torch.float32)
     pos = default_pos_t.unsqueeze(0).expand(n, -1) + pose_samples[:, 0:3]
 
-    # Auto-detect mjlab env_origins offset
-    _scene = getattr(env.scene_manager, "scene", None)
-    env_origins = getattr(_scene, "env_origins", None)
-    if env_origins is not None:
-        pos = pos + env_origins[env_ids]
+    pos = pos + env.scene_manager.env_origins[env_ids]
 
     # ── Orientation: default quat * delta quat (all wxyz) ─────────
     default_quat_t = torch.tensor(default_quat_wxyz, device=device, dtype=torch.float32).unsqueeze(0).expand(n, -1)
@@ -377,10 +374,8 @@ def reset_fallen_or_standing(
     device = env.device
     n = len(env_ids)
 
-    # Auto-detect mjlab multi-env offsets (same convention as
-    # ``reset_root_state_uniform``).
-    _scene = getattr(env.scene_manager, "scene", None)
-    env_origins = getattr(_scene, "env_origins", None)
+    # Unified per-env origins (see ``reset_root_state_uniform``).
+    env_origins = env.scene_manager.env_origins
 
     # Per-env branch mask.
     is_fallen = torch.rand(n, device=device) < fallen_prob
@@ -395,8 +390,7 @@ def reset_fallen_or_standing(
     fallen_pos[:, 2] = fall_height
 
     pos = torch.where(is_fallen_3, fallen_pos, standing_pos)
-    if env_origins is not None:
-        pos = pos + env_origins[env_ids]
+    pos = pos + env_origins[env_ids]
 
     default_quat_t = torch.tensor(default_quat_wxyz, device=device, dtype=torch.float32).unsqueeze(0).expand(n, -1)
     random_quat = _sample_uniform_quaternion_wxyz(n, device)

@@ -56,7 +56,7 @@ class GenesisBridge:
                 break
 
         # Check morph type. A ``Terrain`` entity is skipped here and instead
-        # rendered from the canonical ``_terrain_data`` in ``extract_geometry``
+        # rendered from the canonical ``TerrainImporter.data`` in ``extract_geometry``
         # (Genesis terrain mesh vertices are in the entity-local [0,L] frame
         # and the base-pos offset isn't applied to fixed bodies, so rendering
         # the entity directly would misplace it; the canonical grid is in
@@ -142,7 +142,7 @@ class GenesisBridge:
         # Generated terrain: render the canonical height grid in world
         # coordinates (the Terrain entity itself is skipped — see
         # _is_ground_entity) as a fixed body, and suppress the cosmetic ground.
-        terrain_data = getattr(self._scene_manager, "_terrain_data", None)
+        terrain_data = self._scene_manager.terrain.data
         if terrain_data is not None:
             mesh_groups.append(
                 BodyMeshGroup(

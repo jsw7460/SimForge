@@ -158,8 +158,8 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
             nconmax=300,
             use_mujoco_contacts=not cfg.use_rough_terrain,
         ),
+        terrain_cfg=cfg.make_terrain_cfg(),
         entities={
-            "ground": cfg.make_ground_entity(),
             "robot": UnifiedNewtonEntityCfg(
                 # urdf_path=r.urdf_path,
                 mjcf_path=r.mjcf_path,
@@ -222,7 +222,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                 # Foot names ("FL_foot", ...) have no regex metacharacters
                 # → matched as exact leaf names.
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
-                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="ground"),
+                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="terrain"),
                 history_length=timing["decimation"],
             ),
             ContactSensorCfg(
@@ -233,11 +233,10 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                     entity="robot",
                     exclude=(".*foot.*", ".*calf.*"),
                 ),
-                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="ground"),
+                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="terrain"),
                 history_length=timing["decimation"],
             ),
         ],
-        add_ground=True,
         env_spacing=(2.0, 2.0, 0.0),
         robot_cfg=r,
         # Rough terrain emits many heightfield triangle pairs in

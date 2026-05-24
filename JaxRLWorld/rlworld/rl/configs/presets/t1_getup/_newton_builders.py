@@ -39,7 +39,6 @@ from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
-    GroundPlaneCfg,
     InitialStateCfg,
     NewtonEntityCfg,
 )
@@ -126,7 +125,6 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
             ccd_iterations=50,
         ),
         entities={
-            "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
                 mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
@@ -144,6 +142,7 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                             damping=r.d_gains,
                             armature=r.armature,
                             effort_limit=r.effort_limits,
+                            frictionloss=0.1,
                             # min_delay=0,
                             # max_delay=2,
                         ),
@@ -169,7 +168,6 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
                 history_length=timing["decimation"],
             ),
         ],
-        add_ground=True,
         env_spacing=(2.0, 2.0, 0.0),
     )
 

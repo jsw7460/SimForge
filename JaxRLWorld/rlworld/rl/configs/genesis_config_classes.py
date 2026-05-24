@@ -14,6 +14,7 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
+from .scene.terrain_config import TerrainCfg
 from .sensors import SensorConfig
 
 if TYPE_CHECKING:
@@ -59,6 +60,9 @@ class SceneConfig(BaseConfig):
     # Simulator-agnostic contact sensor configs (``ContactSensorCfg``).
     contact_sensors: "list[ContactSensorCfg] | None" = None
     robot_cfg: Union["RobotConfig", None] = None
+    # Terrain (flat plane by default; generator → heightfield) — owned by
+    # the per-sim TerrainImporter the scene manager constructs.
+    terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
 
 @dataclass

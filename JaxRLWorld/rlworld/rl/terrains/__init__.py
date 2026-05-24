@@ -17,6 +17,7 @@ Layering:  SubTerrainCfg.function → TerrainGenerator → TerrainData(heights, 
 from __future__ import annotations
 
 from .hf_terrains import HfRandomUniformTerrainCfg, random_uniform_terrain
+from .importer import TerrainImporter
 from .sub_terrain_cfg import SubTerrainCfg
 from .terrain_generator import TerrainData, TerrainGenerator, TerrainGeneratorCfg
 
@@ -49,5 +50,6 @@ __all__ = [
     "TerrainGenerator",
     "TerrainGeneratorCfg",
     "TerrainData",
+    "TerrainImporter",
     "ROUGH_TERRAINS_CFG",
 ]

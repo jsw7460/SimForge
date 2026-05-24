@@ -37,7 +37,6 @@ from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
-    GroundPlaneCfg,
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, SensorConfig
@@ -104,7 +103,6 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
 
     return SceneConfig(
         entities={
-            "base_entity": GroundPlaneCfg(),
             "robot": GenesisEntityCfg(
                 mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
@@ -140,7 +138,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             ContactSensorCfg(
                 name="feet_ground_contact",
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
-                secondary=ContactMatch(mode="body", pattern=".*", entity="base_entity"),
+                secondary=ContactMatch(mode="body", pattern=".*", entity="terrain"),
             ),
             ContactSensorCfg(
                 name="self_collision",

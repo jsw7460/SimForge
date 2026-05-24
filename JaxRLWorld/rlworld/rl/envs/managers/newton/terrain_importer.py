@@ -1,18 +1,16 @@
-"""Newton terrain importer.
+"""Newton :class:`TerrainImporter` subclass.
 
-Turns a sim-agnostic :class:`~rlworld.rl.configs.scene.terrain_config.TerrainCfg`
-into Newton collision geometry. This is the per-backend "import" step.
+Injects a flat plane or a generated heightfield into a Newton
+``ModelBuilder`` via the simulator's native API. The shape is labelled
+``"ground_plane"`` so ground contact sensors keep matching regardless of
+which terrain type is selected.
 
-A generated terrain is added as a single static (``body=-1``) heightfield
-— the canonical terrain is a height grid, which Newton supports natively
-via :class:`newton.Heightfield`. The shape is labelled ``"ground_plane"``
-so ground contact sensors (which match the geom ``"ground_plane"``) work
-whether the ground is a flat plane or a heightfield.
-
-Newton terrain runs the solver with ``use_mujoco_contacts=False`` (set in
-the preset): contacts come from ``model.collide()`` (MPR — stable for
-deep penetration, honours the contact margin), avoiding mjwarp's EPA
-horizon issues on heightfield contacts.
+Newton mesh / heightfield terrain requires the solver to run with
+``use_mujoco_contacts=False`` (mjwarp self-collision over an hfield
+overflows its hardcoded EPA horizon and silently zeroes the contact
+margin); the preset enforces that. Contacts come from ``model.collide()``
+via Newton's MPR pipeline, which the scene manager's step loop already
+feeds to ``solver.step()``.
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ from __future__ import annotations
 import newton
 
 from rlworld.rl.configs.scene.terrain_config import TerrainCfg
-from rlworld.rl.terrains import TerrainData, TerrainGenerator
+from rlworld.rl.terrains import TerrainImporter
 
 
 def _ground_shape_cfg(cfg: TerrainCfg, margin: float = 0.0) -> newton.ModelBuilder.ShapeConfig:
@@ -35,31 +33,37 @@ def _ground_shape_cfg(cfg: TerrainCfg, margin: float = 0.0) -> newton.ModelBuild
     )
 
 
-def import_terrain_newton(builder: newton.ModelBuilder, cfg: TerrainCfg) -> TerrainData | None:
-    """Add the terrain to ``builder``. Returns generated terrain data, or None for a flat plane."""
-    if cfg.terrain_type == "plane":
-        builder.add_ground_plane(cfg=_ground_shape_cfg(cfg))
-        return None
+class NewtonTerrainImporter(TerrainImporter):
+    """TerrainImporter that emits Newton collision shapes."""
 
-    if cfg.terrain_type == "generator":
-        if cfg.terrain_generator is None:
-            raise ValueError("TerrainCfg(terrain_type='generator') requires a terrain_generator.")
-        data = TerrainGenerator(cfg.terrain_generator).data
-        hx, hy = data.half_extent
-        # heights_m is in metres, so Newton's auto-derived min_z/max_z make
-        # world-space z == heights_m exactly.
-        heightfield = newton.Heightfield(
-            data=data.heights_m,
-            nrow=data.nrow,
-            ncol=data.ncol,
-            hx=hx,
-            hy=hy,
-        )
-        builder.add_shape_heightfield(
-            heightfield=heightfield,
-            cfg=_ground_shape_cfg(cfg, margin=cfg.contact_margin),
-            label="ground_plane",
-        )
-        return data
+    def import_into_builder(self, builder: newton.ModelBuilder) -> None:
+        """Add the terrain to ``builder`` and configure env origins."""
+        if self.cfg.terrain_type == "plane":
+            builder.add_ground_plane(cfg=_ground_shape_cfg(self.cfg))
+            # No sub-terrain grid → env_origins stays at all-zeros (default).
+            return
 
-    raise ValueError(f"Unknown terrain_type: {cfg.terrain_type!r}")
+        if self.cfg.terrain_type == "generator":
+            data = self._run_generator()
+            hx, hy = data.half_extent
+            # heights_m are metres; auto-derived min_z / max_z make world z
+            # equal heights_m exactly.
+            hfield = newton.Heightfield(
+                data=data.heights_m,
+                nrow=data.nrow,
+                ncol=data.ncol,
+                hx=hx,
+                hy=hy,
+            )
+            builder.add_shape_heightfield(
+                heightfield=hfield,
+                cfg=_ground_shape_cfg(self.cfg, margin=self.cfg.contact_margin),
+                label="ground_plane",
+            )
+            # IsaacLab-style env_origins from the sub-terrain grid (no-op
+            # for the v1 single-cell grid: every env still lands at the
+            # one origin (0, 0, surface_z)).
+            self.configure_env_origins(origins=data.origins)
+            return
+
+        raise ValueError(f"Unknown terrain_type: {self.cfg.terrain_type!r}")

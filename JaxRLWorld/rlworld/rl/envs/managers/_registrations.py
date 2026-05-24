@@ -46,12 +46,14 @@ def _register_genesis() -> None:
         VisualizationManager,
         VisualizationManagerConfig,
     )
+    from rlworld.rl.envs.managers.genesis.terrain_importer import GenesisTerrainImporter
 
     ManagerRegistry.register("genesis", "scene", SceneManager, SceneManagerConfig)
     ManagerRegistry.register("genesis", "action", ActionManager, ActionManagerConfig)
     ManagerRegistry.register("genesis", "observation", ObservationManager, ObsManagerConfig)
     ManagerRegistry.register("genesis", "contact", ContactManager)
     ManagerRegistry.register("genesis", "visualization", VisualizationManager, VisualizationManagerConfig)
+    ManagerRegistry.register("genesis", "terrain", GenesisTerrainImporter)
 
 
 def _register_newton() -> None:
@@ -67,12 +69,14 @@ def _register_newton() -> None:
         NewtonVisualizationManager,
         NewtonVisualizationManagerConfig,
     )
+    from rlworld.rl.envs.managers.newton.terrain_importer import NewtonTerrainImporter
 
     ManagerRegistry.register("newton", "scene", NewtonSceneManager, NewtonSceneManagerConfig)
     ManagerRegistry.register("newton", "action", NewtonActionManager, NewtonActionManagerConfig)
     ManagerRegistry.register("newton", "observation", NewtonObservationManager, NewtonObsManagerConfig)
     ManagerRegistry.register("newton", "contact", NewtonContactManager)
     ManagerRegistry.register("newton", "visualization", NewtonVisualizationManager, NewtonVisualizationManagerConfig)
+    ManagerRegistry.register("newton", "terrain", NewtonTerrainImporter)
 
 
 def _register_mujoco() -> None:
@@ -90,6 +94,7 @@ def _register_mujoco() -> None:
         MujocoSceneManager,
         MujocoSceneManagerConfig,
     )
+    from rlworld.rl.envs.managers.mujoco.terrain_importer import MujocoTerrainImporter
 
     ManagerRegistry.register("mujoco", "scene", MujocoSceneManager, MujocoSceneManagerConfig)
     ManagerRegistry.register("mujoco", "action", MujocoActionManager, MujocoActionManagerConfig)
@@ -97,6 +102,7 @@ def _register_mujoco() -> None:
     ManagerRegistry.register("mujoco", "contact", MujocoContactManager)
     # MuJoCo overrides the common reward manager with MujocoRewardManager
     ManagerRegistry.register("mujoco", "reward", MujocoRewardManager, RewardManagerConfig)
+    ManagerRegistry.register("mujoco", "terrain", MujocoTerrainImporter)
 
 
 def register_all_for(sim_type: str) -> None:

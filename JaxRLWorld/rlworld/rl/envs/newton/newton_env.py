@@ -178,7 +178,7 @@ class NewtonEnv(World):
                 entities=self.scene_cfg.entities,
                 sensors=self.scene_cfg.sensors,
                 contact_sensors=getattr(self.scene_cfg, "contact_sensors", None),
-                add_ground=self.scene_cfg.add_ground,
+                terrain_cfg=self.scene_cfg.terrain_cfg,
                 dt=self.scene_cfg.dt,
                 substeps=self.scene_cfg.substeps,
                 gravity=self.scene_cfg.gravity,

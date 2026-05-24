@@ -118,14 +118,14 @@ def terrain_out_of_bounds(
             terminate.
         asset_cfg: Entity whose root position is checked.
     """
-    # The backend terrain importer stashes the generated terrain (mesh +
-    # origins) here; absent for flat-plane / non-terrain scenes.
-    terrain_data = getattr(env.scene_manager, "_terrain_data", None)
-    if terrain_data is None:
+    # ``TerrainImporter`` exposes the generated terrain via ``terrain.data``;
+    # for flat-plane scenes ``data`` is ``None`` and we short-circuit.
+    terrain = env.scene_manager.terrain
+    if terrain.data is None:
         return TerminationResult(torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
 
     # Terrain is centred on the origin, so the half-extent bounds the field.
-    half_x, half_y = terrain_data.half_extent
+    half_x, half_y = terrain.half_extent
     limit_x = max(0.0, half_x - margin)
     limit_y = max(0.0, half_y - margin)
 

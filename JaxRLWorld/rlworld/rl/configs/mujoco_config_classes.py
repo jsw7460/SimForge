@@ -55,7 +55,7 @@ class MujocoSceneConfig(BaseConfig):
     robot_entity_name: str = "robot"
 
     # Entities — unified EntityCfg dict (scene manager converts to mjlab)
-    entities: Any = None  # dict[str, EntityCfg | GroundPlaneCfg]
+    entities: Any = None  # dict[str, EntityCfg]
 
     # Sensors — sim-agnostic rlworld.rl.configs.sensors.ContactSensorCfg
     # objects, converted to mjlab sensor configs in

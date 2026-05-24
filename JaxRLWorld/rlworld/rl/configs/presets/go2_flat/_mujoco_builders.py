@@ -195,7 +195,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         entities={"robot": robot_entity},
         sensors=(feet_ground_cfg, body_ground_cfg),
         # terrain (flat plane or generated) — single source of truth.
-        terrain_cfg=cfg.make_ground_entity(),
+        terrain_cfg=cfg.make_terrain_cfg(),
         cone="elliptic",
         solver_iterations=10,
         solver_ls_iterations=20,

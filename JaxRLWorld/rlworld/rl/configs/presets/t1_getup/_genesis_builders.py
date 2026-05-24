@@ -35,7 +35,6 @@ from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     GenesisEntityCfg,
-    GroundPlaneCfg,
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, SensorConfig
@@ -105,7 +104,6 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
 
     return SceneConfig(
         entities={
-            "base_entity": GroundPlaneCfg(),
             "robot": GenesisEntityCfg(
                 mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
@@ -121,6 +119,7 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
                             damping=r.d_gains,
                             armature=r.armature,
                             effort_limit=r.effort_limits,
+                            frictionloss=0.1,
                             # min_delay=0,
                             # max_delay=2,
                         ),
@@ -145,7 +144,12 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
                 history_length=timing["decimation"],
             ),
         ],
-        sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
+        sim_options=gs.options.SimOptions(
+            dt=sim_dt,
+            substeps=timing["substeps"],
+            gravity=(0.0, 0.0, -9.81),
+        ),
+        env_spacing=(2.0, 2.0),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
             constraint_solver=gs.constraint_solver.Newton,
@@ -308,7 +312,7 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
         # for the rationale (unbiased obs + unbiased action = symmetric).
         "randomize_body_com": EventTermConfig(
             func=unified_dr.randomize_body_com_offset,
-            mode="reset_dr",
+            mode="startup",
             params={
                 "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.trunk_body_name,)),
                 "ranges": {
@@ -321,7 +325,7 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
         ),
         "randomize_friction_scalar": EventTermConfig(
             func=unified_dr.randomize_friction,
-            mode="reset_dr",
+            mode="startup",
             params={
                 "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.8, 1.5),

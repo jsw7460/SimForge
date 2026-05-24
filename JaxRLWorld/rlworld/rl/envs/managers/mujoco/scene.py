@@ -9,7 +9,6 @@ from rlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from rlworld.rl.configs.scene.terrain_config import TerrainCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg,
-    GroundPlaneCfg,
     MujocoEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactSensorCfg
@@ -17,6 +16,7 @@ from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.managers.common.visual_mesh import extract_visual_meshes_from_mj_model
+from rlworld.rl.envs.managers.registry import ManagerRegistry
 
 if TYPE_CHECKING:
     from mjlab.entity import Entity
@@ -118,7 +118,7 @@ class MujocoSceneManagerConfig:
     substeps: int = 1
 
     # Entities — unified EntityCfg dict (auto-converted to mjlab)
-    entities: dict[str, EntityCfg | GroundPlaneCfg] | None = None
+    entities: dict[str, EntityCfg] | None = None
 
     # Sensors — sim-agnostic rlworld.rl.configs.sensors.ContactSensorCfg
     # objects, converted to mjlab sensor configs in
@@ -177,6 +177,15 @@ class MujocoSceneManager(BaseManager):
 
         # Timing
         self._physics_dt: float | None = None  # updated from sim config
+
+        # Terrain importer (owns terrain data + per-env origins / curriculum).
+        self.terrain = ManagerRegistry.create(
+            "mujoco",
+            "terrain",
+            cfg=self.config.terrain_cfg,
+            num_envs=self.config.num_envs,
+            device=self.config.device,
+        )
 
     @property
     def scene(self) -> Scene:
@@ -237,6 +246,19 @@ class MujocoSceneManager(BaseManager):
         """Get all sensors."""
         return self._scene.sensors
 
+    @property
+    def env_origins(self) -> torch.Tensor:
+        """Per-env world-frame spawn offsets ``(num_envs, 3)``.
+
+        Generator terrain: comes from the ``TerrainImporter`` sub-terrain
+        grid. Plane terrain: comes from mjlab's ``Scene.env_origins``
+        (its ``env_spacing`` grid), so we keep mjlab's native multi-env
+        layout for flat scenes.
+        """
+        if self.terrain.data is not None:
+            return self.terrain.env_origins
+        return self._scene.env_origins
+
     def build_scene(self) -> None:
         """Build the scene and simulation from config.
 
@@ -247,24 +269,11 @@ class MujocoSceneManager(BaseManager):
         from mjlab.sim import MujocoCfg, Simulation, SimulationCfg
         from mjlab.terrains import TerrainEntityCfg
 
-        # Generated terrain → inject our canonical heightfield as an
-        # ``<hfield>`` in a "terrain" body via spec_fn (no mjlab terrain
-        # entity, so env_origins fall back to all-zeros = all envs at the
-        # origin on this single patch). ``self._terrain_data`` is read by
-        # the out-of-bounds termination.
-        # Terrain comes from the unified TerrainCfg. ``"generator"`` injects
-        # our canonical heightfield as an ``<hfield>`` in a "terrain" body
-        # via spec_fn (no mjlab terrain entity, so env_origins fall back to
-        # all-zeros = all envs at the origin on this single patch);
-        # ``"plane"`` uses mjlab's flat plane. ``self._terrain_data`` is read
-        # by the out-of-bounds termination.
-        self._terrain_data = None
-        terrain_cfg = self.config.terrain_cfg
-        terrain_spec_fn = None
-        if terrain_cfg.terrain_type == "generator":
-            from rlworld.rl.envs.managers.mujoco.terrain_importer import build_mujoco_terrain
-
-            terrain_spec_fn, self._terrain_data = build_mujoco_terrain(terrain_cfg)
+        # Terrain importer (constructed in __init__) decides between
+        # mjlab's built-in plane and a spec_fn that injects our generated
+        # heightfield in a "terrain" body. ``self.terrain.data`` is then
+        # available for the out-of-bounds termination + viser bridge.
+        terrain_spec_fn = self.terrain.build_spec_fn()
 
         # Build mjlab SceneCfg
         if self.config.mjlab_scene_cfg is not None:
@@ -348,9 +357,6 @@ class MujocoSceneManager(BaseManager):
         from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 
         for entity_name, cfg in self.config.entities.items():
-            if isinstance(cfg, GroundPlaneCfg):
-                continue
-
             if not isinstance(cfg, MujocoEntityCfg):
                 raise ValueError(f"MuJoCo entity '{entity_name}' must be MujocoEntityCfg, got {type(cfg).__name__}")
             if cfg.spec_fn is None:

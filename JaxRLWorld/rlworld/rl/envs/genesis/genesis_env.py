@@ -175,6 +175,9 @@ class GenesisEnv(World):
                 sensors=self.scene_cfg.sensors,
                 env_spacing=self.scene_cfg.env_spacing,
                 show_viewer=self.visualization_cfg.show_viewer,
+                num_envs=self.num_envs,
+                device=str(self.device),
+                terrain_cfg=self.scene_cfg.terrain_cfg,
             ),
         )
 

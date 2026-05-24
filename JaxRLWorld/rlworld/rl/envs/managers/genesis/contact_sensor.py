@@ -153,7 +153,16 @@ class GenesisContactSensor:
                     "pattern (no entity scope) is not supported; use secondary.entity=<name> "
                     "or secondary.entity='self'."
                 )
-            sec_entity = entity if sec.entity == "self" else env.scene_manager[sec.entity]
+            # ``"self"`` keeps only intra-primary contacts; ``"terrain"``
+            # is a sentinel for the ground (owned by ``TerrainImporter``,
+            # not in ``scene_manager.entities``); everything else looks up
+            # a named entity in the dict.
+            if sec.entity == "self":
+                sec_entity = entity
+            elif sec.entity == "terrain":
+                sec_entity = env.scene_manager.terrain.entity
+            else:
+                sec_entity = env.scene_manager[sec.entity]
             sec_links = set(range(sec_entity.link_start, sec_entity.link_end))
             n_links = env.scene_manager.scene.sim.rigid_solver.n_links
             self._filter_link_idx = tuple(sorted(set(range(n_links)) - sec_links))

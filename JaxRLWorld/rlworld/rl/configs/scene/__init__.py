@@ -1,13 +1,13 @@
 """Scene-config exports.
 
-The sim-agnostic pieces (``SceneEntitySelector`` / ``ResolvedEntity`` and
-the unified ``*EntityCfg`` dataclasses) are imported eagerly — they pull
-in no simulator package.  The sim-specific scene-init configs
-(``EntityConfig`` / ``GenesisSceneInitConfig`` import ``genesis``;
-``NewtonEntityConfig`` & friends import ``newton`` + ``warp``) are
-exposed lazily via ``__getattr__`` so ``from rlworld.rl.configs.scene
-import GroundPlaneCfg`` (used widely) does not drag a simulator into a
-process that only needs another one.
+The sim-agnostic pieces (``SceneEntitySelector`` / ``ResolvedEntity``,
+``TerrainCfg``, and the unified ``*EntityCfg`` dataclasses) are imported
+eagerly — they pull in no simulator package. The sim-specific scene-init
+configs (``EntityConfig`` / ``GenesisSceneInitConfig`` import
+``genesis``; ``NewtonEntityConfig`` & friends import ``newton`` +
+``warp``) are exposed lazily via ``__getattr__`` so importing a unified
+config does not drag a simulator into a process that only needs another
+one.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from .unified_entity_config import (
     ArticulationCfg,
     EntityCfg,
     GenesisEntityCfg,
-    GroundPlaneCfg,
     InitialStateCfg,
     MujocoEntityCfg,
     NewtonEntityCfg,
@@ -33,7 +32,6 @@ _LAZY: dict[str, tuple[str, str]] = {
     "GenesisSceneInitConfig": (".entity_config", "GenesisSceneInitConfig"),
     "NewtonBoxConfig": (".newton_entity_config", "NewtonBoxConfig"),
     "NewtonEntityConfig": (".newton_entity_config", "NewtonEntityConfig"),
-    "NewtonGroundPlaneConfig": (".newton_entity_config", "NewtonGroundPlaneConfig"),
 }
 
 
@@ -46,7 +44,7 @@ def __getattr__(name: str):
 
 if TYPE_CHECKING:  # let type checkers / IDEs see the lazy names
     from .entity_config import EntityConfig, GenesisSceneInitConfig
-    from .newton_entity_config import NewtonBoxConfig, NewtonEntityConfig, NewtonGroundPlaneConfig
+    from .newton_entity_config import NewtonBoxConfig, NewtonEntityConfig
 
 
 __all__ = [
@@ -56,7 +54,6 @@ __all__ = [
     "ArticulationCfg",
     "EntityCfg",
     "GenesisEntityCfg",
-    "GroundPlaneCfg",
     "InitialStateCfg",
     "MujocoEntityCfg",
     "NewtonEntityCfg",
@@ -64,5 +61,4 @@ __all__ = [
     "GenesisSceneInitConfig",
     "NewtonBoxConfig",
     "NewtonEntityConfig",
-    "NewtonGroundPlaneConfig",
 ]

@@ -77,13 +77,6 @@ class NewtonEntityConfig:
 
 
 @dataclass
-class NewtonGroundPlaneConfig:
-    """Ground plane configuration."""
-
-    shape_cfg: newton.ModelBuilder.ShapeConfig | None = None
-
-
-@dataclass
 class NewtonBoxConfig:
     """Configuration for a box primitive in Newton."""
 

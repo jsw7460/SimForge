@@ -129,7 +129,7 @@ class MujocoBridge:
         # skips (MuJoCo hfields aren't a renderable vertex mesh). Render the
         # canonical height grid instead (matches what was injected) as a
         # fixed body, and suppress the viewer's cosmetic flat ground.
-        terrain_data = getattr(self._scene_manager, "_terrain_data", None)
+        terrain_data = self._scene_manager.terrain.data
         has_ground_mesh = terrain_data is not None
         if terrain_data is not None:
             mesh_groups.append(

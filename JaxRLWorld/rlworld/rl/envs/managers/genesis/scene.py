@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import genesis as gs
@@ -13,7 +13,6 @@ from rlworld.rl.configs.scene.terrain_config import TerrainCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg,
     GenesisEntityCfg,
-    GroundPlaneCfg,
 )
 from rlworld.rl.configs.sensors import SensorConfig
 from rlworld.rl.envs.indexing import ArticulationIndexing
@@ -21,7 +20,7 @@ from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.managers.common.visual_mesh_transform import apply_local_transform
-from rlworld.rl.envs.managers.genesis.terrain_importer import import_terrain_genesis
+from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.utils import entity_utils, string as string_utils
 
 if TYPE_CHECKING:
@@ -86,10 +85,15 @@ class SceneManagerConfig:
     viewer_options: gs.options.ViewerOptions
     vis_options: gs.options.VisOptions
     rigid_options: gs.options.RigidOptions
-    entities: dict[str, EntityCfg | GroundPlaneCfg | TerrainCfg]
+    entities: dict[str, EntityCfg]
     sensors: list[SensorConfig] | None
     env_spacing: tuple
     show_viewer: bool
+    num_envs: int = 1
+    device: str = "cpu"
+    # Terrain (flat plane by default; generator → heightfield) — fed to a
+    # GenesisTerrainImporter constructed via ManagerRegistry.
+    terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
 
 class SceneManager(BaseManager):
@@ -104,22 +108,14 @@ class SceneManager(BaseManager):
 
         self.trees: dict = {}
 
-        self.land_x_range = None
-        self.land_y_range = None
-
-        # Height map storage
-        self.coords_x = None
-        self.coords_y = None
-        self.coords_x_clamped = None
-        self.coords_y_clamped = None
-        self.height_map = None  # World map ; [world_size, world_size]
-        self.local_height_map = None  # Map around the robot; [n_envs, map_size, map_size]
-        self.horizontal_scale = None
-        self.vertical_scale = None
-
-        # Generated terrain (TerrainData) when a TerrainCfg generator is
-        # used; None for flat ground. Read by the out-of-bounds termination.
-        self._terrain_data = None
+        # Terrain importer (owns terrain data + per-env origins / curriculum).
+        self.terrain = ManagerRegistry.create(
+            "genesis",
+            "terrain",
+            cfg=self.config.terrain_cfg,
+            num_envs=self.config.num_envs,
+            device=self.config.device,
+        )
 
     def __getattr__(self, item) -> RigidEntity:
         return self.entities[item]
@@ -127,19 +123,18 @@ class SceneManager(BaseManager):
     def __getitem__(self, item) -> RigidEntity:
         return self.entities[item]
 
-    @property
-    def terrain_info(self):
-        return {
-            "x_range": self.land_x_range,
-            "y_range": self.land_y_range,
-            "height_field": self.height_map,
-            "horizontal_scale": self.horizontal_scale,
-            "vertical_scale": self.vertical_scale,
-        }
-
     def find_body_names(self, body_names: list[str], entity_name: str = "robot"):
         _, names = entity_utils.find_links(self.entities[entity_name], body_names, preserve_order=True)
         return names
+
+    @property
+    def env_origins(self) -> torch.Tensor:
+        """Per-env world-frame spawn offsets ``(num_envs, 3)``.
+
+        Sourced from the ``TerrainImporter`` sub-terrain grid; all-zeros
+        when terrain is a flat plane.
+        """
+        return self.terrain.env_origins
 
     def get_visual_meshes(self, body_names: tuple[str, ...]) -> dict[str, trimesh.Trimesh | None]:
         """Per-body visual ``trimesh.Trimesh`` in body-local frame for the
@@ -178,70 +173,52 @@ class SceneManager(BaseManager):
         self.env.vis_manager._setup_visualization_cameras()
 
     def _add_entities(self):
-        """Add entities from dict[str, EntityCfg/GenesisEntityCfg/GroundPlaneCfg]."""
+        """Add robot/articulated entities. Terrain is added separately via the
+        TerrainImporter before the entity loop."""
+        # Terrain (flat plane or generated heightfield) — added once,
+        # before any other entities. Stored as ``self.terrain`` (importer).
+        self.terrain.add_to_scene(self.scene)
+
         for entity_name, cfg in self.config.entities.items():
             if entity_name in self.entities:
                 raise ValueError(f"Entity '{entity_name}' is already registered")
 
-            if isinstance(cfg, TerrainCfg):
-                entity, terrain_data = import_terrain_genesis(self.scene, cfg)
-                if terrain_data is not None:
-                    self._set_terrain_scaffolding(terrain_data)
-            elif isinstance(cfg, GroundPlaneCfg):
-                morph = gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
-                entity = self.scene.add_entity(morph=morph)
+            # GenesisEntityCfg-specific fields
+            if isinstance(cfg, GenesisEntityCfg):
+                convexify = cfg.convexify
+                surface = cfg.surface
+                visualize = cfg.visualize_contact
             else:
-                # GenesisEntityCfg-specific fields
-                if isinstance(cfg, GenesisEntityCfg):
-                    convexify = cfg.convexify
-                    surface = cfg.surface
-                    visualize = cfg.visualize_contact
-                else:
-                    convexify = False
-                    surface = None
-                    visualize = False
+                convexify = False
+                surface = None
+                visualize = False
 
-                mjcf_path = getattr(cfg, "mjcf_path", None)
-                if mjcf_path:
-                    mjcf_kwargs = {
-                        "file": mjcf_path,
-                        "convexify": convexify,
-                        "batch_fixed_verts": True,
-                    }
-                    if cfg.init_state.pos != (0.0, 0.0, 0.0):
-                        mjcf_kwargs["pos"] = cfg.init_state.pos
-                    morph = gs.morphs.MJCF(**mjcf_kwargs)
-                else:
-                    urdf_kwargs = {
-                        "file": cfg.urdf_path,
-                        "fixed": not cfg.floating,
-                        "convexify": convexify,
-                    }
-                    if cfg.links_to_keep:
-                        urdf_kwargs["links_to_keep"] = cfg.links_to_keep
-                    morph = gs.morphs.URDF(**urdf_kwargs)
+            mjcf_path = getattr(cfg, "mjcf_path", None)
+            if mjcf_path:
+                mjcf_kwargs = {
+                    "file": mjcf_path,
+                    "convexify": convexify,
+                    "batch_fixed_verts": True,
+                }
+                if cfg.init_state.pos != (0.0, 0.0, 0.0):
+                    mjcf_kwargs["pos"] = cfg.init_state.pos
+                morph = gs.morphs.MJCF(**mjcf_kwargs)
+            else:
+                urdf_kwargs = {
+                    "file": cfg.urdf_path,
+                    "fixed": not cfg.floating,
+                    "convexify": convexify,
+                }
+                if cfg.links_to_keep:
+                    urdf_kwargs["links_to_keep"] = cfg.links_to_keep
+                morph = gs.morphs.URDF(**urdf_kwargs)
 
-                entity = self.scene.add_entity(
-                    morph=morph,
-                    surface=surface,
-                    visualize_contact=visualize,
-                )
+            entity = self.scene.add_entity(
+                morph=morph,
+                surface=surface,
+                visualize_contact=visualize,
+            )
             self.entities[entity_name] = entity
-
-    def _set_terrain_scaffolding(self, data) -> None:
-        """Populate the terrain scaffolding from generated TerrainData.
-
-        Fills the (previously unset) ``terrain_info`` fields so height-scan
-        observations / the out-of-bounds termination can read the world
-        height map and extent.
-        """
-        self._terrain_data = data
-        self.height_map = data.heights_m
-        self.horizontal_scale = data.horizontal_scale
-        self.vertical_scale = data.vertical_scale
-        lx, ly = data.size_xy
-        self.land_x_range = (-lx / 2.0, lx / 2.0)
-        self.land_y_range = (-ly / 2.0, ly / 2.0)
 
     def _add_sensors(self):
         sensor_configs = self.config.sensors
@@ -270,7 +247,7 @@ class SceneManager(BaseManager):
     def _set_kinematic_tree(self):
         def _resolve(name: str):
             cfg = self.config.entities.get(name)
-            if cfg is None or isinstance(cfg, GroundPlaneCfg | TerrainCfg):
+            if cfg is None:
                 return None
             mjcf_path = getattr(cfg, "mjcf_path", None)
             if mjcf_path:
@@ -311,7 +288,7 @@ class SceneManager(BaseManager):
         """
         for entity_name, entity in self.entities.items():
             cfg = self.config.entities.get(entity_name)
-            if cfg is None or isinstance(cfg, GroundPlaneCfg | TerrainCfg):
+            if cfg is None:
                 continue
 
             for act_cfg in cfg.articulation.actuators:
@@ -453,10 +430,6 @@ class SceneManager(BaseManager):
 
     def step(self):
         self.scene.step()
-
-    def get_local_height_map(self) -> torch.Tensor | None:
-        """Get current height map"""
-        return self.local_height_map
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         # Genesis manages scene state internally; nothing to do here

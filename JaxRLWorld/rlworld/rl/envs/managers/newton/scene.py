@@ -15,14 +15,10 @@ from newton.selection import ArticulationView
 
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.newton_config_classes import SolverMuJoCoCfg
-from rlworld.rl.configs.scene.newton_entity_config import (
-    NewtonEntityConfig,
-    NewtonGroundPlaneConfig,
-)
+from rlworld.rl.configs.scene.newton_entity_config import NewtonEntityConfig
 from rlworld.rl.configs.scene.terrain_config import TerrainCfg
 from rlworld.rl.configs.scene.unified_entity_config import (
     EntityCfg,
-    GroundPlaneCfg,
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactSensorCfg
@@ -37,7 +33,7 @@ from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonic
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.managers.common.visual_mesh import extract_visual_meshes_from_mj_model
 from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
-from rlworld.rl.envs.managers.newton.terrain_importer import import_terrain_newton
+from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.utils import string as string_utils
 
@@ -316,16 +312,14 @@ class NewtonSceneManagerConfig:
                     site_names=["base_imu"],
                 ),
             ],
-            add_ground=True,
+            terrain_cfg=TerrainCfg(terrain_type="plane"),
         )
     """
 
     num_worlds: int
 
     # Entity and sensor configurations
-    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | GroundPlaneCfg | TerrainCfg] = field(
-        default_factory=dict
-    )
+    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | NewtonEntityCfg] = field(default_factory=dict)
     sensors: list[NewtonSensorConfig] | None = None
     # Simulator-agnostic contact sensors (ContactSensorCfg). Handled
     # separately from ``sensors`` (which only holds NewtonSensorConfig
@@ -333,9 +327,9 @@ class NewtonSceneManagerConfig:
     # native ``SensorContact``, with optional substep history.
     contact_sensors: list[ContactSensorCfg] | None = None
 
-    # Ground plane
-    add_ground: bool = True
-    ground_config: NewtonGroundPlaneConfig | None = None
+    # Terrain (flat plane by default; generator → heightfield) — fed to a
+    # NewtonTerrainImporter constructed via ManagerRegistry.
+    terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
     # Simulation parameters
     dt: float = 1.0 / 100.0
@@ -410,6 +404,17 @@ class NewtonSceneManager(BaseManager):
         # Kinematic trees (for observation functions)
         self.trees: dict[str, Any] = {}
 
+        # Terrain importer (owns terrain data + per-env origins / curriculum).
+        # Constructed via ManagerRegistry so the scene manager doesn't know
+        # the concrete subclass.
+        self.terrain = ManagerRegistry.create(
+            "newton",
+            "terrain",
+            cfg=self.config.terrain_cfg,
+            num_envs=self.config.num_worlds,
+            device=self.env.device,
+        )
+
         # Internal
         self.substep_dt = config.dt / config.substeps
 
@@ -435,6 +440,15 @@ class NewtonSceneManager(BaseManager):
     def state(self) -> newton.State:
         """Current state (state_0)."""
         return self.state_0
+
+    @property
+    def env_origins(self) -> torch.Tensor:
+        """Per-env world-frame spawn offsets ``(num_envs, 3)``.
+
+        Sourced from the ``TerrainImporter`` sub-terrain grid; all-zeros
+        when terrain is a flat plane.
+        """
+        return self.terrain.env_origins
 
     def find_body_names(self, body_names: list[str], entity_name: str = "robot") -> list[str]:
         """Resolve regex body-name patterns to concrete body names.
@@ -487,30 +501,20 @@ class NewtonSceneManager(BaseManager):
         for entity_name, cfg in self.config.entities.items():
             self._register_entity(entity_name, cfg)
 
-    def _register_entity(
-        self, entity_name: str, cfg: EntityCfg | NewtonEntityCfg | GroundPlaneCfg | TerrainCfg
-    ) -> None:
-        """Register a single entity from its unified config."""
+    def _register_entity(self, entity_name: str, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Register a single robot/articulated entity from its unified config.
+
+        Terrain is NOT an entity any more — it's owned by ``self.terrain``
+        (a :class:`TerrainImporter`) and added separately during the
+        scene-merge step.
+        """
         if entity_name in self.entities:
             raise ValueError(f"Entity '{entity_name}' already registered")
 
         builder = newton.ModelBuilder()
         newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
 
-        if isinstance(cfg, TerrainCfg):
-            # Unified flat-or-generated terrain → Newton collider.
-            self._terrain_data = import_terrain_newton(builder, cfg)
-        elif isinstance(cfg, GroundPlaneCfg):
-            shape_cfg = newton.ModelBuilder.ShapeConfig(
-                ke=cfg.contact_stiffness,
-                kd=cfg.contact_damping,
-                mu=cfg.friction,
-                kf=cfg.ground_kf,
-                mu_rolling=cfg.ground_mu_rolling,
-                mu_torsional=cfg.ground_mu_torsional,
-            )
-            builder.add_ground_plane(cfg=shape_cfg)
-        elif cfg.usd_path:
+        if cfg.usd_path:
             self._load_usd_entity(builder, cfg)
         elif cfg.mjcf_path:
             self._load_mjcf_entity(builder, cfg)
@@ -879,26 +883,25 @@ class NewtonSceneManager(BaseManager):
         # identical model-name prefix). Single-robot scenes are left untouched
         # (prefix stays the auto-extracted model name). The label *leaves* are
         # unchanged either way, so leaf-name-based matching is unaffected.
-        # Static global ground entities (flat plane or rough terrain) are
-        # added once, not replicated per-world, and don't count as robots.
-        _global_ground = (GroundPlaneCfg, TerrainCfg)
-        n_robot_entities = sum(
-            1 for n in self._entity_builders if not isinstance(self.entities[n]["config"], _global_ground)
-        )
+        # Terrain (flat plane or generated heightfield) — added once,
+        # globally, via the TerrainImporter. Not an entity, so the merge
+        # loop below sees only robots.
+        terrain_builder = newton.ModelBuilder()
+        newton.solvers.SolverMuJoCo.register_custom_attributes(terrain_builder)
+        self.terrain.import_into_builder(terrain_builder)
+        scene_builder.add_builder(terrain_builder)
+
+        # All entries in self._entity_builders are robots → replicate per world.
+        n_robot_entities = len(self._entity_builders)
         for entity_name, entity_builder in self._entity_builders.items():
             cfg = self.entities[entity_name]["config"]
-            if isinstance(cfg, _global_ground):
-                # Ground / terrain: add once (global). No label prefix — it
-                # is resolved via the unscoped fallback in _resolve_indices.
-                scene_builder.add_builder(entity_builder)
-            else:
-                label_prefix = entity_name if n_robot_entities > 1 else None
-                # ModelBuilder.replicate(builder, N) == N×add_world(builder) with
-                # no prefix; do the loop ourselves so we can pass label_prefix.
-                for _ in range(self.config.num_worlds):
-                    scene_builder.add_world(entity_builder, label_prefix=label_prefix)
-                if label_prefix is not None:
-                    cfg.body_label_prefix = label_prefix
+            label_prefix = entity_name if n_robot_entities > 1 else None
+            # ModelBuilder.replicate(builder, N) == N×add_world(builder) with
+            # no prefix; do the loop ourselves so we can pass label_prefix.
+            for _ in range(self.config.num_worlds):
+                scene_builder.add_world(entity_builder, label_prefix=label_prefix)
+            if label_prefix is not None:
+                cfg.body_label_prefix = label_prefix
 
         # Finalize model
         self.model = scene_builder.finalize()
@@ -1098,10 +1101,6 @@ class NewtonSceneManager(BaseManager):
         """
         for entity_name, entity_info in self.entities.items():
             cfg = entity_info["config"]
-            # Static ground entities (flat plane or rough terrain) have no
-            # articulation, so they get no ArticulationView.
-            if isinstance(cfg, GroundPlaneCfg | TerrainCfg):
-                continue
             prefix = getattr(cfg, "body_label_prefix", None)
             pattern = f"{prefix}*" if prefix else "*"
             self.articulation_views[entity_name] = ArticulationView(

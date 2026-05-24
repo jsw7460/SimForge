@@ -174,33 +174,3 @@ class MujocoEntityCfg(EntityCfg):
 
     cameras: tuple = ()
     """mjlab CameraCfg objects."""
-
-
-# ---------------------------------------------------------------------------
-# Ground plane configuration
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class GroundPlaneCfg:
-    """Ground plane entity.
-
-    Attributes:
-        contact_stiffness: Normal contact stiffness [N/m].
-        contact_damping: Normal contact damping [N*s/m].
-        friction: Coulomb friction coefficient.
-    """
-
-    contact_stiffness: float = 2.5e3
-    contact_damping: float = 100.0
-    friction: float = 1.0
-
-    # Newton-specific ground options
-    ground_kf: float = 1000.0
-    """Newton tangential contact stiffness."""
-
-    ground_mu_rolling: float = 0.0001
-    """Newton rolling friction coefficient."""
-
-    ground_mu_torsional: float = 0.005
-    """Newton torsional friction coefficient."""

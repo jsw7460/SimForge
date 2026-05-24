@@ -34,7 +34,6 @@ from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
-    GroundPlaneCfg,
     InitialStateCfg,
     NewtonEntityCfg,
 )
@@ -119,7 +118,6 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             nconmax=35,
         ),
         entities={
-            "ground": GroundPlaneCfg(),
             "robot": NewtonEntityCfg(
                 mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
@@ -164,7 +162,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             ContactSensorCfg(
                 name="feet_ground_contact",
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
-                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="ground"),
+                secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="terrain"),
             ),
             ContactSensorCfg(
                 name="self_collision",
@@ -173,7 +171,6 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
                 history_length=timing["decimation"],
             ),
         ],
-        add_ground=True,
         env_spacing=(2.0, 2.0, 0.0),
     )
 

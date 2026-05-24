@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Literal, Union
 
-from rlworld.rl.configs.scene import GroundPlaneCfg
-
 from .algorithms import AlgorithmConfig, get_algorithm_config_class
 from .base_config import BaseConfig
 from .common_config_classes import (
@@ -14,13 +12,14 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
+from .scene.terrain_config import TerrainCfg
 
 if TYPE_CHECKING:
     from rlworld.rl.configs import (
         CurriculumManagerConfig,
     )
     from rlworld.rl.configs.robots.base import RobotConfig
-    from rlworld.rl.configs.scene import EntityCfg, NewtonEntityConfig, TerrainCfg
+    from rlworld.rl.configs.scene import EntityCfg, NewtonEntityConfig
     from rlworld.rl.configs.sensors.contact_sensor_config import ContactSensorCfg
     from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
 
@@ -103,15 +102,15 @@ class NewtonSceneConfig(BaseConfig):
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
     solver_type: Literal["mujoco"] = "mujoco"  # Currently, only support mujoco solver
     solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
-    entities: dict[str, Union["EntityCfg", "NewtonEntityConfig", "GroundPlaneCfg", "TerrainCfg"]] = field(
-        default_factory=list
-    )
+    entities: dict[str, Union["EntityCfg", "NewtonEntityConfig"]] = field(default_factory=dict)
     sensors: list["NewtonSensorConfig"] | None = None
     # Simulator-agnostic contact sensors (shared with Genesis / mjlab).
     contact_sensors: "list[ContactSensorCfg] | None" = None
-    add_ground: bool = True
     env_spacing: tuple[float, float, float] = (2.0, 2.0, 0.0)
     robot_cfg: Union["RobotConfig", None] = None
+    # Terrain (flat plane by default; generator → heightfield) — owned by
+    # the per-sim TerrainImporter the scene manager constructs.
+    terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
     # Collision broad-phase triangle-pair budget. ``None`` keeps Newton's
     # default (1e6); rough-terrain scenes set ``num_envs * per_env`` so
     # heightfield contacts aren't silently dropped (see the Newton scene
