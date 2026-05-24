@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Literal
 
+import mujoco
 import newton
 import numpy as np
 import torch
@@ -34,6 +35,7 @@ from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
+from rlworld.rl.envs.managers.common.visual_mesh import extract_visual_meshes_from_mj_model
 from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
 from rlworld.rl.envs.managers.newton.terrain_importer import import_terrain_newton
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
@@ -449,6 +451,16 @@ class NewtonSceneManager(BaseManager):
             raise ValueError(f"No ArticulationView for entity {entity_name!r}; did build_scene() run?")
         _, names = string_utils.resolve_matching_names(body_names, list(view.link_names), preserve_order=True)
         return names
+
+    def get_visual_meshes(self, body_names: tuple[str, ...]):
+        """Per-body visual ``trimesh.Trimesh`` in body-local frame for the
+        viser ghost overlay. Newton path: ``solver.mj_model`` is per-env
+        replicated (scoped ``env_0/robot/...`` names, unusable for a
+        single-robot mesh harvest), so re-parse the original MJCF into
+        a clean single-robot MjModel and hand it to the shared extractor."""
+        robot_cfg = self.config.entities["robot"]
+        model = mujoco.MjModel.from_xml_path(robot_cfg.mjcf_path)
+        return extract_visual_meshes_from_mj_model(model, body_names)
 
     def _prefix_names(
         self, entity_name: str, names: str | list[str] | list[int] | None

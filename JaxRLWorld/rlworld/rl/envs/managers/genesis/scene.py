@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import genesis as gs
 import torch
+import trimesh
 
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from rlworld.rl.configs.scene.terrain_config import TerrainCfg
@@ -19,6 +20,7 @@ from rlworld.rl.envs.indexing import ArticulationIndexing
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
+from rlworld.rl.envs.managers.common.visual_mesh_transform import apply_local_transform
 from rlworld.rl.envs.managers.genesis.terrain_importer import import_terrain_genesis
 from rlworld.rl.utils import entity_utils, string as string_utils
 
@@ -138,6 +140,34 @@ class SceneManager(BaseManager):
     def find_body_names(self, body_names: list[str], entity_name: str = "robot"):
         _, names = entity_utils.find_links(self.entities[entity_name], body_names, preserve_order=True)
         return names
+
+    def get_visual_meshes(self, body_names: tuple[str, ...]) -> dict[str, trimesh.Trimesh | None]:
+        """Per-body visual ``trimesh.Trimesh`` in body-local frame for the
+        viser ghost overlay. Genesis path: harvest ``RigidVisGeom``s
+        directly off each link — no mujoco round-trip, so the training
+        model and the ghost mesh agree by construction. A body with
+        zero vgeoms returns ``None``; an unresolvable name crashes via
+        Genesis's own ``get_link``."""
+        robot = self.entities["robot"]
+        out: dict[str, trimesh.Trimesh | None] = {}
+        for bname in body_names:
+            link = robot.get_link(name=bname)
+            parts: list[trimesh.Trimesh] = []
+            for vg in link.vgeoms:
+                mesh = trimesh.Trimesh(
+                    vertices=vg.init_vverts.copy(),
+                    faces=vg.init_vfaces.copy(),
+                    process=False,
+                )
+                apply_local_transform(mesh, vg.init_pos, vg.init_quat)
+                parts.append(mesh)
+            if not parts:
+                out[bname] = None
+            elif len(parts) == 1:
+                out[bname] = parts[0]
+            else:
+                out[bname] = trimesh.util.concatenate(parts)
+        return out
 
     def register_entities(self) -> None:
         """Build complete scene with all components"""
