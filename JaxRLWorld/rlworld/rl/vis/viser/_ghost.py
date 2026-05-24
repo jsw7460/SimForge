@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import mujoco
 import numpy as np
 import trimesh
 import viser
@@ -133,36 +134,47 @@ class MotionGhost:
 
 
 def _get_robot_mj_model(env: World):
-    """Return the live ``mujoco.MjModel`` the env's sim is actually using.
+    """Return a single-robot ``mujoco.MjModel`` for ghost-mesh extraction.
 
-    Pulls from the env's scene manager — *not* a fresh ``MjModel.from_xml_path``
-    of the config's ``mjcf_path`` — so the ghost meshes match exactly what
-    the policy is controlling (mjlab's ``spec_fn`` builds are reflected
-    correctly, etc.). Crashes early when the running sim doesn't expose
-    an in-memory ``mj_model`` (e.g. Genesis backend); no silent fallback.
+    Source branches by sim because the right access point differs:
 
-    * mjlab (mujoco sim) → ``scene_manager.mj_model`` (compiled by mjlab Scene).
-    * Newton with the mujoco-warp solver → ``scene_manager.solver.mj_model``.
-    * Genesis or anything else without an ``mj_model`` → ``RuntimeError``.
+    * **mjlab (mujoco sim)** — ``scene_manager.scene.compile()``. The
+      mjlab Scene holds the spec (including any per-env ``spec_fn``
+      rewrites) and ``compile()`` returns a fresh MjModel with the
+      single robot + bare body names. Exact geometry the training
+      sim uses.
+    * **Newton (and any other file-based backend)** — parse
+      ``entities["robot"].mjcf_path`` via ``mujoco.MjModel.from_xml_path``.
+      Newton's ``solver.mj_model`` is *num_envs-replicated*
+      (``env_0/robot/pelvis``, ``env_1/robot/pelvis``, …) and unusable
+      for single-robot visual extraction; the MJCF file is the
+      ground-truth source Newton itself loaded from.
+    * **Anything else** (e.g. Genesis without an mjcf_path on the
+      entity) — raise ``RuntimeError``. No silent fallback per project
+      policy.
     """
     sm = env.scene_manager
-    mj_model = getattr(sm, "mj_model", None)
-    if mj_model is not None:
-        return mj_model
-    solver = getattr(sm, "solver", None)
-    if solver is not None:
-        mj_model = getattr(solver, "mj_model", None)
-        if mj_model is not None:
-            return mj_model
+
+    # mjlab path: Scene → fresh compiled, single-robot MjModel.
+    scene = getattr(sm, "scene", None)
+    if scene is not None and hasattr(scene, "compile"):
+        return scene.compile()
+
+    # Newton / file-based path: parse the configured MJCF.
+    config = getattr(sm, "config", None)
+    entities = getattr(config, "entities", None)
+    if entities is not None and "robot" in entities:
+        mjcf_path = getattr(entities["robot"], "mjcf_path", None)
+        if mjcf_path:
+            return mujoco.MjModel.from_xml_path(mjcf_path)
+
     sim_type = getattr(env, "sim_type", "<unknown>")
     raise RuntimeError(
-        f"MotionGhost requires a live mujoco.MjModel from the env's "
-        f"scene_manager (sim_type={sim_type!r}). Tried "
-        f"`scene_manager.mj_model` and `scene_manager.solver.mj_model` — "
-        f"neither was present. Backends without an mj_model accessor "
-        f"(e.g. Genesis) cannot render the ghost overlay yet; add a "
-        f"`mj_model` property on the scene manager or skip MotionGhost "
-        f"in the viewer setup for that sim."
+        f"MotionGhost: cannot resolve a single-robot mujoco.MjModel "
+        f"(sim_type={sim_type!r}). Tried `scene_manager.scene.compile()` "
+        f"(mjlab path) and `scene_manager.config.entities['robot'].mjcf_path` "
+        f"(file-based path); both unavailable. Backends without either "
+        f"accessor need a dedicated single-robot extraction path."
     )
 
 
@@ -182,8 +194,6 @@ def _build_per_body_meshes(
     Takes the compiled MjModel directly (not an XML path) so the meshes
     track exactly what the active sim is running — including any per-env
     spec rewrites mjlab applies through ``spec_fn``."""
-    import mujoco
-
     out: dict[str, trimesh.Trimesh | None] = {}
     for bname in body_names:
         body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, bname)
@@ -219,8 +229,6 @@ def _geom_to_trimesh(model, gid: int) -> trimesh.Trimesh | None:
     the caller only needs to push the *body's* world transform to viser
     per tick. Returns ``None`` for unsupported geom types (we cover the
     common visual shapes: mesh, sphere, box, capsule, cylinder)."""
-    import mujoco
-
     geom_type = int(model.geom_type[gid])
     size = np.array(model.geom_size[gid], dtype=np.float32)
     local_pos = np.array(model.geom_pos[gid], dtype=np.float32)
