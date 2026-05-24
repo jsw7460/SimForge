@@ -183,6 +183,36 @@ def _get_robot_mj_model(env: World):
 # ─────────────────────────────────────────────────────────────────────
 
 
+def _find_body_id_scoped(model, bare_name: str) -> int:
+    """Resolve a tracked body's id in ``model`` by bare name first, then
+    by mjlab-style scoped suffix (``<entity>/<bare>``).
+
+    mjlab's spec compilation prepends an entity prefix to body names
+    (e.g. ``robot/pelvis``), so a direct ``mj_name2id('pelvis')`` returns
+    -1 even though the body is right there. We try the bare name first
+    (Newton's file-parsed MJCF keeps bare names) and fall back to suffix
+    matching (mjlab path). Crash-early: if neither resolves, raise with
+    a sample of the model's actual body names so the mismatch is
+    immediately legible. No silent skip.
+    """
+    bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, bare_name)
+    if bid >= 0:
+        return bid
+    target_suffix = "/" + bare_name
+    for i in range(model.nbody):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i)
+        if name and (name == bare_name or name.endswith(target_suffix)):
+            return i
+    sample = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) for i in range(min(model.nbody, 8))]
+    raise RuntimeError(
+        f"MotionGhost: tracked body name {bare_name!r} not found in the "
+        f"loaded mj_model — tried exact match and scoped suffix "
+        f"'/{bare_name}'. First {len(sample)} bodies in model: {sample}. "
+        f"Either MotionCommand.body_names and the model disagree, or "
+        f"the model uses an unexpected naming scheme."
+    )
+
+
 def _build_per_body_meshes(
     model,
     body_names: tuple[str, ...],
@@ -196,10 +226,7 @@ def _build_per_body_meshes(
     spec rewrites mjlab applies through ``spec_fn``."""
     out: dict[str, trimesh.Trimesh | None] = {}
     for bname in body_names:
-        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, bname)
-        if body_id < 0:
-            out[bname] = None
-            continue
+        body_id = _find_body_id_scoped(model, bname)
 
         parts: list[trimesh.Trimesh] = []
         for gid in range(model.ngeom):
