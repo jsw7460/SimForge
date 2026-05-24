@@ -5,15 +5,19 @@ Renders the per-body reference pose of the env's active
 the live robot in the viser scene — so the user can eyeball tracking
 error (anchor drift, joint deviation) at a glance.
 
-Cross-sim implementation: we read the robot meshes directly from the
-preset's MJCF (``cfg.robot.mjcf_path``) via MuJoCo, build one merged
-``trimesh.Trimesh`` per tracked body in body-local frame (geom-local
-``pos``/``quat`` baked in), and add each as a single viser
-``add_mesh_simple`` handle. Per viewer tick we pull the body's world
-transform from ``MotionCommand.body_pos_w`` / ``body_quat_w`` and update
-the handle's ``position``/``wxyz``. The env's actual sim (newton /
-genesis / mujoco) never enters this path — the MJCF is the single
-source of truth for visuals, so the ghost matches across all backends.
+Cross-sim implementation: we pull the **live** ``mujoco.MjModel`` from
+the env's scene manager (mjlab compiles it from its spec; Newton with
+the mujoco-warp solver also keeps one). We do **not** reparse the
+config's ``mjcf_path`` — the live model already reflects any per-env
+spec rewrites (mjlab ``spec_fn``, etc.), so ghost meshes match exactly
+what the policy is controlling. Per tracked body we build a merged
+``trimesh.Trimesh`` in body-local frame (geom-local ``pos``/``quat``
+baked in) and add it as a single viser ``add_mesh_simple`` handle. Per
+viewer tick we pull the body's world transform from
+``MotionCommand.body_pos_w`` / ``body_quat_w`` and update the handle's
+``position``/``wxyz``. Backends without an in-memory ``MjModel``
+accessor (currently Genesis) raise ``RuntimeError`` rather than
+silently rendering nothing — no silent fallback, by project policy.
 
 The Mjlab equivalent is ``mjlab.tasks.tracking.mdp.commands._debug_vis_impl``
 + ``DebugVisualizer.add_ghost_mesh`` — same intent, but Mjlab deep-copies
@@ -61,9 +65,9 @@ class MotionGhost:
             # Non-tracking preset — nothing to draw.
             return
 
-        mjcf_path = self._resolve_mjcf_path()
+        model = _get_robot_mj_model(self._env)
         body_names = tuple(cmd.cfg.body_names)
-        meshes = _build_per_body_meshes(mjcf_path, body_names)
+        meshes = _build_per_body_meshes(model, body_names)
 
         for name, mesh in meshes.items():
             if mesh is None or len(mesh.vertices) == 0:
@@ -127,11 +131,39 @@ class MotionGhost:
             return None
         return cm.get_term("motion")
 
-    def _resolve_mjcf_path(self) -> str:
-        """Pull the robot MJCF path the env was built with."""
-        entities = self._env.scene_manager.config.entities
-        robot_entity = entities["robot"] if "robot" in entities else next(iter(entities.values()))
-        return robot_entity.mjcf_path
+
+def _get_robot_mj_model(env: World):
+    """Return the live ``mujoco.MjModel`` the env's sim is actually using.
+
+    Pulls from the env's scene manager — *not* a fresh ``MjModel.from_xml_path``
+    of the config's ``mjcf_path`` — so the ghost meshes match exactly what
+    the policy is controlling (mjlab's ``spec_fn`` builds are reflected
+    correctly, etc.). Crashes early when the running sim doesn't expose
+    an in-memory ``mj_model`` (e.g. Genesis backend); no silent fallback.
+
+    * mjlab (mujoco sim) → ``scene_manager.mj_model`` (compiled by mjlab Scene).
+    * Newton with the mujoco-warp solver → ``scene_manager.solver.mj_model``.
+    * Genesis or anything else without an ``mj_model`` → ``RuntimeError``.
+    """
+    sm = env.scene_manager
+    mj_model = getattr(sm, "mj_model", None)
+    if mj_model is not None:
+        return mj_model
+    solver = getattr(sm, "solver", None)
+    if solver is not None:
+        mj_model = getattr(solver, "mj_model", None)
+        if mj_model is not None:
+            return mj_model
+    sim_type = getattr(env, "sim_type", "<unknown>")
+    raise RuntimeError(
+        f"MotionGhost requires a live mujoco.MjModel from the env's "
+        f"scene_manager (sim_type={sim_type!r}). Tried "
+        f"`scene_manager.mj_model` and `scene_manager.solver.mj_model` — "
+        f"neither was present. Backends without an mj_model accessor "
+        f"(e.g. Genesis) cannot render the ghost overlay yet; add a "
+        f"`mj_model` property on the scene manager or skip MotionGhost "
+        f"in the viewer setup for that sim."
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -140,15 +172,18 @@ class MotionGhost:
 
 
 def _build_per_body_meshes(
-    mjcf_path: str,
+    model,
     body_names: tuple[str, ...],
 ) -> dict[str, trimesh.Trimesh | None]:
-    """Parse the MJCF and return ``{body_name → merged trimesh in
-    body-local frame}``. Skips collision-only geoms (``contype != 0`` or
-    ``conaffinity != 0``) so only the visual silhouette remains."""
+    """Walk the live ``mujoco.MjModel`` and return ``{body_name → merged
+    trimesh in body-local frame}``. Skips collision-only geoms (``contype
+    != 0`` or ``conaffinity != 0``) so only the visual silhouette remains.
+
+    Takes the compiled MjModel directly (not an XML path) so the meshes
+    track exactly what the active sim is running — including any per-env
+    spec rewrites mjlab applies through ``spec_fn``."""
     import mujoco
 
-    model = mujoco.MjModel.from_xml_path(mjcf_path)
     out: dict[str, trimesh.Trimesh | None] = {}
     for bname in body_names:
         body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, bname)
