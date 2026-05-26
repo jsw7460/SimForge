@@ -37,9 +37,9 @@ external users can clone a single, reproducible stack.
 - **Proxy for sim-to-real research.** Cross-sim provides a
   hardware-free testbed for sim2real-style experiments (e.g., system
   identification). The same task config drives all three backends.
-- **5 task presets × 3 simulators = 15 ready combinations** covering
-  Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and the
-  Booster T1 humanoid.
+- **7 task configurations × 3 simulators = 21 ready combinations**
+  covering Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and
+  the Booster T1 humanoid.
 - **PPO is the default for all locomotion tasks** across the three
   simulators. **SAC, TD3, FastTD3, and TDMPC2** are validated on a
   small subset of a Gymnasium-based benchmark suite (see
@@ -53,13 +53,15 @@ external users can clone a single, reproducible stack.
 The table below lists (task, simulator) combinations that have been
 trained and evaluated end-to-end with PPO.
 
-|              | Robot        | Genesis | Newton | MuJoCo |
-| ------------ | ------------ | :-----: | :----: | :----: |
-| `g1_29dof`   | Unitree G1   | ✓       | ✓      | ✓      |
-| `g1_tracking`| Unitree G1   | ✓       | ✓      | ✓      |
-| `go2_flat`   | Unitree Go2  | ✓       | ✓      | ✓      |
-| `t1_getup`   | Booster T1   | ✓       | ✓      | ✓      |
-| `t1_tracking`| Booster T1   | ✓       | ✓      | ✓      |
+|                              | Robot        | Genesis | Newton | MuJoCo |
+| ---------------------------- | ------------ | :-----: | :----: | :----: |
+| `g1_29dof`                   | Unitree G1   | ✓       | ✓      | ✓      |
+| `g1_tracking`                | Unitree G1   | ✓       | ✓      | ✓      |
+| `go2` (flat, MLP baseline)   | Unitree Go2  | ✓       | ✓      | ✓      |
+| `go2` (rough terrain)        | Unitree Go2  | ✓       | ✓      | ✓      |
+| `go2` (gait-conditioned)     | Unitree Go2  | ✓       | ✓      | ✓      |
+| `t1_getup`                   | Booster T1   | ✓       | ✓      | ✓      |
+| `t1_tracking`                | Booster T1   | ✓       | ✓      | ✓      |
 
 ## Installation
 
