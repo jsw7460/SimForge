@@ -48,7 +48,6 @@ class Go2Config(RobotConfig):
 
     name: str = "go2"
     urdf_path: str = "Genesis/genesis/assets/urdf/go2/urdf/go2.urdf"
-    # mjcf_path: str = "Mjlab/src/mjlab/asset_zoo/robots/unitree_go2/xmls/go2.xml"
     mjcf_path: str = "JaxRLWorld/rlworld/assets/unitree_go2/xmls/go2.xml"
 
     # base_init_height: float = 0.278

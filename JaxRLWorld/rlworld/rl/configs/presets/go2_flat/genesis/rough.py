@@ -16,7 +16,7 @@ from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
 class Go2RoughGenesisConfig(Go2FlatConfig):
     sim_type: str = "genesis"
     run_name: str = "Go2_Rough_Genesis"
-    use_rough_terrain: bool = True
+    use_rough_terrain: bool = False
 
     def build(self) -> GenesisConfigsForRun:
         return super().build()

@@ -161,7 +161,6 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         terrain_cfg=cfg.make_terrain_cfg(),
         entities={
             "robot": UnifiedNewtonEntityCfg(
-                # urdf_path=r.urdf_path,
                 mjcf_path=r.mjcf_path,
                 init_state=InitialStateCfg(
                     pos=(0.0, 0.0, r.base_init_height),
