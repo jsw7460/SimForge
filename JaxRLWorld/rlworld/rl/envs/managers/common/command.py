@@ -64,6 +64,14 @@ class CommandManager(BaseManager):
         """Get the CommandTerm object."""
         return self._terms[name]
 
+    def iter_terms(self):
+        """Iterate ``(name, term)`` pairs in declaration (insertion) order.
+
+        Public view over the underlying term dict. Use this rather than
+        reaching into ``_terms`` from external callers (e.g. viewers).
+        """
+        return iter(self._terms.items())
+
     def get_commands_tensor(self) -> torch.Tensor:
         """Concatenate all term commands into a single tensor.
 

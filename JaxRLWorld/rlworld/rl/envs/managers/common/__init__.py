@@ -7,6 +7,13 @@ from .command_term import (
     VelocityCommandTerm,
     VelocityCommandTermCfg,
 )
+from .command_ui import (
+    CommandTermUISpec,
+    Control,
+    GroupControl,
+    PresetButton,
+    SliderControl,
+)
 from .contact import BaseContactManager
 from .curriculum import CurriculumManager
 from .event import EventManager, EventManagerConfig
@@ -25,6 +32,11 @@ __all__ = [
     "VelocityCommandTerm",
     "GaitCommandTermCfg",
     "GaitCommandTerm",
+    "CommandTermUISpec",
+    "Control",
+    "GroupControl",
+    "PresetButton",
+    "SliderControl",
     "RewardManager",
     "RewardManagerConfig",
     "TerminationManager",
