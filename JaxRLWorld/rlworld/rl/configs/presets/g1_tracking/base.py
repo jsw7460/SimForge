@@ -162,6 +162,18 @@ class G1TrackingConfig:
     adaptive_uniform_ratio: float = 0.1
     adaptive_alpha: float = 0.001
 
+    # ── Action mode (mirror T1 tracking) ──────────────────────────────
+    # ``motion_residual`` (default): target = motion[t] + alpha * tanh(raw).
+    #   raw=0 already tracks the reference, so the policy only has to
+    #   learn corrections — drastically lower optimization burden than
+    #   learning motion + corrections from scratch. The architecture
+    #   comparison (MLP vs SpaceTimeTransformer) inherits this mode by
+    #   default so both nets are evaluated on the same control surface.
+    # ``default_pose`` (backup): target = scale * raw + default_joint_angles.
+    #   The locomotion-style baseline; kept for ablation.
+    action_mode: Literal["motion_residual", "default_pose"] = "motion_residual"
+    motion_residual_alpha: float = 0.5
+
     # ── Reward weights / std (Mjlab tracking_env_cfg.py lines 209-251) ─
     anchor_pos_weight: float = 0.5
     anchor_pos_std: float = 0.3

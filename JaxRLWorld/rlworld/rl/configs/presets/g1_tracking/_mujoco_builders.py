@@ -42,6 +42,12 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
+from rlworld.rl.envs.mdp.actions import (
+    JointPositionAction,
+    JointPositionActionCfg,
+    MotionResidualJointPositionAction,
+    MotionResidualJointPositionActionCfg,
+)
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -260,14 +266,37 @@ def build_observation(cfg: G1TrackingConfig) -> MujocoObservationConfig:
 
 
 def build_action(cfg: G1TrackingConfig) -> MujocoActionConfig:
-    """JointPositionAction with mjlab-native G1 action scale + default offset."""
+    """Action term selection — see ``_newton_builders.build_action``.
+
+    ``default_pose`` uses ``MJLAB_G1_ACTION_SCALE`` (mjlab native) to
+    keep the locomotion-style baseline bit-identical to Mjlab's
+    reference; the residual mode is scale-free.
+    """
     r = cfg.robot
+    if cfg.action_mode == "motion_residual":
+        action_term = MotionResidualJointPositionActionCfg(
+            class_type=MotionResidualJointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            command_name="motion",
+            alpha=cfg.motion_residual_alpha,
+            clip=(-100.0, 100.0),
+        )
+    elif cfg.action_mode == "default_pose":
+        action_term = JointPositionActionCfg(
+            class_type=JointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            scale=MJLAB_G1_ACTION_SCALE,
+            offset=r.get_action_offset(),
+            clip=(-100.0, 100.0),
+        )
+    else:
+        raise ValueError(f"Unknown action_mode: {cfg.action_mode!r}. Expected 'motion_residual' or 'default_pose'.")
+
     return MujocoActionConfig(
         entity_name="robot",
         actuated_dof_names=r.actuated_dof_patterns,
-        action_scale=MJLAB_G1_ACTION_SCALE,
         clip_actions=(-100.0, 100.0),
-        offset=r.get_action_offset(),
+        action_terms={"body": action_term},
     )
 
 

@@ -45,7 +45,7 @@ __all__ = ["G1TrackingTransformerConfig"]
 class G1TrackingTransformerConfig(G1TrackingConfig):
     """G1 tracking with factorized space x time transformer policy."""
 
-    num_envs: int = 512
+    num_envs: int = 1024
     # ── Future motion reference window ────────────────────────────────
     # Sparse offsets in motion frames exposed to the transformer's time
     # axis (and to ``MotionCommandCfg.future_offsets`` so the obs term
@@ -55,7 +55,7 @@ class G1TrackingTransformerConfig(G1TrackingConfig):
     # ── Transformer hyperparameters ───────────────────────────────────
     transformer_embed_dim: int = 128
     transformer_num_heads: int = 4
-    transformer_num_layers: int = 4
+    transformer_num_layers: int = 2
     transformer_dim_feedforward: int = 512
 
     # NPMP-style information bottleneck. Encoder output is pooled to a

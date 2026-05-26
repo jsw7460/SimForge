@@ -36,6 +36,12 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, NewtonIMUSensorConfig
+from rlworld.rl.envs.mdp.actions import (
+    JointPositionAction,
+    JointPositionActionCfg,
+    MotionResidualJointPositionAction,
+    MotionResidualJointPositionActionCfg,
+)
 from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
@@ -259,18 +265,39 @@ def build_observation(cfg: G1TrackingConfig) -> NewtonObservationConfig:
 
 
 def build_action(cfg: G1TrackingConfig) -> NewtonActionConfig:
-    """JointPositionAction — default_pos + action * per-joint-scale.
+    """Action term selection based on ``cfg.action_mode`` (mirrors T1).
 
-    Matches Mjlab's ``JointPositionActionCfg(use_default_offset=True,
-    scale=G1_ACTION_SCALE)`` so both stacks use the same residual-on-default
-    control scheme (not settle-relative).
+    - ``"motion_residual"`` (default): target = motion[t] + alpha * tanh(raw).
+      Anchors the policy on the reference motion so raw=0 already
+      tracks, slashing optimization burden.
+    - ``"default_pose"``: target = scale * raw + default_joint_angles.
+      Locomotion-style baseline matching Mjlab's ``JointPositionActionCfg
+      (use_default_offset=True, scale=G1_ACTION_SCALE)``. Ablation only.
     """
     r = cfg.robot
+    if cfg.action_mode == "motion_residual":
+        action_term = MotionResidualJointPositionActionCfg(
+            class_type=MotionResidualJointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            command_name="motion",
+            alpha=cfg.motion_residual_alpha,
+            clip=(-100.0, 100.0),
+        )
+    elif cfg.action_mode == "default_pose":
+        action_term = JointPositionActionCfg(
+            class_type=JointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            scale=r.action_scale,
+            offset=r.get_action_offset(),
+            clip=(-100.0, 100.0),
+        )
+    else:
+        raise ValueError(f"Unknown action_mode: {cfg.action_mode!r}. Expected 'motion_residual' or 'default_pose'.")
+
     return NewtonActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
-        action_scale=r.action_scale,
         clip_actions=(-100.0, 100.0),
-        offset=r.get_action_offset(),
+        action_terms={"body": action_term},
     )
 
 

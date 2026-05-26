@@ -38,6 +38,12 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, SensorConfig
+from rlworld.rl.envs.mdp.actions import (
+    JointPositionAction,
+    JointPositionActionCfg,
+    MotionResidualJointPositionAction,
+    MotionResidualJointPositionActionCfg,
+)
 from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
@@ -249,13 +255,31 @@ def build_observation(cfg: G1TrackingConfig) -> ObservationConfig:
 
 
 def build_action(cfg: G1TrackingConfig) -> ActionConfig:
-    """default_pos + action * per-joint-scale (Mjlab-equivalent JointPositionAction)."""
+    """Action term selection — see ``_newton_builders.build_action``."""
     r = cfg.robot
+    if cfg.action_mode == "motion_residual":
+        action_term = MotionResidualJointPositionActionCfg(
+            class_type=MotionResidualJointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            command_name="motion",
+            alpha=cfg.motion_residual_alpha,
+            clip=(-100.0, 100.0),
+        )
+    elif cfg.action_mode == "default_pose":
+        action_term = JointPositionActionCfg(
+            class_type=JointPositionAction,
+            joint_names=list(r.actuated_dof_patterns),
+            scale=G1_ACTION_SCALE,
+            offset=r.default_joint_angles,
+            clip=(-100.0, 100.0),
+        )
+    else:
+        raise ValueError(f"Unknown action_mode: {cfg.action_mode!r}. Expected 'motion_residual' or 'default_pose'.")
+
     return ActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
-        action_scale=G1_ACTION_SCALE,
         clip_actions=(-100.0, 100.0),
-        offset=r.default_joint_angles,
+        action_terms={"body": action_term},
     )
 
 
