@@ -314,11 +314,35 @@ class MotionCommand(CommandTerm):
             device=self.device,
         )
 
-        # Adaptive-sampling buffers. One bin per real-time second of
-        # motion, matching mjlab's convention.
-        self.bin_count = int(self.motion.time_step_total // (1.0 / env.control_dt)) + 1
-        self.bin_failed_count = torch.zeros(self.bin_count, device=self.device)
-        self._current_bin_failed = torch.zeros(self.bin_count, device=self.device)
+        # Adaptive-sampling buffers. Each motion gets one bin per
+        # control step, matching mjlab's single-motion convention; the
+        # layout is padded ``(num_motions, B_max)`` so the multi-motion
+        # case is the same code path as single-motion (``M = 1``).
+        steps_per_second = 1.0 / env.control_dt
+        bins_per_motion = [int(int(m.time_step_total) // steps_per_second) + 1 for m in self.motions]
+        self._B_per_motion = torch.tensor(bins_per_motion, dtype=torch.long, device=self.device)
+        self.bin_count = int(self._B_per_motion.max().item())  # B_max — bin axis size
+        self._bin_valid = torch.zeros(
+            self._n_motions,
+            self.bin_count,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        for m, B_m in enumerate(bins_per_motion):
+            self._bin_valid[m, :B_m] = True
+
+        # ``bin_failed_count`` / ``_current_bin_failed`` are ``(M, B_max)``:
+        # EMA over per-(motion, bin) episode terminations and the
+        # per-step accumulator that feeds the EMA in ``_update_command``.
+        self.bin_failed_count = torch.zeros(self._n_motions, self.bin_count, device=self.device)
+        self._current_bin_failed = torch.zeros(self._n_motions, self.bin_count, device=self.device)
+
+        # Per-motion EMA. Drives motion-level resampling weight so each
+        # clip gets a guaranteed minimum visit rate (controlled by
+        # ``adaptive_motion_uniform_ratio``) independent of clip length.
+        self.motion_failed_count = torch.zeros(self._n_motions, device=self.device)
+        self._current_motion_failed = torch.zeros(self._n_motions, device=self.device)
+
         kernel = torch.tensor(
             [cfg.adaptive_lambda**i for i in range(cfg.adaptive_kernel_size)],
             device=self.device,
@@ -634,46 +658,105 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_top1_prob"][:] = 1.0 / max(self.bin_count, 1)
         self.metrics["sampling_top1_bin"][:] = 0.5
 
-    def _adaptive_sampling(self, env_ids: torch.Tensor) -> None:
-        # Record current-step failures into bins for the EMA update
-        # that happens in _update_command.
+    def _adaptive_sampling(self, env_ids: torch.Tensor, *, keep_motion_id: bool = False) -> None:
+        """Failure-weighted curriculum sampling, factored as
+        ``motion_id ~ p_motion`` then ``bin ~ p_bin[motion_id]``.
+
+        Each motion's bin axis is normalised by its own length so short
+        clips don't lose hot-bin signal under length disparity, and the
+        motion-level uniform floor (``adaptive_motion_uniform_ratio``)
+        guarantees a minimum visit rate per clip independent of how
+        much harder another clip is right now.
+
+        Single-motion configs degenerate to ``M=1``: ``p_motion=[1.0]``
+        and the per-motion loop fires once over the only clip, giving
+        numerically identical behaviour to the original 1D path.
+        """
+        # 1. Accumulate this step's failures into the (motion, bin)
+        # counter so ``_update_command``'s EMA can mix it in.
         term_manager = getattr(self._env, "termination_manager", None)
         if term_manager is not None and hasattr(term_manager, "terminated"):
             episode_failed = term_manager.terminated[env_ids]
             if torch.any(episode_failed):
-                current_bin_index = torch.clamp(
-                    (self.time_steps * self.bin_count) // max(self.motion.time_step_total, 1),
-                    0,
-                    self.bin_count - 1,
+                # Per-env current bin index, scaled by each env's own
+                # motion length / bin count (NOT B_max).
+                T_per_env = self._motion_lengths[self.motion_ids].clamp(min=1)
+                B_per_env = self._B_per_motion[self.motion_ids]
+                cur_bin = torch.clamp(
+                    (self.time_steps * B_per_env) // T_per_env,
+                    torch.zeros_like(B_per_env),
+                    B_per_env - 1,
                 )
-                fail_bins = current_bin_index[env_ids][episode_failed]
-                self._current_bin_failed[:] = torch.bincount(
-                    fail_bins,
-                    minlength=self.bin_count,
+                failed_envs = env_ids[episode_failed]
+                failed_motions = self.motion_ids[failed_envs]
+                failed_bins = cur_bin[failed_envs]
+                self._current_motion_failed[:] = torch.bincount(
+                    failed_motions,
+                    minlength=self._n_motions,
+                ).float()
+                flat_idx = failed_motions * self.bin_count + failed_bins
+                self._current_bin_failed[:] = (
+                    torch.bincount(
+                        flat_idx,
+                        minlength=self._n_motions * self.bin_count,
+                    )
+                    .float()
+                    .view(self._n_motions, self.bin_count)
                 )
 
-        probs = self.bin_failed_count + self.cfg.adaptive_uniform_ratio / float(self.bin_count)
-        probs = torch.nn.functional.pad(
-            probs.unsqueeze(0).unsqueeze(0),
+        # 2. Per-motion bin probabilities. Uniform floor is divided by
+        # each motion's own ``B_m`` (not ``B_max``), then masked + conv1d
+        # smoothed + remasked + row-normalised.
+        bin_uniform = self.cfg.adaptive_uniform_ratio / self._B_per_motion.float().unsqueeze(1)
+        bin_probs = (self.bin_failed_count + bin_uniform) * self._bin_valid
+        bin_probs = torch.nn.functional.pad(
+            bin_probs.unsqueeze(1),
             (0, self.cfg.adaptive_kernel_size - 1),
             mode="replicate",
         )
-        probs = torch.nn.functional.conv1d(probs, self.kernel.view(1, 1, -1)).view(-1)
-        probs = probs / probs.sum()
+        bin_probs = torch.nn.functional.conv1d(bin_probs, self.kernel.view(1, 1, -1)).squeeze(1)
+        bin_probs = bin_probs * self._bin_valid
+        bin_probs = bin_probs / bin_probs.sum(dim=1, keepdim=True).clamp(min=1e-12)
 
-        sampled_bins = torch.multinomial(probs, len(env_ids), replacement=True)
-        self.time_steps[env_ids] = (
-            (sampled_bins + torch.rand(len(env_ids), device=self.device))
-            / self.bin_count
-            * (self.motion.time_step_total - 1)
-        ).long()
+        # 3. Motion-level probabilities (skipped when caller keeps the
+        # current per-env motion assignment — e.g. mid-episode rollover).
+        motion_probs = self.motion_failed_count + self.cfg.adaptive_motion_uniform_ratio
+        motion_probs = motion_probs / motion_probs.sum().clamp(min=1e-12)
 
-        H = -(probs * (probs + 1e-12).log()).sum()
-        H_norm = H / math.log(self.bin_count) if self.bin_count > 1 else torch.tensor(1.0)
-        pmax, imax = probs.max(dim=0)
+        # 4. Sample (motion, bin). For ``keep_motion_id`` we use each
+        # env's currently assigned motion; otherwise draw motion fresh.
+        if keep_motion_id:
+            sampled_motion = self.motion_ids[env_ids]
+        else:
+            sampled_motion = torch.multinomial(motion_probs, len(env_ids), replacement=True)
+
+        sampled_bin = torch.zeros(len(env_ids), dtype=torch.long, device=self.device)
+        for m in torch.unique(sampled_motion).tolist():
+            mask = sampled_motion == m
+            sampled_bin[mask] = torch.multinomial(bin_probs[m], int(mask.sum().item()), replacement=True)
+
+        # 5. Write motion_id (only when freshly drawn) and jittered
+        # time_step using each sampled motion's own length / bin count.
+        if not keep_motion_id:
+            self.motion_ids[env_ids] = sampled_motion
+        T_sampled = self._motion_lengths[sampled_motion].float()
+        B_sampled = self._B_per_motion[sampled_motion].float()
+        jitter = torch.rand(len(env_ids), device=self.device)
+        self.time_steps[env_ids] = ((sampled_bin.float() + jitter) / B_sampled * (T_sampled - 1)).long()
+
+        # 6. Observability — joint (motion, bin) distribution view.
+        # ``top1_bin`` is the within-motion fractional position of the
+        # global hottest cell so the metric stays interpretable for both
+        # single- and multi-motion configs.
+        joint_probs = motion_probs.unsqueeze(1) * bin_probs
+        n_valid = int(self._bin_valid.sum().item())
+        H = -(joint_probs * (joint_probs + 1e-12).log()).sum()
+        H_norm = H / math.log(n_valid) if n_valid > 1 else torch.tensor(1.0)
+        flat_top1 = int(joint_probs.argmax().item())
+        top1_bin = flat_top1 % self.bin_count
         self.metrics["sampling_entropy"][:] = H_norm
-        self.metrics["sampling_top1_prob"][:] = pmax
-        self.metrics["sampling_top1_bin"][:] = imax.float() / self.bin_count
+        self.metrics["sampling_top1_prob"][:] = joint_probs.max()
+        self.metrics["sampling_top1_bin"][:] = float(top1_bin) / self.bin_count
 
     # ------------------------------------------------------------------
     # Write reference state through the sim-agnostic writer protocol.
@@ -702,43 +785,37 @@ class MotionCommand(CommandTerm):
         *,
         keep_motion_id: bool = False,
     ) -> None:
-        # 0. In multi-motion mode, pick a new clip for each env unless the
-        # caller wants to preserve the current assignment (as mid-episode
-        # rollover does — see ``_update_command``).
-        if self._is_multi_motion and not keep_motion_id:
-            sampled = torch.multinomial(
-                self._motion_weights,
-                len(env_ids),
-                replacement=True,
-            )
-            self.motion_ids[env_ids] = sampled
-
-        # 1. Sample a new motion frame within each env's current clip.
+        # Mode-specific dispatch. Adaptive owns both ``motion_id`` and
+        # ``time_step`` (jointly factored — motion-level then bin-level)
+        # so it has to be the one to write ``motion_ids[env_ids]``. The
+        # non-adaptive modes keep the legacy factored shape (clip first
+        # via ``_motion_weights``, then frame within that clip).
         mode = self.cfg.sampling_mode
-        if mode == "start":
-            self.time_steps[env_ids] = 0
-        elif mode == "uniform":
-            if self._is_multi_motion:
-                # Per-env clip length; uniform within each env's clip.
-                per_env_T = self._motion_lengths[self.motion_ids[env_ids]]
-                self.time_steps[env_ids] = (torch.rand(len(env_ids), device=self.device) * per_env_T.float()).long()
-                # Keep the same scalar metric schema as single-motion uniform
-                # so downstream loggers don't need to branch on clip count.
-                self.metrics["sampling_entropy"][:] = 1.0
-                self.metrics["sampling_top1_prob"][:] = 1.0 / max(self.bin_count, 1)
-                self.metrics["sampling_top1_bin"][:] = 0.5
-            else:
-                self._uniform_sampling(env_ids)
-        elif mode == "adaptive":
-            if self._is_multi_motion:
-                raise NotImplementedError(
-                    "sampling_mode='adaptive' is not yet supported with "
-                    "multi-motion tracking (motion_files). Use 'uniform' "
-                    "or 'start' — or add a per-motion bin scheme."
-                )
-            self._adaptive_sampling(env_ids)
+        if mode == "adaptive":
+            self._adaptive_sampling(env_ids, keep_motion_id=keep_motion_id)
         else:
-            raise ValueError(f"Unknown sampling_mode: {mode!r}")
+            if self._is_multi_motion and not keep_motion_id:
+                self.motion_ids[env_ids] = torch.multinomial(
+                    self._motion_weights,
+                    len(env_ids),
+                    replacement=True,
+                )
+            if mode == "start":
+                self.time_steps[env_ids] = 0
+            elif mode == "uniform":
+                if self._is_multi_motion:
+                    # Per-env clip length; uniform within each env's clip.
+                    per_env_T = self._motion_lengths[self.motion_ids[env_ids]]
+                    self.time_steps[env_ids] = (torch.rand(len(env_ids), device=self.device) * per_env_T.float()).long()
+                    # Keep the same scalar metric schema as single-motion uniform
+                    # so downstream loggers don't need to branch on clip count.
+                    self.metrics["sampling_entropy"][:] = 1.0
+                    self.metrics["sampling_top1_prob"][:] = 1.0 / max(self.bin_count, 1)
+                    self.metrics["sampling_top1_bin"][:] = 0.5
+                else:
+                    self._uniform_sampling(env_ids)
+            else:
+                raise ValueError(f"Unknown sampling_mode: {mode!r}")
 
         # 2. Reference root state at sampled frame. The root follows
         # the body_names[0] convention used by mjlab: the first listed
@@ -831,11 +908,11 @@ class MotionCommand(CommandTerm):
         self.update_relative_body_poses()
 
         if self.cfg.sampling_mode == "adaptive":
-            self.bin_failed_count = (
-                self.cfg.adaptive_alpha * self._current_bin_failed
-                + (1.0 - self.cfg.adaptive_alpha) * self.bin_failed_count
-            )
+            alpha = self.cfg.adaptive_alpha
+            self.bin_failed_count = alpha * self._current_bin_failed + (1.0 - alpha) * self.bin_failed_count
+            self.motion_failed_count = alpha * self._current_motion_failed + (1.0 - alpha) * self.motion_failed_count
             self._current_bin_failed.zero_()
+            self._current_motion_failed.zero_()
 
     # ------------------------------------------------------------------
     # Reset hook — base class schedules a resample for env_ids; we also
@@ -947,6 +1024,18 @@ class MotionCommandCfg(CommandTermCfg):
     adaptive_kernel_size: int = 1
     adaptive_lambda: float = 0.8
     adaptive_uniform_ratio: float = 0.1
+    """Bin-level uniform mix. Each motion's bin probabilities are
+    floored at ``adaptive_uniform_ratio / B_m`` so a never-failed bin
+    still has non-zero sampling mass. Same semantics as mjlab /
+    whole_body_tracking for single-motion configs."""
+
+    adaptive_motion_uniform_ratio: float = 0.1
+    """Motion-level uniform floor for the factored sampler. Each
+    motion's selection prob is at least ``adaptive_motion_uniform_ratio
+    / sum(motion_failed_count + ratio)``, guaranteeing a minimum visit
+    rate even for clips the policy has already solved. Single-motion
+    configs are unaffected (probs collapse to ``[1.0]``)."""
+
     adaptive_alpha: float = 0.001
 
     sampling_mode: Literal["adaptive", "uniform", "start"] = "adaptive"
