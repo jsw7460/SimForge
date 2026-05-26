@@ -24,6 +24,14 @@ external users can clone a single, reproducible stack.
   <em>One PPO policy trained on <code>t1_getup</code> in Genesis, evaluated across all three simulators.</em>
 </p>
 
+<p align="center">
+  <img src="docs/demo_go2_rough.gif" alt="A single PPO policy trained on go2 rough terrain in Newton, evaluated in Genesis, Newton, and MuJoCo" width="900"/>
+</p>
+
+<p align="center">
+  <em>One PPO policy trained on <code>go2/newton/rough</code> (rough terrain), evaluated across all three simulators.</em>
+</p>
+
 ## Highlights
 
 - **Proxy for sim-to-real research.** Cross-sim provides a
