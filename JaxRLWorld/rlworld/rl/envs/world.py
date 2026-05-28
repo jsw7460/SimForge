@@ -443,14 +443,13 @@ class World(ABC):
         with prof.section("process_actions"):
             self.act_manager.process_actions(actions)
 
-        # Step physics (simulator-specific)
+        # Step physics (simulator-specific). Backends accumulate contact
+        # timing inside their substep loop (``contact_manager.advance(physics_dt)``
+        # per substep), matching IsaacLab/mjlab. No policy-step-end
+        # advance call is needed here.
         with prof.section("step_physics"):
             self._step_physics()
         self._invalidate_cache()
-
-        # Update contact info
-        with prof.section("contact_manager.advance"):
-            self.contact_manager.advance()
 
         # Apply interval events
         with prof.section("interval_events"):

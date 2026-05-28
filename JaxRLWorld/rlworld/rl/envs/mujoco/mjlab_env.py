@@ -308,6 +308,7 @@ class MujocoEnv(World):
             self.scene_manager.write_data_to_sim()
             self.scene_manager.step()
             self.scene_manager.update(dt=self.physics_dt)
+            self.contact_manager.advance(dt=self.physics_dt)
 
         # Update visualization
         if self.visualization_manager is not None:

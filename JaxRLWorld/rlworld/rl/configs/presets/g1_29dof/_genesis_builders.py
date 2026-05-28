@@ -139,6 +139,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                 name="feet_ground_contact",
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
                 secondary=ContactMatch(mode="body", pattern=".*", entity="terrain"),
+                history_length=timing["decimation"],
             ),
             ContactSensorCfg(
                 name="self_collision",
@@ -151,12 +152,17 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
             constraint_solver=gs.constraint_solver.Newton,
+            iterations=50,
+            ls_iterations=50,
+            tolerance=1e-8,
+            ls_tolerance=0.01,
             constraint_timeconst=0.02,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
             max_collision_pairs=100,
             batch_dofs_info=True,
+            contact_pruning_tolerance=None,
         ),
         robot_cfg=r,
     )

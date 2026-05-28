@@ -111,8 +111,8 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
         solver_type="mujoco",
         robot_cfg=r,
         solver_cfg=SolverMuJoCoCfg(
-            iterations=10,
-            ls_iterations=20,
+            iterations=50,
+            ls_iterations=50,
             ccd_iterations=50,
             njmax=1500,
             nconmax=35,
@@ -163,6 +163,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
                 name="feet_ground_contact",
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
                 secondary=ContactMatch(mode="geom", pattern="ground_plane", entity="terrain"),
+                history_length=timing["decimation"],
             ),
             ContactSensorCfg(
                 name="self_collision",

@@ -95,7 +95,13 @@ class BaseContactManager(BaseManager, ABC):
         """Return contact state ``(num_envs, group.num_tracked)`` as bool tensor.
 
         Sim-agnostic: a primary is "in contact" iff its filtered net contact
-        force magnitude exceeds ``_IS_CONTACT_FORCE_EPS``.
+        force magnitude exceeds ``_IS_CONTACT_FORCE_EPS``. Matches the
+        single-step semantics used by IsaacLab (force_threshold-based
+        ``in_contact``) and mjlab (mujoco-warp ``found > 0``) so that
+        ``current_air_time`` / ``first_contact`` mean the same thing
+        across stacks. Rewards that genuinely need brief-substep
+        sensitivity (e.g. collision penalties) should call
+        :meth:`contact_force_history` directly.
         """
         force = self._compute_group_contact_force(group)
         if force is None:
@@ -120,11 +126,7 @@ class BaseContactManager(BaseManager, ABC):
     # ------------------------------------------------------------------
 
     def _get_group(self, name: str) -> ContactGroup:
-        try:
-            return self._groups[name]
-        except KeyError:
-            available = list(self._groups.keys())
-            raise KeyError(f"Contact group '{name}' not found. Available: {available}") from None
+        return self._groups[name]
 
     # -- reindex cache for order parameter --
 
@@ -259,27 +261,45 @@ class BaseContactManager(BaseManager, ABC):
     # Timing logic (operates on all groups)
     # ------------------------------------------------------------------
 
-    def advance(self) -> None:
-        for group in self._groups.values():
-            self._advance_group(group)
+    def advance(self, dt: float) -> None:
+        """Accumulate air/contact timing by ``dt`` for every group.
 
-    def _advance_group(self, g: ContactGroup) -> None:
+        ``dt`` is the increment to add — for IsaacLab/mjlab-style
+        substep accumulation pass ``physics_dt`` and call this from
+        inside the backend's substep loop (one call per substep);
+        ``compute_first_contact`` still uses ``self.dt`` (= control_dt)
+        as the policy-step landing window. Mirrors
+        ``isaaclab/envs/manager_based_rl_env.py`` and
+        ``mjlab/envs/manager_based_rl_env.py`` which both
+        ``scene.update(physics_dt)`` per substep.
+        """
+        for group in self._groups.values():
+            self._advance_group(group, dt)
+
+    def _advance_group(self, g: ContactGroup, dt: float) -> None:
         is_contact = self._compute_group_is_contact(g)
 
         is_landing = ~g._prev_is_contact & is_contact
         is_liftoff = g._prev_is_contact & ~is_contact
 
-        g.last_air_time = torch.where(is_landing, g.current_air_time, g.last_air_time)
-        g.last_contact_time = torch.where(is_liftoff, g.current_contact_time, g.last_contact_time)
+        # Mirror mjlab's ContactSensor._update_air_time_tracking: the
+        # phase that just ended includes *this* substep's dt (the
+        # transition is treated as happening at the end of the substep,
+        # so the substep itself still belonged to the phase that ended).
+        # Without ``+ dt`` here ``last_*_time`` would be one substep
+        # shorter than mjlab's, drifting ``feet_air_time`` reward magnitudes
+        # away from the reference.
+        g.last_air_time = torch.where(is_landing, g.current_air_time + dt, g.last_air_time)
+        g.last_contact_time = torch.where(is_liftoff, g.current_contact_time + dt, g.last_contact_time)
 
         g.current_contact_time = torch.where(
             is_contact,
-            g.current_contact_time + self.dt,
+            g.current_contact_time + dt,
             torch.zeros_like(g.current_contact_time),
         )
         g.current_air_time = torch.where(
             ~is_contact,
-            g.current_air_time + self.dt,
+            g.current_air_time + dt,
             torch.zeros_like(g.current_air_time),
         )
 

@@ -52,10 +52,21 @@ class ContactManager(BaseContactManager):
 
     def _compute_group_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
         sensor = self._sensors[group.name]
-        compute_history = getattr(sensor, "compute_history", None)
-        if compute_history is None:
-            return None
+        compute_history = sensor.compute_history
         return compute_history()
+
+    def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
+        """Contact bool from Genesis's first-class ``gs.sensors.Contact``
+        (pair-count > 0), not the base force-magnitude threshold. The
+        ``Contact`` sensor returns a solver-level binary signal — see
+        ``Genesis/examples/sensors/contact_force_go2.py`` for the canonical
+        pattern — which is invariant to solver-iteration force jitter, so
+        a settled standing foot keeps ``is_contact=True`` even when the
+        net force momentarily dips below the 1 N noise floor used by
+        the base classifier. Aligns with mjlab's ``data.found > 0``
+        semantics in MujocoContactManager._compute_group_is_contact.
+        """
+        return self._sensors[group.name].compute().found
 
     # -- pretty print --
 

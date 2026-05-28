@@ -287,6 +287,7 @@ class NewtonEnv(World):
             self.scene_manager.state_0.clear_forces()
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             self.scene_manager.step()
+            self.contact_manager.advance(dt=self.physics_dt)
 
         # Update visualization
         if self.vis_manager is not None:

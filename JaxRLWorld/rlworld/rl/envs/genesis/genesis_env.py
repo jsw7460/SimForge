@@ -304,5 +304,7 @@ class GenesisEnv(World):
                 self.act_manager.apply_actions(self.act_manager.processed_actions)
             with prof.section("  phys:scene.step"):
                 self.scene_manager.step()
+            with prof.section("  phys:contact_manager.advance"):
+                self.contact_manager.advance(dt=self.physics_dt)
         with prof.section("  phys:vis_manager.advance"):
             self.vis_manager.advance()
