@@ -30,7 +30,8 @@ class GenesisTerrainImporter(TerrainImporter):
     def add_to_scene(self, scene: gs.Scene):
         """Add the terrain to ``scene``; stash the entity for later lookup."""
         if self.cfg.terrain_type == "plane":
-            morph = gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
+            # morph = gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
+            morph = gs.morphs.Plane()
             self.entity = scene.add_entity(morph=morph)
             return self.entity
 
