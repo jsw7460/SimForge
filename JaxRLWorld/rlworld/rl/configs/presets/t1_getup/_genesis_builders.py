@@ -161,6 +161,7 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
             enable_joint_limit=True,
             max_collision_pairs=150,
             batch_dofs_info=True,
+            contact_pruning_tolerance=None,
         ),
         robot_cfg=r,
     )
@@ -330,6 +331,8 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
                 "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.8, 1.5),
                 "operation": "scale",
+                "distribution": "uniform",
+                "shared_random": True,
             },
         ),
     }

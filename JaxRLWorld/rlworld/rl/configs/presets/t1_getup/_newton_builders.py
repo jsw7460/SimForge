@@ -120,8 +120,8 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         solver_cfg=SolverMuJoCoCfg(
             impratio=10.0,
             cone="elliptic",
-            iterations=10,
-            ls_iterations=20,
+            iterations=50,
+            ls_iterations=50,
             ccd_iterations=50,
         ),
         entities={
