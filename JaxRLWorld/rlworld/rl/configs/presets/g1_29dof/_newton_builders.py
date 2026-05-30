@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import ImplicitActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, SolverMuJoCoCfg, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -136,14 +136,14 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
                 links_to_keep=("left_foot_frame_joint", "right_foot_frame_joint"),
                 articulation=ArticulationCfg(
                     actuators=(
-                        ImplicitActuatorCfg(
+                        DelayedPDActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
                             frictionloss=0.3,
-                            # min_delay=0,
-                            # max_delay=2,
+                            min_delay=0,
+                            max_delay=2,
                         ),
                     ),
                 ),
