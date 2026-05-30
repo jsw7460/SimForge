@@ -26,12 +26,16 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 # Sim-agnostic threshold on ``‖net contact force‖`` (N) for ``is_contact``.
-# Centralised here so every backend (Genesis/Newton/mjlab) classifies "in
-# contact" identically; sub-N forces (e.g. mjlab's compliant-contact spring
-# tail right after liftoff) are treated as "no contact". 33 kg G1 carries
-# ~160 N per foot in stance, so 1 N is a 0.6 % noise floor — well below
-# any real touchdown event.
-_IS_CONTACT_FORCE_EPS: float = 1.0
+# Only used by Newton (Genesis and mjlab override ``_compute_group_is_contact``
+# to read their native solver-level ``found > 0`` binary, which is immune to
+# per-iteration force jitter). For Newton this near-zero value matches
+# IsaacLab's ``isaaclab_newton`` ContactSensor convention (default
+# ``force_threshold = 0.0`` in ``contact_sensor.py``): the gate is "is the
+# accumulated contact force on this sensing object non-zero", which on a
+# settled standing foot stays True even when solver-iteration jitter would
+# push a sub-N threshold off — keeping ``current_contact_time`` /
+# ``feet_air_time`` reward magnitudes aligned across the three sims.
+_IS_CONTACT_FORCE_EPS: float = 1e-6
 
 
 @dataclass
@@ -56,9 +60,10 @@ class BaseContactManager(BaseManager, ABC):
     Subclasses must implement:
         - ``_compute_group_contact_force(group)`` → ``(num_envs, N, 3)`` or ``None``
 
-    ``is_contact`` is derived in the base class as
-    ``‖force‖ > _IS_CONTACT_FORCE_EPS`` (1.0 N) so the classification is
-    identical across sims.
+    The base ``is_contact`` falls back to ``‖force‖ > _IS_CONTACT_FORCE_EPS``
+    (1e-6 N, matching IsaacLab Newton). Genesis and mjlab override
+    ``_compute_group_is_contact`` to read their native ``found > 0`` binary
+    directly; only Newton uses the base force-threshold path.
     """
 
     def __init__(self, env: World):
@@ -94,13 +99,15 @@ class BaseContactManager(BaseManager, ABC):
     def _compute_group_is_contact(self, group: ContactGroup) -> torch.Tensor:
         """Return contact state ``(num_envs, group.num_tracked)`` as bool tensor.
 
-        Sim-agnostic: a primary is "in contact" iff its filtered net contact
-        force magnitude exceeds ``_IS_CONTACT_FORCE_EPS``. Matches the
-        single-step semantics used by IsaacLab (force_threshold-based
-        ``in_contact``) and mjlab (mujoco-warp ``found > 0``) so that
-        ``current_air_time`` / ``first_contact`` mean the same thing
-        across stacks. Rewards that genuinely need brief-substep
-        sensitivity (e.g. collision penalties) should call
+        Default (used by Newton): a primary is "in contact" iff its filtered
+        net contact force magnitude exceeds ``_IS_CONTACT_FORCE_EPS`` (1e-6
+        N → effectively "any non-zero accumulated force"). Matches IsaacLab's
+        ``isaaclab_newton`` ContactSensor convention (default
+        ``force_threshold = 0.0``), which is the closest Newton can get to
+        mjlab/Genesis's native solver-level ``found > 0`` binary without a
+        custom counting kernel. Genesis and mjlab override this method to
+        use their native ``found`` field directly. Rewards that need
+        brief-substep sensitivity (e.g. collision penalties) should call
         :meth:`contact_force_history` directly.
         """
         force = self._compute_group_contact_force(group)

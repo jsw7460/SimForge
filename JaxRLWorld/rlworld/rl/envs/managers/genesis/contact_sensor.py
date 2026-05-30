@@ -241,15 +241,10 @@ class GenesisContactSensor:
         """
         if has_history:
             # newest-first along the history axis → index 0
-            return t[..., 0, :] if num_envs == 0 else t[:, 0, :]
+            return t[:, 0, :]
         return t
 
     def compute(self) -> ContactSensorData:
-        if not self._native_created:
-            raise RuntimeError(
-                f"Genesis backend: ContactSensorCfg {self.cfg.name!r}: native sensors were "
-                "never created (create_native_sensors() not called before scene.build())."
-            )
         has_history = self.cfg.history_length > 0
         n = self.num_envs
 
@@ -258,9 +253,6 @@ class GenesisContactSensor:
         for cs, fs in zip(self._contact_sensors, self._force_sensors):
             c = self._current_frame(cs.read_ground_truth(), has_history, n)  # Contact: payload dim 1
             f = self._current_frame(fs.read_ground_truth(), has_history, n)  # ContactForce: payload dim 3
-            if n == 0:
-                c = c.unsqueeze(0)  # (1, 1)
-                f = f.unsqueeze(0)  # (1, 3)
             found_cols.append(c[..., 0] != 0)  # (n,)
             force_cols.append(f)  # (n, 3)
 
