@@ -199,6 +199,7 @@ class SceneManager(BaseManager):
                     "file": mjcf_path,
                     "convexify": convexify,
                     "batch_fixed_verts": True,
+                    "requires_jac_and_IK": False,
                 }
                 if cfg.init_state.pos != (0.0, 0.0, 0.0):
                     mjcf_kwargs["pos"] = cfg.init_state.pos
