@@ -169,6 +169,7 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> SceneConfig:
             enable_joint_limit=True,
             max_collision_pairs=30,
             batch_dofs_info=True,
+            contact_pruning_tolerance=None,
         ),
         robot_cfg=r,
     )
