@@ -1,10 +1,13 @@
 """Shared utilities for domain randomization terms.
 
 Provides:
-- ``DefaultCache`` — caches simulator default values so that ``scale`` and
-  ``add`` operations always reference the original, preventing drift.
 - ``sample`` — unified sampling with pluggable distributions.
+- ``apply_operation`` — combine cached defaults with sampled values.
 - ``resolve_patterns`` — regex-based name-to-index resolution.
+
+Per-simulator baseline storage now lives next to each simulator's env
+class (e.g. Newton uses ``rlworld.rl.envs.utils.newton.dr_baselines``,
+mjlab uses ``env.sim.get_default_field``).
 """
 
 from __future__ import annotations
@@ -14,31 +17,6 @@ import re
 from typing import Sequence
 
 import torch
-
-
-class DefaultCache:
-    """Caches original parameter values to prevent accumulation.
-
-    When using ``operation="scale"`` or ``"add"``, the random perturbation
-    must be applied to the *original* value, not the already-perturbed one.
-    This cache stores the first-seen value for each key and always returns it.
-    """
-
-    def __init__(self) -> None:
-        self._store: dict[str, torch.Tensor] = {}
-
-    def get_or_cache(self, key: str, current: torch.Tensor) -> torch.Tensor:
-        """Return cached default; on first call, cache *current*."""
-        if key not in self._store:
-            self._store[key] = current.clone()
-        return self._store[key]
-
-    def clear(self, key: str | None = None) -> None:
-        """Drop one key or all cached defaults."""
-        if key is None:
-            self._store.clear()
-        else:
-            self._store.pop(key, None)
 
 
 def sample(

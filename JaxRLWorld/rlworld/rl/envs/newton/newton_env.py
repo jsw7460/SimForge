@@ -15,6 +15,7 @@ from rlworld.rl.envs.managers.newton import (
     NewtonVisualizationManagerConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
+from rlworld.rl.envs.utils.newton.dr_baselines import snapshot_newton_dr_baselines
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed, string as _su
 
@@ -262,7 +263,14 @@ class NewtonEnv(World):
         self._robot_state_writer = NewtonRobotStateWriter(self, self.scene_manager.robot_view)
 
     def _post_setup(self) -> None:
-        """Capture CUDA graph for Newton performance."""
+        """Snapshot DR baselines, then capture CUDA graph.
+
+        ``_dr_baselines`` must be filled BEFORE ``capture()`` so the
+        cached CUDA graph never replays a warp write into the cloned
+        baseline tensors, and BEFORE any DR term fires so the snapshot
+        reflects the URDF/MJCF defaults.
+        """
+        self._dr_baselines = snapshot_newton_dr_baselines(self)
         self.scene_manager.capture()
 
     def _step_physics(self) -> None:

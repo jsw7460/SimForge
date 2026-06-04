@@ -8,7 +8,9 @@ Newton keeps a small set of *non-randomised* fixed-value setters
 these write a fixed configured value (optionally with a narrow DR band)
 and have no cross-sim counterpart.
 
-Shared utilities (``DefaultCache``, ``sample``, etc.) are in ``_utils``.
+Shared utilities (``sample``, ``apply_operation``, ``resolve_patterns``)
+are in ``_utils``.  Per-simulator default-value snapshots live next to
+each sim env class (e.g. ``rlworld.rl.envs.utils.newton.dr_baselines``).
 
 Usage in preset configs::
 
@@ -26,7 +28,7 @@ Usage in preset configs::
 """
 
 from . import unified
-from ._utils import DefaultCache, apply_operation, resolve_patterns, sample
+from ._utils import apply_operation, resolve_patterns, sample
 
 # NOTE: the ``newton`` submodule (``set_joint_friction`` / ``set_foot_friction``)
 # is *not* re-exported here -- it does ``import warp`` / ``from newton...`` at
@@ -36,7 +38,6 @@ from ._utils import DefaultCache, apply_operation, resolve_patterns, sample
 
 __all__ = [
     "unified",
-    "DefaultCache",
     "apply_operation",
     "resolve_patterns",
     "sample",

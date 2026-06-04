@@ -33,7 +33,7 @@ import torch
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.events.mujoco import _MujocoEnvAdapter
 
-from ._utils import DefaultCache, apply_operation, sample
+from ._utils import apply_operation, sample
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
@@ -45,8 +45,6 @@ if TYPE_CHECKING:
 # with only one backend installed must still be able to import this
 # module — top-level imports of the others would crash at import time.
 # This mirrors the existing pattern in ``events/mujoco.py``.
-
-_defaults_newton_friction = DefaultCache()
 
 
 def _newton_notify(env: World, flag) -> None:
@@ -292,12 +290,11 @@ def _newton_friction_backend(
                 distribution,
             )
 
-        cache_key = f"friction_axis_{axis}"
         if shape_indices is None:
             if operation == "abs":
                 values[env_ids] = sampled
             else:
-                defaults = _defaults_newton_friction.get_or_cache(cache_key, values.clone())
+                defaults = getattr(env._dr_baselines, attr)
                 values[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
         else:
             env_grid, shape_grid = torch.meshgrid(env_ids, shape_indices, indexing="ij")
@@ -305,7 +302,7 @@ def _newton_friction_backend(
                 for inner in range(n_axes_inner):
                     values[env_grid, inner, shape_grid] = sampled[:, inner, :]
             else:
-                defaults = _defaults_newton_friction.get_or_cache(cache_key, values.clone())
+                defaults = getattr(env._dr_baselines, attr)
                 for inner in range(n_axes_inner):
                     base = defaults[env_grid, inner, shape_grid]
                     values[env_grid, inner, shape_grid] = apply_operation(base, sampled[:, inner, :], operation)
@@ -437,14 +434,14 @@ def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, di
     links_idx = resolved.body_ids.tolist()
     n_envs, n_links = len(env_ids), len(links_idx)
     ratios = sample((n_envs, n_links), *mass_range, env.device, distribution)
-    mass_shift = torch.zeros(n_envs, n_links, device=env.device)
-    for i, idx in enumerate(links_idx):
-        original_mass = entity.links[idx].get_mass()
-        mass_shift[:, i] = original_mass * (ratios[:, i] - 1.0)
+    # mass_shift = torch.zeros(n_envs, n_links, device=env.device)
+    # for i, idx in enumerate(links_idx):
+    #     original_mass = entity.links[idx].get_mass()
+    #     mass_shift[:, i] = original_mass * (ratios[:, i] - 1.0)
+
+    original_masses = entity.get_links_inertial_mass(links_idx_local=links_idx)
+    mass_shift = original_masses * (ratios - 1.0)
     entity.set_mass_shift(mass_shift=mass_shift, links_idx_local=links_idx, envs_idx=env_ids)
-
-
-_defaults_newton_body_mass = DefaultCache()
 
 
 def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, distribution):
@@ -471,7 +468,7 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
     mass = wp.to_torch(model.body_mass).reshape(env.num_envs, cache.bodies_per_env)
     n_bodies = len(body_indices)
     sampled = sample((len(env_ids), n_bodies), *mass_range, env.device, distribution)
-    defaults = _defaults_newton_body_mass.get_or_cache("body_mass", mass.clone())
+    defaults = env._dr_baselines.body_mass
     mass[env_ids.unsqueeze(1), body_indices] = apply_operation(
         defaults[env_ids.unsqueeze(1), body_indices], sampled, operation
     )
@@ -539,13 +536,15 @@ def _genesis_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
         raise ValueError("Genesis randomize_body_com_offset requires asset_cfg.body_names.")
     links_idx = resolved.body_ids.tolist()
     n_envs, n_links = len(env_ids), len(links_idx)
-    com_shift = torch.zeros(n_envs, n_links, 3, device=env.device)
+    # Read current i_pos_shift so non-target axes preserve prior EventTerm writes within the same
+    # reset.  Genesis's set_COM_shift kernel writes the full 3-vec; without this read-modify-write
+    # a follow-up EventTerm targeting another axis would clobber the prior one.  Entity has no
+    # get_COM_shift wrapper, so go through solver.get_links_COM_shift with global link indices.
+    links_global_idx = torch.as_tensor([entity._link_start + i for i in links_idx], device=env.device, dtype=torch.long)
+    com_shift = entity._solver.get_links_COM_shift(links_idx=links_global_idx, envs_idx=env_ids)
     for axis, (lo, hi) in ranges.items():
         com_shift[:, :, axis] = torch.empty(n_envs, n_links, device=env.device).uniform_(lo, hi)
     entity.set_COM_shift(com_shift=com_shift, links_idx_local=links_idx, envs_idx=env_ids)
-
-
-_defaults_newton_body_com = DefaultCache()
 
 
 def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
@@ -571,13 +570,16 @@ def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
             body_indices = torch.tensor(body_indices, device=env.device, dtype=torch.long)
 
     body_com = wp.to_torch(model.body_com).reshape(env.num_envs, cache.bodies_per_env, 3)
-    defaults = _defaults_newton_body_com.get_or_cache("body_com", body_com.clone())
+    defaults = env._dr_baselines.body_com
     n_envs, n_bodies = len(env_ids), len(body_indices)
     original = defaults[:, body_indices, :][env_ids]
-    offsets = torch.zeros(n_envs, n_bodies, 3, device=env.device)
+    # Write target axes only.  Writing the full 3-vec (original + zero-filled offsets) would set
+    # non-target axes back to ``original`` and clobber a prior EventTerm that randomized a
+    # different axis of the same field within the same reset.
+    env_grid = env_ids.unsqueeze(1)
     for axis, (lo, hi) in ranges.items():
-        offsets[:, :, axis] = torch.empty(n_envs, n_bodies, device=env.device).uniform_(lo, hi)
-    body_com[env_ids.unsqueeze(1), body_indices] = original + offsets
+        sampled = torch.empty(n_envs, n_bodies, device=env.device).uniform_(lo, hi)
+        body_com[env_grid, body_indices, axis] = original[..., axis] + sampled
     wp.copy(model.body_com, wp.from_torch(body_com.reshape(-1, 3).contiguous(), dtype=wp.vec3))
     _newton_notify(env, SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
 
@@ -601,9 +603,6 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
 # ══════════════════════════════════════════════════════════════════════
 # randomize_pd_gains
 # ══════════════════════════════════════════════════════════════════════
-
-
-_defaults_newton_pd = DefaultCache()
 
 
 def randomize_pd_gains(
@@ -671,7 +670,7 @@ def _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distri
         if operation == "abs":
             values[env_ids] = sampled
         else:
-            defaults = _defaults_newton_pd.get_or_cache(attr_name, values.clone())
+            defaults = getattr(env._dr_baselines, attr_name)
             values[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
         view.set_attribute(attr_name, model, values)
         notify = True
@@ -702,9 +701,6 @@ def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
 # ══════════════════════════════════════════════════════════════════════
 # randomize_joint_armature
 # ══════════════════════════════════════════════════════════════════════
-
-
-_defaults_newton_armature = DefaultCache()
 
 
 def randomize_joint_armature(
@@ -759,7 +755,7 @@ def _newton_armature_backend(env, env_ids, armature_range, operation, distributi
     if operation == "abs":
         armature[env_ids] = sampled
     else:
-        defaults = _defaults_newton_armature.get_or_cache("joint_armature", armature.clone())
+        defaults = env._dr_baselines.joint_armature
         armature[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
     view.set_attribute("joint_armature", model, armature)
     _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
@@ -783,9 +779,6 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
 # ══════════════════════════════════════════════════════════════════════
 # randomize_joint_friction
 # ══════════════════════════════════════════════════════════════════════
-
-
-_defaults_newton_joint_friction = DefaultCache()
 
 
 def randomize_joint_friction(
@@ -840,7 +833,7 @@ def _newton_joint_friction_backend(env, env_ids, friction_range, operation, dist
     if operation == "abs":
         friction[env_ids] = sampled
     else:
-        defaults = _defaults_newton_joint_friction.get_or_cache("joint_friction", friction.clone())
+        defaults = env._dr_baselines.joint_friction
         friction[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
     view.set_attribute("joint_friction", model, friction)
     _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
