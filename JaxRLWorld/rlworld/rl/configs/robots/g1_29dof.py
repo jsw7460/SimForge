@@ -6,62 +6,68 @@ from rlworld.rl.configs.robots.utils import reflected_inertia_from_two_stage_pla
 from .base import RobotConfig
 
 # Motor 5020 (elbows, shoulders, wrist_roll)
-ROTOR_INERTIAS_5020 = (0.139e-4, 0.017e-4, 0.169e-4)
-GEARS_5020 = (1, 1 + (46 / 18), 1 + (56 / 16))
-ARMATURE_5020 = reflected_inertia_from_two_stage_planetary(ROTOR_INERTIAS_5020, GEARS_5020)
+ROTOR_INERTIAS_5020 = (0.139e-4, 0.017e-4, 0.169e-4)  # (1.39e-5, 1.7e-6, 1.69e-5) kg·m^2 — per-stage rotor inertias
+GEARS_5020 = (1, 1 + (46 / 18), 1 + (56 / 16))  # (1, 3.5556, 4.5) — two-stage planetary; total gear ratio ≈ 16
+ARMATURE_5020 = reflected_inertia_from_two_stage_planetary(ROTOR_INERTIAS_5020, GEARS_5020)  # ≈ 3.610e-3 kg·m^2
 
 # Motor 7520_14 (hip_pitch, hip_yaw, waist_yaw)
-ROTOR_INERTIAS_7520_14 = (0.489e-4, 0.098e-4, 0.533e-4)
-GEARS_7520_14 = (1, 4.5, 1 + (48 / 22))
-ARMATURE_7520_14 = reflected_inertia_from_two_stage_planetary(ROTOR_INERTIAS_7520_14, GEARS_7520_14)
+ROTOR_INERTIAS_7520_14 = (0.489e-4, 0.098e-4, 0.533e-4)  # (4.89e-5, 9.8e-6, 5.33e-5) kg·m^2
+GEARS_7520_14 = (1, 4.5, 1 + (48 / 22))  # (1, 4.5, 3.1818) — total gear ratio ≈ 14.32
+ARMATURE_7520_14 = reflected_inertia_from_two_stage_planetary(
+    ROTOR_INERTIAS_7520_14, GEARS_7520_14
+)  # ≈ 1.018e-2 kg·m^2
 
 # Motor 7520_22 (hip_roll, knee)
-ROTOR_INERTIAS_7520_22 = (0.489e-4, 0.109e-4, 0.738e-4)
-GEARS_7520_22 = (1, 4.5, 5)
-ARMATURE_7520_22 = reflected_inertia_from_two_stage_planetary(ROTOR_INERTIAS_7520_22, GEARS_7520_22)
+ROTOR_INERTIAS_7520_22 = (0.489e-4, 0.109e-4, 0.738e-4)  # (4.89e-5, 1.09e-5, 7.38e-5) kg·m^2
+GEARS_7520_22 = (1, 4.5, 5)  # total gear ratio = 22.5
+ARMATURE_7520_22 = reflected_inertia_from_two_stage_planetary(
+    ROTOR_INERTIAS_7520_22, GEARS_7520_22
+)  # ≈ 2.510e-2 kg·m^2
 
 # Motor 4010 (wrist_pitch, wrist_yaw)
-ROTOR_INERTIAS_4010 = (0.068e-4, 0.0, 0.0)
-GEARS_4010 = (1, 5, 5)
-ARMATURE_4010 = reflected_inertia_from_two_stage_planetary(ROTOR_INERTIAS_4010, GEARS_4010)
+ROTOR_INERTIAS_4010 = (0.068e-4, 0.0, 0.0)  # (6.8e-6, 0, 0) kg·m^2 — second/third stages absent
+GEARS_4010 = (1, 5, 5)  # total gear ratio = 25
+ARMATURE_4010 = reflected_inertia_from_two_stage_planetary(ROTOR_INERTIAS_4010, GEARS_4010)  # ≈ 4.250e-3 kg·m^2
 
 # Parallel linkage actuators (2x 5020)
-ARMATURE_WAIST = ARMATURE_5020 * 2
-ARMATURE_ANKLE = ARMATURE_5020 * 2
+ARMATURE_WAIST = ARMATURE_5020 * 2  # ≈ 7.220e-3 kg·m^2
+ARMATURE_ANKLE = ARMATURE_5020 * 2  # ≈ 7.220e-3 kg·m^2
 
 # PD gains
-NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10Hz
-DAMPING_RATIO = 2.0
+NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10 Hz → 62.832 rad/s
+DAMPING_RATIO = 2.0  # overdamped (≥1 critically damped)
 
-STIFFNESS_5020 = ARMATURE_5020 * NATURAL_FREQ**2
-STIFFNESS_7520_14 = ARMATURE_7520_14 * NATURAL_FREQ**2
-STIFFNESS_7520_22 = ARMATURE_7520_22 * NATURAL_FREQ**2
-STIFFNESS_4010 = ARMATURE_4010 * NATURAL_FREQ**2
-STIFFNESS_WAIST = STIFFNESS_5020 * 2
-STIFFNESS_ANKLE = STIFFNESS_5020 * 2
+# Stiffness ke = armature * ω_n^2  (ω_n^2 ≈ 3947.84)  [units: N·m/rad]
+STIFFNESS_5020 = ARMATURE_5020 * NATURAL_FREQ**2  # ≈ 14.25
+STIFFNESS_7520_14 = ARMATURE_7520_14 * NATURAL_FREQ**2  # ≈ 40.18
+STIFFNESS_7520_22 = ARMATURE_7520_22 * NATURAL_FREQ**2  # ≈ 99.10
+STIFFNESS_4010 = ARMATURE_4010 * NATURAL_FREQ**2  # ≈ 16.78
+STIFFNESS_WAIST = STIFFNESS_5020 * 2  # ≈ 28.50
+STIFFNESS_ANKLE = STIFFNESS_5020 * 2  # ≈ 28.50
 
-DAMPING_5020 = 2.0 * DAMPING_RATIO * ARMATURE_5020 * NATURAL_FREQ
-DAMPING_7520_14 = 2.0 * DAMPING_RATIO * ARMATURE_7520_14 * NATURAL_FREQ
-DAMPING_7520_22 = 2.0 * DAMPING_RATIO * ARMATURE_7520_22 * NATURAL_FREQ
-DAMPING_4010 = 2.0 * DAMPING_RATIO * ARMATURE_4010 * NATURAL_FREQ
-DAMPING_WAIST = DAMPING_5020 * 2
-DAMPING_ANKLE = DAMPING_5020 * 2
+# Damping kd = 2·ζ·armature·ω_n  (= 251.33·armature)  [units: N·m·s/rad]
+DAMPING_5020 = 2.0 * DAMPING_RATIO * ARMATURE_5020 * NATURAL_FREQ  # ≈ 0.907
+DAMPING_7520_14 = 2.0 * DAMPING_RATIO * ARMATURE_7520_14 * NATURAL_FREQ  # ≈ 2.558
+DAMPING_7520_22 = 2.0 * DAMPING_RATIO * ARMATURE_7520_22 * NATURAL_FREQ  # ≈ 6.309
+DAMPING_4010 = 2.0 * DAMPING_RATIO * ARMATURE_4010 * NATURAL_FREQ  # ≈ 1.068
+DAMPING_WAIST = DAMPING_5020 * 2  # ≈ 1.814
+DAMPING_ANKLE = DAMPING_5020 * 2  # ≈ 1.814
 
-# Motor effort limits
+# Motor effort limits  [N·m]
 EFFORT_5020 = 25.0
 EFFORT_7520_14 = 88.0
 EFFORT_7520_22 = 139.0
 EFFORT_4010 = 5.0
-EFFORT_WAIST = EFFORT_5020 * 2
-EFFORT_ANKLE = EFFORT_5020 * 2
+EFFORT_WAIST = EFFORT_5020 * 2  # = 50.0
+EFFORT_ANKLE = EFFORT_5020 * 2  # = 50.0
 
-# Action scale: 0.25 * effort / stiffness
-ACTION_SCALE_5020 = 0.25 * EFFORT_5020 / STIFFNESS_5020
-ACTION_SCALE_7520_14 = 0.25 * EFFORT_7520_14 / STIFFNESS_7520_14
-ACTION_SCALE_7520_22 = 0.25 * EFFORT_7520_22 / STIFFNESS_7520_22
-ACTION_SCALE_4010 = 0.25 * EFFORT_4010 / STIFFNESS_4010
-ACTION_SCALE_WAIST = 0.25 * EFFORT_WAIST / STIFFNESS_WAIST
-ACTION_SCALE_ANKLE = 0.25 * EFFORT_ANKLE / STIFFNESS_ANKLE
+# Action scale: 0.25 * effort / stiffness  [rad — target deviation that saturates motor at quarter-effort]
+ACTION_SCALE_5020 = 0.25 * EFFORT_5020 / STIFFNESS_5020  # ≈ 0.4386 rad (≈ 25.1°)
+ACTION_SCALE_7520_14 = 0.25 * EFFORT_7520_14 / STIFFNESS_7520_14  # ≈ 0.5475 rad (≈ 31.4°)
+ACTION_SCALE_7520_22 = 0.25 * EFFORT_7520_22 / STIFFNESS_7520_22  # ≈ 0.3507 rad (≈ 20.1°)
+ACTION_SCALE_4010 = 0.25 * EFFORT_4010 / STIFFNESS_4010  # ≈ 0.0745 rad (≈  4.3°)
+ACTION_SCALE_WAIST = 0.25 * EFFORT_WAIST / STIFFNESS_WAIST  # ≈ 0.4386 rad (= ACTION_SCALE_5020 — 2× / 2× cancel)
+ACTION_SCALE_ANKLE = 0.25 * EFFORT_ANKLE / STIFFNESS_ANKLE  # ≈ 0.4386 rad (= ACTION_SCALE_5020)
 
 G1_ACTION_SCALE: Dict[str, float] = {
     r".*_hip_pitch_joint": ACTION_SCALE_7520_14,
