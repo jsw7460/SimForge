@@ -25,7 +25,7 @@ What is dumped, per variant:
      (joint_pos / joint_vel / base_pos_z, env 0).
   5. Per-step trace over a deterministic scripted action sequence:
      for each step we dump the raw action, the resulting
-     ``control.joint_target_pos`` and ``control.joint_f`` (one of the
+     ``control.joint_target_q`` and ``control.joint_f`` (one of the
      two will be all-zero depending on path), and the resulting
      joint_pos / joint_vel / base_pos_z so we can see whether the
      simulator actually moves the robot.
@@ -34,7 +34,7 @@ What is dumped, per variant:
 The script's purpose is descriptive, not prescriptive: it tells you
 *where* the two paths diverge so you can decide whether the cause is
 (a) ke/kd not being written to the Newton model on the Implicit path,
-(b) joint_target_pos never being consumed because joint_axis_mode is
+(b) joint_target_q never being consumed because joint_axis_mode is
 wrong, (c) effort_limit / scale mismatch driving the target to an
 unreachable region, or (d) something else entirely.
 
@@ -274,14 +274,14 @@ def _dump_newton_model(env) -> str:
 def _read_control_buffers(env) -> dict:
     """Snapshot the two control buffers that distinguish the paths."""
     control = env.scene_manager.control
-    tp = _wp_to_np(control.joint_target_pos)
+    tp = _wp_to_np(control.joint_target_q)
     jf = _wp_to_np(control.joint_f)
-    return {"joint_target_pos": tp, "joint_f": jf}
+    return {"joint_target_q": tp, "joint_f": jf}
 
 
 def _format_control_buffers(snap: dict, prefix: str = "    ") -> str:
     lines = []
-    for label in ("joint_target_pos", "joint_f"):
+    for label in ("joint_target_q", "joint_f"):
         a = snap[label]
         if a is None:
             lines.append(f"{prefix}control.{label}: <not present>")
@@ -430,7 +430,7 @@ def main() -> int:
         sections.append("=" * 110)
         sections.append(
             f"  {'step':>4s} | {'Δjoint_pos':>14s} | {'Δjoint_vel':>14s} | {'Δbase_z':>12s} | "
-            f"{'Δctrl.joint_target_pos':>26s} | {'Δctrl.joint_f':>16s}"
+            f"{'Δctrl.joint_target_q':>26s} | {'Δctrl.joint_f':>16s}"
         )
         sections.append("  " + "-" * 108)
         for k in range(n):
@@ -445,8 +445,8 @@ def main() -> int:
                 dbz_str = "—"
             ctrl_d = d[k]["ctrl"]
             ctrl_i = i[k]["ctrl"]
-            if ctrl_d["joint_target_pos"] is not None and ctrl_i["joint_target_pos"] is not None:
-                d_tp = float(np.abs(ctrl_i["joint_target_pos"] - ctrl_d["joint_target_pos"]).max())
+            if ctrl_d["joint_target_q"] is not None and ctrl_i["joint_target_q"] is not None:
+                d_tp = float(np.abs(ctrl_i["joint_target_q"] - ctrl_d["joint_target_q"]).max())
                 d_tp_str = f"{d_tp:.5f}"
             else:
                 d_tp_str = "—"

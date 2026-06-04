@@ -1250,13 +1250,23 @@ class NewtonSceneManager(BaseManager):
 
     def capture(self):
         num_worlds = self.model.world_count
-        base_zeros = torch.zeros((num_worlds, 6), device=self.device, dtype=torch.float32)
+        # Free-joint slot count is layout-dependent: 6 DOFs (lin+ang vel) under the
+        # legacy DOF layout vs. 7 coords (pos+quat) under the coord layout introduced
+        # in Newton PR #2965 and gated by ``newton.use_coord_layout_targets``. Under
+        # coord layout the quaternion slot must be a valid rotation — a zero-fill
+        # would corrupt the FREE joint to (0,0,0,0) and propagate NaN through the
+        # captured ``_step()``.
+        base_width = 7 if newton.use_coord_layout_targets else 6
+        base_init = torch.zeros((num_worlds, base_width), device=self.device, dtype=torch.float32)
+        if newton.use_coord_layout_targets:
+            # FREE joint coord order is [x, y, z, qx, qy, qz, qw] — set qw to 1 for identity.
+            base_init[:, 6] = 1.0
         dummy_actions = torch.zeros(
             (num_worlds, self.env.act_manager.num_actions), device=self.device, dtype=torch.float32
         )
 
-        full_targets = torch.cat([base_zeros, dummy_actions], dim=-1).flatten()
-        self.control.joint_target_pos = wp.from_torch(full_targets, dtype=wp.float32, requires_grad=False)
+        full_targets = torch.cat([base_init, dummy_actions], dim=-1).flatten()
+        self.control.joint_target_q = wp.from_torch(full_targets, dtype=wp.float32, requires_grad=False)
 
         with wp.ScopedCapture() as capture:
             self._step()
