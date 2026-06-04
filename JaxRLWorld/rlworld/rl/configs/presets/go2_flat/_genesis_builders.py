@@ -175,9 +175,11 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
+            iterations=10,
+            ls_iterations=20,
             constraint_solver=gs.constraint_solver.Newton,
             constraint_timeconst=0.02,
-            # max_collision_pairs=20,
+            max_collision_pairs=20,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,

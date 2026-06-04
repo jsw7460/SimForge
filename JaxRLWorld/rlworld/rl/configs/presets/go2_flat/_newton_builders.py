@@ -141,7 +141,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
         solver_cfg=SolverMuJoCoCfg(
-            impratio=100.0,
+            impratio=1.0,
             ccd_iterations=50,
             cone="elliptic",
             ls_iterations=20,
