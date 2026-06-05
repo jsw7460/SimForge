@@ -48,7 +48,10 @@ class ContactManager(BaseContactManager):
     # -- abstract impl --
 
     def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
-        return self._sensors[group.name].compute().force
+        # Only the force channel — calling ``compute()`` here would
+        # also read every contact (found) sensor and pay the per-link
+        # GPU sync for data this caller does not use.
+        return self._sensors[group.name].read_force()
 
     def _compute_group_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
         sensor = self._sensors[group.name]
@@ -65,8 +68,12 @@ class ContactManager(BaseContactManager):
         net force momentarily dips below the 1 N noise floor used by
         the base classifier. Aligns with mjlab's ``data.found > 0``
         semantics in MujocoContactManager._compute_group_is_contact.
+
+        Uses the ``read_found``-only fast path so the per-substep
+        ``ContactManager.advance`` does not also pay a force-channel
+        sync per primary link.
         """
-        return self._sensors[group.name].compute().found
+        return self._sensors[group.name].read_found()
 
     # -- pretty print --
 

@@ -244,23 +244,51 @@ class GenesisContactSensor:
             return t[:, 0, :]
         return t
 
-    def compute(self) -> ContactSensorData:
+    def read_found(self) -> torch.Tensor:
+        """Read only the ``gs.sensors.Contact`` (found) channel.
+
+        Each ``read_ground_truth()`` is a GPU→CPU sync per primary
+        link; the substep-rate ``ContactManager.advance`` path needs
+        only the binary contact, never the 3-vec force.  Splitting
+        avoids paying ~50% of the per-substep sensor-read cost (a
+        real fraction of total step time for Genesis at small
+        ``num_envs``).
+        """
         has_history = self.cfg.history_length > 0
         n = self.num_envs
+        cols: list[torch.Tensor] = []
+        for cs in self._contact_sensors:
+            c = self._current_frame(cs.read_ground_truth(), has_history, n)
+            cols.append(c[..., 0] != 0)  # (n,)
+        return torch.stack(cols, dim=1)  # (num_envs, N) bool
 
-        found_cols: list[torch.Tensor] = []
-        force_cols: list[torch.Tensor] = []
-        for cs, fs in zip(self._contact_sensors, self._force_sensors):
-            c = self._current_frame(cs.read_ground_truth(), has_history, n)  # Contact: payload dim 1
-            f = self._current_frame(fs.read_ground_truth(), has_history, n)  # ContactForce: payload dim 3
-            found_cols.append(c[..., 0] != 0)  # (n,)
-            force_cols.append(f)  # (n, 3)
+    def read_force(self) -> torch.Tensor:
+        """Read only the ``gs.sensors.ContactForce`` (3-vec) channel.
 
-        found = torch.stack(found_cols, dim=1)  # (num_envs, N) bool
-        force = torch.stack(force_cols, dim=1)  # (num_envs, N, 3)
-        # ``Contact`` and ``ContactForce`` carry the same ``filter_link_idx``
-        # blacklist, so ``force`` is already counterpart-filtered (matches ``found``).
-        return ContactSensorData(found=found, force=force, tracked_names=self._tracked_names)
+        Counterpart to :meth:`read_found`; used by reward / observation
+        paths that need the force magnitude.  Both channels share the
+        same ``filter_link_idx`` blacklist on the Genesis side, so the
+        per-link ordering and entry count match :meth:`read_found`.
+        """
+        has_history = self.cfg.history_length > 0
+        n = self.num_envs
+        cols: list[torch.Tensor] = []
+        for fs in self._force_sensors:
+            f = self._current_frame(fs.read_ground_truth(), has_history, n)
+            cols.append(f)  # (n, 3)
+        return torch.stack(cols, dim=1)  # (num_envs, N, 3)
+
+    def compute(self) -> ContactSensorData:
+        """Read both channels — kept for callers that legitimately need
+        both ``found`` and ``force`` from one call.  Performance-sensitive
+        code paths should use :meth:`read_found` or :meth:`read_force`
+        directly to skip the channel they do not need.
+        """
+        return ContactSensorData(
+            found=self.read_found(),
+            force=self.read_force(),
+            tracked_names=self._tracked_names,
+        )
 
     # ------------------------------------------------------------------
     # substep history (only when history_length > 0)
