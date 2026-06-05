@@ -201,6 +201,11 @@ class ViserVisualizationManager:
         if self._step_counter % self.config.update_every_n_steps != 0:
             return
 
+        # Invalidate the bridge's per-frame cache so the first ``get_*``
+        # call this tick re-fetches; later calls (scene.update, command
+        # arrows, tracked-body queries) share the result.
+        self.bridge.begin_frame()
+
         with self.server.atomic():
             # Update 3D scene.
             self.scene.update()

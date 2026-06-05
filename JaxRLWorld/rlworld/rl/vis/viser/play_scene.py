@@ -52,6 +52,7 @@ class PlayScene(Protocol):
     def needs_update(self, value: bool) -> None: ...
 
     def create(self, server: viser.ViserServer) -> None: ...
+    def begin_frame(self) -> None: ...
     def update(self) -> None: ...
     def setup_gui(self, tabs: Any) -> None: ...
     def set_on_env_switch(self, callback: Any) -> None: ...
@@ -93,6 +94,9 @@ class BridgePlayScene:
     @needs_update.setter
     def needs_update(self, value: bool) -> None:
         self._scene.needs_update = value
+
+    def begin_frame(self) -> None:
+        self._bridge.begin_frame()
 
     def update(self) -> None:
         self._scene.update()
@@ -164,6 +168,12 @@ class MujocoPlayScene:
     @needs_update.setter
     def needs_update(self, value: bool) -> None:
         self._mj_scene.needs_update = value
+
+    def begin_frame(self) -> None:
+        # MjlabViserScene reads ``data.xpos`` / ``data.xquat`` / ``data.cvel``
+        # directly each call — there is no JaxRLWorld bridge cache to
+        # invalidate on this path.  No-op.
+        pass
 
     def update(self) -> None:
         wp_data = self._scene_manager.data

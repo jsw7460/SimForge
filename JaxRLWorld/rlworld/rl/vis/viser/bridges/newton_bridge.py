@@ -12,17 +12,19 @@ import numpy as np
 import trimesh
 import trimesh.visual
 from newton import Heightfield, ShapeFlags
+from scipy.spatial.transform import Rotation
 
-from ..bridge import BodyMeshGroup, SimulatorGeometry
+from ..bridge import BodyMeshGroup, SimulatorBridge, SimulatorGeometry
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.newton.scene import NewtonSceneManager
 
 
-class NewtonBridge:
+class NewtonBridge(SimulatorBridge):
     """Bridge between Newton simulator and ViserScene."""
 
     def __init__(self, scene_manager: NewtonSceneManager):
+        super().__init__()
         self._scene_manager = scene_manager
         self._model = scene_manager.model
         self._num_envs = scene_manager.config.num_worlds
@@ -41,6 +43,10 @@ class NewtonBridge:
     @property
     def num_envs(self) -> int:
         return self._num_envs
+
+    @property
+    def tracked_body_id(self) -> int | None:
+        return self._tracked_body_local
 
     def extract_geometry(self) -> SimulatorGeometry:
         """Extract visual meshes from Newton's model for world 0."""
@@ -108,50 +114,34 @@ class NewtonBridge:
             has_ground_mesh=any(group.is_fixed for group in mesh_groups),
         )
 
-    def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
-        """Body poses for one environment — one GPU→CPU read total.
+    def _fetch_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """One ``body_q.numpy()`` per frame covering all worlds.
 
-        Returns ``(positions, quaternions)`` of shapes ``(num_bodies, 3)`` /
-        ``(num_bodies, 4)`` (wxyz; Newton stores xyzw).
+        Returns ``(positions, quaternions)`` of shapes
+        ``(num_bodies, 3)`` / ``(num_bodies, 4)`` (wxyz; Newton stores
+        the rotation as xyzw).
         """
         body_q = self._scene_manager.state_0.body_q.numpy()  # (total_bodies, 7) — one transfer
         start = env_idx * self._bodies_per_world
         end = start + self._bodies_per_world
         block = body_q[start:end]
-        positions = block[:, :3].copy()
-        quaternions = block[:, [6, 3, 4, 5]].copy()  # xyzw -> wxyz
+        positions = block[:, :3].astype(np.float32).copy()
+        quaternions = block[:, [6, 3, 4, 5]].astype(np.float32).copy()  # xyzw -> wxyz
         return positions, quaternions
 
-    def get_body_positions(self, env_idx: int) -> np.ndarray:
-        """Get body positions for one environment. Returns (num_bodies, 3)."""
-        return self.get_body_transforms(env_idx)[0]
+    def _fetch_tracked_world_velocity(self, env_idx: int) -> np.ndarray | None:
+        """World-frame linear velocity at the tracked body.
 
-    def get_body_quaternions(self, env_idx: int) -> np.ndarray:
-        """Get body orientations for one environment. Returns (num_bodies, 4) wxyz."""
-        return self.get_body_transforms(env_idx)[1]
-
-    def get_tracked_position(self, env_idx: int) -> np.ndarray:
-        """Get tracked body position. Returns (3,)."""
-        positions = self.get_body_transforms(env_idx)[0]
-        if self._tracked_body_local is not None:
-            return positions[self._tracked_body_local]
-        return positions[0]
-
-    def get_body_velocity(self, env_idx: int) -> np.ndarray | None:
-        """Body-frame linear velocity of the tracked body. Returns (2,) [vx, vy]."""
+        Only the velocity is fetched here — the base class supplies the
+        quaternion needed for the world→body rotation from its cached
+        transforms snapshot, so we never re-sync ``body_q``.
+        """
         tracked = self._tracked_body_local
         if tracked is None:
             return None
-        state = self._scene_manager.state_0
         body_idx = env_idx * self._bodies_per_world + tracked
-        body_qd = state.body_qd.numpy()[body_idx]  # (6,) [vx,vy,vz,wx,wy,wz]
-        world_vel = body_qd[:3]
-        body_q = state.body_q.numpy()[body_idx]  # (7,) [x,y,z,qx,qy,qz,qw]
-        qx, qy, qz, qw = body_q[3:7]
-        from scipy.spatial.transform import Rotation
-
-        body_vel = Rotation.from_quat([qx, qy, qz, qw]).inv().apply(world_vel)
-        return body_vel[:2].astype(np.float32)
+        body_qd = self._scene_manager.state_0.body_qd.numpy()[body_idx]  # (6,) [vx,vy,vz,wx,wy,wz]
+        return body_qd[:3].astype(np.float32)
 
     def _is_ground_body(self, body_id: int) -> bool:
         """Check if a body is a ground/world plane by its label.
@@ -236,8 +226,6 @@ class NewtonBridge:
         local_quat_xyzw = shape_xform[3:7]
         # Convert to rotation matrix.
         qx, qy, qz, qw = local_quat_xyzw
-        from scipy.spatial.transform import Rotation
-
         rot = Rotation.from_quat([qx, qy, qz, qw]).as_matrix()
         transformed_verts = (rot @ scaled_verts.T).T + local_pos
 

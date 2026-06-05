@@ -11,17 +11,21 @@ from typing import TYPE_CHECKING
 import numpy as np
 import trimesh
 import trimesh.visual
+from scipy.spatial.transform import Rotation
 
-from ..bridge import BodyMeshGroup, SimulatorGeometry, terrain_data_to_trimesh
+from ..bridge import BodyMeshGroup, SimulatorBridge, SimulatorGeometry, terrain_data_to_trimesh
+
+_IDENTITY_QUAT_WXYZ = np.array([1.0, 0.0, 0.0, 0.0])
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.genesis.scene import SceneManager
 
 
-class GenesisBridge:
+class GenesisBridge(SimulatorBridge):
     """Bridge between Genesis simulator and ViserScene."""
 
     def __init__(self, scene_manager: SceneManager):
+        super().__init__()
         self._scene_manager = scene_manager
         self._num_envs = scene_manager.scene.n_envs
 
@@ -35,7 +39,7 @@ class GenesisBridge:
 
         self._build_link_map()
 
-        # Pre-allocated per-frame buffers (filled in place by get_body_transforms).
+        # Pre-allocated per-frame buffers (filled in place by _fetch_body_transforms).
         n = len(self._link_map)
         self._pos_buf = np.zeros((n, 3), dtype=np.float32)
         self._quat_buf = np.zeros((n, 4), dtype=np.float32)
@@ -44,6 +48,10 @@ class GenesisBridge:
     @property
     def num_envs(self) -> int:
         return self._num_envs
+
+    @property
+    def tracked_body_id(self) -> int | None:
+        return self._tracked_body_id
 
     def _is_ground_entity(self, entity) -> bool:
         """Check if an entity is a ground plane (skip for Viser rendering)."""
@@ -102,7 +110,15 @@ class GenesisBridge:
             self._tracked_body_id = 0
 
     def extract_geometry(self) -> SimulatorGeometry:
-        """Extract visual meshes from Genesis entities."""
+        """Extract visual meshes from Genesis entities.
+
+        Each vgeom's local transform (``init_pos`` / ``init_quat``,
+        wxyz) is baked into the mesh vertices so the per-frame
+        :meth:`ViserScene.update` only needs the body's own pose —
+        no per-mesh ``quaternion_multiply`` + rotation-matrix multiply.
+        Mirrors how the Newton bridge already pre-bakes shape transforms
+        (see :meth:`NewtonBridge._newton_mesh_to_trimesh`).
+        """
         mesh_groups: list[BodyMeshGroup] = []
 
         for entity, link, body_id in self._link_map:
@@ -111,19 +127,23 @@ class GenesisBridge:
                 continue
 
             meshes = []
-            local_positions = []
-            local_quaternions = []
-
             for vgeom in vgeoms:
                 mesh = self._extract_vgeom_mesh(vgeom)
-                if mesh is not None:
-                    meshes.append(mesh)
-                    # Local offset of vgeom relative to link frame.
-                    init_pos = getattr(vgeom, "init_pos", np.zeros(3))
-                    init_quat = getattr(vgeom, "init_quat", np.array([1, 0, 0, 0]))
-                    local_positions.append(np.asarray(init_pos, dtype=np.float32))
-                    # Genesis quaternion is wxyz.
-                    local_quaternions.append(np.asarray(init_quat, dtype=np.float32))
+                if mesh is None:
+                    continue
+                init_pos = np.asarray(
+                    getattr(vgeom, "init_pos", np.zeros(3)),
+                    dtype=np.float64,
+                )
+                init_quat_wxyz = np.asarray(
+                    getattr(vgeom, "init_quat", _IDENTITY_QUAT_WXYZ),
+                    dtype=np.float64,
+                )
+                if not (np.allclose(init_pos, 0.0) and np.allclose(init_quat_wxyz, _IDENTITY_QUAT_WXYZ)):
+                    w, x, y, z = init_quat_wxyz
+                    rot = Rotation.from_quat([x, y, z, w]).as_matrix()
+                    mesh.vertices = (rot @ np.asarray(mesh.vertices).T).T + init_pos
+                meshes.append(mesh)
 
             if meshes:
                 is_fixed = getattr(link, "is_fixed", False)
@@ -134,8 +154,9 @@ class GenesisBridge:
                         body_name=link_name,
                         is_fixed=is_fixed,
                         meshes=meshes,
-                        local_positions=local_positions,
-                        local_quaternions=local_quaternions,
+                        # local_positions / local_quaternions intentionally
+                        # omitted — baked into mesh.vertices above so
+                        # scene.update() can take the cheap branch.
                     )
                 )
 
@@ -161,12 +182,17 @@ class GenesisBridge:
             has_ground_mesh=terrain_data is not None,
         )
 
-    def get_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
-        """Link poses for one environment — one GPU→CPU read per entity.
+    def _fetch_body_transforms(self, env_idx: int) -> tuple[np.ndarray, np.ndarray]:
+        """One ``get_links_pos`` + ``get_links_quat`` per Genesis entity.
 
-        Returns ``(positions, quaternions)`` of shapes ``(num_bodies, 3)`` /
-        ``(num_bodies, 4)`` (wxyz). The returned arrays are reused across
-        calls (filled in place), so callers must not retain them.
+        Genesis exposes link poses only at the entity level (no
+        scene-wide accessor), so we issue one call per entity per data
+        kind.  The base-class cache makes sure this runs at most once
+        per ``(env_idx, frame)`` regardless of how many ``get_*``
+        helpers ask for transforms during a tick.  The returned arrays
+        are reused across frames (filled in place); the base-class
+        contract is that callers don't retain them past the next
+        ``begin_frame``.
         """
         for entity, start, n in self._entity_ranges:
             # (n_envs, n_links, 3) / (n_envs, n_links, 4) — one transfer each.
@@ -174,33 +200,18 @@ class GenesisBridge:
             self._quat_buf[start : start + n] = entity.get_links_quat()[env_idx].cpu().numpy()
         return self._pos_buf, self._quat_buf
 
-    def get_body_positions(self, env_idx: int) -> np.ndarray:
-        """Get link positions for one environment. Returns (num_bodies, 3)."""
-        return self.get_body_transforms(env_idx)[0]
+    def _fetch_tracked_world_velocity(self, env_idx: int) -> np.ndarray | None:
+        """World-frame linear velocity of the robot base — single sync.
 
-    def get_body_quaternions(self, env_idx: int) -> np.ndarray:
-        """Get link orientations for one environment. Returns (num_bodies, 4) wxyz."""
-        return self.get_body_transforms(env_idx)[1]
-
-    def get_tracked_position(self, env_idx: int) -> np.ndarray:
-        """Get tracked body position. Returns (3,)."""
-        positions = self.get_body_transforms(env_idx)[0]
-        if self._tracked_body_id is not None:
-            return positions[self._tracked_body_id]
-        return positions[0]
-
-    def get_body_velocity(self, env_idx: int) -> np.ndarray | None:
-        """Body-frame linear velocity of the robot base. Returns (2,) [vx, vy]."""
+        The tracked-body quaternion needed for the world→body rotation
+        is already cached by the base class (it came out of
+        ``_fetch_body_transforms``), so we only read the velocity
+        here.
+        """
         robot = self._scene_manager.entities.get("robot")
         if robot is None or not hasattr(robot, "get_vel"):
             return None
-        world_vel = robot.get_vel()[env_idx].cpu().numpy()  # (3,)
-        quat_wxyz = robot.get_quat()[env_idx].cpu().numpy()  # (4,) wxyz
-        w, x, y, z = quat_wxyz
-        from scipy.spatial.transform import Rotation
-
-        body_vel = Rotation.from_quat([x, y, z, w]).inv().apply(world_vel)
-        return body_vel[:2].astype(np.float32)
+        return robot.get_vel()[env_idx].cpu().numpy().astype(np.float32)
 
     @staticmethod
     def _extract_vgeom_mesh(vgeom) -> trimesh.Trimesh | None:

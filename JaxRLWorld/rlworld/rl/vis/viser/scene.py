@@ -19,7 +19,6 @@ import trimesh
 import trimesh.visual
 import trimesh.visual.material
 import viser
-import viser.transforms as vtf
 from PIL import Image
 
 from .bridge import SimulatorBridge, SimulatorGeometry
@@ -37,20 +36,6 @@ _GROUND_TEXTURE_ALIASES = {
     "concrete": _BUNDLED_CONCRETE_TEXTURE,
 }
 _SKY_IMAGE_ALIASES = {"construction": _BUNDLED_CONSTRUCTION_BACKDROP}
-
-
-def _quaternion_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
-    """Multiply two wxyz quaternions."""
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    return np.array(
-        [
-            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        ]
-    )
 
 
 def _quat_shortest_arc(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -261,8 +246,13 @@ class ViserScene:
         # Scene offset for camera tracking (Mjlab pattern).
         self._scene_offset: np.ndarray = np.zeros(3)
 
-        # Mesh handles: body_id -> list of handles.
-        self._body_handles: dict[int, list[Any]] = {}
+        # Per-body parent frame: ``body_id -> SceneNodeHandle``.  Meshes
+        # attach as children of the frame; the per-frame update only
+        # has to write the body's own pose to this single handle, and
+        # viser propagates to all child meshes server-side.  Drops the
+        # per-mesh ``handle.position = body_pos`` loop and the message
+        # count to one per body per frame.
+        self._body_frames: dict[int, Any] = {}
         self._fixed_frame: viser.SceneNodeHandle | None = None
         self._ground_handle: Any = None
 
@@ -294,17 +284,26 @@ class ViserScene:
         return cls(server=server, bridge=bridge, geometry=geometry, scene_config=scene_config)
 
     def _create_mesh_handles(self) -> None:
-        """Create Viser mesh handles from geometry."""
-        self._fixed_frame = self.server.scene.add_frame("/fixed_bodies")
+        """Build the scene graph: one parent frame per dynamic body,
+        meshes attached as children of that frame.
+
+        For fixed bodies the meshes live directly under the single
+        ``/fixed_bodies`` frame (no per-body frame) — they share one
+        scene-offset update path and never need an individual pose.
+        """
+        self._fixed_frame = self.server.scene.add_frame("/fixed_bodies", show_axes=False)
         cfg = self.scene_config
 
         for group in self.geometry.mesh_groups:
-            handles = []
-            for mesh_idx, mesh in enumerate(group.meshes):
-                name = f"/body_{group.body_id}/mesh_{mesh_idx}"
-                if group.is_fixed:
-                    name = f"/fixed_bodies/body_{group.body_id}/mesh_{mesh_idx}"
+            # Dynamic body: one parent frame, meshes as children.
+            if not group.is_fixed:
+                frame = self.server.scene.add_frame(f"/body_{group.body_id}", show_axes=False)
+                self._body_frames[group.body_id] = frame
+                mesh_path = f"/body_{group.body_id}/mesh"
+            else:
+                mesh_path = f"/fixed_bodies/body_{group.body_id}/mesh"
 
+            for mesh_idx, mesh in enumerate(group.meshes):
                 if cfg.robot_color is not None:
                     mesh = mesh.copy()
                     # Fresh material per mesh — sharing a TextureVisuals would
@@ -313,16 +312,12 @@ class ViserScene:
                         cfg.robot_color, cfg.robot_metalness, cfg.robot_roughness, cfg.robot_opacity
                     )
 
-                handle = self.server.scene.add_mesh_trimesh(
-                    name=name,
+                self.server.scene.add_mesh_trimesh(
+                    name=f"{mesh_path}_{mesh_idx}",
                     mesh=mesh,
                     cast_shadow=cfg.cast_shadow,
                     receive_shadow=cfg.receive_shadow,
                 )
-                handles.append(handle)
-
-            if handles:
-                self._body_handles[group.body_id] = handles
 
     def _create_ground_plane(self) -> None:
         """Add the ground plane to the scene (look from ViserSceneConfig)."""
@@ -445,9 +440,13 @@ class ViserScene:
         self.server.scene.set_background_image(img)
 
     def update(self) -> None:
-        """Update all dynamic body transforms from the bridge."""
-        # Single GPU→CPU read per frame; the tracked-body position is sliced
-        # from the result rather than re-queried.
+        """Update all dynamic body transforms from the bridge.
+
+        One viser message per dynamic body (write to its parent frame)
+        plus one for the ground / fixed-bodies offset.  The per-mesh
+        loop is gone — meshes inherit from their body frame, so the
+        cost no longer scales with mesh-per-body fan-out.
+        """
         positions, quaternions = self.bridge.get_body_transforms(self.env_idx)
 
         # Compute scene offset for camera tracking.
@@ -466,32 +465,14 @@ class ViserScene:
         if self._fixed_frame is not None:
             self._fixed_frame.position = tuple(scene_offset)
 
-        # Update dynamic bodies.
-        for group in self.geometry.mesh_groups:
-            if group.is_fixed:
-                continue
-
-            handles = self._body_handles.get(group.body_id)
-            if not handles:
-                continue
-
-            body_pos = positions[group.body_id] + scene_offset
-            # ``quaternions`` is a buffer the bridge reuses across frames — copy
-            # the slice before handing it to viser handles.
-            body_quat = quaternions[group.body_id].copy()  # wxyz
-
-            for mesh_idx, handle in enumerate(handles):
-                if group.local_positions and group.local_quaternions:
-                    local_pos = group.local_positions[mesh_idx]
-                    local_quat = group.local_quaternions[mesh_idx]
-                    final_quat = _quaternion_multiply(body_quat, local_quat)
-                    rot = vtf.SO3(wxyz=body_quat)
-                    final_pos = body_pos + rot.as_matrix() @ local_pos
-                    handle.wxyz = final_quat
-                    handle.position = final_pos
-                else:
-                    handle.wxyz = body_quat
-                    handle.position = body_pos
+        # Update dynamic bodies — one frame write per body.  Mesh
+        # vertices are already in body-local frame (bridges pre-bake the
+        # per-mesh shape transform), so no per-mesh math is needed.
+        for body_id, frame in self._body_frames.items():
+            frame.position = positions[body_id] + scene_offset
+            # quaternions is a buffer the bridge may reuse across frames —
+            # copy before handing the slice to viser.
+            frame.wxyz = quaternions[body_id].copy()
 
         # Debug visuals.
         self._sync_debug_visuals()
@@ -620,10 +601,14 @@ class ViserScene:
 
     def cleanup(self) -> None:
         """Remove all scene handles."""
-        for handles in self._body_handles.values():
-            for h in handles:
-                h.remove()
-        self._body_handles.clear()
+        # Removing each body frame removes all its child mesh handles
+        # too — viser cleans the subtree when a parent goes away.
+        for frame in self._body_frames.values():
+            frame.remove()
+        self._body_frames.clear()
+        if self._fixed_frame is not None:
+            self._fixed_frame.remove()
+            self._fixed_frame = None
         if self._ground_handle is not None:
             self._ground_handle.remove()
         for h in self._arrow_handles:
