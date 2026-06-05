@@ -30,7 +30,16 @@ def main():
     parser.add_argument("--policy_path", type=str, required=True, help="Checkpoint path")
     parser.add_argument("--wandb_run_path", type=str, default=None, help="W&B run path")
     parser.add_argument("--eval_sim", type=str, required=True, choices=["genesis", "newton", "mujoco"])
-    parser.add_argument("--num_envs", type=int, default=10)
+    parser.add_argument(
+        "--num_envs",
+        type=int,
+        default=1,
+        help=(
+            "Number of parallel envs. ``1`` keeps interactive viewer responsiveness "
+            "minimal; larger values let Genesis amortise kernel-launch overhead per "
+            "step (useful when interactive Genesis is slow at ``num_envs=1``)."
+        ),
+    )
     parser.add_argument("--num_evals", type=int, default=10)
     parser.add_argument("--record_video", action="store_true")
     parser.add_argument("--eval", action="store_true", help="Run batch evaluation instead of interactive viewer")
@@ -47,7 +56,7 @@ def main():
 
     overrides: dict = {
         "env": {
-            "num_envs": 1,
+            "num_envs": args.num_envs,
             "episode_length_s": 10e9,
         },
     }
