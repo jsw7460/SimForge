@@ -63,11 +63,14 @@ class JointActionCfg(ActionTermCfg):
 
 
 class JointAction(ActionTerm):
-    """Base class implementing ``processed = raw * scale + offset``.
+    """Shared base implementing ``processed = raw * scale + offset``.
 
-    Subclasses override :meth:`compute_target_positions` to turn the
-    intermediate ``processed_actions`` into an absolute joint
-    position target.
+    Position subclasses override :meth:`compute_target_positions` to
+    turn the intermediate ``processed_actions`` into an absolute joint
+    position target (dispatched through the actuator-compute path). The
+    effort subclass (:class:`JointEffortAction`) instead applies
+    ``processed_actions`` directly as joint torque and never calls
+    :meth:`compute_target_positions`.
     """
 
     __name__ = "JointAction"
@@ -393,3 +396,77 @@ class MotionResidualJointPositionAction(JointAction):
         else:
             residual = self._alpha * self._raw_actions
         return motion_target + residual
+
+
+# ── Direct joint effort (torque) ────────────────────────────────────
+
+
+@dataclass
+class JointEffortActionCfg(JointActionCfg):
+    """Direct joint-torque action.
+
+    The policy output for this term's joints is interpreted as a
+    **joint torque** (``processed = raw * scale + offset``) and written
+    straight to the simulator, bypassing the position-target /
+    actuator-PD path. Mirrors IsaacLab's / mjlab's ``JointEffortAction``.
+
+    Used by tasks that command joint torques directly — e.g. NeRD-style
+    random-torque data collection, or torque-control RL.
+
+    .. important::
+        The joints driven by this term must be in the backend's
+        **direct-torque mode** (no internal PD): configure them with an
+        explicit actuator (``IdealPDActuatorCfg`` / ``DelayedPDActuatorCfg``
+        / ``DCMotorCfg`` with zero gains, or simply no implicit actuator)
+        so Newton leaves ``joint_target_mode = NONE`` and drives the joint
+        purely from ``control.joint_f``. If an ``ImplicitActuatorCfg``
+        (``joint_target_mode = POSITION``) covers the same joints, this
+        torque is applied *on top of* the simulator's internal PD output.
+
+    Attributes:
+        scale: Per-joint scale mapping raw policy output to torque
+            [N·m]. ``float`` or ``dict[regex → float]``. Set this to the
+            joint's effort limit to map a ``(-1, 1)`` action onto the
+            full torque range.
+        offset: Per-joint torque offset [N·m]. Defaults to 0.
+        effort_limit: Optional per-joint torque saturation [N·m] applied
+            after scale/offset. ``float`` (same for all joints),
+            ``dict[regex → float]`` (per-joint), or ``None`` (no clamp).
+    """
+
+    effort_limit: float | dict[str, float] | None = None
+
+
+class JointEffortAction(JointAction):
+    """Direct joint-torque action.
+
+    Reuses :class:`JointAction`'s ``process_actions`` (clip → scale →
+    offset) and applies the resulting ``processed_actions`` as joint
+    torque via the manager's :meth:`_apply_joint_effort_via_indices`
+    path. :meth:`compute_target_positions` is intentionally not
+    implemented — this term never produces a position target.
+    """
+
+    __name__ = "JointEffortAction"
+    _cfg: JointEffortActionCfg
+
+    def __init__(
+        self,
+        cfg: JointEffortActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        # Per-joint torque saturation. ``None`` → no clamp. When given
+        # as a regex dict, joints the dict does not match stay unlimited
+        # (default ``inf``) rather than being silently clamped to zero.
+        if cfg.effort_limit is None:
+            self._effort_limit: torch.Tensor | None = None
+        else:
+            self._effort_limit = self._resolve_float_field(cfg.effort_limit, default=float("inf"))
+
+    def apply_actions(self) -> None:
+        torques = self._processed_actions
+        if self._effort_limit is not None:
+            torques = torch.clamp(torques, min=-self._effort_limit, max=self._effort_limit)
+        self._manager._apply_joint_effort_via_indices(torques, self._joint_ids)

@@ -612,6 +612,40 @@ class ActionManagerBase(BaseManager):
         self._applied_torque = full_torques
         self._apply_force(full_torques)
 
+    def _apply_joint_effort_via_indices(
+        self,
+        term_torques: torch.Tensor,
+        joint_ids: torch.Tensor,
+    ) -> None:
+        """Apply a term's joint torques directly to the simulator.
+
+        The effort-action counterpart of
+        :meth:`_apply_joint_target_via_actuators`. Scatters the term's
+        per-joint torques into the full actuated-joint space and writes
+        them straight to the simulator via :meth:`_apply_force`,
+        bypassing the actuator-PD compute and the position-target path
+        entirely.
+
+        The driven joints must be in the backend's direct-torque mode
+        (no ``ImplicitActuatorCfg`` / internal PD); otherwise this
+        torque is applied *on top of* the simulator's PD output. See
+        :class:`~rlworld.rl.envs.mdp.actions.joint_actions.JointEffortActionCfg`.
+
+        Args:
+            term_torques: shape ``(num_envs, len(joint_ids))`` — joint
+                torques for the term's joint subset [N·m].
+            joint_ids: shape ``(len(joint_ids),)`` — indices into the
+                full actuated joint space.
+        """
+        full_torques = torch.zeros(
+            (term_torques.shape[0], self._total_action_dim),
+            dtype=term_torques.dtype,
+            device=term_torques.device,
+        )
+        full_torques[:, joint_ids] = term_torques
+        self._applied_torque = full_torques
+        self._apply_force(full_torques)
+
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
         """Process raw actions: dispatch to term system or legacy path.
 
