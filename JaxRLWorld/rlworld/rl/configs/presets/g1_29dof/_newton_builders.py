@@ -124,8 +124,15 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             iterations=50,
             ls_iterations=50,
             ccd_iterations=50,
-            njmax=1500,
-            nconmax=35,
+            # Rough terrain inflates the per-env contact count by an order
+            # of magnitude vs flat ground (~300 contacts/env vs ~35 on a
+            # plane; observed on G1 29-DOF + self-collision + heightfield).
+            # ``nconmax`` / ``njmax`` are mjwarp's *per-env* solver buffers
+            # (total = num_envs * field); undersizing on rough surfaces
+            # raises "Number of Newton contacts exceeded MJWarp limit" at
+            # every step. Flat keeps the existing tight budgets.
+            njmax=5000 if cfg.use_rough_terrain else 1500,
+            nconmax=500 if cfg.use_rough_terrain else 35,
             # Mesh terrain: route contacts through Newton's MPR-based
             # pipeline instead of mjwarp's internal GJK/EPA collision.
             # Under use_mujoco_contacts=True mjwarp does its own collision,
