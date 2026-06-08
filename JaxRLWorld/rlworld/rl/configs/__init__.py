@@ -63,6 +63,11 @@ _LAZY: dict[str, tuple[str, str]] = {
     "GenesisConfigsForRun": (".genesis_config_classes", "GenesisConfigsForRun"),
     "ObservationConfig": (".genesis_config_classes", "ObservationConfig"),
     "SceneConfig": (".genesis_config_classes", "SceneConfig"),
+    # Gymnasium-backed envs (dm_control via shimmy, classic control, ...).
+    # Pure-Python module — no simulator import — so it's safe to expose
+    # alongside the Genesis-importing names above.
+    "GymnasiumConfigsForRun": (".gymnasium_config_classes", "GymnasiumConfigsForRun"),
+    "GymnasiumEnvConfig": (".gymnasium_config_classes", "GymnasiumEnvConfig"),
 }
 
 # sim_type → (submodule, ConfigsForRun class name) for lazy resolution.
@@ -70,6 +75,7 @@ _CONFIGS_FOR_RUN_LOCATIONS: dict[str, tuple[str, str]] = {
     "genesis": (".genesis_config_classes", "GenesisConfigsForRun"),
     "newton": (".newton_config_classes", "NewtonConfigsForRun"),
     "mujoco": (".mujoco_config_classes", "MujocoConfigsForRun"),
+    "gymnasium": (".gymnasium_config_classes", "GymnasiumConfigsForRun"),
 }
 
 

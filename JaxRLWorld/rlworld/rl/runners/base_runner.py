@@ -3,7 +3,10 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple
+
+if TYPE_CHECKING:
+    import gymnasium as gym
 
 import jax
 import jax.numpy as jnp
@@ -33,12 +36,25 @@ class BaseRunner(ABC):
     def _create_env_from_config(
         cls,
         cfgs: ConfigsForRun,
+        gym_env_factory: "Callable[[int], gym.Env] | None" = None,
     ) -> World:
         """Create environment from config.
 
-        Dispatches on ``cfgs.sim_type`` when available (new path), falling
-        back to ``cfgs.env.env_name`` for backward compatibility and for
-        non-physics environments (Gymnasium, ManiSkill).
+        Dispatches on ``env_class.sim_name`` (resolved from
+        ``cfgs.env.env_name`` via ``rlworld.rl.envs``).  ``cfgs.sim_type``
+        is intentionally not consulted here: it labels the *config family*
+        (a ``GenesisConfigsForRun`` keeps ``sim_type="genesis"`` even when
+        ``env_name="GymnasiumEnv"``), so dispatching on it would route a
+        Gymnasium env through the physics-sim kwargs branch.
+
+        ``gym_env_factory`` (Gymnasium path only): user-provided
+        ``(seed) -> gym.Env`` callable.  When set, replaces the default
+        bare ``gym.make(task_name)`` factory so the runner-built eval
+        env shares the same wrapper chain as the user-built training
+        env (action repeat, ``FlattenObservation``, ...).  Set via
+        :attr:`gym_env_factory` on the runner instance — see
+        :class:`rlworld.rl.envs.gymnasium.make_dmc_env_factory` for the
+        DMC reproduction pattern.
         """
         from rlworld.rl import envs
 
@@ -48,9 +64,12 @@ class BaseRunner(ABC):
         # dragged in.
         env_class = getattr(envs, env_class_name)
 
-        sim_type = getattr(cfgs, "sim_type", None)
-
-        if sim_type in ("genesis", "newton", "mujoco") or env_class.sim_name in ("Genesis", "Newton", "Mujoco"):
+        # Dispatch on the env class's own ``sim_name`` only — ``cfgs.sim_type``
+        # tracks the *config family* (a ``GenesisConfigsForRun`` keeps
+        # ``sim_type="genesis"`` even when ``env_name="GymnasiumEnv"``), so
+        # using it here would force the Genesis sim kwargs onto a Gymnasium
+        # env and raise ``TypeError: unexpected keyword argument 'num_envs'``.
+        if env_class.sim_name in ("Genesis", "Newton", "Mujoco"):
             kwargs = dict(
                 num_envs=cfgs.env.num_envs,
                 env_cfg=cfgs.env,
@@ -100,14 +119,26 @@ class BaseRunner(ABC):
 
             from rlworld.rl.envs import GymnasiumEnv
 
-            def make_env(seed):
-                def _init():
-                    env = gym.make(cfgs.env.task_name)
-                    env.action_space.seed(seed)
-                    env.observation_space.seed(seed)
-                    return env
+            if gym_env_factory is not None:
+                # User-supplied factory carries the full wrapper chain
+                # (action repeat, FlattenObservation, seeding).  Reuse it
+                # verbatim so train and eval envs are structurally
+                # identical.
+                def make_env(seed):
+                    return lambda: gym_env_factory(seed)
+            else:
+                # Bare fallback for the legacy / wrapper-less Gymnasium
+                # path.  Used by scripts that don't set
+                # ``runner.gym_env_factory`` — fine for simple tasks
+                # whose raw observation is already a flat ``Box``.
+                def make_env(seed):
+                    def _init():
+                        env = gym.make(cfgs.env.task_name)
+                        env.action_space.seed(seed)
+                        env.observation_space.seed(seed)
+                        return env
 
-                return _init
+                    return _init
 
             env_gym = SyncVectorEnv(
                 [make_env(i) for i in range(cfgs.env.num_envs)], autoreset_mode=AutoresetMode.SAME_STEP
@@ -199,6 +230,13 @@ class BaseRunner(ABC):
         # Training parameters
         self.save_interval = self.runner_cfg.save_interval
         self.squash_output: bool | None = None
+
+        # Gymnasium-only: user-supplied ``(seed) -> gym.Env`` factory
+        # used by ``_create_env_from_config`` when building the eval
+        # env, so the runner-built eval env shares the same wrapper
+        # chain as the user-built training env.  ``None`` falls back
+        # to a bare ``gym.make(task_name)`` factory (legacy path).
+        self.gym_env_factory: Callable[[int], gym.Env] | None = None
 
         # Initialize training modules
         self.training_modules: Dict[str, Any] = dict()
@@ -448,10 +486,18 @@ class BaseRunner(ABC):
         return eval_cfgs
 
     def _get_or_create_eval_env(self) -> World:
-        """Lazily create eval environment on first use."""
+        """Lazily create eval environment on first use.
+
+        For Gymnasium envs, threads ``self.gym_env_factory`` (when set
+        by the user script) into ``_create_env_from_config`` so the
+        eval env's wrapper chain matches the training env's exactly.
+        """
         if not hasattr(self, "_eval_env") or self._eval_env is None:
             eval_cfgs = self._create_eval_configs()
-            self._eval_env = self._create_env_from_config(eval_cfgs)
+            self._eval_env = self._create_env_from_config(
+                eval_cfgs,
+                gym_env_factory=getattr(self, "gym_env_factory", None),
+            )
         return self._eval_env
 
     def _run_evaluation(self) -> Dict[str, Any]:
