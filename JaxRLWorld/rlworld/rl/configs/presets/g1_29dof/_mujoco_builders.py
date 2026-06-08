@@ -60,6 +60,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
+from rlworld.rl.envs.mdp.terminations.common import terminations as common_tf
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
 
 if TYPE_CHECKING:
@@ -87,6 +88,15 @@ def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
             {"limit_angle": math.radians(70.0)},
         )
         time_out = TerminationTermConfig(tf.time_out)
+
+        # On generated (finite) terrain, reset the robot before it walks
+        # off the mesh edge into the void. Only registered for rough so
+        # the flat preset's terminations are unchanged.
+        if cfg.use_rough_terrain:
+            out_of_terrain_bounds = TerminationTermConfig(
+                common_tf.terrain_out_of_bounds,
+                {"margin": 0.5},
+            )
 
     return MujocoEnvConfig(
         num_envs=cfg.num_envs,
@@ -175,6 +185,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         contact_sensor_maxmatch=64,
         preset_class_name=type(cfg).__name__,
         preset_module_path=type(cfg).__module__,
+        terrain_cfg=cfg.make_terrain_cfg(),
     )
 
 

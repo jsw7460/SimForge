@@ -89,6 +89,16 @@ def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonEnvConfig:
         )
         max_episode = TerminationTermConfig(max_episode_exceed)
 
+        # On generated (finite) terrain, reset the robot before it walks
+        # off the mesh edge into the void (matches IsaacLab / mjlab). Only
+        # registered for rough so the flat preset's terminations are
+        # unchanged.
+        if cfg.use_rough_terrain:
+            out_of_terrain_bounds = TerminationTermConfig(
+                common_tf.terrain_out_of_bounds,
+                {"margin": 0.5},
+            )
+
     return NewtonEnvConfig(
         num_envs=cfg.num_envs,
         env_name="NewtonEnv",
@@ -116,7 +126,18 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             ccd_iterations=50,
             njmax=1500,
             nconmax=35,
+            # Mesh terrain: route contacts through Newton's MPR-based
+            # pipeline instead of mjwarp's internal GJK/EPA collision.
+            # Under use_mujoco_contacts=True mjwarp does its own collision,
+            # which rejects planar mesh colliders, overflows its hardcoded
+            # 24-edge EPA horizon on mesh contacts, and silently zeroes the
+            # contact margin. With False, the solver consumes Newton's
+            # model.collide() contacts (MPR — stable for deep penetration,
+            # honors margin). Flat ground keeps the default mjwarp contacts
+            # (True) — unchanged.
+            use_mujoco_contacts=not cfg.use_rough_terrain,
         ),
+        terrain_cfg=cfg.make_terrain_cfg(),
         entities={
             "robot": NewtonEntityCfg(
                 mjcf_path=r.mjcf_path,
@@ -173,6 +194,13 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             ),
         ],
         env_spacing=(2.0, 2.0, 0.0),
+        # Rough terrain emits many heightfield triangle pairs in
+        # ``model.collide()``; size the broad-phase buffer to the env
+        # count so contacts aren't silently dropped. ``None`` on flat
+        # ground keeps Newton's default.
+        collision_max_triangle_pairs=(
+            cfg.num_envs * cfg.terrain_collision_pairs_per_env if cfg.use_rough_terrain else None
+        ),
     )
 
 

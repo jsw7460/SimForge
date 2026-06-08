@@ -86,6 +86,15 @@ def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> EnvConfig:
         )
         time_out = TerminationTermConfig(max_episode_exceed)
 
+        # On generated (finite) terrain, reset the robot before it walks
+        # off the mesh edge into the void. Only registered for rough so
+        # the flat preset's terminations are unchanged.
+        if cfg.use_rough_terrain:
+            out_of_terrain_bounds = TerminationTermConfig(
+                common_tf.terrain_out_of_bounds,
+                {"margin": 0.5},
+            )
+
     return EnvConfig(
         env_name="GenesisEnv",
         task_name="G1_Velocity_Tracking",
@@ -164,6 +173,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             contact_pruning_tolerance=None,
         ),
         robot_cfg=r,
+        terrain_cfg=cfg.make_terrain_cfg(),
     )
 
 
