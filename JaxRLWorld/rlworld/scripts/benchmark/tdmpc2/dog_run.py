@@ -1,11 +1,28 @@
-"""TDMPC2 reproduction on dm_control ``cheetah-run``.
+"""TDMPC2 reproduction on dm_control ``dog-run``.
 
-Single-task entry point.  Other DMC tasks reuse the same structure —
-copy this file, change ``TASK_NAME`` (and any TDMPC2 hyperparameters
-that differ for that task), keep everything else identical.  The
-gymnasium wrapper chain and the eval-env routing both live in
-:mod:`rlworld.rl.envs.gymnasium`, so train and eval envs are always
-built through the same factory.
+Sibling of ``halfcheetah.py`` / ``walker_walk.py`` / ``humanoid_walk.py``
+— identical structure, only ``TASK_NAME`` and ``run_name`` differ.
+TDMPC2's design principle is a *single* hyperparameter set across the
+entire DMControl suite, so the ``TDMPC2Config`` is left bit-identical
+to the other DMC task scripts to keep the paper-vs-our-impl
+comparison fair.
+
+``dog-run`` is the **hardest DMC locomotion task** in the TDMPC2 paper:
+a 38-DOF quadruped (high-DOF, complex contact dynamics) where SAC /
+PPO baselines fail entirely and TDMPC2 is the only method that
+reaches non-trivial return.  Reproducing it is the strongest
+demonstration of the model-based planning + value ensemble pipeline.
+
+Cost warning (num_envs=1):
+
+* Saturated return per paper Fig. 2-3: ~400-600 at ~3-5M env steps
+* Per-step cost ~2x cheetah (38 DOF MPPI rollout)
+* 1M iter: ~24-36 hours; 3M iter: ~3-5 days per seed
+* 5-seed reproduction: ~2-3 weeks GPU time
+
+The ``max_iterations`` below is left at 1M for the initial run so
+the first results land in a reasonable time; bump to 3-5M for the
+full paper-matching curve.
 """
 
 import os
@@ -25,15 +42,12 @@ from rlworld.rl.envs import GymnasiumEnv  # noqa: E402
 from rlworld.rl.envs.gymnasium import make_dmc_env_factory  # noqa: E402
 from rlworld.rl.runners import ModelBasedRunner  # noqa: E402
 
-TASK_NAME = "dm_control/cheetah-run-v0"
+TASK_NAME = "dm_control/dog-run-v0"
 ACTION_REPEAT = 2
 MAX_EPISODE_STEPS = 1000
 
 
 def main():
-    # All TDMPC2 hyperparameters live on this dataclass instance so the
-    # call site is fully self-describing — no preset lookup, no
-    # ``cfgs.algorithm.<field> = ...`` dance after the fact.
     algorithm_cfg = TDMPC2Config(
         batch_size=256,
         buffer_size=1_000_000,
@@ -52,17 +66,13 @@ def main():
         max_episode_steps=MAX_EPISODE_STEPS,
         num_envs=1,
         seed=42,
-        run_name="HalfCheetah_TDMPC2",
+        run_name="DogRun_TDMPC2",
     )
     cfgs_for_run.runner.log_interval = 500
     cfgs_for_run.runner.max_iterations = 1_000_000
     cfgs_for_run.runner.save_interval = 100_000
     cfgs_for_run.runner.eval_interval = 2500
 
-    # Single factory drives BOTH the training vector env (built below)
-    # and the eval env (built by ``ModelBasedRunner`` via the
-    # ``runner.gym_env_factory`` hook), so the wrapper chain — action
-    # repeat → flatten dict obs → seed — never drifts between them.
     env_factory = make_dmc_env_factory(
         task_name=cfgs_for_run.env.task_name,
         action_repeat=ACTION_REPEAT,

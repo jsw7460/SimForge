@@ -1,11 +1,18 @@
-"""TDMPC2 reproduction on dm_control ``cheetah-run``.
+"""TDMPC2 reproduction on dm_control ``finger-spin``.
 
-Single-task entry point.  Other DMC tasks reuse the same structure —
-copy this file, change ``TASK_NAME`` (and any TDMPC2 hyperparameters
-that differ for that task), keep everything else identical.  The
-gymnasium wrapper chain and the eval-env routing both live in
-:mod:`rlworld.rl.envs.gymnasium`, so train and eval envs are always
-built through the same factory.
+Sibling of ``halfcheetah.py`` — identical structure, only ``TASK_NAME``
+and ``run_name`` differ.  TDMPC2's design principle is a *single*
+hyperparameter set across the entire DMControl suite, so the
+``TDMPC2Config`` is left bit-identical to ``halfcheetah.py`` to keep
+the paper-vs-our-impl comparison fair.
+
+``finger-spin`` is a 2-DOF manipulation task (spinning a free body
+with a planar finger): different dynamics class from the locomotion
+tasks (``cheetah-run``, ``walker-walk``), so it tests whether the
+TDMPC2 stack generalises across motor-control regimes rather than
+overfits a single task family.  The paper reports near-saturated
+return at ~250-500k env steps, comparable in budget to
+``walker-walk``.
 """
 
 import os
@@ -25,15 +32,12 @@ from rlworld.rl.envs import GymnasiumEnv  # noqa: E402
 from rlworld.rl.envs.gymnasium import make_dmc_env_factory  # noqa: E402
 from rlworld.rl.runners import ModelBasedRunner  # noqa: E402
 
-TASK_NAME = "dm_control/cheetah-run-v0"
+TASK_NAME = "dm_control/finger-spin-v0"
 ACTION_REPEAT = 2
 MAX_EPISODE_STEPS = 1000
 
 
 def main():
-    # All TDMPC2 hyperparameters live on this dataclass instance so the
-    # call site is fully self-describing — no preset lookup, no
-    # ``cfgs.algorithm.<field> = ...`` dance after the fact.
     algorithm_cfg = TDMPC2Config(
         batch_size=256,
         buffer_size=1_000_000,
@@ -52,17 +56,13 @@ def main():
         max_episode_steps=MAX_EPISODE_STEPS,
         num_envs=1,
         seed=42,
-        run_name="HalfCheetah_TDMPC2",
+        run_name="FingerSpin_TDMPC2",
     )
     cfgs_for_run.runner.log_interval = 500
     cfgs_for_run.runner.max_iterations = 1_000_000
     cfgs_for_run.runner.save_interval = 100_000
     cfgs_for_run.runner.eval_interval = 2500
 
-    # Single factory drives BOTH the training vector env (built below)
-    # and the eval env (built by ``ModelBasedRunner`` via the
-    # ``runner.gym_env_factory`` hook), so the wrapper chain — action
-    # repeat → flatten dict obs → seed — never drifts between them.
     env_factory = make_dmc_env_factory(
         task_name=cfgs_for_run.env.task_name,
         action_repeat=ACTION_REPEAT,
