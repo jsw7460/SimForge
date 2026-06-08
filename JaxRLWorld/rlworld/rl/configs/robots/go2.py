@@ -106,7 +106,7 @@ class Go2Config(RobotConfig):
     # place of the default wide DR. Default ``None`` means "no
     # override" — every existing training run is bit-identical to
     # before these fields were added. See ``rlworld/rl/configs/
-    # presets/go2_flat/_newton_builders.py`` for the read sites.
+    # presets/go2/_newton_builders.py`` for the read sites.
     kp_hip_override: float | None = None
     kd_hip_override: float | None = None
     kp_knee_override: float | None = None

@@ -9,7 +9,7 @@ import genesis.utils.terrain
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config
+from rlworld.rl.configs.presets.go2.mlp import get_config
 from rlworld.rl.runners import BaseRunner
 
 

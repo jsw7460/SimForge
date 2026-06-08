@@ -1,16 +1,30 @@
-"""Go2 Newton config with gait-conditioned commands.
+"""Go2 Genesis config with gait-conditioned commands.
 
-Observation structure matching Walk-These-Ways (69 dim).
-See genesis/gait_conditioned.py for detailed documentation.
+Extends the base Go2 flat config with GaitCommandTerm and observation
+structure matching Walk-These-Ways (Margolis & Agrawal, CoRL 2022).
+
+Observation (69 dim):
+    projected_gravity       (3)
+    all_commands * scale    (14)  velocity(3) + gait(11)
+    dof_pos - default       (12)
+    dof_vel                 (12)
+    actions                 (12)  current step
+    last_actions            (12)  previous step
+    clock_inputs            (4)   sin gait phase per foot
 """
 
 from dataclasses import dataclass, field
 
-from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
-from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun, NewtonObservationConfig as ObservationConfig
+from rlworld.rl.configs.common_config_classes import (
+    CommandConfig,
+    GaitConfig,
+    ObservationGroupConfig,
+    RewardConfig,
+)
+from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun, ObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
+from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.envs.managers.common.command_term import (
     GaitCommandTermCfg,
@@ -29,13 +43,13 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common, wtw as rf_wtw
-from rlworld.rl.envs.mdp.rewards.newton import reward_terms as rf_newton
+from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
 
 
 @dataclass
-class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
-    sim_type: str = "newton"
-    run_name: str = "Go2_GaitConditioned_Newton"
+class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
+    sim_type: str = "genesis"
+    run_name: str = "Go2_GaitConditioned_Genesis"
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(
@@ -82,6 +96,7 @@ class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
             reward_mode: str = "exponential_auto"
             shaping_sigma: float = 0.02
 
+            # ── Tracking (common) ──
             track_lin_vel = RewardTermConfig(
                 func=rf_common.track_lin_vel,
                 weight=1.0,
@@ -92,16 +107,20 @@ class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
                 weight=0.5,
                 params={"std": 0.5},
             )
+
+            # ── Gait tracking (Genesis-specific) ──
             tracking_contacts_shaped_force = RewardTermConfig(
-                func=rf_newton.wtw_tracking_contacts_shaped_force,
+                func=rf_genesis.wtw_tracking_contacts_shaped_force,
                 weight=4.0,
                 params={"gait_force_sigma": 100.0},
             )
             tracking_contacts_shaped_vel = RewardTermConfig(
-                func=rf_newton.wtw_tracking_contacts_shaped_vel,
+                func=rf_genesis.wtw_tracking_contacts_shaped_vel,
                 weight=4.0,
                 params={"gait_vel_sigma": 10.0},
             )
+
+            # ── Body commands (common) ──
             body_height_cmd = RewardTermConfig(
                 func=rf_wtw.reward_body_height_cmd,
                 weight=10.0,
@@ -111,16 +130,20 @@ class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
                 func=rf_wtw.penalize_orientation_control,
                 weight=5.0,
             )
+
+            # ── Footstep placement (Genesis-specific) ──
             raibert_heuristic = RewardTermConfig(
-                func=rf_newton.wtw_raibert_heuristic,
+                func=rf_genesis.wtw_raibert_heuristic,
                 weight=10.0,
             )
             feet_clearance_cmd_linear = RewardTermConfig(
-                func=rf_newton.wtw_feet_clearance_cmd_linear,
+                func=rf_genesis.wtw_feet_clearance_cmd_linear,
                 weight=30.0,
             )
+
+            # ── Regularization (common) ──
             feet_slip = RewardTermConfig(
-                func=rf_newton.wtw_feet_slip,
+                func=rf_genesis.wtw_feet_slip,
                 weight=0.04,
             )
             action_smoothness_1 = RewardTermConfig(
@@ -143,8 +166,10 @@ class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
                 func=rf_common.penalize_ang_vel_xy,
                 weight=0.001,
             )
+
+            # ── Collision ──
             collision = RewardTermConfig(
-                func=rf_newton.wtw_collision,
+                func=rf_genesis.wtw_collision,
                 weight=5.0,
                 params={"contact_group": "body_ground_contact", "force_threshold": 10.0},
             )
@@ -187,9 +212,9 @@ class Go2GaitConditionedNewtonConfig(Go2FlatConfig):
 
         return _ObsCfg()
 
-    def build(self) -> NewtonConfigsForRun:
+    def build(self) -> GenesisConfigsForRun:
         return super().build()
 
 
-def get_config() -> NewtonConfigsForRun:
-    return Go2GaitConditionedNewtonConfig().build()
+def get_config() -> GenesisConfigsForRun:
+    return Go2GaitConditionedGenesisConfig().build()

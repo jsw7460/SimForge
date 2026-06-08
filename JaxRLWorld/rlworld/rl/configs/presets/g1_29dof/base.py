@@ -6,7 +6,7 @@ once. Per-simulator differences (env, scene, action, reward,
 observation, event, visualization) are dispatched to ``_{sim}_builders``
 modules at build time.
 
-Compared to go2_flat, the g1_29dof preset has more sim-specific drift:
+Compared to go2, the g1_29dof preset has more sim-specific drift:
 the critic observation and reward configs are *not* shared across sims
 because the underlying state helpers and reward functions have
 different names and parameter schemes per simulator. Only the actor
@@ -104,7 +104,7 @@ class G1FlatConfig:
     robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
     # Environment / training settings (sim-agnostic)
-    num_envs: int = 4096
+    num_envs: int = 8192
     episode_length_s: float = 20.0
     seed: int = 42
 

@@ -1,4 +1,4 @@
-from rlworld.rl.configs.presets.go2_flat.newton.gait_conditioned import Go2GaitConditionedNewtonConfig
+from rlworld.rl.configs.presets.go2.newton.gait_conditioned import Go2GaitConditionedNewtonConfig
 from rlworld.rl.runners import BaseRunner
 
 

@@ -18,7 +18,7 @@ guard doesn't reject multi-sim runs.
 
 Usage:
     python -m rlworld.scripts.diag.check_reward_parity                    # g1_29dof, all 3 sims
-    python -m rlworld.scripts.diag.check_reward_parity --preset go2_flat
+    python -m rlworld.scripts.diag.check_reward_parity --preset go2
     python -m rlworld.scripts.diag.check_reward_parity --sim newton       # one sim
     python -m rlworld.scripts.diag.check_reward_parity --steps 50 --terms feet_slip,angular_momentum_penalty
 """
@@ -35,7 +35,7 @@ os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 import numpy as np
 
 _PRESETS: dict[str, tuple[str, str]] = {
-    "go2_flat": ("rlworld.rl.configs.presets.go2_flat.base", "Go2FlatConfig"),
+    "go2": ("rlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
     "g1_29dof": ("rlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
     "g1_tracking": ("rlworld.rl.configs.presets.g1_tracking.base", "G1TrackingConfig"),
     "t1_tracking": ("rlworld.rl.configs.presets.t1_tracking.base", "T1TrackingConfig"),

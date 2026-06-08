@@ -123,7 +123,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     Strategy:
         1. **Path substitution** — for sim-specific subclasses whose
            module path contains a simulator segment (e.g.
-           ``go2_flat.newton.gait_conditioned``). Swap the segment for
+           ``go2.newton.gait_conditioned``). Swap the segment for
            *target_sim* and call ``get_config()`` on the new module.
         2. **Class reinstantiation** — for unified configs (single
            class, ``sim_type`` field selects the backend). Import the

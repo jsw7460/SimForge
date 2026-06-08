@@ -8,7 +8,7 @@ narrow DR band): :func:`set_joint_friction` and :func:`set_foot_friction`.
 
 Both follow the standard event-term signature
 ``func(env: NewtonEnv, env_ids: torch.Tensor, **params) -> None`` and
-are installed by ``go2_flat/_newton_builders.build_dr_terms`` only when
+are installed by ``go2/_newton_builders.build_dr_terms`` only when
 the matching ``Go2Config.*_override`` field is set on the preset.
 """
 

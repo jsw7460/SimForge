@@ -1,4 +1,4 @@
-from rlworld.rl.configs.presets.go2_flat.mujoco.gait_conditioned import Go2GaitConditionedMujocoConfig
+from rlworld.rl.configs.presets.go2.mujoco.gait_conditioned import Go2GaitConditionedMujocoConfig
 from rlworld.rl.runners import BaseRunner
 
 

@@ -19,7 +19,7 @@ from gymnasium.wrappers import FlattenObservation
 
 from rlworld.rl.configs import GenesisConfigsForRun, TD3PolicyConfig
 from rlworld.rl.configs.algorithms import TD3Config
-from rlworld.rl.configs.presets.go2_flat.mlp import get_config
+from rlworld.rl.configs.presets.go2.mlp import get_config
 from rlworld.rl.envs import GymnasiumEnv
 from rlworld.rl.runners import OffPolicyRunner
 

@@ -1,18 +1,18 @@
 """Unified Go2 flat-terrain locomotion config.
 
-Single source of truth for go2_flat across Newton, Genesis, and MuJoCo
+Single source of truth for go2 across Newton, Genesis, and MuJoCo
 simulators. The shared dataclass fields and shared build methods are
 defined here once. Per-simulator differences (scene, action, event,
 reward function imports, env class, visualization class) are dispatched
 to ``_{sim}_builders`` modules at build time.
 
 Usage:
-    from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
+    from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
     cfgs_for_run = Go2FlatConfig(sim_type="newton").build()
 
 Variants (``gait_conditioned``) inherit ``Go2FlatConfig`` directly and
 pin ``sim_type`` themselves; see
-``presets/go2_flat/{newton,genesis,mujoco}/`` for the variant files.
+``presets/go2/{newton,genesis,mujoco}/`` for the variant files.
 """
 
 from __future__ import annotations

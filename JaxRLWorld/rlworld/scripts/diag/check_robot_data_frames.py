@@ -24,7 +24,7 @@ proves the implementation is consistent.
 
 Usage::
 
-    python -m rlworld.scripts.diag.check_robot_data_frames                  # go2_flat, all 3 sims
+    python -m rlworld.scripts.diag.check_robot_data_frames                  # go2, all 3 sims
     python -m rlworld.scripts.diag.check_robot_data_frames --preset g1_29dof
     python -m rlworld.scripts.diag.check_robot_data_frames --sim genesis    # one sim only
     python -m rlworld.scripts.diag.check_robot_data_frames --num-envs 4 --steps 60
@@ -43,7 +43,7 @@ import numpy as np
 
 # preset key -> (module path, config class name)
 _PRESETS: dict[str, tuple[str, str]] = {
-    "go2_flat": ("rlworld.rl.configs.presets.go2_flat.base", "Go2FlatConfig"),
+    "go2": ("rlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
     "g1_29dof": ("rlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
     "g1_tracking": ("rlworld.rl.configs.presets.g1_tracking.base", "G1TrackingConfig"),
     "t1_tracking": ("rlworld.rl.configs.presets.t1_tracking.base", "T1TrackingConfig"),
@@ -124,7 +124,7 @@ def _arr(v: np.ndarray) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--preset", choices=sorted(_PRESETS), default="go2_flat")
+    ap.add_argument("--preset", choices=sorted(_PRESETS), default="go2")
     ap.add_argument("--sim", choices=[*_SIMS, "all"], default="all")
     ap.add_argument("--num-envs", type=int, default=16)
     ap.add_argument("--settle", type=int, default=5, help="zero-action steps before perturbing")

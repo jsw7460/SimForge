@@ -1,4 +1,4 @@
-from rlworld.rl.configs.presets.go2_flat.genesis.rough import Go2RoughGenesisConfig
+from rlworld.rl.configs.presets.go2.genesis.rough import Go2RoughGenesisConfig
 from rlworld.rl.runners import BaseRunner
 
 

@@ -2,7 +2,7 @@
 
 These functions are dispatched from ``Go2FlatConfig.build()`` when
 ``sim_type == "mujoco"``. The bodies are extracted directly from the
-old ``presets/go2_flat/mujoco/base.py`` so the produced configs are
+old ``presets/go2/mujoco/base.py`` so the produced configs are
 identical.
 """
 

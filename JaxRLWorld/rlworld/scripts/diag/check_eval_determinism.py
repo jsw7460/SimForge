@@ -56,7 +56,7 @@ os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("rlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
-    "go2_flat": ("rlworld.rl.configs.presets.go2_flat.base", "Go2FlatConfig"),
+    "go2": ("rlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
     "t1_tracking": ("rlworld.rl.configs.presets.t1_tracking.base", "T1TrackingConfig"),
 }
 _SIMS = ("genesis", "newton", "mujoco")

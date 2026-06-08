@@ -2,7 +2,7 @@
 
 These functions are dispatched from ``Go2FlatConfig.build()`` when
 ``sim_type == "genesis"``. The bodies are extracted directly from the
-old ``presets/go2_flat/genesis/base.py`` so the produced configs are
+old ``presets/go2/genesis/base.py`` so the produced configs are
 identical.
 """
 

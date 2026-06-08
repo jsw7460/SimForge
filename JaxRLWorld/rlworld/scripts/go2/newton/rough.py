@@ -1,4 +1,4 @@
-from rlworld.rl.configs.presets.go2_flat.newton.rough import Go2RoughNewtonConfig
+from rlworld.rl.configs.presets.go2.newton.rough import Go2RoughNewtonConfig
 from rlworld.rl.runners import BaseRunner
 
 

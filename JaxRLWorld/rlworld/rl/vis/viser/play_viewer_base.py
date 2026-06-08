@@ -153,7 +153,7 @@ class PlayViewerBase(ABC):
     def _get_motion_command(self):
         """Return the env's 'motion' CommandTerm if present, else ``None``.
 
-        Non-tracking tasks (g1_29dof locomotion, t1_getup, go2_flat, ...)
+        Non-tracking tasks (g1_29dof locomotion, t1_getup, go2, ...)
         don't register a 'motion' term, so this cleanly returns ``None``
         and the motion picker code paths become no-ops without branching
         at every call site.

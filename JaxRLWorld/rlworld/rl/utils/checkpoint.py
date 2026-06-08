@@ -41,11 +41,11 @@ def load_config_from_checkpoint(metadata: dict) -> "ConfigsForRun":
     2. **Module-level get_config()** (legacy entry-point convention):
        fall through to ``preset_mod.get_config()`` for older checkpoints
        whose ``preset_module`` already pointed at a wrapper module like
-       ``presets.go2_flat.mlp``.
+       ``presets.go2.mlp``.
 
     3. **Convention-based fallback**: locate a buildable ``*Config``
        class inside ``preset_module`` (e.g. ``Go2FlatConfig`` inside
-       ``presets.go2_flat.base``) and instantiate it with
+       ``presets.go2.base``) and instantiate it with
        ``sim_type=<config.sim_type>`` from the checkpoint metadata. This
        covers the gap created in Phase A, when the unified
        ``Go2FlatConfig`` started writing ``preset_module = base`` (the

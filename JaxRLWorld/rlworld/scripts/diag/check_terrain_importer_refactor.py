@@ -101,8 +101,8 @@ _TERRAINS = ("plane", "rough")
 # the same body ``"base"``. g1_29dof happens to use ``"pelvis"`` under
 # both loaders, so the override is a no-op there.
 _PRESETS: dict[str, dict] = {
-    "go2_flat": {
-        "module": "rlworld.rl.configs.presets.go2_flat.base",
+    "go2": {
+        "module": "rlworld.rl.configs.presets.go2.base",
         "class_name": "Go2FlatConfig",
         "supports_rough": True,
         "urdf_body_name": "base",
@@ -119,8 +119,8 @@ _PRESETS: dict[str, dict] = {
 # MJCF matrix when newton is in scope and ``--skip-urdf-e2e`` is not
 # passed. Each entry is (terrain, preset).
 _NEWTON_URDF_E2E_COMBOS: tuple[tuple[str, str], ...] = (
-    ("plane", "go2_flat"),
-    ("rough", "go2_flat"),
+    ("plane", "go2"),
+    ("rough", "go2"),
     ("plane", "g1_29dof"),
 )
 
@@ -165,12 +165,12 @@ def _build_env(
     num_envs: int,
     seed: int,
     *,
-    preset: str = "go2_flat",
+    preset: str = "go2",
     newton_asset: str = "mjcf",
 ):
     """Construct an env for the given preset / sim / terrain / loader.
 
-    ``preset`` selects between :data:`_PRESETS` entries (go2_flat,
+    ``preset`` selects between :data:`_PRESETS` entries (go2,
     g1_29dof). ``newton_asset`` (Newton only) swaps the robot entity's
     mjcf_path / urdf_path; the preset wires only one of them by
     default, so the helper clears the other and pulls the wanted path
@@ -489,7 +489,7 @@ def _check_newton_terrain_sentinel(env, lg: _Logger, combo: str) -> bool:
     if cm is None or not getattr(cm, "_group_sensors", None):
         lg.w("    (no Newton contact sensors registered — skipping sentinel check)")
         return True
-    # Find any sensor with secondary.entity == "terrain"; the go2_flat
+    # Find any sensor with secondary.entity == "terrain"; the go2
     # preset registers two such sensors (foot_ground, body_ground).
     matched: list[str] = []
     for sensor in cm._group_sensors.values():
@@ -720,12 +720,12 @@ def _run_combo(
     seed: int,
     lg: _Logger,
     *,
-    preset: str = "go2_flat",
+    preset: str = "go2",
     newton_asset: str = "mjcf",
 ) -> bool:
     use_rough = terrain == "rough"
     combo = f"{sim}/{terrain}"
-    if preset != "go2_flat":
+    if preset != "go2":
         combo = f"{combo}/{preset}"
     if sim == "newton":
         combo = f"{combo}[{newton_asset}]"
@@ -805,7 +805,7 @@ def _spawn_subprocess(
     num_envs: int,
     seed: int,
     *,
-    preset: str = "go2_flat",
+    preset: str = "go2",
     newton_asset: str = "mjcf",
 ) -> int:
     """Run one (sim, terrain, preset, asset) combo in a fresh Python process.
@@ -863,7 +863,7 @@ def main() -> int:
     ap.add_argument(
         "--preset",
         choices=tuple(_PRESETS),
-        default="go2_flat",
+        default="go2",
         help="Preset used for the main matrix entry. URDF-end-to-end coverage iterates its own "
         "preset list (see ``_NEWTON_URDF_E2E_COMBOS``).",
     )
@@ -875,7 +875,7 @@ def main() -> int:
     ap.add_argument(
         "--skip-urdf-e2e",
         action="store_true",
-        help="Skip the Newton-URDF end-to-end combos (go2_flat URDF plane/rough + g1_29dof URDF "
+        help="Skip the Newton-URDF end-to-end combos (go2 URDF plane/rough + g1_29dof URDF "
         "plane). Default: always run when newton is in sims.",
     )
     ap.add_argument("--num-envs", type=int, default=4)
@@ -946,7 +946,7 @@ def main() -> int:
                 label = f"unit/{terrain}"
             else:
                 parts = [f"{sim}/{terrain}"]
-                if preset != "go2_flat":
+                if preset != "go2":
                     parts.append(f"/{preset}")
                 if sim == "newton":
                     parts.append(f"[{asset}]")

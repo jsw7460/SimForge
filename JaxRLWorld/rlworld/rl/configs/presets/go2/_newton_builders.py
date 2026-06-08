@@ -2,7 +2,7 @@
 
 These functions are dispatched from ``Go2FlatConfig.build()`` when
 ``sim_type == "newton"``. The bodies are extracted directly from the
-old ``presets/go2_flat/newton/base.py`` so the produced configs are
+old ``presets/go2/newton/base.py`` so the produced configs are
 identical.
 """
 
@@ -206,7 +206,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
             ),
         ],
         # Simulator-agnostic contact sensors (same ContactSensorCfg the
-        # Genesis / mjlab go2_flat builders use). Newton resolves the
+        # Genesis / mjlab go2 builders use). Newton resolves the
         # ``secondary`` whitelist directly (no inversion). The Newton
         # ground plane is a single global *shape* named "ground_plane"
         # with no parent body, so the ground secondary uses mode="geom".

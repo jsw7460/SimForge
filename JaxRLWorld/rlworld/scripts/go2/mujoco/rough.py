@@ -1,4 +1,4 @@
-from rlworld.rl.configs.presets.go2_flat.mujoco.rough import Go2RoughMujocoConfig
+from rlworld.rl.configs.presets.go2.mujoco.rough import Go2RoughMujocoConfig
 from rlworld.rl.runners import BaseRunner
 
 

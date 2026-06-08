@@ -15,7 +15,7 @@ Usage::
     python -m rlworld.scripts.diag.check_lazy_imports --sim mujoco
 
     # pick the preset (default: t1_getup):
-    python -m rlworld.scripts.diag.check_lazy_imports --sim genesis --preset go2_flat
+    python -m rlworld.scripts.diag.check_lazy_imports --sim genesis --preset go2
 
     # on a leak, print the stack trace of the first import of each sim pkg:
     python -m rlworld.scripts.diag.check_lazy_imports --sim genesis --trace
@@ -43,7 +43,7 @@ _SIM_PKGS: dict[str, tuple[str, ...]] = {
 _PRESETS: dict[str, tuple[str, str]] = {
     "t1_getup": ("rlworld.rl.configs.presets.t1_getup.base", "T1GetupConfig"),
     "t1_tracking": ("rlworld.rl.configs.presets.t1_tracking.base", "T1TrackingConfig"),
-    "go2_flat": ("rlworld.rl.configs.presets.go2_flat.base", "Go2FlatConfig"),
+    "go2": ("rlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
     "g1_29dof": ("rlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
     "g1_tracking": ("rlworld.rl.configs.presets.g1_tracking.base", "G1TrackingConfig"),
 }

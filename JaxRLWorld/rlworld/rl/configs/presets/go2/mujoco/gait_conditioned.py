@@ -1,31 +1,18 @@
-"""Go2 Genesis config with gait-conditioned commands.
+"""Go2 MuJoCo config with gait-conditioned commands.
 
-Extends the base Go2 flat config with GaitCommandTerm and observation
-structure matching Walk-These-Ways (Margolis & Agrawal, CoRL 2022).
-
-Observation (69 dim):
-    projected_gravity       (3)
-    all_commands * scale    (14)  velocity(3) + gait(11)
-    dof_pos - default       (12)
-    dof_vel                 (12)
-    actions                 (12)  current step
-    last_actions            (12)  previous step
-    clock_inputs            (4)   sin gait phase per foot
+Observation structure matching Walk-These-Ways (69 dim).
+See genesis/gait_conditioned.py for detailed documentation.
 """
 
 from dataclasses import dataclass, field
 
-from rlworld.rl.configs.common_config_classes import (
-    CommandConfig,
-    GaitConfig,
-    ObservationGroupConfig,
-    RewardConfig,
-)
-from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun, ObservationConfig
+from rlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
+from rlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun, MujocoObservationConfig as ObservationConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
+from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.envs.managers.common.command_term import (
     GaitCommandTermCfg,
     VelocityCommandTermCfg,
@@ -43,13 +30,13 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common, wtw as rf_wtw
-from rlworld.rl.envs.mdp.rewards.genesis import reward_terms as rf_genesis
+from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_mujoco
 
 
 @dataclass
-class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
-    sim_type: str = "genesis"
-    run_name: str = "Go2_GaitConditioned_Genesis"
+class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
+    sim_type: str = "mujoco"
+    run_name: str = "Go2_GaitConditioned_Mujoco"
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(
@@ -91,12 +78,27 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
         )
 
     def _build_reward_config(self) -> RewardConfig:
+        # site_names is resolved by mjlab via find_sites(...,
+        # preserve_order=...). With preserve_order=False the result
+        # follows go2.xml's site declaration order (FL, FR, RL, RR),
+        # not the tuple below. Reward functions that touch site_ids
+        # alongside gait_manager state would then silently pair the
+        # wrong legs. Use preserve_order=True so the resolved
+        # ``site_names`` / ``site_ids`` honour this tuple, and the
+        # per-reward _gait_aligned_site_indices helper still reorders
+        # to gait_manager order regardless.
+        site_names = ("FR", "FL", "RR", "RL")
+        foot_asset_cfg = SceneEntitySelector(
+            name="robot",
+            site_names=site_names,
+            preserve_order=False,
+        )
+
         @dataclass
         class _WTWRewardsCfg(RewardConfig):
             reward_mode: str = "exponential_auto"
             shaping_sigma: float = 0.02
 
-            # ── Tracking (common) ──
             track_lin_vel = RewardTermConfig(
                 func=rf_common.track_lin_vel,
                 weight=1.0,
@@ -107,20 +109,16 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
                 weight=0.5,
                 params={"std": 0.5},
             )
-
-            # ── Gait tracking (Genesis-specific) ──
             tracking_contacts_shaped_force = RewardTermConfig(
-                func=rf_genesis.wtw_tracking_contacts_shaped_force,
+                func=rf_mujoco.wtw_tracking_contacts_shaped_force,
                 weight=4.0,
-                params={"gait_force_sigma": 100.0},
+                params={"contact_group": "feet_ground_contact", "gait_force_sigma": 100.0},
             )
             tracking_contacts_shaped_vel = RewardTermConfig(
-                func=rf_genesis.wtw_tracking_contacts_shaped_vel,
+                func=rf_mujoco.wtw_tracking_contacts_shaped_vel,
                 weight=4.0,
-                params={"gait_vel_sigma": 10.0},
+                params={"gait_vel_sigma": 10.0, "asset_cfg": foot_asset_cfg},
             )
-
-            # ── Body commands (common) ──
             body_height_cmd = RewardTermConfig(
                 func=rf_wtw.reward_body_height_cmd,
                 weight=10.0,
@@ -130,21 +128,20 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
                 func=rf_wtw.penalize_orientation_control,
                 weight=5.0,
             )
-
-            # ── Footstep placement (Genesis-specific) ──
             raibert_heuristic = RewardTermConfig(
-                func=rf_genesis.wtw_raibert_heuristic,
+                func=rf_mujoco.wtw_raibert_heuristic,
                 weight=10.0,
+                params={"asset_cfg": foot_asset_cfg},
             )
             feet_clearance_cmd_linear = RewardTermConfig(
-                func=rf_genesis.wtw_feet_clearance_cmd_linear,
+                func=rf_mujoco.wtw_feet_clearance_cmd_linear,
                 weight=30.0,
+                params={"asset_cfg": foot_asset_cfg},
             )
-
-            # ── Regularization (common) ──
             feet_slip = RewardTermConfig(
-                func=rf_genesis.wtw_feet_slip,
+                func=rf_mujoco.wtw_feet_slip,
                 weight=0.04,
+                params={"contact_group": "feet_ground_contact", "asset_cfg": foot_asset_cfg},
             )
             action_smoothness_1 = RewardTermConfig(
                 func=rf_wtw.penalize_action_smoothness_1,
@@ -166,10 +163,8 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
                 func=rf_common.penalize_ang_vel_xy,
                 weight=0.001,
             )
-
-            # ── Collision ──
             collision = RewardTermConfig(
-                func=rf_genesis.wtw_collision,
+                func=rf_mujoco.wtw_collision,
                 weight=5.0,
                 params={"contact_group": "body_ground_contact", "force_threshold": 10.0},
             )
@@ -212,9 +207,9 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
 
         return _ObsCfg()
 
-    def build(self) -> GenesisConfigsForRun:
+    def build(self) -> MujocoConfigsForRun:
         return super().build()
 
 
-def get_config() -> GenesisConfigsForRun:
-    return Go2GaitConditionedGenesisConfig().build()
+def get_config() -> MujocoConfigsForRun:
+    return Go2GaitConditionedMujocoConfig().build()

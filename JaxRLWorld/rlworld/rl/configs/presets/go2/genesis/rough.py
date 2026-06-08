@@ -9,7 +9,7 @@ to Newton / MuJoCo). Blind simple-walking baseline on rough ground.
 from dataclasses import dataclass
 
 from rlworld.rl.configs.genesis_config_classes import GenesisConfigsForRun
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
+from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 
 
 @dataclass

@@ -11,7 +11,7 @@ rough ground at a fixed terrain difficulty — NOT the gait-conditioned
 from dataclasses import dataclass
 
 from rlworld.rl.configs.newton_config_classes import NewtonConfigsForRun
-from rlworld.rl.configs.presets.go2_flat.base import Go2FlatConfig
+from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 
 
 @dataclass

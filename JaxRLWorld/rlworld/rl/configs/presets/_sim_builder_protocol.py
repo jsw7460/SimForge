@@ -74,7 +74,7 @@ class Go2SimBuilderProtocol(SimBuilderProtocol, Protocol):
     Adds ``get_foot_names`` — Go2's base config uses this when
     building the gait config.  Go2 shares observation construction
     across simulators via ``_build_observation_config`` in
-    ``go2_flat/base.py``, so sim builders do **not** need to provide
+    ``go2/base.py``, so sim builders do **not** need to provide
     a ``build_observation`` function.
     """
 

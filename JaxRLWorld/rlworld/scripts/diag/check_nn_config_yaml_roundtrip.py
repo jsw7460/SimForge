@@ -96,7 +96,7 @@ def _build_cases() -> list[tuple[str, NNConfig]]:
     )
     cases.append(
         (
-            "go2_flat (PPO MLP state_independent)",
+            "go2 (PPO MLP state_independent)",
             NNConfig(
                 policy=PPOPolicyConfig(
                     actor=MLPActorCfg(hidden_dims=[256, 128, 64], activation=Activation.ELU),
