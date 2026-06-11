@@ -112,29 +112,21 @@ class NewtonEnv(World):
             body_names_resolved = list(link_names_matched)
 
         # In Newton, "geom" maps to a per-shape entry under
-        # ``ArticulationView.shape_names`` (bare names) /
-        # ``model.shape_label`` (XPath).
+        # ``ArticulationView.shape_names`` — per-shape bare names, the
+        # same canonical name list the ContactMatch resolver uses via
+        # ``NewtonLabelIndexing.find_shapes``.  Patterns are matched
+        # against these bare leaves with ``re.fullmatch`` — preset
+        # ``geom_names`` must be bare-style (``"FR_foot_collision"`` or
+        # ``".*_foot_collision"``); XPath-style ``".*/<name>"`` would
+        # demand a literal ``/`` the bare list does not contain.
         geom_ids: torch.Tensor | None = None
         geom_names_resolved: list[str] | None = None
         if selector.geom_names is not None:
-            shape_names = list(view.shape_names)
-            try:
-                shape_idx, shape_names_matched = _su.resolve_matching_names(
-                    list(selector.geom_names),
-                    shape_names,
-                    preserve_order=selector.preserve_order,
-                )
-            except ValueError:
-                # Fall back to full XPath labels.
-                all_labels = list(self.scene_manager.model.shape_label)
-                world_count = self.scene_manager.model.world_count
-                per_world = len(all_labels) // world_count
-                first_env_labels = all_labels[:per_world]
-                shape_idx, shape_names_matched = _su.resolve_matching_names(
-                    list(selector.geom_names),
-                    first_env_labels,
-                    preserve_order=selector.preserve_order,
-                )
+            shape_idx, shape_names_matched = _su.resolve_matching_names(
+                list(selector.geom_names),
+                list(view.shape_names),
+                preserve_order=selector.preserve_order,
+            )
             geom_ids = torch.tensor(shape_idx, device=self.device, dtype=torch.long)
             geom_names_resolved = list(shape_names_matched)
 
