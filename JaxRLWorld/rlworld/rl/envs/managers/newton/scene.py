@@ -1249,6 +1249,18 @@ class NewtonSceneManager(BaseManager):
                 self.sensors[config.sensor_name] = sensor
 
     def capture(self):
+        # CUDA graph capture is only valid on a CUDA device. On CPU
+        # (e.g. a Mac dev box running the viewer) ``wp.ScopedCapture``
+        # can't record kernels like ``wp.utils.array_scan`` used by
+        # Newton's mesh-plane narrow phase, and silently dropping them
+        # would replay stale contacts. Fall back to running ``_step()``
+        # directly every control step (``step()`` already takes that
+        # branch when ``self.graph is None``).
+        if not self.model.device.is_cuda:
+            self.use_cuda_graph = False
+            self.graph = None
+            return
+
         num_worlds = self.model.world_count
         # Free-joint slot count is layout-dependent: 6 DOFs (lin+ang vel) under the
         # legacy DOF layout vs. 7 coords (pos+quat) under the coord layout introduced

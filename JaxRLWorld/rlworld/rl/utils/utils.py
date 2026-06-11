@@ -73,9 +73,20 @@ def setup_log_dir(output_dir: str | None = None) -> tuple[str, str]:
     models_log_dir = base_path / "outputs" / "models" / date_str / time_str
     wandb_log_dir = base_path / "outputs" / "logs" / date_str / time_str
 
-    # Create directories if they don't exist
-    models_log_dir.mkdir(parents=True, exist_ok=True)
-    wandb_log_dir.mkdir(parents=True, exist_ok=True)
+    # Create directories if they don't exist. On CHTC, ``EXP_OUTPUT_DIR``
+    # is set to ``/staging`` (data-transfer dir, not writable) when
+    # running inside a job slot — fall back to the current scratch
+    # directory so policy load (which forces this path on every
+    # checkpoint) doesn't abort the run.
+    try:
+        models_log_dir.mkdir(parents=True, exist_ok=True)
+        wandb_log_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        fallback = Path(".")
+        models_log_dir = fallback / "outputs" / "models" / date_str / time_str
+        wandb_log_dir = fallback / "outputs" / "logs" / date_str / time_str
+        models_log_dir.mkdir(parents=True, exist_ok=True)
+        wandb_log_dir.mkdir(parents=True, exist_ok=True)
 
     return str(models_log_dir), str(wandb_log_dir)
 
