@@ -410,8 +410,10 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         ),
         # mjlab parity foot-friction DR: same range / abs / shared_random
         # pattern as mjlab's randomize_friction in _mujoco_builders. The
-        # ``.*/<name>`` leaf-regex form matches Newton's MJCF XPath
-        # labels (``go2/worldbody/.../FR_foot/FR_foot_collision`` etc.).
+        # bare leaf names (``FR_foot_collision`` etc.) are matched against
+        # Newton's ``ArticulationView.shape_names`` (per-shape bare names),
+        # which is the same canonical name list the Newton ContactMatch
+        # resolver uses.
         "randomize_friction": EventTermConfig(
             func=unified_dr.randomize_friction,
             mode="reset_dr",
@@ -419,10 +421,10 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
                 "asset_cfg": SceneEntitySelector(
                     name="robot",
                     geom_names=(
-                        ".*/FR_foot_collision",
-                        ".*/FL_foot_collision",
-                        ".*/RR_foot_collision",
-                        ".*/RL_foot_collision",
+                        "FR_foot_collision",
+                        "FL_foot_collision",
+                        "RR_foot_collision",
+                        "RL_foot_collision",
                     ),
                 ),
                 "friction_range": (0.3, 1.2),
@@ -449,13 +451,18 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     # training runs (no override) get only the body_mass DR above
     # plus the wide friction-range terms.
     if r.foot_friction_override is not None:
+        # ``set_foot_friction`` matches the foot collision shapes by name
+        # against the raw ``model.shape_label`` and writes
+        # ``model.shape_material_mu`` directly. The ArticulationView /
+        # ``resolve_selector`` geom path is avoided: its shape index is
+        # offset by one from the raw array, so a write would land on the
+        # neighbouring shape and leave the foot at its default mu.
         terms["set_foot_friction"] = EventTermConfig(
             func=newton_dr.set_foot_friction,
             mode="reset_dr",
             params={
                 "value": float(r.foot_friction_override),
-                "foot_pattern": ".*foot$",
-                "dr_scale": (0.9, 1.1),
+                # "dr_scale": (0.99, 1.01),
             },
         )
     if r.joint_frictionloss_override is not None:
@@ -464,7 +471,7 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
             mode="reset_dr",
             params={
                 "value": float(r.joint_frictionloss_override),
-                "dr_scale": (0.9, 1.1),
+                # "dr_scale": (0.99, 1.01),
             },
         )
     return terms
