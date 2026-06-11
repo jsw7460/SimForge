@@ -113,3 +113,20 @@ class Go2Config(RobotConfig):
     kd_knee_override: float | None = None
     joint_frictionloss_override: float | None = None
     foot_friction_override: float | None = None
+
+    # ── Per-leg PD overrides (Newton only, default None = legacy) ──
+    # When set, builders broadcast a per-joint stiffness/damping dict to
+    # the actuator instead of a single scalar — the four quadrants then
+    # ship distinct PD gains. Format:
+    #
+    #   {"FL": {"hip": 12.0, "knee": 45.0},
+    #    "FR": {"hip": 15.0, "knee": 55.0},
+    #    "RL": {"hip": 18.0, "knee": 60.0},
+    #    "RR": {"hip": 22.0, "knee": 70.0}}
+    #
+    # ``hip`` covers both hip and thigh joints (matches the existing
+    # ``(.*_hip_joint, .*_thigh_joint)`` actuator grouping); ``knee``
+    # covers the calf joint. Takes precedence over the scalar
+    # ``kp_hip_override`` / ``kp_knee_override`` slots above when set.
+    kp_per_leg_override: dict[str, dict[str, float]] | None = None
+    kd_per_leg_override: dict[str, dict[str, float]] | None = None

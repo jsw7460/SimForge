@@ -124,10 +124,30 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
     # training. Friction overrides are applied via event terms (see
     # ``build_dr_terms`` below) since neither the actuator nor the
     # scene config exposes friction fields.
-    stiffness_hip = r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
-    damping_hip = r.kd_hip_override if r.kd_hip_override is not None else DAMPING_HIP
-    stiffness_knee = r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
-    damping_knee = r.kd_knee_override if r.kd_knee_override is not None else DAMPING_KNEE
+    # ``r.kp_per_leg_override`` and ``r.kd_per_leg_override`` (when set)
+    # take precedence over the scalar slots: each becomes a regex
+    # pattern → value dict that ``IdealPDActuatorCfg.stiffness`` /
+    # ``damping`` already accepts natively, so the four quadrants ship
+    # distinct PD gains without changing the actuator wiring below.
+    def _hip_grouped_dict(perleg: dict[str, dict[str, float]]) -> dict[str, float]:
+        return {rf"{leg}_(hip|thigh)_joint": float(perleg[leg]["hip"]) for leg in ("FL", "FR", "RL", "RR")}
+
+    def _knee_grouped_dict(perleg: dict[str, dict[str, float]]) -> dict[str, float]:
+        return {rf"{leg}_calf_joint": float(perleg[leg]["knee"]) for leg in ("FL", "FR", "RL", "RR")}
+
+    if r.kp_per_leg_override is not None:
+        stiffness_hip = _hip_grouped_dict(r.kp_per_leg_override)
+        stiffness_knee = _knee_grouped_dict(r.kp_per_leg_override)
+    else:
+        stiffness_hip = r.kp_hip_override if r.kp_hip_override is not None else STIFFNESS_HIP
+        stiffness_knee = r.kp_knee_override if r.kp_knee_override is not None else STIFFNESS_KNEE
+
+    if r.kd_per_leg_override is not None:
+        damping_hip = _hip_grouped_dict(r.kd_per_leg_override)
+        damping_knee = _knee_grouped_dict(r.kd_per_leg_override)
+    else:
+        damping_hip = r.kd_hip_override if r.kd_hip_override is not None else DAMPING_HIP
+        damping_knee = r.kd_knee_override if r.kd_knee_override is not None else DAMPING_KNEE
 
     ActuatorCls, _delay_kwargs = (
         (IdealPDActuatorCfg, {})
