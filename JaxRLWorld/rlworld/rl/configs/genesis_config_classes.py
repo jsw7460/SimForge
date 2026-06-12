@@ -90,10 +90,13 @@ class ActionConfig(BaseConfig):
     """Genesis action configuration."""
 
     actuated_dof_names: list[str] = field(default_factory=list)
-    action_scale: float | dict[str, float] = 0.4
+    action_scale: float | dict[str, float] | Literal["joint_limit"] = 0.4
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-100.0, 100.0)
-    offset: dict[str, float] = field(default_factory=dict)
+    offset: dict[str, float] | Literal["joint_limit_center"] = field(default_factory=dict)
     settle_steps: int = 0
+    # Soft-limit factor for the "joint_limit" / "joint_limit_center"
+    # auto modes (see ActionManagerBaseConfig.joint_limit_soft_factor).
+    joint_limit_soft_factor: float = 0.9
     # Optional term-based action system (see rlworld/rl/envs/mdp/actions/).
     action_terms: "dict[str, Any] | None" = None
 

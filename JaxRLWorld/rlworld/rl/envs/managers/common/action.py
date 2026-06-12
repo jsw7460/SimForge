@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 JOINT_LIMIT_CLIP = "joint_limit"
+JOINT_LIMIT_SCALE = "joint_limit"
+JOINT_LIMIT_CENTER_OFFSET = "joint_limit_center"
 
 
 @dataclass
@@ -66,9 +68,25 @@ class ActionManagerBaseConfig:
 
     actuated_dof_names: list[str] = field(default_factory=list)
     clip: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
-    scale: float | dict[str, float] = 1.0
-    offset: dict[str, float] | None = None
+    scale: float | dict[str, float] | Literal["joint_limit"] = 1.0
+    offset: dict[str, float] | Literal["joint_limit_center"] | None = None
     settle_steps: int = 0
+
+    joint_limit_soft_factor: float = 0.9
+    """Soft-limit factor for the ``scale="joint_limit"`` /
+    ``offset="joint_limit_center"`` auto modes. The usable range per
+    joint is the hard limit range shrunk symmetrically about its
+    midpoint (IsaacLab / mjlab ``soft_joint_pos_limit_factor``
+    convention)::
+
+        mid        = (upper + lower) / 2
+        soft_half  = (upper - lower) / 2 * joint_limit_soft_factor
+        scale_j    = soft_half          # scale="joint_limit"
+        offset_j   = mid                # offset="joint_limit_center"
+
+    A policy emitting actions in [-1, 1] (e.g. a tanh-squashed SAC
+    actor) then commands targets spanning exactly the soft limit
+    range. Ignored unless one of the auto modes is selected."""
 
     # New term-based action path. When ``action_terms`` is a non-empty
     # dict, the action manager builds each ``ActionTerm`` from the
@@ -250,6 +268,38 @@ class ActionManagerBase(BaseManager):
     # Initialization helpers
     # ------------------------------------------------------------------
 
+    def _soft_joint_limits(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-joint soft limit midpoints and half-ranges.
+
+        Returns:
+            Tuple of (mid, soft_half), each shape (num_actuated_joints,)::
+
+                mid       = (upper + lower) / 2
+                soft_half = (upper - lower) / 2 * joint_limit_soft_factor
+
+        Used by the ``scale="joint_limit"`` / ``offset="joint_limit_center"``
+        auto modes. Only valid on the legacy (non-term) action path where
+        every action dimension is an actuated joint.
+        """
+        joint_lower, joint_upper = self._get_joint_limits()
+        if joint_lower.shape[0] != self._total_action_dim:
+            raise ValueError(
+                f"joint_limit auto mode requires every action dim to be an "
+                f"actuated joint: got {joint_lower.shape[0]} joints vs "
+                f"total_action_dim={self._total_action_dim} (term-based "
+                f"action configs are not supported)."
+            )
+        mid = (joint_upper + joint_lower) / 2.0
+        soft_half = (joint_upper - joint_lower) / 2.0 * self.config.joint_limit_soft_factor
+        if (soft_half <= 0).any():
+            bad = [
+                f"{self._actuated_joint_names[i]} (half={soft_half[i].item():.4f})"
+                for i in range(len(soft_half))
+                if soft_half[i] <= 0
+            ]
+            raise ValueError(f"joint_limit auto mode: non-positive soft half-range for joints: {bad}")
+        return mid, soft_half
+
     def _initialize_scale(self) -> torch.Tensor:
         """Initialize per-dimension scale from configuration.
 
@@ -258,7 +308,12 @@ class ActionManagerBase(BaseManager):
         """
         scale = torch.ones(self._total_action_dim, device=self.device)
 
-        if isinstance(self.config.scale, int | float):
+        if isinstance(self.config.scale, str):
+            if self.config.scale != JOINT_LIMIT_SCALE:
+                raise ValueError(f'Unknown scale mode {self.config.scale!r}; expected "{JOINT_LIMIT_SCALE}".')
+            _, soft_half = self._soft_joint_limits()
+            scale[:] = soft_half
+        elif isinstance(self.config.scale, int | float):
             scale[:] = self.config.scale
         elif isinstance(self.config.scale, dict):
             indices, _, values = string_utils.resolve_matching_names_values(
@@ -325,7 +380,12 @@ class ActionManagerBase(BaseManager):
         """
         offset = torch.zeros((self.env.num_envs, self._total_action_dim), device=self.device)
 
-        if self.config.offset is not None and isinstance(self.config.offset, dict):
+        if isinstance(self.config.offset, str):
+            if self.config.offset != JOINT_LIMIT_CENTER_OFFSET:
+                raise ValueError(f'Unknown offset mode {self.config.offset!r}; expected "{JOINT_LIMIT_CENTER_OFFSET}".')
+            mid, _ = self._soft_joint_limits()
+            offset[:] = mid
+        elif self.config.offset is not None and isinstance(self.config.offset, dict):
             offset_indices, _, offset_values = string_utils.resolve_matching_names_values(
                 self.config.offset, self._actuated_joint_names
             )

@@ -135,10 +135,13 @@ class NewtonActionConfig(BaseConfig):
     """Newton action configuration."""
 
     actuated_dof_names: list[str] = field(default_factory=list)
-    action_scale: float | Dict[str, float] = 0.25
+    action_scale: float | Dict[str, float] | Literal["joint_limit"] = 0.25
     clip_actions: tuple[float, float] | dict[str, tuple[float, float]] | Literal["joint_limit"] | None = (-1.0, 1.0)
-    offset: dict[str, float] = field(default_factory=dict)
+    offset: dict[str, float] | Literal["joint_limit_center"] = field(default_factory=dict)
     settle_steps: int = 0
+    # Soft-limit factor for the "joint_limit" / "joint_limit_center"
+    # auto modes (see ActionManagerBaseConfig.joint_limit_soft_factor).
+    joint_limit_soft_factor: float = 0.9
     # Optional term-based action system (see rlworld/rl/envs/mdp/actions/).
     # When provided, ``scale``/``clip``/``offset`` above are ignored and
     # each term is instantiated by the action manager. Used by tasks
