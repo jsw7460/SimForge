@@ -527,6 +527,14 @@ class SACPolicyConfig(PolicyConfig):
     log_std_min: float = -20.0
     log_std_max: float = 2.0
 
+    small_output_init: bool = False
+    """Re-initialize the actor output heads for calibrated initial
+    exploration: the mean head's final layer gets N(0, 1e-3) weights
+    with zero bias (initial pre-tanh actions near zero), and the
+    log-std net's final layer gets zero weights (initial std exactly
+    ``init_noise_std`` for every state and dimension). Default False
+    keeps the historical orthogonal/Kaiming output init."""
+
     def __post_init__(self):
         super().__post_init__()
         if isinstance(self.distribution_type, str):

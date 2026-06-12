@@ -111,6 +111,7 @@ class OffPolicyRunner(BaseRunner):
             log_std_max=policy_cfg.log_std_max,
             kinematic_tree=self.env.scene_manager.trees.get("robot", None),
             obs_normalization=self.cfgs.algorithm.obs_normalization,
+            small_output_init=policy_cfg.small_output_init,
             key=key,
         )
 

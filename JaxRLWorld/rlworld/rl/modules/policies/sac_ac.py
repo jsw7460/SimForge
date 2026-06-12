@@ -206,6 +206,7 @@ class SACActorCritic(BaseActorCritic):
         log_std_max: float = 2.0,
         kinematic_tree: "KinematicTree | None" = None,
         obs_normalization: bool = False,
+        small_output_init: bool = False,
         *,
         key: jax.Array,
     ):
@@ -225,6 +226,12 @@ class SACActorCritic(BaseActorCritic):
             log_std_max: Maximum log_std (clipping)
             kinematic_tree: Optional kinematic tree for dynamics-aware actors
             obs_normalization: Whether to enable observation normalization
+            small_output_init: Re-initialize the output heads for
+                calibrated initial exploration: mean head final layer
+                N(0, 1e-3) weights + zero bias (pre-tanh actions start
+                near zero), log-std net final layer zero weights (std
+                starts at exactly ``init_noise_std`` everywhere). Only
+                supported for MLP actors.
             key: JAX random key
         """
         self.actor_obs_dim = num_actor_obs
@@ -271,6 +278,33 @@ class SACActorCritic(BaseActorCritic):
             log_std_max=self.log_std_max,
             key=key_log_std,
         )
+
+        if small_output_init:
+            # Calibrated initial exploration: pre-tanh mean ~ 0 so the
+            # squashed policy starts at the action-space center, and
+            # log-std output depends only on the (already log(sigma_0))
+            # final bias so the initial std is uniform across states
+            # and dimensions.
+            if not hasattr(self.actor, "net"):
+                raise TypeError(
+                    f"small_output_init only supports MLP actors with a '.net' MLP; got {type(self.actor).__name__}"
+                )
+            key, key_mean_init = jax.random.split(key)
+            mean_last = self.actor.net.linears[-1]
+            self.actor = eqx.tree_at(
+                lambda a: (a.net.linears[-1].weight, a.net.linears[-1].bias),
+                self.actor,
+                (
+                    1e-3 * jax.random.normal(key_mean_init, mean_last.weight.shape),
+                    jnp.zeros_like(mean_last.bias),
+                ),
+            )
+            log_std_last = self.log_std_net.linears[-1]
+            self.log_std_net = eqx.tree_at(
+                lambda n: n.linears[-1].weight,
+                self.log_std_net,
+                jnp.zeros_like(log_std_last.weight),
+            )
 
         # Build twin critics from the MLPCriticCfg.
         critic_hidden = list(critic_cfg.hidden_dims)
