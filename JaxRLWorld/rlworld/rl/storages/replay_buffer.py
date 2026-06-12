@@ -157,8 +157,28 @@ class ReplayBuffer:
             start_positions: Starting positions in buffer [batch_size]
 
         Returns:
-            nstep_rewards, final_next_actor_obs, final_next_critic_obs,
-            final_terminated, final_truncated, gamma_power
+            Tuple of (all shapes verified against the [num_envs,
+            size_per_env, dim] buffer layout; B = batch_size):
+
+            - ``nstep_rewards``         [B, 1] — discounted reward sum,
+              truncated at the first episode boundary in the window.
+            - ``final_next_actor_obs``  [B, actor_obs_dim] — stored
+              next_obs of the *last used* transition (= first boundary
+              step when one exists, else step n-1). For a truncated
+              transition this is the pre-reset observation the runner
+              stored.
+            - ``final_next_critic_obs`` [B, critic_obs_dim] — same
+              position as above.
+            - ``final_terminated``      [B, 1] — terminated flag of the
+              last used transition. The trailing 1 comes from the
+              ``[num_envs, size_per_env, 1]`` buffer: indexing axes 0/1
+              with two [B] integer arrays leaves axis 2 intact.
+            - ``final_truncated``       [B, 1] — same as above.
+            - ``gamma_power``           [B, 1] — per-sample
+              ``gamma ** effective_n`` for the bootstrap term.
+
+            All [B, 1] shapes broadcast directly against the critic's
+            [B, 1] Q outputs in the loss; do NOT squeeze them.
         """
         batch_size = env_indices.shape[0]
 
@@ -171,7 +191,9 @@ class ReplayBuffer:
         # Expand env_indices to match: [batch_size, n_steps]
         env_indices_expanded = np.broadcast_to(env_indices[:, None], (batch_size, self.n_steps))
 
-        # Gather rewards, terminated, and truncated for all steps
+        # Gather rewards, terminated, and truncated for all steps.
+        # Buffers are [num_envs, size_per_env, 1]; the explicit 0 on the
+        # last axis drops the trailing dim -> each is [batch_size, n_steps].
         all_rewards = self.rews_buf[env_indices_expanded, all_positions, 0]
         all_terminated = self.terminated_buf[env_indices_expanded, all_positions, 0]
         all_truncated = self.truncated_buf[env_indices_expanded, all_positions, 0]
@@ -194,23 +216,29 @@ class ReplayBuffer:
         # Sum to get n-step reward
         nstep_rewards = discounted_rewards.sum(axis=1, keepdims=True)
 
-        # Find effective n (number of steps actually used)
+        # Find effective n (number of steps actually used). All [B].
         has_boundary = all_boundaries.sum(axis=1) > 0
         first_boundary_idx = np.argmax(all_boundaries > 0, axis=1)
         effective_n = np.where(has_boundary, first_boundary_idx + 1, self.n_steps)
 
-        # Position of the last used transition
+        # Position of the last used transition: the first boundary step
+        # when one exists, else start + n_steps - 1. Shape [B].
         last_used_position = (start_positions + effective_n - 1) % self.size_per_env
 
-        # Get next_obs from the last used transition
+        # Get next_obs from the last used transition.
+        # Buffer [num_envs, size_per_env, obs_dim] indexed on axes 0/1
+        # with two [B] integer arrays -> [B, obs_dim].
         final_next_actor_obs = self.next_actor_obs_buf[env_indices, last_used_position]
         final_next_critic_obs = self.next_critic_obs_buf[env_indices, last_used_position]
 
-        # Terminal flags from the last used transition
+        # Terminal flags from the last used transition.
+        # Buffer [num_envs, size_per_env, 1]: axis 2 is not indexed, so
+        # the trailing 1 survives -> [B, 1]. Matches the critic's [B, 1]
+        # Q output in the loss without further reshaping.
         final_terminated = self.terminated_buf[env_indices, last_used_position]
         final_truncated = self.truncated_buf[env_indices, last_used_position]
 
-        # gamma^n for bootstrap
+        # gamma^effective_n for the bootstrap term: [B] -> [B, 1].
         gamma_power = np.power(self.gamma, effective_n.astype(np.float32))[:, None]
 
         return (
@@ -236,6 +264,14 @@ class ReplayBuffer:
         """
         if self.filled_size == 0:
             raise ValueError("Cannot sample from an empty buffer")
+        if self.filled_size < self.n_steps:
+            # An n-step window sampled now would read zero-initialized
+            # slots past the filled region (silent garbage targets).
+            raise ValueError(
+                f"Cannot sample n-step ({self.n_steps}) windows from a buffer "
+                f"with only {self.filled_size} filled steps per env; increase "
+                f"learning_starts so collection covers at least n_steps."
+            )
 
         key1, key2 = jax.random.split(key)
 
