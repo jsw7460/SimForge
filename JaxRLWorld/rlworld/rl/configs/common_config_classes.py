@@ -193,6 +193,7 @@ class Activation(StrEnum):
     SIGMOID = "sigmoid"
     SELU = "selu"
     GELU = "gelu"
+    SILU = "silu"
 
 
 class DistributionType(StrEnum):

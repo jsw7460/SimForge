@@ -126,6 +126,7 @@ def get_activation(act_name: str) -> Callable:
         "sigmoid": jax.nn.sigmoid,
         "softplus": jax.nn.softplus,
         "swish": jax.nn.swish,
+        "silu": jax.nn.silu,
         "gelu": jax.nn.gelu,
     }
     if act_name not in activations:

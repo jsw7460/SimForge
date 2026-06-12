@@ -19,6 +19,10 @@ class SACConfig(BaseConfig):
     ent_coef: Union[str, float] = "auto"
     target_entropy: Union[str, float] = "auto"
     obs_normalization: bool = False
+    # Gradient-norm clipping for actor/critic/alpha optimizers. 10.0
+    # matches the historical OffPolicyRunner fallback so existing SAC
+    # benchmarks are unchanged; legged presets tighten this to 1.0.
+    max_grad_norm: float = 10.0
     optimizer: str = "adam"
     optimizer_betas: tuple = (0.9, 0.999)
     optimizer_eps: float = 1e-8
