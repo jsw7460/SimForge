@@ -151,6 +151,16 @@ class Go2FlatConfig:
     builder); too low → contacts silently dropped (robots sink / jitter).
     Ignored when ``use_rough_terrain`` is False (flat plane emits ~0)."""
 
+    # ── Joint-limit action mapping ────────────────────────────────────
+    use_joint_limit_action: bool = False
+    """Swap the fixed ``GO2_ACTION_SCALE`` action mapping for the
+    joint-limit auto modes: ``scale="joint_limit"`` (per-joint soft
+    half-range) + ``offset="joint_limit_center"`` (per-joint limit
+    midpoint) + ``clip=(-1, 1)``. A policy emitting [-1, 1] actions
+    (tanh-squashed SAC) then commands targets spanning exactly the
+    soft joint-limit range. Default ``False`` keeps every existing
+    PPO preset byte-identical; the SAC variant flips it."""
+
     # Actuator class selection
     use_ideal_pd_actuator: bool = True
     """If True, swap the default DelayedPDActuator pair for

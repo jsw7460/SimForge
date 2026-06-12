@@ -270,6 +270,17 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
 
 def build_action(cfg: Go2FlatConfig) -> NewtonActionConfig:
     r = cfg.robot
+    if cfg.use_joint_limit_action:
+        # Joint-limit auto mapping for bounded ([-1, 1]) policies:
+        # target = action * soft_half_range + limit_midpoint. The
+        # per-joint values are resolved by the action manager from the
+        # sim model's joint limits at build time.
+        return NewtonActionConfig(
+            actuated_dof_names=r.actuated_dof_patterns,
+            action_scale="joint_limit",
+            clip_actions=(-1.0, 1.0),
+            offset="joint_limit_center",
+        )
     return NewtonActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
         action_scale=GO2_ACTION_SCALE,
