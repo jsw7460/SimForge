@@ -68,13 +68,14 @@ class Go2SACNewtonConfig(Go2FlatConfig):
             # docstring for the derivation and the per-joint values.
             target_entropy=-4.40121,
             obs_normalization=True,
+            max_grad_norm=1.0,
             batch_size=8192,
             buffer_size=5_000_000,
             # Transitions before updates start; one 24-step collection
             # pass at 8192 envs stores 196,608 transitions, so updates
             # begin from the second iteration.
             learning_starts=200_000,
-            policy_delay=2,
+            policy_delay=1,
             num_gradient_steps=200,
             num_steps_per_env=24,
         )
@@ -83,11 +84,11 @@ class Go2SACNewtonConfig(Go2FlatConfig):
         return NNConfig(
             policy=SACPolicyConfig(
                 actor=MLPActorCfg(
-                    activation=Activation.ELU,
+                    activation=Activation.SILU,
                     hidden_dims=[1024, 512, 256],
                 ),
                 critic=MLPCriticCfg(
-                    activation=Activation.ELU,
+                    activation=Activation.SILU,
                     hidden_dims=[1024, 512, 256],
                 ),
                 init_noise_std=0.15,
