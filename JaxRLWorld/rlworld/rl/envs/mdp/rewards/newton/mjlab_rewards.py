@@ -344,11 +344,12 @@ def processed_action_rate_l2_mjlab(env: NewtonEnv) -> torch.Tensor:
 class variable_posture:
     """Thin wrapper around ``common.VariablePostureTracker``.
 
-    Bit-identical to the legacy Newton implementation: passes
-    ``env.act_manager.actuated_joint_names`` as the joint name list,
-    reads current joint positions via ``env.robot_data.joint_pos``, and
-    uses ``env.act_manager.offset`` as the default-pose tensor — all the
-    same accessors the legacy code used.
+    Passes ``env.act_manager.actuated_joint_names`` as the joint name
+    list, reads current joint positions via ``env.robot_data.joint_pos``,
+    and uses ``env.robot_data.default_joint_pos`` (the nominal standing
+    pose) as the reference. The legacy code used ``act_manager.offset``,
+    which equals the default pose only for absolute-action presets and
+    diverges under joint-limit action mapping (offset = limit midpoint).
     """
 
     __name__ = "variable_posture"
@@ -369,7 +370,13 @@ class variable_posture:
             std_walking=std_walking,
             std_running=std_running,
             get_current_joint_pos=lambda e: e.robot_data.joint_pos,
-            default_joint_pos=env.act_manager.offset,
+            # Nominal standing pose, NOT the action-space zero point.
+            # ``act_manager.offset`` equals the default pose only for
+            # absolute-action presets; under joint-limit action mapping
+            # it is the limit midpoint, so posture must be shaped against
+            # ``default_joint_pos`` (resolved from init_state.joint_pos,
+            # same canonical actuated-joint order).
+            default_joint_pos=env.robot_data.default_joint_pos,
             walking_threshold=walking_threshold,
             running_threshold=running_threshold,
         )

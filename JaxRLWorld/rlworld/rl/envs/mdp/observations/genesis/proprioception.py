@@ -46,7 +46,11 @@ def dof_pos(env: GenesisEnv, dofs_idx_local: torch.Tensor | None = None) -> torc
 
 @EnvStepCache()
 def dof_pos_nominal_difference(env: GenesisEnv) -> torch.Tensor:
-    return dof_pos(env) - env.act_manager.offset
+    # Relative to the nominal standing pose (default_joint_pos), not the
+    # action-space zero point (act_manager.offset). These coincide for
+    # absolute-action presets but differ under joint-limit action
+    # mapping; both are in canonical actuated-joint order.
+    return dof_pos(env) - env.robot_data.default_joint_pos
 
 
 @EnvStepCache()

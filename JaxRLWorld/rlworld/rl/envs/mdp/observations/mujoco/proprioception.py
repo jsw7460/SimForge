@@ -148,7 +148,11 @@ def dof_pos_nominal_difference(env: MujocoEnv) -> torch.Tensor:
     Returns:
         Tensor of shape [num_envs, num_actions]
     """
-    return dof_pos(env) - env.act_manager.offset
+    # Relative to the nominal standing pose (default_joint_pos), not the
+    # action-space zero point (act_manager.offset). These coincide for
+    # absolute-action presets but differ under joint-limit action
+    # mapping; both are in canonical actuated-joint order.
+    return dof_pos(env) - env.robot_data.default_joint_pos
 
 
 @EnvStepCache()

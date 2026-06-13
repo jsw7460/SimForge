@@ -189,7 +189,13 @@ class variable_posture:
             std_walking=std_walking,
             std_running=std_running,
             get_current_joint_pos=lambda e: e.robot_data.joint_pos,
-            default_joint_pos=env.act_manager.offset,
+            # Nominal standing pose, NOT the action-space zero point.
+            # ``act_manager.offset`` equals the default pose only for
+            # absolute-action presets; under joint-limit action mapping
+            # it is the limit midpoint, so posture must be shaped against
+            # ``default_joint_pos`` (resolved from init_state.joint_pos,
+            # same canonical actuated-joint order).
+            default_joint_pos=env.robot_data.default_joint_pos,
             walking_threshold=walking_threshold,
             running_threshold=running_threshold,
         )

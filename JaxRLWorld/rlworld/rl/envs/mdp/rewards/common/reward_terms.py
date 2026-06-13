@@ -130,9 +130,18 @@ def penalize_dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) 
 
 
 def similar_to_default(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
-    """Penalty for deviating from default joint positions."""
+    """Penalty for deviating from default joint positions.
+
+    References ``RobotData.default_joint_pos`` (the nominal standing
+    pose) rather than ``act_manager.offset`` (the action-space zero
+    point): the two coincide only for absolute-action presets, and
+    differ under joint-limit action mapping where the offset is the
+    limit midpoint. Both tensors are in canonical actuated-joint order,
+    so the per-joint subtraction stays aligned.
+    """
+    rd = env.get_robot_data(asset_cfg.name)
     return -torch.sum(
-        torch.abs(env.get_robot_data(asset_cfg.name).joint_pos - env.act_manager.offset),
+        torch.abs(rd.joint_pos - rd.default_joint_pos),
         dim=1,
     )
 
