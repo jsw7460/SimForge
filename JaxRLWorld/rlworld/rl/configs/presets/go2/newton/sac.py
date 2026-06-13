@@ -46,6 +46,9 @@ from rlworld.rl.configs.common_config_classes import (
     SACPolicyConfig,
 )
 from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
+from rlworld.rl.configs.rewards import RewardTermConfig
+from rlworld.rl.configs.robots.go2 import GO2_ACTION_SCALE
+from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 
 
 @dataclass
@@ -54,6 +57,31 @@ class Go2SACNewtonConfig(Go2FlatConfig):
     run_name: str = "Go2_SAC_Newton"
     algorithm_name: str = "SAC"
     use_joint_limit_action: bool = True
+
+    def _build_reward_config(self):
+        """Inherit the flat reward set, but replace the action-smoothness
+        term so it matches the PPO preset numerically.
+
+        The base preset uses ``raw_action_rate_l2`` (penalizes the raw
+        policy-output delta). Under this preset's joint-limit action
+        mapping the raw output is a tanh in [-1, 1] with a large per-joint
+        scale, so that penalty is 10-80x weaker per unit of physical joint
+        motion than the PPO preset's (whose 0.25-ish fixed scale makes the
+        raw delta large). Swap it for ``processed_action_rate_l2_scaled``
+        fed the *PPO* action scale (``GO2_ACTION_SCALE``): that penalizes
+        ``sum_j (delta_joint_target_j / ppo_scale_j)**2``, which is exactly
+        what the PPO ``raw_action_rate_l2`` computes on the same joint
+        trajectory — so the smoothness penalty is bit-identical to PPO for
+        every joint, with the same 0.1 weight.
+        """
+        cfg = super()._build_reward_config()
+        cfg.raw_action_rate_l2 = None  # disable the raw-output penalty
+        cfg.processed_action_rate_scaled = RewardTermConfig(
+            func=rf_common.processed_action_rate_l2_scaled,
+            weight=0.1,
+            params={"action_scale": GO2_ACTION_SCALE},
+        )
+        return cfg
 
     def _build_algorithm_config(self) -> SACConfig:
         return SACConfig(

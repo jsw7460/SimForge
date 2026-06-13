@@ -220,6 +220,60 @@ def raw_action_rate_l2(env: World) -> torch.Tensor:
     )
 
 
+# Per-env cache of the resolved per-joint scale tensor, keyed by env id.
+# Built once on first call (the scale dict and joint order are fixed for
+# an env's lifetime) so the regex resolution is not repeated every step.
+_PROCESSED_ACTION_SCALE_CACHE: dict[int, torch.Tensor] = {}
+
+
+def processed_action_rate_l2_scaled(env: World, action_scale: dict[str, float]) -> torch.Tensor:
+    """Penalize the processed-action (joint-target) rate, normalized by a
+    per-joint scale.
+
+    Penalizes ``sum_j ((target_j - prev_target_j) / scale_j)**2`` where
+    ``target`` is ``act_manager.processed_actions`` (the post-scale/offset
+    joint command, in radians) and ``scale_j`` is the per-joint value from
+    ``action_scale`` (a name-regex -> value dict, resolved against
+    ``act_manager.actuated_joint_names``).
+
+    This reproduces a fixed-scale ``raw_action_rate_l2`` *numerically* on
+    the joint-target trajectory: for an absolute-action (PPO) preset,
+    ``raw = (target - offset) / scale`` so ``raw_action_rate`` already
+    equals ``sum_j (delta_target_j / scale_j)**2``. Computing the same
+    quantity from ``processed_actions`` makes the penalty invariant to how
+    the action space is parameterized — under a tanh-squashed policy with
+    joint-limit action mapping the raw output lives in ``[-1, 1]`` with a
+    much larger per-joint scale, so ``raw_action_rate`` would be 10-80x
+    weaker per unit of physical joint motion. Passing the PPO ``action_scale``
+    here yields a smoothness penalty bit-identical to the PPO preset's
+    ``raw_action_rate_l2`` for the same joint trajectory.
+
+    Args:
+        env: Any ``World`` subclass.
+        action_scale: Joint-name-regex -> scale value dict (e.g. the same
+            ``GO2_ACTION_SCALE`` the PPO action manager uses). Resolved to a
+            per-joint tensor in canonical actuated-joint order and cached.
+
+    Returns:
+        Tensor of shape ``(num_envs,)`` — negative scaled L2-squared
+        difference.
+    """
+    scale = _PROCESSED_ACTION_SCALE_CACHE.get(id(env))
+    if scale is None:
+        names = list(env.act_manager.actuated_joint_names)
+        idx, _, vals = string_utils.resolve_matching_names_values(action_scale, names)
+        scale = torch.ones(len(names), device=env.device, dtype=torch.float32)
+        scale[idx] = torch.tensor(vals, device=env.device, dtype=torch.float32)
+        if (scale <= 0).any():
+            raise ValueError(
+                f"processed_action_rate_l2_scaled: non-positive scale for joints {names}: {scale.tolist()}"
+            )
+        _PROCESSED_ACTION_SCALE_CACHE[id(env)] = scale
+
+    delta = (env.act_manager.processed_actions - env.act_manager.prev_processed_actions) / scale
+    return -torch.sum(torch.square(delta), dim=1)
+
+
 def penalize_body_ang_vel_xy(
     env: World,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
