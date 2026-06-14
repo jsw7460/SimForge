@@ -84,7 +84,6 @@ class SolverMuJoCoCfg(BaseConfig):
     sdf_iterations: int | None = None
 
     # Mode flags
-    ls_parallel: bool = True
     use_mujoco_contacts: bool = True
     use_mujoco_cpu: bool = False
     enable_multiccd: bool = False

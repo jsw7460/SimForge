@@ -59,7 +59,6 @@ def main() -> None:
             "ls_iterations",
             "ccd_iterations",
             "use_mujoco_contacts",
-            "ls_parallel",
         ):
             v = getattr(s, attr, None)
             if v is not None:

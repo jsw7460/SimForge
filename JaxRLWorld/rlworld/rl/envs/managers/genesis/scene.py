@@ -201,8 +201,9 @@ class SceneManager(BaseManager):
                     "batch_fixed_verts": True,
                     "requires_jac_and_IK": False,
                 }
-                if cfg.init_state.pos != (0.0, 0.0, 0.0):
-                    mjcf_kwargs["pos"] = cfg.init_state.pos
+                # Keep morph offset at origin so the new relative=True default of
+                # get_pos/set_pos/get_quat/set_quat (Genesis #2934) collapses to the
+                # absolute frame.  init_state.pos is applied by the reset events instead.
                 morph = gs.morphs.MJCF(**mjcf_kwargs)
             else:
                 urdf_kwargs = {

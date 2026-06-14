@@ -66,7 +66,8 @@ class NewtonVisualizationManager(BaseManager):
                 )
             else:
                 return
-            self.viewer.set_model(model, max_worlds=1)
+            self.viewer.set_model(model)
+            self.viewer.set_visible_worlds({0})
 
         elif self.config.record_video:
             if self.config.viewer_type == "usd":
@@ -82,7 +83,8 @@ class NewtonVisualizationManager(BaseManager):
                 )
             else:
                 raise NotImplementedError(f"Unknown viewer type: {self.config.viewer_type}")
-            self.viewer.set_model(model, max_worlds=1)
+            self.viewer.set_model(model)
+            self.viewer.set_visible_worlds({0})
 
     def advance(self) -> None:
         if self.viewer is None:

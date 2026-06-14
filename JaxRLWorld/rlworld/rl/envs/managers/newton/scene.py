@@ -936,7 +936,6 @@ class NewtonSceneManager(BaseManager):
                 ccd_tolerance=scfg.ccd_tolerance,
                 ccd_iterations=scfg.ccd_iterations,
                 sdf_iterations=scfg.sdf_iterations,
-                ls_parallel=scfg.ls_parallel,
                 use_mujoco_contacts=scfg.use_mujoco_contacts,
                 use_mujoco_cpu=scfg.use_mujoco_cpu,
                 enable_multiccd=scfg.enable_multiccd,
