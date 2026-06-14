@@ -102,6 +102,16 @@ def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonEnvConfig:
                 {"margin": 0.5},
             )
 
+        # Terminate when a non-foot body (trunk / hip / thigh) hits the
+        # ground. Reads the ``body_ground_contact`` group declared in
+        # build_scene (feet + calf excluded). Opt-in so the flat PPO
+        # preset's terminations are unchanged.
+        if cfg.terminate_on_body_contact:
+            body_contact = TerminationTermConfig(
+                common_tf.illegal_contact,
+                {"contact_group": "body_ground_contact", "force_threshold": 1.0},
+            )
+
     return NewtonEnvConfig(
         env_name="NewtonLocomotionEnv",
         num_envs=cfg.num_envs,
@@ -277,9 +287,11 @@ def build_action(cfg: Go2FlatConfig) -> NewtonActionConfig:
         # sim model's joint limits at build time.
         return NewtonActionConfig(
             actuated_dof_names=r.actuated_dof_patterns,
-            action_scale="joint_limit",
+            # action_scale="joint_limit",
+            action_scale=0.5,
             clip_actions=(-1.0, 1.0),
-            offset="joint_limit_center",
+            # offset="joint_limit_center",
+            offset=r.get_action_offset(),
         )
     return NewtonActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,

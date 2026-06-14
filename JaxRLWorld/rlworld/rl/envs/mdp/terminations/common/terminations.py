@@ -132,3 +132,47 @@ def terrain_out_of_bounds(
     root_xy = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, :2]
     out = (root_xy[:, 0].abs() > limit_x) | (root_xy[:, 1].abs() > limit_y)
     return TerminationResult(out)
+
+
+def illegal_contact(
+    env: World,
+    contact_group: str,
+    force_threshold: float = 1.0,
+) -> TerminationResult:
+    """Terminate when any body tracked by ``contact_group`` registers a
+    ground-contact force above ``force_threshold``.
+
+    Reads ``env.contact_manager`` (a sim-agnostic interface), so it works
+    on any backend. Point it at a contact group whose primary is the set
+    of bodies that must NOT touch the ground — e.g. the go2 preset's
+    ``"body_ground_contact"`` group (trunk + hips + thighs, feet and calf
+    excluded). The episode then terminates the moment a non-foot body hits
+    the ground, the standard "illegal contact" fall condition (mirrors
+    IsaacLab's ``illegal_contact`` and mjlab's contact terminations).
+
+    Uses substep force history when the backend provides it (MuJoCo with
+    ``history_length > 0`` — a hit on any substep counts); otherwise falls
+    back to the instantaneous per-body contact force (Newton / Genesis).
+
+    Args:
+        env: Any ``World`` subclass with a ``contact_manager``.
+        contact_group: Registered contact group name whose tracked bodies
+            should trigger termination on ground contact.
+        force_threshold: Contact-force magnitude (N) above which a body
+            counts as touching. ``1.0`` cleanly separates "no contact"
+            (~0 N) from a real contact (hundreds of N) — verified for the
+            go2 ``body_ground_contact`` group.
+
+    Returns:
+        ``TerminationResult`` of shape ``(num_envs,)`` — True where any
+        tracked body exceeds the force threshold.
+    """
+    history = env.contact_manager.contact_force_history(contact_group)
+    if history is not None:
+        # (B, N, H, 3) -> (B, N, H) -> (B, N): hit if any substep crosses.
+        force_mag = torch.norm(history, dim=-1)
+        hit = (force_mag > force_threshold).any(dim=2)
+    else:
+        forces = env.contact_manager.contact_force(contact_group)  # (B, N, 3)
+        hit = torch.norm(forces, dim=-1) > force_threshold  # (B, N)
+    return TerminationResult(hit.any(dim=-1))

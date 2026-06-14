@@ -161,6 +161,13 @@ class Go2FlatConfig:
     soft joint-limit range. Default ``False`` keeps every existing
     PPO preset byte-identical; the SAC variant flips it."""
 
+    # ── Body-contact termination ──────────────────────────────────────
+    terminate_on_body_contact: bool = False
+    """Terminate the episode when a non-foot body (trunk / hip / thigh)
+    touches the ground, via the ``body_ground_contact`` contact group
+    and ``terminations.common.illegal_contact``. Default ``False`` keeps
+    every existing preset's termination set unchanged; variants opt in."""
+
     # Actuator class selection
     use_ideal_pd_actuator: bool = True
     """If True, swap the default DelayedPDActuator pair for
