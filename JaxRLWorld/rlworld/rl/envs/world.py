@@ -457,6 +457,22 @@ class World(ABC):
                 if "interval" in self.event_manager.available_modes:
                     self.event_manager.apply(mode="interval", dt=self.control_dt)
 
+        # Pre-termination hook
+        with prof.section("pre_termination_hook"):
+            self._pre_termination_hook()
+
+        # Check termination BEFORE computing rewards so reward terms can read
+        # the current step's termination state (e.g. is_terminated / is_alive),
+        # matching IsaacLab / mjlab ordering (termination_manager is computed
+        # before reward_manager). Termination terms depend only on physics
+        # state — not on rewards or the gait phase advanced in
+        # _pre_reward_hook — so this ordering preserves behaviour for all
+        # existing terms.
+        with prof.section("check_termination"):
+            terminated, truncated = self.termination_manager.check_termination()
+            reset_buf = terminated | truncated
+            reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
+
         # Pre-reward hook (e.g., gait advance that rewards depend on)
         with prof.section("pre_reward_hook"):
             self._pre_reward_hook()
@@ -467,16 +483,6 @@ class World(ABC):
             self.reward_manager.set_rewards(
                 reward_buffer=self.rew_buf, episode_sums=self.episode_sums, reward_buffer_per_type=self.rew_buf_per_type
             )
-
-        # Pre-termination hook
-        with prof.section("pre_termination_hook"):
-            self._pre_termination_hook()
-
-        # Check termination
-        with prof.section("check_termination"):
-            terminated, truncated = self.termination_manager.check_termination()
-            reset_buf = terminated | truncated
-            reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
 
         # Handle terminal observations.
         #
