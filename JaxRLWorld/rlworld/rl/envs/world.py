@@ -451,6 +451,17 @@ class World(ABC):
             self._step_physics()
         self._invalidate_cache()
 
+        # Increment the episode-step counter AFTER physics and BEFORE
+        # termination/reward, matching IsaacLab / mjlab which do
+        # ``episode_length_buf += 1`` right after the decimation loop and
+        # before termination_manager.compute. Doing it here — rather than at
+        # the end of step() — makes the timeout check and every
+        # episode_length_buf reader see a consistent count from the first
+        # episode onward, instead of relying on just-reset envs picking up a
+        # trailing end-of-step increment (which the initial reset() and eval
+        # resets never get, leaving their first episode one step too long).
+        self.termination_manager.advance()
+
         # Apply interval events
         with prof.section("interval_events"):
             if hasattr(self, "event_manager") and self.event_manager is not None:
@@ -574,10 +585,14 @@ class World(ABC):
         pass
 
     def _advance_managers(self) -> None:
-        """Advance all managers. Override to add custom managers."""
+        """Advance all managers. Override to add custom managers.
+
+        Note: the episode-step counter (``termination_manager.advance``) is
+        intentionally NOT advanced here — it is incremented at the start of
+        :meth:`step` (after physics, before termination), matching IsaacLab.
+        """
         self.obs_manager.advance()
         self.reward_manager.advance()
-        self.termination_manager.advance()
         self.act_manager.advance()
 
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
