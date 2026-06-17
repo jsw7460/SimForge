@@ -156,6 +156,31 @@ def reward_alive(env: World) -> torch.Tensor:
     return torch.ones((env.num_envs,))
 
 
+def is_alive(env: World) -> torch.Tensor:
+    """Termination-aware alive reward: 1.0 every step except the step a
+    non-timeout termination fires (then 0.0).
+
+    Unlike :func:`reward_alive` (a constant 1.0 that ignores terminations),
+    this reads ``termination_manager.terminated`` so the alive bonus is not
+    paid on the step the episode actually terminates. Matches IsaacLab /
+    mjlab ``is_alive``. Sim-agnostic — only reads the World-level termination
+    manager, so it works identically on Newton, Genesis, and MuJoCo.
+    """
+    return (~env.termination_manager.terminated).float()
+
+
+def is_terminated(env: World) -> torch.Tensor:
+    """Termination penalty: 1.0 on the step a non-timeout termination fires,
+    else 0.0 (pair with a negative weight to penalise falling / failure).
+
+    Timeouts (episode-length truncations) are excluded — only hard
+    terminations count. Matches IsaacLab / mjlab ``is_terminated``.
+    Sim-agnostic — only reads the World-level termination manager, so it
+    works identically on Newton, Genesis, and MuJoCo.
+    """
+    return env.termination_manager.terminated.float()
+
+
 def base_height_penalty(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalty for deviating from target base height."""
     height_z = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, 2]

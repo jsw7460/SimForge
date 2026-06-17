@@ -39,16 +39,6 @@ def _ids_or_slice(ids: torch.Tensor | None):
     return ids if ids is not None else slice(None)
 
 
-def is_alive(env: MujocoEnv) -> torch.Tensor:
-    """Reward for being alive."""
-    return (~env.termination_manager.terminated).float()
-
-
-def is_terminated(env: MujocoEnv) -> torch.Tensor:
-    """Penalize terminated episodes that don't correspond to episodic timeouts."""
-    return env.termination_manager.terminated.float()
-
-
 def track_linear_velocity(
     env: MujocoEnv,
     std: float,

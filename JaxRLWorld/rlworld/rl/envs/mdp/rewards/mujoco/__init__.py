@@ -16,9 +16,6 @@ from .reward_terms import (
     flat_orientation,
     # Orientation rewards
     flat_orientation_l2,
-    # Basic rewards
-    is_alive,
-    is_terminated,
     joint_acc_l2,
     joint_pos_limits,
     # Joint-based penalties
@@ -31,9 +28,6 @@ from .reward_terms import (
 )
 
 __all__ = [
-    # Basic rewards
-    "is_alive",
-    "is_terminated",
     # Velocity tracking
     "track_linear_velocity",
     "track_angular_velocity",
