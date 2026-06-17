@@ -462,12 +462,6 @@ class World(ABC):
         # resets never get, leaving their first episode one step too long).
         self.termination_manager.advance()
 
-        # Apply interval events
-        with prof.section("interval_events"):
-            if hasattr(self, "event_manager") and self.event_manager is not None:
-                if "interval" in self.event_manager.available_modes:
-                    self.event_manager.apply(mode="interval", dt=self.control_dt)
-
         # Pre-termination hook
         with prof.section("pre_termination_hook"):
             self._pre_termination_hook()
@@ -533,6 +527,21 @@ class World(ABC):
         # Advance commands (timer-based resampling + per-step post-processing)
         with prof.section("command_manager.compute"):
             self.command_manager.compute(self.control_dt)
+
+        # Apply interval events AFTER reset/command and BEFORE the observation
+        # is built in _advance_managers, matching IsaacLab and mjlab (both apply
+        # mode="interval" after the reward/termination/reset block, right before
+        # observation_manager.compute). Interval disturbances (e.g.
+        # push_by_setting_velocity) must NOT contaminate this step's reward or
+        # termination — those reflect the policy's own action — but MUST be
+        # visible to the returned observation so the policy can react next step.
+        # The cache is invalidated afterwards so the obs build sees the new
+        # state written by the events.
+        with prof.section("interval_events"):
+            if hasattr(self, "event_manager") and self.event_manager is not None:
+                if "interval" in self.event_manager.available_modes:
+                    self.event_manager.apply(mode="interval", dt=self.control_dt)
+                    self._invalidate_cache()
 
         # Advance managers
         with prof.section("advance_managers"):
