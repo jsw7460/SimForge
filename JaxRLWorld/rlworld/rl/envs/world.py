@@ -609,6 +609,19 @@ class World(ABC):
             return
         prof = self._step_profiler
 
+        # Curriculum compute FIRST — before any reset write — so curriculum
+        # terms can read the ending episode's terminal state (e.g. distance
+        # walked from root_pos_w, episode_length_buf) and the episode's command
+        # before the reset events / manager resets below overwrite them. Matches
+        # IsaacLab and mjlab, which both call curriculum_manager.compute as the
+        # first line of _reset_idx. The current step-stage curricula only read
+        # env.env_step_counter (reset-independent), but this early placement is
+        # what unlocks terminal-state-based curricula such as terrain levels.
+        # curriculum.reset (stateful-term reset) is forwarded with the other
+        # manager resets below.
+        with prof.section("  reset:curriculum.compute"):
+            self.curriculum_manager.compute(env_ids=env_ids)
+
         # State initialization via event manager
         with prof.section("  reset:event_manager.reset"):
             self.event_manager.reset(env_ids)
@@ -626,21 +639,13 @@ class World(ABC):
             self.obs_manager.reset(env_ids)
             self.contact_manager.reset(env_ids)
             self.reward_manager.reset(env_ids)
-
-        # Curriculum: apply stage updates (reads env.env_step_counter)
-        # and forward reset to any stateful curriculum terms. Runs at
-        # every episode-reset boundary, matching mjlab's cadence. The
-        # manager is always constructed (empty terms dict is a no-op),
-        # so no guard needed.
-        #
-        # Note: curriculum state is *not* injected into
-        # ``rew_buf_per_type`` — its values (e.g. ``energy_threshold``
-        # in Watts) live on a different scale from reward terms and
-        # polluted the "Rewards" breakdown in wandb. The runner logs
-        # the latest state under a ``Curriculum/`` namespace directly
-        # in :meth:`BaseRunner.log_training_data`.
-        with prof.section("  reset:curriculum"):
-            self.curriculum_manager.compute(env_ids=env_ids)
+            # Forward reset to stateful curriculum terms (compute already ran at
+            # the top of _reset_idx). Curriculum state is intentionally NOT
+            # injected into ``rew_buf_per_type`` — its values (e.g.
+            # ``energy_threshold`` in Watts) live on a different scale and
+            # polluted the wandb "Rewards" breakdown; the runner logs the latest
+            # state under a ``Curriculum/`` namespace in
+            # :meth:`BaseRunner.log_training_data`.
             self.curriculum_manager.reset(env_ids)
 
         # Reset episode sums
