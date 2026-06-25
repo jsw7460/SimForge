@@ -19,7 +19,7 @@ if TYPE_CHECKING:
         CurriculumManagerConfig,
     )
     from rlworld.rl.configs.robots.base import RobotConfig
-    from rlworld.rl.configs.scene import EntityCfg, NewtonEntityConfig
+    from rlworld.rl.configs.scene import EntityCfg, NewtonEntityConfig, RigidObjectCfg
     from rlworld.rl.configs.sensors.contact_sensor_config import ContactSensorCfg
     from rlworld.rl.configs.sensors.newton_sensor_config import NewtonSensorConfig
 
@@ -102,6 +102,9 @@ class NewtonSceneConfig(BaseConfig):
     solver_type: Literal["mujoco"] = "mujoco"  # Currently, only support mujoco solver
     solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
     entities: dict[str, Union["EntityCfg", "NewtonEntityConfig"]] = field(default_factory=dict)
+    # Passive rigid objects (no actuated joints) — graspable objects, props,
+    # static fixtures. Read via ``get_rigid_object_data(name)``. Empty by default.
+    rigid_objects: dict[str, "RigidObjectCfg"] = field(default_factory=dict)
     sensors: list["NewtonSensorConfig"] | None = None
     # Simulator-agnostic contact sensors (shared with Genesis / mjlab).
     contact_sensors: "list[ContactSensorCfg] | None" = None

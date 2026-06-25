@@ -57,6 +57,10 @@ class MujocoSceneConfig(BaseConfig):
     # Entities — unified EntityCfg dict (scene manager converts to mjlab)
     entities: Any = None  # dict[str, EntityCfg]
 
+    # Passive rigid objects (no actuated joints) — graspable objects, props,
+    # static fixtures. Read via ``get_rigid_object_data(name)``. None by default.
+    rigid_objects: Any = None  # dict[str, RigidObjectCfg]
+
     # Sensors — sim-agnostic rlworld.rl.configs.sensors.ContactSensorCfg
     # objects, converted to mjlab sensor configs in
     # MujocoSceneManager.build_scene.

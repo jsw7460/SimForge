@@ -24,6 +24,7 @@ from .unified_entity_config import (
     InitialStateCfg,
     MujocoEntityCfg,
     NewtonEntityCfg,
+    RigidObjectCfg,
 )
 
 # name → (submodule, attr) for lazily-loaded, simulator-dependent exports.
@@ -57,6 +58,7 @@ __all__ = [
     "InitialStateCfg",
     "MujocoEntityCfg",
     "NewtonEntityCfg",
+    "RigidObjectCfg",
     "EntityConfig",
     "GenesisSceneInitConfig",
     "NewtonBoxConfig",

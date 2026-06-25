@@ -174,3 +174,27 @@ class MujocoEntityCfg(EntityCfg):
 
     cameras: tuple = ()
     """mjlab CameraCfg objects."""
+
+
+# ---------------------------------------------------------------------------
+# Rigid object configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RigidObjectCfg(EntityCfg):
+    """A passive rigid object — a graspable object, prop, or static fixture.
+
+    Mirrors IsaacLab's ``RigidObjectCfg`` (vs ``ArticulationCfg``): an entity
+    with **no actuated joints**. In all three backends a rigid object is loaded
+    as a single body — free (``floating=True``, e.g. a graspable cube) or
+    fixed (``floating=False``, e.g. a table). Its state is read via
+    ``env.get_rigid_object_data(name)`` →
+    :class:`~rlworld.rl.envs.robot_data.RigidObjectData` (root + body reads, no
+    joint accessors).
+
+    Structurally an :class:`EntityCfg` so it flows through the existing
+    per-backend scene loaders unchanged; the distinct type is what routes it
+    into the scene's ``rigid_objects`` registry (vs articulated ``entities``).
+    Leave ``articulation.actuators`` empty (the default).
+    """

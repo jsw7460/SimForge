@@ -56,6 +56,9 @@ class SceneConfig(BaseConfig):
     rigid_options: gs.options.RigidOptions = field(default_factory=gs.options.RigidOptions)
     env_spacing: tuple[float, float] = (20.0, 20.0)
     entities: dict = field(default_factory=dict)
+    # Passive rigid objects (no actuated joints) — graspable objects, props,
+    # static fixtures. Read via ``get_rigid_object_data(name)``. Empty by default.
+    rigid_objects: dict = field(default_factory=dict)
     sensors: list[SensorConfig] | None = field(default_factory=list)
     # Simulator-agnostic contact sensor configs (``ContactSensorCfg``).
     contact_sensors: "list[ContactSensorCfg] | None" = None
