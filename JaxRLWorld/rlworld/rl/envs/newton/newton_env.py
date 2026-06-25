@@ -80,18 +80,16 @@ class NewtonEnv(World):
         return self.get_robot_data("robot")
 
     def get_robot_data(self, entity_name: str = "robot"):
-        # Newton currently supports single entity only
-        return self._robot_data
+        return self._robot_data_cache[entity_name]
 
     def get_robot_state_writer(self, entity_name: str = "robot"):
         """Return the write-API companion to ``get_robot_data``.
 
         Used by event terms / reset functions to mutate joint and root
         state via ``NewtonRobotStateWriter`` (see
-        ``rlworld/rl/envs/newton/robot_state_writer.py``). Newton
-        currently supports a single entity only.
+        ``rlworld/rl/envs/newton/robot_state_writer.py``).
         """
-        return self._robot_state_writer
+        return self._robot_state_writer_cache[entity_name]
 
     def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
         view = self.scene_manager.articulation_views[selector.name]
@@ -248,12 +246,20 @@ class NewtonEnv(World):
         from rlworld.rl.envs.newton.robot_data import NewtonRobotData
         from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
 
-        self._robot_data = NewtonRobotData(
-            self,
-            self.scene_manager.robot_view,
-            default_joint_pos=self._resolve_default_joint_pos(),
-        )
-        self._robot_state_writer = NewtonRobotStateWriter(self, self.scene_manager.robot_view)
+        # Per-entity RobotData / state-writer caches (mirrors GenesisEnv). The
+        # "robot" entry is built from the same articulation view as before
+        # (scene_manager.robot_view IS articulation_views["robot"]), so the
+        # single-robot path is unchanged; additional entities (rigid objects,
+        # extra robots) get their own entry keyed by name.
+        self._robot_data_cache: dict[str, NewtonRobotData] = {}
+        self._robot_state_writer_cache: dict[str, NewtonRobotStateWriter] = {}
+        _default_jp = self._resolve_default_joint_pos()
+        for name in self.scene_manager.entities:
+            view = self.scene_manager.articulation_views[name]
+            self._robot_data_cache[name] = NewtonRobotData(self, view, default_joint_pos=_default_jp)
+            self._robot_state_writer_cache[name] = NewtonRobotStateWriter(self, view)
+        self._robot_data = self._robot_data_cache["robot"]
+        self._robot_state_writer = self._robot_state_writer_cache["robot"]
 
     def _post_setup(self) -> None:
         """Snapshot DR baselines, then capture CUDA graph.

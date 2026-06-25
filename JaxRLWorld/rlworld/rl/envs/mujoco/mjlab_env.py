@@ -243,21 +243,25 @@ class MujocoEnv(World):
 
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
-        entity = self.scene_manager.robot
         indexing = self.act_manager.indexing
-        self._robot_data_cache["robot"] = MujocoRobotData(
-            entity=entity,
-            joint_ids=indexing.sim_indices,
-            num_envs=self.num_envs,
-            device=self.device,
-            env=self,
-            default_joint_pos=self._resolve_default_joint_pos(),
-        )
-        self._robot_state_writer_cache["robot"] = MujocoRobotStateWriter(
-            env=self,
-            entity=entity,
-            joint_ids=indexing.sim_indices,
-        )
+        _default_jp = self._resolve_default_joint_pos()
+        # Per-entity caches (mirrors GenesisEnv). The "robot" entry is built
+        # exactly as before; additional entities (rigid objects, extra robots)
+        # get their own entry keyed by name.
+        for name, entity in self.scene_manager.entities.items():
+            self._robot_data_cache[name] = MujocoRobotData(
+                entity=entity,
+                joint_ids=indexing.sim_indices,
+                num_envs=self.num_envs,
+                device=self.device,
+                env=self,
+                default_joint_pos=_default_jp,
+            )
+            self._robot_state_writer_cache[name] = MujocoRobotStateWriter(
+                env=self,
+                entity=entity,
+                joint_ids=indexing.sim_indices,
+            )
 
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
         self.obs_manager = ObsCls(
