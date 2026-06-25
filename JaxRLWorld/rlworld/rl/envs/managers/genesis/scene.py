@@ -173,54 +173,73 @@ class SceneManager(BaseManager):
         self.env.vis_manager._setup_visualization_cameras()
 
     def _add_entities(self):
-        """Add robot/articulated entities. Terrain is added separately via the
-        TerrainImporter before the entity loop."""
+        """Add articulated entities (``config.entities``) and passive rigid
+        objects (``config.rigid_objects``).
+
+        Terrain is added separately via the TerrainImporter first. Both kinds
+        load through the same Genesis morph / ``add_entity`` path (a rigid
+        object is just a zero-actuator entity), but are kept in separate
+        registries — ``self.entities`` (articulations) vs ``self.rigid_objects``
+        — mirroring IsaacLab's scene.articulations / scene.rigid_objects.
+        """
         # Terrain (flat plane or generated heightfield) — added once,
         # before any other entities. Stored as ``self.terrain`` (importer).
         self.terrain.add_to_scene(self.scene)
 
+        self.rigid_objects = {}
         for entity_name, cfg in self.config.entities.items():
-            if entity_name in self.entities:
-                raise ValueError(f"Entity '{entity_name}' is already registered")
+            self.entities[entity_name] = self._load_entity(entity_name, cfg)
+        for object_name, cfg in (self.config.rigid_objects or {}).items():
+            self.rigid_objects[object_name] = self._load_entity(object_name, cfg)
 
-            # GenesisEntityCfg-specific fields
-            if isinstance(cfg, GenesisEntityCfg):
-                convexify = cfg.convexify
-                surface = cfg.surface
-                visualize = cfg.visualize_contact
-            else:
-                convexify = False
-                surface = None
-                visualize = False
+    def _load_entity(self, name: str, cfg):
+        """Load one Genesis ``RigidEntity`` from a unified EntityCfg / RigidObjectCfg.
 
-            mjcf_path = getattr(cfg, "mjcf_path", None)
-            if mjcf_path:
-                mjcf_kwargs = {
-                    "file": mjcf_path,
-                    "convexify": convexify,
-                    "batch_fixed_verts": True,
-                    "requires_jac_and_IK": False,
-                }
-                # Keep morph offset at origin so the new relative=True default of
-                # get_pos/set_pos/get_quat/set_quat (Genesis #2934) collapses to the
-                # absolute frame.  init_state.pos is applied by the reset events instead.
-                morph = gs.morphs.MJCF(**mjcf_kwargs)
-            else:
-                urdf_kwargs = {
-                    "file": cfg.urdf_path,
-                    "fixed": not cfg.floating,
-                    "convexify": convexify,
-                }
-                if cfg.links_to_keep:
-                    urdf_kwargs["links_to_keep"] = cfg.links_to_keep
-                morph = gs.morphs.URDF(**urdf_kwargs)
+        Shared by articulations and rigid objects; the only difference is which
+        registry the caller stores the result in. ``fixed=not cfg.floating``
+        gives a static body (e.g. a table) or a free body (a robot or a
+        graspable object).
+        """
+        if name in self.entities or name in self.rigid_objects:
+            raise ValueError(f"Entity '{name}' is already registered")
 
-            entity = self.scene.add_entity(
-                morph=morph,
-                surface=surface,
-                visualize_contact=visualize,
-            )
-            self.entities[entity_name] = entity
+        # GenesisEntityCfg-specific fields
+        if isinstance(cfg, GenesisEntityCfg):
+            convexify = cfg.convexify
+            surface = cfg.surface
+            visualize = cfg.visualize_contact
+        else:
+            convexify = False
+            surface = None
+            visualize = False
+
+        mjcf_path = getattr(cfg, "mjcf_path", None)
+        if mjcf_path:
+            mjcf_kwargs = {
+                "file": mjcf_path,
+                "convexify": convexify,
+                "batch_fixed_verts": True,
+                "requires_jac_and_IK": False,
+            }
+            # Keep morph offset at origin so the new relative=True default of
+            # get_pos/set_pos/get_quat/set_quat (Genesis #2934) collapses to the
+            # absolute frame.  init_state.pos is applied by the reset events instead.
+            morph = gs.morphs.MJCF(**mjcf_kwargs)
+        else:
+            urdf_kwargs = {
+                "file": cfg.urdf_path,
+                "fixed": not cfg.floating,
+                "convexify": convexify,
+            }
+            if cfg.links_to_keep:
+                urdf_kwargs["links_to_keep"] = cfg.links_to_keep
+            morph = gs.morphs.URDF(**urdf_kwargs)
+
+        return self.scene.add_entity(
+            morph=morph,
+            surface=surface,
+            visualize_contact=visualize,
+        )
 
     def _add_sensors(self):
         sensor_configs = self.config.sensors

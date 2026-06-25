@@ -15,7 +15,7 @@ from rlworld.rl.envs.utils.step_profiler import StepProfiler
 if TYPE_CHECKING:
     from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
     from rlworld.rl.envs.managers.common.robot_state_writer_protocol import RobotStateWriterProtocol
-    from rlworld.rl.envs.robot_data import RobotData
+    from rlworld.rl.envs.robot_data import RigidObjectData, RobotData
 
 
 class World(ABC):
@@ -88,6 +88,14 @@ class World(ABC):
         # Per-section step timing — no-op unless JAXRLWORLD_PROFILE_STEP is set.
         self._step_profiler = StepProfiler(label=self.sim_name)
 
+        # Per-entity RigidObjectData cache for passive (non-articulated) scene
+        # entities declared in ``scene.rigid_objects`` — a table, a graspable
+        # object. Empty unless a backend's env populates it at build time;
+        # read via :meth:`get_rigid_object_data`. Kept separate from the
+        # articulation ``_robot_data_cache`` (mirrors IsaacLab's RigidObject vs
+        # Articulation split).
+        self._rigid_object_data_cache: dict = {}
+
     def _init_buffers(self) -> None:
         """Initialize common buffers. Call after setting num_envs and device."""
         self.rew_buf = torch.zeros(self.num_envs, device=self.device)
@@ -154,6 +162,24 @@ class World(ABC):
             An object satisfying the ``RobotData`` protocol.
         """
         pass
+
+    def get_rigid_object_data(self, entity_name: str = "object") -> RigidObjectData:
+        """Get the RigidObjectData (root + body reads, no joints) for a passive
+        rigid entity declared in the scene's ``rigid_objects`` registry.
+
+        Companion to :meth:`get_robot_data` for non-articulated entities such
+        as a table or a graspable object. The per-backend env populates
+        ``_rigid_object_data_cache`` at build time; backends without rigid
+        objects leave it empty.
+
+        Args:
+            entity_name: Name of the rigid object in the scene's
+                ``rigid_objects`` dict (default: "object").
+
+        Returns:
+            An object satisfying the ``RigidObjectData`` protocol.
+        """
+        return self._rigid_object_data_cache[entity_name]
 
     def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
         """Resolve a sim-agnostic selector against this world's scene.

@@ -270,7 +270,7 @@ class GenesisEnv(World):
             for sensor_cfg in contact_sensors:
                 self.contact_manager.register_sensor(sensor_cfg)
 
-        from rlworld.rl.envs.genesis.robot_data import GenesisRobotData
+        from rlworld.rl.envs.genesis.robot_data import GenesisRigidObjectData, GenesisRobotData
         from rlworld.rl.envs.genesis.robot_state_writer import GenesisRobotStateWriter
 
         self._robot_data_cache = {}
@@ -289,6 +289,18 @@ class GenesisEnv(World):
                 env=self,
                 entity=entity,
                 actuated_dof_ids=indexing.sim_indices,
+            )
+
+        # Passive rigid objects (config.rigid_objects) — read via
+        # get_rigid_object_data(name) -> RigidObjectData (root + body, no
+        # joints). No actuated DOFs, so actuated_dof_ids is empty.
+        for name, entity in self.scene_manager.rigid_objects.items():
+            self._rigid_object_data_cache[name] = GenesisRigidObjectData(
+                entity=entity,
+                actuated_dof_ids=[],
+                num_envs=self.num_envs,
+                device=self.device,
+                default_joint_pos=None,
             )
 
     def _step_physics(self) -> None:
