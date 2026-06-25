@@ -23,8 +23,14 @@ if TYPE_CHECKING:
     from mjlab.entity import Entity
 
 
-class MujocoRobotData:
-    """RobotData implementation for MuJoCo/mjlab entities."""
+class MujocoRigidObjectData:
+    """RigidObjectData implementation (root + body reads) for a mjlab entity.
+
+    Joint-free entity state for a MuJoCo/mjlab ``Entity``.
+    :class:`MujocoRobotData` extends this with the actuated-joint accessors. A
+    passive rigid object (a free-floating box, a table) uses this base directly;
+    an articulated robot uses :class:`MujocoRobotData`.
+    """
 
     def __init__(
         self,
@@ -110,74 +116,6 @@ class MujocoRobotData:
     def heading_w(self) -> Tensor:
         euler = quat_to_euler_wxyz(self.root_link_quat_w)
         return euler[:, 2]
-
-    @property
-    def default_joint_pos(self) -> Tensor:
-        return self._default_joint_pos
-
-    @property
-    def joint_pos(self) -> Tensor:
-        """Actuated joint positions in action manager order."""
-        return self._entity.data.joint_pos[:, self._joint_ids]
-
-    @property
-    def joint_vel(self) -> Tensor:
-        """Actuated joint velocities in action manager order."""
-        return self._entity.data.joint_vel[:, self._joint_ids]
-
-    @property
-    def applied_torque(self) -> Tensor:
-        """Per-DOF actuator torque in action manager order.
-
-        Reads mjlab's ``EntityData.qfrc_actuator`` which is the
-        MuJoCo ``qfrc_actuator`` field sliced to this entity's joint
-        DoFs — i.e. post-PD-law, post-actfrcrange clip. Re-indexed by
-        ``_joint_ids`` to match action manager ordering.
-        """
-        return self._entity.data.qfrc_actuator[:, self._joint_ids]
-
-    @property
-    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Hard joint position limits — not exposed by mjlab.
-
-        mjlab only stores the *soft* limits (already scaled by the soft
-        limit factor) in ``entity.data.soft_joint_pos_limits`` with shape
-        ``(num_envs, num_joints, 2)``. There is no separate hard-limit
-        accessor.
-
-        Phase D-1 only migrates Newton + Genesis ``joint_pos_limits_mjlab``,
-        so this stub is never called from active code paths. MuJoCo's
-        ``joint_pos_limits`` reward function (in
-        ``mdp/rewards/mujoco/reward_terms.py``) reads
-        ``soft_joint_pos_limits`` directly and is unchanged.
-
-        Raises:
-            NotImplementedError: Always. See note above for the alternative.
-        """
-        raise NotImplementedError(
-            "MujocoRobotData does not expose hard joint position limits. "
-            "mjlab only stores soft limits via "
-            "``entity.data.soft_joint_pos_limits``. Use mjlab's "
-            "``joint_pos_limits`` reward function in "
-            "``mdp/rewards/mujoco/reward_terms.py`` instead."
-        )
-
-    @property
-    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Soft joint position limits (mjlab-scaled) in actuated order.
-
-        Reads ``entity.data.soft_joint_pos_limits`` which mjlab exposes
-        as ``(num_envs, num_joints, 2)``. We take the first env's slice
-        (limits are shared across envs in the common case) and index
-        by ``_joint_ids`` to align with the action manager's joint
-        ordering.
-
-        Returns:
-            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
-        """
-        limits = self._entity.data.soft_joint_pos_limits
-        sliced = limits[0, self._joint_ids]
-        return sliced[:, 0], sliced[:, 1]
 
     # ------------------------------------------------------------------
     # Body-level reads
@@ -322,3 +260,75 @@ class MujocoRobotData:
             )
         sensor = self._env.scene_manager.get_sensor(sensor_name)
         return sensor.data
+
+
+class MujocoRobotData(MujocoRigidObjectData):
+    """Articulation state for mjlab: RigidObjectData + actuated-joint reads."""
+
+    @property
+    def default_joint_pos(self) -> Tensor:
+        return self._default_joint_pos
+
+    @property
+    def joint_pos(self) -> Tensor:
+        """Actuated joint positions in action manager order."""
+        return self._entity.data.joint_pos[:, self._joint_ids]
+
+    @property
+    def joint_vel(self) -> Tensor:
+        """Actuated joint velocities in action manager order."""
+        return self._entity.data.joint_vel[:, self._joint_ids]
+
+    @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator torque in action manager order.
+
+        Reads mjlab's ``EntityData.qfrc_actuator`` which is the
+        MuJoCo ``qfrc_actuator`` field sliced to this entity's joint
+        DoFs — i.e. post-PD-law, post-actfrcrange clip. Re-indexed by
+        ``_joint_ids`` to match action manager ordering.
+        """
+        return self._entity.data.qfrc_actuator[:, self._joint_ids]
+
+    @property
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
+        """Hard joint position limits — not exposed by mjlab.
+
+        mjlab only stores the *soft* limits (already scaled by the soft
+        limit factor) in ``entity.data.soft_joint_pos_limits`` with shape
+        ``(num_envs, num_joints, 2)``. There is no separate hard-limit
+        accessor.
+
+        Phase D-1 only migrates Newton + Genesis ``joint_pos_limits_mjlab``,
+        so this stub is never called from active code paths. MuJoCo's
+        ``joint_pos_limits`` reward function (in
+        ``mdp/rewards/mujoco/reward_terms.py``) reads
+        ``soft_joint_pos_limits`` directly and is unchanged.
+
+        Raises:
+            NotImplementedError: Always. See note above for the alternative.
+        """
+        raise NotImplementedError(
+            "MujocoRobotData does not expose hard joint position limits. "
+            "mjlab only stores soft limits via "
+            "``entity.data.soft_joint_pos_limits``. Use mjlab's "
+            "``joint_pos_limits`` reward function in "
+            "``mdp/rewards/mujoco/reward_terms.py`` instead."
+        )
+
+    @property
+    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
+        """Soft joint position limits (mjlab-scaled) in actuated order.
+
+        Reads ``entity.data.soft_joint_pos_limits`` which mjlab exposes
+        as ``(num_envs, num_joints, 2)``. We take the first env's slice
+        (limits are shared across envs in the common case) and index
+        by ``_joint_ids`` to align with the action manager's joint
+        ordering.
+
+        Returns:
+            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
+        """
+        limits = self._entity.data.soft_joint_pos_limits
+        sliced = limits[0, self._joint_ids]
+        return sliced[:, 0], sliced[:, 1]

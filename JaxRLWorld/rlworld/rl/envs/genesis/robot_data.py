@@ -19,8 +19,14 @@ if TYPE_CHECKING:
     from genesis.engine.entities import RigidEntity
 
 
-class GenesisRobotData:
-    """RobotData implementation for a Genesis RigidEntity."""
+class GenesisRigidObjectData:
+    """RigidObjectData implementation (root + body reads) for a Genesis entity.
+
+    Joint-free entity state for a Genesis ``RigidEntity``.
+    :class:`GenesisRobotData` extends this with the actuated-joint accessors. A
+    passive rigid object (a free-floating box, a table) uses this base directly;
+    an articulated robot uses :class:`GenesisRobotData`.
+    """
 
     def __init__(
         self,
@@ -111,65 +117,6 @@ class GenesisRobotData:
     def heading_w(self) -> Tensor:
         euler = quat_to_euler_wxyz(self.root_link_quat_w)
         return euler[:, 2]
-
-    @property
-    def default_joint_pos(self) -> Tensor:
-        return self._default_joint_pos
-
-    @property
-    def joint_pos(self) -> Tensor:
-        return self._entity.get_dofs_position(self._actuated_dof_ids)
-
-    @property
-    def joint_vel(self) -> Tensor:
-        return self._entity.get_dofs_velocity(self._actuated_dof_ids)
-
-    @property
-    def applied_torque(self) -> Tensor:
-        """Per-DOF actuator control force for actuated joints.
-
-        Calls Genesis's ``get_dofs_control_force`` which runs the PD-law
-        kernel (``kernel_get_dofs_control_force`` in
-        ``Genesis/.../rigid/abd/accessor.py``) and returns the torque
-        clipped to the joint's ``force_range`` — the analog of
-        MuJoCo's ``qfrc_actuator``. This is distinct from
-        ``get_dofs_force``, which returns the net joint-space force
-        including passive damping and gravity bias.
-        """
-        return self._entity.get_dofs_control_force(dofs_idx_local=self._actuated_dof_ids)
-
-    @property
-    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Hard joint position limits in canonical actuated order.
-
-        Calls Genesis's ``entity.get_dofs_limit(actuated_dof_ids)``. Per
-        the Genesis docstring, the return shape is *either*
-        ``(n_dofs,)`` or ``(n_envs, n_dofs)`` depending on whether the
-        scene is batched. We normalise both cases to the 1-D
-        ``(n_dofs,)`` shape the RobotData protocol promises — for the
-        batched case we take the first env's row since joint limits are
-        constant across envs in all current Genesis configs.
-
-        Returns:
-            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
-        """
-        lower, upper = self._entity.get_dofs_limit(dofs_idx_local=self._actuated_dof_ids)
-        if lower.ndim == 2:
-            lower = lower[0]
-            upper = upper[0]
-        return lower, upper
-
-    @property
-    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Soft joint position limits (hard * 0.9) in actuated order.
-
-        Genesis only stores hard limits via ``get_dofs_limit``; the
-        soft flavour is hard × 0.9 to match mjlab's default
-        ``soft_joint_pos_limit_factor=0.9``. Returns a tuple of
-        ``(num_joints,)`` tensors.
-        """
-        lo, hi = self.joint_pos_limits
-        return lo * 0.9, hi * 0.9
 
     # ------------------------------------------------------------------
     # Body-level reads
@@ -329,3 +276,66 @@ class GenesisRobotData:
         orbital = (m.unsqueeze(-1) * torch.cross(r_rel, v_i, dim=-1)).sum(dim=1)  # (W, 3)
 
         return spin + orbital
+
+
+class GenesisRobotData(GenesisRigidObjectData):
+    """Articulation state for Genesis: RigidObjectData + actuated-joint reads."""
+
+    @property
+    def default_joint_pos(self) -> Tensor:
+        return self._default_joint_pos
+
+    @property
+    def joint_pos(self) -> Tensor:
+        return self._entity.get_dofs_position(self._actuated_dof_ids)
+
+    @property
+    def joint_vel(self) -> Tensor:
+        return self._entity.get_dofs_velocity(self._actuated_dof_ids)
+
+    @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator control force for actuated joints.
+
+        Calls Genesis's ``get_dofs_control_force`` which runs the PD-law
+        kernel (``kernel_get_dofs_control_force`` in
+        ``Genesis/.../rigid/abd/accessor.py``) and returns the torque
+        clipped to the joint's ``force_range`` — the analog of
+        MuJoCo's ``qfrc_actuator``. This is distinct from
+        ``get_dofs_force``, which returns the net joint-space force
+        including passive damping and gravity bias.
+        """
+        return self._entity.get_dofs_control_force(dofs_idx_local=self._actuated_dof_ids)
+
+    @property
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
+        """Hard joint position limits in canonical actuated order.
+
+        Calls Genesis's ``entity.get_dofs_limit(actuated_dof_ids)``. Per
+        the Genesis docstring, the return shape is *either*
+        ``(n_dofs,)`` or ``(n_envs, n_dofs)`` depending on whether the
+        scene is batched. We normalise both cases to the 1-D
+        ``(n_dofs,)`` shape the RobotData protocol promises — for the
+        batched case we take the first env's row since joint limits are
+        constant across envs in all current Genesis configs.
+
+        Returns:
+            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
+        """
+        lower, upper = self._entity.get_dofs_limit(dofs_idx_local=self._actuated_dof_ids)
+        if lower.ndim == 2:
+            lower = lower[0]
+            upper = upper[0]
+        return lower, upper
+
+    @property
+    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
+        """Soft joint position limits (hard * 0.9) in actuated order.
+
+        Genesis only stores hard limits via ``get_dofs_limit``; the
+        soft flavour is hard × 0.9 to match mjlab's default
+        ``soft_joint_pos_limit_factor=0.9``. Returns a tuple of
+        ``(num_joints,)`` tensors.
+        """
+        lo, hi = self.joint_pos_limits
+        return lo * 0.9, hi * 0.9

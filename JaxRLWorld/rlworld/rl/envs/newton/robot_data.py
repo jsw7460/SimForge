@@ -26,8 +26,15 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.newton.newton_env import NewtonEnv
 
 
-class NewtonRobotData:
-    """RobotData implementation + state write API for Newton environments."""
+class NewtonRigidObjectData:
+    """RigidObjectData implementation (root + body reads) for Newton entities.
+
+    Joint-free entity state backed by an ``ArticulationView``.
+    :class:`NewtonRobotData` extends this with the actuated-joint accessors. A
+    passive rigid object (a free-floating box, a table) is a 0-joint
+    articulation in Newton, so it uses this base directly; an articulated robot
+    uses :class:`NewtonRobotData`.
+    """
 
     def __init__(
         self,
@@ -187,75 +194,6 @@ class NewtonRobotData:
     @property
     def heading_w(self) -> Tensor:
         return quat_to_euler_wxyz(self.root_link_quat_w)[:, 2]
-
-    @property
-    def default_joint_pos(self) -> Tensor:
-        return self._default_joint_pos
-
-    @property
-    def joint_pos(self) -> Tensor:
-        dof_pos = self.dof_positions(self._state)
-        return dof_pos[:, self._env.act_manager.indexing.newton_q_indices]
-
-    @property
-    def joint_vel(self) -> Tensor:
-        dof_vel = self.dof_velocities(self._state)
-        return dof_vel[:, self._env.act_manager.indexing.newton_qd_indices]
-
-    @property
-    def applied_torque(self) -> Tensor:
-        """Per-DOF actuator torque in actuated order.
-
-        Reads ``state.mujoco.qfrc_actuator`` — the MuJoCo solver's
-        per-DOF actuator force after PD-law evaluation and
-        ``effort_limit`` clipping, transposed into Newton's DOF
-        frame by ``convert_qfrc_actuator_from_mj_kernel``. The flat
-        warp array is reshaped into ``(num_envs, dofs_per_world)`` and
-        indexed by ``newton_qd_indices`` so columns line up with
-        :attr:`joint_pos` / :attr:`joint_vel`.
-
-        Raises ``AttributeError`` if the scene was built without
-        requesting ``mujoco:qfrc_actuator`` (the scene manager requests
-        it automatically when ``solver_type == "mujoco"``).
-        """
-        state = self._state
-        model = self._env.scene_manager.model
-        dofs_per_world = model.joint_dof_count // model.world_count
-        qfrc_flat = wp.to_torch(state.mujoco.qfrc_actuator)
-        qfrc = qfrc_flat.view(model.world_count, dofs_per_world)
-        return qfrc[:, self._env.act_manager.indexing.newton_qd_indices]
-
-    @property
-    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Hard joint position limits in canonical actuated order.
-
-        Reads ``model.joint_limit_lower`` / ``joint_limit_upper`` (which
-        are flattened across worlds), takes the first world's slice, and
-        indexes by ``newton_qd_indices`` to select actuated DOFs in the
-        same order as ``joint_pos`` / ``joint_vel``.
-
-        Returns:
-            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
-        """
-        model = self._env.scene_manager.model
-        dofs_per_world = model.joint_dof_count // model.world_count
-        lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
-        upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
-        qd_indices = self._env.act_manager.indexing.newton_qd_indices
-        return lower_all[qd_indices], upper_all[qd_indices]
-
-    @property
-    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Soft joint position limits (hard * 0.9).
-
-        Newton only stores hard limits; the soft flavour is hard ×
-        ``soft_limit_factor`` where the factor is hardcoded to 0.9 to
-        match mjlab's default ``soft_joint_pos_limit_factor=0.9``.
-        Returned as a tuple of ``(num_joints,)`` tensors in actuated
-        order, same shape as :attr:`joint_pos_limits`.
-        """
-        lo, hi = self.joint_pos_limits
-        return lo * 0.9, hi * 0.9
 
     # ------------------------------------------------------------------
     # Body-level reads
@@ -519,3 +457,81 @@ class NewtonRobotData:
         orbital = orbital_per_body.sum(dim=1)  # (W, 3)
 
         return spin_world.sum(dim=1) + orbital  # (W, 3)
+
+
+class NewtonRobotData(NewtonRigidObjectData):
+    """Articulation state for Newton: RigidObjectData + actuated-joint reads.
+
+    Adds the actuated-joint accessors on top of :class:`NewtonRigidObjectData`.
+    Constructed for articulated robots; ``default_joint_pos`` is supplied via
+    the base ``__init__``.
+    """
+
+    @property
+    def default_joint_pos(self) -> Tensor:
+        return self._default_joint_pos
+
+    @property
+    def joint_pos(self) -> Tensor:
+        dof_pos = self.dof_positions(self._state)
+        return dof_pos[:, self._env.act_manager.indexing.newton_q_indices]
+
+    @property
+    def joint_vel(self) -> Tensor:
+        dof_vel = self.dof_velocities(self._state)
+        return dof_vel[:, self._env.act_manager.indexing.newton_qd_indices]
+
+    @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator torque in actuated order.
+
+        Reads ``state.mujoco.qfrc_actuator`` — the MuJoCo solver's
+        per-DOF actuator force after PD-law evaluation and
+        ``effort_limit`` clipping, transposed into Newton's DOF
+        frame by ``convert_qfrc_actuator_from_mj_kernel``. The flat
+        warp array is reshaped into ``(num_envs, dofs_per_world)`` and
+        indexed by ``newton_qd_indices`` so columns line up with
+        :attr:`joint_pos` / :attr:`joint_vel`.
+
+        Raises ``AttributeError`` if the scene was built without
+        requesting ``mujoco:qfrc_actuator`` (the scene manager requests
+        it automatically when ``solver_type == "mujoco"``).
+        """
+        state = self._state
+        model = self._env.scene_manager.model
+        dofs_per_world = model.joint_dof_count // model.world_count
+        qfrc_flat = wp.to_torch(state.mujoco.qfrc_actuator)
+        qfrc = qfrc_flat.view(model.world_count, dofs_per_world)
+        return qfrc[:, self._env.act_manager.indexing.newton_qd_indices]
+
+    @property
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
+        """Hard joint position limits in canonical actuated order.
+
+        Reads ``model.joint_limit_lower`` / ``joint_limit_upper`` (which
+        are flattened across worlds), takes the first world's slice, and
+        indexes by ``newton_qd_indices`` to select actuated DOFs in the
+        same order as ``joint_pos`` / ``joint_vel``.
+
+        Returns:
+            ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
+        """
+        model = self._env.scene_manager.model
+        dofs_per_world = model.joint_dof_count // model.world_count
+        lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
+        upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
+        qd_indices = self._env.act_manager.indexing.newton_qd_indices
+        return lower_all[qd_indices], upper_all[qd_indices]
+
+    @property
+    def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
+        """Soft joint position limits (hard * 0.9).
+
+        Newton only stores hard limits; the soft flavour is hard ×
+        ``soft_limit_factor`` where the factor is hardcoded to 0.9 to
+        match mjlab's default ``soft_joint_pos_limit_factor=0.9``.
+        Returned as a tuple of ``(num_joints,)`` tensors in actuated
+        order, same shape as :attr:`joint_pos_limits`.
+        """
+        lo, hi = self.joint_pos_limits
+        return lo * 0.9, hi * 0.9

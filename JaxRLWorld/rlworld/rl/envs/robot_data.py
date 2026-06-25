@@ -1,9 +1,19 @@
-"""RobotData Protocol — unified read-only interface for robot state.
+"""Entity-state read interfaces — :class:`RigidObjectData` and :class:`RobotData`.
 
 Property names match mjlab's ``EntityData`` exactly so that mjlab satisfies
 the protocol with zero adapter code.  Genesis and Newton provide thin
 wrapper classes (see ``genesis/robot_data.py`` and ``newton/robot_data.py``)
 that lazily compute each property from their native APIs.
+
+Two protocols, mirroring IsaacLab's ``RigidObjectData`` / ``ArticulationData``
+split:
+
+  * :class:`RigidObjectData` — root pose/velocity + per-body/site reads. The
+    joint-free subset that any rigid entity exposes (a free-floating or static
+    object: a table, a graspable object).
+  * :class:`RobotData` — :class:`RigidObjectData` **plus** the articulation-only
+    joint state (``joint_pos`` / ``joint_vel`` / ``applied_torque`` / limits /
+    ``default_joint_pos``). An articulated robot satisfies the full protocol.
 
 All quaternions are **wxyz**.  All velocities labelled ``_b`` are in the
 **body frame**.
@@ -43,8 +53,17 @@ JointLimitsTuple = "tuple[Tensor, Tensor]"
 
 
 @runtime_checkable
-class RobotData(Protocol):
-    """Minimal robot state readable by any simulator backend."""
+class RigidObjectData(Protocol):
+    """Joint-free entity state: root pose/velocity + per-body/site reads.
+
+    The subset of entity state that any rigid body exposes regardless of
+    whether it has joints — root pose/velocity (link-origin and CoM variants),
+    projected gravity / heading, per-body and per-site reads, and whole-body
+    angular momentum. A free-floating or static rigid object (a table, a
+    graspable object) satisfies exactly this. :class:`RobotData` extends it
+    with articulation-only joint state. Mirrors IsaacLab's ``RigidObjectData``
+    vs ``ArticulationData`` split.
+    """
 
     @property
     def root_link_pos_w(self) -> Tensor:
@@ -103,56 +122,6 @@ class RobotData(Protocol):
     @property
     def heading_w(self) -> Tensor:
         """Heading angle (yaw) in world frame. Shape (num_envs,)."""
-        ...
-
-    @property
-    def default_joint_pos(self) -> Tensor:
-        """Default (home) joint positions in canonical actuated order.
-
-        Shape ``(num_joints,)`` — single-env, broadcast by caller.
-        Resolved once at env init from the preset's
-        ``init_state.joint_pos`` regex→float dict.
-        """
-        ...
-
-    @property
-    def joint_pos(self) -> Tensor:
-        """Actuated joint positions. Shape (num_envs, num_joints)."""
-        ...
-
-    @property
-    def joint_vel(self) -> Tensor:
-        """Actuated joint velocities. Shape (num_envs, num_joints)."""
-        ...
-
-    @property
-    def applied_torque(self) -> Tensor:
-        """Per-DOF actuator torque actually applied by the simulator last step.
-
-        Corresponds to MuJoCo's ``qfrc_actuator``: the output of each
-        actuator's PD law (or motor command), already clipped to the
-        joint's effort limit. Works uniformly for implicit (simulator
-        internal PD) and explicit (Python-computed) actuators — unlike
-        ``act_manager.applied_torque`` which only reflects Python-side
-        torques and is zero in pure-implicit mode.
-
-        Shape ``(num_envs, num_joints)`` in the same canonical actuated
-        order as :attr:`joint_pos` / :attr:`joint_vel`. Units: N·m for
-        revolute DOFs, N for prismatic DOFs.
-        """
-        ...
-
-    @property
-    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Hard joint position limits in canonical actuated order.
-
-        Returns ``(lower, upper)``, each of shape ``(num_joints,)``. These
-        are the *hard* limits as stored in the simulator's model — apply
-        any soft-limit factor in the consumer.
-
-        Implementations that don't natively expose hard limits (e.g. mjlab,
-        which only stores soft limits) may raise ``NotImplementedError``.
-        """
         ...
 
     # ── Body-level reads (named bodies / links) ──────────────────────
@@ -362,5 +331,66 @@ class RobotData(Protocol):
         Returns:
             Tensor of shape ``(num_envs, 3)`` — angular momentum in
             world frame.
+        """
+        ...
+
+
+@runtime_checkable
+class RobotData(RigidObjectData, Protocol):
+    """Articulation state: :class:`RigidObjectData` plus joint-level reads.
+
+    Extends the joint-free :class:`RigidObjectData` with actuated-joint
+    position / velocity / applied torque / hard limits and the resolved
+    default joint pose. An articulated robot satisfies this full protocol; a
+    passive rigid object satisfies only :class:`RigidObjectData`.
+    """
+
+    @property
+    def default_joint_pos(self) -> Tensor:
+        """Default (home) joint positions in canonical actuated order.
+
+        Shape ``(num_joints,)`` — single-env, broadcast by caller.
+        Resolved once at env init from the preset's
+        ``init_state.joint_pos`` regex→float dict.
+        """
+        ...
+
+    @property
+    def joint_pos(self) -> Tensor:
+        """Actuated joint positions. Shape (num_envs, num_joints)."""
+        ...
+
+    @property
+    def joint_vel(self) -> Tensor:
+        """Actuated joint velocities. Shape (num_envs, num_joints)."""
+        ...
+
+    @property
+    def applied_torque(self) -> Tensor:
+        """Per-DOF actuator torque actually applied by the simulator last step.
+
+        Corresponds to MuJoCo's ``qfrc_actuator``: the output of each
+        actuator's PD law (or motor command), already clipped to the
+        joint's effort limit. Works uniformly for implicit (simulator
+        internal PD) and explicit (Python-computed) actuators — unlike
+        ``act_manager.applied_torque`` which only reflects Python-side
+        torques and is zero in pure-implicit mode.
+
+        Shape ``(num_envs, num_joints)`` in the same canonical actuated
+        order as :attr:`joint_pos` / :attr:`joint_vel`. Units: N·m for
+        revolute DOFs, N for prismatic DOFs.
+        """
+        ...
+
+    @property
+    def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
+        """Hard joint position limits in canonical actuated order.
+
+        Returns ``(lower, upper)``, each of shape ``(num_joints,)``. These
+        are the *hard* limits as stored in the simulator's model — apply
+        any soft-limit factor in the consumer.
+
+        Implementations that don't natively expose hard limits (e.g. mjlab,
+        which only stores soft limits) may raise ``NotImplementedError``.
         """
         ...
