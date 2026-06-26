@@ -130,7 +130,9 @@ def reset_root_state_uniform(
     if len(env_ids) == 0:
         return
 
-    writer = env.get_robot_state_writer(asset_cfg.name)
+    # Polymorphic: resolves to a robot writer or a rigid-object writer, so the
+    # same event places both an articulation and a passive rigid object.
+    writer = env.get_root_state_writer(asset_cfg.name)
     device = env.device
     n = len(env_ids)
 

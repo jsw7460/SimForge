@@ -245,7 +245,10 @@ class NewtonEnv(World):
         self.contact_manager.register_sensors()
 
         from rlworld.rl.envs.newton.robot_data import NewtonRigidObjectData, NewtonRobotData
-        from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
+        from rlworld.rl.envs.newton.robot_state_writer import (
+            NewtonRigidObjectStateWriter,
+            NewtonRobotStateWriter,
+        )
 
         # Per-entity RobotData / state-writer caches (mirrors GenesisEnv). The
         # "robot" entry is built from the same articulation view as before
@@ -267,6 +270,7 @@ class NewtonEnv(World):
         for name in self.scene_manager.rigid_objects:
             view = self.scene_manager.articulation_views[name]
             self._rigid_object_data_cache[name] = NewtonRigidObjectData(self, view, default_joint_pos=None)
+            self._rigid_object_state_writer_cache[name] = NewtonRigidObjectStateWriter(self, view)
 
     def _post_setup(self) -> None:
         """Snapshot DR baselines, then capture CUDA graph.

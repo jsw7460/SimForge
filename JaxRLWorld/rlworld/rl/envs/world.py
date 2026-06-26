@@ -96,6 +96,12 @@ class World(ABC):
         # Articulation split).
         self._rigid_object_data_cache: dict = {}
 
+        # Root-state writers for passive rigid objects (companion to
+        # ``_rigid_object_data_cache``). Populated by a backend's env at build
+        # time; resolved together with the articulation writers in
+        # :meth:`get_root_state_writer`.
+        self._rigid_object_state_writer_cache: dict = {}
+
     def _init_buffers(self) -> None:
         """Initialize common buffers. Call after setting num_envs and device."""
         self.rew_buf = torch.zeros(self.num_envs, device=self.device)
@@ -180,6 +186,23 @@ class World(ABC):
             An object satisfying the ``RigidObjectData`` protocol.
         """
         return self._rigid_object_data_cache[entity_name]
+
+    def get_root_state_writer(self, entity_name: str = "robot"):
+        """Root-state writer for any scene entity — articulation or rigid object.
+
+        Reset events that only move an entity's root (e.g.
+        :func:`~rlworld.rl.envs.mdp.events.common.reset_root_state_uniform`)
+        use this so a single generic event works for both a robot and a passive
+        rigid object — mirroring IsaacLab's polymorphic ``scene[name]`` lookup
+        that returns either an Articulation or a RigidObject. Articulations
+        resolve to their full joint+root writer (``_robot_state_writer_cache``);
+        passive bodies resolve to the root-only writer
+        (``_rigid_object_state_writer_cache``). Raises ``KeyError`` if the name
+        is in neither registry.
+        """
+        if entity_name in self._robot_state_writer_cache:
+            return self._robot_state_writer_cache[entity_name]
+        return self._rigid_object_state_writer_cache[entity_name]
 
     def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
         """Resolve a sim-agnostic selector against this world's scene.

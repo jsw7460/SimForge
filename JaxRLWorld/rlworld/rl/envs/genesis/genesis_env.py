@@ -303,6 +303,14 @@ class GenesisEnv(World):
                 device=self.device,
                 default_joint_pos=None,
             )
+            # Genesis root writes go through the per-entity RigidEntity (set_pos /
+            # set_quat), so the robot writer is per-entity-correct for a rigid
+            # object; the empty actuated_dof_ids make the joint writes no-ops.
+            self._rigid_object_state_writer_cache[name] = GenesisRobotStateWriter(
+                env=self,
+                entity=entity,
+                actuated_dof_ids=[],
+            )
 
     def _step_physics(self) -> None:
         """Genesis physics step with decimation.

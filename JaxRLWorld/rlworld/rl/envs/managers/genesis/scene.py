@@ -124,7 +124,12 @@ class SceneManager(BaseManager):
         return self.entities[item]
 
     def __getitem__(self, item) -> RigidEntity:
-        return self.entities[item]
+        # Articulations and passive rigid objects share the same Genesis entity
+        # type; resolve across both registries so selectors (e.g. a reset event
+        # targeting a graspable object) can name a rigid object too.
+        if item in self.entities:
+            return self.entities[item]
+        return self.rigid_objects[item]
 
     def find_body_names(self, body_names: list[str], entity_name: str = "robot"):
         _, names = entity_utils.find_links(self.entities[entity_name], body_names, preserve_order=True)

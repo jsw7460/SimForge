@@ -275,6 +275,14 @@ class MujocoEnv(World):
                 env=self,
                 default_joint_pos=None,
             )
+            # mjlab's root writes go through the per-entity Entity object, so the
+            # robot writer is already per-entity-correct for a rigid object; the
+            # empty joint_ids make the joint writes no-ops.
+            self._rigid_object_state_writer_cache[name] = MujocoRobotStateWriter(
+                env=self,
+                entity=entity,
+                joint_ids=empty_joint_ids,
+            )
 
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
         self.obs_manager = ObsCls(

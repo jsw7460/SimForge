@@ -19,10 +19,15 @@ import tempfile
 
 import torch
 
+from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from rlworld.rl.configs.scene import RigidObjectCfg
+from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import InitialStateCfg
+from rlworld.rl.envs.mdp.events import common as common_ef
 from rlworld.rl.runners import BaseRunner
+
+CUBE_SPAWN = (0.3, 0.0, 0.6)
 
 CUBE_URDF = """<?xml version="1.0"?>
 <robot name="cube">
@@ -55,9 +60,25 @@ def main() -> int:
         "cube": RigidObjectCfg(
             urdf_path=cube_urdf,
             floating=True,
-            init_state=InitialStateCfg(pos=(0.3, 0.0, 0.6)),
+            init_state=InitialStateCfg(pos=CUBE_SPAWN),
         )
     }
+
+    # Place the cube at reset via the SAME event the robot uses
+    # (reset_root_state_uniform), targeting it through a SceneEntitySelector.
+    # No perturbation → it should land exactly at CUBE_SPAWN on every backend
+    # (verifies the rigid-object state writer + polymorphic root-writer lookup).
+    cfgs.event.reset_cube = EventTermConfig(
+        func=common_ef.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {},
+            "velocity_range": {},
+            "default_pos": CUBE_SPAWN,
+            "default_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
+            "asset_cfg": SceneEntitySelector(name="cube"),
+        },
+    )
 
     runner = BaseRunner.create_with_env(cfgs)
     env = runner.env
@@ -94,6 +115,20 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"[cube]   ERROR: {type(e).__name__}: {e}")
         results["object_read"] = False
+
+    # 2b) Object placed at reset by the event (root writer path). On every
+    #     backend the cube must sit at CUBE_SPAWN right after reset — this is
+    #     what was broken on mjlab before the rigid-object writer existed
+    #     (it spawned at the origin because reset_data ignores the keyframe).
+    try:
+        od = env.get_rigid_object_data("cube")
+        opos = od.root_link_pos_w[0].tolist()
+        err = max(abs(opos[i] - CUBE_SPAWN[i]) for i in range(3))
+        print(f"[cube]   post-reset pos = {opos}  target = {list(CUBE_SPAWN)}  max_err = {err:.4f}")
+        results["object_placed_by_event"] = err < 1e-3
+    except Exception as e:  # noqa: BLE001
+        print(f"[cube]   PLACEMENT ERROR: {type(e).__name__}: {e}")
+        results["object_placed_by_event"] = False
 
     # 3) Object has NO joint API (it's a RigidObjectData, not RobotData).
     has_joint_attr = hasattr(env.get_rigid_object_data("cube"), "joint_pos")
