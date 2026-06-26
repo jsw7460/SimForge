@@ -101,6 +101,28 @@ def _to_mjlab_sensor_cfg(cfg: Any) -> Any:
     )
 
 
+def _rigid_object_spec_fn(source_path: str, floating: bool):
+    """Build a ``spec_fn`` for a passive rigid object from a URDF/MJCF file.
+
+    Returns a zero-arg callable producing a fresh ``mujoco.MjSpec`` (the shape
+    mjlab's ``EntityCfg.spec_fn`` expects). When ``floating`` is True a free
+    joint is added to the single root body so the object is a 6-DOF floating
+    base (box / ball / mug); when False the body stays welded to the world
+    (table / wall). ``mujoco`` is imported lazily — this module loads without
+    mjlab/mujoco installed (see ``_canonical_joint_order_mujoco``).
+    """
+
+    def spec_fn():
+        import mujoco
+
+        spec = mujoco.MjSpec.from_file(source_path)
+        if floating:
+            spec.worldbody.bodies[0].add_freejoint()
+        return spec
+
+    return spec_fn
+
+
 @dataclass
 class MujocoSceneManagerConfig:
     """Internal config consumed by MujocoSceneManager.
@@ -119,6 +141,12 @@ class MujocoSceneManagerConfig:
 
     # Entities — unified EntityCfg dict (auto-converted to mjlab)
     entities: dict[str, EntityCfg] | None = None
+
+    # Passive rigid objects (no actuated joints) — graspable objects, props,
+    # static fixtures. Added to the same mjlab Scene.entities registry but
+    # tracked separately so the env reads them via RigidObjectData (root-only),
+    # mirroring IsaacLab's scene.articulations vs scene.rigid_objects split.
+    rigid_objects: dict[str, EntityCfg] = field(default_factory=dict)
 
     # Sensors — sim-agnostic rlworld.rl.configs.sensors.ContactSensorCfg
     # objects, converted to mjlab sensor configs in
@@ -171,6 +199,11 @@ class MujocoSceneManager(BaseManager):
         # mjlab objects (initialized in build_scene)
         self._scene: Scene = None
         self._sim: Simulation = None
+
+        # Names of passive rigid objects (subset of the mjlab Scene.entities
+        # registry). The ``entities`` / ``rigid_objects`` properties partition
+        # the single mjlab registry by this list.
+        self._rigid_object_names: list[str] = []
 
         # Kinematic trees for each entity
         self.trees: dict[str, KinematicTree] = {}
@@ -238,8 +271,19 @@ class MujocoSceneManager(BaseManager):
 
     @property
     def entities(self) -> dict[str, Entity]:
-        """Get all entities."""
-        return self._scene.entities
+        """Articulated entities (robots).
+
+        mjlab keeps a single ``Scene.entities`` registry for every body; we
+        partition it by name so the env routes articulations to RobotData and
+        passive rigid objects to RigidObjectData (mirrors IsaacLab's
+        scene.articulations vs scene.rigid_objects).
+        """
+        return {n: e for n, e in self._scene.entities.items() if n not in self._rigid_object_names}
+
+    @property
+    def rigid_objects(self) -> dict[str, Entity]:
+        """Passive rigid objects (no actuated joints)."""
+        return {n: self._scene.entities[n] for n in self._rigid_object_names}
 
     @property
     def sensors(self) -> dict[str, Any]:
@@ -293,6 +337,9 @@ class MujocoSceneManager(BaseManager):
         # Convert unified entities → mjlab entities and merge
         if self.config.entities is not None:
             self._build_mjlab_entities()
+
+        # Convert passive rigid objects → actuator-free mjlab entities.
+        self._build_mjlab_rigid_objects()
 
         # Create scene
         self._scene = Scene(scene_cfg, device=self.config.device)
@@ -461,6 +508,37 @@ class MujocoSceneManager(BaseManager):
             )
 
             self.config.mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
+
+    def _build_mjlab_rigid_objects(self) -> None:
+        """Convert passive ``RigidObjectCfg`` entries → actuator-free mjlab entities.
+
+        A rigid object is a single-body system with no actuated joints, loaded
+        from its URDF/MJCF source (``mjcf_path`` preferred over ``urdf_path``).
+        It is added to the same mjlab ``SceneCfg.entities`` registry as
+        articulations (mjlab has one entity registry) but its name is recorded
+        in ``self._rigid_object_names`` so the ``entities`` / ``rigid_objects``
+        properties partition the registry and the env routes it to a
+        RigidObjectData (root-only) reader.
+        """
+        from mjlab.entity import EntityCfg as MjlabEntityCfg
+
+        for object_name, cfg in self.config.rigid_objects.items():
+            source_path = cfg.mjcf_path or cfg.urdf_path
+            if source_path is None:
+                raise ValueError(f"Rigid object '{object_name}' requires 'mjcf_path' or 'urdf_path'")
+
+            init_state = MjlabEntityCfg.InitialStateCfg(
+                pos=cfg.init_state.pos,
+                rot=cfg.init_state.rot,
+            )
+            mjlab_cfg = MjlabEntityCfg(
+                init_state=init_state,
+                spec_fn=_rigid_object_spec_fn(source_path, cfg.floating),
+                articulation=None,
+                sort_actuators=True,
+            )
+            self.config.mjlab_scene_cfg.entities[object_name] = mjlab_cfg
+            self._rigid_object_names.append(object_name)
 
     def build_articulation_indexing(
         self,

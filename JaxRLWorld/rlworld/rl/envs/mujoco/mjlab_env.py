@@ -194,6 +194,7 @@ class MujocoEnv(World):
                 physics_dt=self.scene_cfg.physics_dt,
                 substeps=getattr(self.scene_cfg, "substeps", 1),
                 entities=getattr(self.scene_cfg, "entities", None),
+                rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=getattr(self.scene_cfg, "sensors", ()),
                 terrain_cfg=self.scene_cfg.terrain_cfg,
                 solver_iterations=getattr(self.scene_cfg, "solver_iterations", 10),
@@ -238,7 +239,7 @@ class MujocoEnv(World):
         )
 
         # Build MujocoRobotData using ArticulationIndexing
-        from rlworld.rl.envs.mujoco.robot_data import MujocoRobotData
+        from rlworld.rl.envs.mujoco.robot_data import MujocoRigidObjectData, MujocoRobotData
         from rlworld.rl.envs.mujoco.robot_state_writer import MujocoRobotStateWriter
 
         self._robot_data_cache = {}
@@ -261,6 +262,18 @@ class MujocoEnv(World):
                 env=self,
                 entity=entity,
                 joint_ids=indexing.sim_indices,
+            )
+
+        # Passive rigid objects — RigidObjectData (root + body, no joints).
+        empty_joint_ids = torch.zeros(0, device=self.device, dtype=torch.long)
+        for name, entity in self.scene_manager.rigid_objects.items():
+            self._rigid_object_data_cache[name] = MujocoRigidObjectData(
+                entity=entity,
+                joint_ids=empty_joint_ids,
+                num_envs=self.num_envs,
+                device=self.device,
+                env=self,
+                default_joint_pos=None,
             )
 
         ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
