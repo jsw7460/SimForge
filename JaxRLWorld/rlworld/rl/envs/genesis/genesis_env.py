@@ -172,6 +172,7 @@ class GenesisEnv(World):
                 vis_options=self.scene_cfg.vis_options,
                 rigid_options=self.scene_cfg.rigid_options,
                 entities=self.scene_cfg.entities,
+                rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=self.scene_cfg.sensors,
                 env_spacing=self.scene_cfg.env_spacing,
                 show_viewer=self.visualization_cfg.show_viewer,

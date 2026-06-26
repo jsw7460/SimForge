@@ -91,6 +91,9 @@ class SceneManagerConfig:
     show_viewer: bool
     num_envs: int = 1
     device: str = "cpu"
+    # Passive rigid objects (no actuated joints) — graspable objects, props,
+    # static fixtures. Loaded into the separate ``self.rigid_objects`` registry.
+    rigid_objects: dict = field(default_factory=dict)
     # Terrain (flat plane by default; generator → heightfield) — fed to a
     # GenesisTerrainImporter constructed via ManagerRegistry.
     terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
@@ -189,7 +192,7 @@ class SceneManager(BaseManager):
         self.rigid_objects = {}
         for entity_name, cfg in self.config.entities.items():
             self.entities[entity_name] = self._load_entity(entity_name, cfg)
-        for object_name, cfg in (self.config.rigid_objects or {}).items():
+        for object_name, cfg in self.config.rigid_objects.items():
             self.rigid_objects[object_name] = self._load_entity(object_name, cfg)
 
     def _load_entity(self, name: str, cfg):
