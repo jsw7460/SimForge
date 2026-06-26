@@ -1,20 +1,20 @@
-"""Genesis rigid-object (RigidObjectCfg) read-path smoke / verification.
+"""Multi-entity rigid-object (RigidObjectCfg) read-path smoke / verification.
 
-Verifies the multi-entity read path on Genesis end-to-end: declare a passive
-rigid object (a free-floating cube) in ``scene.rigid_objects`` alongside the
-Go2 robot, build the env, and read the cube's root pose/velocity via
-``env.get_rigid_object_data("cube")`` (the RigidObjectData root-only API),
+Verifies the multi-entity read path on a chosen backend end-to-end: declare a
+passive rigid object (a free-floating cube) in ``scene.rigid_objects``
+alongside the Go2 robot, build the env, and read the cube's root pose/velocity
+via ``env.get_rigid_object_data("cube")`` (the RigidObjectData root-only API),
 while confirming the robot path (``get_robot_data("robot")``) is unaffected.
 
-This is the design proof on the cleanest backend before implementing the
-Newton / mjlab loaders.
-
 Run (GPU box):
-    jaxpy rlworld/scripts/diag/genesis_rigid_object_smoke.py
+    jaxpy rlworld/scripts/diag/rigid_object_smoke.py --sim genesis
+    jaxpy rlworld/scripts/diag/rigid_object_smoke.py --sim newton
+    jaxpy rlworld/scripts/diag/rigid_object_smoke.py --sim mujoco
 """
 
 from __future__ import annotations
 
+import argparse
 import tempfile
 
 import torch
@@ -40,11 +40,15 @@ CUBE_URDF = """<?xml version="1.0"?>
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sim", choices=["genesis", "newton", "mujoco"], default="genesis")
+    args = ap.parse_args()
+
     with tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False) as f:
         f.write(CUBE_URDF)
         cube_urdf = f.name
 
-    cfg = Go2FlatConfig(sim_type="genesis", num_envs=1)
+    cfg = Go2FlatConfig(sim_type=args.sim, num_envs=1)
     cfgs = cfg.build()
     # Inject one passive rigid object into the (separate) rigid_objects registry.
     cfgs.scene.rigid_objects = {
@@ -60,7 +64,7 @@ def main() -> int:
     env.reset()
 
     print("=" * 70)
-    print("GENESIS RIGID-OBJECT READ SMOKE")
+    print(f"RIGID-OBJECT READ SMOKE  [sim={args.sim}]")
     print("=" * 70)
 
     results: dict[str, bool] = {}

@@ -167,6 +167,7 @@ class NewtonEnv(World):
             config=SceneCfgCls(
                 num_worlds=self.num_envs,
                 entities=self.scene_cfg.entities,
+                rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=self.scene_cfg.sensors,
                 contact_sensors=getattr(self.scene_cfg, "contact_sensors", None),
                 terrain_cfg=self.scene_cfg.terrain_cfg,
@@ -243,7 +244,7 @@ class NewtonEnv(World):
         self.contact_manager = ContactCls(env=self)
         self.contact_manager.register_sensors()
 
-        from rlworld.rl.envs.newton.robot_data import NewtonRobotData
+        from rlworld.rl.envs.newton.robot_data import NewtonRigidObjectData, NewtonRobotData
         from rlworld.rl.envs.newton.robot_state_writer import NewtonRobotStateWriter
 
         # Per-entity RobotData / state-writer caches (mirrors GenesisEnv). The
@@ -260,6 +261,12 @@ class NewtonEnv(World):
             self._robot_state_writer_cache[name] = NewtonRobotStateWriter(self, view)
         self._robot_data = self._robot_data_cache["robot"]
         self._robot_state_writer = self._robot_state_writer_cache["robot"]
+
+        # Passive rigid objects — RigidObjectData (root + body, no joints) from
+        # each object's own ArticulationView (free-joint single body).
+        for name in self.scene_manager.rigid_objects:
+            view = self.scene_manager.articulation_views[name]
+            self._rigid_object_data_cache[name] = NewtonRigidObjectData(self, view, default_joint_pos=None)
 
     def _post_setup(self) -> None:
         """Snapshot DR baselines, then capture CUDA graph.

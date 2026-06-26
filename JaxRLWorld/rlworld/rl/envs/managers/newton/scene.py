@@ -321,6 +321,9 @@ class NewtonSceneManagerConfig:
 
     # Entity and sensor configurations
     entities: list[NewtonEntityConfig] | dict[str, EntityCfg | NewtonEntityCfg] = field(default_factory=dict)
+    # Passive rigid objects (no actuated joints) — graspable objects, props,
+    # static fixtures. Loaded into the separate ``self.rigid_objects`` registry.
+    rigid_objects: dict[str, EntityCfg | NewtonEntityCfg] = field(default_factory=dict)
     sensors: list[NewtonSensorConfig] | None = None
     # Simulator-agnostic contact sensors (ContactSensorCfg). Handled
     # separately from ``sensors`` (which only holds NewtonSensorConfig
@@ -399,6 +402,11 @@ class NewtonSceneManager(BaseManager):
         # Entity tracking
         self.entities: dict[str, Any] = {}  # entity_name -> entity info
         self._entity_builders: dict[str, newton.ModelBuilder] = {}  # Temporary during build
+        # Passive rigid objects — separate registry (mirrors IsaacLab's
+        # scene.articulations vs scene.rigid_objects). Same {config, builder,
+        # shape_count} info shape as ``self.entities``.
+        self.rigid_objects: dict[str, Any] = {}
+        self._rigid_object_builders: dict[str, newton.ModelBuilder] = {}
         self._body_name_to_idx: dict[str, dict[str, int]] = defaultdict(dict)  # entity_name -> {body_name: body_idx}
 
         # Sensor tracking
@@ -504,19 +512,40 @@ class NewtonSceneManager(BaseManager):
         return names
 
     def register_entities(self) -> None:
-        """Register all entities defined in config."""
+        """Register articulated entities and passive rigid objects from config."""
         for entity_name, cfg in self.config.entities.items():
             self._register_entity(entity_name, cfg)
+        for object_name, cfg in self.config.rigid_objects.items():
+            self._register_rigid_object(object_name, cfg)
 
     def _register_entity(self, entity_name: str, cfg: EntityCfg | NewtonEntityCfg) -> None:
-        """Register a single robot/articulated entity from its unified config.
+        """Register a single articulated entity (robot) from its unified config."""
+        builder, info = self._build_entity(entity_name, cfg)
+        self._entity_builders[entity_name] = builder
+        self.entities[entity_name] = info
 
-        Terrain is NOT an entity any more — it's owned by ``self.terrain``
-        (a :class:`TerrainImporter`) and added separately during the
-        scene-merge step.
+    def _register_rigid_object(self, object_name: str, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Register a single passive rigid object from its unified config.
+
+        Loaded identically to an articulated entity (a rigid object is just a
+        zero-actuator entity), but tracked in the separate ``rigid_objects``
+        registry and built into each world by :meth:`build_scene` alongside the
+        robots.
         """
-        if entity_name in self.entities:
-            raise ValueError(f"Entity '{entity_name}' already registered")
+        builder, info = self._build_entity(object_name, cfg)
+        self._rigid_object_builders[object_name] = builder
+        self.rigid_objects[object_name] = info
+
+    def _build_entity(self, name: str, cfg: EntityCfg | NewtonEntityCfg) -> tuple[newton.ModelBuilder, dict]:
+        """Build a Newton ModelBuilder for one entity (robot or rigid object).
+
+        Terrain is NOT an entity — it's owned by ``self.terrain`` (a
+        :class:`TerrainImporter`) and added separately during the scene-merge
+        step. Shared by :meth:`_register_entity` and
+        :meth:`_register_rigid_object`.
+        """
+        if name in self.entities or name in self.rigid_objects:
+            raise ValueError(f"Entity '{name}' already registered")
 
         builder = newton.ModelBuilder()
         newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
@@ -528,14 +557,14 @@ class NewtonSceneManager(BaseManager):
         elif cfg.urdf_path:
             self._load_urdf_entity(builder, cfg)
         else:
-            raise ValueError(f"Entity '{entity_name}' has no mjcf_path, urdf_path, or usd_path")
+            raise ValueError(f"Entity '{name}' has no mjcf_path, urdf_path, or usd_path")
 
-        self._entity_builders[entity_name] = builder
-        self.entities[entity_name] = {
+        info = {
             "config": cfg,
             "builder": builder,
             "shape_count": len(builder.shape_label),
         }
+        return builder, info
 
     def _load_urdf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
         """Load URDF entity from unified config."""
@@ -898,17 +927,36 @@ class NewtonSceneManager(BaseManager):
         self.terrain.import_into_builder(terrain_builder)
         scene_builder.add_builder(terrain_builder)
 
-        # All entries in self._entity_builders are robots → replicate per world.
         n_robot_entities = len(self._entity_builders)
-        for entity_name, entity_builder in self._entity_builders.items():
-            cfg = self.entities[entity_name]["config"]
-            label_prefix = entity_name if n_robot_entities > 1 else None
-            # ModelBuilder.replicate(builder, N) == N×add_world(builder) with
-            # no prefix; do the loop ourselves so we can pass label_prefix.
+        if not self._rigid_object_builders:
+            # Articulations only — replicate each per world (unchanged path).
+            for entity_name, entity_builder in self._entity_builders.items():
+                cfg = self.entities[entity_name]["config"]
+                label_prefix = entity_name if n_robot_entities > 1 else None
+                # ModelBuilder.replicate(builder, N) == N×add_world(builder) with
+                # no prefix; do the loop ourselves so we can pass label_prefix.
+                for _ in range(self.config.num_worlds):
+                    scene_builder.add_world(entity_builder, label_prefix=label_prefix)
+                if label_prefix is not None:
+                    cfg.body_label_prefix = label_prefix
+        else:
+            # Robots + rigid objects co-located in each world. Every entity is
+            # label-prefixed by its name so each per-entity ArticulationView
+            # (pattern ``{prefix}*``) resolves to only its own bodies — without
+            # a prefix the robot's "*" pattern would also match the object's
+            # (free-joint) articulation. begin_world/end_world groups one
+            # robot+objects set into a single world, replicated num_worlds times.
+            for entity_name in self._entity_builders:
+                self.entities[entity_name]["config"].body_label_prefix = entity_name
+            for object_name in self._rigid_object_builders:
+                self.rigid_objects[object_name]["config"].body_label_prefix = object_name
             for _ in range(self.config.num_worlds):
-                scene_builder.add_world(entity_builder, label_prefix=label_prefix)
-            if label_prefix is not None:
-                cfg.body_label_prefix = label_prefix
+                scene_builder.begin_world()
+                for entity_name, entity_builder in self._entity_builders.items():
+                    scene_builder.add_builder(entity_builder, label_prefix=entity_name)
+                for object_name, object_builder in self._rigid_object_builders.items():
+                    scene_builder.add_builder(object_builder, label_prefix=object_name)
+                scene_builder.end_world()
 
         # Finalize model
         self.model = scene_builder.finalize()
@@ -1111,7 +1159,7 @@ class NewtonSceneManager(BaseManager):
         ``"FR_hip_joint"`` never fullmatch Newton's multi-DOF names
         like ``"root_joint:0"``).
         """
-        for entity_name, entity_info in self.entities.items():
+        for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
             cfg = entity_info["config"]
             prefix = getattr(cfg, "body_label_prefix", None)
             pattern = f"{prefix}*" if prefix else "*"
@@ -1133,7 +1181,7 @@ class NewtonSceneManager(BaseManager):
         re-scanning ``model.body_label`` / ``model.shape_label`` on
         every sensor construction.
         """
-        for entity_name, entity_info in self.entities.items():
+        for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
             cfg = entity_info["config"]
             prefix = getattr(cfg, "body_label_prefix", None)
             self.label_indexing[entity_name] = NewtonLabelIndexing.from_articulation(
