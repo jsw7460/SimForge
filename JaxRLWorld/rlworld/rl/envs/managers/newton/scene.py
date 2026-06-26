@@ -928,35 +928,27 @@ class NewtonSceneManager(BaseManager):
         scene_builder.add_builder(terrain_builder)
 
         n_robot_entities = len(self._entity_builders)
-        if not self._rigid_object_builders:
-            # Articulations only — replicate each per world (unchanged path).
-            for entity_name, entity_builder in self._entity_builders.items():
-                cfg = self.entities[entity_name]["config"]
-                label_prefix = entity_name if n_robot_entities > 1 else None
-                # ModelBuilder.replicate(builder, N) == N×add_world(builder) with
-                # no prefix; do the loop ourselves so we can pass label_prefix.
-                for _ in range(self.config.num_worlds):
-                    scene_builder.add_world(entity_builder, label_prefix=label_prefix)
-                if label_prefix is not None:
-                    cfg.body_label_prefix = label_prefix
-        else:
-            # Robots + rigid objects co-located in each world. Every entity is
-            # label-prefixed by its name so each per-entity ArticulationView
-            # (pattern ``{prefix}*``) resolves to only its own bodies — without
-            # a prefix the robot's "*" pattern would also match the object's
-            # (free-joint) articulation. begin_world/end_world groups one
-            # robot+objects set into a single world, replicated num_worlds times.
-            for entity_name in self._entity_builders:
-                self.entities[entity_name]["config"].body_label_prefix = entity_name
-            for object_name in self._rigid_object_builders:
-                self.rigid_objects[object_name]["config"].body_label_prefix = object_name
-            for _ in range(self.config.num_worlds):
-                scene_builder.begin_world()
-                for entity_name, entity_builder in self._entity_builders.items():
-                    scene_builder.add_builder(entity_builder, label_prefix=entity_name)
-                for object_name, object_builder in self._rigid_object_builders.items():
-                    scene_builder.add_builder(object_builder, label_prefix=object_name)
-                scene_builder.end_world()
+
+        # Assemble one per-world template (all articulated entities + all
+        # passive rigid objects) and replicate it across worlds in a single
+        # call — the idiomatic Newton pattern (``scene.replicate`` is what the
+        # examples use; one ``add_world`` per world is the manual equivalent).
+        # Robots keep the previous prefix policy: ``None`` for a single robot
+        # so its body / site / sensor labels stay bare (sensor lookups match
+        # by exact name); each rigid object is name-prefixed so its own
+        # ArticulationView (pattern ``{name}*``) resolves to only its bodies.
+        world_template = newton.ModelBuilder()
+        newton.solvers.SolverMuJoCo.register_custom_attributes(world_template)
+        for entity_name, entity_builder in self._entity_builders.items():
+            label_prefix = entity_name if n_robot_entities > 1 else None
+            world_template.add_builder(entity_builder, label_prefix=label_prefix)
+            if label_prefix is not None:
+                self.entities[entity_name]["config"].body_label_prefix = label_prefix
+        for object_name, object_builder in self._rigid_object_builders.items():
+            world_template.add_builder(object_builder, label_prefix=object_name)
+            self.rigid_objects[object_name]["config"].body_label_prefix = object_name
+
+        scene_builder.replicate(world_template, self.config.num_worlds)
 
         # Finalize model
         self.model = scene_builder.finalize()
