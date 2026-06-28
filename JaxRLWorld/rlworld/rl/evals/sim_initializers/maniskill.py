@@ -50,7 +50,11 @@ class ManiSkillInitializer(SimInitializer):
 
         from rlworld.rl.envs import ManiSkillEnv
 
-        env_kwargs = eval_cfgs.env.gym_make_kwargs
+        env_kwargs = dict(eval_cfgs.env.gym_make_kwargs)
+        if record_video and video_dir:
+            # RecordEpisode pulls frames via env.render(); state-obs training
+            # envs are built without a render mode, so enable it for capture.
+            env_kwargs.setdefault("render_mode", "rgb_array")
         env = gym.make(eval_cfgs.env.task_name, num_envs=eval_cfgs.env.num_envs, **env_kwargs)
 
         if record_video and video_dir:
