@@ -202,8 +202,7 @@ class PPOActorCritic(BaseActorCritic):
             self.critic_obs_normalizer = None
 
         print(
-            f"🎲 PPO Actor-Critic: actor={type(actor_cfg).__name__}, "
-            f"distribution={distribution_type}, std={std_type}"
+            f"🎲 PPO Actor-Critic: actor={type(actor_cfg).__name__}, distribution={distribution_type}, std={std_type}"
         )
         print(f"📏 Obs normalization: {obs_normalization}")
 
@@ -326,7 +325,10 @@ class PPOActorCritic(BaseActorCritic):
             log_prob = dist.log_prob_raw(actions)
         else:
             log_prob = dist.log_prob(actions)
-        entropy = dist.entropy()
+        # Squashed entropy is MC-estimated and needs an rng (split off the actor key);
+        # the Gaussian path ignores it. key is always provided on the PPO update path.
+        ent_key = None if key is None else jax.random.fold_in(key, 0)
+        entropy = dist.entropy(ent_key)
         return log_prob, entropy, dist.mean, dist.std, aux
 
     def evaluate_value(self, critic_obs: jax.Array) -> tuple[jax.Array, dict]:
@@ -354,7 +356,7 @@ class PPOActorCritic(BaseActorCritic):
             action = dist.sample(key)
 
         log_prob = dist.log_prob(action)
-        entropy = dist.entropy()
+        entropy = dist.entropy(jax.random.fold_in(key, 1))
         value, critic_aux = self.evaluate_value(critic_obs)
 
         # Merge aux dicts

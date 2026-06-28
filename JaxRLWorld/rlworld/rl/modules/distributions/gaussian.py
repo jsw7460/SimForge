@@ -46,9 +46,10 @@ class GaussianDistribution(eqx.Module):
         log_prob = -0.5 * (((actions - self.mean) ** 2) / var + 2 * log_scale + jnp.log(2 * jnp.pi))
         return log_prob.sum(axis=-1)
 
-    def entropy(self) -> jax.Array:
+    def entropy(self, key: jax.Array | None = None) -> jax.Array:
         """
-        Compute entropy of the distribution.
+        Compute entropy of the distribution (closed form). ``key`` is ignored;
+        it exists only to share the signature with SquashedGaussianDistribution.
 
         Returns sum over action dimensions.
         """
@@ -143,13 +144,24 @@ class SquashedGaussianDistribution(eqx.Module):
 
         return (gaussian_log_prob - log_det_jacobian).sum(axis=-1)
 
-    def entropy(self) -> jax.Array:
+    def entropy(self, key: jax.Array) -> jax.Array:
         """
-        Approximate entropy (Gaussian entropy, ignoring squashing).
+        Entropy of the tanh-squashed Gaussian. No closed form, so MC-estimate
+        the change-of-variables correction with ONE pre-tanh sample (mirrors
+        brax ``NormalTanhDistribution.entropy``):
 
-        Exact entropy of squashed Gaussian has no closed form.
+            H(tanh X) = H(X) + E_X[log|d tanh/dx|]
+                      = H_gauss + E_X[log(1 - tanh^2 X)]
+
+        The batch mean taken by the caller makes the single-sample estimate
+        low-variance. Note the sign vs log_prob: log_prob SUBTRACTS the
+        log-det-Jacobian, entropy ADDS it.
         """
-        return 0.5 * (1 + jnp.log(2 * jnp.pi) + 2 * jnp.log(self.std)).sum(axis=-1)
+        gaussian_entropy = 0.5 * (1 + jnp.log(2 * jnp.pi) + 2 * jnp.log(self.std))
+        pre_tanh = self.mean + self.std * jax.random.normal(key, shape=self.mean.shape)
+        # tanh forward log-det-Jacobian: log(1 - tanh^2) = 2(log2 - x - softplus(-2x)) <= 0
+        log_det_jacobian = 2 * (jnp.log(2.0) - pre_tanh - jax.nn.softplus(-2 * pre_tanh))
+        return (gaussian_entropy + log_det_jacobian).sum(axis=-1)
 
 
 # ==================== Utility Functions ====================
