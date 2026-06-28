@@ -1,3 +1,4 @@
+import os
 import time
 from typing import Any, Dict, List
 
@@ -15,6 +16,40 @@ from rlworld.rl.modules.utils import count_parameters, print_model_summary
 from rlworld.rl.runners.base_runner import BaseRunner
 from rlworld.rl.runners.iteration_data import IterationData
 from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+
+# Opt-in per-section rollout profiling. No-op unless the env var is set.
+_PROFILE_ROLLOUT = os.environ.get("JAXRLWORLD_PROFILE_ROLLOUT", "0") == "1"
+
+
+class _RolloutProfiler:
+    """Per-section timing of the rollout loop (gated by JAXRLWORLD_PROFILE_ROLLOUT).
+
+    Synchronizes the relevant runtime at each section boundary so the attributed
+    time is real device time, not async kernel-launch time: ``jax_out`` blocks
+    the JAX/XLA stream on that output, ``torch_sync`` syncs the PyTorch CUDA
+    stream. Disabled by default -> zero cost.
+    """
+
+    def __init__(self) -> None:
+        self.acc: dict[str, float] = {}
+        self.steps = 0
+
+    def lap(self, name: str, t0: float, jax_out: Any = None, torch_sync: bool = False) -> float:
+        if jax_out is not None:
+            jax.block_until_ready(jax_out)
+        if torch_sync and torch.cuda.is_available():
+            torch.cuda.synchronize()
+        now = time.perf_counter()
+        self.acc[name] = self.acc.get(name, 0.0) + (now - t0)
+        return now
+
+    def report(self) -> None:
+        total = sum(self.acc.values()) or 1e-9
+        n = max(self.steps, 1)
+        print(f"\n[rollout profile] {n} steps, per-section:")
+        for name, sec in sorted(self.acc.items(), key=lambda kv: -kv[1]):
+            print(f"  {name:20s} {sec * 1e3:9.2f} ms | {sec / n * 1e3:7.3f} ms/step | {sec / total * 100:5.1f}%")
+        print(f"  {'TOTAL':20s} {total * 1e3:9.2f} ms | {total / n * 1e3:7.3f} ms/step")
 
 
 class OnPolicyRunner(BaseRunner):
@@ -181,15 +216,25 @@ class OnPolicyRunner(BaseRunner):
         critic_obs = obs.critic_obs
         infos = {}
 
+        prof = _RolloutProfiler() if _PROFILE_ROLLOUT else None
+
         for _step_i in range(self.num_steps_per_env):
+            t = time.perf_counter() if prof else 0.0
+
             # Get action
             actions = self.alg.act(PPO.ActInput(actor_obs, critic_obs))
+            if prof:
+                t = prof.lap("act", t, jax_out=actions)
             actions_for_env = self._process_action_for_env(actions)
             actions_torch = jax_to_torch(actions_for_env, self.device)
+            if prof:
+                t = prof.lap("act->torch", t, torch_sync=True)
 
             # Environment step
             obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
             dones = terminated | truncated
+            if prof:
+                t = prof.lap("env.step", t, torch_sync=True)
 
             # Reward-shaping hook (default: identity). Subclasses may add
             # an externally-computed reward term — one that the env's
@@ -207,9 +252,13 @@ class OnPolicyRunner(BaseRunner):
             actor_obs = torch_to_jax(obs_dict["actor"])
             critic_obs = torch_to_jax(obs_dict["critic"])
             rewards_jax = torch_to_jax(rewards)
+            if prof:
+                t = prof.lap("obs->jax", t, jax_out=actor_obs)
             # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
             terminated_jax = jnp.asarray(terminated.cpu().numpy())
             truncated_jax = jnp.asarray(truncated.cpu().numpy())
+            if prof:
+                t = prof.lap("bool->jax(.cpu)", t, jax_out=terminated_jax)
 
             # Process step
             infos_jax = {}
@@ -232,6 +281,8 @@ class OnPolicyRunner(BaseRunner):
                 next_actor_obs=actor_obs,
                 next_critic_obs=critic_obs,
             )
+            if prof:
+                t = prof.lap("process_env_step", t)
 
             # Update statistics
             self._update_reward_stats(
@@ -239,6 +290,12 @@ class OnPolicyRunner(BaseRunner):
                 dones=dones,
                 success=infos.get("success", None),
             )
+            if prof:
+                t = prof.lap("reward_stats", t, torch_sync=True)
+                prof.steps += 1
+
+        if prof:
+            prof.report()
 
         return {
             "collection_time": time.time() - start_time,
