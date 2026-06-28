@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, SolverMuJoCoCfg, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -114,6 +114,20 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
     r = cfg.robot
     quat = _initial_quat()
 
+    # explicit-PD collection uses the explicit-PD path (no command
+    # delay) so kp/kd map onto a clean torque computation; training keeps
+    # the trained DelayedPD actuator. Per-joint PD overrides (when set on
+    # the robot config) replace the nominal p_gains / d_gains — the
+    # actuator's stiffness / damping accept a {joint_regex: value} map
+    # natively, so heterogeneous per-joint PD ships without rewiring.
+    ActuatorCls, _delay_kwargs = (
+        (IdealPDActuatorCfg, {})
+        if cfg.use_ideal_pd_actuator
+        else (DelayedPDActuatorCfg, {"min_delay": 0, "max_delay": 2})
+    )
+    stiffness = r.kp_per_dof_override if r.kp_per_dof_override is not None else r.p_gains
+    damping = r.kd_per_dof_override if r.kd_per_dof_override is not None else r.d_gains
+
     return NewtonSceneConfig(
         dt=timing["dt"],
         substeps=timing["substeps"],
@@ -164,14 +178,13 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
                 links_to_keep=("left_foot_frame_joint", "right_foot_frame_joint"),
                 articulation=ArticulationCfg(
                     actuators=(
-                        DelayedPDActuatorCfg(
+                        ActuatorCls(
                             target_names_expr=(".*",),
-                            stiffness=r.p_gains,
-                            damping=r.d_gains,
+                            stiffness=stiffness,
+                            damping=damping,
                             armature=r.armature,
                             frictionloss=0.3,
-                            min_delay=0,
-                            max_delay=2,
+                            **_delay_kwargs,
                         ),
                     ),
                 ),

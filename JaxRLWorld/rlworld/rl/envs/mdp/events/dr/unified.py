@@ -260,7 +260,7 @@ def _newton_friction_backend(
 
     for axis in axes:
         if axis not in _NEWTON_FRICTION_AXIS_ATTR:
-            raise ValueError(f"Unknown friction axis {axis}; valid axes are " f"{sorted(_NEWTON_FRICTION_AXIS_ATTR)}.")
+            raise ValueError(f"Unknown friction axis {axis}; valid axes are {sorted(_NEWTON_FRICTION_AXIS_ATTR)}.")
         attr = _NEWTON_FRICTION_AXIS_ATTR[axis]
         values = wp.to_torch(view.get_attribute(attr, model))
         # Layout: (num_worlds, n_axes_inner, n_shapes_per_world).  The
@@ -423,14 +423,11 @@ def randomize_body_mass(
 def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(
-            f"Genesis body mass DR only supports operation='scale' "
-            f"(got {operation!r}); set_mass_shift is a multiplier."
+            f"Genesis body mass DR only supports operation='scale' (got {operation!r}); set_mass_shift is a multiplier."
         )
     entity = env.scene_manager[resolved.name]
     if resolved.body_ids is None:
-        raise ValueError(
-            "Genesis randomize_body_mass requires asset_cfg.body_names; " "got selector with no body subset."
-        )
+        raise ValueError("Genesis randomize_body_mass requires asset_cfg.body_names; got selector with no body subset.")
     links_idx = resolved.body_ids.tolist()
     n_envs, n_links = len(env_ids), len(links_idx)
     ratios = sample((n_envs, n_links), *mass_range, env.device, distribution)
@@ -655,6 +652,16 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
 
 
 def _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution):
+    # Explicit actuators (IdealPD / Delayed / DCMotor) compute torque in Python
+    # from their OWN stiffness/damping and ZERO the solver's joint_target_ke/kd
+    # (the joint runs in direct-torque / joint_f mode), so randomizing the solver
+    # gains here is a no-op. Randomize the ACTUATOR gains instead — those are what
+    # actuator_pd.compute() actually uses. Implicit actuators (Newton internal PD)
+    # DO consume joint_target_ke/kd, so keep the solver-gain path below for them.
+    if getattr(env.act_manager, "has_explicit_actuators", False):
+        _newton_actuator_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution)
+        return
+
     import warp as wp
     from newton.solvers import SolverNotifyFlags
 
@@ -678,12 +685,40 @@ def _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distri
         _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
+def _newton_actuator_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution):
+    """Randomize the per-env stiffness/damping of the EXPLICIT actuators — the
+    gains that actually produce torque in ``actuator_pd.compute`` (the solver's
+    joint_target_ke/kd are zeroed/unused in direct-torque mode). Each explicit
+    actuator owns ``(num_envs, n_actuated_joints)`` stiffness/damping tensors; we
+    edit them in place so the next step's torque reflects the new gains (no solver
+    notify needed — the gains live on the Python actuator). The pre-DR gains are
+    captured once per actuator so 'scale'/'add' do not compound across resets.
+    """
+    for actuator, _joint_idx in env.act_manager.actuators:
+        if not hasattr(actuator, "_dr_base_stiffness"):
+            actuator._dr_base_stiffness = actuator.stiffness.clone()
+            actuator._dr_base_damping = actuator.damping.clone()
+        for attr, base_attr, value_range in (
+            ("stiffness", "_dr_base_stiffness", kp_range),
+            ("damping", "_dr_base_damping", kd_range),
+        ):
+            if value_range is None:
+                continue
+            gains = getattr(actuator, attr)  # [num_envs, n_actuated_joints]
+            sampled = sample((len(env_ids), gains.shape[1]), *value_range, env.device, distribution)
+            if operation == "abs":
+                gains[env_ids] = sampled
+            else:
+                base = getattr(actuator, base_attr)
+                gains[env_ids] = apply_operation(base[env_ids], sampled, operation)
+
+
 def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
     from mjlab.envs.mdp.dr import pd_gains as _mjlab_pd_gains
 
     if kp_range is None or kd_range is None:
         raise NotImplementedError(
-            "MuJoCo pd_gains requires both kp_range and kd_range " "(mjlab's dr.pd_gains has no None-skip option)."
+            "MuJoCo pd_gains requires both kp_range and kd_range (mjlab's dr.pd_gains has no None-skip option)."
         )
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)

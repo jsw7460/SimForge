@@ -130,3 +130,19 @@ class Go2Config(RobotConfig):
     # ``kp_hip_override`` / ``kp_knee_override`` slots above when set.
     kp_per_leg_override: dict[str, dict[str, float]] | None = None
     kd_per_leg_override: dict[str, dict[str, float]] | None = None
+
+    # ── Per-DOF / per-foot friction overrides (Newton only, default
+    # None = legacy) ──
+    # When set, builders install a deterministic per-dim friction event
+    # (``set_joint_friction_per_dim`` / ``set_foot_friction_per_foot``)
+    # that rewrites the heterogeneous values every reset, in place of the
+    # scalar ``joint_frictionloss_override`` / ``foot_friction_override``
+    # terms. ``joint_friction_per_joint_override`` is a 12-vector in the
+    # actuated-DOF order matched by ``(.*_joint$,)`` against
+    # ``robot_view.joint_dof_names``; ``foot_friction_per_foot_override``
+    # is a 4-vector in the order the foot collision shapes are matched
+    # against ``model.shape_label`` (same order the per-foot apply
+    # uses, so collect and identification stay column-consistent). Take
+    # precedence over the scalar friction overrides when set.
+    joint_friction_per_joint_override: list[float] | None = None
+    foot_friction_per_foot_override: list[float] | None = None

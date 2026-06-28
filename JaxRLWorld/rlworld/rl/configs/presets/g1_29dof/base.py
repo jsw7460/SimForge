@@ -128,6 +128,14 @@ class G1FlatConfig:
     # Run name (None → auto from sim_type)
     run_name: str | None = None
 
+    # ── Actuator model ────────────────────────────────────────────────
+    # Newton only. False (default) keeps the trained DelayedPD actuator
+    # (command delay) so existing training/eval is bit-identical. True
+    # swaps in IdealPDActuatorCfg (explicit PD, no delay) — used by the
+    # explicit-PD collection arm so kp/kd map onto a clean
+    # explicit-PD torque path (matches the Go2 setup).
+    use_ideal_pd_actuator: bool = True
+
     # ── Rough terrain ─────────────────────────────────────────────────
     use_rough_terrain: bool = False
     """Swap the flat ground for a generated rough terrain (the shared

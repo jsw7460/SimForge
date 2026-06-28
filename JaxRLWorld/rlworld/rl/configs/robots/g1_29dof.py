@@ -188,6 +188,18 @@ class G1MujocoConfig(RobotConfig):
 
     foot_names: List[str] = field(default_factory=lambda: ["left_ankle_roll_link", "right_ankle_roll_link"])
 
+    # ── Per-joint PD overrides (Newton only, default None = legacy) ──
+    # When set, ``_newton_builders`` feeds these per-joint dicts to the
+    # actuator's ``stiffness`` / ``damping`` (which natively accept a
+    # ``{joint_regex: value}`` map) in place of the nominal ``p_gains`` /
+    # ``d_gains``, so callers can pin heterogeneous per-joint PD
+    # without touching the actuator wiring. Keys are joint-name regexes —
+    # for per-DOF identification use exact joint names. Default ``None``
+    # means "no override" (every existing training run is bit-identical to
+    # before these fields were added).
+    kp_per_dof_override: dict[str, float] | None = None
+    kd_per_dof_override: dict[str, float] | None = None
+
     @property
     def action_scale(self) -> Dict[str, float]:
         return dict(G1_ACTION_SCALE)

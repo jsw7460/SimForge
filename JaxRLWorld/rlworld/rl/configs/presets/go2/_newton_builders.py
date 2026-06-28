@@ -287,8 +287,8 @@ def build_action(cfg: Go2FlatConfig) -> NewtonActionConfig:
         # sim model's joint limits at build time.
         return NewtonActionConfig(
             actuated_dof_names=r.actuated_dof_patterns,
-            # action_scale="joint_limit",
-            action_scale=0.5,
+            action_scale="joint_limit",
+            # action_scale=0.5,
             clip_actions=(-1.0, 1.0),
             # offset="joint_limit_center",
             offset=r.get_action_offset(),
@@ -473,7 +473,19 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     # when the corresponding override field is set, so vanilla
     # training runs (no override) get only the body_mass DR above
     # plus the wide friction-range terms.
-    if r.foot_friction_override is not None:
+    # Per-foot heterogeneous friction takes precedence over the scalar
+    # override. Installed after the wide ``randomize_friction`` term so it
+    # runs later in the reset_dr list and wins the final write (same
+    # mechanism the scalar setter relies on).
+    if r.foot_friction_per_foot_override is not None:
+        terms["set_foot_friction_per_foot"] = EventTermConfig(
+            func=newton_dr.set_foot_friction_per_foot,
+            mode="reset_dr",
+            params={
+                "values": list(r.foot_friction_per_foot_override),
+            },
+        )
+    elif r.foot_friction_override is not None:
         # ``set_foot_friction`` matches the foot collision shapes by name
         # against the raw ``model.shape_label`` and writes
         # ``model.shape_material_mu`` directly. The ArticulationView /
@@ -488,7 +500,18 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
                 # "dr_scale": (0.99, 1.01),
             },
         )
-    if r.joint_frictionloss_override is not None:
+
+    # Per-DOF heterogeneous joint friction takes precedence over the
+    # scalar override (same reset_dr ordering rationale as above).
+    if r.joint_friction_per_joint_override is not None:
+        terms["set_joint_friction_per_dim"] = EventTermConfig(
+            func=newton_dr.set_joint_friction_per_dim,
+            mode="reset_dr",
+            params={
+                "values": list(r.joint_friction_per_joint_override),
+            },
+        )
+    elif r.joint_frictionloss_override is not None:
         terms["set_joint_friction"] = EventTermConfig(
             func=newton_dr.set_joint_friction,
             mode="reset_dr",
