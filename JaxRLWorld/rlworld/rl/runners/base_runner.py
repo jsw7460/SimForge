@@ -522,6 +522,12 @@ class BaseRunner(ABC):
 
         completed_returns: list[float] = []
         completed_lengths: list[float] = []
+        # Optional per-episode success, only for envs that report
+        # ``infos["success"]`` (e.g. ManiSkill). Stays empty for sims that don't,
+        # so no ``eval/success_rate`` key is emitted and their logging is
+        # unchanged.
+        completed_successes: list[float] = []
+        success_available = False
 
         # Per-reward-type tracking
         reward_type_sums: dict[str, torch.Tensor] = {}
@@ -559,11 +565,19 @@ class BaseRunner(ABC):
                     completed_reward_breakdowns[rname] = []
                 reward_type_sums[rname] += rval
 
+            # Per-episode success (terminal value at the done step), when the env
+            # reports it. Absent for sims without a success criterion.
+            success_t = infos.get("success", None)
+            if success_t is not None:
+                success_available = True
+
             # Collect completed episodes
             for i in range(num_envs):
                 if dones[i] and len(completed_returns) < target_episodes:
                     completed_returns.append(episode_returns[i].item())
                     completed_lengths.append(episode_lengths[i].item())
+                    if success_t is not None:
+                        completed_successes.append(float(success_t[i].item()))
                     for rname in reward_type_sums:
                         completed_reward_breakdowns[rname].append(reward_type_sums[rname][i].item())
 
@@ -594,6 +608,12 @@ class BaseRunner(ABC):
                 per_step = [v / l for v, l in zip(vals, completed_lengths)]
                 eval_stats[f"eval/reward/{rname}"] = np.mean(per_step)
 
+        # Success rate -- only emitted when the env reports success, so no key is
+        # added (and downstream console/wandb logging is unchanged) for sims
+        # without a success criterion.
+        if success_available and completed_successes:
+            eval_stats["eval/success_rate"] = float(np.mean(completed_successes))
+
         return eval_stats
 
     def _log_eval_stats(self, eval_stats: Dict[str, Any], it: int) -> None:
@@ -608,10 +628,13 @@ class BaseRunner(ABC):
         n_eps = eval_stats["eval/num_episodes"]
         eval_time = eval_stats["eval/time"]
 
+        sr = eval_stats.get("eval/success_rate", None)
+        sr_str = f"success={sr * 100:.1f}%  " if sr is not None else ""
         print(
             f"\n  {GREEN}[Eval @ iter {it}]{RESET} "
             f"return={mean_ret:.2f} ± {std_ret:.2f}  "
             f"length={mean_len:.1f}  "
+            f"{sr_str}"
             f"episodes={n_eps}  "
             f"time={eval_time:.1f}s"
         )

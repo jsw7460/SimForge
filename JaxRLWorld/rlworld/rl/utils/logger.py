@@ -308,6 +308,15 @@ class ConsoleWriter:
             f"({n_eps} episodes)"
         )
 
+        # Success rate (only present for envs that report success, e.g. ManiSkill)
+        if "eval/success_rate" in eval_stats:
+            sr = eval_stats["eval/success_rate"] * 100
+            sr_color = Fore.GREEN if sr >= 50 else Fore.YELLOW if sr >= 20 else Fore.RED
+            lines.append(
+                f"  {Fore.WHITE}Success Rate{Style.RESET_ALL}".ljust(self.pad + 9)
+                + f"{sr_color}{sr:.1f}%{Style.RESET_ALL}"
+            )
+
         # Per-reward-type breakdown
         reward_keys = sorted(k for k in eval_stats if k.startswith("eval/reward/"))
         if reward_keys:
@@ -608,6 +617,7 @@ class WandbLogger:
             "eval/mean_episode_length": "Eval/mean_episode_length",
             "eval/num_episodes": "Eval/num_episodes",
             "eval/time": "Eval/time",
+            "eval/success_rate": "Eval/success_rate",
         }
         for src, dst in key_mapping.items():
             if src in eval_stats:
