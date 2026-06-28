@@ -16,9 +16,7 @@ class ManiSkillInitializer(SimInitializer):
         return True
 
     def init_device(self) -> torch.device:
-        import genesis as gs
-
-        return gs.device
+        return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     def prepare_configs(
         self,

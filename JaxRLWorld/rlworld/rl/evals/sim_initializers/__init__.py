@@ -201,7 +201,7 @@ def detect_sim_type(metadata: dict) -> str:
         return "Newton"
     elif "MujocoEnv" in env_name:
         return "MujocoEnv"
-    elif env_name == "Maniskill":
+    elif "ManiSkill" in env_name:
         return "ManiSkill"
     elif env_name == "Gymnasium":
         return "Gymnasium"
