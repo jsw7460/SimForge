@@ -281,13 +281,17 @@ class OffPolicyRunner(BaseRunner):
         for step in range(total_steps):
             # ========== Warmup: use random actions ==========
             if self.total_timesteps < self.cfgs.algorithm.learning_starts:
-                # Random uniform action in [-1, 1]
+                # Uniform action in [-r, r]; r defaults to 1.0 (full range)
+                # but presets can shrink it via ``warmup_action_range`` to
+                # keep warmup exploration gentle (getattr keeps configs
+                # without the field on the historical full range).
+                warmup_range = getattr(self.cfgs.algorithm, "warmup_action_range", 1.0)
                 self.key, subkey = jax.random.split(self.key)
                 actions = jax.random.uniform(
                     subkey,
                     shape=(self.env.num_envs, self.env.num_actions),
-                    minval=-1.0,
-                    maxval=1.0,
+                    minval=-warmup_range,
+                    maxval=warmup_range,
                 )
 
             else:

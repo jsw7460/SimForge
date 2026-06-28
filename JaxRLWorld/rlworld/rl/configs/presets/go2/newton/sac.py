@@ -103,10 +103,11 @@ class Go2SACNewtonConfig(Go2FlatConfig):
             # Transitions before updates start; one 24-step collection
             # pass at 8192 envs stores 196,608 transitions, so updates
             # begin from the second iteration.
-            learning_starts=200_000,
+            learning_starts=0,
             policy_delay=1,
             num_gradient_steps=200,
             num_steps_per_env=24,
+            warmup_action_range=0.3,
         )
 
     def _build_nn_config(self) -> NNConfig:
@@ -120,7 +121,7 @@ class Go2SACNewtonConfig(Go2FlatConfig):
                     activation=Activation.SILU,
                     hidden_dims=[1024, 512, 256],
                 ),
-                init_noise_std=0.05,
+                init_noise_std=0.001,
                 small_output_init=True,
             ),
         )

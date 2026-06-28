@@ -27,6 +27,15 @@ class SACConfig(BaseConfig):
     optimizer_betas: tuple = (0.9, 0.999)
     optimizer_eps: float = 1e-8
     learning_starts: int = 100
+    # Half-width of the uniform warmup action distribution: during the
+    # ``learning_starts`` warmup the runner samples actions from
+    # ``U[-warmup_action_range, +warmup_action_range]`` instead of the
+    # policy. 1.0 = the historical full [-1, 1] range. Lower it to make
+    # warmup exploration gentler — with the joint-limit action mapping
+    # full-range warmup drives every joint to its soft-limit extremes,
+    # which can spam joint-limit / body-contact penalties before learning
+    # starts.
+    warmup_action_range: float = 1.0
     batch_size: int = 512
     buffer_size: int = 1_000_000
     policy_delay: int = 1
