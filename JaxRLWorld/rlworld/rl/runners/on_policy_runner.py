@@ -159,6 +159,16 @@ class OnPolicyRunner(BaseRunner):
         critic_obs = torch_to_jax(obs["critic"])
         return PPO.ActInput(actor_obs, critic_obs)
 
+    def _postprocess_step_reward(self, rewards, actions, obs_dict, step_i):
+        """Per-step reward-shaping hook; identity by default.
+
+        Override to add an externally-computed reward term before it
+        enters the algorithm. ``rewards`` is the torch reward tensor from
+        ``env.step``; return a tensor of the same shape/device. ``self.env``
+        is accessible for reading state. Called every rollout step.
+        """
+        return rewards
+
     def _collect_experience(
         self,
         obs: PPO.ActInput,
@@ -181,6 +191,18 @@ class OnPolicyRunner(BaseRunner):
             obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
             dones = terminated | truncated
 
+            # Reward-shaping hook (default: identity). Subclasses may add
+            # an externally-computed reward term — one that the env's
+            # reward manager cannot produce because it depends on a window
+            # of steps or a separate evaluation env (e.g. a per-segment
+            # information-gain reward) — before it enters the algorithm.
+            rewards = self._postprocess_step_reward(
+                rewards,
+                actions_torch,
+                obs_dict,
+                _step_i,
+            )
+
             # Convert to JAX
             actor_obs = torch_to_jax(obs_dict["actor"])
             critic_obs = torch_to_jax(obs_dict["critic"])
@@ -196,6 +218,12 @@ class OnPolicyRunner(BaseRunner):
                     "actor": torch_to_jax(infos["final_observation"]["actor"]),
                     "critic": torch_to_jax(infos["final_observation"]["critic"]),
                 }
+                # Bootstrap mask (truncations + non-absorbing terminations).
+                # Only meaningful on done steps (final_observation present);
+                # absent -> PPO falls back to ``truncated & ~terminated``.
+                if infos.get("bootstrap_mask") is not None:
+                    # NOTE: bool -> use asarray, not DLPack.
+                    infos_jax["bootstrap_mask"] = jnp.asarray(infos["bootstrap_mask"].cpu().numpy())
             self.alg.process_env_step(
                 rewards_jax,
                 terminated_jax,

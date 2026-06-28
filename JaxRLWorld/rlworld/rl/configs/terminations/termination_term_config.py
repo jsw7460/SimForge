@@ -20,10 +20,19 @@ class TerminationTermConfig:
     """Configuration for a termination term.
 
     ``func`` is a ``"module.path:attr_name"`` string reference.
+
+    ``bootstrap_value`` declares whether this (non-timeout) termination is a
+    *non-absorbing* early-stop whose terminal value should still be
+    bootstrapped — e.g. reaching a goal in a dense-reward task, where the agent
+    would keep earning if it continued. Default ``False`` = absorbing failure
+    (fall / unrecoverable), so the terminal value is treated as 0 (no
+    bootstrap), which is the correct and historical behaviour for locomotion.
+    Ignored for timeout terms (they are truncations and always bootstrap).
     """
 
     func: Callable | str
     params: dict = field(default_factory=dict)
+    bootstrap_value: bool = False
 
     @property
     def resolved_func(self) -> Callable:

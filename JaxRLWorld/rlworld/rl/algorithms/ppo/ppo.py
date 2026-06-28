@@ -376,8 +376,14 @@ class PPO(OnPolicyAlgorithm):
         if self.value_normalizer is not None:
             bootstrap_values = self.value_normalizer.unnormalize(bootstrap_values[..., None]).squeeze(-1)
 
-        truncated_only = truncated & ~terminated
-        bonus = truncated_only.astype(self.transition.rewards.dtype) * (self.gamma * bootstrap_values)
+        # Prefer the env-provided bootstrap mask (termination manager builds it
+        # from per-term ``bootstrap_value``; ManiSkill adapter from ``success``).
+        # Falls back to ``truncated & ~terminated`` for envs that don't provide
+        # one — identical to the historical behaviour.
+        bootstrap_mask = infos.get("bootstrap_mask")
+        if bootstrap_mask is None:
+            bootstrap_mask = truncated & ~terminated
+        bonus = bootstrap_mask.astype(self.transition.rewards.dtype) * (self.gamma * bootstrap_values)
         self.transition.rewards = self.transition.rewards + bonus
 
     def compute_returns(self, last_critic_obs: jax.Array) -> None:

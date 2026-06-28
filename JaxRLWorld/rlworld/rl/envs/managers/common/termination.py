@@ -73,6 +73,13 @@ class TerminationManager(BaseManager):
         # :meth:`check_termination` call.
         self._terminated_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=self.device)
 
+        # Per-env mask of "bootstrap the terminal value this step" — union of
+        # truncations and non-absorbing terminations, minus absorbing failures
+        # (see :meth:`check_termination`). With no term setting
+        # ``bootstrap_value=True`` this reduces exactly to ``truncated &
+        # ~terminated`` (the historical PPO behaviour). Refreshed every step.
+        self._bootstrap_buf = torch.zeros(env.num_envs, dtype=torch.bool, device=self.device)
+
         self.extras = {}
 
     @property
@@ -138,6 +145,11 @@ class TerminationManager(BaseManager):
     def check_termination(self) -> tuple[torch.Tensor, torch.Tensor]:
         terminated = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
         truncated = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
+        # Split non-timeout terminations by whether their terminal value should
+        # be bootstrapped (non-absorbing, e.g. goal reached) or not (absorbing
+        # failure). Used to build the bootstrap mask below.
+        boot_term = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
+        absorb_term = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
 
         for name, term_config in self._all_terms.items():
             result: TerminationResult = self._resolved_fns[name](self.env, **term_config.params)
@@ -149,11 +161,20 @@ class TerminationManager(BaseManager):
                 truncated |= result.reset
             else:
                 terminated |= result.reset
+                if term_config.bootstrap_value:
+                    boot_term |= result.reset
+                else:
+                    absorb_term |= result.reset
 
             if result.extras:
                 self.extras.update(result.extras)
 
         self._terminated_mask = terminated
+        # Bootstrap iff (timeout OR non-absorbing termination) AND no absorbing
+        # failure fired on the same env this step. With no bootstrap_value term
+        # (boot_term all-False) this is ``truncated & ~terminated`` — identical
+        # to the prior behaviour.
+        self._bootstrap_buf = (truncated | boot_term) & ~absorb_term
         self.reset_buf = terminated | truncated
         return terminated, truncated
 
@@ -166,6 +187,16 @@ class TerminationManager(BaseManager):
         adaptive sampling to measure per-bin episode failure rates.
         """
         return self._terminated_mask
+
+    @property
+    def bootstrap_buf(self) -> torch.Tensor:
+        """Per-env mask of "bootstrap the terminal value this step".
+
+        ``(truncated | non_absorbing_termination) & ~absorbing_failure``.
+        Consumed by the on-policy bootstrap; with no ``bootstrap_value=True``
+        term it equals ``truncated & ~terminated`` (historical behaviour).
+        """
+        return self._bootstrap_buf
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
