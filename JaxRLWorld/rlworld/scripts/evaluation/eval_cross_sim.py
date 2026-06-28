@@ -82,6 +82,24 @@ def main():
         extra_overrides=overrides,
     )
 
+    # import warp as wp
+    # from newton.solvers import SolverNotifyFlags
+    # from rlworld.rl.configs.scene import SceneEntitySelector
+    #
+    # env = evaluator.env
+    # resolved = env.resolve_selector(SceneEntitySelector(
+    #     name="robot",
+    #     geom_names=("FR_foot_collision", "FL_foot_collision",
+    #                 "RR_foot_collision", "RL_foot_collision"),
+    # ))
+    # model = env.scene_manager.model
+    # spe = model.shape_count // env.num_envs
+    # flat = wp.to_torch(model.shape_material_mu)
+    # shape_mu = flat[:env.num_envs * spe].reshape(env.num_envs, spe)
+    # shape_mu[:, resolved.geom_ids] = 0.02
+    # wp.copy(model.shape_material_mu, wp.from_torch(flat, dtype=wp.float32))
+    # env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
+
     # env = evaluator.env
     # robot = env.scene_manager.scene["robot"]
     #
