@@ -6,6 +6,7 @@ environment and manager information in a colorful, structured format.
 
 from __future__ import annotations
 
+import os
 from io import StringIO
 from typing import TYPE_CHECKING, Any
 
@@ -52,7 +53,7 @@ def format_weight(weight: Any) -> str:
     """
     from rlworld.rl.configs.rewards import ExponentialDecay, LinearSchedule, StepSchedule, WeightSchedule
 
-    if isinstance(weight, (int, float)):
+    if isinstance(weight, int | float):
         if abs(weight) < 0.0001 and weight != 0:
             return f"{weight:.2e}"
         return f"{weight}"
@@ -207,7 +208,14 @@ def print_env_summary(env: World) -> None:
 
     Args:
         env: The environment instance (GenesisEnv or NewtonEnv).
+
+    Verbosity is controlled by the ``JAXRLWORLD_ENV_SUMMARY`` env var:
+    set it to ``0`` / ``false`` / ``off`` to suppress the per-build manager
+    tables (default: enabled, preserving the previous behavior).
     """
+    if os.environ.get("JAXRLWORLD_ENV_SUMMARY", "1").lower() in ("0", "false", "off", "no"):
+        return
+
     console = get_console()
 
     # Environment header panel
