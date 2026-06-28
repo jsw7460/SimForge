@@ -11,7 +11,7 @@ Implicit world model with:
 All networks use NormedLinear (LayerNorm + Mish activation).
 """
 
-from typing import Sequence
+from typing import Callable, Sequence
 
 import equinox as eqx
 import jax
@@ -317,6 +317,80 @@ class QEnsemble(eqx.Module):
         return jnp.stack(outputs, axis=0)
 
 
+# ==================== Latent Dynamics (swappable) ====================
+
+
+class LatentDynamics(eqx.Module):
+    """Base for the latent transition (z, a) -> z'.
+
+    The world model holds one of these in ``self.dynamics`` and calls it as
+    ``dynamics(za)`` where ``za = concat([z, a])``. Subclasses override
+    ``__call__``; the optional ``regularization(za)`` is summed over the model
+    rollout and added to the world-model loss (weighted by ``dynamics_reg_coef``).
+    The default contributes nothing, so a plain dynamics keeps stock behavior.
+
+    New dynamics variants register a factory under a string name via
+    ``register_dynamics`` and are selected through ``dynamics_type`` — this is the
+    seam that lets out-of-tree code provide alternative transitions without
+    touching this module.
+    """
+
+    def __call__(self, za: jax.Array, *, key: jax.Array | None = None, inference: bool = False) -> jax.Array:
+        raise NotImplementedError
+
+    def regularization(self, za: jax.Array) -> jax.Array:
+        return jnp.float32(0.0)
+
+    def auxiliary_loss(self, za: jax.Array, extras: dict) -> jax.Array:
+        """Optional supervised side-channel loss for this transition.
+
+        ``extras`` is the per-(z,a) slice of the batch's named side channels (see
+        ``SequenceBatch.extras``); a variant that consumes them returns a scalar
+        loss summed over the rollout and weighted by ``aux_loss_coef``. The default
+        ignores them and contributes nothing, so stock dynamics is unaffected.
+        """
+        return jnp.float32(0.0)
+
+
+class MLPDynamics(LatentDynamics):
+    """Stock TD-MPC2 dynamics: an MLP with SimNorm output. No regularizer."""
+
+    net: TDMPC2MLP
+
+    def __init__(self, *, in_dim: int, out_dim: int, mlp_dim: int, simnorm_dim: int, key: jax.Array):
+        self.net = TDMPC2MLP(
+            in_dim=in_dim,
+            hidden_dims=[mlp_dim, mlp_dim],
+            out_dim=out_dim,
+            act=SimNorm(dim=simnorm_dim),
+            key=key,
+        )
+
+    def __call__(self, za: jax.Array, *, key: jax.Array | None = None, inference: bool = False) -> jax.Array:
+        return self.net(za, key=key, inference=inference)
+
+
+# Factory signature: (*, in_dim, out_dim, latent_dim, mlp_dim, simnorm_dim, key, **kwargs) -> LatentDynamics
+DYNAMICS_REGISTRY: dict[str, Callable[..., LatentDynamics]] = {}
+
+
+def register_dynamics(name: str) -> Callable[[Callable[..., LatentDynamics]], Callable[..., LatentDynamics]]:
+    """Register a latent-dynamics factory under ``name`` (selected via ``dynamics_type``)."""
+
+    def deco(factory: Callable[..., LatentDynamics]) -> Callable[..., LatentDynamics]:
+        if name in DYNAMICS_REGISTRY:
+            raise ValueError(f"dynamics type {name!r} already registered")
+        DYNAMICS_REGISTRY[name] = factory
+        return factory
+
+    return deco
+
+
+@register_dynamics("mlp")
+def _make_mlp_dynamics(*, in_dim, out_dim, latent_dim, mlp_dim, simnorm_dim, key, **kwargs) -> LatentDynamics:
+    return MLPDynamics(in_dim=in_dim, out_dim=out_dim, mlp_dim=mlp_dim, simnorm_dim=simnorm_dim, key=key)
+
+
 # ==================== World Model ====================
 
 
@@ -336,11 +410,14 @@ class TDMPC2WorldModel(eqx.Module):
 
     # Networks
     encoder: TDMPC2MLP
-    dynamics: TDMPC2MLP
+    dynamics: LatentDynamics
     reward_head: TDMPC2MLP
     q_ensemble: QEnsemble
     policy: TDMPC2MLP
     termination_head: TDMPC2MLP | None
+    # Applied to the latent at the INPUT of reward/Q/policy/termination heads when
+    # simnorm_at_head is on (encoder + dynamics then operate in an un-normalized space).
+    head_simnorm: SimNorm | None
 
     # Configuration (static)
     latent_dim: int = eqx.field(static=True)
@@ -350,6 +427,9 @@ class TDMPC2WorldModel(eqx.Module):
     num_bins: int = eqx.field(static=True)
     simnorm_dim: int = eqx.field(static=True)
     episodic: bool = eqx.field(static=True)
+    # False (default): SimNorm normalizes the encoder/dynamics latent (stock TD-MPC2).
+    # True: latent is un-normalized; SimNorm is applied only at the head inputs.
+    simnorm_at_head: bool = eqx.field(static=True)
 
     # Log-std bounds
     log_std_min: float = eqx.field(static=True)
@@ -385,6 +465,9 @@ class TDMPC2WorldModel(eqx.Module):
         action_high: tuple = None,
         obs_normalization: bool = False,
         episodic: bool = False,
+        dynamics_type: str = "mlp",
+        dynamics_kwargs: dict | None = None,
+        simnorm_at_head: bool = False,
         *,
         key: jax.Array,
     ):
@@ -419,6 +502,7 @@ class TDMPC2WorldModel(eqx.Module):
         self.log_std_dif = log_std_max - log_std_min
         self.squash_action = squash_action
         self.episodic = episodic
+        self.simnorm_at_head = simnorm_at_head
 
         # Action bounds: static tuples for JIT compatibility
         if squash_action:
@@ -439,26 +523,37 @@ class TDMPC2WorldModel(eqx.Module):
 
         out_bins = max(num_bins, 1)
         sim_norm = SimNorm(dim=simnorm_dim)
+        # simnorm_at_head: encoder/dynamics latent is left un-normalized; SimNorm is
+        # applied at the head inputs instead (so the structured transition integrates
+        # in an un-squashed vector space). Default keeps SimNorm on the encoder latent.
+        self.head_simnorm = SimNorm(dim=simnorm_dim) if simnorm_at_head else None
+        enc_act = None if simnorm_at_head else sim_norm
 
         k_enc, k_dyn, k_rew, k_q, k_pi, k_term = jax.random.split(key, 6)
 
-        # Encoder: obs -> latent (with SimNorm output activation)
+        # Encoder: obs -> latent (SimNorm output unless simnorm_at_head)
         enc_hidden = max(num_enc_layers - 1, 1) * [mlp_dim]
         self.encoder = TDMPC2MLP(
             in_dim=obs_dim,
             hidden_dims=enc_hidden,
             out_dim=latent_dim,
-            act=sim_norm,
+            act=enc_act,
             key=k_enc,
         )
 
-        # Dynamics: (z, a) -> z' (with SimNorm output activation)
-        self.dynamics = TDMPC2MLP(
+        # Dynamics: (z, a) -> z'. Built from the registry so out-of-tree variants
+        # (e.g. structured transitions) can be selected via dynamics_type without
+        # editing this module. Default "mlp" reproduces the stock TDMPC2MLP+SimNorm.
+        if dynamics_type not in DYNAMICS_REGISTRY:
+            raise ValueError(f"unknown dynamics_type {dynamics_type!r}; registered: {sorted(DYNAMICS_REGISTRY)}")
+        self.dynamics = DYNAMICS_REGISTRY[dynamics_type](
             in_dim=latent_dim + action_dim,
-            hidden_dims=[mlp_dim, mlp_dim],
             out_dim=latent_dim,
-            act=sim_norm,
+            latent_dim=latent_dim,
+            mlp_dim=mlp_dim,
+            simnorm_dim=simnorm_dim,
             key=k_dyn,
+            **(dynamics_kwargs or {}),
         )
 
         # Reward: (z, a) -> reward logits
@@ -538,6 +633,15 @@ class TDMPC2WorldModel(eqx.Module):
             obs = self.obs_normalizer.normalize(obs)
         return self.encoder(obs)
 
+    def _head_latent(self, z: jax.Array) -> jax.Array:
+        """Latent fed to the reward/Q/policy/termination heads.
+
+        Identity unless ``simnorm_at_head`` — then SimNorm is applied here (rather than
+        on the encoder output), so heads still see a simplex-normalized latent while the
+        encoder/dynamics operate in an un-normalized space.
+        """
+        return self.head_simnorm(z) if self.head_simnorm is not None else z
+
     def next_latent(self, z: jax.Array, a: jax.Array) -> jax.Array:
         """
         Predict next latent state.
@@ -563,7 +667,7 @@ class TDMPC2WorldModel(eqx.Module):
         Returns:
             Reward logits [num_bins] or [batch_size, num_bins]
         """
-        za = jnp.concatenate([z, a], axis=-1)
+        za = jnp.concatenate([self._head_latent(z), a], axis=-1)
         return self.reward_head(za)
 
     def predict_termination(self, z: jax.Array) -> jax.Array:
@@ -576,7 +680,7 @@ class TDMPC2WorldModel(eqx.Module):
         Returns:
             Termination logit [1] or [batch_size, 1]
         """
-        return self.termination_head(z)
+        return self.termination_head(self._head_latent(z))
 
     def predict_q(
         self,
@@ -598,7 +702,7 @@ class TDMPC2WorldModel(eqx.Module):
         Returns:
             Q logits [num_q, batch_size, num_bins]
         """
-        za = jnp.concatenate([z, a], axis=-1)
+        za = jnp.concatenate([self._head_latent(z), a], axis=-1)
         return self.q_ensemble(za, key=key, inference=inference)
 
     def q_value(
@@ -692,7 +796,7 @@ class TDMPC2WorldModel(eqx.Module):
 
     def _pi_forward(self, z: jax.Array) -> jax.Array:
         """Raw policy forward pass. Handles [dim] and [batch, dim]."""
-        return self.policy(z)
+        return self.policy(self._head_latent(z))
 
     def act_inference(self, obs: jax.Array, *, key: jax.Array) -> tuple[jax.Array, dict]:
         """

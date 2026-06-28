@@ -21,7 +21,27 @@ class WorldModelLossInfo(NamedTuple):
     reward_loss: jax.Array
     value_loss: jax.Array
     termination_loss: jax.Array
+    dynamics_reg: jax.Array
+    vicreg_loss: jax.Array
+    aux_loss: jax.Array
     total_loss: jax.Array
+
+
+def _vicreg(z: jax.Array) -> jax.Array:
+    """VICReg variance+covariance anti-collapse on a [B, latent] batch.
+
+    Variance hinge keeps each latent dim spread across the batch (fights the
+    constant-z collapse that consistency-only training admits); covariance term
+    decorrelates dims. The std target (1.0) is unreachable on a SimNorm simplex,
+    so the hinge stays active as a steady anti-collapse pressure (weight via coef).
+    """
+    std = jnp.sqrt(jnp.var(z, axis=0) + 1e-4)
+    var_loss = jnp.mean(jax.nn.relu(1.0 - std))
+    zc = z - jnp.mean(z, axis=0)
+    cov = (zc.T @ zc) / (z.shape[0] - 1)
+    off = cov - jnp.diag(jnp.diagonal(cov))
+    cov_loss = jnp.sum(off**2) / z.shape[1]
+    return var_loss + cov_loss
 
 
 class PolicyLossInfo(NamedTuple):
@@ -42,6 +62,10 @@ def compute_world_model_loss(
     value_coef: float,
     episodic: bool = False,
     termination_coef: float = 5.0,
+    dynamics_reg_coef: float = 0.0,
+    detach_task_heads: bool = False,
+    vicreg_coef: float = 0.0,
+    aux_loss_coef: float = 0.0,
     *,
     key: jax.Array,
 ) -> tuple[jax.Array, WorldModelLossInfo]:
@@ -86,12 +110,41 @@ def compute_world_model_loss(
     consistency_per_t = jnp.mean((zs_post - next_z_targets) ** 2, axis=(-1, -2))  # [H]
     consistency_loss = jnp.sum(consistency_per_t * rho_weights) / horizon
 
+    # Optional dynamics regularization (e.g. activity/sparsity on the transition).
+    # Default dynamics returns 0, so this is inert unless a regularizing variant is used.
+    def _dyn_reg_single(z, a):
+        za = jnp.concatenate([z, a], axis=-1)
+        return model.dynamics.regularization(za)
+
+    dyn_reg_per_t = jax.vmap(_dyn_reg_single)(zs_pre, actions)  # [H]
+    dynamics_reg = jnp.sum(dyn_reg_per_t * rho_weights) / horizon
+
+    # Optional supervised side-channel loss: the dynamics consumes the batch's named
+    # ``extras`` (per-timestep) and returns a scalar. Inert unless a consuming variant
+    # is used AND extras were stored AND aux_loss_coef > 0.
+    if aux_loss_coef > 0.0 and len(batch.extras) > 0:
+
+        def _aux_single(z, a, ex):
+            za = jnp.concatenate([z, a], axis=-1)
+            return model.dynamics.auxiliary_loss(za, ex)
+
+        aux_per_t = jax.vmap(_aux_single)(zs_pre, actions, batch.extras)  # [H]
+        aux_loss = jnp.sum(aux_per_t * rho_weights) / horizon
+    else:
+        aux_loss = jnp.float32(0.0)
+
+    # Optionally cut the gradient from the task heads into the representation, so the
+    # latent is shaped by the consistency loss (and the dynamics model) alone and the
+    # reward/value heads merely decode it. NOTE: this removes the implicit anti-collapse
+    # that the reward/value gradients provide — pair with vicreg_coef > 0 when enabling.
+    task_zs = jax.lax.stop_gradient(zs_pre) if detach_task_heads else zs_pre
+
     # Vectorized reward loss
     def _reward_loss_single(z, a, r):
         pred = model.predict_reward(z, a)
         return soft_ce(pred, r, two_hot_cfg).mean()
 
-    reward_losses = jax.vmap(_reward_loss_single)(zs_pre, actions, rewards)  # [H]
+    reward_losses = jax.vmap(_reward_loss_single)(task_zs, actions, rewards)  # [H]
     reward_loss = jnp.sum(reward_losses * rho_weights) / horizon
 
     # Vectorized value loss
@@ -103,7 +156,7 @@ def compute_world_model_loss(
         q_ce = jax.vmap(soft_ce, in_axes=(0, 0, None))(q_preds, td_broadcast, two_hot_cfg)  # [num_q, B, 1]
         return q_ce.mean()
 
-    value_losses = jax.vmap(_value_loss_single)(zs_pre, actions, td_targets, q_keys)  # [H]
+    value_losses = jax.vmap(_value_loss_single)(task_zs, actions, td_targets, q_keys)  # [H]
     value_loss = jnp.sum(value_losses * rho_weights) / horizon
 
     # Termination loss (episodic mode only)
@@ -117,11 +170,19 @@ def compute_world_model_loss(
     else:
         termination_loss = jnp.float32(0.0)
 
+    # Anti-collapse on the encoded latent batch (encode(obs[0])). Always computed as
+    # a collapse DIAGNOSTIC (logged); only added to the loss when vicreg_coef > 0.
+    # High var term (std→0) ⇒ latent is collapsing.
+    vicreg_loss = _vicreg(zs_pre[0])
+
     total_loss = (
         consistency_coef * consistency_loss
         + reward_coef * reward_loss
         + value_coef * value_loss
         + termination_coef * termination_loss
+        + dynamics_reg_coef * dynamics_reg
+        + vicreg_coef * vicreg_loss
+        + aux_loss_coef * aux_loss
     )
 
     return total_loss, WorldModelLossInfo(
@@ -129,6 +190,9 @@ def compute_world_model_loss(
         reward_loss=reward_loss,
         value_loss=value_loss,
         termination_loss=termination_loss,
+        dynamics_reg=dynamics_reg,
+        vicreg_loss=vicreg_loss,
+        aux_loss=aux_loss,
         total_loss=total_loss,
     )
 

@@ -87,6 +87,9 @@ class ModelBasedRunner(BaseRunner):
             action_high=tuple(action_high.tolist()),
             obs_normalization=alg_cfg.obs_normalization,
             episodic=alg_cfg.episodic,
+            dynamics_type=alg_cfg.dynamics_type,
+            dynamics_kwargs=alg_cfg.dynamics_kwargs,
+            simnorm_at_head=alg_cfg.simnorm_at_head,
             key=subkey,
         )
 
@@ -141,6 +144,10 @@ class ModelBasedRunner(BaseRunner):
             max_grad_norm=alg_cfg.max_grad_norm,
             episodic=alg_cfg.episodic,
             termination_coef=alg_cfg.termination_coef,
+            dynamics_reg_coef=alg_cfg.dynamics_reg_coef,
+            detach_task_heads=alg_cfg.detach_task_heads,
+            vicreg_coef=alg_cfg.vicreg_coef,
+            aux_loss_coef=alg_cfg.aux_loss_coef,
             key=subkey,
         )
 
@@ -240,7 +247,9 @@ class ModelBasedRunner(BaseRunner):
                     if (truncated_mask[i] or terminated_mask[i]) and final_obs is not None:
                         next_obs_for_buffer = next_obs_for_buffer.at[i].set(final_actor[i])
 
-            # Store transition (buffer gets terminal obs, loop continues with reset obs)
+            # Store transition (buffer gets terminal obs, loop continues with reset obs).
+            # Generic side channels: if the env surfaces info["extras"] ({name: [num_envs, dim]}),
+            # store them parallel to the transition for downstream consumers; else no-op.
             self.alg.store_transition(
                 obs=actor_obs,
                 action=actions,
@@ -248,6 +257,7 @@ class ModelBasedRunner(BaseRunner):
                 next_obs=next_obs_for_buffer,  # Terminal observation
                 terminated=terminated_jax,
                 truncated=truncated_jax,
+                extras=infos.get("extras"),
             )
 
             # Update reward statistics

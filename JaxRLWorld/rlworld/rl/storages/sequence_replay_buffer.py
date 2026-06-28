@@ -25,6 +25,10 @@ class SequenceBatch(NamedTuple):
     actions: jax.Array  # [horizon, batch_size, action_dim]
     rewards: jax.Array  # [horizon, batch_size, 1]
     terminated: jax.Array  # [horizon, batch_size, 1]
+    # Optional named per-transition side channels, each [horizon, batch_size, dim].
+    # Generic: the buffer neither names nor interprets them; producers/consumers agree
+    # on the keys out of band (e.g. extra supervision targets logged from the env).
+    extras: dict[str, jax.Array] = {}
 
 
 class SequenceReplayBuffer:
@@ -68,6 +72,10 @@ class SequenceReplayBuffer:
         self.reward_buf = np.zeros((num_envs, size_per_env, 1), dtype=np.float32)
         self.terminated_buf = np.zeros((num_envs, size_per_env, 1), dtype=np.float32)
 
+        # Optional named side-channel buffers, lazily allocated on first store:
+        # name -> [num_envs, size_per_env, dim].
+        self.extras_buf: dict[str, np.ndarray] = {}
+
         # Episode boundary tracking:
         # episode_id[env, pos] records which episode a transition belongs to.
         # Sequences must not span different episode_ids.
@@ -96,6 +104,7 @@ class SequenceReplayBuffer:
         next_obs: jax.Array,
         terminated: jax.Array,
         truncated: jax.Array,
+        extras: Dict[str, jax.Array] | None = None,
     ) -> None:
         """
         Store transitions from all parallel environments.
@@ -107,6 +116,8 @@ class SequenceReplayBuffer:
             next_obs: Next observations [num_envs, obs_dim]
             terminated: True termination flags [num_envs]
             truncated: Truncation flags [num_envs]
+            extras: optional {name: [num_envs, dim]} side channels stored parallel to
+                the transition (buffers lazily allocated per key on first store).
         """
         obs_np = np.asarray(obs)
         next_obs_np = np.asarray(next_obs)
@@ -128,6 +139,14 @@ class SequenceReplayBuffer:
         self.action_buf[:, self.ptr] = action_np
         self.reward_buf[:, self.ptr] = reward_np
         self.terminated_buf[:, self.ptr] = terminated_np
+        if extras:
+            for k, v in extras.items():
+                v_np = np.asarray(v, dtype=np.float32)
+                if v_np.ndim == 1:
+                    v_np = v_np[:, None]
+                if k not in self.extras_buf:
+                    self.extras_buf[k] = np.zeros((self.num_envs, self.size_per_env, v_np.shape[-1]), dtype=np.float32)
+                self.extras_buf[k][:, self.ptr] = v_np
         self._episode_id[:, self.ptr] = self._current_episode_id
 
         # Increment episode ID for environments that ended
@@ -256,12 +275,17 @@ class SequenceReplayBuffer:
         action_seq = self.action_buf[env_exp, positions]  # [H, B, action_dim]
         reward_seq = self.reward_buf[env_exp, positions]  # [H, B, 1]
         terminated_seq = self.terminated_buf[env_exp, positions]  # [H, B, 1]
+        extras_seq = {
+            k: jnp.asarray(buf[env_exp, positions])
+            for k, buf in self.extras_buf.items()  # [H, B, dim]
+        }
 
         return SequenceBatch(
             observations=jnp.asarray(obs_seq),
             actions=jnp.asarray(action_seq),
             rewards=jnp.asarray(reward_seq),
             terminated=jnp.asarray(terminated_seq),
+            extras=extras_seq,
         )
 
     def get_recent_actions(self, n: int) -> jax.Array:

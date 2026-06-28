@@ -25,6 +25,9 @@ class UnifiedUpdateInfo(NamedTuple):
     reward_loss: jax.Array
     value_loss: jax.Array
     termination_loss: jax.Array
+    dynamics_reg: jax.Array
+    vicreg_loss: jax.Array
+    aux_loss: jax.Array
     total_loss: jax.Array
     wm_grad_norm: jax.Array
     # Policy
@@ -58,6 +61,10 @@ def unified_update(
     value_coef: float,
     episodic: bool,
     termination_coef: float,
+    dynamics_reg_coef: float,
+    detach_task_heads: bool,
+    vicreg_coef: float,
+    aux_loss_coef: float,
     scale_value: jax.Array,
     scale_tau: float,
     key: jax.Array,
@@ -106,6 +113,10 @@ def unified_update(
             value_coef=value_coef,
             episodic=episodic,
             termination_coef=termination_coef,
+            dynamics_reg_coef=dynamics_reg_coef,
+            detach_task_heads=detach_task_heads,
+            vicreg_coef=vicreg_coef,
+            aux_loss_coef=aux_loss_coef,
             key=wm_key,
         )
         return _loss, _info
@@ -199,6 +210,9 @@ def unified_update(
         reward_loss=wm_info.reward_loss,
         value_loss=wm_info.value_loss,
         termination_loss=wm_info.termination_loss,
+        dynamics_reg=wm_info.dynamics_reg,
+        vicreg_loss=wm_info.vicreg_loss,
+        aux_loss=wm_info.aux_loss,
         total_loss=wm_info.total_loss,
         wm_grad_norm=wm_grad_norm,
         pi_loss=pi_loss,

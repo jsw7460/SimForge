@@ -58,10 +58,19 @@ class TDMPC2Config(BaseConfig):
     num_enc_layers: int = 2
     num_q: int = 5
     simnorm_dim: int = 8
+    simnorm_at_head: bool = False  # SimNorm at head inputs instead of on the encoder latent
     dropout: float = 0.01
     log_std_min: float = -10.0
     log_std_max: float = 2.0
     squash_action: bool = True
+
+    # ---- Latent dynamics variant (swappable; see DYNAMICS_REGISTRY) ----
+    dynamics_type: str = "mlp"  # registered factory name
+    dynamics_kwargs: dict = field(default_factory=dict)  # extra args for the chosen dynamics
+    dynamics_reg_coef: float = 0.0  # weight on dynamics.regularization() in the WM loss
+    detach_task_heads: bool = False  # stop-gradient z into reward/value heads (z shaped by consistency only)
+    vicreg_coef: float = 0.0  # VICReg anti-collapse on the encoded latent (use with detach_task_heads)
+    aux_loss_coef: float = 0.0  # weight on dynamics.auxiliary_loss() (consumes batch.extras side channels)
 
     # ---- Observation normalization ----
     obs_normalization: bool = True

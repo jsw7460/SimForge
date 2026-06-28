@@ -18,6 +18,9 @@ class TDMPC2WorldModelMetrics:
     reward_loss: float = 0.0
     value_loss: float = 0.0
     termination_loss: float = 0.0
+    dynamics_reg: float = 0.0
+    vicreg_loss: float = 0.0
+    aux_loss: float = 0.0
     total_loss: float = 0.0
     grad_norm: float = 0.0
 
@@ -27,6 +30,9 @@ class TDMPC2WorldModelMetrics:
             f"{prefix}/reward_loss": self.reward_loss,
             f"{prefix}/value_loss": self.value_loss,
             f"{prefix}/termination_loss": self.termination_loss,
+            f"{prefix}/dynamics_reg": self.dynamics_reg,
+            f"{prefix}/vicreg_loss": self.vicreg_loss,
+            f"{prefix}/aux_loss": self.aux_loss,
             f"{prefix}/total_loss": self.total_loss,
             f"{prefix}/grad_norm": self.grad_norm,
         }

@@ -115,6 +115,13 @@ class TDMPC2(OffPolicyAlgorithm):
         # Episodic termination
         episodic: bool = False,
         termination_coef: float = 5.0,
+        # Optional latent-dynamics regularization (e.g. activity/sparsity on the transition)
+        dynamics_reg_coef: float = 0.0,
+        # Decouple representation from task heads (z shaped by consistency only) + anti-collapse
+        detach_task_heads: bool = False,
+        vicreg_coef: float = 0.0,
+        # Weight on dynamics.auxiliary_loss() (consumes batch.extras side channels)
+        aux_loss_coef: float = 0.0,
         # Key
         key: jax.Array = None,
         **kwargs,
@@ -160,6 +167,12 @@ class TDMPC2(OffPolicyAlgorithm):
         # Episodic termination
         self.episodic = episodic
         self.termination_coef = termination_coef
+
+        # Latent-dynamics regularization
+        self.dynamics_reg_coef = dynamics_reg_coef
+        self.detach_task_heads = detach_task_heads
+        self.vicreg_coef = vicreg_coef
+        self.aux_loss_coef = aux_loss_coef
 
         # Discount (heuristic based on episode length)
         self.discount = self._compute_discount(episode_length, discount_min, discount_max, discount_denom)
@@ -317,6 +330,7 @@ class TDMPC2(OffPolicyAlgorithm):
         next_obs: jax.Array,
         terminated: jax.Array,
         truncated: jax.Array,
+        extras: dict | None = None,
     ) -> None:
         """Store transition in replay buffer."""
         self.replay_buffer.store_parallel(
@@ -326,6 +340,7 @@ class TDMPC2(OffPolicyAlgorithm):
             next_obs=next_obs,
             terminated=terminated,
             truncated=truncated,
+            extras=extras,
         )
 
     def sample_batch(self, batch_size: int, key: jax.Array) -> SequenceBatch:
@@ -452,6 +467,10 @@ class TDMPC2(OffPolicyAlgorithm):
             value_coef=self.value_coef,
             episodic=self.episodic,
             termination_coef=self.termination_coef,
+            dynamics_reg_coef=self.dynamics_reg_coef,
+            detach_task_heads=self.detach_task_heads,
+            vicreg_coef=self.vicreg_coef,
+            aux_loss_coef=self.aux_loss_coef,
             scale_value=jnp.array(self.scale.value),
             scale_tau=self.scale.tau,
             key=update_key,
@@ -476,6 +495,9 @@ class TDMPC2(OffPolicyAlgorithm):
                 reward_loss=float(info.reward_loss),
                 value_loss=float(info.value_loss),
                 termination_loss=float(info.termination_loss),
+                dynamics_reg=float(info.dynamics_reg),
+                vicreg_loss=float(info.vicreg_loss),
+                aux_loss=float(info.aux_loss),
                 total_loss=float(info.total_loss),
                 grad_norm=float(info.wm_grad_norm),
             ),
