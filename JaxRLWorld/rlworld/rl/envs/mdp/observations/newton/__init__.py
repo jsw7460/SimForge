@@ -10,6 +10,7 @@ Usage:
     )
 """
 
+from .physics_parameters import physics_parameters
 from .proprioception import (
     dof_pos,
     dof_pos_nominal_difference,
@@ -40,4 +41,6 @@ __all__ = [
     "raw_actions",
     "prev_processed_actions",
     "dof_pos_nominal_difference",
+    # Physics parameters (privileged)
+    "physics_parameters",
 ]
