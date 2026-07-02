@@ -1,7 +1,7 @@
 """Newton Sensor Configuration.
 
 This module defines configuration for sensors in Newton environments.
-Newton supports IMU, Contact, FrameTransform, Raycast, and TiledCamera sensors.
+Newton supports IMU, Contact, FrameTransform, and TiledCamera sensors.
 
 Sensors in Newton are attached to "sites" which are created on bodies during
 entity registration.
@@ -20,7 +20,6 @@ class NewtonSensorType(Enum):
 
     IMU = "imu"
     FRAME_TRANSFORM = "frame_transform"
-    RAYCAST = "raycast"
     TILED_CAMERA = "tiled_camera"
 
 
@@ -93,28 +92,3 @@ class NewtonFrameTransformSensorConfig(NewtonSensorConfig):
         import newton
 
         return newton.sensors.SensorFrameTransform(model, site_indices)
-
-
-@dataclass
-class NewtonRaycastSensorConfig(NewtonSensorConfig):
-    """Configuration for Newton Raycast sensor.
-
-    Casts rays from specified sites and returns hit information.
-    """
-
-    sensor_type: NewtonSensorType = NewtonSensorType.RAYCAST
-    site_names: list[str] = field(default_factory=list)
-    ray_direction: tuple[float, float, float] = (0.0, 0.0, -1.0)  # Local direction
-    max_distance: float = 10.0
-
-    def create_sensor(self, model: "newton.Model", site_indices: list[int]) -> "newton.sensors.SensorRaycast":
-        """Create the actual Raycast sensor object."""
-        import newton
-        import warp as wp
-
-        return newton.sensors.SensorRaycast(
-            model,
-            site_indices,
-            ray_direction=wp.vec3(*self.ray_direction),
-            max_distance=self.max_distance,
-        )
