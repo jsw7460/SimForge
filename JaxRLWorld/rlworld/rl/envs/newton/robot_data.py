@@ -485,18 +485,29 @@ class NewtonRobotData(NewtonRigidObjectData):
     def applied_torque(self) -> Tensor:
         """Per-DOF actuator torque in actuated order.
 
-        Reads ``state.mujoco.qfrc_actuator`` — the MuJoCo solver's
-        per-DOF actuator force after PD-law evaluation and
-        ``effort_limit`` clipping, transposed into Newton's DOF
-        frame by ``convert_qfrc_actuator_from_mj_kernel``. The flat
-        warp array is reshaped into ``(num_envs, dofs_per_world)`` and
-        indexed by ``newton_qd_indices`` so columns line up with
-        :attr:`joint_pos` / :attr:`joint_vel`.
+        Two sources, matching how the joint is actually driven:
 
-        Raises ``AttributeError`` if the scene was built without
-        requesting ``mujoco:qfrc_actuator`` (the scene manager requests
-        it automatically when ``solver_type == "mujoco"``).
+        * **Explicit actuators** (IdealPD / DelayedPD / ...): torque is
+          computed in Python and written to ``control.joint_f`` — no mjwarp
+          actuator exists (``joint_target_mode=NONE``), so
+          ``qfrc_actuator`` would read ~0. Return the action manager's
+          post-clip applied torque instead: the exact tensor written to
+          ``joint_f``, ``(num_envs, total_action_dim)`` in the same
+          canonical actuated order as :attr:`joint_pos`.
+        * **Implicit actuators** (mjwarp position actuator): read
+          ``state.mujoco.qfrc_actuator`` — the MuJoCo solver's per-DOF
+          actuator force after PD-law evaluation and ``effort_limit``
+          clipping, transposed into Newton's DOF frame by
+          ``convert_qfrc_actuator_from_mj_kernel``. The flat warp array is
+          reshaped into ``(num_envs, dofs_per_world)`` and indexed by
+          ``newton_qd_indices`` so columns line up with :attr:`joint_pos`
+          / :attr:`joint_vel`. Raises ``AttributeError`` if the scene was
+          built without requesting ``mujoco:qfrc_actuator`` (the scene
+          manager requests it automatically when ``solver_type ==
+          "mujoco"``).
         """
+        if self._env.act_manager.has_explicit_actuators:
+            return self._env.act_manager.applied_torque
         state = self._state
         model = self._env.scene_manager.model
         dofs_per_world = model.joint_dof_count // model.world_count
