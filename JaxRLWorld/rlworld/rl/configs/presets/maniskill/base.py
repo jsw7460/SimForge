@@ -41,6 +41,7 @@ STATE_PPO_TASKS: Dict[str, Dict[str, Any]] = {
     "TriFingerRotateCubeLevel2-v1": dict(num_envs=128, total_timesteps=50_000_000, num_steps=250),
     "TriFingerRotateCubeLevel3-v1": dict(num_envs=128, total_timesteps=50_000_000, num_steps=250),
     "TriFingerRotateCubeLevel4-v1": dict(num_envs=1024, total_timesteps=500_000_000, num_steps=250),
+    "OpenCabinetDrawer-v1": dict(num_envs=1024, total_timesteps=500_000_000, num_steps=100),
     "PokeCube-v1": dict(total_timesteps=5_000_000, num_steps=20, eval_freq=10),
     "MS-CartpoleBalance-v1": dict(total_timesteps=4_000_000, num_steps=250, gamma=0.99, gae_lambda=0.95, eval_freq=5),
 }
