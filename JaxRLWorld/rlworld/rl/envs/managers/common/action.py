@@ -514,6 +514,8 @@ class ActionManagerBase(BaseManager):
         if entity_cfg is None:
             return
 
+        has_implicit = any(isinstance(c, ImplicitActuatorCfg) for c in entity_cfg.articulation.actuators)
+
         for act_cfg in entity_cfg.articulation.actuators:
             if isinstance(act_cfg, ImplicitActuatorCfg):
                 continue
@@ -540,6 +542,20 @@ class ActionManagerBase(BaseManager):
             self._actuators.append((actuator, joint_indices))
 
         self._has_explicit_actuators = len(self._actuators) > 0
+
+        # Mixing implicit and explicit actuator groups on one entity is not
+        # supported: once ANY explicit actuator exists, apply_actions routes
+        # ALL actuated joints through the force path, so implicit-group joints
+        # are never given position targets — they go limp on Genesis (force
+        # mode disables the sim PD) or freeze at the build-time target on
+        # Newton/mjlab. Fail loudly instead of silently misbehaving. (Per-group
+        # mixed control would require an IsaacLab-style per-group action split.)
+        if self._has_explicit_actuators and has_implicit:
+            raise NotImplementedError(
+                "Entity mixes ImplicitActuatorCfg with explicit actuator configs; "
+                "the action pipeline drives all joints through one mode. Use a "
+                "single mode per entity (all implicit or all explicit)."
+            )
 
     def _get_entity_cfg(self):
         """Get the unified EntityCfg for the robot from scene manager."""
