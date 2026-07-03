@@ -176,6 +176,12 @@ class ManiSkillEnv(World):
                 obs = outer._current_obs
                 return {"actor": obs, "critic": obs}
 
+            def get_robot_state(self):
+                # No separate privileged robot state for flat-state ManiSkill
+                # tasks; the PolicyEvaluator loop passes None through to the
+                # policy (which ignores it).
+                return None
+
         return _ObsManager()
 
     def calculate_obs_dim(self) -> dict[str, int]:
