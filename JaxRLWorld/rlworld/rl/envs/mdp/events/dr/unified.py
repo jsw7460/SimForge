@@ -613,12 +613,31 @@ def randomize_pd_gains(
 ) -> None:
     """Randomize PD controller gains (kp / kd) for actuated DOFs.
 
-    Genesis only supports ``operation="scale"`` (no built-in ratio API
-    on ``set_dofs_kp/kv`` so we sample a ratio and multiply).
+    Two gain stores exist, and this term dispatches to whichever one the
+    robot actually uses (mirrors IsaacLab's ``randomize_actuator_gains``):
+
+    * **Explicit actuators** (IdealPD / DelayedPD / DCMotor / ActuatorNet):
+      torque is computed in Python from the actuator's own
+      ``stiffness``/``damping`` tensors on EVERY backend, and the sim-side
+      PD store is zeroed/unused (Genesis force mode, Newton
+      ``joint_target_mode=NONE``, mjlab ``BuiltinMotorActuatorCfg``).
+      Randomizing the sim store would be a silent no-op, so the actuator
+      tensors are randomized instead — sim-agnostic.
+    * **Implicit actuators** (sim-internal PD): the sim's gain store is
+      the live one, randomized via the per-backend path below. Genesis
+      only supports ``operation="scale"`` there (no built-in ratio API on
+      ``set_dofs_kp/kv`` so we sample a ratio and multiply).
+
+    Note: like the rest of the pd-gains DR, ``asset_cfg.joint_names``
+    subsets are not honored — gains are randomized for all actuated DOFs.
     """
     if len(env_ids) == 0:
         return
     if kp_range is None and kd_range is None:
+        return
+
+    if env.act_manager.has_explicit_actuators:
+        _explicit_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution)
         return
 
     if env.sim_type == "genesis":
@@ -652,16 +671,9 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
 
 
 def _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution):
-    # Explicit actuators (IdealPD / Delayed / DCMotor) compute torque in Python
-    # from their OWN stiffness/damping and ZERO the solver's joint_target_ke/kd
-    # (the joint runs in direct-torque / joint_f mode), so randomizing the solver
-    # gains here is a no-op. Randomize the ACTUATOR gains instead — those are what
-    # actuator_pd.compute() actually uses. Implicit actuators (Newton internal PD)
-    # DO consume joint_target_ke/kd, so keep the solver-gain path below for them.
-    if getattr(env.act_manager, "has_explicit_actuators", False):
-        _newton_actuator_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution)
-        return
-
+    # Implicit actuators only (the explicit case is handled sim-agnostically in
+    # randomize_pd_gains via _explicit_pd_gains_backend): Newton's internal PD
+    # consumes joint_target_ke/kd, so randomize the solver store.
     import warp as wp
     from newton.solvers import SolverNotifyFlags
 
@@ -685,14 +697,17 @@ def _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distri
         _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
-def _newton_actuator_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution):
+def _explicit_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution):
     """Randomize the per-env stiffness/damping of the EXPLICIT actuators — the
-    gains that actually produce torque in ``actuator_pd.compute`` (the solver's
-    joint_target_ke/kd are zeroed/unused in direct-torque mode). Each explicit
-    actuator owns ``(num_envs, n_actuated_joints)`` stiffness/damping tensors; we
-    edit them in place so the next step's torque reflects the new gains (no solver
-    notify needed — the gains live on the Python actuator). The pre-DR gains are
-    captured once per actuator so 'scale'/'add' do not compound across resets.
+    gains that actually produce torque in ``actuator_pd.compute`` (the sim-side
+    PD store is zeroed/unused in direct-torque mode). Sim-agnostic: the gains
+    are plain torch tensors on the Python actuator objects, shared by all three
+    backends (Genesis / Newton / mjlab route the computed torque through their
+    own force API, but the gains live here). Each explicit actuator owns
+    ``(num_envs, n_actuated_joints)`` stiffness/damping tensors; we edit them in
+    place so the next step's torque reflects the new gains (no sim notify
+    needed). The pre-DR gains are captured once per actuator so 'scale'/'add'
+    do not compound across resets.
     """
     for actuator, _joint_idx in env.act_manager.actuators:
         if not hasattr(actuator, "_dr_base_stiffness"):
