@@ -650,6 +650,24 @@ def randomize_pd_gains(
         raise NotImplementedError(f"randomize_pd_gains has no backend for sim_type={env.sim_type!r}")
 
 
+def _genesis_dr_baseline(env, entity_name: str, param: str, getter) -> torch.Tensor:
+    """Pre-DR value of a Genesis ``dofs_info`` parameter, captured on the
+    term's first call (before any DR has touched it).
+
+    Genesis ``set_dofs_kp/kv/armature`` are ABSOLUTE-set APIs writing the
+    persistent ``dofs_info`` store, ``get_dofs_*`` reads back the last-set
+    value, and nothing restores ``dofs_info`` on reset (episode resets only
+    touch ``dofs_state``). Scaling the CURRENT value therefore multiplies
+    ratios across resets into a log random-walk; always scale this captured
+    baseline instead (counterpart of Newton's ``_dr_baselines`` snapshot).
+    """
+    key = (entity_name, param)
+    cache = env._genesis_dr_baselines
+    if key not in cache:
+        cache[key] = torch.as_tensor(getter()).clone()
+    return cache[key]
+
+
 def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(
@@ -659,14 +677,14 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
     entity = env.scene_manager[resolved.name]
     n_dofs = entity.n_dofs
     if kp_range is not None:
-        current_kp = entity.get_dofs_kp()
+        base_kp = _genesis_dr_baseline(env, resolved.name, "kp", entity.get_dofs_kp)
         ratios = sample((len(env_ids), n_dofs), *kp_range, env.device, distribution)
-        kp_new = (current_kp * ratios) if current_kp.dim() == 1 else (current_kp[env_ids] * ratios)
+        kp_new = (base_kp * ratios) if base_kp.dim() == 1 else (base_kp[env_ids] * ratios)
         entity.set_dofs_kp(kp=kp_new.cpu().numpy(), envs_idx=env_ids)
     if kd_range is not None:
-        current_kv = entity.get_dofs_kv()
+        base_kv = _genesis_dr_baseline(env, resolved.name, "kv", entity.get_dofs_kv)
         ratios = sample((len(env_ids), n_dofs), *kd_range, env.device, distribution)
-        kv_new = (current_kv * ratios) if current_kv.dim() == 1 else (current_kv[env_ids] * ratios)
+        kv_new = (base_kv * ratios) if base_kv.dim() == 1 else (base_kv[env_ids] * ratios)
         entity.set_dofs_kv(kv=kv_new.cpu().numpy(), envs_idx=env_ids)
 
 
@@ -787,9 +805,9 @@ def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation,
         raise NotImplementedError(f"Genesis joint_armature DR only supports operation='scale' (got {operation!r}).")
     entity = env.scene_manager[resolved.name]
     n_dofs = entity.n_dofs
-    current = entity.get_dofs_armature()
+    base = _genesis_dr_baseline(env, resolved.name, "armature", entity.get_dofs_armature)
     ratios = sample((len(env_ids), n_dofs), *armature_range, env.device, distribution)
-    arm_new = (current * ratios) if current.dim() == 1 else (current[env_ids] * ratios)
+    arm_new = (base * ratios) if base.dim() == 1 else (base[env_ids] * ratios)
     entity.set_dofs_armature(armature=arm_new.cpu().numpy(), envs_idx=env_ids)
 
 

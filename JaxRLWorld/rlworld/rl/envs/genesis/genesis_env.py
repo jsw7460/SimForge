@@ -77,6 +77,14 @@ class GenesisEnv(World):
         self.decimation = env_cfg.decimation
         self.control_dt = self.physics_dt * self.decimation
 
+        # Pre-DR baselines for Genesis DR terms that only support
+        # operation="scale" (pd gains, armature). Keyed by
+        # ``(entity_name, param)``; captured lazily on a term's first call so
+        # 'scale' multiplies the BUILD-TIME value instead of the previously
+        # randomized one (which compounds into a log random-walk across
+        # resets). Counterpart of Newton's ``_dr_baselines`` snapshot.
+        self._genesis_dr_baselines: dict = {}
+
         # Initialize buffers
         self._init_buffers()
 
