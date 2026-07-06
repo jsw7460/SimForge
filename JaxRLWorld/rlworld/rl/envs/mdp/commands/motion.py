@@ -304,16 +304,6 @@ class MotionCommand(CommandTerm):
         )
         self.body_quat_relative_w[:, :, 0] = 1.0
 
-        # Base-class set_command writes into self._command indexed by
-        # env_ids. We don't support external override (motion is
-        # time-indexed), but keep a zero buffer so the attribute exists.
-        num_cols = 2 * self.motion.joint_pos.shape[1]
-        self._command_buf = torch.zeros(
-            self.num_envs,
-            num_cols,
-            device=self.device,
-        )
-
         # Adaptive-sampling buffers. Each motion gets one bin per
         # control step, matching mjlab's single-motion convention; the
         # layout is padded ``(num_motions, B_max)`` so the multi-motion

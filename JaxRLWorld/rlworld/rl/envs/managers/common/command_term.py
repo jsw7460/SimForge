@@ -71,6 +71,13 @@ class CommandTerm(ABC):
 
     column_names: tuple[str, ...] = ()
 
+    # Column-wise external-control mask, ``[num_envs, command_dim]`` bool.
+    # Allocated by the CommandManager via :meth:`_init_external_control_mask`
+    # right after the term is constructed (the base ``__init__`` cannot: the
+    # subclass allocates ``self._command`` and thereby chooses the width).
+    # From then on it is ALWAYS a tensor — no None state, no reader guards.
+    _externally_controlled: torch.Tensor
+
     def __init__(self, env: World, cfg: CommandTermCfg):
         self._env = env
         self.cfg = cfg
@@ -78,28 +85,22 @@ class CommandTerm(ABC):
         self.device = env.device
         self.time_left = torch.zeros(self.num_envs, device=self.device)
 
-        # Column-wise external-control mask: ``[num_envs, command_dim]``.
-        # Allocated lazily in ``__init_command_buffer`` once the subclass
-        # has set ``self._command`` (we need its width). Subclasses MUST
-        # call :meth:`_init_external_control_mask` after allocating
-        # ``self._command``.
-        self._externally_controlled: torch.Tensor | None = None
-
-    # ── Subclass helpers ───────────────────────────────────────────
+    # ── Manager hook ───────────────────────────────────────────────
 
     def _init_external_control_mask(self) -> None:
         """Allocate the column-wise lock mask.
 
-        Subclasses must call this once ``self._command`` is allocated
-        (i.e. at the end of their ``__init__``). Kept as an explicit
-        step rather than wiring it into the base ``__init__`` because
-        subclasses choose their own command_dim.
+        Called exactly once by the ``CommandManager`` after constructing the
+        term — the single owner of this invariant. The width comes from the
+        public :attr:`command` property (the required subclass surface), so
+        it also works for terms whose command is derived rather than stored
+        (e.g. the time-indexed motion command); a broken ``command``
+        implementation fails loudly at build time.
         """
-        assert hasattr(
-            self, "_command"
-        ), "Subclass must assign self._command before calling _init_external_control_mask()"
-        cmd_dim = self._command.shape[1]
+        cmd_dim = self.command.shape[1]
         self._externally_controlled = torch.zeros(self.num_envs, cmd_dim, dtype=torch.bool, device=self.device)
+
+    # ── Subclass helpers ───────────────────────────────────────────
 
     def _resolve_columns(self, columns: tuple[str, ...] | list[str] | None) -> torch.Tensor:
         """Resolve a column-name selector to a long-tensor of indices.
@@ -107,7 +108,7 @@ class CommandTerm(ABC):
         ``None`` resolves to all columns (legacy whole-row semantics).
         """
         if columns is None:
-            return torch.arange(self._command.shape[1], device=self.device)
+            return torch.arange(self.command.shape[1], device=self.device)
         idx = []
         for name in columns:
             try:
@@ -172,7 +173,7 @@ class CommandTerm(ABC):
             )
             self._resample_command(resample_ids)
 
-        if self._externally_controlled is not None and self._externally_controlled.any():
+        if self._externally_controlled.any():
             # Capture the user-driven values; restore after the
             # subclass's post-processing so e.g. heading P-control
             # never overwrites a locked column.
@@ -208,11 +209,6 @@ class CommandTerm(ABC):
                 ``None`` (default) means override every column — same as
                 the pre-refactor behavior.
         """
-        if self._externally_controlled is None:
-            raise NotImplementedError(
-                f"{type(self).__name__} does not support external command override "
-                "(no `_command` buffer registered via `_init_external_control_mask()`)."
-            )
         col_idx = self._resolve_columns(columns)
         # Index-assign: _command[env_ids[:, None], col_idx[None, :]] = values.
         self._command[env_ids[:, None], col_idx[None, :]] = values
@@ -235,9 +231,6 @@ class CommandTerm(ABC):
             columns: Column names to release. ``None`` releases every
                 column.
         """
-        if self._externally_controlled is None:
-            # Term does not support external control — nothing to release.
-            return
         col_idx = self._resolve_columns(columns)
         self._externally_controlled[env_ids[:, None], col_idx[None, :]] = False
 
@@ -246,11 +239,9 @@ class CommandTerm(ABC):
 
         Also clears external-control state for ALL columns of those
         envs so that they resume normal auto-resampling after an
-        episode reset. Terms that do not support external control
-        (no ``_externally_controlled`` mask allocated) skip the clear.
+        episode reset.
         """
-        if self._externally_controlled is not None:
-            self._externally_controlled[env_ids] = False
+        self._externally_controlled[env_ids] = False
         self.time_left[env_ids] = torch.empty(len(env_ids), device=self.device).uniform_(
             *self.cfg.resampling_time_range
         )
@@ -297,7 +288,6 @@ class VelocityCommandTerm(CommandTerm):
         self.is_standing_env = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.is_heading_env = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.heading_target = torch.zeros(self.num_envs, device=self.device)
-        self._init_external_control_mask()
 
     @property
     def command(self) -> torch.Tensor:
@@ -500,7 +490,6 @@ class GaitCommandTerm(CommandTerm):
     def __init__(self, env: World, cfg: GaitCommandTermCfg):
         super().__init__(env, cfg)
         self._command = torch.zeros(self.num_envs, _GAIT_DIM, device=self.device)
-        self._init_external_control_mask()
 
     @property
     def command(self) -> torch.Tensor:

@@ -52,6 +52,13 @@ class CommandManager(BaseManager):
 
         for name, term_cfg in config.terms.items():
             term = term_cfg.build(env)
+            # Single owner of the external-control invariant: every term gets
+            # its column-wise lock mask allocated here, right after
+            # construction — so `_externally_controlled` is ALWAYS a tensor
+            # and neither the base class nor subclasses need None guards. A
+            # term whose __init__ failed to allocate `_command` fails loudly
+            # at build time.
+            term._init_external_control_mask()
             self._terms[name] = term
             for col_idx, col_name in enumerate(term.column_names):
                 self._column_map[col_name] = (name, col_idx)
