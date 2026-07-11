@@ -32,10 +32,7 @@ class PolicyWrapper(ABC):
         joint_perm: "_JointPermutation | None" = None,
     ):
         self.device = device
-        self.is_squashed = runner.squash_output
-        if self.is_squashed:
-            self.action_scale = runner.action_scale
-            self.action_bias = runner.action_bias
+        self._runner_process_action = runner._process_action_for_env
         self._joint_perm = joint_perm
 
     @classmethod
@@ -51,10 +48,18 @@ class PolicyWrapper(ABC):
         return ModelPolicyWrapper(runner, device, joint_perm=joint_perm)
 
     def _process_action(self, actions: jax.Array) -> jax.Array:
-        """Apply action rescaling for squashed policies."""
-        if self.is_squashed:
-            return actions * self.action_scale + self.action_bias
-        return actions
+        """Post-process policy output exactly like the training-side path.
+
+        Delegates to ``BaseRunner._process_action_for_env`` (squashed:
+        rescale to env range; non-squashed: clip to env bounds). A
+        wrapper-local reimplementation once dropped the non-squashed
+        clip, so unclipped Gaussian action means leaked into the
+        ActionManager's raw-action buffer — knocking the prev-actions
+        observation out of the obs-normalizer's training distribution
+        and collapsing checkpoint-eval performance while in-training
+        evaluation looked fine.
+        """
+        return self._runner_process_action(actions)
 
     def _permute_obs_to_canonical(self, env_obs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Reorder observations from eval sim's joint order to canonical."""
