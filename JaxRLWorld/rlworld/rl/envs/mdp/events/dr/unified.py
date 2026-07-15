@@ -344,7 +344,6 @@ def _mujoco_friction_backend(
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg.resolve(adapter.scene)
 
-    _mjlab_expand_dr_fields(adapter, "geom_friction")
     _mjlab_geom_friction(
         env=adapter,
         env_ids=env_ids,
@@ -476,11 +475,9 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
 
 def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution, shared_random):
     from mjlab.envs.mdp.dr import body_mass as _mjlab_body_mass
-    from mjlab.managers.event_manager import RecomputeLevel
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "body_mass")
     _mjlab_body_mass(
         env=adapter,
         env_ids=env_ids,
@@ -489,10 +486,6 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
         operation=operation,
         shared_random=shared_random,
     )
-    # mjlab's EventManager runs this after firing mass DR (derived inertial
-    # constants like invweights go stale otherwise); we call the term
-    # directly, so recompute here.
-    adapter.sim.recompute_constants(RecomputeLevel.set_const)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -590,11 +583,9 @@ def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
 
 def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, axes, shared_random):
     from mjlab.envs.mdp.dr import body_com_offset as _mjlab_body_com_offset
-    from mjlab.managers.event_manager import RecomputeLevel
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "body_ipos")
     _mjlab_body_com_offset(
         env=adapter,
         env_ids=env_ids,
@@ -604,7 +595,6 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
         axes=axes,
         shared_random=shared_random,
     )
-    adapter.sim.recompute_constants(RecomputeLevel.set_const)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -638,12 +628,8 @@ def randomize_pd_gains(
       only supports ``operation="scale"`` there (no built-in ratio API on
       ``set_dofs_kp/kv`` so we sample a ratio and multiply).
 
-    ``asset_cfg.joint_names`` selects a canonical actuated-joint SUBSET to
-    randomize (e.g. arm joints only on a mobile manipulator); ``None``
-    randomizes every actuated DOF. Honored on the explicit path (every
-    backend) and the Genesis/Newton implicit paths; the mujoco IMPLICIT path
-    raises instead (mjlab's dr.pd_gains randomizes whole actuator groups, so
-    joint-level subsets cannot be expressed there).
+    Note: like the rest of the pd-gains DR, ``asset_cfg.joint_names``
+    subsets are not honored — gains are randomized for all actuated DOFs.
     """
     if len(env_ids) == 0:
         return
@@ -651,86 +637,17 @@ def randomize_pd_gains(
         return
 
     if env.act_manager.has_explicit_actuators:
-        _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
+        _explicit_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution)
         return
 
     if env.sim_type == "genesis":
         _genesis_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
+        _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution)
     elif env.sim_type == "mujoco":
         _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
     else:
         raise NotImplementedError(f"randomize_pd_gains has no backend for sim_type={env.sim_type!r}")
-
-
-def _mjlab_expand_dr_fields(adapter, *fields: str) -> None:
-    """Expand mjlab model fields to per-world storage before a direct dr call.
-
-    mjlab's own EventManager does this once at setup from each term's
-    ``@requires_model_fields`` declaration; we invoke the mjlab dr functions
-    directly through the adapter, so expand here instead. Without it the
-    write lands on the single shared world row: ``env_ids`` are silently
-    ignored and every env gets the same randomized values.
-
-    Gated on the ACTUAL per-world shape (``wp_model.<field>.shape[0] == 1`` =
-    still shared) because ``expand_model_fields`` re-captures the CUDA graph
-    on every call — only the first call per field may pay that cost. mjlab's
-    ``_expanded_fields`` bookkeeping cannot be used as the gate: it
-    pre-registers the variant-dependent fields (body_mass, body_ipos, ...)
-    for viewer syncing even in non-variant scenes where they are still
-    unexpanded.
-    """
-    if adapter.num_envs == 1:
-        return  # nothing to expand; expand_model_fields would no-op anyway
-    sim = adapter.sim
-    missing = tuple(f for f in fields if getattr(sim.wp_model, f).shape[0] == 1)
-    if missing:
-        sim.expand_model_fields(missing)
-
-
-def _selected_joint_ids(env, asset_cfg) -> torch.Tensor | None:
-    """Canonical actuated-joint indices selected by ``asset_cfg.joint_names``,
-    or ``None`` when no subset was requested (= randomize all actuated DOFs).
-
-    Subset detection keys on the ORIGINAL selector's ``joint_names``: the
-    event manager resolves selectors before the term runs, and backends
-    populate ``ResolvedEntity.joint_ids`` with the full actuated set even
-    when no ``joint_names`` were given — so ``joint_ids`` alone cannot
-    distinguish "all joints (default)" from "subset requested". Direct calls
-    (diags, scripts) may pass a raw :class:`SceneEntitySelector`, which is
-    resolved here on demand.
-    """
-    if isinstance(asset_cfg, SceneEntitySelector):
-        if asset_cfg.joint_names is None:
-            return None
-        asset_cfg = env.resolve_selector(asset_cfg)
-    if asset_cfg.source_selector.joint_names is None:
-        return None
-    return asset_cfg.joint_ids
-
-
-def _slice_dofs(values: torch.Tensor, sel: torch.Tensor | None) -> torch.Tensor:
-    """Select DOF columns from a per-DOF tensor of shape ``(n,)`` or ``(B, n)``."""
-    if sel is None:
-        return values
-    return values[sel] if values.dim() == 1 else values[:, sel]
-
-
-def _newton_dof_view(values: torch.Tensor) -> torch.Tensor:
-    """``(num_envs, dof_count)`` zero-copy view of a Newton view attribute.
-
-    ``ArticulationView.get_attribute`` returns joint-DOF attributes shaped
-    ``(world_count, articulations_per_world, dof_count)``; our robot views hold
-    exactly one articulation per world, so squeeze that axis. In-place writes
-    through the returned view hit the original tensor (basic indexing), which
-    is then written back via ``set_attribute``.
-    """
-    if values.dim() == 2:
-        return values
-    if values.dim() == 3 and values.shape[1] == 1:
-        return values[:, 0]
-    raise NotImplementedError(f"Unexpected Newton view attribute shape {tuple(values.shape)}")
 
 
 def _genesis_dr_baseline(env, entity_name: str, param: str, getter) -> torch.Tensor:
@@ -758,24 +675,20 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
             f"(got {operation!r}); set_dofs_kp/kv take absolute values."
         )
     entity = env.scene_manager[resolved.name]
-    # Canonical joint subset -> Genesis local dof indices (None = all dofs).
-    selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
-    sel_np = None if sel_dofs is None else sel_dofs.cpu().numpy()
-    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
+    n_dofs = entity.n_dofs
     if kp_range is not None:
-        base_kp = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "kp", entity.get_dofs_kp), sel_dofs)
-        ratios = sample((len(env_ids), n_sel), *kp_range, env.device, distribution)
+        base_kp = _genesis_dr_baseline(env, resolved.name, "kp", entity.get_dofs_kp)
+        ratios = sample((len(env_ids), n_dofs), *kp_range, env.device, distribution)
         kp_new = (base_kp * ratios) if base_kp.dim() == 1 else (base_kp[env_ids] * ratios)
-        entity.set_dofs_kp(kp=kp_new.cpu().numpy(), dofs_idx_local=sel_np, envs_idx=env_ids)
+        entity.set_dofs_kp(kp=kp_new.cpu().numpy(), envs_idx=env_ids)
     if kd_range is not None:
-        base_kv = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "kv", entity.get_dofs_kv), sel_dofs)
-        ratios = sample((len(env_ids), n_sel), *kd_range, env.device, distribution)
+        base_kv = _genesis_dr_baseline(env, resolved.name, "kv", entity.get_dofs_kv)
+        ratios = sample((len(env_ids), n_dofs), *kd_range, env.device, distribution)
         kv_new = (base_kv * ratios) if base_kv.dim() == 1 else (base_kv[env_ids] * ratios)
-        entity.set_dofs_kv(kv=kv_new.cpu().numpy(), dofs_idx_local=sel_np, envs_idx=env_ids)
+        entity.set_dofs_kv(kv=kv_new.cpu().numpy(), envs_idx=env_ids)
 
 
-def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
+def _newton_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution):
     # Implicit actuators only (the explicit case is handled sim-agnostically in
     # randomize_pd_gains via _explicit_pd_gains_backend): Newton's internal PD
     # consumes joint_target_ke/kd, so randomize the solver store.
@@ -784,37 +697,25 @@ def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
-    # Canonical joint subset -> per-env dof columns of the view attributes
-    # (same mapping RobotData uses; None = all dofs).
-    selected = _selected_joint_ids(env, asset_cfg)
-    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
     notify = False
     for attr_name, value_range in (("joint_target_ke", kp_range), ("joint_target_kd", kd_range)):
         if value_range is None:
             continue
         values = wp.to_torch(view.get_attribute(attr_name, model))
-        defaults = getattr(env._dr_baselines, attr_name)
-        if cols is None:
-            sampled = sample((len(env_ids),) + values.shape[1:], *value_range, env.device, distribution)
-            if operation == "abs":
-                values[env_ids] = sampled
-            else:
-                values[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+        shape = (len(env_ids),) + values.shape[1:]
+        sampled = sample(shape, *value_range, env.device, distribution)
+        if operation == "abs":
+            values[env_ids] = sampled
         else:
-            vals2d = _newton_dof_view(values)
-            defs2d = _newton_dof_view(defaults)
-            sampled = sample((len(env_ids), len(cols)), *value_range, env.device, distribution)
-            if operation == "abs":
-                vals2d[env_ids[:, None], cols[None, :]] = sampled
-            else:
-                vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+            defaults = getattr(env._dr_baselines, attr_name)
+            values[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
         view.set_attribute(attr_name, model, values)
         notify = True
     if notify:
         _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
-def _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
+def _explicit_pd_gains_backend(env, env_ids, kp_range, kd_range, operation, distribution):
     """Randomize the per-env stiffness/damping of the EXPLICIT actuators — the
     gains that actually produce torque in ``actuator_pd.compute`` (the sim-side
     PD store is zeroed/unused in direct-torque mode). Sim-agnostic: the gains
@@ -826,15 +727,7 @@ def _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, oper
     needed). The pre-DR gains are captured once per actuator so 'scale'/'add'
     do not compound across resets.
     """
-    selected = _selected_joint_ids(env, asset_cfg)
-    for actuator, joint_idx in env.act_manager.actuators:
-        # Columns of this actuator group covered by the subset: group column j
-        # drives canonical joint joint_idx[j].
-        cols = None
-        if selected is not None:
-            cols = torch.nonzero(torch.isin(joint_idx, selected), as_tuple=True)[0]
-            if cols.numel() == 0:
-                continue
+    for actuator, _joint_idx in env.act_manager.actuators:
         if not hasattr(actuator, "_dr_base_stiffness"):
             actuator._dr_base_stiffness = actuator.stiffness.clone()
             actuator._dr_base_damping = actuator.damping.clone()
@@ -845,14 +738,12 @@ def _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, oper
             if value_range is None:
                 continue
             gains = getattr(actuator, attr)  # [num_envs, n_actuated_joints]
-            base = getattr(actuator, base_attr)
-            n_cols = gains.shape[1] if cols is None else cols.numel()
-            sampled = sample((len(env_ids), n_cols), *value_range, env.device, distribution)
-            if cols is None:
-                gains[env_ids] = sampled if operation == "abs" else apply_operation(base[env_ids], sampled, operation)
+            sampled = sample((len(env_ids), gains.shape[1]), *value_range, env.device, distribution)
+            if operation == "abs":
+                gains[env_ids] = sampled
             else:
-                new = sampled if operation == "abs" else apply_operation(base[env_ids][:, cols], sampled, operation)
-                gains[env_ids[:, None], cols[None, :]] = new
+                base = getattr(actuator, base_attr)
+                gains[env_ids] = apply_operation(base[env_ids], sampled, operation)
 
 
 def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
@@ -862,20 +753,7 @@ def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
         raise NotImplementedError(
             "MuJoCo pd_gains requires both kp_range and kd_range (mjlab's dr.pd_gains has no None-skip option)."
         )
-    if _selected_joint_ids(env, asset_cfg) is not None:
-        # mjlab's dr.pd_gains selects whole actuator OBJECTS
-        # (asset_cfg.actuator_ids), and one Builtin actuator config can span
-        # several joints — a per-joint subset cannot be expressed through it.
-        # Fail loudly rather than silently randomizing all joints. (Explicit
-        # actuators support joint subsets on every backend.)
-        raise NotImplementedError(
-            "Joint-level subsets are not supported for pd-gain DR on the mujoco "
-            "IMPLICIT path (mjlab randomizes whole actuator groups). Use explicit "
-            "actuators or drop joint_names for full-set randomization."
-        )
-
     adapter = _MujocoEnvAdapter(env)
-    _mjlab_expand_dr_fields(adapter, "actuator_gainprm", "actuator_biasprm")
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
     _mjlab_pd_gains(
         env=adapter,
@@ -904,9 +782,10 @@ def randomize_joint_armature(
 ) -> None:
     """Randomize joint armature (reflected rotor inertia).
 
-    Genesis enforces ``operation="scale"``.  ``asset_cfg.joint_names``
-    selects a canonical actuated-joint subset (``None`` = all actuated
-    DOFs); honored on every backend.
+    Genesis enforces ``operation="scale"``.  All sims operate on the
+    full actuated DOF set; per-joint subset selection via
+    ``asset_cfg.joint_names`` is honored on MuJoCo (mjlab supports it)
+    and ignored on Genesis/Newton (whose APIs touch all DOFs at once).
     """
     if len(env_ids) == 0:
         return
@@ -914,7 +793,7 @@ def randomize_joint_armature(
     if env.sim_type == "genesis":
         _genesis_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution)
+        _newton_armature_backend(env, env_ids, armature_range, operation, distribution)
     elif env.sim_type == "mujoco":
         _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution, shared_random)
     else:
@@ -925,54 +804,36 @@ def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation,
     if operation != "scale":
         raise NotImplementedError(f"Genesis joint_armature DR only supports operation='scale' (got {operation!r}).")
     entity = env.scene_manager[resolved.name]
-    selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
-    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
-    base = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "armature", entity.get_dofs_armature), sel_dofs)
-    ratios = sample((len(env_ids), n_sel), *armature_range, env.device, distribution)
+    n_dofs = entity.n_dofs
+    base = _genesis_dr_baseline(env, resolved.name, "armature", entity.get_dofs_armature)
+    ratios = sample((len(env_ids), n_dofs), *armature_range, env.device, distribution)
     arm_new = (base * ratios) if base.dim() == 1 else (base[env_ids] * ratios)
-    entity.set_dofs_armature(
-        armature=arm_new.cpu().numpy(),
-        dofs_idx_local=None if sel_dofs is None else sel_dofs.cpu().numpy(),
-        envs_idx=env_ids,
-    )
+    entity.set_dofs_armature(armature=arm_new.cpu().numpy(), envs_idx=env_ids)
 
 
-def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution):
+def _newton_armature_backend(env, env_ids, armature_range, operation, distribution):
     import warp as wp
     from newton.solvers import SolverNotifyFlags
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
-    selected = _selected_joint_ids(env, asset_cfg)
-    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
     armature = wp.to_torch(view.get_attribute("joint_armature", model))
-    defaults = env._dr_baselines.joint_armature
-    if cols is None:
-        sampled = sample((len(env_ids),) + armature.shape[1:], *armature_range, env.device, distribution)
-        if operation == "abs":
-            armature[env_ids] = sampled
-        else:
-            armature[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+    shape = (len(env_ids),) + armature.shape[1:]
+    sampled = sample(shape, *armature_range, env.device, distribution)
+    if operation == "abs":
+        armature[env_ids] = sampled
     else:
-        vals2d = _newton_dof_view(armature)
-        defs2d = _newton_dof_view(defaults)
-        sampled = sample((len(env_ids), len(cols)), *armature_range, env.device, distribution)
-        if operation == "abs":
-            vals2d[env_ids[:, None], cols[None, :]] = sampled
-        else:
-            vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+        defaults = env._dr_baselines.joint_armature
+        armature[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
     view.set_attribute("joint_armature", model, armature)
     _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
 
 def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution, shared_random):
     from mjlab.envs.mdp.dr import joint_armature as _mjlab_joint_armature
-    from mjlab.managers.event_manager import RecomputeLevel
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "dof_armature")
     _mjlab_joint_armature(
         env=adapter,
         env_ids=env_ids,
@@ -981,7 +842,6 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
         operation=operation,
         shared_random=shared_random,
     )
-    adapter.sim.recompute_constants(RecomputeLevel.set_const_0)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1001,9 +861,8 @@ def randomize_joint_friction(
     """Randomize joint Coulomb friction (load-independent).
 
     Genesis enforces ``operation="abs"`` (its set_dofs_frictionloss
-    takes absolute values).  ``asset_cfg.joint_names`` selects a
-    canonical actuated-joint subset (``None`` = all actuated DOFs);
-    honored on every backend.
+    takes absolute values).  All sims default to the full actuated DOF
+    set.
     """
     if len(env_ids) == 0:
         return
@@ -1011,7 +870,7 @@ def randomize_joint_friction(
     if env.sim_type == "genesis":
         _genesis_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution)
+        _newton_joint_friction_backend(env, env_ids, friction_range, operation, distribution)
     elif env.sim_type == "mujoco":
         _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution, shared_random)
     else:
@@ -1025,41 +884,25 @@ def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, oper
             f"(got {operation!r}); set_dofs_frictionloss takes absolute values."
         )
     entity = env.scene_manager[resolved.name]
-    selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
-    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
-    values = sample((len(env_ids), n_sel), *friction_range, env.device, distribution)
-    entity.set_dofs_frictionloss(
-        frictionloss=values.cpu().numpy(),
-        dofs_idx_local=None if sel_dofs is None else sel_dofs.cpu().numpy(),
-        envs_idx=env_ids,
-    )
+    n_dofs = entity.n_dofs
+    values = sample((len(env_ids), n_dofs), *friction_range, env.device, distribution)
+    entity.set_dofs_frictionloss(frictionloss=values.cpu().numpy(), envs_idx=env_ids)
 
 
-def _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution):
+def _newton_joint_friction_backend(env, env_ids, friction_range, operation, distribution):
     import warp as wp
     from newton.solvers import SolverNotifyFlags
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
-    selected = _selected_joint_ids(env, asset_cfg)
-    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
     friction = wp.to_torch(view.get_attribute("joint_friction", model))
-    defaults = env._dr_baselines.joint_friction
-    if cols is None:
-        sampled = sample((len(env_ids),) + friction.shape[1:], *friction_range, env.device, distribution)
-        if operation == "abs":
-            friction[env_ids] = sampled
-        else:
-            friction[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+    shape = (len(env_ids),) + friction.shape[1:]
+    sampled = sample(shape, *friction_range, env.device, distribution)
+    if operation == "abs":
+        friction[env_ids] = sampled
     else:
-        vals2d = _newton_dof_view(friction)
-        defs2d = _newton_dof_view(defaults)
-        sampled = sample((len(env_ids), len(cols)), *friction_range, env.device, distribution)
-        if operation == "abs":
-            vals2d[env_ids[:, None], cols[None, :]] = sampled
-        else:
-            vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+        defaults = env._dr_baselines.joint_friction
+        friction[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
     view.set_attribute("joint_friction", model, friction)
     _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
@@ -1069,7 +912,6 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "dof_frictionloss")
     _mjlab_joint_friction(
         env=adapter,
         env_ids=env_ids,
