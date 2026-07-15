@@ -316,17 +316,101 @@ class MujocoEnv(World):
         else:
             self.visualization_manager = None
 
-    def _post_setup(self) -> None:
-        """Expand model fields for per-env domain randomization."""
+    def _pre_manager_setup(self) -> None:
+        """Expand mjlab model fields for per-env domain randomization.
+
+        Runs between scene build and manager creation — the same lifecycle
+        point as mjlab's own ``ManagerBasedRlEnv`` (Sim init -> expand ->
+        build managers).  ``expand_model_fields`` replaces the GPU arrays
+        behind the nominated fields and re-captures the CUDA graphs, so it
+        must happen while nothing else can hold references to the old
+        arrays.  The previous placement (``_post_setup``, i.e. AFTER every
+        manager was constructed) violated that contract and surfaced as
+        ``CUDA_ERROR_ILLEGAL_ADDRESS`` at the first reset-time DR write.
+
+        Two nomination sources are merged into a single expand call:
+
+        1) mjlab-native DR terms: ``mode='startup'`` with a ``field`` param.
+        2) Unified DR terms (``events/dr/unified.py``): the term's ``func``
+           is the entry point; the static map below records which mjlab
+           model fields each function writes through its
+           ``_mujoco_*_backend`` AND the recompute level that backend
+           requests afterwards.  Keep the map in sync with those backends.
+
+        DERIVED fields must be nominated too: a backend's
+        ``recompute_constants(level)`` launches mujoco-warp kernels over
+        every world that WRITE derived constants.  If a derived field is
+        still the shared ``(1, ...)`` row, those per-world writes are out
+        of bounds — an overrun that stays inside memory-pool slack at
+        small num_envs (silent corruption) and faults with
+        ``CUDA_ERROR_ILLEGAL_ADDRESS`` at larger num_envs.
+
+        The derived-field table below is the COMPLETE write-set of
+        mujoco-warp's set_const family, extracted from mujoco_warp
+        3.10.0.2 ``io.py`` (set_const_fixed / set_const_0 /
+        set_const_spring).  mjlab's own
+        ``event_manager._DERIVED_FIELDS`` misses the actuator / camera /
+        light / equality entries — e.g. ``_compute_actuator_acc0`` writes
+        ``actuator_acc0[worldid, act]`` unconditionally, so any actuated
+        robot crashes there (upstream mjlab bug; use our table until it
+        is fixed).  ``m.stat.meaninertia`` needs no expansion: its
+        kernels index ``worldid % shape[0]``.
+        """
+        from mjlab.managers.event_manager import RecomputeLevel
+
         from rlworld.rl.configs.base_config import iter_terms
         from rlworld.rl.configs.events.event_term_config import EventTermConfig
 
-        dr_fields = []
-        for name, term in iter_terms(self.event_cfg, EventTermConfig).items():
+        # Local import: unified.py imports the mujoco event adapter package,
+        # which resolves back into this env package (circular at load time).
+        from rlworld.rl.envs.mdp.events.dr import unified as _unified
+
+        set_const_0_fields = (
+            "dof_invweight0",
+            "body_invweight0",
+            "tendon_length0",
+            "tendon_invweight0",
+            "actuator_acc0",
+            "actuator_biasprm",
+            "cam_pos0",
+            "cam_poscom0",
+            "cam_mat0",
+            "light_pos0",
+            "light_poscom0",
+            "light_dir0",
+            "eq_data",
+        )
+        derived_fields = {
+            RecomputeLevel.none: (),
+            RecomputeLevel.set_const_fixed: ("body_subtreemass",),
+            RecomputeLevel.set_const_0: set_const_0_fields,
+            RecomputeLevel.set_const: (("body_subtreemass",) + set_const_0_fields + ("tendon_lengthspring",)),
+        }
+
+        unified_to_fields: dict = {
+            _unified.randomize_friction: (("geom_friction",), RecomputeLevel.none),
+            _unified.randomize_body_mass: (("body_mass",), RecomputeLevel.set_const),
+            _unified.randomize_body_com_offset: (("body_ipos",), RecomputeLevel.set_const),
+            _unified.randomize_pd_gains: (
+                ("actuator_gainprm", "actuator_biasprm"),
+                RecomputeLevel.none,
+            ),
+            _unified.randomize_joint_armature: (("dof_armature",), RecomputeLevel.set_const_0),
+            _unified.randomize_joint_friction: (("dof_frictionloss",), RecomputeLevel.none),
+        }
+
+        dr_fields: list[str] = []
+        for _name, term in iter_terms(self.event_cfg, EventTermConfig).items():
             if term.mode == "startup" and "field" in term.params:
                 dr_fields.append(term.params["field"])
+            entry = unified_to_fields.get(term.func)
+            if entry is not None:
+                fields, level = entry
+                dr_fields.extend(fields)
+                dr_fields.extend(derived_fields[level])
         if dr_fields:
-            self.scene_manager.sim.expand_model_fields(dr_fields)
+            # Dedupe while preserving order; expand exactly once.
+            self.scene_manager.sim.expand_model_fields(tuple(dict.fromkeys(dr_fields)))
 
     def _step_physics(self) -> None:
         for _ in range(self.decimation):

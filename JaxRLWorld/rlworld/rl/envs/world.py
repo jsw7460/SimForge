@@ -374,6 +374,13 @@ class World(ABC):
         self._build_scene()
         self.lifecycle.dispatch(LifecycleEvent.SCENE_BUILT)
 
+        # Phase 1.5 — Simulator-specific work that must happen after the
+        # physics scene exists but BEFORE any manager is constructed
+        # (e.g. mjlab per-env model-field expansion, which replaces GPU
+        # arrays and must precede anything that could hold references
+        # to them).
+        self._pre_manager_setup()
+
         # Phase 2 — Create managers
         self._build_sim_managers()
         self._build_common_managers()
@@ -465,11 +472,20 @@ class World(ABC):
             config=self.curriculum_cfg,
         )
 
+    def _pre_manager_setup(self) -> None:
+        """Simulator-specific work between scene build and manager creation.
+
+        mjlab expands model fields for per-env domain randomization here:
+        ``expand_model_fields`` replaces the GPU arrays behind the fields and
+        re-captures the CUDA graphs, so it must run before any manager or
+        entity can hold a reference to the old arrays (mirrors mjlab's own
+        ``ManagerBasedRlEnv`` ordering: Sim init -> expand -> managers).
+        """
+
     def _post_setup(self) -> None:
         """Simulator-specific finalization after all managers are created.
 
-        Examples: Newton captures CUDA graphs, MuJoCo expands model fields
-        for domain randomisation.  Called before startup events.
+        Example: Newton captures CUDA graphs.  Called before startup events.
         """
 
     @abstractmethod

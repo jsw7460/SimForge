@@ -344,7 +344,6 @@ def _mujoco_friction_backend(
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg.resolve(adapter.scene)
 
-    _mjlab_expand_dr_fields(adapter, "geom_friction")
     _mjlab_geom_friction(
         env=adapter,
         env_ids=env_ids,
@@ -480,7 +479,6 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "body_mass")
     _mjlab_body_mass(
         env=adapter,
         env_ids=env_ids,
@@ -594,7 +592,6 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "body_ipos")
     _mjlab_body_com_offset(
         env=adapter,
         env_ids=env_ids,
@@ -662,31 +659,6 @@ def randomize_pd_gains(
         _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
     else:
         raise NotImplementedError(f"randomize_pd_gains has no backend for sim_type={env.sim_type!r}")
-
-
-def _mjlab_expand_dr_fields(adapter, *fields: str) -> None:
-    """Expand mjlab model fields to per-world storage before a direct dr call.
-
-    mjlab's own EventManager does this once at setup from each term's
-    ``@requires_model_fields`` declaration; we invoke the mjlab dr functions
-    directly through the adapter, so expand here instead. Without it the
-    write lands on the single shared world row: ``env_ids`` are silently
-    ignored and every env gets the same randomized values.
-
-    Gated on the ACTUAL per-world shape (``wp_model.<field>.shape[0] == 1`` =
-    still shared) because ``expand_model_fields`` re-captures the CUDA graph
-    on every call — only the first call per field may pay that cost. mjlab's
-    ``_expanded_fields`` bookkeeping cannot be used as the gate: it
-    pre-registers the variant-dependent fields (body_mass, body_ipos, ...)
-    for viewer syncing even in non-variant scenes where they are still
-    unexpanded.
-    """
-    if adapter.num_envs == 1:
-        return  # nothing to expand; expand_model_fields would no-op anyway
-    sim = adapter.sim
-    missing = tuple(f for f in fields if getattr(sim.wp_model, f).shape[0] == 1)
-    if missing:
-        sim.expand_model_fields(missing)
 
 
 def _selected_joint_ids(env, asset_cfg) -> torch.Tensor | None:
@@ -875,7 +847,6 @@ def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
         )
 
     adapter = _MujocoEnvAdapter(env)
-    _mjlab_expand_dr_fields(adapter, "actuator_gainprm", "actuator_biasprm")
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
     _mjlab_pd_gains(
         env=adapter,
@@ -972,7 +943,6 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "dof_armature")
     _mjlab_joint_armature(
         env=adapter,
         env_ids=env_ids,
@@ -1069,7 +1039,6 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
-    _mjlab_expand_dr_fields(adapter, "dof_frictionloss")
     _mjlab_joint_friction(
         env=adapter,
         env_ids=env_ids,
