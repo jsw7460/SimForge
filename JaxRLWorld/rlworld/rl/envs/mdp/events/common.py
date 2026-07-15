@@ -88,6 +88,42 @@ def push_by_setting_velocity(
     writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
 
 
+def push_by_planar_impulse(
+    env: World,
+    env_ids: torch.Tensor,
+    magnitude_range: tuple[float, float],
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> None:
+    """Add a planar velocity impulse of random direction to the root link.
+
+    Unlike :func:`push_by_setting_velocity`, which samples each axis
+    independently (a box distribution), this samples a direction
+    ``theta ~ U(0, 2*pi)`` and a magnitude ``m ~ U(magnitude_range)``
+    and adds ``m * (cos(theta), sin(theta))`` to the current world-frame
+    root xy velocity — the polar distribution used by locomotion push
+    events that perturb with an isotropic horizontal kick.
+
+    Works identically across Newton, Genesis, and MuJoCo.
+    """
+    if len(env_ids) == 0:
+        return
+
+    rd = env.get_robot_data(asset_cfg.name)
+    writer = env.get_robot_state_writer(asset_cfg.name)
+    device = env.device
+    n = len(env_ids)
+
+    lin_vel = rd.root_link_lin_vel_w[env_ids].clone()
+    ang_vel = rd.root_link_ang_vel_w[env_ids].clone()
+
+    theta = torch.empty(n, device=device).uniform_(0.0, 2.0 * torch.pi)
+    magnitude = torch.empty(n, device=device).uniform_(*magnitude_range)
+    lin_vel[:, 0] += magnitude * torch.cos(theta)
+    lin_vel[:, 1] += magnitude * torch.sin(theta)
+
+    writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
+
+
 # ── Reset root state ────────────────────────────────────────────────
 
 
@@ -239,6 +275,48 @@ def reset_joints_by_offset(
         )
 
     writer.set_dof_positions(default_pos, env_ids=env_ids)
+    writer.set_dof_velocities(joint_vel, env_ids=env_ids)
+    writer.eval_fk(env_ids=env_ids)
+
+
+def reset_joints_by_scale(
+    env: World,
+    env_ids: torch.Tensor,
+    position_range: tuple[float, float],
+    velocity_range: tuple[float, float] = (0.0, 0.0),
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> None:
+    """Reset actuated joint positions to ``default * U(position_range)``.
+
+    Multiplicative counterpart of :func:`reset_joints_by_offset`
+    (IsaacLab's ``reset_joints_by_scale``): each joint's default
+    position from ``act_manager.offset`` is scaled by an independent
+    per-joint uniform sample, so joints whose default is zero stay at
+    zero. Velocities are sampled additively as in the offset variant.
+
+    Works identically across Newton, Genesis, and MuJoCo.
+    """
+    if len(env_ids) == 0:
+        return
+
+    writer = env.get_robot_state_writer(asset_cfg.name)
+    device = env.device
+    n = len(env_ids)
+
+    joint_pos = env.act_manager.offset[env_ids].clone()
+    if joint_pos.dim() == 1:
+        joint_pos = joint_pos.unsqueeze(0)
+    num_joints = joint_pos.shape[-1]
+
+    scale = torch.empty(n, num_joints, device=device).uniform_(*position_range)
+    joint_pos = joint_pos * scale
+
+    if velocity_range == (0.0, 0.0):
+        joint_vel = torch.zeros(n, num_joints, device=device)
+    else:
+        joint_vel = torch.empty(n, num_joints, device=device).uniform_(*velocity_range)
+
+    writer.set_dof_positions(joint_pos, env_ids=env_ids)
     writer.set_dof_velocities(joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
 

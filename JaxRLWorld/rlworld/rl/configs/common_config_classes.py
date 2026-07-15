@@ -30,6 +30,11 @@ class RewardConfig(BaseConfig):
 
     reward_mode: str = "sum"
     shaping_sigma: float = 0.02
+    # Optional (min, max) clip applied to the TOTAL per-step reward after
+    # mode computation (per-term episode sums stay unclipped). E.g.
+    # ``(0.0, 10000.0)`` floors the summed reward at zero so penalty-heavy
+    # steps cannot go negative.
+    total_clip: tuple[float, float] | None = None
 
 
 @dataclass

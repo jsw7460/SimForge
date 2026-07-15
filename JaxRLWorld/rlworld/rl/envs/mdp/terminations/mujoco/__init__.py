@@ -4,13 +4,13 @@ This module provides termination functions for MuJoCo-based environments,
 ported from mjlab's MDP module.
 """
 
-# MuJoCo-specific termination functions
+# MuJoCo-specific termination functions.
+# nan_detection lives in terminations.common (sim-agnostic RobotData impl).
 from .terminations import (
     bad_orientation,
     base_contact,
     illegal_contact,
     joint_limit_violation,
-    nan_detection,
     roll_pitch_violation,
     root_height_below_minimum,
     time_out,
@@ -24,7 +24,6 @@ __all__ = [
     "roll_pitch_violation",
     "illegal_contact",
     "base_contact",
-    "nan_detection",
     "joint_limit_violation",
     "velocity_limit_violation",
 ]

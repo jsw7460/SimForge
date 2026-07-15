@@ -84,6 +84,9 @@ class RewardManager(BaseManager):
         else:
             raise ValueError(f"Unknown reward_mode: {mode!r}")
 
+        if self.config.total_clip is not None:
+            reward_buffer.clamp_(*self.config.total_clip)
+
         reward_buffer_per_type["total_reward"] = reward_buffer
 
     def _set_rewards_exponential_fixed(

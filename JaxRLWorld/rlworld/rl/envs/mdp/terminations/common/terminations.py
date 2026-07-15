@@ -68,6 +68,28 @@ def energy_termination(
     return TerminationResult(exceeded)
 
 
+def nan_detection(
+    env: World,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> TerminationResult:
+    """Terminate environments whose physics state contains NaN.
+
+    Sim-agnostic generalization of the mujoco-only ``nan_detection``:
+    checks joint positions/velocities and the root position through the
+    ``RobotData`` protocol so it works on Newton and Genesis too.
+
+    Returns:
+        TerminationResult flagging envs with NaN state.
+    """
+    rd = env.get_robot_data(asset_cfg.name)
+    has_nan = (
+        torch.any(torch.isnan(rd.joint_pos), dim=1)
+        | torch.any(torch.isnan(rd.joint_vel), dim=1)
+        | torch.any(torch.isnan(rd.root_link_pos_w), dim=1)
+    )
+    return TerminationResult(has_nan)
+
+
 def roll_pitch_violation(
     env: World,
     roll_threshold_degree: float = 15.0,

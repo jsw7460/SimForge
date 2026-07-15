@@ -163,27 +163,6 @@ def base_contact(env: MujocoEnv) -> TerminationResult:
     return TerminationResult(terminated)
 
 
-def nan_detection(env: MujocoEnv) -> TerminationResult:
-    """Terminate environments that have NaN/Inf values in physics state.
-
-    Args:
-        env: The MujocoEnv environment.
-
-    Returns:
-        TerminationResult for NaN detection.
-    """
-    robot_data = env.scene_manager.robot.data
-
-    # Check common state variables for NaN
-    has_nan = (
-        torch.any(torch.isnan(robot_data.joint_pos), dim=1)
-        | torch.any(torch.isnan(robot_data.joint_vel), dim=1)
-        | torch.any(torch.isnan(robot_data.root_link_pos_w), dim=1)
-    )
-
-    return TerminationResult(has_nan)
-
-
 def joint_limit_violation(
     env: MujocoEnv,
     margin: float = 0.0,

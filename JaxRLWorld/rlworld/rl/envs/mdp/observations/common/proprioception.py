@@ -141,6 +141,23 @@ def dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.
 
 
 @EnvStepCache()
+def applied_torque(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Per-joint actuator torque actually applied at the last physics substep.
+
+    Reads :attr:`RobotData.applied_torque` (MuJoCo ``qfrc_actuator``
+    semantics), which each backend implements for BOTH actuator modes:
+    the sim-native actuator force under ``ImplicitActuatorCfg`` and the
+    clipped Python-side PD output under explicit actuators. Typically a
+    privileged (critic-only) term — real hardware has no torque sensor
+    on most robots.
+
+    Returns:
+        Tensor of shape (num_envs, num_joints) in act_manager order.
+    """
+    return env.get_robot_data(asset_cfg.name).applied_torque
+
+
+@EnvStepCache()
 def dof_pos_nominal_difference(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Joint positions relative to nominal (default) positions, in act_manager order.
 
