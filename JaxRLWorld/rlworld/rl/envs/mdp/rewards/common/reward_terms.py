@@ -150,10 +150,12 @@ def reward_alive(env: World) -> torch.Tensor:
     """Constant alive reward (1.0 per env).
 
     Returns:
-        Tensor of shape (num_envs,) on the default device. Matches the
-        original sim-specific implementations exactly: ``torch.ones((num_envs,))``.
+        Tensor of shape (num_envs,) on the env device. (Allocating on the
+        torch default device crashes the CUDA reward accumulation on
+        Newton/mjlab; Genesis masked the bug by setting the global torch
+        default device to cuda.)
     """
-    return torch.ones((env.num_envs,))
+    return torch.ones(env.num_envs, device=env.device)
 
 
 def is_alive(env: World) -> torch.Tensor:
