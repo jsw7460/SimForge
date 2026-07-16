@@ -139,14 +139,25 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             ls_iterations=50,
             ccd_iterations=50,
             # Rough terrain inflates the per-env contact count by an order
-            # of magnitude vs flat ground (~300 contacts/env vs ~35 on a
-            # plane; observed on G1 29-DOF + self-collision + heightfield).
-            # ``nconmax`` / ``njmax`` are mjwarp's *per-env* solver buffers
-            # (total = num_envs * field); undersizing on rough surfaces
-            # raises "Number of Newton contacts exceeded MJWarp limit" at
-            # every step. Flat keeps the existing tight budgets.
+            # of magnitude vs flat ground (observed on G1 29-DOF +
+            # self-collision + heightfield). ``nconmax`` / ``njmax`` are
+            # mjwarp's *per-env* solver buffers (total = num_envs * field).
+            #
+            # Flat budget: measured with the contact-demand sweep in
+            # ``scripts/diag/newton_g1_dr_nan_diag.py`` (2026-07-16,
+            # Newton 1.5.0.dev + mujoco-warp 3.10.0.2): peak per-world
+            # ncon = 76 under random actions, ~60 just STANDING. The old
+            # value 35 dated from an earlier Newton/mjwarp combination
+            # that counted fewer contacts for the same scene; after the
+            # upstream collision/margin reworks it overflowed even at
+            # rest. mjwarp SKIPS contacts beyond the budget silently
+            # (collision_driver: "the remaining contacts will be
+            # skipped"), so undersizing shows up not as an error but as
+            # feet losing contact -> penetration -> velocity blowup ->
+            # NaN within ~1 s of training. Re-measure with the diag
+            # after any Newton / mujoco-warp bump.
             njmax=5000 if cfg.use_rough_terrain else 1500,
-            nconmax=500 if cfg.use_rough_terrain else 35,
+            nconmax=500 if cfg.use_rough_terrain else 128,
             # Mesh terrain: route contacts through Newton's MPR-based
             # pipeline instead of mjwarp's internal GJK/EPA collision.
             # Under use_mujoco_contacts=True mjwarp does its own collision,
