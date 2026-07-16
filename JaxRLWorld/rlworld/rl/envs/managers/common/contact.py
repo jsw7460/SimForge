@@ -284,8 +284,16 @@ class BaseContactManager(BaseManager, ABC):
             self._advance_group(group, dt)
 
     def _advance_group(self, g: ContactGroup, dt: float) -> None:
-        is_contact = self._compute_group_is_contact(g)
+        self._apply_contact_frame(g, self._compute_group_is_contact(g), dt)
 
+    @staticmethod
+    def _apply_contact_frame(g: ContactGroup, is_contact: torch.Tensor, dt: float) -> None:
+        """Accumulate one substep's contact boolean into the timing buffers.
+
+        Split out of :meth:`_advance_group` so backends that can fetch the
+        whole substep history in one read (Genesis's native sensor ring)
+        can replay the frames through the exact same arithmetic.
+        """
         is_landing = ~g._prev_is_contact & is_contact
         is_liftoff = g._prev_is_contact & ~is_contact
 

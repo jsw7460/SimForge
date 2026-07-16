@@ -262,6 +262,28 @@ class GenesisContactSensor:
             cols.append(c[..., 0] != 0)  # (n,)
         return torch.stack(cols, dim=1)  # (num_envs, N) bool
 
+    def read_found_history(self) -> torch.Tensor:
+        """Read the full per-substep ``found`` history, oldest-first.
+
+        Returns ``(num_envs, H, N)`` bool — the frame axis is reversed
+        from Genesis's newest-first ring layout so callers can replay the
+        substeps of the just-finished control step in temporal order.
+
+        Costs ONE GPU->CPU sync per primary link (the ring is returned
+        whole by ``read_ground_truth``), versus one sync per link PER
+        SUBSTEP on the ``read_found`` path — the batched
+        ``ContactManager.advance`` relies on this being the only
+        found-channel read of the control step.
+        """
+        if self.cfg.history_length <= 0:
+            raise RuntimeError(f"ContactSensorCfg {self.cfg.name!r}: read_found_history requires history_length > 0.")
+        cols: list[torch.Tensor] = []
+        for cs in self._contact_sensors:
+            h = cs.read_ground_truth()  # (num_envs, H, D), newest-first
+            cols.append(h[..., 0] != 0)  # (num_envs, H)
+        stacked = torch.stack(cols, dim=2)  # (num_envs, H, N)
+        return torch.flip(stacked, dims=(1,))
+
     def read_force(self) -> torch.Tensor:
         """Read only the ``gs.sensors.ContactForce`` (3-vec) channel.
 

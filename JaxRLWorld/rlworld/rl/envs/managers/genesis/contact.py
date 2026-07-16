@@ -26,6 +26,8 @@ class ContactManager(BaseContactManager):
     def __init__(self, env: GenesisEnv):
         super().__init__(env=env)
         self._sensors: dict[str, GenesisContactSensor] = {}
+        # Substep counter for the batched advance() — see the override below.
+        self._substeps_seen = 0
 
     def register_sensor(self, cfg: ContactSensorCfg) -> None:
         """Register a contact sensor config as a named group.
@@ -42,8 +44,45 @@ class ContactManager(BaseContactManager):
                 "scene.build(); ensure GenesisEnv._build_scene() iterates "
                 "scene_cfg.contact_sensors and calls create_native_sensors()."
             )
+        if cfg.history_length < self.env.decimation:
+            raise ValueError(
+                f"Genesis ContactSensorCfg {cfg.name!r}: history_length="
+                f"{cfg.history_length} < decimation={self.env.decimation}. The batched "
+                "contact-timing path replays the native per-substep history once per "
+                "control step, so the sensor ring must retain every substep frame; "
+                "set history_length=decimation (as every genesis preset does)."
+            )
         self._sensors[cfg.name] = sensor
         self._register_group(cfg.name, sensor.tracked_names)
+
+    # -- batched timing accumulation --
+
+    def advance(self, dt: float) -> None:
+        """Batched contact-timing accumulation: one read per control step.
+
+        The base implementation reads each group's CURRENT contact boolean
+        on every substep — on Genesis that is one GPU sync per primary
+        link per substep (~128 syncs per control step for G1's
+        feet + self-collision groups; measured ~14 ms/step at 4096 envs).
+        The native sensors already record a per-substep history ring
+        (``history_length >= decimation``, enforced in
+        :meth:`register_sensor`), so this override skips the intermediate
+        substeps and, on the LAST substep of the control step, reads the
+        ring ONCE and replays its frames oldest-first through the
+        identical arithmetic (:meth:`_apply_contact_frame`).  Same
+        booleans, same order, same dt — bit-identical timing buffers at
+        1/decimation of the sync cost.  Verified per-robot by
+        ``scripts/diag/genesis_contact_batching_diag.py``.
+        """
+        self._substeps_seen += 1
+        if self._substeps_seen < self.env.decimation:
+            return
+        self._substeps_seen = 0
+        for group in self._groups.values():
+            hist = self._sensors[group.name].read_found_history()  # (n, H, N) oldest-first
+            frames = hist[:, -self.env.decimation :, :]
+            for k in range(frames.shape[1]):
+                self._apply_contact_frame(group, frames[:, k, :], dt)
 
     # -- abstract impl --
 
