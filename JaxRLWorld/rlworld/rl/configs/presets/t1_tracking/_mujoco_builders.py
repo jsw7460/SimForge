@@ -57,7 +57,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     projected_gravity,
     raw_actions,
 )
-from rlworld.rl.envs.mdp.rewards.common import motion_tracking as rf_motion
+from rlworld.rl.envs.mdp.rewards.common import motion_tracking as rf_motion, reward_terms as rf_common
 from rlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf
 from rlworld.rl.envs.mdp.terminations.common import motion_tracking as tt_motion
 from rlworld.rl.envs.mdp.terminations.mujoco import terminations as tf
@@ -347,7 +347,7 @@ def build_reward(cfg: T1TrackingConfig) -> RewardConfig:
             params=motion_params_std(cfg.body_ang_vel_std),
         )
         raw_action_rate_l2 = RewardTermConfig(
-            func=rf.raw_action_rate_l2,
+            func=rf_common.raw_action_rate_l2,
             weight=cfg.action_rate_l2_weight,
         )
         joint_pos_limits = RewardTermConfig(
