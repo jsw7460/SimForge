@@ -292,6 +292,7 @@ class GenesisEnv(World):
                 actuated_dof_ids=indexing.sim_indices,
                 num_envs=self.num_envs,
                 device=self.device,
+                env=self,
                 default_joint_pos=_default_jp,
             )
             self._robot_state_writer_cache[name] = GenesisRobotStateWriter(
@@ -309,6 +310,7 @@ class GenesisEnv(World):
                 actuated_dof_ids=[],
                 num_envs=self.num_envs,
                 device=self.device,
+                env=self,
                 default_joint_pos=None,
             )
             # Genesis root writes go through the per-entity RigidEntity (set_pos /
@@ -334,6 +336,11 @@ class GenesisEnv(World):
                 self.act_manager.apply_actions(self.act_manager.processed_actions)
             with prof.section("  phys:scene.step"):
                 self.scene_manager.step()
+            # The physics state just advanced; bump the read-cache generation
+            # so per-step-memoized reads (RobotData / contact sensors) can
+            # never serve a pre-substep value inside the decimation loop —
+            # the explicit-actuator PD path re-reads joint state each substep.
+            self._invalidate_cache()
             with prof.section("  phys:contact_manager.advance"):
                 self.contact_manager.advance(dt=self.physics_dt)
         with prof.section("  phys:vis_manager.advance"):

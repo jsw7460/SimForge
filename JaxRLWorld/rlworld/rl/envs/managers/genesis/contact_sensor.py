@@ -29,6 +29,7 @@ import genesis as gs
 import torch
 
 from rlworld.rl.configs.sensors import ContactSensorCfg
+from rlworld.rl.envs.genesis.robot_data import _per_step_read
 from rlworld.rl.utils import entity_utils as eu
 
 if TYPE_CHECKING:
@@ -66,6 +67,9 @@ class GenesisContactSensor:
             raise TypeError(f"GenesisContactSensor expects a ContactSensorCfg, got {type(cfg).__name__}")
 
         self.env = env
+        # Alias + per-step read memoization — see robot_data._per_step_read.
+        self._env = env
+        self._read_cache: dict[str, tuple[int, object]] = {}
         self.cfg = cfg
         self.device = env.device
         self.num_envs = env.num_envs
@@ -244,6 +248,7 @@ class GenesisContactSensor:
             return t[:, 0, :]
         return t
 
+    @_per_step_read
     def read_found(self) -> torch.Tensor:
         """Read only the ``gs.sensors.Contact`` (found) channel.
 
@@ -262,6 +267,7 @@ class GenesisContactSensor:
             cols.append(c[..., 0] != 0)  # (n,)
         return torch.stack(cols, dim=1)  # (num_envs, N) bool
 
+    @_per_step_read
     def read_found_history(self) -> torch.Tensor:
         """Read the full per-substep ``found`` history, oldest-first.
 
@@ -284,6 +290,7 @@ class GenesisContactSensor:
         stacked = torch.stack(cols, dim=2)  # (num_envs, H, N)
         return torch.flip(stacked, dims=(1,))
 
+    @_per_step_read
     def read_force(self) -> torch.Tensor:
         """Read only the ``gs.sensors.ContactForce`` (3-vec) channel.
 
@@ -316,6 +323,7 @@ class GenesisContactSensor:
     # substep history (only when history_length > 0)
     # ------------------------------------------------------------------
 
+    @_per_step_read
     def compute_history(self) -> torch.Tensor | None:
         """Return ``(num_envs, N, H, 3)`` counterpart-filtered contact-force history, or ``None``.
 

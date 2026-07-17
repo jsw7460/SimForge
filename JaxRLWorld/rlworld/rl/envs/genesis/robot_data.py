@@ -7,6 +7,7 @@ Genesis velocities are in **world frame**, so we rotate to body frame.
 
 from __future__ import annotations
 
+import functools
 from typing import TYPE_CHECKING
 
 import torch
@@ -17,6 +18,37 @@ from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_rotate_wx
 
 if TYPE_CHECKING:
     from genesis.engine.entities import RigidEntity
+
+
+def _per_step_read(fn):
+    """Memoize a zero-argument state read for the current cache generation.
+
+    Genesis getters cost one taichi kernel launch + device sync per CALL, and
+    obs / reward / termination terms re-read the same quantity several times
+    per control step (measured: ``get_quat`` ~12 calls/step on g1_29dof).
+    The cache key is ``env._cache_generation``; ``GenesisEnv._step_physics``
+    bumps it after EVERY physics substep (and ``World.step`` after the loop
+    and after resets), so a cached value can never outlive the sim state it
+    was read from — in particular the explicit-actuator PD path still gets a
+    fresh joint state each substep.
+
+    Cached tensors are shared between callers within a step: treat every
+    RobotData read as read-only (the same convention mjlab's zero-copy
+    TorchArray views already impose).
+    """
+    name = fn.__name__
+
+    @functools.wraps(fn)
+    def wrapper(self):
+        gen = self._env._cache_generation
+        hit = self._read_cache.get(name)
+        if hit is not None and hit[0] == gen:
+            return hit[1]
+        value = fn(self)
+        self._read_cache[name] = (gen, value)
+        return value
+
+    return wrapper
 
 
 class GenesisRigidObjectData:
@@ -34,9 +66,13 @@ class GenesisRigidObjectData:
         actuated_dof_ids: Tensor | list[int],
         num_envs: int,
         device: torch.device,
+        env,
         default_joint_pos: Tensor | None = None,
     ) -> None:
         self._entity = entity
+        self._env = env
+        # Per-step read memoization — see :func:`_per_step_read`.
+        self._read_cache: dict[str, tuple[int, Tensor]] = {}
         self._actuated_dof_ids = actuated_dof_ids
         self._gravity_vec: Tensor | None = None
         self._num_envs = num_envs
@@ -63,18 +99,22 @@ class GenesisRigidObjectData:
         return self._gravity_vec
 
     @property
+    @_per_step_read
     def root_link_pos_w(self) -> Tensor:
         return self._entity.get_pos()
 
     @property
+    @_per_step_read
     def root_link_quat_w(self) -> Tensor:
         return self._entity.get_quat()  # already wxyz
 
     @property
+    @_per_step_read
     def root_link_lin_vel_w(self) -> Tensor:
         return self._entity.get_vel()
 
     @property
+    @_per_step_read
     def root_link_ang_vel_w(self) -> Tensor:
         return self._entity.get_ang()
 
@@ -95,10 +135,12 @@ class GenesisRigidObjectData:
     #   get_links_vel(ref="link_com") = cd_vel + cd_ang x links_state.i_pos        (vel at link CoM, world)
 
     @property
+    @_per_step_read
     def root_com_pos_w(self) -> Tensor:
         return self._entity._solver.get_links_pos(self._entity.base_link_idx, ref="link_com")[..., 0, :]
 
     @property
+    @_per_step_read
     def root_com_lin_vel_w(self) -> Tensor:
         return self._entity._solver.get_links_vel(self._entity.base_link_idx, ref="link_com")[..., 0, :]
 
@@ -141,11 +183,13 @@ class GenesisRigidObjectData:
     # ------------------------------------------------------------------
 
     @property
+    @_per_step_read
     def body_pos_w_all(self) -> Tensor:
         """World-frame positions of all links. Shape ``(num_envs, num_links, 3)``."""
         return self._entity.get_links_pos()
 
     @property
+    @_per_step_read
     def body_quat_w_all(self) -> Tensor:
         """World-frame orientations of all links, wxyz. Shape ``(num_envs, num_links, 4)``.
 
@@ -154,6 +198,7 @@ class GenesisRigidObjectData:
         return self._entity.get_links_quat()
 
     @property
+    @_per_step_read
     def body_lin_vel_w_all(self) -> Tensor:
         """World-frame linear velocities of all links. Shape ``(num_envs, num_links, 3)``.
 
@@ -163,11 +208,13 @@ class GenesisRigidObjectData:
         return self._entity.get_links_vel()
 
     @property
+    @_per_step_read
     def body_ang_vel_w_all(self) -> Tensor:
         """World-frame angular velocities of all links. Shape ``(num_envs, num_links, 3)``."""
         return self._entity.get_links_ang()
 
     @property
+    @_per_step_read
     def body_com_pos_w_all(self) -> Tensor:
         """World-frame positions of all links' centers of mass. Shape ``(num_envs, num_links, 3)``.
 
@@ -177,6 +224,7 @@ class GenesisRigidObjectData:
         return self._entity._solver.get_links_pos(self._global_link_ids, ref="link_com")
 
     @property
+    @_per_step_read
     def body_com_lin_vel_w_all(self) -> Tensor:
         """World-frame linear velocities of all links at their centers of mass. Shape ``(num_envs, num_links, 3)``."""
         return self._entity._solver.get_links_vel(self._global_link_ids, ref="link_com")
@@ -286,14 +334,17 @@ class GenesisRobotData(GenesisRigidObjectData):
         return self._default_joint_pos
 
     @property
+    @_per_step_read
     def joint_pos(self) -> Tensor:
         return self._entity.get_dofs_position(self._actuated_dof_ids)
 
     @property
+    @_per_step_read
     def joint_vel(self) -> Tensor:
         return self._entity.get_dofs_velocity(self._actuated_dof_ids)
 
     @property
+    @_per_step_read
     def applied_torque(self) -> Tensor:
         """Per-DOF actuator control force for actuated joints.
 
