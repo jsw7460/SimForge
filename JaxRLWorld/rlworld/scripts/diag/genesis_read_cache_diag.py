@@ -1,10 +1,11 @@
-"""Genesis per-step read-cache verification (candidate-3 optimization).
+"""Genesis per-step read-cache verification.
 
-``GenesisRobotData`` properties and ``GenesisContactSensor`` reads are now
-memoized per cache generation (``_per_step_read``), and
-``GenesisEnv._step_physics`` bumps the generation after every substep so the
-explicit-actuator PD path still sees fresh joint state inside the decimation
-loop.  This diag proves both properties on a live rollout:
+``GenesisRobotData`` properties are memoized per cache generation
+(``_per_step_read``), and ``GenesisEnv._step_physics`` bumps the generation
+after every substep so the explicit-actuator PD path still sees fresh joint
+state inside the decimation loop.  This diag proves both properties on a
+live rollout (contact sensors are ring-served by the contact-list backend
+and verified separately by ``genesis_contact_list_wiring_diag``):
 
     1. FRESHNESS / PARITY: after every control step, every cached quantity is
        compared (torch.equal) against a direct, cache-bypassing read of the
@@ -132,17 +133,9 @@ def main() -> int:
         ),
     }
 
-    # sensor reads: cached vs fresh per-link native ring reads
-    sensors = getattr(env.contact_manager, "_sensors", {})
-
-    def fresh_found(sensor) -> torch.Tensor:
-        cols = [cs.read_ground_truth()[:, 0, :][..., 0] != 0 for cs in sensor._contact_sensors]
-        return torch.stack(cols, dim=1)
-
-    def fresh_force(sensor) -> torch.Tensor:
-        cols = [fs.read_ground_truth()[:, 0, :] for fs in sensor._force_sensors]
-        return torch.stack(cols, dim=1)
-
+    # Contact sensors are ring-served from the contact-list backend and
+    # verified end-to-end by genesis_contact_list_wiring_diag; this diag
+    # only covers the RobotData read cache.
     actions = torch.zeros((args.num_envs, env.num_actions), device=env.device)
     mismatches: dict[str, int] = defaultdict(int)
     step_times: list[float] = []
@@ -161,11 +154,6 @@ def main() -> int:
         for name, (cached_fn, fresh_fn) in pairs.items():
             if not torch.equal(cached_fn(), fresh_fn()):
                 mismatches[name] += 1
-        for sname, sensor in sensors.items():
-            if not torch.equal(sensor.read_found(), fresh_found(sensor)):
-                mismatches[f"sensor[{sname}].found"] += 1
-            if not torch.equal(sensor.read_force(), fresh_force(sensor)):
-                mismatches[f"sensor[{sname}].force"] += 1
 
     n = args.warmup + args.num_steps
     has_explicit = env.act_manager.has_explicit_actuators
@@ -181,9 +169,7 @@ def main() -> int:
     lines.append(f"steps: {args.num_steps} (+{args.warmup} warmup)   env.step: {ms:.2f} ms (sync-bracketed)")
     lines.append("")
     verdict = "PASS" if parity_ok else "FAIL"
-    lines.append(
-        f"[1] cache freshness/parity ({len(pairs)} quantities + {2 * len(sensors)} sensor channels): {verdict}"
-    )
+    lines.append(f"[1] cache freshness/parity ({len(pairs)} RobotData quantities): {verdict}")
     if mismatches:
         for name, cnt in sorted(mismatches.items()):
             lines.append(f"      MISMATCH {name}: {cnt} steps")

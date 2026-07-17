@@ -1,22 +1,44 @@
 """Genesis contact sensor — simulator-agnostic ``ContactSensorCfg`` backend.
 
-Backed by Genesis's first-class link sensors (``gs.sensors.Contact`` +
-``gs.sensors.ContactForce``), one pair per primary link. Both sensors
-carry the same native ``filter_link_idx`` blacklist, so ``found`` and
-``force`` are counterpart-filtered consistently, and both keep a substep
-ring buffer when ``cfg.history_length > 0``. Native sensors must be
-added to the scene before ``scene.build()`` (``scene.add_sensor`` is
-``@gs.assert_unbuilt``), so :meth:`create_native_sensors` is invoked
-from the env's pre-build phase (``GenesisEnv._build_scene``) rather than
-from ``ContactManager.register_sensor`` (which runs post-build).
+Contact-list implementation. Instead of per-link native sensors (one
+``gs.sensors.Contact`` + ``gs.sensors.ContactForce`` pair per primary
+link, each updated inside ``scene.step`` on every substep — a cost that
+scales with sensor count and dominated the Genesis step time for
+many-link groups), every group is computed from ONE batched read of the
+rigid solver's global contact list per substep
+(``collider.get_contacts`` + the live ``n_contacts`` counter), shared
+across all groups through the per-step read cache.
 
-The agnostic config's positive ``secondary`` is inverted into the
-blacklist:
+The computation reproduces the native sensors' values exactly — verified
+bit-exact for ``found`` and to float32 sum-order tolerance for ``force``
+by ``scripts/diag/genesis_contact_list_parity_diag.py`` (standalone
+native-vs-list scene) on every genesis preset's group layout:
 
-* ``secondary is None``          → no filter (every contact counts)
-* ``secondary.entity == <name>`` → blacklist every link not in that entity
-* ``secondary.entity == "self"`` → blacklist every link not in the primary
-  entity (keeps robot↔robot contacts only)
+* ``found``: an unfiltered (primary, counterpart) pair exists in the
+  contact list.
+* ``force``: sum of signed pair forces on the primary side (``-f`` when
+  the primary link is contact side a, ``+f`` on side b), rotated into
+  the link LOCAL frame with the link quaternion at capture time —
+  matching ``genesis/engine/sensors/contact_force.py``.
+* Rows past each env's live ``n_contacts`` counter are stale on the
+  zero-copy path and are masked out via the counter, never via field
+  sentinels.
+
+Timing semantics also match the native sensors: one frame is captured
+per substep (``ContactManager.advance`` drives :meth:`capture_substep`)
+into per-group rings, and ``read_found`` / ``read_force`` /
+``compute_history`` serve captured frames only. Values therefore change
+when physics steps, not when a reset teleports state — a recompute-on-
+read design would rotate the stale contact list with post-reset link
+quaternions.
+
+The agnostic config's ``secondary`` resolves to a POSITIVE counterpart
+link set (the native path inverted it into a blacklist):
+
+* ``secondary is None``          → every link counts
+* ``secondary.entity == <name>`` → only that entity's links count
+* ``secondary.entity == "self"`` → only the primary entity's links count
+* ``secondary.entity == "terrain"`` → only the terrain links count
 """
 
 from __future__ import annotations
@@ -25,8 +47,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import genesis as gs
 import torch
+from genesis.utils.geom import inv_transform_by_quat
+from genesis.utils.misc import qd_to_torch
 
 from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.genesis.robot_data import _per_step_read
@@ -53,26 +76,71 @@ def _matches_any(name: str, patterns: tuple[str, ...]) -> bool:
     return any(re.search(p, name) for p in patterns)
 
 
+class GenesisContactListReader:
+    """One shared, generation-cached read of the solver's contact list.
+
+    All contact groups of an env consume the same collider state, so the
+    expensive parts — the ``get_contacts`` readback and the per-entity
+    link-quaternion read — are cached on the env's cache generation
+    (bumped once per substep by ``GenesisEnv._step_physics``) and paid
+    once per substep regardless of the number of groups.
+    """
+
+    def __init__(self, env: GenesisEnv):
+        self._env = env
+        self._read_cache: dict[str, tuple[int, object]] = {}
+        self._quat_generation = -1
+        self._quat_by_entity: dict[int, torch.Tensor] = {}
+
+    @_per_step_read
+    def raw(self):
+        """``(link_a, link_b, force, row_valid)`` for the current substep.
+
+        ``link_a``/``link_b``: (num_envs, C) global link indices;
+        ``force``: (num_envs, C, 3) world-frame contact force (applied to
+        side b; side a receives ``-force``); ``row_valid``: (num_envs, C)
+        bool masking each env's live rows via the collider's
+        ``n_contacts`` counter (rows beyond it are stale on the zero-copy
+        path).
+        """
+        solver = self._env.scene_manager.scene.sim.rigid_solver
+        cd = solver.collider.get_contacts(as_tensor=True, to_torch=True)
+        link_a, link_b, force = cd["link_a"], cd["link_b"], cd["force"]
+        n_live = qd_to_torch(solver.collider._collider_state.n_contacts, copy=False)
+        row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
+        return link_a, link_b, force, row_valid
+
+    def links_quat(self, entity) -> torch.Tensor:
+        """(num_envs, entity_n_links, 4) link quaternions, generation-cached per entity."""
+        gen = self._env._cache_generation
+        if self._quat_generation != gen:
+            self._quat_generation = gen
+            self._quat_by_entity.clear()
+        quat = self._quat_by_entity.get(entity.idx)
+        if quat is None:
+            quat = entity.get_links_quat()
+            self._quat_by_entity[entity.idx] = quat
+        return quat
+
+
 class GenesisContactSensor:
     """Runtime contact sensor backing one ``ContactManager`` group.
 
-    Resolution + validation happen in ``__init__`` (safe pre- or
-    post-build). The actual Genesis sensor objects are created via
-    :meth:`create_native_sensors`, which must run while the scene is
-    still unbuilt.
+    Fully resolved at construction (post-build is fine — no native scene
+    objects are created). ``ContactManager.advance`` calls
+    :meth:`capture_substep` once per physics substep; all read paths
+    serve the captured rings.
     """
 
-    def __init__(self, env: GenesisEnv, cfg: ContactSensorCfg):
+    def __init__(self, env: GenesisEnv, cfg: ContactSensorCfg, reader: GenesisContactListReader):
         if not isinstance(cfg, ContactSensorCfg):
             raise TypeError(f"GenesisContactSensor expects a ContactSensorCfg, got {type(cfg).__name__}")
 
         self.env = env
-        # Alias + per-step read memoization — see robot_data._per_step_read.
-        self._env = env
-        self._read_cache: dict[str, tuple[int, object]] = {}
         self.cfg = cfg
         self.device = env.device
         self.num_envs = env.num_envs
+        self._reader = reader
 
         # ---- backend support matrix ---------------------------------
         if cfg.primary.mode == "subtree":
@@ -83,8 +151,7 @@ class GenesisContactSensor:
         if cfg.primary.mode == "geom":
             raise NotImplementedError(
                 f"Genesis backend: ContactSensorCfg {cfg.name!r} primary.mode='geom' is not "
-                "yet supported (Genesis native link sensors are link-indexed, not "
-                "geom-indexed); use mode='body'."
+                "yet supported (the contact-list reader matches on link indices); use mode='body'."
             )
         if cfg.primary.mode != "body":
             raise NotImplementedError(
@@ -106,6 +173,13 @@ class GenesisContactSensor:
             raise NotImplementedError(
                 f"Genesis backend: ContactSensorCfg {cfg.name!r} fields={cfg.fields}; only "
                 f"{{'found', 'force'}} are supported (got extra {sorted(unsupported_fields)})."
+            )
+        if cfg.history_length < env.decimation:
+            raise ValueError(
+                f"Genesis ContactSensorCfg {cfg.name!r}: history_length={cfg.history_length} < "
+                f"decimation={env.decimation}. History consumers (contact_force_history) expect "
+                "every substep of the last control step to be retained; set "
+                "history_length=decimation (as every genesis preset does)."
             )
 
         # ---- resolve primary links ----------------------------------
@@ -138,18 +212,19 @@ class GenesisContactSensor:
         self._link_ids_local: list[int] = link_ids_local
         self._tracked_names: list[str] = link_names
         self._num_primary = len(link_names)
+        self._primary_local = torch.tensor(link_ids_local, dtype=torch.long, device=self.device)
+        self._primary_links = torch.tensor(
+            [entity.link_start + lid for lid in link_ids_local], dtype=torch.long, device=self.device
+        )
 
-        # ---- resolve secondary → native filter_link_idx (BLACKLIST) -------
-        # ``gs.sensors.Contact`` / ``ContactForce`` take a ``filter_link_idx``
-        # blacklist: contacts whose *other* participant is in this list are
-        # ignored. Invert the agnostic config's positive ``secondary``:
-        #   - secondary is None          → no filter
-        #   - secondary.entity == <name> → blacklist every link not in that entity
-        #   - secondary.entity == "self" → blacklist every link not in the primary
-        #     entity (so only robot↔robot contacts survive)
-        self._filter_link_idx: tuple[int, ...] = ()
+        # ---- resolve secondary → counterpart link set ----------------
+        n_links = env.scene_manager.scene.sim.rigid_solver.n_links
         sec = cfg.secondary
-        if sec is not None:
+        if sec is None:
+            # Every link counts; skip the counterpart membership test entirely.
+            self._counterpart_is_all = True
+            self._counterpart_links = torch.arange(n_links, dtype=torch.long, device=self.device)
+        else:
             if not sec.entity:
                 # secondary.entity is None/"" but a literal pattern was given — out of scope.
                 raise NotImplementedError(
@@ -157,69 +232,24 @@ class GenesisContactSensor:
                     "pattern (no entity scope) is not supported; use secondary.entity=<name> "
                     "or secondary.entity='self'."
                 )
-            # ``"self"`` keeps only intra-primary contacts; ``"terrain"``
-            # is a sentinel for the ground (owned by ``TerrainImporter``,
-            # not in ``scene_manager.entities``); everything else looks up
-            # a named entity in the dict.
+            # ``"self"`` keeps only intra-primary-entity contacts; ``"terrain"``
+            # is a sentinel for the ground (owned by ``TerrainImporter``, not in
+            # ``scene_manager.entities``); everything else looks up a named entity.
             if sec.entity == "self":
                 sec_entity = entity
             elif sec.entity == "terrain":
                 sec_entity = env.scene_manager.terrain.entity
             else:
                 sec_entity = env.scene_manager[sec.entity]
-            sec_links = set(range(sec_entity.link_start, sec_entity.link_end))
-            n_links = env.scene_manager.scene.sim.rigid_solver.n_links
-            self._filter_link_idx = tuple(sorted(set(range(n_links)) - sec_links))
-
-        # Native sensor objects, created later in create_native_sensors().
-        self._contact_sensors: list = []
-        self._force_sensors: list = []
-        self._native_created = False
-
-    # ------------------------------------------------------------------
-    # native sensor creation (must be called while scene is unbuilt)
-    # ------------------------------------------------------------------
-
-    def create_native_sensors(self) -> None:
-        """Add ``gs.sensors.Contact`` / ``gs.sensors.ContactForce`` to the scene.
-
-        Must be called before ``scene.build()`` — ``scene.add_sensor`` is
-        ``@gs.assert_unbuilt`` — so the env's pre-build phase
-        (``GenesisEnv._build_scene``) invokes it.
-        """
-        if self._native_created:
-            return
-
-        scene = self.env.scene_manager.scene
-        if scene.is_built:
-            raise RuntimeError(
-                f"Genesis backend: ContactSensorCfg {self.cfg.name!r}: native contact sensors "
-                "must be created before scene.build(); the scene is already built. Wire "
-                "GenesisContactSensor.create_native_sensors() into the env's pre-build phase."
+            self._counterpart_is_all = False
+            self._counterpart_links = torch.arange(
+                sec_entity.link_start, sec_entity.link_end, dtype=torch.long, device=self.device
             )
 
-        entity_idx = self._entity.idx
-        hist = self.cfg.history_length
-        for l in self._link_ids_local:
-            contact_sensor = scene.add_sensor(
-                gs.sensors.Contact(
-                    entity_idx=entity_idx,
-                    link_idx_local=l,
-                    filter_link_idx=self._filter_link_idx,
-                    history_length=hist,
-                )
-            )
-            force_sensor = scene.add_sensor(
-                gs.sensors.ContactForce(
-                    entity_idx=entity_idx,
-                    link_idx_local=l,
-                    filter_link_idx=self._filter_link_idx,
-                    history_length=hist,
-                )
-            )
-            self._contact_sensors.append(contact_sensor)
-            self._force_sensors.append(force_sensor)
-        self._native_created = True
+        # ---- per-substep capture rings (newest-first, native layout) --
+        h = cfg.history_length
+        self._found_hist = torch.zeros(self.num_envs, h, self._num_primary, dtype=torch.bool, device=self.device)
+        self._force_hist = torch.zeros(self.num_envs, h, self._num_primary, 3, device=self.device)
 
     # ------------------------------------------------------------------
     # properties
@@ -230,119 +260,65 @@ class GenesisContactSensor:
         return self._tracked_names
 
     # ------------------------------------------------------------------
-    # compute
+    # per-substep capture
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _current_frame(t: torch.Tensor, has_history: bool, num_envs: int) -> torch.Tensor:
-        """Slice the most-recent frame out of a Genesis sensor reading.
+    def capture_substep(self) -> None:
+        """Compute this substep's ``found``/``force`` frame from the shared
+        contact-list read and push it onto the rings (newest-first).
 
-        Native sensor ``read_ground_truth()`` returns, for a per-element
-        payload of dim ``D``:
-          - ``history > 0``:  ``(num_envs, H, D)``  (or ``(H, D)`` if num_envs==0) — newest first.
-          - ``history == 0``: ``(num_envs, D)``     (or ``(D,)`` if num_envs==0).
-        This returns ``(num_envs, D)`` (or ``(D,)`` if num_envs==0): the newest frame.
+        Called by ``ContactManager.advance`` after every physics substep;
+        the underlying collider read is generation-cached, so all groups
+        of the env share one readback per substep.
         """
-        if has_history:
-            # newest-first along the history axis → index 0
-            return t[:, 0, :]
-        return t
+        link_a, link_b, force, row_valid = self._reader.raw()
 
-    @_per_step_read
+        on_p_a = link_a.unsqueeze(-1) == self._primary_links  # (B, C, P)
+        on_p_b = link_b.unsqueeze(-1) == self._primary_links
+        if self._counterpart_is_all:
+            a_ok = row_valid
+            b_ok = row_valid
+        else:
+            a_ok = row_valid & (link_a.unsqueeze(-1) == self._counterpart_links).any(-1)
+            b_ok = row_valid & (link_b.unsqueeze(-1) == self._counterpart_links).any(-1)
+        # A pair counts for a primary link on side a iff the OTHER side (b)
+        # is an allowed counterpart, and vice versa.
+        pmask_a = on_p_a & b_ok.unsqueeze(-1)
+        pmask_b = on_p_b & a_ok.unsqueeze(-1)
+
+        found = (pmask_a | pmask_b).any(1)  # (B, P)
+        # World-frame signed sum: the collider force applies to side b;
+        # side a receives the opposite sign.
+        f_world = torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force)
+        quats = self._reader.links_quat(self._entity)[:, self._primary_local]
+        f_local = inv_transform_by_quat(f_world, quats)
+
+        # torch.roll allocates a fresh tensor, so frames handed out by the
+        # read paths below stay valid snapshots after later captures.
+        self._found_hist = torch.roll(self._found_hist, 1, dims=1)
+        self._found_hist[:, 0] = found
+        self._force_hist = torch.roll(self._force_hist, 1, dims=1)
+        self._force_hist[:, 0] = f_local
+
+    # ------------------------------------------------------------------
+    # reads (captured frames only)
+    # ------------------------------------------------------------------
+
     def read_found(self) -> torch.Tensor:
-        """Read only the ``gs.sensors.Contact`` (found) channel.
+        """(num_envs, N) bool — newest captured ``found`` frame."""
+        return self._found_hist[:, 0]
 
-        Each ``read_ground_truth()`` is a GPU→CPU sync per primary
-        link; the substep-rate ``ContactManager.advance`` path needs
-        only the binary contact, never the 3-vec force.  Splitting
-        avoids paying ~50% of the per-substep sensor-read cost (a
-        real fraction of total step time for Genesis at small
-        ``num_envs``).
-        """
-        has_history = self.cfg.history_length > 0
-        n = self.num_envs
-        cols: list[torch.Tensor] = []
-        for cs in self._contact_sensors:
-            c = self._current_frame(cs.read_ground_truth(), has_history, n)
-            cols.append(c[..., 0] != 0)  # (n,)
-        return torch.stack(cols, dim=1)  # (num_envs, N) bool
-
-    @_per_step_read
-    def read_found_history(self) -> torch.Tensor:
-        """Read the full per-substep ``found`` history, oldest-first.
-
-        Returns ``(num_envs, H, N)`` bool — the frame axis is reversed
-        from Genesis's newest-first ring layout so callers can replay the
-        substeps of the just-finished control step in temporal order.
-
-        Costs ONE GPU->CPU sync per primary link (the ring is returned
-        whole by ``read_ground_truth``), versus one sync per link PER
-        SUBSTEP on the ``read_found`` path — the batched
-        ``ContactManager.advance`` relies on this being the only
-        found-channel read of the control step.
-        """
-        if self.cfg.history_length <= 0:
-            raise RuntimeError(f"ContactSensorCfg {self.cfg.name!r}: read_found_history requires history_length > 0.")
-        cols: list[torch.Tensor] = []
-        for cs in self._contact_sensors:
-            h = cs.read_ground_truth()  # (num_envs, H, D), newest-first
-            cols.append(h[..., 0] != 0)  # (num_envs, H)
-        stacked = torch.stack(cols, dim=2)  # (num_envs, H, N)
-        return torch.flip(stacked, dims=(1,))
-
-    @_per_step_read
     def read_force(self) -> torch.Tensor:
-        """Read only the ``gs.sensors.ContactForce`` (3-vec) channel.
-
-        Counterpart to :meth:`read_found`; used by reward / observation
-        paths that need the force magnitude.  Both channels share the
-        same ``filter_link_idx`` blacklist on the Genesis side, so the
-        per-link ordering and entry count match :meth:`read_found`.
-        """
-        has_history = self.cfg.history_length > 0
-        n = self.num_envs
-        cols: list[torch.Tensor] = []
-        for fs in self._force_sensors:
-            f = self._current_frame(fs.read_ground_truth(), has_history, n)
-            cols.append(f)  # (n, 3)
-        return torch.stack(cols, dim=1)  # (num_envs, N, 3)
+        """(num_envs, N, 3) — newest captured link-local net contact force."""
+        return self._force_hist[:, 0]
 
     def compute(self) -> ContactSensorData:
-        """Read both channels — kept for callers that legitimately need
-        both ``found`` and ``force`` from one call.  Performance-sensitive
-        code paths should use :meth:`read_found` or :meth:`read_force`
-        directly to skip the channel they do not need.
-        """
         return ContactSensorData(
             found=self.read_found(),
             force=self.read_force(),
             tracked_names=self._tracked_names,
         )
 
-    # ------------------------------------------------------------------
-    # substep history (only when history_length > 0)
-    # ------------------------------------------------------------------
-
-    @_per_step_read
-    def compute_history(self) -> torch.Tensor | None:
-        """Return ``(num_envs, N, H, 3)`` counterpart-filtered contact-force history, or ``None``.
-
-        Newest-first along the H axis (Genesis ring layout). The only
-        consumer (``penalize_contact_force_count``) reduces over H with
-        ``.any(dim=2)``, so the order does not matter.
-        """
-        if self.cfg.history_length <= 0:
-            return None
-        if not self._native_created:
-            raise RuntimeError(
-                f"Genesis backend: ContactSensorCfg {self.cfg.name!r}: native sensors were "
-                "never created (create_native_sensors() not called before scene.build())."
-            )
-        n = self.num_envs
-        cols: list[torch.Tensor] = []
-        for fs in self._force_sensors:
-            h = fs.read_ground_truth()  # (num_envs, H, 3) or (H, 3) when num_envs==0
-            if n == 0:
-                h = h.unsqueeze(0)  # (1, H, 3)
-            cols.append(h)  # (n, H, 3)
-        return torch.stack(cols, dim=1)  # (num_envs, N, H, 3)
+    def compute_history(self) -> torch.Tensor:
+        """(num_envs, N, H, 3) captured contact-force history, newest-first."""
+        return self._force_hist.permute(0, 2, 1, 3)

@@ -274,8 +274,9 @@ def raw_genesis_sensors(
 ) -> dict:
     """raw_genesis PLUS the g1 preset's two contact-sensor groups, built with
     Genesis's native API only (one gs.sensors.Contact + ContactForce pair per
-    primary link, exactly what GenesisContactSensor.create_native_sensors
-    does: 2 feet links vs ground + EVERY robot link for self-collision).
+    primary link — the FORMER GenesisContactSensor design, kept as the
+    baseline the contact-list backend is measured against: 2 feet links vs
+    ground + EVERY robot link for self-collision).
 
     Isolates the engine-side cost of the sensor configuration: if this cell
     jumps from raw_genesis's level toward the wrapped level, the wrapped

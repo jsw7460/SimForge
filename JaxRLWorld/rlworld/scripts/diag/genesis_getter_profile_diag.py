@@ -121,12 +121,9 @@ def main() -> int:
         meter.wrap(robot, name, f"entity.{name}")
     for name in _SOLVER_GETTERS:
         meter.wrap(solver, name, f"solver.{name}")
-    # Native contact sensors (already batched to 1 ring read per link per step).
-    for cname, sensor in getattr(env.contact_manager, "_sensors", {}).items():
-        for cs in sensor._contact_sensors:
-            meter.wrap(cs, "read_ground_truth", f"sensor[{cname}].contact.read")
-        for fs in sensor._force_sensors:
-            meter.wrap(fs, "read_ground_truth", f"sensor[{cname}].force.read")
+    # Contact-list backend: one shared collider read per substep (all groups).
+    meter.wrap(env.contact_manager._list_reader, "raw", "contactlist.raw")
+    meter.wrap(solver.collider, "get_contacts", "collider.get_contacts")
 
     actions = torch.zeros((args.num_envs, env.num_actions), device=env.device)
 
