@@ -467,6 +467,12 @@ class NewtonRobotData(NewtonRigidObjectData):
     the base ``__init__``.
     """
 
+    def __init__(self, env, view, *, soft_joint_pos_limit_factor: float, **kwargs) -> None:
+        super().__init__(env, view, **kwargs)
+        # From ArticulationCfg — used by soft_joint_pos_limits (the same
+        # factor mjlab applies to its data.soft_joint_pos_limits).
+        self._soft_joint_pos_limit_factor = float(soft_joint_pos_limit_factor)
+
     @property
     def default_joint_pos(self) -> Tensor:
         return self._default_joint_pos
@@ -536,13 +542,18 @@ class NewtonRobotData(NewtonRigidObjectData):
 
     @property
     def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Soft joint position limits (hard * 0.9).
+        """Soft joint position limits in actuated order.
 
-        Newton only stores hard limits; the soft flavour is hard ×
-        ``soft_limit_factor`` where the factor is hardcoded to 0.9 to
-        match mjlab's default ``soft_joint_pos_limit_factor=0.9``.
-        Returned as a tuple of ``(num_joints,)`` tensors in actuated
-        order, same shape as :attr:`joint_pos_limits`.
+        mjlab/IsaacLab convention: the hard range shrunk around its
+        midpoint by ``ArticulationCfg.soft_joint_pos_limit_factor``
+        (``mid ± 0.5 · range · factor``) — the same numbers mjlab
+        serves via ``data.soft_joint_pos_limits``, so all three
+        backends agree for any factor. With the cfg default 1.0 this
+        is exactly the hard limits. Returned as ``(num_joints,)``
+        tensors, same shape as :attr:`joint_pos_limits`.
         """
         lo, hi = self.joint_pos_limits
-        return lo * 0.9, hi * 0.9
+        mid = 0.5 * (lo + hi)
+        half = 0.5 * (hi - lo)
+        f = self._soft_joint_pos_limit_factor
+        return mid - half * f, mid + half * f

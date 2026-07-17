@@ -281,6 +281,7 @@ class GenesisEnv(World):
                 device=self.device,
                 env=self,
                 default_joint_pos=_default_jp,
+                soft_joint_pos_limit_factor=self.scene_cfg.entities[name].articulation.soft_joint_pos_limit_factor,
             )
             self._robot_state_writer_cache[name] = GenesisRobotStateWriter(
                 env=self,

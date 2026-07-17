@@ -260,7 +260,12 @@ class NewtonEnv(World):
         _default_jp = self._resolve_default_joint_pos()
         for name in self.scene_manager.entities:
             view = self.scene_manager.articulation_views[name]
-            self._robot_data_cache[name] = NewtonRobotData(self, view, default_joint_pos=_default_jp)
+            self._robot_data_cache[name] = NewtonRobotData(
+                self,
+                view,
+                default_joint_pos=_default_jp,
+                soft_joint_pos_limit_factor=self.scene_cfg.entities[name].articulation.soft_joint_pos_limit_factor,
+            )
             self._robot_state_writer_cache[name] = NewtonRobotStateWriter(self, view)
         self._robot_data = self._robot_data_cache["robot"]
         self._robot_state_writer = self._robot_state_writer_cache["robot"]

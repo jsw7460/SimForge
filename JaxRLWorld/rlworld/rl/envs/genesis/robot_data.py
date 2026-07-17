@@ -329,6 +329,12 @@ class GenesisRigidObjectData:
 class GenesisRobotData(GenesisRigidObjectData):
     """Articulation state for Genesis: RigidObjectData + actuated-joint reads."""
 
+    def __init__(self, *, soft_joint_pos_limit_factor: float, **kwargs) -> None:
+        super().__init__(**kwargs)
+        # From ArticulationCfg — used by soft_joint_pos_limits (the same
+        # factor mjlab applies to its data.soft_joint_pos_limits).
+        self._soft_joint_pos_limit_factor = float(soft_joint_pos_limit_factor)
+
     @property
     def default_joint_pos(self) -> Tensor:
         return self._default_joint_pos
@@ -381,12 +387,17 @@ class GenesisRobotData(GenesisRigidObjectData):
 
     @property
     def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
-        """Soft joint position limits (hard * 0.9) in actuated order.
+        """Soft joint position limits in actuated order.
 
-        Genesis only stores hard limits via ``get_dofs_limit``; the
-        soft flavour is hard × 0.9 to match mjlab's default
-        ``soft_joint_pos_limit_factor=0.9``. Returns a tuple of
-        ``(num_joints,)`` tensors.
+        mjlab/IsaacLab convention: the hard range shrunk around its
+        midpoint by ``ArticulationCfg.soft_joint_pos_limit_factor``
+        (``mid ± 0.5 · range · factor``) — the same numbers mjlab
+        serves via ``data.soft_joint_pos_limits``, so all three
+        backends agree for any factor. With the cfg default 1.0 this
+        is exactly the hard limits. Returns ``(num_joints,)`` tensors.
         """
         lo, hi = self.joint_pos_limits
-        return lo * 0.9, hi * 0.9
+        mid = 0.5 * (lo + hi)
+        half = 0.5 * (hi - lo)
+        f = self._soft_joint_pos_limit_factor
+        return mid - half * f, mid + half * f
