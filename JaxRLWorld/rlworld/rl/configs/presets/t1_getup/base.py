@@ -106,7 +106,7 @@ class T1GetupConfig:
     robot: T1Config = field(default_factory=T1Config)
 
     # Environment / training settings.
-    num_envs: int = 4096
+    num_envs: int = 8192
     episode_length_s: float = 6.0
     seed: int = 42
 
