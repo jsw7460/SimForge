@@ -134,7 +134,7 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
             ls_iterations=20,
             ccd_iterations=50,
             njmax=1500,
-            nconmax=35,
+            nconmax=150,
         ),
         entities={
             "robot": NewtonEntityCfg(
