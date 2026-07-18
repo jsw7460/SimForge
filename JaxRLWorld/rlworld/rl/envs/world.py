@@ -10,7 +10,6 @@ import torch
 from gymnasium import spaces
 
 from rlworld.rl.envs.lifecycle import LifecycleEvent, LifecycleManager
-from rlworld.rl.envs.utils.step_profiler import StepProfiler
 
 if TYPE_CHECKING:
     from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
@@ -84,9 +83,6 @@ class World(ABC):
 
         self._env_step_counter = 0
         self.lifecycle = LifecycleManager()
-
-        # Per-section step timing — no-op unless JAXRLWORLD_PROFILE_STEP is set.
-        self._step_profiler = StepProfiler(label=self.sim_name)
 
         # Per-entity RigidObjectData cache for passive (non-articulated) scene
         # entities declared in ``scene.rigid_objects`` — a table, a graspable
@@ -502,18 +498,15 @@ class World(ABC):
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Execute one environment step."""
-        prof = self._step_profiler
 
         # Process and apply actions
-        with prof.section("process_actions"):
-            self.act_manager.process_actions(actions)
+        self.act_manager.process_actions(actions)
 
         # Step physics (simulator-specific). Backends accumulate contact
         # timing inside their substep loop (``contact_manager.advance(physics_dt)``
         # per substep), matching IsaacLab/mjlab. No policy-step-end
         # advance call is needed here.
-        with prof.section("step_physics"):
-            self._step_physics()
+        self._step_physics()
         self._invalidate_cache()
 
         # Increment the episode-step counter AFTER physics and BEFORE
@@ -528,8 +521,7 @@ class World(ABC):
         self.termination_manager.advance()
 
         # Pre-termination hook
-        with prof.section("pre_termination_hook"):
-            self._pre_termination_hook()
+        self._pre_termination_hook()
 
         # Check termination BEFORE computing rewards so reward terms can read
         # the current step's termination state (e.g. is_terminated / is_alive),
@@ -538,21 +530,18 @@ class World(ABC):
         # state — not on rewards or the gait phase advanced in
         # _pre_reward_hook — so this ordering preserves behaviour for all
         # existing terms.
-        with prof.section("check_termination"):
-            terminated, truncated = self.termination_manager.check_termination()
-            reset_buf = terminated | truncated
-            reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
+        terminated, truncated = self.termination_manager.check_termination()
+        reset_buf = terminated | truncated
+        reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
 
         # Pre-reward hook (e.g., gait advance that rewards depend on)
-        with prof.section("pre_reward_hook"):
-            self._pre_reward_hook()
+        self._pre_reward_hook()
 
         # Compute rewards
-        with prof.section("reward_manager.set_rewards"):
-            self.rew_buf[:] = 0.0
-            self.reward_manager.set_rewards(
-                reward_buffer=self.rew_buf, episode_sums=self.episode_sums, reward_buffer_per_type=self.rew_buf_per_type
-            )
+        self.rew_buf[:] = 0.0
+        self.reward_manager.set_rewards(
+            reward_buffer=self.rew_buf, episode_sums=self.episode_sums, reward_buffer_per_type=self.rew_buf_per_type
+        )
 
         # Handle terminal observations.
         #
@@ -568,30 +557,26 @@ class World(ABC):
         # ones.
         final_observation = None
         final_info = None
-        with prof.section("terminal_obs"):
-            if len(reset_env_ids) > 0:
-                self.obs_manager.process_observations(update_history=True)
-                final_observation = {key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()}
-                self.obs_manager.rollback_last_history_append()
-                final_info = {
-                    "episode_reward_sums": deepcopy(self.episode_sums),
-                }
+        if len(reset_env_ids) > 0:
+            self.obs_manager.process_observations(update_history=True)
+            final_observation = {key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()}
+            self.obs_manager.rollback_last_history_append()
+            final_info = {
+                "episode_reward_sums": deepcopy(self.episode_sums),
+            }
 
         # Reset terminated environments
-        with prof.section("reset_idx"):
-            self._reset_idx(reset_env_ids)
+        self._reset_idx(reset_env_ids)
         self._invalidate_cache()
 
         # Post-reset forward pass — refresh derived quantities (xpos,
         # xquat, site positions, sensor data, ...) so the upcoming
         # observation sees fresh kinematics. Override in backends that
         # need an explicit FK pass (mjlab: sim.forward()).
-        with prof.section("post_reset_forward"):
-            self._post_reset_forward()
+        self._post_reset_forward()
 
         # Advance commands (timer-based resampling + per-step post-processing)
-        with prof.section("command_manager.compute"):
-            self.command_manager.compute(self.control_dt)
+        self.command_manager.compute(self.control_dt)
 
         # Apply interval events AFTER reset/command and BEFORE the observation
         # is built in _advance_managers, matching IsaacLab and mjlab (both apply
@@ -602,37 +587,33 @@ class World(ABC):
         # visible to the returned observation so the policy can react next step.
         # The cache is invalidated afterwards so the obs build sees the new
         # state written by the events.
-        with prof.section("interval_events"):
-            if hasattr(self, "event_manager") and self.event_manager is not None:
-                if "interval" in self.event_manager.available_modes:
-                    self.event_manager.apply(mode="interval", dt=self.control_dt)
-                    self._invalidate_cache()
+        if hasattr(self, "event_manager") and self.event_manager is not None:
+            if "interval" in self.event_manager.available_modes:
+                self.event_manager.apply(mode="interval", dt=self.control_dt)
+                self._invalidate_cache()
 
         # Advance managers
-        with prof.section("advance_managers"):
-            self._advance_managers()
+        self._advance_managers()
 
         self._update_num_step_calls()
 
         # Build extras
-        with prof.section("build_extras+get_obs"):
-            self.extras = {
-                "final_observation": final_observation,
-                "final_info": final_info,
-                "terminal_env_ids": reset_env_ids if len(reset_env_ids) > 0 else None,
-                "rewards_per_type": self.rew_buf_per_type,
-                "episode_reward_sums": deepcopy(self.episode_sums),
-                # Per-env mask of terminals whose value should be bootstrapped
-                # (truncations + non-absorbing terminations). Consumed by the
-                # on-policy bootstrap; equals ``truncated & ~terminated`` unless
-                # a termination term sets ``bootstrap_value=True``.
-                "bootstrap_mask": self.termination_manager.bootstrap_buf,
-                **self.obs_manager.extras,
-                **self.termination_manager.extras,
-            }
-            result = (self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras)
+        self.extras = {
+            "final_observation": final_observation,
+            "final_info": final_info,
+            "terminal_env_ids": reset_env_ids if len(reset_env_ids) > 0 else None,
+            "rewards_per_type": self.rew_buf_per_type,
+            "episode_reward_sums": deepcopy(self.episode_sums),
+            # Per-env mask of terminals whose value should be bootstrapped
+            # (truncations + non-absorbing terminations). Consumed by the
+            # on-policy bootstrap; equals ``truncated & ~terminated`` unless
+            # a termination term sets ``bootstrap_value=True``.
+            "bootstrap_mask": self.termination_manager.bootstrap_buf,
+            **self.obs_manager.extras,
+            **self.termination_manager.extras,
+        }
+        result = (self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras)
 
-        prof.step_done()
         return result
 
     def _pre_reward_hook(self) -> None:
@@ -677,7 +658,6 @@ class World(ABC):
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
         if len(env_ids) == 0:
             return
-        prof = self._step_profiler
 
         # Curriculum compute FIRST — before any reset write — so curriculum
         # terms can read the ending episode's terminal state (e.g. distance
@@ -689,34 +669,29 @@ class World(ABC):
         # what unlocks terminal-state-based curricula such as terrain levels.
         # curriculum.reset (stateful-term reset) is forwarded with the other
         # manager resets below.
-        with prof.section("  reset:curriculum.compute"):
-            self.curriculum_manager.compute(env_ids=env_ids)
+        self.curriculum_manager.compute(env_ids=env_ids)
 
         # State initialization via event manager
-        with prof.section("  reset:event_manager.reset"):
-            self.event_manager.reset(env_ids)
-        with prof.section("  reset:events[reset]"):
-            if "reset" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="reset", env_ids=env_ids)
-        with prof.section("  reset:events[reset_dr]"):
-            if "reset_dr" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="reset_dr", env_ids=env_ids)
+        self.event_manager.reset(env_ids)
+        if "reset" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="reset", env_ids=env_ids)
+        if "reset_dr" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="reset_dr", env_ids=env_ids)
 
-        with prof.section("  reset:managers"):
-            self.termination_manager.reset(env_ids)
-            self.command_manager.reset(env_ids)
-            self.act_manager.reset(env_ids)
-            self.obs_manager.reset(env_ids)
-            self.contact_manager.reset(env_ids)
-            self.reward_manager.reset(env_ids)
-            # Forward reset to stateful curriculum terms (compute already ran at
-            # the top of _reset_idx). Curriculum state is intentionally NOT
-            # injected into ``rew_buf_per_type`` — its values (e.g.
-            # ``energy_threshold`` in Watts) live on a different scale and
-            # polluted the wandb "Rewards" breakdown; the runner logs the latest
-            # state under a ``Curriculum/`` namespace in
-            # :meth:`BaseRunner.log_training_data`.
-            self.curriculum_manager.reset(env_ids)
+        self.termination_manager.reset(env_ids)
+        self.command_manager.reset(env_ids)
+        self.act_manager.reset(env_ids)
+        self.obs_manager.reset(env_ids)
+        self.contact_manager.reset(env_ids)
+        self.reward_manager.reset(env_ids)
+        # Forward reset to stateful curriculum terms (compute already ran at
+        # the top of _reset_idx). Curriculum state is intentionally NOT
+        # injected into ``rew_buf_per_type`` — its values (e.g.
+        # ``energy_threshold`` in Watts) live on a different scale and
+        # polluted the wandb "Rewards" breakdown; the runner logs the latest
+        # state under a ``Curriculum/`` namespace in
+        # :meth:`BaseRunner.log_training_data`.
+        self.curriculum_manager.reset(env_ids)
 
         # Reset episode sums
         keys = list(self.episode_sums.keys())

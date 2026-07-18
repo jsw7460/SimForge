@@ -318,18 +318,13 @@ class GenesisEnv(World):
         For position control without an actuator, re-applying the same
         target each substep is a harmless no-op.
         """
-        prof = self._step_profiler
         for _ in range(self.decimation):
-            with prof.section("  phys:apply_actions"):
-                self.act_manager.apply_actions(self.act_manager.processed_actions)
-            with prof.section("  phys:scene.step"):
-                self.scene_manager.step()
+            self.act_manager.apply_actions(self.act_manager.processed_actions)
+            self.scene_manager.step()
             # The physics state just advanced; bump the read-cache generation
             # so per-step-memoized reads (RobotData / contact sensors) can
             # never serve a pre-substep value inside the decimation loop —
             # the explicit-actuator PD path re-reads joint state each substep.
             self._invalidate_cache()
-            with prof.section("  phys:contact_manager.advance"):
-                self.contact_manager.advance(dt=self.physics_dt)
-        with prof.section("  phys:vis_manager.advance"):
-            self.vis_manager.advance()
+            self.contact_manager.advance(dt=self.physics_dt)
+        self.vis_manager.advance()

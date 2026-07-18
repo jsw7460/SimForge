@@ -4,21 +4,10 @@ Concrete implementation of PlayViewerBase using Viser for 3D rendering
 and GUI. Scene rendering is delegated to a PlayScene instance, which
 abstracts over simulator-specific backends (ViserScene for Newton/Genesis,
 ViserMujocoScene for MuJoCo).
-
-Profiling
----------
-Set ``JAXRLWORLD_PROFILE_VIEWER=1`` to print a per-section wall-clock
-breakdown of the per-tick physics + per-render ``_do_update`` work to
-stderr every ``JAXRLWORLD_PROFILE_VIEWER_INTERVAL`` ticks (default 60).
-Use this to confirm whether the bottleneck is sim ``env.step``,
-bridge GPU→CPU sync, ``ViserScene.update``, or ``server.flush``.
 """
 
 from __future__ import annotations
 
-import os
-import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, auto
 from threading import Lock
@@ -63,77 +52,6 @@ class _UpdateReason(Enum):
     SCENE_REQUEST = auto()
 
 
-def _truthy(value: str) -> bool:
-    return value.strip().lower() not in ("", "0", "false", "no", "off")
-
-
-class _ViewerProfile:
-    """Lightweight wall-clock profiler for the play_viewer hot path.
-
-    Disabled by default — every call is a no-op unless
-    ``JAXRLWORLD_PROFILE_VIEWER`` is truthy.  When enabled, accumulates
-    per-section time across ``interval`` ticks, then prints to stderr
-    and resets.  Thread-safe under the assumption that ``record`` is
-    called from at most two threads (the main tick thread and the
-    single render worker).
-    """
-
-    def __init__(self) -> None:
-        self.enabled = _truthy(os.environ.get("JAXRLWORLD_PROFILE_VIEWER", ""))
-        try:
-            self.interval = max(1, int(os.environ.get("JAXRLWORLD_PROFILE_VIEWER_INTERVAL", "60")))
-        except ValueError:
-            self.interval = 60
-        self._lock = Lock()
-        self._totals: dict[str, float] = {}
-        self._counts: dict[str, int] = {}
-        self._max: dict[str, float] = {}
-        self._order: list[str] = []
-        self._n_ticks = 0
-
-    def record(self, section: str, dt_sec: float) -> None:
-        if not self.enabled:
-            return
-        with self._lock:
-            if section not in self._totals:
-                self._totals[section] = 0.0
-                self._counts[section] = 0
-                self._max[section] = 0.0
-                self._order.append(section)
-            self._totals[section] += dt_sec
-            self._counts[section] += 1
-            if dt_sec > self._max[section]:
-                self._max[section] = dt_sec
-
-    def tick(self) -> None:
-        if not self.enabled:
-            return
-        with self._lock:
-            self._n_ticks += 1
-            if self._n_ticks < self.interval:
-                return
-            n = self._n_ticks
-            print(f"\n[viewer profile] avg over {n} tick(s):", file=sys.stderr)
-            for name in self._order:
-                t = self._totals[name]
-                c = self._counts[name]
-                if c == 0:
-                    continue
-                mean_ms = t / c * 1e3
-                max_ms = self._max[name] * 1e3
-                per_tick_ms = t / n * 1e3
-                print(
-                    f"  {name:<28s} {mean_ms:7.3f} ms/call  "
-                    f"max {max_ms:7.3f} ms  ({c} calls, {per_tick_ms:6.3f} ms/tick)",
-                    file=sys.stderr,
-                )
-            self._totals.clear()
-            self._counts.clear()
-            self._max.clear()
-            self._order.clear()
-            self._n_ticks = 0
-
-
 class ViserPlayViewer(PlayViewerBase):
     """Interactive Viser-based viewer with playback controls."""
 
@@ -167,8 +85,6 @@ class ViserPlayViewer(PlayViewerBase):
         # Translucent reference-pose overlay (motion-tracking presets
         # only; ``MotionGhost.is_active`` is False otherwise).
         self._motion_ghost: MotionGhost | None = None
-        # Optional per-section wall-clock profile (env-var gated).
-        self._profile = _ViewerProfile()
 
     # ── Setup ──────────────────────────────────────────────────────
 
@@ -432,7 +348,6 @@ class ViserPlayViewer(PlayViewerBase):
 
     def sync_env_to_viewer(self) -> None:
         self._counter += 1
-        self._profile.tick()
 
         if self._counter % 10 == 0:
             self._update_status_display()
@@ -453,11 +368,8 @@ class ViserPlayViewer(PlayViewerBase):
         if not will_submit:
             return
 
-        prof = self._profile
-
         def _do_update() -> None:
             try:
-                t_outer = time.perf_counter()
                 with self._sim_lock:
                     with self._server.atomic():
                         # Invalidate the bridge's per-frame cache so
@@ -468,20 +380,11 @@ class ViserPlayViewer(PlayViewerBase):
                         # frame's _sync_debug_visuals (called inside update)
                         # picks them up — otherwise they lag by one frame.
                         self._update_target_position_marker()
-                        t = time.perf_counter()
                         self._play_scene.update()
-                        prof.record("do_update.scene.update", time.perf_counter() - t)
-                        t = time.perf_counter()
                         self._update_command_arrows()
-                        prof.record("do_update.cmd_arrows", time.perf_counter() - t)
                         if self._motion_ghost is not None:
-                            t = time.perf_counter()
                             self._motion_ghost.update(self._play_scene.env_idx)
-                            prof.record("do_update.motion_ghost", time.perf_counter() - t)
-                        t = time.perf_counter()
                         self._server.flush()
-                        prof.record("do_update.server.flush", time.perf_counter() - t)
-                prof.record("do_update.total", time.perf_counter() - t_outer)
             except Exception:
                 import traceback
 
