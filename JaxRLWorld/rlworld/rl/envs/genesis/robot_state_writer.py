@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING
 
 from torch import Tensor
 
+from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
+
 if TYPE_CHECKING:
     import torch
     from genesis.engine.entities import RigidEntity
@@ -101,14 +103,24 @@ class GenesisRobotStateWriter:
         ang_vel: Tensor,
         env_ids: torch.Tensor | None = None,
     ) -> None:
-        """Write root link linear + angular velocity.
+        """Write root link linear + angular velocity (both WORLD frame).
 
         Genesis has no dedicated root-velocity setter; root velocity is
-        the first 6 DOFs (3 linear + 3 angular). Pack and forward.
+        the first 6 DOFs (3 linear + 3 angular). The two triplets use
+        DIFFERENT frames in Genesis's free joint: the linear dof axes
+        are the world unit vectors, but the rotational dof axes are the
+        link rotation matrix columns (``cdof_ang = xmat_T`` rows,
+        abd/forward_kinematics.py FREE branch) — i.e. the angular dof
+        velocities are BODY-frame components, same as MuJoCo's free
+        joint. Rotate the world angular velocity into the link frame
+        before writing; the pose write precedes this call in the reset
+        protocol, so ``get_quat`` already reflects the new orientation.
         """
         import torch
 
-        combined = torch.cat([lin_vel, ang_vel], dim=-1)
+        quat_wxyz = self._entity.get_quat(envs_idx=env_ids)
+        ang_local = quat_rotate_inverse_wxyz(quat_wxyz, ang_vel)
+        combined = torch.cat([lin_vel, ang_local], dim=-1)
         self._entity.set_dofs_velocity(
             velocity=combined,
             dofs_idx_local=list(range(6)),
