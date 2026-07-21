@@ -160,6 +160,13 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
+            # Genesis defaults to approximate_implicitfast, which folds
+            # joint damping into the mass matrix BEFORE the constraint
+            # solve — extra effective damping that measurably reduces
+            # limb-motion amplitude versus the mjlab/newton cells (both
+            # run implicitfast by default) and skews contact-event
+            # rewards. implicitfast is the MuJoCo-consistent integrator.
+            integrator=gs.integrator.implicitfast,
             constraint_solver=gs.constraint_solver.Newton,
             iterations=10,
             ls_iterations=20,
