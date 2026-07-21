@@ -405,27 +405,24 @@ def soft_landing_mjlab(
 
 def joint_pos_limits_mjlab(
     env: GenesisEnv,
-    soft_limit_factor: float = 1.0,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits.
 
-    Delegates to ``common.penalize_joint_pos_limits_l1`` which reads
-    ``RobotData.joint_pos`` and ``RobotData.joint_pos_limits``. The
-    Genesis implementation of ``joint_pos_limits`` calls the same
-    ``entity.get_dofs_limit(actuated_dof_ids)`` that the legacy code
-    used (with a ``squeeze(0)`` to drop the leading dim), so the
-    resulting penalty is bit-identical to the legacy direct-access path.
+    Delegates to ``common.penalize_joint_pos_limits_l1``, which reads
+    ``RobotData.joint_pos`` and ``RobotData.soft_joint_pos_limits``
+    (mid ± half·factor — the same band mjlab's ``joint_pos_limits``
+    penalizes against, and identical to the hard limits for robots with
+    ``soft_joint_pos_limit_factor`` 1.0).
 
     Args:
         env: Genesis environment.
-        soft_limit_factor: Factor to scale hard limits to get soft limits.
-        entity_name: Name of the robot entity.
+        asset_cfg: Selector identifying the robot entity.
 
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return penalize_joint_pos_limits_l1(env, soft_limit_factor=soft_limit_factor, asset_cfg=asset_cfg)
+    return penalize_joint_pos_limits_l1(env, asset_cfg=asset_cfg)
 
 
 # ============================================================

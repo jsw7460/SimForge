@@ -725,7 +725,6 @@ class VariablePostureTracker:
 
 def penalize_joint_pos_limits_l1(
     env: World,
-    soft_limit_factor: float = 1.0,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits (L1, sim-agnostic).
@@ -735,20 +734,24 @@ def penalize_joint_pos_limits_l1(
         out = max(lower - q, 0) + max(q - upper, 0)
         return -sum(out, dim=-1)
 
-    Where ``lower``, ``upper`` are the *soft* limits, computed as
-    ``hard_lower * soft_limit_factor`` and ``hard_upper * soft_limit_factor``.
+    Where ``lower``, ``upper`` are ``RobotData.soft_joint_pos_limits``
+    (``mid ± 0.5·range·soft_joint_pos_limit_factor`` — the mjlab/IsaacLab
+    convention; identical to the hard limits when the articulation's
+    factor is 1.0). The previous value-scaled form (``hard × factor``)
+    measured violations against a DIFFERENT band on any robot with a
+    factor below 1.0 — K1's 0.95 put this term ~1.7x apart from the
+    mjlab backend's ``joint_pos_limits`` at reset — so all backends now
+    read the same soft-limits property.
 
-    Reads ``RobotData.joint_pos`` and ``RobotData.joint_pos_limits``, both
-    in canonical actuated joint order.
+    Reads ``RobotData.joint_pos`` and ``RobotData.soft_joint_pos_limits``,
+    both in canonical actuated joint order.
 
     Args:
         env: Any environment whose ``RobotData`` implements
-            ``joint_pos_limits`` (Newton, Genesis). Note: not callable on
-            MuJoCo, which uses its own ``joint_pos_limits`` reward function
-            in ``mdp/rewards/mujoco/reward_terms.py``.
-        soft_limit_factor: Multiplicative factor on the hard limits.
-            ``1.0`` (the active default in current presets) means
-            penalize whenever the joint exceeds its hard limit.
+            ``soft_joint_pos_limits`` (Newton, Genesis). Note: not
+            callable on MuJoCo, which uses its own ``joint_pos_limits``
+            reward function in ``mdp/rewards/mujoco/reward_terms.py`` —
+            the two now agree by construction.
         asset_cfg: Selector identifying the robot entity.
 
     Returns:
@@ -757,9 +760,7 @@ def penalize_joint_pos_limits_l1(
     """
     rd = env.get_robot_data(asset_cfg.name)
     dof_pos = rd.joint_pos
-    lower, upper = rd.joint_pos_limits
-    lower = lower * soft_limit_factor
-    upper = upper * soft_limit_factor
+    lower, upper = rd.soft_joint_pos_limits
     out_of_limits = -(dof_pos - lower).clamp(max=0.0)
     out_of_limits += (dof_pos - upper).clamp(min=0.0)
     return -torch.sum(out_of_limits, dim=-1)

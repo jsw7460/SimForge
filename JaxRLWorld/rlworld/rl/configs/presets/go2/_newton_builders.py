@@ -382,7 +382,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
         joint_pos_limits = RewardTermConfig(
             func=rf_mjlab.joint_pos_limits_mjlab,
             weight=1.0,
-            params={"soft_limit_factor": 1.0},
+            params={},
         )
         raw_action_rate_l2 = RewardTermConfig(
             func=rf_mjlab.raw_action_rate_l2_mjlab,

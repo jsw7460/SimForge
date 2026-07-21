@@ -287,25 +287,22 @@ def soft_landing_mjlab(
 
 def joint_pos_limits_mjlab(
     env: NewtonEnv,
-    soft_limit_factor: float = 1.0,
 ) -> torch.Tensor:
     """Penalize joint positions exceeding soft limits.
 
-    Delegates to ``common.penalize_joint_pos_limits_l1`` which reads
-    ``RobotData.joint_pos`` and ``RobotData.joint_pos_limits``. The
-    Newton implementation of ``joint_pos_limits`` reads the same
-    ``model.joint_limit_lower/upper`` arrays indexed by
-    ``newton_qd_indices`` that the legacy code accessed, so the result
-    is bit-identical to the legacy direct-access path.
+    Delegates to ``common.penalize_joint_pos_limits_l1``, which reads
+    ``RobotData.joint_pos`` and ``RobotData.soft_joint_pos_limits``
+    (mid ± half·factor — the same band mjlab's ``joint_pos_limits``
+    penalizes against, and identical to the hard limits for robots with
+    ``soft_joint_pos_limit_factor`` 1.0).
 
     Args:
         env: Newton environment.
-        soft_limit_factor: Factor to scale hard limits to get soft limits.
 
     Returns:
         Penalty tensor of shape (num_envs,).
     """
-    return penalize_joint_pos_limits_l1(env, soft_limit_factor=soft_limit_factor)
+    return penalize_joint_pos_limits_l1(env)
 
 
 # ============================================================
