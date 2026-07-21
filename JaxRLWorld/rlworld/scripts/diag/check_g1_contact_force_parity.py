@@ -282,7 +282,7 @@ def _genesis_dump(env, cfg) -> dict:
             # invweight per foot link + ground link (mass matrix inverse
             # projection — the other half of the D denominator).
             try:
-                inv = rs.links_info.invweight
+                inv = rs.dyn_info.links.invweight
                 inv_arr = _try_arr(inv)
                 # Map foot links + likely ground link by name.
                 links_meta = []

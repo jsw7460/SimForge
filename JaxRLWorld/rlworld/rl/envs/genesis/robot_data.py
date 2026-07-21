@@ -288,8 +288,10 @@ class GenesisRigidObjectData:
             L = sum_i [ m_i * (r_i - r_c) x v_i              # orbital
                         +  R_i @ I_i_local @ R_i^T @ omega_i ]  # spin
 
-        Reads ``solver.links_info.inertial_mass`` / ``inertial_i`` for
-        per-body model values and the existing
+        Reads ``solver.dyn_info.links.inertial_mass`` / ``inertial_i``
+        (Genesis packs solver data per component under ``dyn_info`` since
+        the 2026-07 per-component packing refactor) for per-body model
+        values and the existing
         ``body_com_pos_w_all`` / ``body_com_lin_vel_w_all`` /
         ``body_ang_vel_w_all`` / ``body_quat_w_all`` accessors for state.
         ``sensor_name`` is ignored.
@@ -298,11 +300,11 @@ class GenesisRigidObjectData:
         link_ids = self._global_link_ids
 
         # Per-body mass: (W, B) if batch_links_info else (B,) → broadcast to (W, B).
-        m = qd_to_torch(solver.links_info.inertial_mass, None, link_ids, transpose=True, copy=True)
+        m = qd_to_torch(solver.dyn_info.links.inertial_mass, None, link_ids, transpose=True, copy=True)
         if m.dim() == 1:
             m = m.unsqueeze(0).expand(self._num_envs, -1)
         # Per-body local inertia 3x3: (W, B, 3, 3) if batched else (B, 3, 3) → broadcast.
-        I_body = qd_to_torch(solver.links_info.inertial_i, None, link_ids, transpose=True, copy=True)
+        I_body = qd_to_torch(solver.dyn_info.links.inertial_i, None, link_ids, transpose=True, copy=True)
         if I_body.dim() == 3:
             I_body = I_body.unsqueeze(0).expand(self._num_envs, -1, -1, -1)
 
