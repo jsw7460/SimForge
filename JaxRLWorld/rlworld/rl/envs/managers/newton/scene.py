@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -959,8 +960,22 @@ class NewtonSceneManager(BaseManager):
         # Create solver
         if self.config.solver_type == "xpbd":
             self.solver = newton.solvers.SolverXPBD(self.model)
+            self._use_mujoco_contacts = False
         elif self.config.solver_type == "mujoco":
             scfg = self.config.solver_cfg
+            # Perf-experiment escape hatch (default: preset value).
+            # JAXRLWORLD_NEWTON_MJC_CONTACTS=1 forces mjwarp-native
+            # collision (use_mujoco_contacts=True) — on heightfield
+            # terrain that replaces Newton's MPR collide() pipeline
+            # (whose hfield midphase enumerates triangle candidates by
+            # XY footprint with no z-culling) with mjwarp's native
+            # HFIELD path, the same one mjlab runs. =0 forces the
+            # Newton pipeline.
+            use_mjc_contacts = scfg.use_mujoco_contacts
+            mjc_override = os.environ.get("JAXRLWORLD_NEWTON_MJC_CONTACTS", "")
+            if mjc_override:
+                use_mjc_contacts = mjc_override == "1"
+            self._use_mujoco_contacts = use_mjc_contacts
             self.solver = newton.solvers.SolverMuJoCo(
                 self.model,
                 solver=scfg.solver,
@@ -976,7 +991,7 @@ class NewtonSceneManager(BaseManager):
                 ccd_tolerance=scfg.ccd_tolerance,
                 ccd_iterations=scfg.ccd_iterations,
                 sdf_iterations=scfg.sdf_iterations,
-                use_mujoco_contacts=scfg.use_mujoco_contacts,
+                use_mujoco_contacts=use_mjc_contacts,
                 use_mujoco_cpu=scfg.use_mujoco_cpu,
                 enable_multiccd=scfg.enable_multiccd,
                 disable_contacts=scfg.disable_contacts,
@@ -996,14 +1011,40 @@ class NewtonSceneManager(BaseManager):
         # Create collision pipeline. Pass an enlarged triangle-pair buffer
         # only when the scene requests it (rough terrain); otherwise keep
         # Newton's default so flat-ground scenes are unaffected.
-        if self.config.collision_max_triangle_pairs is not None:
+        #
+        # Perf-experiment escape hatches (defaults unchanged when unset):
+        #   JAXRLWORLD_NEWTON_TRI_PAIRS_TOTAL=<n> — override the TOTAL
+        #     triangle-pair buffer. Several narrow-phase kernels
+        #     (scan/compaction) run over buffer CAPACITY, not demand, so
+        #     an oversized buffer costs collide time every physics step.
+        #     verify_buffers stays on: undersizing prints an overflow
+        #     warning instead of silently dropping contacts.
+        #   JAXRLWORLD_NEWTON_NO_VERIFY=1 — drop the per-collide buffer
+        #     verification kernel (Newton docs recommend disabling in hot
+        #     loops once sizes are known adequate).
+        verify = os.environ.get("JAXRLWORLD_NEWTON_NO_VERIFY", "0") != "1"
+        tri_override = os.environ.get("JAXRLWORLD_NEWTON_TRI_PAIRS_TOTAL", "")
+        if self._use_mujoco_contacts:
+            # mjwarp runs collision internally and ``_step`` skips
+            # ``model.collide()`` entirely — a CollisionPipeline here
+            # would only allocate multi-hundred-MB contact/triangle-pair
+            # buffers that are never filled (measured: 6.76M-row rigid
+            # buffer sitting at 0 on g1 rough). ``solver.step`` still
+            # requires a Contacts container; size it the way Newton's
+            # own basic_heightfield example does on this path.
+            self.collision_pipeline = None
+            self.contacts = newton.Contacts(self.solver.get_max_contact_count(), 0)
+        elif self.config.collision_max_triangle_pairs is not None or tri_override:
+            max_pairs = int(tri_override) if tri_override else self.config.collision_max_triangle_pairs
             self.collision_pipeline = newton.CollisionPipeline(
                 self.model,
-                max_triangle_pairs=self.config.collision_max_triangle_pairs,
+                max_triangle_pairs=max_pairs,
+                verify_buffers=verify,
             )
+            self.contacts = self.collision_pipeline.contacts()
         else:
-            self.collision_pipeline = newton.CollisionPipeline(self.model)
-        self.contacts = self.collision_pipeline.contacts()
+            self.collision_pipeline = newton.CollisionPipeline(self.model, verify_buffers=verify)
+            self.contacts = self.collision_pipeline.contacts()
 
         # Update entity tracking with replicated info
         for entity_name in self.entities:
@@ -1429,9 +1470,17 @@ class NewtonSceneManager(BaseManager):
         need_state_copy = self.use_cuda_graph and self.config.substeps % 2 == 1
         last_idx = self.config.substeps - 1
 
-        self.contacts = self.model.collide(
-            self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
-        )
+        # With use_mujoco_contacts=True the mjwarp solver runs its own
+        # collision internally and IGNORES the Newton contacts argument —
+        # running the CollisionPipeline would be pure dead work (Newton's
+        # own basic_heightfield example skips it the same way).
+        if not self._use_mujoco_contacts:
+            self.contacts = self.model.collide(
+                self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
+            )
+        self._substep_loop(need_state_copy, last_idx)
+
+    def _substep_loop(self, need_state_copy: bool, last_idx: int) -> None:
         for i in range(self.config.substeps):
             # NOTE: ``state_0.clear_forces()`` USED to live here. Moved
             # out to ``NewtonEnv._step_physics`` so that callers writing

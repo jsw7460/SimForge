@@ -176,17 +176,22 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
             cone="elliptic",
             ls_iterations=20,
             iterations=10,
-            # Mesh terrain: route contacts through Newton's MPR-based
-            # pipeline instead of mjwarp's internal GJK/EPA collision.
-            # Under use_mujoco_contacts=True mjwarp does its own collision,
-            # which rejects planar mesh colliders, overflows its hardcoded
-            # 24-edge EPA horizon on mesh contacts, and silently zeroes the
-            # contact margin. With False, the solver consumes Newton's
-            # model.collide() contacts (MPR — stable for deep penetration,
-            # honors margin). Matches IsaacLab's Newton terrain setup. Flat
-            # ground keeps the default mjwarp contacts (True) — unchanged.
+            # mjwarp-native collision on BOTH flat and rough. The old
+            # rough-only opt-out (use_mujoco_contacts=False → Newton's
+            # MPR collide()) dated from when the terrain was a triangle
+            # MESH, which mjwarp's GJK/EPA path genuinely mishandled.
+            # The terrain importer now emits a NATIVE heightfield, which
+            # SolverMuJoCo converts to a first-class mjwarp HFIELD geom
+            # with dedicated primitive collision — the same path mjlab
+            # runs. Newton's own MPR heightfield midphase enumerates
+            # triangle candidates by XY footprint with NO z-culling
+            # (elevated trunk/hip shapes sweep in millions of dead
+            # triangle pairs), which made rough 2-3x slower than
+            # genesis/mjlab (go2 rough profiling 2026-07-18: collide
+            # alone 54 ms/step at 4096 envs); mjwarp's 3D AABB
+            # broadphase culls those for free.
             nconmax=300,
-            use_mujoco_contacts=not cfg.use_rough_terrain,
+            use_mujoco_contacts=True,
         ),
         terrain_cfg=cfg.make_terrain_cfg(),
         entities={

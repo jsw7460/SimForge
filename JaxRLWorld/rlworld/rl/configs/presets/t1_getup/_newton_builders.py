@@ -118,11 +118,7 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         solver_type="mujoco",
         robot_cfg=r,
         solver_cfg=SolverMuJoCoCfg(
-            impratio=10.0,
-            cone="elliptic",
-            iterations=50,
-            ls_iterations=50,
-            ccd_iterations=50,
+            impratio=10.0, cone="elliptic", iterations=50, ls_iterations=50, ccd_iterations=50, nconmax=200
         ),
         entities={
             "robot": NewtonEntityCfg(
