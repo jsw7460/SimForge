@@ -1,3 +1,5 @@
+import os
+
 import torch
 import warp as wp
 
@@ -18,6 +20,13 @@ from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.utils.newton.dr_baselines import snapshot_newton_dr_baselines
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed, string as _su
+
+# Opt-in first-NaN forensics (JAXRLWORLD_NAN_TRIPWIRE=1): stop the run at
+# the first non-finite physics state and dump contact/constraint counter
+# utilization plus per-env kinematics — mid-training Newton NaNs have
+# historically been rare-tail events (1e8 steps in) that offline
+# random-action rollouts cannot reproduce.
+_NAN_TRIPWIRE = os.environ.get("JAXRLWORLD_NAN_TRIPWIRE", "0") == "1"
 
 
 class NewtonEnv(World):
@@ -312,6 +321,70 @@ class NewtonEnv(World):
             self.scene_manager.step()
             self.contact_manager.advance(dt=self.physics_dt)
 
+        if _NAN_TRIPWIRE:
+            self._nan_tripwire_check()
+
         # Update visualization
         if self.vis_manager is not None:
             self.vis_manager.advance()
+
+    def _nan_tripwire_check(self) -> None:
+        """Dump forensics and crash on the FIRST non-finite physics state.
+
+        Reports, for every poisoned env: episode step (recent reset?),
+        its mjwarp contact and constraint-row counts (buffer-overflow
+        attribution), root kinematics and the blown-up joint. Raises so
+        the run stops at the first poisoned transition instead of
+        feeding NaNs to the learner for days.
+        """
+        rd = self.get_robot_data()
+        checks = (
+            ("joint_pos", rd.joint_pos),
+            ("joint_vel", rd.joint_vel),
+            ("root_pos", rd.root_link_pos_w),
+            ("root_lin_vel", rd.root_link_lin_vel_w),
+            ("root_ang_vel", rd.root_link_ang_vel_w),
+        )
+        bad_envs = None
+        bad_names = []
+        for name, t in checks:
+            finite = torch.isfinite(t).reshape(self.num_envs, -1).all(dim=1)
+            if not bool(finite.all()):
+                bad_names.append(name)
+                bad_envs = ~finite if bad_envs is None else (bad_envs | ~finite)
+        if bad_envs is None:
+            return
+
+        ids = torch.nonzero(bad_envs).flatten()
+        mjw_data = self.scene_manager.solver.mjw_data
+        naconmax = int(mjw_data.naconmax)
+        nacon = int(wp.to_torch(mjw_data.nacon)[0].item())
+        n_written = min(nacon, naconmax)
+        ncon_world = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if n_written > 0:
+            worldid = wp.to_torch(mjw_data.contact.worldid)[:n_written].to(self.device).long()
+            ncon_world = torch.bincount(worldid, minlength=self.num_envs)
+        nefc = wp.to_torch(mjw_data.nefc).to(self.device)
+        contacts = self.scene_manager.contacts
+        rigid_count = int(wp.to_torch(contacts.rigid_contact_count)[0].item())
+        rigid_cap = int(contacts.rigid_contact_point_id.shape[0])
+        joint_names = [n.rsplit("/", 1)[-1] for n in self.act_manager.actuated_joint_names]
+
+        lines = [
+            f"[NAN-TRIPWIRE] non-finite physics state in: {bad_names}",
+            f"[NAN-TRIPWIRE] bad envs: {int(bad_envs.sum())}/{self.num_envs}  ids(first16)={ids[:16].tolist()}",
+            f"[NAN-TRIPWIRE] contact pools: nacon={nacon}/naconmax={naconmax} (overflow={nacon > naconmax})  "
+            f"newton rigid={rigid_count}/{rigid_cap} (sat={rigid_count >= rigid_cap})  njmax={int(mjw_data.njmax)}",
+        ]
+        for e in ids[:8].tolist():
+            jv_f = torch.nan_to_num(rd.joint_vel[e].abs(), nan=float("inf"))
+            j = int(jv_f.argmax())
+            lines.append(
+                f"[NAN-TRIPWIRE] env {e}: ep_len={int(self.episode_length_buf[e])}  "
+                f"ncon={int(ncon_world[e])}  nefc={int(nefc[e])}  "
+                f"root_z={float(rd.root_link_pos_w[e, 2]):.4f}  "
+                f"max|joint_vel|={float(jv_f[j]):.3e} @ {joint_names[j]}  "
+                f"root_lin_vel={[round(float(v), 3) for v in rd.root_link_lin_vel_w[e].tolist()]}"
+            )
+        print("\n".join(lines), flush=True)
+        raise RuntimeError("JAXRLWORLD_NAN_TRIPWIRE: first non-finite physics state (details above)")

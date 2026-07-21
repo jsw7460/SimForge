@@ -26,6 +26,17 @@ Usage (GPU box):
     python -m rlworld.scripts.diag.newton_g1_dr_nan_diag
     python -m rlworld.scripts.diag.newton_g1_dr_nan_diag --num-envs 4096
     python -m rlworld.scripts.diag.newton_g1_dr_nan_diag --cells full,no_body_com
+
+Rough-terrain mode (--rough): builds the env with use_rough_terrain=True.
+On rough the contact path differs from flat — use_mujoco_contacts=False,
+so contacts come from Newton's own ``model.collide()`` (CollisionPipeline)
+and are then consumed by the mjwarp solver. That adds TWO more silently-
+overflowing buffers on top of mjwarp's nacon pool: the Newton rigid-
+contact buffer (``rigid_contact_max``) and the mjwarp per-world
+constraint rows (``nefc`` vs ``njmax``). All three are measured per step.
+
+    python -m rlworld.scripts.diag.newton_g1_dr_nan_diag --rough \
+        --num-envs 4096 --num-steps 300 --cells act_050,full_100
 """
 
 from __future__ import annotations
@@ -68,7 +79,7 @@ def _finite(t) -> bool:
     return bool(torch.isfinite(t).all().item())
 
 
-def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int) -> dict:
+def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int, njmax: int, rough: bool) -> dict:
     import torch
     import warp as wp
 
@@ -76,19 +87,22 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int) 
     disable, action_scale = _CELLS[cell]
     _stage(
         f"cell start: {cell} (disable={list(disable)}, action_scale={action_scale}) "
-        f"num_envs={num_envs} nconmax={nconmax}"
+        f"num_envs={num_envs} nconmax={nconmax} njmax={njmax} rough={rough}"
     )
 
     from rlworld.rl.configs.base_config import iter_terms
     from rlworld.rl.configs.events.event_term_config import EventTermConfig
     from rlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 
-    cfgs = G1FlatConfig(sim_type="newton", num_envs=num_envs, seed=seed).build()
+    cfgs = G1FlatConfig(sim_type="newton", num_envs=num_envs, seed=seed, use_rough_terrain=rough).build()
+    # Budget overrides for overflow-free demand measurement (overflowed
+    # contacts are silently skipped and the resulting NaN cuts the
+    # rollout short). The live fields are solver_cfg.nconmax/njmax —
+    # the scene manager builds SolverMuJoCo from those.
     if nconmax > 0:
-        # Override the preset budget so contact-demand measurement runs
-        # without overflow (overflowed contacts are silently skipped and
-        # the resulting NaN cuts the rollout short).
-        cfgs.scene.nconmax = nconmax
+        cfgs.scene.solver_cfg.nconmax = nconmax
+    if njmax > 0:
+        cfgs.scene.solver_cfg.njmax = njmax
 
     disabled_names: list[str] = []
     for name, term in list(iter_terms(cfgs.event, EventTermConfig).items()):
@@ -127,6 +141,14 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int) 
     joint_names = list(env.act_manager.actuated_joint_names)
     mjw_data = env.scene_manager.solver.mjw_data
     naconmax = int(mjw_data.naconmax)
+    njmax_cap = int(mjw_data.njmax)
+    # Newton-side rigid contact buffer (the collide() output the mjwarp
+    # solver consumes on rough where use_mujoco_contacts=False). Sized
+    # by CollisionPipeline rigid_contact_max; overflow is silent.
+    nt_contacts = env.scene_manager.contacts
+    rigid_cap = int(nt_contacts.rigid_contact_point_id.shape[0])
+    peak_rigid_count = 0
+    peak_nefc_world = 0
     first_bad_step = -1
     bad_quantity = ""
     peak_nacon = 0
@@ -144,6 +166,8 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int) 
         if n_written > 0:
             worldid = wp.to_torch(mjw_data.contact.worldid)[:n_written]
             peak_ncon_world = max(peak_ncon_world, int(torch.bincount(worldid, minlength=num_envs).max().item()))
+        peak_rigid_count = max(peak_rigid_count, int(wp.to_torch(nt_contacts.rigid_contact_count)[0].item()))
+        peak_nefc_world = max(peak_nefc_world, int(wp.to_torch(mjw_data.nefc).max().item()))
         jv_abs = rd.joint_vel.abs()
         jv_flat = torch.nan_to_num(jv_abs, nan=float("inf"))
         flat_idx = int(jv_flat.argmax().item())
@@ -176,9 +200,21 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int) 
     _stage(f"cell done: {'CLEAN' if ok else f'NON-FINITE ({bad_quantity} @ step {first_bad_step})'}")
     peak_v = max((v for _s, v, _j in trace if v == v), default=float("nan"))
     overflowed = peak_nacon > naconmax
+    rigid_overflowed = peak_rigid_count >= rigid_cap
+    nefc_overflowed = peak_nefc_world >= njmax_cap
     print(
         f"[INFO] contact demand: peak nacon={peak_nacon} (pool naconmax={naconmax}, "
         f"overflow={overflowed})  peak per-world ncon={peak_ncon_world}",
+        flush=True,
+    )
+    print(
+        f"[INFO] newton rigid contacts: peak count={peak_rigid_count} (cap rigid_contact_max={rigid_cap}, "
+        f"saturated={rigid_overflowed})",
+        flush=True,
+    )
+    print(
+        f"[INFO] mjwarp constraint rows: peak per-world nefc={peak_nefc_world} (cap njmax={njmax_cap}, "
+        f"saturated={nefc_overflowed})",
         flush=True,
     )
     return {
@@ -191,6 +227,13 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int) 
         "peak_nacon": peak_nacon,
         "peak_ncon_world": peak_ncon_world,
         "overflowed": overflowed,
+        "rough": rough,
+        "rigid_contact_cap": rigid_cap,
+        "peak_rigid_count": peak_rigid_count,
+        "rigid_overflowed": rigid_overflowed,
+        "njmax_cap": njmax_cap,
+        "peak_nefc_world": peak_nefc_world,
+        "nefc_overflowed": nefc_overflowed,
         "disabled": disabled_names,
         "body_com_finite": body_com_finite,
         "body_com_max_dev": max_dev,
@@ -237,6 +280,9 @@ def run_parent(args) -> int:
                     str(args.seed),
                     "--nconmax",
                     str(args.nconmax),
+                    "--njmax",
+                    str(args.njmax),
+                    *(["--rough"] if args.rough else []),
                 ],
                 stdout=lf,
                 stderr=subprocess.STDOUT,
@@ -268,7 +314,11 @@ def run_parent(args) -> int:
             f"{d.get('bad_quantity', '') or '-':<14}{dev:<18}"
             f"scale={d.get('action_scale', '?')} peak|jv|={d.get('peak_joint_vel', float('nan')):.2e} "
             f"peak_nacon={d.get('peak_nacon', '?')} peak_ncon/world={d.get('peak_ncon_world', '?')} "
-            f"overflow={d.get('overflowed', '?')} disabled={d.get('disabled', '?')}"
+            f"overflow={d.get('overflowed', '?')} "
+            f"rigid={d.get('peak_rigid_count', '?')}/{d.get('rigid_contact_cap', '?')} "
+            f"(sat={d.get('rigid_overflowed', '?')}) "
+            f"nefc/world={d.get('peak_nefc_world', '?')}/{d.get('njmax_cap', '?')} "
+            f"(sat={d.get('nefc_overflowed', '?')}) disabled={d.get('disabled', '?')}"
         )
     lines.append("")
     lines.append("[Reading] zero_action BAD -> gross instability (standing still explodes);")
@@ -283,6 +333,15 @@ def run_parent(args) -> int:
         f"[nconmax recommendation] worst per-world ncon={worst_world}, "
         f"worst total nacon={worst_total} ({per_world_avg:.1f}/env avg) "
         f"-> suggest nconmax >= {int(rec * 1.5 + 0.999)} (peak x1.5 headroom)"
+    )
+    worst_rigid = max((d.get("peak_rigid_count", 0) for d in results), default=0)
+    rigid_cap = max((d.get("rigid_contact_cap", 0) for d in results), default=0)
+    worst_nefc = max((d.get("peak_nefc_world", 0) for d in results), default=0)
+    njcap = max((d.get("njmax_cap", 0) for d in results), default=0)
+    lines.append(
+        f"[rough buffers] newton rigid contacts peak={worst_rigid} / cap={rigid_cap}; "
+        f"mjwarp per-world nefc peak={worst_nefc} / njmax={njcap}. "
+        f"Any sat=True above = silent-drop overflow: raise that budget (peak x1.5 headroom)."
     )
     report = "\n".join(lines)
     out_path.write_text(report + "\n")
@@ -300,12 +359,16 @@ def main() -> int:
     ap.add_argument("--num-envs", type=int, default=1024)
     ap.add_argument("--num-steps", type=int, default=100)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--nconmax", type=int, default=512, help="scene nconmax override for overflow-free measurement")
+    ap.add_argument(
+        "--nconmax", type=int, default=512, help="solver_cfg nconmax override for overflow-free measurement"
+    )
+    ap.add_argument("--njmax", type=int, default=0, help="solver_cfg njmax override (0 = preset value)")
+    ap.add_argument("--rough", action="store_true", help="build with use_rough_terrain=True")
     ap.add_argument("--out", default="newton_g1_dr_nan_diag.txt")
     args = ap.parse_args()
 
     if args.cell is not None:
-        result = run_cell(args.cell, args.num_envs, args.num_steps, args.seed, args.nconmax)
+        result = run_cell(args.cell, args.num_envs, args.num_steps, args.seed, args.nconmax, args.njmax, args.rough)
         Path(args.result_json).write_text(json.dumps(result, indent=2))
         print(json.dumps(result, indent=2))
         return 0
