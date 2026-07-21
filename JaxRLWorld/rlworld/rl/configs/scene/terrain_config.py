@@ -49,10 +49,14 @@ class TerrainCfg:
     ground_mu_torsional: float = 0.005
 
     # ── Newton-specific ───────────────────────────────────────────────
-    contact_margin: float = 0.005
-    """Per-shape collision margin (m) for the Newton backend's mesh
-    terrain. IsaacLab flags this as the single most important Newton
-    rough-terrain setting; ignored by Genesis / MuJoCo."""
+    contact_margin: float = 0.0
+    """Per-shape collision margin (m) for the Newton backend's terrain;
+    ignored by Genesis / MuJoCo. Under ``use_mujoco_contacts=True`` the
+    mjwarp hfield kernel adds the margin to the prism top surface without
+    subtracting it from the contact distance, so any non-zero value
+    physically raises the Newton terrain surface by that amount relative
+    to the other backends. Keep at 0 for cross-sim surface parity; only
+    set >0 as detection padding for the Newton-native contact path."""
 
     # ── Curriculum (used by TerrainImporter when terrain_origins exists) ──
     max_init_terrain_level: int | None = None

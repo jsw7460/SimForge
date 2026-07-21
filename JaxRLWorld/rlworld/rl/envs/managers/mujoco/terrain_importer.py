@@ -37,9 +37,15 @@ class MujocoTerrainImporter(TerrainImporter):
             z_min = float(heights.min())
             z_max = float(heights.max())
             elevation = max(z_max - z_min, 1e-4)
-            userdata = ((heights - z_min) / elevation).flatten().tolist()
+            # Axis conventions: the canonical grid is heights[ix, iy]
+            # (dim0 = X), while MuJoCo hfield userdata is data[iy, ix]
+            # (rows span Y, columns span X) and nrow counts Y samples.
+            # Transposing maps one onto the other, which is also why
+            # nrow/ncol come from the opposite canonical dimensions.
+            userdata = ((heights - z_min) / elevation).T.flatten().tolist()
             hx, hy = data.half_extent
-            nrow, ncol = data.nrow, data.ncol
+            num_x, num_y = data.nrow, data.ncol
+            nrow, ncol = num_y, num_x
             friction = float(self.cfg.friction)
 
             def _spec_fn(spec: mujoco.MjSpec) -> None:
