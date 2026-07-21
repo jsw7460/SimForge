@@ -48,11 +48,26 @@ class GenesisRobotStateWriter:
     # ------------------------------------------------------------------
 
     def set_dof_positions(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
-        """Write actuated joint positions."""
+        """Write actuated joint positions.
+
+        ``zero_velocity=False`` is load-bearing on EVERY Genesis position
+        write in this class: Genesis's ``set_pos`` / ``set_quat`` /
+        ``set_dofs_position`` default to ``zero_velocity=True``, which
+        zeroes ALL of the entity's dof velocities as a teleport safety
+        measure. Under the reset event order (``reset_root`` writes the
+        randomized root velocity, then ``reset_joints`` writes joint
+        positions) that default silently wiped the root velocity — every
+        Genesis episode started from perfect rest while Newton/mjlab
+        started with the sampled |v|≈0.25-0.4 m/s, skewing first-step
+        tracking and feet rewards on all Genesis presets. The writer must
+        only write what it was asked to; velocities are written
+        explicitly by the events.
+        """
         self._entity.set_dofs_position(
             position=values,
             dofs_idx_local=self._actuated_dof_ids,
             envs_idx=env_ids,
+            zero_velocity=False,
         )
 
     def set_dof_velocities(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
@@ -73,9 +88,12 @@ class GenesisRobotStateWriter:
         quat_wxyz: Tensor,
         env_ids: torch.Tensor | None = None,
     ) -> None:
-        """Write root link position + orientation. Genesis is wxyz native."""
-        self._entity.set_pos(pos, envs_idx=env_ids)
-        self._entity.set_quat(quat_wxyz, envs_idx=env_ids)
+        """Write root link position + orientation. Genesis is wxyz native.
+
+        ``zero_velocity=False``: see :meth:`set_dof_positions`.
+        """
+        self._entity.set_pos(pos, envs_idx=env_ids, zero_velocity=False)
+        self._entity.set_quat(quat_wxyz, envs_idx=env_ids, zero_velocity=False)
 
     def set_root_velocity(
         self,
