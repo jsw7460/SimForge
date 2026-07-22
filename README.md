@@ -37,9 +37,9 @@ external users can clone a single, reproducible stack.
 - **Proxy for sim-to-real research.** Cross-sim provides a
   hardware-free testbed for sim2real-style experiments (e.g., system
   identification). The same task config drives all three backends.
-- **7 task configurations × 3 simulators = 21 ready combinations**
+- **9 task configurations × 3 simulators = 27 ready combinations**
   covering Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and
-  the Booster T1 humanoid.
+  the Booster T1 and K1 humanoids.
 - **PPO is the default for all locomotion tasks** across the three
   simulators. **SAC, TD3, FastTD3, and TDMPC2** are validated on a
   small subset of a Gymnasium-based benchmark suite (see
@@ -62,6 +62,8 @@ trained and evaluated end-to-end with PPO.
 | `go2` (gait-conditioned)     | Unitree Go2  | ✓       | ✓      | ✓      |
 | `t1_getup`                   | Booster T1   | ✓       | ✓      | ✓      |
 | `t1_tracking`                | Booster T1   | ✓       | ✓      | ✓      |
+| `k1_joystick`                | Booster K1   | ✓       | ✓      | ✓      |
+| `k1_joystick` (g1 recipe)    | Booster K1   | ✓       | ✓      | ✓      |
 
 ## Installation
 
