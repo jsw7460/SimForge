@@ -71,6 +71,15 @@ class BaseContactManager(BaseManager, ABC):
         self.num_envs = env.num_envs
         self.dt = env.control_dt
         self._groups: dict[str, ContactGroup] = {}
+        # True for envs that were reset after the last physics step. The
+        # public read API reports zero contact for these envs until the
+        # next step: the backends disagree otherwise (mjlab's reset-time
+        # forward already solves the standing contact (~full weight on
+        # the feet), while Genesis/Newton buffers hold zeros on the first
+        # reset and STALE pre-reset contacts on mid-training resets).
+        # Masking pins all three to one convention — no contact signal
+        # between a reset and the first step that follows it.
+        self._fresh_reset = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
     # ------------------------------------------------------------------
     # Group registration (called by subclasses)
@@ -179,6 +188,7 @@ class BaseContactManager(BaseManager, ABC):
         """Bool contact state. Shape: ``(num_envs, N)``."""
         group = self._get_group(group_name)
         result = self._compute_group_is_contact(group)
+        result = result & ~self._fresh_reset.unsqueeze(1)
         return self._apply_order(result, group_name, order)
 
     def prev_is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
@@ -192,6 +202,9 @@ class BaseContactManager(BaseManager, ABC):
         force = self._compute_group_contact_force(group)
         if force is None:
             force = torch.zeros(self.num_envs, group.num_tracked, 3, device=self.device)
+        # torch.where instead of in-place: backends may return live views
+        # of their sensor buffers (mjlab).
+        force = torch.where(self._fresh_reset.view(-1, 1, 1), torch.zeros((), device=force.device), force)
         return self._apply_order_3d(force, group_name, order)
 
     def contact_force_history(self, group_name: str, order: list[str] | None = None) -> torch.Tensor | None:
@@ -205,6 +218,7 @@ class BaseContactManager(BaseManager, ABC):
         history = self._compute_group_contact_force_history(group)
         if history is None:
             return None
+        history = torch.where(self._fresh_reset.view(-1, 1, 1, 1), torch.zeros((), device=history.device), history)
         if order is not None:
             reindex = self._get_reindex(group_name, order)
             history = history[:, reindex, :, :]
@@ -280,6 +294,9 @@ class BaseContactManager(BaseManager, ABC):
         ``mjlab/envs/manager_based_rl_env.py`` which both
         ``scene.update(physics_dt)`` per substep.
         """
+        # A physics step has run: freshly-reset envs now carry real
+        # contact state again (see ``_fresh_reset``).
+        self._fresh_reset.fill_(False)
         for group in self._groups.values():
             self._advance_group(group, dt)
 
@@ -321,8 +338,11 @@ class BaseContactManager(BaseManager, ABC):
         g._prev_is_contact = is_contact
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
-        if env_ids is None or len(env_ids) == 0:
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        if len(env_ids) == 0:
             return
+        self._fresh_reset[env_ids] = True
         for g in self._groups.values():
             g.current_air_time[env_ids] = 0.0
             g.current_contact_time[env_ids] = 0.0
