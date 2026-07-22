@@ -29,23 +29,33 @@ class GenesisTerrainImporter(TerrainImporter):
 
     def add_to_scene(self, scene: gs.Scene):
         """Add the terrain to ``scene``; stash the entity for later lookup."""
+        # Genesis combines pair friction as max(mu_a, mu_b) and has no
+        # geom-priority concept (the MJCF ``priority`` attribute is
+        # ignored by its parser). Our robot assets rely on MuJoCo's
+        # priority rule — the foot geom's (possibly DR'd) friction
+        # applies exclusively against the ground — so a default-friction
+        # (1.0) ground masks any robot-side friction below 1.0 and
+        # silently disables foot-friction DR. Anchoring the ground at the
+        # minimum allowed friction makes max() always resolve to the
+        # robot side, matching the priority semantics of the other
+        # backends.
+        ground_material = gs.materials.Rigid(friction=0.01)
+
         if self.cfg.terrain_type == "plane":
-            # morph = gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True)
             morph = gs.morphs.Plane()
-            self.entity = scene.add_entity(morph=morph)
+            self.entity = scene.add_entity(morph=morph, material=ground_material)
             return self.entity
 
         if self.cfg.terrain_type == "generator":
             data = self._run_generator()
             lx, ly = data.size_xy
-            # No material arg → Genesis defaults to gs.materials.Rigid().
             morph = gs.morphs.Terrain(
                 height_field=data.heights_m / data.vertical_scale,  # metres → raw units
                 horizontal_scale=data.horizontal_scale,
                 vertical_scale=data.vertical_scale,
                 pos=(-lx / 2.0, -ly / 2.0, 0.0),  # centre the patch on the origin
             )
-            self.entity = scene.add_entity(morph=morph)
+            self.entity = scene.add_entity(morph=morph, material=ground_material)
             self.configure_env_origins(origins=data.origins)
             return self.entity
 
