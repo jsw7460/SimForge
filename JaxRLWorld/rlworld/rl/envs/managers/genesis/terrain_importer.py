@@ -42,7 +42,15 @@ class GenesisTerrainImporter(TerrainImporter):
         ground_material = gs.materials.Rigid(friction=0.01)
 
         if self.cfg.terrain_type == "plane":
-            morph = gs.morphs.Plane()
+            # Genesis primitive morphs default to contype/conaffinity
+            # 0xFFFF, which makes the plane collide with EVERY robot geom
+            # regardless of the geom's own mask. MuJoCo grounds carry
+            # contype=1/conaffinity=1, so robot geoms whose masks exclude
+            # bit 0 (e.g. foot boxes reserved for foot-to-foot collision)
+            # never touch the ground there; mirror that mask so Genesis
+            # agrees. Terrain morphs need no override — Genesis hardcodes
+            # terrain geoms to contype=1/conaffinity=1.
+            morph = gs.morphs.Plane(contype=1, conaffinity=1)
             self.entity = scene.add_entity(morph=morph, material=ground_material)
             return self.entity
 
