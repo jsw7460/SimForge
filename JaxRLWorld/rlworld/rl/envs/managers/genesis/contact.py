@@ -82,8 +82,14 @@ class ContactManager(BaseContactManager):
         if not self._sensors:
             return
         solver = self.env.scene_manager.scene.sim.rigid_solver
-        solver._kernel_detect_collision()
         force = qd_to_torch(solver.collider._collider_state.contact_data.force, transpose=True, copy=False)
+        # ``collider.clear()`` inside the detection kernel wipes the force
+        # field for EVERY env; the non-reset envs must keep their last
+        # solve's forces (re-detection from unchanged states reproduces
+        # the same slot order), so snapshot and restore around it.
+        saved_force = force.clone()
+        solver._kernel_detect_collision()
+        force.copy_(saved_force)
         if env_ids is None:
             force.zero_()
         else:
