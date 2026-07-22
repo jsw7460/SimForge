@@ -89,8 +89,14 @@ class ContactManager(BaseContactManager):
         else:
             force[env_ids] = 0.0
         # Detection replaced the collider state in place; drop the shared
-        # list-reader cache so the next read re-pulls it.
+        # list-reader cache so the capture below re-pulls it.
         self.env._invalidate_cache()
+        # Sensor reads return captured frames, not live collider reads
+        # (``read_found``/``read_force``), so push one frame from the
+        # fresh detection — the Newton counterpart's ``_update_sensors``
+        # call does the same on its side.
+        for sensor in self._sensors.values():
+            sensor.capture_substep()
 
     # -- pretty print --
 
