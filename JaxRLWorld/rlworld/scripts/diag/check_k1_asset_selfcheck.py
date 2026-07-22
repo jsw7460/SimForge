@@ -15,9 +15,12 @@ Verifies, using only the vendored files:
 
  1. mesh inventory — referenced set == shipped set, all loadable
  2. model sizes + compiler options vs pinned constants
- 3. K1Config vs the vendored XML — kp/kd/armature/effort per joint,
-    default joint angles vs the pinned home keyframe, pattern coverage,
-    referenced geom/body names
+ 3. K1Config vs the vendored XML — kp/kd/effort per joint, default
+    joint angles vs the pinned home keyframe, pattern coverage,
+    referenced geom/body names.  Armature is the one intentional
+    config-over-XML override: it is checked against the Booster
+    reference model ``assets/K1/K1_22dof.xml`` instead (the feetonly
+    MJCF flattens armature to a uniform 0.005)
  4. collision-filter masks + truth table (spheres↔floor only,
     boxes↔boxes only)
  5. physics — PD hold at the home pose on a default plane: ground
@@ -153,6 +156,10 @@ check(
 section("3. K1Config vs vendored XML + pinned keyframe")
 cfg = K1Config()
 
+# Booster reference model: source of truth for per-joint armature (the
+# vendored feetonly XML carries a flattened uniform 0.005 instead).
+ref = mujoco.MjModel.from_xml_path(str(_ASSET_DIR / "K1_22dof.xml"))
+
 
 def resolve(d: dict, name: str, default: float = 0.0) -> float:
     hits = {v for p, v in d.items() if re.fullmatch(p, name)}
@@ -174,7 +181,10 @@ for i in range(1, m.njnt):
     print(f"  {jname:<24}{kp_c:>6.0f}{kd_c:>6.0f}{arm_c:>9.4f}{eff_c:>7.0f}{q0_c:>9.2f}")
     check(f"{jname} kp", kp_c == m.actuator(act).gainprm[0])
     check(f"{jname} kd (joint damping)", kd_c == m.dof_damping[dof])
-    check(f"{jname} armature", arm_c == m.dof_armature[dof])
+    check(
+        f"{jname} armature (Booster reference model)",
+        arm_c == ref.dof_armature[ref.jnt_dofadr[ref.joint(jname).id]],
+    )
     check(f"{jname} effort (jnt_actfrcrange)", eff_c == m.jnt_actfrcrange[i][1])
     check(
         f"{jname} default angle vs pinned keyframe",

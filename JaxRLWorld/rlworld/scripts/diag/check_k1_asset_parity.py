@@ -11,9 +11,12 @@ mujoco_playground K1 source tree and verifies:
     else identical. The triplet moves the upstream floor's winning
     contact parameters onto the feet so foot-side friction DR works
     against a default (priority-0) plane.
- 5. K1Config values — kp/kd/armature/effort per joint, default joint
-    angles vs the upstream home keyframe, base height, pattern coverage,
-    referenced geom/body names, collision-filter masks
+ 5. K1Config values — kp/kd/effort per joint, default joint angles vs
+    the upstream home keyframe, base height, pattern coverage,
+    referenced geom/body names, collision-filter masks.  Armature is
+    the one intentional config-over-XML override: it is checked
+    against the Booster reference model ``assets/K1/K1_22dof.xml``
+    instead (the feetonly MJCF flattens armature to a uniform 0.005)
  6. physics behaviour — PD hold at the home pose, run twice: the
     upstream scene (ground truth) and our robot on a default
     (priority-0, friction-1.0, condim-3) plane. Both runs must produce
@@ -282,6 +285,10 @@ check(
 # ──────────────────────────────────────────────────────────────────────
 section("5. K1Config cross-check")
 cfg = K1Config()
+
+# Booster reference model: source of truth for per-joint armature (the
+# vendored feetonly XML carries a flattened uniform 0.005 instead).
+ref = mujoco.MjModel.from_xml_path(str(_OURS_DIR / "K1_22dof.xml"))
 check(
     "mjcf_path resolves to the vendored asset",
     (_SIMFORGE_ROOT / cfg.mjcf_path.lstrip("./")).resolve() == (_OURS_DIR / "k1_mjx_feetonly.xml").resolve(),
@@ -310,7 +317,10 @@ for i in range(1, ours.njnt):
     print(f"  {jname:<24}{kp_c:>6.0f}{kd_c:>6.0f}{arm_c:>9.4f}{eff_c:>7.0f}{q0_c:>9.2f}")
     check(f"{jname} kp", kp_c == ours.actuator(act).gainprm[0])
     check(f"{jname} kd (joint damping)", kd_c == ours.dof_damping[dof])
-    check(f"{jname} armature", arm_c == ours.dof_armature[dof])
+    check(
+        f"{jname} armature (Booster reference model)",
+        arm_c == ref.dof_armature[ref.jnt_dofadr[ref.joint(jname).id]],
+    )
     check(f"{jname} effort (jnt_actfrcrange)", eff_c == ours.jnt_actfrcrange[i][1])
     check(f"{jname} default angle vs home keyframe", q0_c == q0_x)
     n_act = sum(bool(re.fullmatch(p, jname)) for p in cfg.actuated_dof_patterns)

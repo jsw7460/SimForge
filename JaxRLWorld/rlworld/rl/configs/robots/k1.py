@@ -1,13 +1,19 @@
 """Booster K1 humanoid robot configuration (22 actuated DOF).
 
-All values are read verbatim from the MJCF at
+All values except armature are read verbatim from the MJCF at
 ``assets/K1/k1_mjx_feetonly.xml`` (default-class attributes and
 the home keyframe of its companion scene file) so the joint-PD path
 reproduces the source model exactly:
 
 - PD gains: actuator ``kp`` per class (head/arm 15, hip/knee 25,
   ankle 10) with the joint ``damping`` as ``kd`` (head/arm 2, leg 3).
-- armature 0.005 and frictionloss 0.1 uniformly on every joint.
+- frictionloss 0.1 uniformly on every joint.
+- armature per joint from the Booster reference model
+  ``assets/K1/K1_22dof.xml`` (head 0.002, arm 0.001, legs
+  0.028-0.096).  The feetonly MJCF flattens all of these to a uniform
+  0.005, which understates the leg reflected rotor inertia by roughly
+  an order of magnitude; the actuator configs override the XML value
+  on every backend, so the reference values win at runtime.
 - effort limits from ``actuatorfrcrange`` per class.
 - action scale is 1.0 (raw action added to the default pose), so no
   per-group action-scale table exists for this robot.
@@ -36,7 +42,16 @@ DAMPING_HEAD = 2.0
 DAMPING_ARM = 2.0
 DAMPING_LEG = 3.0
 
-ARMATURE_ALL = 0.005
+# Armature (reflected rotor inertia) per joint group, read from the
+# Booster reference model ``assets/K1/K1_22dof.xml``.  These override
+# the feetonly MJCF's flattened uniform 0.005 (see module docstring).
+ARMATURE_HEAD = 0.002
+ARMATURE_ARM = 0.001
+ARMATURE_HIP_PITCH = 0.0478125
+ARMATURE_HIP_ROLL = 0.0339552
+ARMATURE_HIP_YAW = 0.0282528
+ARMATURE_KNEE = 0.095625
+ARMATURE_ANKLE = 0.0565
 
 # ``actuatorfrcrange`` magnitudes per class.
 EFFORT_HEAD = 6.0
@@ -159,7 +174,20 @@ class K1Config(RobotConfig):
     # Explicit per-group patterns, NOT a ".*" catch-all: Genesis resolves
     # this dict against ALL joint names including the free joint, so a
     # catch-all produces one value too many vs the actuated-DOF index set.
-    armature: Dict[str, float] = field(default_factory=lambda: _pattern_dict(dict.fromkeys(_GROUPS, ARMATURE_ALL)))
+    armature: Dict[str, float] = field(
+        default_factory=lambda: _pattern_dict(
+            {
+                "head": ARMATURE_HEAD,
+                "shoulder": ARMATURE_ARM,
+                "elbow": ARMATURE_ARM,
+                "hip_pitch": ARMATURE_HIP_PITCH,
+                "hip_roll": ARMATURE_HIP_ROLL,
+                "hip_yaw": ARMATURE_HIP_YAW,
+                "knee": ARMATURE_KNEE,
+                "ankle": ARMATURE_ANKLE,
+            }
+        )
+    )
 
     # Per-joint motor saturation torques [N*m] from ``actuatorfrcrange``.
     effort_limits: Dict[str, float] = field(
