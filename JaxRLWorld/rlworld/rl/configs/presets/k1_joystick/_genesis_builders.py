@@ -116,16 +116,15 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
         ),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
-            # Genesis's default integrator is approximate_implicitfast, a
-            # faster approximation with extra effective damping (joint
-            # damping folded into the mass matrix before the constraint
-            # solve). Under identical PD targets it moves the limbs ~4-10%
-            # less than the mjlab/newton cells and skews the contact-event
-            # rewards (feet_pair_collision / swing_height / clearance).
-            # implicitfast is the MuJoCo-consistent integrator and matches
-            # the mjlab/newton K1 presets; measured to close most of the
-            # kinematic gap (ground-contact fraction lands exactly on
-            # mjlab's 0.785).
+            # approximate_implicitfast (the Genesis default) is deliberate.
+            # implicitfast is the MuJoCo-consistent integrator and closes
+            # most of the per-step kinematic gap to the mjlab/newton cells
+            # (limb speeds, ground-contact fraction), but training this
+            # preset under it fails: velocity tracking never rises. The
+            # approximation folds joint damping into the mass matrix
+            # before the constraint solve; the extra effective damping
+            # costs a small (~4-10%) kinematic offset versus mjlab/newton,
+            # accepted in exchange for stable learning.
             integrator=gs.integrator.approximate_implicitfast,
             constraint_timeconst=0.02,
             enable_self_collision=True,
