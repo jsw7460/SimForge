@@ -683,6 +683,10 @@ class World(ABC):
         self.act_manager.reset(env_ids)
         self.obs_manager.reset(env_ids)
         self.contact_manager.reset(env_ids)
+        # All reset events have written the new states by now; recompute
+        # contact state so post-reset reads see the NEW pose's contacts
+        # (reference frameworks run sim.forward() at this point).
+        self.contact_manager.refresh_after_reset(env_ids)
         self.reward_manager.reset(env_ids)
         # Forward reset to stateful curriculum terms (compute already ran at
         # the top of _reset_idx). Curriculum state is intentionally NOT

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
+from genesis.utils.misc import qd_to_torch
 
 from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
@@ -65,6 +66,31 @@ class ContactManager(BaseContactManager):
         jitter and aligned with mjlab's ``data.found > 0`` semantics.
         """
         return self._sensors[group.name].read_found()
+
+    # -- post-reset refresh --
+
+    def refresh_after_reset(self, env_ids: torch.Tensor | None = None) -> None:
+        """Recompute collision detection for the freshly reset poses.
+
+        Genesis exposes no ``forward()``-equivalent that solves contact
+        forces without integrating, but detection is a standalone
+        geometric pass — so post-reset reads carry a fresh ``found`` for
+        the new poses, while the force field (a constraint-solve
+        product) is zeroed for the reset envs instead of leaking the
+        pre-reset solve's values into the re-detected slots.
+        """
+        if not self._sensors:
+            return
+        solver = self.env.scene_manager.scene.sim.rigid_solver
+        solver._kernel_detect_collision()
+        force = qd_to_torch(solver.collider._collider_state.contact_data.force, transpose=True, copy=False)
+        if env_ids is None:
+            force.zero_()
+        else:
+            force[env_ids] = 0.0
+        # Detection replaced the collider state in place; drop the shared
+        # list-reader cache so the next read re-pulls it.
+        self.env._invalidate_cache()
 
     # -- pretty print --
 

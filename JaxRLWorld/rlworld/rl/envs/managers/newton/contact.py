@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import mujoco_warp
 import torch
+import warp as wp
 
 from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
 from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
@@ -53,6 +55,29 @@ class NewtonContactManager(BaseContactManager):
         super().reset(env_ids)
         for sensor in self._group_sensors.values():
             sensor.reset(env_ids)
+
+    def refresh_after_reset(self, env_ids: torch.Tensor | None = None) -> None:
+        """Recompute contacts for the freshly reset poses (MuJoCo semantics).
+
+        Syncs the reset Newton state into the mjwarp buffers and runs a
+        forward pass — the full MuJoCo pipeline up to constraint forces
+        with no integration — so post-reset sensor reads carry the NEW
+        pose's contacts and forces, exactly like mjlab's reset path.
+        """
+        if not self._group_sensors:
+            return
+        sm = self.env.scene_manager
+        solver = sm.solver
+        if not sm._use_mujoco_contacts:
+            raise NotImplementedError(
+                "refresh_after_reset only supports the use_mujoco_contacts=True "
+                "path; the Newton-native contact pipeline injects externally "
+                "collided contacts that a lone mjwarp forward would not reproduce."
+            )
+        with wp.ScopedDevice(sm.model.device):
+            solver._update_mjc_data(solver.mjw_data, sm.model, sm.state_0)
+            mujoco_warp.forward(solver.mjw_model, solver.mjw_data)
+        sm._update_sensors()
 
     # -- pretty print --
 
