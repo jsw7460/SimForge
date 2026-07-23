@@ -996,6 +996,18 @@ class NewtonSceneManager(BaseManager):
                 enable_multiccd=scfg.enable_multiccd,
                 disable_contacts=scfg.disable_contacts,
             )
+            # SolverMuJoCo's constructor exposes no disable-bit control, but
+            # mjwarp reads ``opt.disableflags`` from the host at kernel-launch
+            # time, so applying the bits right after construction — before the
+            # first step and any CUDA-graph capture — is equivalent to setting
+            # them in the spec. Same name-to-bit convention as mjlab's
+            # ``MujocoCfg.disableflags`` (``mujoco.mjtDisableBit.mjDSBL_<NAME>``).
+            if scfg.disableflags:
+                disable_bits = 0
+                for flag_name in scfg.disableflags:
+                    disable_bits |= int(getattr(mujoco.mjtDisableBit, f"mjDSBL_{flag_name.upper()}"))
+                self.solver.mj_model.opt.disableflags |= disable_bits
+                self.solver.mjw_model.opt.disableflags |= disable_bits
         else:
             raise ValueError(f"Unsupported solver type: {self.config.solver_type}")
 

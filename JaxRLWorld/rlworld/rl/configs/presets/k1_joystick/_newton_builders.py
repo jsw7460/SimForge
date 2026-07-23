@@ -82,6 +82,9 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         # see the module docstring for why this departs from upstream.
         solver_cfg=SolverMuJoCoCfg(
             ccd_iterations=50,
+            # The mjlab K1 preset disables nativeccd; keep the two mjwarp
+            # backends on the same collision pipeline.
+            disableflags=("nativeccd",),
         ),
         entities={
             "robot": NewtonEntityCfg(

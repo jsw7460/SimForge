@@ -28,6 +28,10 @@ class NewtonContactManager(BaseContactManager):
         super().__init__(env)
         # group name -> NewtonContactSensor
         self._group_sensors: dict[str, NewtonContactSensor] = {}
+        # Lazily captured CUDA graph for the post-reset forward (see
+        # refresh_after_reset); None until first capture or when the
+        # scene manager runs without graphs.
+        self._refresh_graph = None
 
     # -- sensor registration --
 
@@ -74,9 +78,22 @@ class NewtonContactManager(BaseContactManager):
                 "path; the Newton-native contact pipeline injects externally "
                 "collided contacts that a lone mjwarp forward would not reproduce."
             )
+        # The eager sync + forward launches hundreds of kernels from the
+        # host every reset (~15 ms/step under training reset churn), so
+        # capture them into a CUDA graph once and replay it — the mjwarp
+        # buffers and the state_0 reference are stable across steps, and
+        # the scene manager captures its step graph the same way.
         with wp.ScopedDevice(sm.model.device):
-            solver._update_mjc_data(solver.mjw_data, sm.model, sm.state_0)
-            mujoco_warp.forward(solver.mjw_model, solver.mjw_data)
+            if sm.use_cuda_graph and self._refresh_graph is None:
+                with wp.ScopedCapture() as capture:
+                    solver._update_mjc_data(solver.mjw_data, sm.model, sm.state_0)
+                    mujoco_warp.forward(solver.mjw_model, solver.mjw_data)
+                self._refresh_graph = capture.graph
+            if self._refresh_graph is not None:
+                wp.capture_launch(self._refresh_graph)
+            else:
+                solver._update_mjc_data(solver.mjw_data, sm.model, sm.state_0)
+                mujoco_warp.forward(solver.mjw_model, solver.mjw_data)
         sm._update_sensors()
 
     # -- pretty print --

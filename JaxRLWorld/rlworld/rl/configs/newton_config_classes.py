@@ -89,6 +89,11 @@ class SolverMuJoCoCfg(BaseConfig):
     enable_multiccd: bool = False
     disable_contacts: bool = False
 
+    # MuJoCo option disable bits by lowercase name (e.g. "nativeccd"),
+    # mirroring mjlab's ``MujocoCfg.disableflags`` so a preset can pin
+    # the same collision pipeline on both mjwarp backends.
+    disableflags: tuple[str, ...] = ()
+
 
 @dataclass
 class NewtonSceneConfig(BaseConfig):
