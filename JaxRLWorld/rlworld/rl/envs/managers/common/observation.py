@@ -11,6 +11,7 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import apply_noise
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.storages import CircularBuffer
+from rlworld.rl.storages.delay_buffer import DelayBuffer
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -63,6 +64,10 @@ class ObservationManager(BaseManager):
         self._group_obs_term_history_buffer: dict[str, dict[str, CircularBuffer]] = {}
         self._initialize_history_buffers()
 
+        # Delay buffers (mjlab-style stochastic observation delay)
+        self._group_obs_term_delay_buffer: dict[str, dict[str, DelayBuffer]] = {}
+        self._initialize_delay_buffers()
+
         # Term index mapping for extraction
         self._group_term_indices: dict[str, dict[str, tuple[int, int]]] = {}
         self._is_term_indices_built = False
@@ -83,6 +88,34 @@ class ObservationManager(BaseManager):
                         batch_size=self.num_envs,
                         device=self.env.device,
                     )
+
+    def _initialize_delay_buffers(self) -> None:
+        import zlib
+
+        for group_name, terms in self._group_terms.items():
+            self._group_obs_term_delay_buffer[group_name] = {}
+            for term_name, obs_term in terms.items():
+                if obs_term.delay_max_lag <= 0:
+                    continue
+                # Deterministic per-term RNG derived from (seed, group,
+                # term): the lag streams are identical across simulator
+                # backends, keeping delayed observations comparable in
+                # cross-sim parity checks.
+                generator = torch.Generator(device=self.env.device)
+                generator.manual_seed(
+                    (int(self.env.seed or 0) << 20) ^ zlib.crc32(f"{group_name}:{term_name}".encode())
+                )
+                self._group_obs_term_delay_buffer[group_name][term_name] = DelayBuffer(
+                    min_lag=obs_term.delay_min_lag,
+                    max_lag=obs_term.delay_max_lag,
+                    batch_size=self.num_envs,
+                    device=self.env.device,
+                    per_env=obs_term.delay_per_env,
+                    hold_prob=obs_term.delay_hold_prob,
+                    update_period=obs_term.delay_update_period,
+                    per_env_phase=obs_term.delay_per_env_phase,
+                    generator=generator,
+                )
 
     def _build_term_indices(self) -> None:
         for group_name, terms in self._group_terms.items():
@@ -124,6 +157,9 @@ class ObservationManager(BaseManager):
         for group_name, history_buffers in self._group_obs_term_history_buffer.items():
             for term_name, buffer in history_buffers.items():
                 buffer.reset(batch_ids=env_ids)
+        for delay_buffers in self._group_obs_term_delay_buffer.values():
+            for buffer in delay_buffers.values():
+                buffer.reset(batch_ids=env_ids)
 
     def rollback_last_history_append(self) -> None:
         """Undo the most recent history append on every term's circular buffer.
@@ -135,6 +171,13 @@ class ObservationManager(BaseManager):
         """
         for group_buffers in self._group_obs_term_history_buffer.values():
             for buf in group_buffers.values():
+                buf.rollback_last()
+        # Delay buffers advanced (append + lag sample) during the capture
+        # pass too; rewind them the same way, including the sampler RNG,
+        # so a step with a terminal capture consumes the same random
+        # stream as one without.
+        for delay_buffers in self._group_obs_term_delay_buffer.values():
+            for buf in delay_buffers.values():
                 buf.rollback_last()
 
     def extract_term(
@@ -178,6 +221,19 @@ class ObservationManager(BaseManager):
                     obs_value = obs_value.clip_(min=clip[0], max=clip[1])
 
                 obs_value = obs_value * scale
+
+                # Stochastic delay (mjlab pipeline position: after scale,
+                # before history). The delay state must advance exactly
+                # once per control step, so non-advancing passes
+                # (dimension probing at init) serve the current frame via
+                # peek() after the initialising append.
+                if obs_term.delay_max_lag > 0:
+                    delay_buffer = self._group_obs_term_delay_buffer[group_name][term_name]
+                    if update_history or not delay_buffer.is_initialized:
+                        delay_buffer.append(obs_value)
+                        obs_value = delay_buffer.compute()
+                    else:
+                        obs_value = delay_buffer.peek()
 
                 # Handle history
                 history_length = obs_term.history_length

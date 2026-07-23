@@ -22,6 +22,29 @@ class ObservationTermConfig:
     params: dict[str, Any] = field(default_factory=dict)
     noise: NoiseConfig | None = None
 
+    # Stochastic observation delay (mjlab-compatible field set). The
+    # processing order matches mjlab: compute -> noise -> clip -> scale
+    # -> delay -> history. Lags are in CONTROL steps.
+    delay_min_lag: int = 0
+    """Minimum lag for delayed observations. Lag is sampled uniformly
+    from ``[delay_min_lag, delay_max_lag]``; use min == max for a
+    constant delay."""
+    delay_max_lag: int = 0
+    """Maximum lag for delayed observations. 0 disables the delay
+    stage entirely."""
+    delay_per_env: bool = True
+    """Sample an independent lag per environment; ``False`` shares one
+    sampled lag across the batch."""
+    delay_hold_prob: float = 0.0
+    """Probability of keeping the previous lag when a resample is due
+    (temporal correlation in the delay pattern)."""
+    delay_update_period: int = 0
+    """Resample lags every N control steps per env; 0 resamples every
+    step."""
+    delay_per_env_phase: bool = True
+    """With ``delay_update_period > 0``, stagger the resample steps
+    across envs via a random per-env phase offset."""
+
     @property
     def resolved_func(self) -> Callable:
         if callable(self.func):
