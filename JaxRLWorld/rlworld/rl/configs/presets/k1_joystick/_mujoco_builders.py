@@ -176,7 +176,6 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> MujocoSceneCon
                 impratio=100.0,
                 cone="elliptic",
                 ccd_iterations=50,
-                disableflags=("nativeccd",),
             ),
         ),
         preset_class_name=type(cfg).__name__,
