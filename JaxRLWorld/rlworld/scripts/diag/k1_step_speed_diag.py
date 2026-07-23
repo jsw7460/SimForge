@@ -204,6 +204,8 @@ def run_cell(sim: str, num_envs: int, seed: int) -> dict:
         capacities.update(_host_geom_stats(sm.mj_model))
         counters_fn = lambda d=_d: {"nacon_peak": _host_int(d.nacon), "nefc_peak_per_world": _host_int(d.nefc)}  # noqa: E731
 
+    _stage(f"capacities: {capacities}")
+
     zero = torch.zeros((num_envs, env.num_actions), device=env.device)
     for _ in range(_WARMUP):
         env.step(zero)
