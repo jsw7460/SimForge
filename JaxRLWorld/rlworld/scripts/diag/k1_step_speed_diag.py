@@ -78,12 +78,30 @@ class _Timers:
         }
 
 
-def _measure(env, timers: _Timers, num_envs: int, steps: int, random_actions: bool, seed: int) -> dict:
+def _host_int(x) -> int:
+    """Scalar host read of a torch tensor / warp array / tensor proxy."""
+    import torch
+    import warp as wp
+
+    if isinstance(x, torch.Tensor):
+        return int(x.max().item())
+    if isinstance(x, wp.array):
+        return int(x.numpy().max())
+    t = x.detach()
+    if not isinstance(t, torch.Tensor):
+        raise TypeError(f"unsupported array type: {type(x)}")
+    return int(t.max().item())
+
+
+def _measure(
+    env, timers: _Timers, num_envs: int, steps: int, random_actions: bool, seed: int, counters_fn=None
+) -> dict:
     import torch
 
     gen = torch.Generator(device="cpu").manual_seed(seed)
     zero = torch.zeros((num_envs, env.num_actions), device=env.device)
 
+    peaks: dict[str, int] = {}
     timers.reset()
     timers.enabled = True
     torch.cuda.synchronize()
@@ -96,6 +114,9 @@ def _measure(env, timers: _Timers, num_envs: int, steps: int, random_actions: bo
             a = zero
         _o, _r, term_b, trunc_b, _e = env.step(a)
         resets += int((term_b | trunc_b).sum())
+        if counters_fn is not None:
+            for k, v in counters_fn().items():
+                peaks[k] = max(peaks.get(k, 0), v)
     torch.cuda.synchronize()
     synced_total = time.perf_counter() - t0
     timers.enabled = False
@@ -118,6 +139,7 @@ def _measure(env, timers: _Timers, num_envs: int, steps: int, random_actions: bo
         "fps_env_steps": int(num_envs * steps / unsynced_total),
         "ms_per_step_synced_total": round(1e3 * synced_total / steps, 3),
         "resets_in_timed_window": resets,
+        "peak_counters": peaks,
         "components_ms_per_step": timers.report(steps),
     }
 
@@ -158,15 +180,30 @@ def run_cell(sim: str, num_envs: int, seed: int) -> dict:
         timers.wrap(sm, "step", "gs_scene_step")
         timers.wrap(env.contact_manager, "refresh_after_reset", "gs_reset_refresh")
 
+    counters_fn = None
+    capacities: dict[str, int] = {}
+    if sim == "newton":
+        _d = sm.solver.mjw_data
+        capacities = {"naconmax": int(_d.naconmax), "njmax": int(_d.njmax), "nworld": int(_d.nworld)}
+        counters_fn = lambda d=_d: {"nacon_peak": _host_int(d.nacon), "nefc_peak_per_world": _host_int(d.nefc)}  # noqa: E731
+    elif sim == "mujoco":
+        _d = sm.data
+        capacities = {"naconmax": int(_d.naconmax), "njmax": int(_d.njmax), "nworld": int(_d.nworld)}
+        counters_fn = lambda d=_d: {"nacon_peak": _host_int(d.nacon), "nefc_peak_per_world": _host_int(d.nefc)}  # noqa: E731
+
     zero = torch.zeros((num_envs, env.num_actions), device=env.device)
     for _ in range(_WARMUP):
         env.step(zero)
     _stage("warmup done")
 
-    out: dict = {"sim": sim, "num_envs": num_envs}
-    out["zero_actions"] = _measure(env, timers, num_envs, _STEPS, random_actions=False, seed=seed + 1)
+    out: dict = {"sim": sim, "num_envs": num_envs, "mjwarp_capacities": capacities}
+    out["zero_actions"] = _measure(
+        env, timers, num_envs, _STEPS, random_actions=False, seed=seed + 1, counters_fn=counters_fn
+    )
     _stage("zero-action phase done")
-    out["random_actions"] = _measure(env, timers, num_envs, _STEPS, random_actions=True, seed=seed + 2)
+    out["random_actions"] = _measure(
+        env, timers, num_envs, _STEPS, random_actions=True, seed=seed + 2, counters_fn=counters_fn
+    )
     _stage("random-action phase done")
     return out
 
@@ -227,6 +264,8 @@ def main() -> int:
             print(f"\n[{sim}] MISSING (crashed)")
             continue
         r = results[sim]
+        if r.get("mjwarp_capacities"):
+            print(f"\n[{sim}] mjwarp capacities: {r['mjwarp_capacities']}")
         for phase in ("zero_actions", "random_actions"):
             p = r[phase]
             print(
@@ -234,6 +273,8 @@ def main() -> int:
                 f"({p['fps_env_steps']} env-steps/s)  synced_total={p['ms_per_step_synced_total']} ms  "
                 f"resets={p['resets_in_timed_window']}"
             )
+            if p.get("peak_counters"):
+                print(f"    peaks: {p['peak_counters']}")
             for name, d in p["components_ms_per_step"].items():
                 print(f"    {name:<20} {d['ms_per_step']:>8} ms/step  ({d['calls']} calls)")
     print(
