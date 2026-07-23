@@ -82,6 +82,14 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         # see the module docstring for why this departs from upstream.
         solver_cfg=SolverMuJoCoCfg(
             ccd_iterations=50,
+            # mjwarp constraint kernels run at njmax*nworld; the framework
+            # default of 1500 rows/world is ~25x the measured demand here
+            # (peak nefc/world 61 under random-action churn at 4096 envs;
+            # mjlab auto-sizes 64 and trains fine at peak 48). 128 keeps a
+            # 2x margin over the measured peak. nconmax stays at the
+            # framework default: the contact-slot peak (170k of 614k) has
+            # less headroom and contact kernels scale far less steeply.
+            njmax=128,
         ),
         entities={
             "robot": NewtonEntityCfg(

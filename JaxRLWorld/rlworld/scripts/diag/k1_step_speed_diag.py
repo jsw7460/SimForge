@@ -180,15 +180,28 @@ def run_cell(sim: str, num_envs: int, seed: int) -> dict:
         timers.wrap(sm, "step", "gs_scene_step")
         timers.wrap(env.contact_manager, "refresh_after_reset", "gs_reset_refresh")
 
+    def _host_geom_stats(mj_model) -> dict[str, int]:
+        import numpy as np
+
+        collidable = (np.asarray(mj_model.geom_contype) != 0) | (np.asarray(mj_model.geom_conaffinity) != 0)
+        return {
+            "ngeom": int(mj_model.ngeom),
+            "n_collidable_geoms": int(collidable.sum()),
+            "npair": int(mj_model.npair),
+            "nexclude": int(mj_model.nexclude),
+        }
+
     counters_fn = None
     capacities: dict[str, int] = {}
     if sim == "newton":
         _d = sm.solver.mjw_data
         capacities = {"naconmax": int(_d.naconmax), "njmax": int(_d.njmax), "nworld": int(_d.nworld)}
+        capacities.update(_host_geom_stats(sm.solver.mj_model))
         counters_fn = lambda d=_d: {"nacon_peak": _host_int(d.nacon), "nefc_peak_per_world": _host_int(d.nefc)}  # noqa: E731
     elif sim == "mujoco":
         _d = sm.data
         capacities = {"naconmax": int(_d.naconmax), "njmax": int(_d.njmax), "nworld": int(_d.nworld)}
+        capacities.update(_host_geom_stats(sm.mj_model))
         counters_fn = lambda d=_d: {"nacon_peak": _host_int(d.nacon), "nefc_peak_per_world": _host_int(d.nefc)}  # noqa: E731
 
     zero = torch.zeros((num_envs, env.num_actions), device=env.device)
