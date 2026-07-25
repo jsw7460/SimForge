@@ -117,15 +117,34 @@ def section(title: str) -> None:
 
 # ──────────────────────────────────────────────────────────────────────
 section("1. Mesh inventory")
-xml_text = _XML.read_text()
-referenced = set(re.findall(r'<mesh name="[^"]+" file="([^"]+)"/>', xml_text))
+# The meshes/ dir is SHARED by every K1 asset variant that lives beside it
+# (the feetonly + full MJCFs and the three URDFs), so the integrity check is
+# "every mesh any of them REFERENCES is present" — not "the dir holds exactly
+# the feetonly model's meshes". mjcf refs are file="X"; urdf refs are
+# filename=".../X". Basename only (meshdir / package paths are stripped).
 shipped = {p.name for p in (_ASSET_DIR / "meshes").iterdir()}
-print(f"  referenced {len(referenced)}, shipped {len(shipped)}")
+referenced: set[str] = set()
+for asset in sorted((*_ASSET_DIR.glob("*.xml"), *_ASSET_DIR.glob("*.urdf"))):
+    text = asset.read_text()
+    for raw in re.findall(r'file="([^"]+)"', text):
+        referenced.add(Path(raw).name)
+    for raw in re.findall(r'filename="([^"]+)"', text):
+        referenced.add(Path(raw).name)
+print(f"  referenced (all K1 assets) {len(referenced)}, shipped {len(shipped)}")
+# Hard requirement: a referenced-but-missing mesh crashes model load.
 check(
-    "referenced mesh set == shipped mesh set",
-    referenced == shipped,
-    f"missing={referenced - shipped} extra={shipped - referenced}",
+    "every referenced mesh is shipped",
+    referenced <= shipped,
+    f"missing={sorted(referenced - shipped)}",
 )
+# Shipped-but-unreferenced meshes are inert (MuJoCo/URDF load only what they
+# name) — vendored extras from the raw Booster mesh set. Report, don't fail.
+unreferenced = shipped - referenced
+if unreferenced:
+    print(
+        f"  [note] {len(unreferenced)} shipped mesh(es) referenced by no K1 asset "
+        f"(harmless vendoring extras; delete to tighten): {sorted(unreferenced)}"
+    )
 
 # ──────────────────────────────────────────────────────────────────────
 section("2. Model sizes + compiler options (pinned)")
