@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import genesis as gs
 
-from rlworld.rl.actuators import IdealPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
 from rlworld.rl.configs.genesis_config_classes import (
@@ -80,13 +80,15 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
                 enable_self_collisions=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        IdealPDActuatorCfg(
+                        DelayedPDActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
                             effort_limit=r.effort_limits,
                             frictionloss=0.1,
+                            min_delay=0,
+                            max_delay=cfg.action_delay_max,
                         ),
                     ),
                     soft_joint_pos_limit_factor=0.95,

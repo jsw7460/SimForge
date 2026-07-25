@@ -61,7 +61,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards import k1_locomotion as k1_rf
-from rlworld.rl.envs.mdp.rewards.common.reward_terms import reward_alive
+from rlworld.rl.envs.mdp.rewards.common.reward_terms import raw_action_rate_l2, reward_alive
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
     # Upstream: sim_dt=0.002, ctrl_dt=0.02 → decimation 10.
@@ -108,7 +108,7 @@ class K1JoystickConfig:
 
     # Rewards (upstream reward_config; zero-weight terms omitted).
     tracking_sigma: float = 0.25
-    max_foot_height: float = 0.12
+    max_foot_height: float = 0.15  # feet_phase bezier swing peak (foot-link z); ~0.11 m sole
     w_tracking_lin_vel: float = 1.0
     w_tracking_ang_vel: float = 0.5
     w_ang_vel_xy: float = -0.15
@@ -123,6 +123,11 @@ class K1JoystickConfig:
     w_pose: float = -1.0
     w_feet_distance: float = -1.0
     w_collision: float = -1.0
+    # Action-rate smoothness penalty (not in the upstream K1 MDP; added to
+    # damp the high-frequency action jitter that upstream's tanh bound alone
+    # does not suppress). POSITIVE weight: raw_action_rate_l2 already returns a
+    # negative penalty. Mirrors the G1 recipe's value.
+    w_raw_action_rate: float = 0.1
 
     # Action parameterization. The pal recipe pairs a tanh-squashed
     # policy with scale 1.0 and a (-1, 1) clip (identity rescale); the
@@ -132,6 +137,11 @@ class K1JoystickConfig:
     action_distribution: str = "squashed_gaussian"
     action_scale: Any = 1.0
     action_clip: tuple = (-1.0, 1.0)
+
+    # Sim2real domain randomization knobs (0 disables each; see
+    # _build_dr_terms / _build_observation_config / the sim builders).
+    action_delay_max: int = 2  # per-env command delay U[0,N] PHYSICS steps (~N*5ms)
+    obs_delay_max_lag: int = 1  # per-env sensor delay U[0,N] CONTROL steps (~N*20ms)
 
     # Training.
     algorithm_name: str = "PPO"
@@ -193,20 +203,38 @@ class K1JoystickConfig:
     # noiseless privileged extras in upstream order (accelerometer
     # omitted — see module docstring).
 
+    def _uses_gait_phase(self) -> bool:
+        """Whether the gait-phase clock feeds observations / command.
+
+        pal's ``feet_phase`` reward consumes it. Recipes without a
+        phase-based reward (the G1 recipe) override this to False, dropping
+        the 4-D phase obs block and the ``gait_phase`` command term — a
+        75-D actor with no deploy-side gait clock to reconstruct."""
+        return True
+
     def _build_observation_config(self):
         builders = _get_sim_builders(self.sim_type)
         obs_cfg_cls = builders.OBSERVATION_CFG_CLS
 
+        # Per-env stochastic sensor delay on the DEPLOYABLE proprioceptive
+        # channels only (IMU gyro/gravity + joint encoders). Internal signals
+        # (command / last_action / phase) are not sensor-derived → no delay.
+        # Control-step units; hold_prob gives temporally-correlated lag.
+        _sd = dict(delay_max_lag=self.obs_delay_max_lag, delay_hold_prob=0.8, delay_update_period=50)
+        _use_phase = self._uses_gait_phase()
+
         @dataclass
         class _ActorObsCfg(ObservationGroupConfig):
-            lin_vel = ObservationTermConfig(func=base_lin_vel, scale=1.0, noise=Unoise(-0.1, 0.1))
-            gyro = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
-            gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            gyro = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2), **_sd)
+            gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05), **_sd)
             command = ObservationTermConfig(func=k1_obs.velocity_command, scale=1.0)
-            joint_pos = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
-            joint_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+            joint_pos = ObservationTermConfig(
+                func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03), **_sd
+            )
+            joint_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5), **_sd)
             last_action = ObservationTermConfig(func=raw_actions, scale=1.0)
-            phase = ObservationTermConfig(func=k1_obs.gait_phase_encoding, scale=1.0)
+            if _use_phase:
+                phase = ObservationTermConfig(func=k1_obs.gait_phase_encoding, scale=1.0)
 
         # Standalone class (NOT inheriting _ActorObsCfg): iter_terms walks
         # the MRO subclass-first, which would put the privileged extras
@@ -220,7 +248,8 @@ class K1JoystickConfig:
             joint_pos = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
             joint_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
             last_action = ObservationTermConfig(func=raw_actions, scale=1.0)
-            phase = ObservationTermConfig(func=k1_obs.gait_phase_encoding, scale=1.0)
+            if _use_phase:
+                phase = ObservationTermConfig(func=k1_obs.gait_phase_encoding, scale=1.0)
             # Privileged extras (noiseless), upstream order.
             gyro_clean = ObservationTermConfig(func=base_ang_vel, scale=1.0)
             gravity_clean = ObservationTermConfig(func=projected_gravity, scale=1.0)
@@ -321,6 +350,7 @@ class K1JoystickConfig:
                 weight=self.w_collision,
                 params={"contact_group": "feet_pair_contact"},
             )
+            action_rate = RewardTermConfig(func=raw_action_rate_l2, weight=self.w_raw_action_rate)
 
         # Upstream: reward = clip(sum * dt, 0, 10000). Per-term dt scaling
         # already happens in the manager, so the clip acts on the same
@@ -331,18 +361,18 @@ class K1JoystickConfig:
     # ── Commands / events ─────────────────────────────────────────────
 
     def _build_command_config(self) -> CommandConfig:
-        return CommandConfig(
-            terms={
-                "velocity": VelocityCommandTermCfg(
-                    resampling_time_range=(10.0, 10.0),
-                    lin_vel_x_range=self.lin_vel_x_range,
-                    lin_vel_y_range=self.lin_vel_y_range,
-                    ang_vel_range=self.ang_vel_range,
-                    rel_standing_envs=0.1,
-                ),
-                "gait_phase": K1GaitPhaseCommandTermCfg(),
-            }
-        )
+        terms = {
+            "velocity": VelocityCommandTermCfg(
+                resampling_time_range=(10.0, 10.0),
+                lin_vel_x_range=self.lin_vel_x_range,
+                lin_vel_y_range=self.lin_vel_y_range,
+                ang_vel_range=self.ang_vel_range,
+                rel_standing_envs=0.1,
+            ),
+        }
+        if self._uses_gait_phase():
+            terms["gait_phase"] = K1GaitPhaseCommandTermCfg()
+        return CommandConfig(terms=terms)
 
     def _build_event_config(self) -> EventConfig:
         terms: Dict[str, EventTermConfig] = {
@@ -381,18 +411,27 @@ class K1JoystickConfig:
         return events
 
     def _build_dr_terms(self) -> Dict[str, EventTermConfig]:
-        """Upstream domain randomization, per-env, fixed at startup.
+        """Domain randomization for sim2real robustness.
+
+        Context params (friction, joint friction, kp, kd) use ``reset_dr``
+        — re-sampled per episode so the policy sees a fresh physics draw
+        each reset (far broader coverage than a fixed per-env value). Build
+        params (trunk/link mass, armature) stay ``startup`` (fixed per env)
+        to avoid a mass-matrix recompute on every reset. Every backend
+        samples from a captured baseline, so re-applying at reset does not
+        compound. Command latency (DelayedPD) and sensor latency (obs delay)
+        are wired in the sim builders / observation config, not here.
+
 
         Friction / trunk-mass semantics per sim (Genesis is scale-only):
-        the effective ground-contact friction ends up U(0.7, 1.0) and
+        the effective ground-contact friction ends up U(0.9, 1.2) and
         the trunk mass ±1 kg on every backend.
 
-        The friction range targets indoor floors (rubber sole on wood /
-        tile: static mu ~0.7-1.0+). The upstream mirror used U(0.2, 0.6),
-        which spends most of the DR budget in the near-slipping regime
-        where dragging gaits outcompete lifting gaits; for indoor-only
-        deployment the higher band keeps the friction cone comfortably
-        away from the tangential demand of normal walking.
+        The friction range targets a high-friction ground surface
+        (mu ~1.0+). The high band also encourages proper foot lifting: on
+        grippy ground the stance foot does not slip, so the policy can
+        clear the swing foot cleanly instead of learning a low dragging
+        gait (which the near-slipping regime below ~0.7 rewards).
         """
         r = self.robot
         all_bodies = SceneEntitySelector(name="robot", body_names=(".*",))
@@ -408,7 +447,7 @@ class K1JoystickConfig:
             # frictionloss 0.1).
             joint_friction_term = EventTermConfig(
                 func=unified_dr.randomize_joint_friction,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": all_joints,
                     "friction_range": (0.09, 0.11),  # 0.1 x U(0.9, 1.1)
@@ -417,10 +456,10 @@ class K1JoystickConfig:
             )
             friction_term = EventTermConfig(
                 func=unified_dr.randomize_friction,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": SceneEntitySelector(name="robot", body_names=tuple(r.foot_names)),
-                    "friction_range": (0.7 / 0.6, 1.0 / 0.6),  # x0.6 default → U(0.7, 1.0)
+                    "friction_range": (0.9 / 0.6, 1.2 / 0.6),  # x0.6 default → U(0.9, 1.2)
                     "operation": "scale",
                 },
             )
@@ -436,7 +475,7 @@ class K1JoystickConfig:
         else:
             joint_friction_term = EventTermConfig(
                 func=unified_dr.randomize_joint_friction,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": all_joints,
                     "friction_range": (0.9, 1.1),
@@ -445,10 +484,10 @@ class K1JoystickConfig:
             )
             friction_term = EventTermConfig(
                 func=unified_dr.randomize_friction,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": SceneEntitySelector(name="robot", geom_names=r.foot_geom_names),
-                    "friction_range": (0.7, 1.0),
+                    "friction_range": (0.9, 1.2),
                     "operation": "abs",
                     "axes": [0],
                 },
@@ -487,16 +526,28 @@ class K1JoystickConfig:
             ),
             "dr_kp": EventTermConfig(
                 func=unified_dr.randomize_pd_gains,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": all_joints,
                     "kp_range": (0.9, 1.1),
                     "operation": "scale",
                 },
             ),
+            # All-joint kd DR (was ankle-only). dr_ankle_kd runs AFTER this
+            # so ankles get the wider range (both sample from the same
+            # baseline, so the later term wins on the overlapping columns).
+            "dr_kd": EventTermConfig(
+                func=unified_dr.randomize_pd_gains,
+                mode="reset_dr",
+                params={
+                    "asset_cfg": all_joints,
+                    "kd_range": (0.8, 1.25),
+                    "operation": "scale",
+                },
+            ),
             "dr_ankle_kd": EventTermConfig(
                 func=unified_dr.randomize_pd_gains,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": ankles,
                     "kd_range": (0.5, 2.0),

@@ -25,8 +25,9 @@ angular-momentum penalty reads the "robot/root_angmom" sensor that
 K1SpecFn injects into the spec.
 
 Note: K1's foot reference point (``left_foot_link`` origin) sits
-~0.038 m above the sole, so ``target_height=0.1`` means ~0.06 m of
-actual sole clearance — bump it if swings come out too flat.
+~0.038 m above the sole, so ``target_height`` overstates the actual
+sole clearance by that offset (e.g. 0.15 -> ~0.11 m sole clearance).
+Adjust if swings come out too flat or too high.
 """
 
 from __future__ import annotations
@@ -126,6 +127,12 @@ class K1G1RecipeConfig(K1JoystickConfig):
         r".*_Ankle_Roll": 0.15,
     }
 
+    def _uses_gait_phase(self) -> bool:
+        """No G1-recipe reward reads the gait phase (walking rhythm comes from
+        feet_clearance / feet_swing_height), so drop the 4-D phase obs block
+        and its command term — 75-D actor, no deploy-side gait clock."""
+        return False
+
     def _build_reward_config(self) -> RewardConfig:
         if self.sim_type == "mujoco":
             return self._build_reward_mujoco()
@@ -179,7 +186,7 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 weight=2.0,
                 params={
                     "asset_cfg": feet_selector,
-                    "target_height": 0.1,
+                    "target_height": 0.15,
                     "command_threshold": 0.05,
                 },
             )
@@ -188,7 +195,7 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 weight=0.25,
                 params={
                     "asset_cfg": feet_selector,
-                    "target_height": 0.1,
+                    "target_height": 0.15,
                     "command_threshold": 0.05,
                     "contact_order": feet_contact_order,
                 },
@@ -279,7 +286,7 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 weight=2.0,
                 params={
                     "asset_cfg": feet_selector,
-                    "target_height": 0.1,
+                    "target_height": 0.15,
                     "command_threshold": 0.05,
                 },
             )
@@ -289,7 +296,7 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 params={
                     "contact_group": "feet_ground_contact",
                     "asset_cfg": feet_selector,
-                    "target_height": 0.1,
+                    "target_height": 0.15,
                     "command_threshold": 0.05,
                     "contact_order": feet_contact_order,
                 },
