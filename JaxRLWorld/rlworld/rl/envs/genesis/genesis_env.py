@@ -335,7 +335,7 @@ class GenesisEnv(World):
         """Apply the viewer wrench via the rigid solver's per-link force API."""
         link_name, force_w, env_idx = self._external_wrench
         robot = self.scene_manager["robot"]
-        link_ids_global, _ = _eu.find_links(robot, [link_name], global_ids=True)
+        link_ids_global, _ = _eu.find_links(robot, [link_name.rsplit("/", 1)[-1]], global_ids=True)
         self.scene.rigid_solver.apply_links_external_force(
             force=force_w.view(1, 3),
             links_idx=link_ids_global,

@@ -11,19 +11,22 @@ Interaction model
 The tool is a TOGGLE — it never steals the default left-drag camera
 orbit. While the checkbox is off nothing changes. While it is on:
 
-- Camera tracking is turned OFF so the rendered scene offset is zero;
-  the gizmo lives in true world coordinates and the spring math is a
-  plain ``gizmo - link_world`` with no offset bookkeeping. Tracking is
-  restored when the tool is disabled.
+- Camera tracking stays ON so the robot remains centred on screen and
+  is easy to grab even while it moves fast. Everything (gizmo, spring)
+  is computed in SCENE coordinates (world + the scene's re-centring
+  offset); the offset cancels in ``gizmo_scene - link_scene``, so the
+  applied world-frame force needs no offset bookkeeping.
 - The gizmo follows the selected link while the user is NOT dragging
-  (zero force), so a walking robot doesn't accumulate a spring pull.
+  (zero force), so it sits right on the link — the user just grabs the
+  handle at screen centre.
 - The moment the user drags the gizmo it detaches; the spring pulls the
   link toward the gizmo until the user presses Release (or disables the
   tool), which re-attaches the gizmo and zeroes the force.
 
 Force is applied to the single env the viewer follows
 (``play_scene.env_idx``). The magnitude is capped so a large drag can't
-explode the sim.
+explode the sim. Use the viewer's Speed control for slow-motion if the
+robot still moves too fast to grab comfortably.
 """
 
 from __future__ import annotations
@@ -112,14 +115,10 @@ class ForceDragController:
         if enabled == self._enabled:
             return
         self._enabled = enabled
-        scene = self._play_scene._scene
         if enabled:
-            # Freeze the scene offset to zero so gizmo == world frame.
-            scene.camera_tracking_enabled = False
             self._ensure_gizmo()
         else:
             self._release()
-            scene.camera_tracking_enabled = True
             if self._gizmo is not None:
                 self._gizmo.remove()
                 self._gizmo = None
@@ -137,10 +136,10 @@ class ForceDragController:
     def _ensure_gizmo(self) -> None:
         if self._gizmo is not None:
             return
-        pos = self._link_world_pos()
+        pos = self._link_scene_pos()
         self._gizmo = self._server.scene.add_transform_controls(
             "/force_drag_gizmo",
-            scale=0.25,
+            scale=0.3,
             disable_rotations=True,
             disable_sliders=True,
             position=tuple(float(x) for x in pos),
@@ -163,17 +162,19 @@ class ForceDragController:
         """
         if not self._enabled or self._gizmo is None:
             return
-        link_pos = self._link_world_pos()
+        link_scene = self._link_scene_pos()
 
         if not self._dragging:
             # Follow the link: keep the gizmo on it, apply no force.
             self._programmatic = True
-            self._gizmo.position = tuple(float(x) for x in link_pos)
+            self._gizmo.position = tuple(float(x) for x in link_scene)
             self._programmatic = False
             return
 
         gizmo_pos = np.asarray(self._gizmo.position, dtype=np.float64)
-        disp = gizmo_pos - link_pos
+        # gizmo and link both carry the same scene offset this frame, so
+        # the difference is the true world-frame displacement.
+        disp = gizmo_pos - link_scene
         force = self._stiffness.value * disp
         mag = float(np.linalg.norm(force))
         fmax = self._max_force.value
@@ -182,18 +183,19 @@ class ForceDragController:
 
         force_t = torch.as_tensor(force, dtype=torch.float32, device=self._env.device)
         self._env.set_external_wrench(self._link_name, force_t, int(self._play_scene.env_idx))
-        self._draw_spring(link_pos, gizmo_pos)
+        self._draw_spring(link_scene, gizmo_pos)
 
-    def _link_world_pos(self) -> np.ndarray:
-        """Selected link's world position for the current env.
+    def _link_scene_pos(self) -> np.ndarray:
+        """Selected link's on-screen (scene) position for the current env.
 
-        Uses the bridge (same source as rendering); with camera tracking
-        off the scene offset is zero, so this equals the on-screen
-        position.
+        Scene position = world position + the scene's re-centring offset,
+        matching where the body is actually rendered so the gizmo sits on
+        the link even while camera tracking is on.
         """
+        scene = self._play_scene._scene
         env_idx = int(self._play_scene.env_idx)
-        positions = self._play_scene._scene.bridge.get_body_positions(env_idx)
-        return positions[self._link_body_id[self._link_name]].astype(np.float64)
+        world = scene.bridge.get_body_positions(env_idx)[self._link_body_id[self._link_name]]
+        return world.astype(np.float64) + np.asarray(scene._scene_offset, dtype=np.float64)
 
     def _draw_spring(self, link_pos: np.ndarray, gizmo_pos: np.ndarray) -> None:
         pts = np.stack([link_pos, gizmo_pos], axis=0).astype(np.float32)[None]  # (1, 2, 3)
