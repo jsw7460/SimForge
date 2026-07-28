@@ -62,9 +62,13 @@ class ForceDragController:
         self._env = env
         self._play_scene = play_scene
 
+        # UI-thread flags (set by viser callbacks; read by tick()). Every
+        # simulator touch — wrench set/clear, gizmo create/remove — is
+        # deferred to tick(), which runs under the viewer's sim lock, so
+        # the viser callback threads never race the physics step.
         self._enabled = False
         self._dragging = False
-        self._programmatic = False  # guards on_update while we move the gizmo
+        self._force_active = False  # a wrench is currently set on the env
         self._gizmo: Any | None = None
         self._spring_line: Any | None = None
 
@@ -98,77 +102,52 @@ class ForceDragController:
 
             @self._enable_cb.on_update
             def _(_e: Any) -> None:
-                self._set_enabled(self._enable_cb.value)
+                self._enabled = self._enable_cb.value
+                self._request_update()
 
             @self._link_dd.on_update
             def _(_e: Any) -> None:
                 self._link_name = self._link_dd.value
-                self._release()  # re-attach gizmo to the new link next tick
+                self._dragging = False  # re-attach the gizmo to the new link
+                self._request_update()
 
             @self._release_btn.on_click
             def _(_e: Any) -> None:
-                self._release()
+                self._dragging = False
+                self._request_update()
 
-    # ── Enable / release ───────────────────────────────────────────
-
-    def _set_enabled(self, enabled: bool) -> None:
-        if enabled == self._enabled:
-            return
-        self._enabled = enabled
-        if enabled:
-            self._ensure_gizmo()
-        else:
-            self._release()
-            if self._gizmo is not None:
-                self._gizmo.remove()
-                self._gizmo = None
-            if self._spring_line is not None:
-                self._spring_line.remove()
-                self._spring_line = None
-
-    def _release(self) -> None:
-        """Stop applying force and re-attach the gizmo to the link."""
-        self._dragging = False
-        self._env.clear_external_wrench()
-        if self._spring_line is not None:
-            self._spring_line.visible = False
-
-    def _ensure_gizmo(self) -> None:
-        if self._gizmo is not None:
-            return
-        pos = self._link_scene_pos()
-        self._gizmo = self._server.scene.add_transform_controls(
-            "/force_drag_gizmo",
-            scale=0.3,
-            disable_rotations=True,
-            disable_sliders=True,
-            position=tuple(float(x) for x in pos),
-        )
-
-        @self._gizmo.on_update
-        def _(_e: Any) -> None:
-            if self._programmatic:
-                return
-            # First user drag detaches the gizmo from the link.
-            self._dragging = True
+    def _request_update(self) -> None:
+        """Wake the render loop so tick() processes a flag change promptly."""
+        self._play_scene.needs_update = True
 
     # ── Per-frame update (called under the sim lock) ───────────────
 
     def tick(self) -> None:
-        """Recompute and push the wrench for the current viewer env.
+        """Drive the gizmo and wrench for the current viewer env.
 
-        Must run under the viewer's sim lock: it reads a body transform
-        and writes ``env.set_external_wrench``.
+        Runs under the viewer's sim lock inside the atomic scene update,
+        so this is the only place that touches the simulator (wrench
+        set/clear) or the gizmo scene node — the viser callbacks only
+        flip flags.
         """
-        if not self._enabled or self._gizmo is None:
+        if not self._enabled:
+            self._teardown()
             return
+
+        if self._gizmo is None:
+            self._create_gizmo()
+
         link_scene = self._link_scene_pos()
 
         if not self._dragging:
-            # Follow the link: keep the gizmo on it, apply no force.
-            self._programmatic = True
+            # Not dragging: drop any force so the robot recovers, then
+            # keep the gizmo sitting on the link.
+            if self._force_active:
+                self._env.clear_external_wrench()
+                self._force_active = False
+            if self._spring_line is not None:
+                self._spring_line.visible = False
             self._gizmo.position = tuple(float(x) for x in link_scene)
-            self._programmatic = False
             return
 
         gizmo_pos = np.asarray(self._gizmo.position, dtype=np.float64)
@@ -183,7 +162,47 @@ class ForceDragController:
 
         force_t = torch.as_tensor(force, dtype=torch.float32, device=self._env.device)
         self._env.set_external_wrench(self._link_name, force_t, int(self._play_scene.env_idx))
+        self._force_active = True
         self._draw_spring(link_scene, gizmo_pos)
+
+    # ── Gizmo lifecycle (called from tick, under the sim lock) ─────
+
+    def _create_gizmo(self) -> None:
+        pos = self._link_scene_pos()
+        self._gizmo = self._server.scene.add_transform_controls(
+            "/force_drag_gizmo",
+            scale=0.3,
+            disable_rotations=True,
+            disable_sliders=True,
+            position=tuple(float(x) for x in pos),
+        )
+
+        # Force is applied only between mouse-down and mouse-up on the
+        # gizmo. The callbacks only flip ``_dragging``; tick() clears the
+        # wrench and re-attaches the gizmo on release, so the robot springs
+        # back and recovers instead of being dragged forever.
+        @self._gizmo.on_drag_start
+        def _(_e: Any) -> None:
+            self._dragging = True
+            self._request_update()
+
+        @self._gizmo.on_drag_end
+        def _(_e: Any) -> None:
+            self._dragging = False
+            self._request_update()
+
+    def _teardown(self) -> None:
+        """Disabled: drop the force and remove the gizmo / spring."""
+        if self._force_active:
+            self._env.clear_external_wrench()
+            self._force_active = False
+        self._dragging = False
+        if self._gizmo is not None:
+            self._gizmo.remove()
+            self._gizmo = None
+        if self._spring_line is not None:
+            self._spring_line.remove()
+            self._spring_line = None
 
     def _link_scene_pos(self) -> np.ndarray:
         """Selected link's on-screen (scene) position for the current env.
