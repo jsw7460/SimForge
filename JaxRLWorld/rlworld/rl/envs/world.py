@@ -109,6 +109,53 @@ class World(ABC):
         """Bump the cache generation so all @EnvStepCache values are recomputed."""
         self._cache_generation += 1
 
+    # ========== Interactive external wrench (viewer drag) ==========
+    # A single per-link world-frame force on one env, applied every
+    # physics substep while set. Default ``None`` so the training step
+    # path costs one identity check per substep. The viewer's force-drag
+    # tool is the only writer; the backend ``_step_physics`` reads it via
+    # ``_write_external_wrench``.
+
+    _external_wrench: tuple[str, torch.Tensor, int] | None = None
+
+    def set_external_wrench(self, link_name: str, force_w: torch.Tensor, env_idx: int) -> None:
+        """Set a persistent world-frame force on ``link_name`` for one env.
+
+        ``force_w`` is a ``(3,)`` tensor on ``self.device``. Overwrites any
+        previous wrench; :meth:`clear_external_wrench` removes it.
+        """
+        self._external_wrench = (link_name, force_w, env_idx)
+
+    def clear_external_wrench(self) -> None:
+        """Remove the wrench and zero any residual left in the sim buffer.
+
+        Backends whose external-force buffer persists across steps (mjlab
+        ``xfrc_applied``, Genesis's accumulator) must zero it on release;
+        :meth:`_flush_external_wrench` does that per backend before the
+        wrench is dropped.
+        """
+        if self._external_wrench is not None:
+            self._flush_external_wrench()
+        self._external_wrench = None
+
+    def _write_external_wrench(self) -> None:
+        """Push ``self._external_wrench`` into the backend force buffer.
+
+        Called from ``_step_physics`` once per substep, only when a wrench
+        is set. Base class is a no-op; each simulator env overrides it
+        with its native per-link external-force API.
+        """
+        return None
+
+    def _flush_external_wrench(self) -> None:
+        """Zero the backend force buffer for the current wrench's target.
+
+        Base class is a no-op (correct for Newton, whose ``body_f`` is
+        cleared every substep). Overridden by backends with a persistent
+        buffer.
+        """
+        return None
+
     def _update_num_step_calls(self) -> None:
         self._env_step_counter += 1
 

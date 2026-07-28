@@ -416,6 +416,8 @@ class MujocoEnv(World):
         for _ in range(self.decimation):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             self.scene_manager.write_data_to_sim()
+            if self._external_wrench is not None:
+                self._write_external_wrench()
             self.scene_manager.step()
             self.scene_manager.update(dt=self.physics_dt)
             self.contact_manager.advance(dt=self.physics_dt)
@@ -423,6 +425,35 @@ class MujocoEnv(World):
         # Update visualization
         if self.visualization_manager is not None:
             self.visualization_manager.advance()
+
+    def _write_external_wrench(self) -> None:
+        """Apply the viewer force via mjlab's ``xfrc_applied`` entity API."""
+        link_name, force_w, env_idx = self._external_wrench
+        entity = self.scene_manager.get_entity("robot")
+        rd = self.get_robot_data("robot")
+        body_id = rd.find_body_index(link_name)
+        env_ids = torch.tensor([int(env_idx)], device=self.device)
+        forces = force_w.view(1, 1, 3)
+        torques = torch.zeros_like(forces)
+        entity.write_external_wrench_to_sim(
+            forces=forces,
+            torques=torques,
+            env_ids=env_ids,
+            body_ids=[int(body_id)],
+        )
+
+    def _flush_external_wrench(self) -> None:
+        """Zero the persistent ``xfrc_applied`` slot on release."""
+        link_name, _force_w, env_idx = self._external_wrench
+        entity = self.scene_manager.get_entity("robot")
+        body_id = self.get_robot_data("robot").find_body_index(link_name)
+        zeros = torch.zeros(1, 1, 3, device=self.device)
+        entity.write_external_wrench_to_sim(
+            forces=zeros,
+            torques=zeros,
+            env_ids=torch.tensor([int(env_idx)], device=self.device),
+            body_ids=[int(body_id)],
+        )
 
     def _reset_idx(self, env_ids: torch.Tensor) -> None:
         """Reset with mjlab-specific write to sim."""

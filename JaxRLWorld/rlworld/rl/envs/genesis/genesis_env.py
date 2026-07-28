@@ -320,6 +320,8 @@ class GenesisEnv(World):
         """
         for _ in range(self.decimation):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
+            if self._external_wrench is not None:
+                self._write_external_wrench()
             self.scene_manager.step()
             # The physics state just advanced; bump the read-cache generation
             # so per-step-memoized reads (RobotData / contact sensors) can
@@ -328,3 +330,20 @@ class GenesisEnv(World):
             self._invalidate_cache()
             self.contact_manager.advance(dt=self.physics_dt)
         self.vis_manager.advance()
+
+    def _write_external_wrench(self) -> None:
+        """Apply the viewer wrench via the rigid solver's per-link force API."""
+        link_name, force_w, env_idx = self._external_wrench
+        robot = self.scene_manager["robot"]
+        link_ids_global, _ = _eu.find_links(robot, [link_name], global_ids=True)
+        self.scene.rigid_solver.apply_links_external_force(
+            force=force_w.view(1, 3),
+            links_idx=link_ids_global,
+            envs_idx=[int(env_idx)],
+            ref="link_com",
+            local=False,
+        )
+
+    def _flush_external_wrench(self) -> None:
+        """Zero all external forces (viewer is the only writer)."""
+        self.scene.rigid_solver.clear_external_force()

@@ -20,6 +20,7 @@ import viser
 
 from ._ghost import MotionGhost
 from .command_panel import ViserCommandPanel
+from .force_drag import ForceDragController
 from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .play_scene import PlayScene
 from .play_viewer_base import PlayViewerBase
@@ -107,10 +108,17 @@ class ViserPlayViewer(PlayViewerBase):
         # GUI.
         tabs = self._server.gui.add_tab_group()
         self._build_controls_tab(tabs)
+        self._build_inspect_tab(tabs)
         self._play_scene.setup_gui(tabs)
         self._play_scene.set_on_env_switch(self._on_env_switch)
         self._setup_overlays(tabs)
         self._setup_command_panels(tabs)
+        # Interactive external-force drag tool (Newton / Genesis bridge
+        # scenes only; see ForceDragController.is_supported).
+        self._force_drag = None
+        if ForceDragController.is_supported(self._play_scene):
+            self._force_drag = ForceDragController(self._server, self.env, self._play_scene)
+            self._force_drag.build_ui(tabs)
         # Motion picker (only renders when the env exposes a 'motion' command
         # term — i.e. tracking presets; no-op on locomotion / getup / ...).
         self._build_motion_controls(tabs)
@@ -147,6 +155,117 @@ class ViserPlayViewer(PlayViewerBase):
                         self.request_reset_speed()
                     else:
                         self.request_speed_up()
+
+    # ── Inspect tab: live link/joint readout + foot-height reference ──
+    def _build_inspect_tab(self, tabs: Any) -> None:
+        """Live per-frame readout of foot height / link positions / joint
+        angles, plus a movable horizontal reference plane. All values are read
+        from the SAME accessors the rewards use (``robot_data.body_pos_w_by_ids``
+        / ``joint_pos``), so the foot z shown here is exactly the height the
+        ``feet_clearance`` / ``feet_swing_height`` rewards optimise against.
+        """
+        self._foot_peak: dict[int, float] = {}
+        self._foot_ids: dict[str, int] | None = None  # resolved lazily
+        with tabs.add_tab("Inspect", icon=viser.Icon.RULER_2):
+            with self._server.gui.add_folder("Readout"):
+                self._inspect_mode = self._server.gui.add_dropdown(
+                    "Show",
+                    options=["Off", "Foot height", "Link positions", "Joint angles"],
+                    initial_value="Foot height",
+                )
+                self._inspect_html = self._server.gui.add_html("")
+                reset_peak = self._server.gui.add_button("Reset foot peak")
+                reset_peak.on_click(lambda _: self._foot_peak.clear())
+            with self._server.gui.add_folder("Height reference"):
+                self._ref_show = self._server.gui.add_checkbox("Show plane", initial_value=False)
+                self._ref_height = self._server.gui.add_slider(
+                    "Height (m)", min=0.0, max=0.30, step=0.005, initial_value=0.11
+                )
+                self._ref_show.on_update(lambda _: self._sync_ref_plane())
+                self._ref_height.on_update(lambda _: self._sync_ref_plane())
+
+        # A thin translucent plate at world z = slider; foot mesh renders above
+        # it iff its world z clears the slider height (Z is unshifted by the
+        # scene-follow offset, so render z == world z).
+        plate = trimesh.creation.box(extents=(1.5, 1.5, 0.004))
+        plate.visual = trimesh.visual.ColorVisuals(plate, face_colors=[80, 180, 255, 110])
+        self._ref_plane = self._server.scene.add_mesh_trimesh(name="/height_ref", mesh=plate)
+        self._ref_plane.position = (0.0, 0.0, float(self._ref_height.value))
+        self._ref_plane.visible = False
+
+    def _sync_ref_plane(self) -> None:
+        plane = getattr(self, "_ref_plane", None)
+        if plane is None:
+            return
+        plane.position = (0.0, 0.0, float(self._ref_height.value))
+        plane.visible = bool(self._ref_show.value)
+
+    def _resolve_foot_ids(self, rd: Any) -> dict[str, int]:
+        candidates = (
+            "left_foot_link",
+            "right_foot_link",
+            "left_ankle_roll_link",
+            "right_ankle_roll_link",
+            "left_foot",
+            "right_foot",
+        )
+        ids: dict[str, int] = {}
+        for name in candidates:
+            try:
+                ids[name] = int(rd.find_body_index(name))
+            except Exception:  # noqa: BLE001 — body simply absent on this robot
+                pass
+        return ids
+
+    def _update_inspect_display(self) -> None:
+        html = getattr(self, "_inspect_html", None)
+        if html is None:
+            return
+        mode = self._inspect_mode.value
+        if mode == "Off":
+            html.content = ""
+            return
+
+        def _wrap(inner: str) -> str:
+            return (
+                '<div style="font-size:0.8em;line-height:1.3;padding:0 1em .5em 1em;'
+                'font-family:monospace;">' + inner + "</div>"
+            )
+
+        try:
+            import torch
+
+            env_idx = int(self._play_scene.env_idx)
+            rd = self.env.get_robot_data("robot")
+
+            if mode == "Foot height":
+                if self._foot_ids is None:
+                    self._foot_ids = self._resolve_foot_ids(rd)
+                if not self._foot_ids:
+                    html.content = _wrap("<i>no foot bodies found on this robot</i>")
+                    return
+                rows = []
+                for name, bid in self._foot_ids.items():
+                    ids_t = torch.tensor([bid], device=self.env.device)
+                    z = float(rd.body_pos_w_by_ids(ids_t)[env_idx, 0, 2])
+                    peak = max(self._foot_peak.get(bid, z), z)
+                    self._foot_peak[bid] = peak
+                    rows.append(f"{name:22s} z={z:6.3f}  peak={peak:6.3f}")
+                note = "<span style='color:#888'>link-origin z (== reward height); sole ≈ z − 0.038</span>"
+                html.content = _wrap("<br/>".join(rows) + "<br/>" + note)
+
+            elif mode == "Link positions":
+                pos = rd.body_pos_w_all[env_idx].detach().cpu().numpy()  # (num_bodies, 3)
+                rows = [f"body {i:2d}  x={p[0]:6.3f} y={p[1]:6.3f} z={p[2]:6.3f}" for i, p in enumerate(pos)]
+                html.content = _wrap("<br/>".join(rows))
+
+            elif mode == "Joint angles":
+                names = list(self.env.act_manager.actuated_joint_names)
+                q = rd.joint_pos[env_idx].detach().cpu().numpy()
+                rows = [f"{n:22s} {float(v):+.3f}" for n, v in zip(names, q)]
+                html.content = _wrap("<br/>".join(rows))
+        except Exception as e:  # noqa: BLE001 — diagnostic readout, never crash the viewer
+            html.content = _wrap(f"<i>inspect error: {e}</i>")
 
     def _build_motion_controls(self, tabs: Any) -> None:
         """Add a Motion tab exposing clip selection + rollover-lock toggle.
@@ -381,6 +500,11 @@ class ViserPlayViewer(PlayViewerBase):
                         # picks them up — otherwise they lag by one frame.
                         self._update_target_position_marker()
                         self._play_scene.update()
+                        if self._force_drag is not None:
+                            # After scene.update so the frozen (offset-0)
+                            # transforms are current; reads a body pose and
+                            # writes env.set_external_wrench under the lock.
+                            self._force_drag.tick()
                         self._update_command_arrows()
                         if self._motion_ghost is not None:
                             self._motion_ghost.update(self._play_scene.env_idx)
@@ -598,3 +722,4 @@ class ViserPlayViewer(PlayViewerBase):
             f"<strong>Actual RT:</strong> {rt} ({s.smoothed_fps:.0f} FPS){err}"
             "</div>"
         )
+        self._update_inspect_display()

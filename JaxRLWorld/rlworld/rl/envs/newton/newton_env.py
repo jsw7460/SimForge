@@ -318,11 +318,39 @@ class NewtonEnv(World):
         for _ in range(self.decimation):
             self.scene_manager.state_0.clear_forces()
             self.act_manager.apply_actions(self.act_manager.processed_actions)
+            # After clear_forces / actuator body_f writes, before the solver
+            # (mirrors the propeller action convention).
+            if self._external_wrench is not None:
+                self._write_external_wrench()
             self.scene_manager.step()
             self.contact_manager.advance(dt=self.physics_dt)
 
         if _NAN_TRIPWIRE:
             self._nan_tripwire_check()
+
+    def _write_external_wrench(self) -> None:
+        """Add the viewer force into ``state_0.body_f`` for one body/env.
+
+        ``State.body_f`` is a world-frame spatial wrench ``[force, torque]``
+        referenced at the body COM. Only the target (env, body) slot is
+        touched; other slots keep whatever the actuator path wrote this
+        substep.
+        """
+        link_name, force_w, env_idx = self._external_wrench
+        model = self.scene_manager.model
+        num_worlds = model.world_count
+        num_bodies_per_world = model.body_count // num_worlds
+        labels = list(getattr(model, "body_label", []) or getattr(model, "body_key", []))
+        bare = [bl.rsplit("/", 1)[-1] if "/" in bl else bl for bl in labels[:num_bodies_per_world]]
+        key = link_name.rsplit("/", 1)[-1] if "/" in link_name else link_name
+        body_idx = bare.index(key)
+
+        body_f = wp.to_torch(self.scene_manager.state_0.body_f).view(num_worlds, num_bodies_per_world, 6)
+        body_f[int(env_idx), body_idx, 0:3] += force_w
+        wp.copy(
+            self.scene_manager.state_0.body_f,
+            wp.from_torch(body_f.view(-1, 6), dtype=wp.spatial_vector, requires_grad=False),
+        )
 
         # Update visualization
         if self.vis_manager is not None:
