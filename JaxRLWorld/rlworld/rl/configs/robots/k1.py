@@ -1,12 +1,15 @@
 """Booster K1 humanoid robot configuration (22 actuated DOF).
 
-All values except armature are read verbatim from the MJCF at
-``assets/K1/k1_mjx_feetonly.xml`` (default-class attributes and
-the home keyframe of its companion scene file) so the joint-PD path
-reproduces the source model exactly:
+All values except the PD gains and armature are read verbatim from the
+MJCF at ``assets/K1/k1_mjx_feetonly.xml`` (default-class attributes and
+the home keyframe of its companion scene file) so the model matches the
+source:
 
-- PD gains: actuator ``kp`` per class (head/arm 15, hip/knee 25,
-  ankle 10) with the joint ``damping`` as ``kd`` (head/arm 2, leg 3).
+- PD gains: chosen by ``PD_PROFILE`` (default ``"stiff_legs"`` = arms 15,
+  hip/knee 50, ankle 15, ``kd`` arm 2, leg 5). Also available: the softer
+  ``"mujoco_playground"`` gains (kp 15/25/10, kd 2/3) and the real-robot
+  ``"booster"`` gains (kp 4/80/30, kd 1/2); switch with the ``K1_PD_PROFILE``
+  env var.
 - frictionloss 0.1 uniformly on every joint.
 - armature per joint from the Booster reference model
   ``assets/K1/K1_22dof.xml`` (head 0.002, arm 0.001, legs
@@ -25,22 +28,74 @@ Joint-name convention is the Booster family one (same as T1):
 K1 has no waist joint.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List
 
 from rlworld.rl.configs.robots.base import RobotConfig
 
-# ── Values from k1_mjx_feetonly.xml default classes ───────────────────
-STIFFNESS_HEAD = 15.0
-STIFFNESS_ARM = 15.0
-STIFFNESS_HIP = 25.0
-STIFFNESS_KNEE = 25.0
-STIFFNESS_ANKLE = 10.0
+# ── PD gain profiles (kp = stiffness, kd = damping) ───────────────────
+# Two coherent gain sets, kept side by side and selected by ``PD_PROFILE``:
+#   "booster"           – Booster SDK deploy gains (booster_deploy's K1_CFG),
+#                         matched to the real K1 actuators. The default.
+#   "mujoco_playground" – the k1_mjx_feetonly.xml sim gains this preset
+#                         originally shipped with. NOT the real-robot gains;
+#                         kept to reproduce older runs.
+_PD_PROFILES: Dict[str, Dict[str, float]] = {
+    "booster": {
+        "stiffness_head": 4.0,
+        "stiffness_arm": 4.0,
+        "stiffness_hip": 80.0,
+        "stiffness_knee": 80.0,
+        "stiffness_ankle": 30.0,
+        "damping_head": 1.0,
+        "damping_arm": 1.0,
+        "damping_leg": 2.0,
+    },
+    "mujoco_playground": {
+        "stiffness_head": 15.0,
+        "stiffness_arm": 15.0,
+        "stiffness_hip": 25.0,
+        "stiffness_knee": 25.0,
+        "stiffness_ankle": 10.0,
+        "damping_head": 2.0,
+        "damping_arm": 2.0,
+        "damping_leg": 3.0,
+    },
+    # Middle ground: mujoco_playground arms, stiffer legs so they hold the
+    # body under load (kp 25 sagged / looked underpowered on the real robot).
+    # kd scaled up with kp to keep it well-damped (avoids the kp-80 shaking).
+    "stiff_legs": {
+        "stiffness_head": 15.0,
+        "stiffness_arm": 15.0,
+        "stiffness_hip": 50.0,
+        "stiffness_knee": 50.0,
+        "stiffness_ankle": 15.0,
+        "damping_head": 2.0,
+        "damping_arm": 2.0,
+        "damping_leg": 5.0,
+    },
+}
 
-# ``kd`` comes from the joint ``damping`` attribute in the MJCF.
-DAMPING_HEAD = 2.0
-DAMPING_ARM = 2.0
-DAMPING_LEG = 3.0
+# Active profile. Defaults to "stiff_legs" (stiffer, well-damped legs that hold
+# the body under load better than the softer mujoco_playground gains). Override
+# per-run with the ``K1_PD_PROFILE`` env var, e.g.
+# ``K1_PD_PROFILE=mujoco_playground`` or ``K1_PD_PROFILE=booster``. The resolved
+# kp/kd are baked into the saved config.yaml, so each checkpoint records the
+# gains it trained with.
+PD_PROFILE = os.environ.get("K1_PD_PROFILE", "stiff_legs")
+if PD_PROFILE not in _PD_PROFILES:
+    raise ValueError(f"K1_PD_PROFILE={PD_PROFILE!r} unknown; choose from {sorted(_PD_PROFILES)}")
+_pd = _PD_PROFILES[PD_PROFILE]
+
+STIFFNESS_HEAD = _pd["stiffness_head"]
+STIFFNESS_ARM = _pd["stiffness_arm"]
+STIFFNESS_HIP = _pd["stiffness_hip"]
+STIFFNESS_KNEE = _pd["stiffness_knee"]
+STIFFNESS_ANKLE = _pd["stiffness_ankle"]
+DAMPING_HEAD = _pd["damping_head"]
+DAMPING_ARM = _pd["damping_arm"]
+DAMPING_LEG = _pd["damping_leg"]
 
 # Armature (reflected rotor inertia) per joint group, read from the
 # Booster reference model ``assets/K1/K1_22dof.xml``.  These override
