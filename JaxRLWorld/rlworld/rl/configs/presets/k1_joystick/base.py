@@ -524,6 +524,21 @@ class K1JoystickConfig:
                     "operation": "scale",
                 },
             ),
+            # Passive joint (viscous) damping — the plant's own dof_damping
+            # (MJCF default class 3 legs / 2 arms), distinct from the PD kd.
+            # Randomized ABSOLUTE to [0, 1] to hedge the unknown real-robot
+            # joint damping (Booster's own model uses 0; training inherited
+            # 3/2 from mujoco_playground). reset_dr so every env sweeps the
+            # range across episodes.
+            "dr_joint_damping": EventTermConfig(
+                func=unified_dr.randomize_joint_damping,
+                mode="reset_dr",
+                params={
+                    "asset_cfg": all_joints,
+                    "damping_range": (0.0, 1.0),
+                    "operation": "abs",
+                },
+            ),
             "dr_kp": EventTermConfig(
                 func=unified_dr.randomize_pd_gains,
                 mode="reset_dr",

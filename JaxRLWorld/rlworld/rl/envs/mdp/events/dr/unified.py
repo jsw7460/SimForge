@@ -1050,6 +1050,111 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
 
 
 # ══════════════════════════════════════════════════════════════════════
+# randomize_joint_damping
+# ══════════════════════════════════════════════════════════════════════
+
+
+def randomize_joint_damping(
+    env: World,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
+    damping_range: tuple[float, float] = (0.0, 1.0),
+    operation: Literal["abs", "scale", "add"] = "abs",
+    distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
+    shared_random: bool = False,
+) -> None:
+    """Randomize passive joint (viscous) damping — the model's ``dof_damping``.
+
+    This is the PLANT's own velocity damping (the training MJCF's default-class
+    ``damping`` of 3 legs / 2 arms), NOT the controller PD kd (that lives on the
+    actuator and is randomized by :func:`randomize_pd_gains`). The two are
+    separate velocity-opposing layers.
+
+    With ``operation="abs"`` (the default) the sampled value REPLACES the model
+    value, so ``damping_range=(0.0, 1.0)`` overrides the XML 3/2 with a per-env
+    draw in [0, 1] — hedging the unknown real-robot joint damping. Genesis
+    enforces ``operation="abs"`` (``set_dofs_damping`` takes absolute values).
+    ``asset_cfg.joint_names`` selects a canonical actuated-joint subset
+    (``None`` = all actuated DOFs); honored on every backend.
+    """
+    if len(env_ids) == 0:
+        return
+
+    if env.sim_type == "genesis":
+        _genesis_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution)
+    elif env.sim_type == "newton":
+        _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution)
+    elif env.sim_type == "mujoco":
+        _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution, shared_random)
+    else:
+        raise NotImplementedError(f"randomize_joint_damping has no backend for sim_type={env.sim_type!r}")
+
+
+def _genesis_joint_damping_backend(env, env_ids, resolved, damping_range, operation, distribution):
+    if operation != "abs":
+        raise NotImplementedError(
+            f"Genesis joint_damping DR only supports operation='abs' "
+            f"(got {operation!r}); set_dofs_damping takes absolute values."
+        )
+    entity = env.scene_manager[resolved.name]
+    selected = _selected_joint_ids(env, resolved)
+    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
+    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
+    values = sample((len(env_ids), n_sel), *damping_range, env.device, distribution)
+    entity.set_dofs_damping(
+        damping=values.cpu().numpy(),
+        dofs_idx_local=None if sel_dofs is None else sel_dofs.cpu().numpy(),
+        envs_idx=env_ids,
+    )
+
+
+def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution):
+    import warp as wp
+    from newton.solvers import SolverNotifyFlags
+
+    view = env.scene_manager.robot_view
+    model = env.scene_manager.model
+    selected = _selected_joint_ids(env, asset_cfg)
+    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
+    damping = wp.to_torch(view.get_attribute("joint_damping", model))
+    # abs replaces the value outright, so no baseline is needed (newton's DR
+    # baseline snapshot does not capture joint_damping); only the scale/add
+    # paths dereference it.
+    if cols is None:
+        sampled = sample((len(env_ids),) + damping.shape[1:], *damping_range, env.device, distribution)
+        if operation == "abs":
+            damping[env_ids] = sampled
+        else:
+            defaults = env._dr_baselines.joint_damping
+            damping[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+    else:
+        vals2d = _newton_dof_view(damping)
+        sampled = sample((len(env_ids), len(cols)), *damping_range, env.device, distribution)
+        if operation == "abs":
+            vals2d[env_ids[:, None], cols[None, :]] = sampled
+        else:
+            defs2d = _newton_dof_view(env._dr_baselines.joint_damping)
+            vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+    view.set_attribute("joint_damping", model, damping)
+    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+
+
+def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution, shared_random):
+    from mjlab.envs.mdp.dr import joint_damping as _mjlab_joint_damping
+
+    adapter = _MujocoEnvAdapter(env)
+    mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
+    _mjlab_joint_damping(
+        env=adapter,
+        env_ids=env_ids,
+        ranges=damping_range,
+        asset_cfg=mjlab_cfg,
+        operation=operation,
+        shared_random=shared_random,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
 # randomize_encoder_bias  (sim-agnostic, obs-side)
 # ══════════════════════════════════════════════════════════════════════
 

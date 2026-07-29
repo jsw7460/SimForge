@@ -397,6 +397,7 @@ class MujocoEnv(World):
             ),
             _unified.randomize_joint_armature: (("dof_armature",), RecomputeLevel.set_const_0),
             _unified.randomize_joint_friction: (("dof_frictionloss",), RecomputeLevel.none),
+            _unified.randomize_joint_damping: (("dof_damping",), RecomputeLevel.none),
         }
 
         dr_fields: list[str] = []
