@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import torch
 import warp as wp
-from newton.solvers import SolverNotifyFlags
+from newton import ModelFlags
 
 from ._utils import sample
 from .unified import _newton_notify
@@ -78,7 +78,7 @@ def set_joint_friction(
         )
         friction[env_ids] = float(value) * scale
     view.set_attribute("joint_friction", model, friction)
-    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+    _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
 def set_foot_friction(
@@ -135,7 +135,7 @@ def set_foot_friction(
         shape_mu[env_ids, si] = mu_val
 
     wp.copy(model.shape_material_mu, wp.from_torch(flat_mu, dtype=wp.float32))
-    _newton_notify(env, SolverNotifyFlags.SHAPE_PROPERTIES)
+    _newton_notify(env, ModelFlags.SHAPE_PROPERTIES)
 
 
 # ------------------------------------------------------------------ #
@@ -222,7 +222,7 @@ def set_joint_friction_per_dim(
         attrib_flat[env_ids.unsqueeze(1), dof_idx_t] = vals_t * scale
 
     view.set_attribute("joint_friction", model, attrib)
-    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+    _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
 def set_foot_friction_per_foot(
@@ -279,4 +279,4 @@ def set_foot_friction_per_foot(
         shape_mu[env_ids, si] = mu_val
 
     wp.copy(model.shape_material_mu, wp.from_torch(flat_mu, dtype=wp.float32))
-    _newton_notify(env, SolverNotifyFlags.SHAPE_PROPERTIES)
+    _newton_notify(env, ModelFlags.SHAPE_PROPERTIES)

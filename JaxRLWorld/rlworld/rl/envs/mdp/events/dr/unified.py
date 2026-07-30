@@ -234,7 +234,7 @@ def _newton_friction_backend(
     axes: list[int],
 ) -> None:
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     view = env.scene_manager.articulation_views[resolved.name]
     model = env.scene_manager.model
@@ -309,7 +309,7 @@ def _newton_friction_backend(
 
         view.set_attribute(attr, model, values)
 
-    _newton_notify(env, SolverNotifyFlags.SHAPE_PROPERTIES)
+    _newton_notify(env, ModelFlags.SHAPE_PROPERTIES)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -443,7 +443,7 @@ def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, di
 
 def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, distribution):
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
@@ -470,7 +470,7 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
         defaults[env_ids.unsqueeze(1), body_indices], sampled, operation
     )
     wp.copy(model.body_mass, wp.from_torch(mass.reshape(-1).contiguous(), dtype=wp.float32))
-    _newton_notify(env, SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
+    _newton_notify(env, ModelFlags.BODY_INERTIAL_PROPERTIES)
 
 
 def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution, shared_random):
@@ -551,7 +551,7 @@ def _genesis_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
 
 def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
@@ -583,7 +583,7 @@ def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
         sampled = torch.empty(n_envs, n_bodies, device=env.device).uniform_(lo, hi)
         body_com[env_grid, body_indices, axis] = original[..., axis] + sampled
     wp.copy(model.body_com, wp.from_torch(body_com.reshape(-1, 3).contiguous(), dtype=wp.vec3))
-    _newton_notify(env, SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
+    _newton_notify(env, ModelFlags.BODY_INERTIAL_PROPERTIES)
 
 
 def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, axes, shared_random):
@@ -752,7 +752,7 @@ def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
     # randomize_pd_gains via _explicit_pd_gains_backend): Newton's internal PD
     # consumes joint_target_ke/kd, so randomize the solver store.
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -783,7 +783,7 @@ def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
         view.set_attribute(attr_name, model, values)
         notify = True
     if notify:
-        _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+        _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
 def _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
@@ -911,7 +911,7 @@ def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation,
 
 def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution):
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -934,7 +934,7 @@ def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
         else:
             vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
     view.set_attribute("joint_armature", model, armature)
-    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+    _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
 def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution, shared_random):
@@ -1008,7 +1008,7 @@ def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, oper
 
 def _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution):
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -1031,7 +1031,7 @@ def _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
         else:
             vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
     view.set_attribute("joint_friction", model, friction)
-    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+    _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
 def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution, shared_random):
@@ -1110,7 +1110,7 @@ def _genesis_joint_damping_backend(env, env_ids, resolved, damping_range, operat
 
 def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution):
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -1136,7 +1136,7 @@ def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
             defs2d = _newton_dof_view(env._dr_baselines.joint_damping)
             vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
     view.set_attribute("joint_damping", model, damping)
-    _newton_notify(env, SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+    _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
 def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution, shared_random):
