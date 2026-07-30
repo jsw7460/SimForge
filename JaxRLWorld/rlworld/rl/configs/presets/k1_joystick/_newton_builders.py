@@ -108,6 +108,7 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> NewtonSceneCon
                             damping=r.d_gains,
                             armature=r.armature,
                             effort_limit=r.effort_limits,
+                            tau_scale=r.tau_scale,
                             frictionloss=0.1,
                             min_delay=0,
                             max_delay=cfg.action_delay_max,

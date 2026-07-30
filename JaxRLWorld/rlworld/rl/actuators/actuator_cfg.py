@@ -72,9 +72,18 @@ class IdealPDActuatorCfg(ActuatorBaseCfg):
 
     Torques are computed externally and applied as direct forces,
     bypassing the simulator's built-in PD.
+
+    Attributes:
+        tau_scale: Optional per-joint saturation scale kappa. When set, the
+            PD torque is passed through a smooth ``tau = kappa * tanh(tau_PD /
+            kappa)`` before the hard effort clip, modeling the torque decay
+            real actuators exhibit in the high-torque regime (small torques
+            pass ~linearly; large ones roll off toward +/-kappa). ``None``
+            (default) keeps the plain hard clip only. Same scalar-or-dict
+            format as ``stiffness``.
     """
 
-    pass
+    tau_scale: float | dict[str, float] | None = None
 
 
 @dataclass

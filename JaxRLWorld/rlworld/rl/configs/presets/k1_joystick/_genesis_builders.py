@@ -86,6 +86,7 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
                             damping=r.d_gains,
                             armature=r.armature,
                             effort_limit=r.effort_limits,
+                            tau_scale=r.tau_scale,
                             frictionloss=0.1,
                             min_delay=0,
                             max_delay=cfg.action_delay_max,
@@ -136,6 +137,8 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
             # shared across envs and rejects batched writes).
             batch_dofs_info=True,
             contact_pruning_tolerance=None,
+            friction_cone=gs.friction_cone.elliptic,
+            contact_resolution=gs.contact_resolution.signorini,
         ),
     )
 

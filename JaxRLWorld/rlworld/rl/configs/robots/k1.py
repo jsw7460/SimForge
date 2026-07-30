@@ -260,6 +260,27 @@ class K1Config(RobotConfig):
         )
     )
 
+    # Actuator saturation scale kappa for the tanh torque model
+    # ``tau_motor = kappa * tanh(tau_PD / kappa)`` (smooth torque decay in the
+    # high-torque regime instead of a hard clip). Initialized to the effort
+    # limits, so v1 is a soft version of the existing clip; a SysID target —
+    # lower kappa where the real motors show more decay. Same per-group format
+    # as ``effort_limits``.
+    tau_scale: Dict[str, float] = field(
+        default_factory=lambda: _pattern_dict(
+            {
+                "head": EFFORT_HEAD,
+                "shoulder": EFFORT_SHOULDER,
+                "elbow": EFFORT_ELBOW,
+                "hip_pitch": EFFORT_HIP_PITCH,
+                "hip_roll": EFFORT_HIP_ROLL,
+                "hip_yaw": EFFORT_HIP_YAW,
+                "knee": EFFORT_KNEE,
+                "ankle": EFFORT_ANKLE,
+            }
+        )
+    )
+
     # Foot bodies (ankle-roll links carrying the foot geoms/sites).
     foot_names: List[str] = field(default_factory=lambda: ["left_foot_link", "right_foot_link"])
 

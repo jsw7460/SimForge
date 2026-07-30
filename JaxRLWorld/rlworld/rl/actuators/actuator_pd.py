@@ -19,9 +19,19 @@ class IdealPDActuator(ActuatorBase):
 
     .. math::
 
-        \tau = K_p (q_{target} - q) + K_d (0 - \dot{q})
+        \tau_{PD} = K_p (q_{target} - q) + K_d (0 - \dot{q})
 
-    The output is clipped to ``[-effort_limit, effort_limit]``.
+    With ``tau_scale`` (:math:`\kappa`) unset the output is the raw PD torque
+    clipped to ``[-effort_limit, effort_limit]``. With ``tau_scale`` set a
+    smooth actuator-saturation model is applied first,
+
+    .. math::
+
+        \tau = \kappa \tanh(\tau_{PD} / \kappa),
+
+    so small torques pass ~linearly and large ones roll off toward
+    :math:`\pm\kappa` (the torque decay real motors show under high load),
+    followed by the same hard effort clip as a safety ceiling.
     """
 
     cfg: IdealPDActuatorCfg
@@ -39,6 +49,13 @@ class IdealPDActuator(ActuatorBase):
         self.stiffness = self._resolve_per_joint_param(cfg.stiffness, default=0.0)
         self.damping = self._resolve_per_joint_param(cfg.damping, default=0.0)
 
+        # Optional tanh torque-saturation scale kappa. None ⇒ plain hard clip.
+        self._use_tau_scale = cfg.tau_scale is not None
+        if self._use_tau_scale:
+            self.tau_scale = self._resolve_per_joint_param(cfg.tau_scale, default=float("inf"))
+            if bool((self.tau_scale <= 0.0).any()):
+                raise ValueError("tau_scale (kappa) must be > 0 for the tanh actuator model")
+
     def reset(self, env_ids: Sequence[int]) -> None:
         pass
 
@@ -49,8 +66,13 @@ class IdealPDActuator(ActuatorBase):
         joint_vel: torch.Tensor,
     ) -> torch.Tensor:
         error_pos = target_pos - joint_pos
+        # Raw PD torque (kept in computed_effort for logging/diagnostics).
         self.computed_effort = self.stiffness * error_pos - self.damping * joint_vel
-        self.applied_effort = self._clip_effort(self.computed_effort)
+        if self._use_tau_scale:
+            effort = self.tau_scale * torch.tanh(self.computed_effort / self.tau_scale)
+        else:
+            effort = self.computed_effort
+        self.applied_effort = self._clip_effort(effort)
         return self.applied_effort
 
 

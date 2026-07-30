@@ -539,6 +539,19 @@ class K1JoystickConfig:
                     "operation": "abs",
                 },
             ),
+            # tanh actuator-saturation scale kappa (effective max torque).
+            # Scaled to [0.5, 1.0]x the configured value (= effort limit), i.e.
+            # from strong torque decay to none — hedges the unknown real motor
+            # saturation until SysID pins kappa per joint.
+            "dr_tau_scale": EventTermConfig(
+                func=unified_dr.randomize_tau_scale,
+                mode="reset_dr",
+                params={
+                    "asset_cfg": all_joints,
+                    "tau_scale_range": (0.5, 1.0),
+                    "operation": "scale",
+                },
+            ),
             "dr_kp": EventTermConfig(
                 func=unified_dr.randomize_pd_gains,
                 mode="reset_dr",

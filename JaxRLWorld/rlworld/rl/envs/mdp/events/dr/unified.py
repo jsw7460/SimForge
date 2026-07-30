@@ -1155,6 +1155,58 @@ def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
 
 
 # ══════════════════════════════════════════════════════════════════════
+# randomize_tau_scale  (tanh actuator-saturation scale kappa)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def randomize_tau_scale(
+    env: World,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
+    tau_scale_range: tuple[float, float] = (0.5, 1.0),
+    operation: Literal["abs", "scale", "add"] = "scale",
+    distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
+) -> None:
+    """Randomize the tanh actuator-saturation scale kappa (``tau_scale``) per env.
+
+    kappa is the asymptote of ``tau = kappa*tanh(tau_PD/kappa)`` — the effective
+    max deliverable torque. It lives on the explicit Python PD actuator (like
+    kp/kd), NOT in any sim model store, so this is sim-agnostic and needs no
+    per-backend path or model-field expansion. ``operation="scale"`` multiplies
+    the configured kappa (default = effort limit), so ``(0.5, 1.0)`` spans from
+    strong torque decay (half the effort limit) to none (full limit), hedging
+    the unknown real value. reset_dr-safe: the base kappa is captured once per
+    actuator so scale/add do not compound across resets.
+    """
+    if len(env_ids) == 0:
+        return
+    if not env.act_manager.has_explicit_actuators:
+        raise NotImplementedError(
+            "randomize_tau_scale requires explicit actuators (kappa lives on the actuator, " "not a sim PD store)."
+        )
+    selected = _selected_joint_ids(env, asset_cfg)
+    for actuator, joint_idx in env.act_manager.actuators:
+        if not getattr(actuator, "_use_tau_scale", False):
+            continue  # actuator has no tanh saturation configured → nothing to randomize
+        cols = None
+        if selected is not None:
+            cols = torch.nonzero(torch.isin(joint_idx, selected), as_tuple=True)[0]
+            if cols.numel() == 0:
+                continue
+        if not hasattr(actuator, "_dr_base_tau_scale"):
+            actuator._dr_base_tau_scale = actuator.tau_scale.clone()
+        kap = actuator.tau_scale  # [num_envs, n_actuated_joints]
+        base = actuator._dr_base_tau_scale
+        n_cols = kap.shape[1] if cols is None else cols.numel()
+        sampled = sample((len(env_ids), n_cols), *tau_scale_range, env.device, distribution)
+        if cols is None:
+            kap[env_ids] = sampled if operation == "abs" else apply_operation(base[env_ids], sampled, operation)
+        else:
+            new = sampled if operation == "abs" else apply_operation(base[env_ids][:, cols], sampled, operation)
+            kap[env_ids[:, None], cols[None, :]] = new
+
+
+# ══════════════════════════════════════════════════════════════════════
 # randomize_encoder_bias  (sim-agnostic, obs-side)
 # ══════════════════════════════════════════════════════════════════════
 
