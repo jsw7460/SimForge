@@ -20,11 +20,20 @@ from typing import TYPE_CHECKING
 import torch
 
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, yaw_quat_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 _DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
+def _uprightness(env: World, asset_cfg: ResolvedEntity) -> torch.Tensor:
+    """robot_lab's ``clamp(-g_z, 0, 0.7) / 0.7`` gate: 1 when upright, ramps to
+    0 past ~45deg tilt. Zeroes a reward once the robot is tipping so tracking /
+    step rewards cannot be farmed while falling."""
+    g = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    return torch.clamp(-g[:, 2], 0.0, 0.7) / 0.7
 
 
 # ── Tracking (sigma is the DIVISOR of the squared error, as upstream) ─
@@ -56,6 +65,39 @@ def track_ang_vel_z_exp(
     return torch.exp(-err / tracking_sigma)
 
 
+def track_lin_vel_xy_yaw_frame_exp(
+    env: World,
+    std: float = 0.5,
+    command_term: str = "velocity",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """robot_lab ``track_lin_vel_xy_yaw_frame_exp``: track xy command in the
+    gravity-aligned (yaw-only) robot frame, ``exp(-err / std^2)``, gated by
+    uprightness. Differs from :func:`track_lin_vel_xy_exp` (full body frame,
+    no gate); on flat ground the two nearly coincide."""
+    data = env.get_robot_data(asset_cfg.name)
+    cmd = env.command_manager.get_term(command_term).command
+    vel_yaw = quat_rotate_inverse_wxyz(yaw_quat_wxyz(data.root_link_quat_w), data.root_link_lin_vel_w)
+    err = torch.sum(torch.square(cmd[:, :2] - vel_yaw[:, :2]), dim=1)
+    return torch.exp(-err / std**2) * _uprightness(env, asset_cfg)
+
+
+def track_ang_vel_z_world_exp(
+    env: World,
+    std: float = 0.5,
+    command_term: str = "velocity",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """robot_lab ``track_ang_vel_z_world_exp``: track yaw-rate command against
+    the WORLD-frame z angular velocity, ``exp(-err / std^2)``, gated by
+    uprightness. On flat ground world-z ~= body-z yaw rate."""
+    data = env.get_robot_data(asset_cfg.name)
+    cmd = env.command_manager.get_term(command_term).command
+    w = data.root_link_ang_vel_w
+    err = torch.square(cmd[:, 2] - w[:, 2])
+    return torch.exp(-err / std**2) * _uprightness(env, asset_cfg)
+
+
 # ── Base costs ────────────────────────────────────────────────────────
 
 
@@ -69,6 +111,76 @@ def orientation_l2(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) ->
     """``sum(upvector_xy^2)``; equal to projected-gravity xy squared."""
     g = env.get_robot_data(asset_cfg.name).projected_gravity_b
     return torch.sum(torch.square(g[:, :2]), dim=1)
+
+
+def upward(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """``(1 - g_z)^2`` in the body frame — 4 fully upright (g_z = -1), 1
+    horizontal, 0 inverted. Rewards keeping the base upright (robot_lab
+    ``upward``; despite its misleading upstream docstring the code uses
+    projected gravity, not linear velocity). Pair with a POSITIVE weight."""
+    g = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    return torch.square(1.0 - g[:, 2])
+
+
+def joint_pos_penalty(
+    env: World,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+    command_term: str = "velocity",
+    stand_still_scale: float = 5.0,
+    velocity_threshold: float = 0.5,
+    command_threshold: float = 0.1,
+) -> torch.Tensor:
+    """``||q_sel - q0_sel||`` deviation from the default pose (robot_lab
+    ``joint_pos_penalty``). Scaled UP by ``stand_still_scale`` while standing
+    (both command norm and planar body speed below their thresholds) so the
+    default pose is held at rest, then modulated by uprightness
+    (``clamp(-g_z, 0, 0.7) / 0.7``) so a tipped robot is not pose-penalised.
+    Default pose is ``act_manager.offset`` (as ``joint_deviation_l1``). Pair
+    with a NEGATIVE weight."""
+    data = env.get_robot_data(asset_cfg.name)
+    ids = asset_cfg.joint_ids
+    cmd = env.command_manager.get_term(command_term).command.norm(dim=1)
+    body_vel = data.root_link_lin_vel_b[:, :2].norm(dim=1)
+    dev = (data.joint_pos[:, ids] - env.act_manager.offset[:, ids]).norm(dim=1)
+    reward = torch.where(
+        torch.logical_or(cmd > command_threshold, body_vel > velocity_threshold),
+        dev,
+        stand_still_scale * dev,
+    )
+    return reward * torch.clamp(-data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7
+
+
+def joint_torques_l2(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """``sum(tau_sel^2)`` on the selected joints (robot_lab ``joint_torques_l2``).
+    Uses ``RobotData.applied_torque`` (the torque actually written to the sim on
+    every backend). Pair with a NEGATIVE weight."""
+    tau = env.get_robot_data(asset_cfg.name).applied_torque[:, asset_cfg.joint_ids]
+    return torch.sum(torch.square(tau), dim=1)
+
+
+class K1JointAccL2:
+    """``sum(qdd_sel^2)`` (robot_lab ``joint_acc_l2``). ``RobotData`` exposes no
+    joint acceleration on every backend, so it is finite-differenced from
+    ``joint_vel`` at the control rate (``(v - v_prev) / control_dt``) — kept
+    consistent across sims. The weight is tiny (~1e-7), so the first-step
+    transient after a reset (v_prev = 0) is negligible. Pair with a NEGATIVE
+    weight."""
+
+    __name__ = "K1JointAccL2"
+
+    def __init__(self, env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> None:
+        self._asset_cfg = asset_cfg
+        n = env.get_robot_data(asset_cfg.name).joint_vel.shape[1]
+        self.prev_vel = torch.zeros(env.num_envs, n, device=env.device)
+
+    def __call__(self, env: World) -> torch.Tensor:
+        v = env.get_robot_data(self._asset_cfg.name).joint_vel
+        acc = (v - self.prev_vel) / env.control_dt
+        self.prev_vel = v.clone()
+        return torch.sum(torch.square(acc[:, self._asset_cfg.joint_ids]), dim=1)
+
+    def reset(self, env_ids: torch.Tensor) -> None:
+        self.prev_vel[env_ids] = 0.0
 
 
 # ── Feet ──────────────────────────────────────────────────────────────
@@ -134,6 +246,80 @@ class K1FeetAirTime:
     def reset(self, env_ids: torch.Tensor) -> None:
         self.air_time[env_ids] = 0.0
         self._last_contact[env_ids] = False
+
+
+class K1FeetAirTimePositiveBiped:
+    """robot_lab ``feet_air_time_positive_biped``: reward single-support steps.
+
+    Per foot keeps ``air_time`` / ``contact_time`` (control-rate, same
+    bookkeeping style as :class:`K1FeetAirTime`). The reward is the min over
+    feet of the current mode-time (contact_time if in contact else air_time),
+    but ONLY while exactly one foot is in contact (single stance), clipped to
+    ``threshold``. Zeroed for near-zero command and gated by uprightness."""
+
+    __name__ = "K1FeetAirTimePositiveBiped"
+
+    def __init__(
+        self,
+        env: World,
+        contact_group: str,
+        threshold: float = 0.4,
+        command_term: str = "velocity",
+        command_threshold: float = 0.1,
+        asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+    ) -> None:
+        self._contact_group = contact_group
+        self._threshold = threshold
+        self._command_term = command_term
+        self._command_threshold = command_threshold
+        self._asset_cfg = asset_cfg
+        num_feet = env.contact_manager.is_contact(contact_group).shape[1]
+        self.air_time = torch.zeros(env.num_envs, num_feet, device=env.device)
+        self.contact_time = torch.zeros(env.num_envs, num_feet, device=env.device)
+
+    def __call__(self, env: World) -> torch.Tensor:
+        contact = env.contact_manager.is_contact(self._contact_group)
+        dt = env.control_dt
+        self.air_time = torch.where(contact, torch.zeros_like(self.air_time), self.air_time + dt)
+        self.contact_time = torch.where(contact, self.contact_time + dt, torch.zeros_like(self.contact_time))
+
+        in_contact = self.contact_time > 0.0
+        in_mode_time = torch.where(in_contact, self.contact_time, self.air_time)
+        single_stance = torch.sum(in_contact.int(), dim=1) == 1
+        reward = torch.min(
+            torch.where(single_stance.unsqueeze(-1), in_mode_time, torch.zeros_like(in_mode_time)),
+            dim=1,
+        )[0]
+        reward = torch.clamp(reward, max=self._threshold)
+        cmd = env.command_manager.get_term(self._command_term).command
+        reward = reward * (cmd.norm(dim=1) > self._command_threshold)
+        return reward * _uprightness(env, self._asset_cfg)
+
+    def reset(self, env_ids: torch.Tensor) -> None:
+        self.air_time[env_ids] = 0.0
+        self.contact_time[env_ids] = 0.0
+
+
+def feet_slide(
+    env: World,
+    contact_group: str,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """robot_lab ``feet_slide``: per foot in contact, penalize the LATERAL
+    (xy-in-body-frame) foot velocity relative to the base. Foot world velocity
+    minus root world velocity, rotated into the base frame, xy-norm, summed
+    over contacting feet, gated by uprightness. ``asset_cfg.body_names`` =
+    (left foot, right foot). Pair with a NEGATIVE weight."""
+    data = env.get_robot_data(asset_cfg.name)
+    foot_vel_w = data.body_lin_vel_w_by_ids(asset_cfg.body_ids)  # (E, n_foot, 3)
+    rel = foot_vel_w - data.root_link_lin_vel_w.unsqueeze(1)  # base-relative (world)
+    q = data.root_link_quat_w  # (E, 4) wxyz
+    foot_b = torch.stack(
+        [quat_rotate_inverse_wxyz(q, rel[:, i, :]) for i in range(rel.shape[1])], dim=1
+    )  # (E, n_foot, 3), base frame
+    lateral = foot_b[:, :, :2].norm(dim=-1)  # (E, n_foot)
+    contact = env.contact_manager.is_contact(contact_group).float()
+    return torch.sum(lateral * contact, dim=1) * _uprightness(env, asset_cfg)
 
 
 def feet_slip_base_vel(
