@@ -126,8 +126,14 @@ class K1JoystickConfig:
     # Action-rate smoothness penalty (not in the upstream K1 MDP; added to
     # damp the high-frequency action jitter that upstream's tanh bound alone
     # does not suppress). POSITIVE weight: raw_action_rate_l2 already returns a
-    # negative penalty. Mirrors the G1 recipe's value.
-    w_raw_action_rate: float = 0.1
+    # negative penalty. Larger than the G1 recipe's 0.1 on purpose: pal's
+    # action scale is 1.0, so raw_actions are already in physical radians and
+    # a given joint-target jitter is penalized at this weight directly; the G1
+    # head's small per-joint scale amplifies the same physical jitter into the
+    # raw penalty by 1/scale^2 (~4-100x), so 0.1 there ≈ this weight here in
+    # physical terms. Raised to curb the on-hardware shaking clean-sim reward
+    # under-reports (scale 1.0 also makes pal amplify real sensor noise 1:1).
+    w_raw_action_rate: float = 0.3
 
     # Action parameterization. The pal recipe pairs a tanh-squashed
     # policy with scale 1.0 and a (-1, 1) clip (identity rescale); the
@@ -145,7 +151,7 @@ class K1JoystickConfig:
 
     # Training.
     algorithm_name: str = "PPO"
-    max_iterations: int = 10_000
+    max_iterations: int = 30_000
     actor_hidden_dims: tuple = (512, 256, 128)
     run_name: str | None = None
 
@@ -363,11 +369,11 @@ class K1JoystickConfig:
     def _build_command_config(self) -> CommandConfig:
         terms = {
             "velocity": VelocityCommandTermCfg(
-                resampling_time_range=(10.0, 10.0),
+                resampling_time_range=(5.0, 10.0),
                 lin_vel_x_range=self.lin_vel_x_range,
                 lin_vel_y_range=self.lin_vel_y_range,
                 ang_vel_range=self.ang_vel_range,
-                rel_standing_envs=0.1,
+                rel_standing_envs=0.15,
             ),
         }
         if self._uses_gait_phase():
@@ -465,7 +471,7 @@ class K1JoystickConfig:
             )
             trunk_mass_term = EventTermConfig(
                 func=unified_dr.randomize_body_mass,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": trunk,
                     "mass_range": (1.0 - 1.0 / 6.5, 1.0 + 1.0 / 6.5),  # ±1 kg on 6.5 kg
@@ -494,7 +500,7 @@ class K1JoystickConfig:
             )
             trunk_mass_term = EventTermConfig(
                 func=unified_dr.randomize_body_mass,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": trunk,
                     "mass_range": (-1.0, 1.0),
@@ -507,7 +513,7 @@ class K1JoystickConfig:
             "dr_trunk_mass": trunk_mass_term,
             "dr_link_mass": EventTermConfig(
                 func=unified_dr.randomize_body_mass,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": all_bodies,
                     "mass_range": (0.98, 1.02),
@@ -517,7 +523,7 @@ class K1JoystickConfig:
             "dr_joint_friction": joint_friction_term,
             "dr_armature": EventTermConfig(
                 func=unified_dr.randomize_joint_armature,
-                mode="startup",
+                mode="reset_dr",
                 params={
                     "asset_cfg": all_joints,
                     "armature_range": (1.0, 1.05),
@@ -548,7 +554,7 @@ class K1JoystickConfig:
                 mode="reset_dr",
                 params={
                     "asset_cfg": all_joints,
-                    "tau_scale_range": (0.5, 1.0),
+                    "tau_scale_range": (1.0, 1.2),
                     "operation": "scale",
                 },
             ),
@@ -561,24 +567,12 @@ class K1JoystickConfig:
                     "operation": "scale",
                 },
             ),
-            # All-joint kd DR (was ankle-only). dr_ankle_kd runs AFTER this
-            # so ankles get the wider range (both sample from the same
-            # baseline, so the later term wins on the overlapping columns).
             "dr_kd": EventTermConfig(
                 func=unified_dr.randomize_pd_gains,
                 mode="reset_dr",
                 params={
                     "asset_cfg": all_joints,
                     "kd_range": (0.8, 1.25),
-                    "operation": "scale",
-                },
-            ),
-            "dr_ankle_kd": EventTermConfig(
-                func=unified_dr.randomize_pd_gains,
-                mode="reset_dr",
-                params={
-                    "asset_cfg": ankles,
-                    "kd_range": (0.5, 2.0),
                     "operation": "scale",
                 },
             ),
