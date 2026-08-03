@@ -101,7 +101,7 @@ class K1G1RecipeConfig(K1JoystickConfig):
     _STD_WALKING = {
         r".*AAHead_yaw": 0.1,
         r".*Head_pitch": 0.1,
-        r".*_Shoulder_Pitch": 0.15,
+        r".*_Shoulder_Pitch": 0.4,  # loose: allow front-back arm swing while walking
         r".*_Shoulder_Roll": 0.15,
         r".*_Elbow_Pitch": 0.15,
         r".*_Elbow_Yaw": 0.15,
@@ -175,10 +175,10 @@ class K1G1RecipeConfig(K1JoystickConfig):
             )
             body_angular_velocity_penalty = RewardTermConfig(
                 func=rf.body_ang_vel_penalty_mjlab,
-                weight=0.05,
+                weight=0.025,
                 params={"asset_cfg": SceneEntitySelector(name="robot", body_names=(r.trunk_body_name,))},
             )
-            angular_momentum_penalty = RewardTermConfig(func=rf.angular_momentum_penalty, weight=0.02)
+            angular_momentum_penalty = RewardTermConfig(func=rf.angular_momentum_penalty, weight=0.01)
             joint_pos_limits = RewardTermConfig(func=rf.joint_pos_limits_mjlab, weight=1.0)
             raw_action_rate_l2 = RewardTermConfig(func=rf.raw_action_rate_l2_mjlab, weight=0.1)
             feet_clearance = RewardTermConfig(
@@ -270,13 +270,13 @@ class K1G1RecipeConfig(K1JoystickConfig):
             )
             body_angular_velocity_penalty = RewardTermConfig(
                 func=rf.body_angular_velocity_penalty,
-                weight=0.05,
+                weight=0.025,
                 params={"asset_cfg": SceneEntitySelector(name="robot", body_names=(r.trunk_body_name,))},
             )
             # Reads the "robot/root_angmom" sensor injected by K1SpecFn.
             angular_momentum_penalty = RewardTermConfig(
                 func=rf.angular_momentum_penalty,
-                weight=0.02,
+                weight=0.01,
                 params={"sensor_name": "robot/root_angmom"},
             )
             joint_pos_limits = RewardTermConfig(func=rf.joint_pos_limits, weight=1.0)
