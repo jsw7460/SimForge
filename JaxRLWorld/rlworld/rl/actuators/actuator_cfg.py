@@ -44,7 +44,7 @@ class ActuatorBaseCfg:
     stiffness: float | dict[str, float] | None = None
     damping: float | dict[str, float] | None = None
     effort_limit: float | dict[str, float] | None = None
-    velocity_limit: float | None = None
+    velocity_limit: float | dict[str, float] | None = None
     armature: float | dict[str, float] = 0.0
     frictionloss: float = 0.0
 
@@ -84,6 +84,13 @@ class IdealPDActuatorCfg(ActuatorBaseCfg):
     """
 
     tau_scale: float | dict[str, float] | None = None
+
+    # Piecewise-linear torque-speed (T-N) curve. When BOTH ``velocity_limit``
+    # and ``knee_point_velocity`` are set, the deliverable torque is full
+    # ``effort_limit`` for |vel| <= knee_point, then ramps linearly to zero at
+    # ``velocity_limit`` (booster_train BoosterDelayedPDActuator). Same
+    # scalar-or-dict format as ``stiffness``. ``None`` ⇒ plain box clip.
+    knee_point_velocity: float | dict[str, float] | None = None
 
 
 @dataclass

@@ -109,6 +109,8 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> NewtonSceneCon
                             armature=r.armature,
                             effort_limit=r.effort_limits,
                             tau_scale=r.tau_scale,
+                            velocity_limit=r.velocity_limit,
+                            knee_point_velocity=r.knee_point_velocity,
                             frictionloss=0.1,
                             min_delay=cfg.action_delay_min,
                             max_delay=cfg.action_delay_max,
@@ -145,7 +147,9 @@ def build_action(cfg: K1JoystickConfig) -> NewtonActionConfig:
     r = cfg.robot
     return NewtonActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,
-        action_scale=cfg.action_scale,
+        # Physical actuator mode supplies a per-joint action scale (0.25·effort/kp);
+        # it overrides the recipe's scale. legacy mode ⇒ None ⇒ recipe scale.
+        action_scale=(r.physical_action_scale if r.physical_action_scale is not None else cfg.action_scale),
         clip_actions=cfg.action_clip,
         offset=r.get_action_offset(),
     )

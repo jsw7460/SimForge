@@ -56,6 +56,15 @@ class IdealPDActuator(ActuatorBase):
             if bool((self.tau_scale <= 0.0).any()):
                 raise ValueError("tau_scale (kappa) must be > 0 for the tanh actuator model")
 
+        # Optional piecewise-linear torque-speed (T-N) curve: full effort below
+        # knee_point_velocity, ramp to zero at velocity_limit. Active only when
+        # both are set; otherwise the plain box clip is used.
+        self._use_tn = cfg.velocity_limit is not None and cfg.knee_point_velocity is not None
+        if self._use_tn:
+            self._vel_limit = self._resolve_per_joint_param(cfg.velocity_limit, default=float("inf"))
+            self._knee_point = self._resolve_per_joint_param(cfg.knee_point_velocity, default=0.0)
+            self._tn_denom = (self._vel_limit - self._knee_point).clamp(min=1e-6)
+
     def reset(self, env_ids: Sequence[int]) -> None:
         pass
 
@@ -72,8 +81,19 @@ class IdealPDActuator(ActuatorBase):
             effort = self.tau_scale * torch.tanh(self.computed_effort / self.tau_scale)
         else:
             effort = self.computed_effort
-        self.applied_effort = self._clip_effort(effort)
+        if self._use_tn:
+            self.applied_effort = self._clip_effort_tn(effort, joint_vel)
+        else:
+            self.applied_effort = self._clip_effort(effort)
         return self.applied_effort
+
+    def _clip_effort_tn(self, effort: torch.Tensor, joint_vel: torch.Tensor) -> torch.Tensor:
+        """Piecewise-linear torque-speed clip (booster_train T-N curve): the
+        deliverable torque is ``effort_limit`` for ``|vel| <= knee_point``, then
+        ramps linearly to 0 at ``velocity_limit``."""
+        tau_linear = self.effort_limit * (self._vel_limit - joint_vel.abs()) / self._tn_denom
+        max_effort = torch.minimum(tau_linear.clamp(min=0.0), self.effort_limit)
+        return torch.clip(effort, min=-max_effort, max=max_effort)
 
 
 class DelayedPDActuator(IdealPDActuator):
