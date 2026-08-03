@@ -6,10 +6,9 @@ the home keyframe of its companion scene file) so the model matches the
 source:
 
 - PD gains: chosen by ``PD_PROFILE`` (default ``"stiff_legs"`` = arms 15,
-  hip/knee 50, ankle 15, ``kd`` arm 2, leg 5). Also available: the softer
-  ``"mujoco_playground"`` gains (kp 15/25/10, kd 2/3) and the real-robot
-  ``"booster"`` gains (kp 4/80/30, kd 1/2); switch with the ``K1_PD_PROFILE``
-  env var.
+  hip/knee 50, ankle 15, ``kd`` arm 2, leg 5). The ``"stiffer_legs"``
+  profile pushes the legs toward the Booster stiffness (hip/knee 70,
+  ankle 22, leg kd 6); switch with the ``K1_PD_PROFILE`` env var.
 - frictionloss 0.1 uniformly on every joint.
 - armature per joint from the Booster reference model
   ``assets/K1/K1_22dof.xml`` (head 0.002, arm 0.001, legs
@@ -35,36 +34,13 @@ from typing import Dict, List
 from rlworld.rl.configs.robots.base import RobotConfig
 
 # ── PD gain profiles (kp = stiffness, kd = damping) ───────────────────
-# Two coherent gain sets, kept side by side and selected by ``PD_PROFILE``:
-#   "booster"           – Booster SDK deploy gains (booster_deploy's K1_CFG),
-#                         matched to the real K1 actuators. The default.
-#   "mujoco_playground" – the k1_mjx_feetonly.xml sim gains this preset
-#                         originally shipped with. NOT the real-robot gains;
-#                         kept to reproduce older runs.
+# Two coherent gain sets selected by ``PD_PROFILE``. Both keep the softer
+# arms (kp 15, kd 2) and differ only in the legs; kd is scaled with kp so the
+# legs stay well-damped (the Booster SDK's kp-80/kd-2 legs shook badly). The
+# resolved kp/kd are baked into config.yaml per checkpoint.
 _PD_PROFILES: Dict[str, Dict[str, float]] = {
-    "booster": {
-        "stiffness_head": 4.0,
-        "stiffness_arm": 4.0,
-        "stiffness_hip": 80.0,
-        "stiffness_knee": 80.0,
-        "stiffness_ankle": 30.0,
-        "damping_head": 1.0,
-        "damping_arm": 1.0,
-        "damping_leg": 2.0,
-    },
-    "mujoco_playground": {
-        "stiffness_head": 15.0,
-        "stiffness_arm": 15.0,
-        "stiffness_hip": 25.0,
-        "stiffness_knee": 25.0,
-        "stiffness_ankle": 10.0,
-        "damping_head": 2.0,
-        "damping_arm": 2.0,
-        "damping_leg": 3.0,
-    },
-    # Middle ground: mujoco_playground arms, stiffer legs so they hold the
-    # body under load (kp 25 sagged / looked underpowered on the real robot).
-    # kd scaled up with kp to keep it well-damped (avoids the kp-80 shaking).
+    # Default: stiffer, well-damped legs that hold the body under load (kp 25
+    # sagged / looked underpowered on the real robot).
     "stiff_legs": {
         "stiffness_head": 15.0,
         "stiffness_arm": 15.0,
@@ -75,14 +51,25 @@ _PD_PROFILES: Dict[str, Dict[str, float]] = {
         "damping_arm": 2.0,
         "damping_leg": 5.0,
     },
+    # Legs pushed further toward the Booster SDK leg stiffness (hip/knee 80),
+    # but with kd raised to match so they stay well-damped (unlike Booster's
+    # kd 2). Arms unchanged.
+    "stiffer_legs": {
+        "stiffness_head": 15.0,
+        "stiffness_arm": 15.0,
+        "stiffness_hip": 70.0,
+        "stiffness_knee": 70.0,
+        "stiffness_ankle": 22.0,
+        "damping_head": 2.0,
+        "damping_arm": 2.0,
+        "damping_leg": 6.0,
+    },
 }
 
-# Active profile. Defaults to "stiff_legs" (stiffer, well-damped legs that hold
-# the body under load better than the softer mujoco_playground gains). Override
-# per-run with the ``K1_PD_PROFILE`` env var, e.g.
-# ``K1_PD_PROFILE=mujoco_playground`` or ``K1_PD_PROFILE=booster``. The resolved
-# kp/kd are baked into the saved config.yaml, so each checkpoint records the
-# gains it trained with.
+# Active profile. Defaults to "stiff_legs" (stiffer, well-damped legs). Override
+# per-run with the ``K1_PD_PROFILE`` env var, e.g. ``K1_PD_PROFILE=stiffer_legs``.
+# The resolved kp/kd are baked into the saved config.yaml, so each checkpoint
+# records the gains it trained with.
 PD_PROFILE = os.environ.get("K1_PD_PROFILE", "stiff_legs")
 if PD_PROFILE not in _PD_PROFILES:
     raise ValueError(f"K1_PD_PROFILE={PD_PROFILE!r} unknown; choose from {sorted(_PD_PROFILES)}")
