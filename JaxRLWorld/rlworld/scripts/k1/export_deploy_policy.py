@@ -206,23 +206,33 @@ def main() -> None:
 
     # Sidecar metadata for the deploy repo (obs is single-frame, no history).
     canonical = metadata.get("canonical_joint_names") or list(am.actuated_joint_names)
+    # Phase is present only when the dim exceeds the phase-less base (the G1
+    # recipe drops it -> 75-D; pal keeps it -> 79-D).
+    uses_phase = actor_obs_dim > (9 + 3 * num_actions)
+    obs_layout = [
+        "base_ang_vel(3)",
+        "projected_gravity(3)",
+        "velocity_command(3)",
+        f"dof_pos_minus_default({num_actions})",
+        f"dof_vel({num_actions})",
+        f"last_action({num_actions})",
+    ]
+    if uses_phase:
+        obs_layout.append("gait_phase_cos_sin(4)")
     meta = {
         "actor_obs_dim": actor_obs_dim,
         "num_actions": num_actions,
         "squashed_tanh": squashed,
+        "uses_gait_phase": uses_phase,
         "obs_normalizer_baked_in": mean is not None,
         "canonical_joint_names": canonical,
         "sim_type": metadata.get("sim_type"),
         "iteration": metadata.get("iteration"),
-        "obs_layout_after_linvel_removed": [
-            "base_ang_vel(3)",
-            "projected_gravity(3)",
-            "velocity_command(3)",
-            "dof_pos_minus_default(22)",
-            "dof_vel(22)",
-            "last_action(22)",
-            "gait_phase_cos_sin(4)",
-        ],
+        # Provenance: which W&B run this checkpoint came from (None if the run
+        # was not logged to W&B). Lets a .pt be traced back to its training run.
+        "wandb_run_path": metadata.get("wandb_run_path"),
+        "wandb_run_name": metadata.get("wandb_run_name"),
+        "obs_layout": obs_layout,
         "action_pipeline": "target_k = clip(a_k, clip_low_k, clip_high_k) * scale_k + offset_k",
         "action_scale": action_scale,
         "action_clip_low": action_clip_low,
