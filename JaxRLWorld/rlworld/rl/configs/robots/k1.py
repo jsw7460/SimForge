@@ -5,12 +5,13 @@ The kinematics/home keyframe are read verbatim from the MJCF at
 armature, action-scale, torque-speed limits) is picked by the
 ``K1_ACTUATOR_MODE`` env var (see below):
 
-- ``legacy`` (default): the hand-tuned setup. PD gains from ``PD_PROFILE``
+- ``legacy``: the hand-tuned setup. PD gains from ``PD_PROFILE``
   (only ``"stiff_legs"`` = arms 15, hip/knee 50, ankle 15, ``kd`` arm 2,
   leg 5; ``K1_PD_PROFILE`` env var), derated MJCF effort limits
   (``actuatorfrcrange``: hip 30, knee 40, ...), the recipe's own action
-  scale, and plain PD (no torque-speed curve). Reproduces earlier runs.
-- ``physical``: the Booster motor spec the real K1 runs (booster_train
+  scale, and plain PD (no torque-speed curve). Reproduces earlier runs
+  (set ``K1_ACTUATOR_MODE=legacy``).
+- ``physical`` (default): the Booster motor spec the real K1 runs (booster_train
   ``actuator.py``/``booster.py``). Per-joint kp = J·ω_n², kd = 2ζ·J·ω_n,
   the real motor effort rating (2-3× the MJCF: hip 68, knee 112, ...),
   action_scale = 0.25·effort/kp, plus the piecewise-linear torque-speed
@@ -63,9 +64,9 @@ _PD_PROFILES: Dict[str, Dict[str, float]] = {
 }
 
 # Active legacy profile (only ``stiff_legs`` remains). Selected by the
-# ``K1_PD_PROFILE`` env var; used only when ``K1_ACTUATOR_MODE=legacy`` (the
-# default). The resolved kp/kd are baked into the saved config.yaml, so each
-# checkpoint records the gains it trained with.
+# ``K1_PD_PROFILE`` env var; used ONLY when ``K1_ACTUATOR_MODE=legacy`` (the
+# default is now ``physical``). The resolved kp/kd are baked into the saved
+# config.yaml, so each checkpoint records the gains it trained with.
 PD_PROFILE = os.environ.get("K1_PD_PROFILE", "stiff_legs")
 if PD_PROFILE not in _PD_PROFILES:
     raise ValueError(f"K1_PD_PROFILE={PD_PROFILE!r} unknown; choose from {sorted(_PD_PROFILES)}")
@@ -144,8 +145,9 @@ def _pattern_dict(value_by_group: Dict[str, float]) -> Dict[str, float]:
 #   "legacy"   – the hand-tuned setup: PD gains from ``_PD_PROFILES``
 #                (``K1_PD_PROFILE``, default stiff_legs), the derated MJCF
 #                effort limits, per-recipe action_scale, plain PD (no
-#                torque-speed curve). Reproduces earlier runs exactly.
-#   "physical" – the Booster motor spec the REAL K1 runs (booster_train
+#                torque-speed curve). Reproduces earlier runs exactly
+#                (opt in with ``K1_ACTUATOR_MODE=legacy``).
+#   "physical" – DEFAULT. The Booster motor spec the REAL K1 runs (booster_train
 #                actuator.py / booster.py): per-joint kp = J·ω_n²,
 #                kd = 2ζ·J·ω_n, effort = the real motor rating (2-3× the
 #                MJCF), action_scale = 0.25·effort/kp, plus the piecewise-
@@ -183,7 +185,7 @@ def _physical_bundle():
     return kp, kd, ascale, eff, arm, vel, knee
 
 
-K1_ACTUATOR_MODE = os.environ.get("K1_ACTUATOR_MODE", "legacy")
+K1_ACTUATOR_MODE = os.environ.get("K1_ACTUATOR_MODE", "physical")
 if K1_ACTUATOR_MODE not in ("legacy", "physical"):
     raise ValueError(f"K1_ACTUATOR_MODE={K1_ACTUATOR_MODE!r} unknown; choose 'legacy' or 'physical'")
 
