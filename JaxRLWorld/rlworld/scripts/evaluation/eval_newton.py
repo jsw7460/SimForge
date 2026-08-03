@@ -20,7 +20,7 @@ def apply_contact_friction(
     so the ground's friction would otherwise override the foot value.
     """
     import warp as wp
-    from newton.solvers import SolverNotifyFlags
+    from newton import ModelFlags
 
     from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
@@ -43,7 +43,7 @@ def apply_contact_friction(
             shape_mu[env_ids, si] = mu_val
 
     wp.copy(model.shape_material_mu, wp.from_torch(flat_mu, dtype=wp.float32))
-    env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
+    env.scene_manager.solver.notify_model_changed(ModelFlags.SHAPE_PROPERTIES)
 
     # Also set ground/terrain geom friction directly on mjw_model so that
     # max(foot_mu, ground_mu) = foot_mu in the contact pair.

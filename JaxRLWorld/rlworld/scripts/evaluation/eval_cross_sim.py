@@ -83,7 +83,7 @@ def main():
     )
 
     # import warp as wp
-    # from newton.solvers import SolverNotifyFlags
+    # from newton import ModelFlags
     # from rlworld.rl.configs.scene import SceneEntitySelector
     #
     # env = evaluator.env
@@ -98,7 +98,7 @@ def main():
     # shape_mu = flat[:env.num_envs * spe].reshape(env.num_envs, spe)
     # shape_mu[:, resolved.geom_ids] = 0.02
     # wp.copy(model.shape_material_mu, wp.from_torch(flat, dtype=wp.float32))
-    # env.scene_manager.solver.notify_model_changed(SolverNotifyFlags.SHAPE_PROPERTIES)
+    # env.scene_manager.solver.notify_model_changed(ModelFlags.SHAPE_PROPERTIES)
 
     # env = evaluator.env
     # robot = env.scene_manager.scene["robot"]
