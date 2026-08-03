@@ -229,10 +229,10 @@
                   <geom class="visual" mesh="Left_Foot"/>
                   <geom name="left_foot" class="foot"/>
                   <site name="left_foot"/>
-                  <geom name="left_foot_1" class="foot_sphere" pos="0.115 0.035 -0.038"/>
-                  <geom name="left_foot_2" class="foot_sphere" pos="0.115 -0.035 -0.038"/>
-                  <geom name="left_foot_3" class="foot_sphere" pos="-0.063 0.035 -0.038"/>
-                  <geom name="left_foot_4" class="foot_sphere" pos="-0.063 -0.035 -0.038"/>
+                  <geom name="left_foot_1" class="foot_sphere" pos="0.115 0.035 -0.028"/>
+                  <geom name="left_foot_2" class="foot_sphere" pos="0.115 -0.035 -0.028"/>
+                  <geom name="left_foot_3" class="foot_sphere" pos="-0.063 0.035 -0.028"/>
+                  <geom name="left_foot_4" class="foot_sphere" pos="-0.063 -0.035 -0.028"/>
                 </body>
               </body>
             </body>
@@ -270,10 +270,10 @@
                   <geom class="visual" mesh="Right_Foot"/>
                   <geom name="right_foot" class="foot"/>
                   <site name="right_foot"/>
-                  <geom name="right_foot_1" class="foot_sphere" pos="0.115 0.035 -0.038"/>
-                  <geom name="right_foot_2" class="foot_sphere" pos="0.115 -0.035 -0.038"/>
-                  <geom name="right_foot_3" class="foot_sphere" pos="-0.063 0.035 -0.038"/>
-                  <geom name="right_foot_4" class="foot_sphere" pos="-0.063 -0.035 -0.038"/>
+                  <geom name="right_foot_1" class="foot_sphere" pos="0.115 0.035 -0.028"/>
+                  <geom name="right_foot_2" class="foot_sphere" pos="0.115 -0.035 -0.028"/>
+                  <geom name="right_foot_3" class="foot_sphere" pos="-0.063 0.035 -0.028"/>
+                  <geom name="right_foot_4" class="foot_sphere" pos="-0.063 -0.035 -0.028"/>
                 </body>
               </body>
             </body>
