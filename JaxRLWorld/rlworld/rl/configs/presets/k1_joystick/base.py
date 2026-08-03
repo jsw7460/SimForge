@@ -146,7 +146,13 @@ class K1JoystickConfig:
 
     # Sim2real domain randomization knobs (0 disables each; see
     # _build_dr_terms / _build_observation_config / the sim builders).
-    action_delay_max: int = 2  # per-env command delay U[0,N] PHYSICS steps (~N*5ms)
+    # Per-env command delay U[min,max] PHYSICS steps (5 ms each). The
+    # real K1 loop applies commands ~20 ms late (measured by replaying
+    # the real logs with time-shifted actions: +1 control step fits
+    # best), so the band is centered there — 10-30 ms — rather than
+    # including the never-real instant-response regime.
+    action_delay_min: int = 2
+    action_delay_max: int = 6
     obs_delay_max_lag: int = 1  # per-env sensor delay U[0,N] CONTROL steps (~N*20ms)
 
     # Training.

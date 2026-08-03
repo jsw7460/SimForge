@@ -88,7 +88,7 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
                             effort_limit=r.effort_limits,
                             tau_scale=r.tau_scale,
                             frictionloss=0.1,
-                            min_delay=0,
+                            min_delay=cfg.action_delay_min,
                             max_delay=cfg.action_delay_max,
                         ),
                     ),
