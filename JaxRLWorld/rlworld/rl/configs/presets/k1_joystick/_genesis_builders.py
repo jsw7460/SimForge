@@ -137,8 +137,6 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
             # shared across envs and rejects batched writes).
             batch_dofs_info=True,
             contact_pruning_tolerance=None,
-            friction_cone=gs.friction_cone.elliptic,
-            contact_resolution=gs.contact_resolution.signorini,
         ),
     )
 
