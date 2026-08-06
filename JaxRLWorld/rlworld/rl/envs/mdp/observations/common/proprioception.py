@@ -176,6 +176,21 @@ def dof_pos_nominal_difference(env: World, asset_cfg: ResolvedEntity = _DEFAULT_
     return rd.joint_pos - rd.default_joint_pos.unsqueeze(0)
 
 
+def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """:func:`dof_pos_nominal_difference` plus the per-env encoder bias.
+
+    ``(q + encoder_bias) - default_pos`` — the nominal-difference joint obs with
+    a static per-episode encoder miscalibration (``act_manager.encoder_bias``,
+    written by ``randomize_encoder_bias``). Mirrors mjlab's
+    ``joint_pos_rel(biased=True)``. Register in the ACTOR group in place of
+    :func:`dof_pos_nominal_difference` when ``randomize_encoder_bias`` is active;
+    the critic keeps the unbiased version. On the real robot the encoder already
+    reads ``q + bias`` physically, so ``(q + bias) - default`` matches deploy.
+    """
+    rd = env.get_robot_data(asset_cfg.name)
+    return rd.joint_pos + env.act_manager.encoder_bias - rd.default_joint_pos.unsqueeze(0)
+
+
 @EnvStepCache()
 def foot_height(
     env: World,
