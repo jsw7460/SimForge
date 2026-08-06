@@ -33,46 +33,16 @@ Adjust if swings come out too flat or too high.
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass, field
-from typing import Any, Dict
+from dataclasses import dataclass
+from typing import Any
 
 from rlworld.rl.configs.common_config_classes import RewardConfig
 from rlworld.rl.configs.rewards import RewardTermConfig
-from rlworld.rl.configs.robots.k1 import (
-    EFFORT_ANKLE,
-    EFFORT_ELBOW,
-    EFFORT_HEAD,
-    EFFORT_HIP_PITCH,
-    EFFORT_HIP_ROLL,
-    EFFORT_HIP_YAW,
-    EFFORT_KNEE,
-    EFFORT_SHOULDER,
-    STIFFNESS_ANKLE,
-    STIFFNESS_ARM,
-    STIFFNESS_HEAD,
-    STIFFNESS_HIP,
-    STIFFNESS_KNEE,
-    _pattern_dict,
-)
 from rlworld.rl.configs.scene import SceneEntitySelector
 from rlworld.rl.envs.mdp.rewards import k1_locomotion as k1_rf
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
 
 from .base import K1JoystickConfig
-
-# G1 convention: action scale = 0.25 * effort_limit / kp per joint group.
-K1_ACTION_SCALE: Dict[str, float] = _pattern_dict(
-    {
-        "head": 0.25 * EFFORT_HEAD / STIFFNESS_HEAD,
-        "shoulder": 0.25 * EFFORT_SHOULDER / STIFFNESS_ARM,
-        "elbow": 0.25 * EFFORT_ELBOW / STIFFNESS_ARM,
-        "hip_pitch": 0.25 * EFFORT_HIP_PITCH / STIFFNESS_HIP,
-        "hip_roll": 0.25 * EFFORT_HIP_ROLL / STIFFNESS_HIP,
-        "hip_yaw": 0.25 * EFFORT_HIP_YAW / STIFFNESS_HIP,
-        "knee": 0.25 * EFFORT_KNEE / STIFFNESS_KNEE,
-        "ankle": 0.25 * EFFORT_ANKLE / STIFFNESS_ANKLE,
-    }
-)
 
 
 @dataclass
@@ -81,9 +51,21 @@ class K1G1RecipeConfig(K1JoystickConfig):
 
     sim_type: str = "newton"
     action_distribution: str = "gaussian"
-    action_scale: Any = field(default_factory=lambda: dict(K1_ACTION_SCALE))
+    # Placeholder: the sim builders override action_scale with the robot's
+    # physical_action_scale (0.25·effort/kp), so this value is never used.
+    action_scale: Any = 1.0
     action_clip: tuple = (-100.0, 100.0)
     run_name: str | None = None
+
+    # Standing-only capture-point (XCoM) support-margin penalty. Weight <= 0;
+    # set to 0.0 to disable. sigma/margin are the penalty decay length and the
+    # foot-size fattening of the two-feet support segment (see
+    # k1_locomotion.capture_point_support_penalty). Validated inputs:
+    # k1_capture_point_inputs_diag.
+    capture_point_weight: float = -1.0
+    capture_point_sigma: float = 0.10
+    capture_point_margin: float = 0.10
+    capture_point_command_threshold: float = 0.1
     _RUN_NAMES = {
         "newton": "K1_Newton_G1Recipe",
         "mujoco": "K1_Mujoco_G1Recipe",
@@ -164,7 +146,17 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 weight=2.0,
                 params={"std": 0.707, "penalize_xy": True},
             )
-            flat_orientation = RewardTermConfig(func=rf_common.flat_orientation, weight=1.0, params={"std": 0.447})
+            flat_orientation = RewardTermConfig(func=rf_common.flat_orientation, weight=1.0, params={"std": 0.25})
+            capture_point_support = RewardTermConfig(
+                func=k1_rf.capture_point_support_penalty,
+                weight=self.capture_point_weight,
+                params={
+                    "asset_cfg": feet_selector,
+                    "sigma": self.capture_point_sigma,
+                    "margin": self.capture_point_margin,
+                    "command_threshold": self.capture_point_command_threshold,
+                },
+            )
             variable_posture = RewardTermConfig(func=rf.variable_posture, weight=1.0, params=posture_params)
             # G1's self_collision_cost has no signal on the feet-only K1
             # collision model; the foot-pair contact penalty stands in.
@@ -186,16 +178,16 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 weight=2.0,
                 params={
                     "asset_cfg": feet_selector,
-                    "target_height": 0.15,
+                    "target_height": 0.18,
                     "command_threshold": 0.05,
                 },
             )
             feet_swing_height = RewardTermConfig(
                 func=rf.feet_swing_height_mjlab,
-                weight=0.25,
+                weight=0.75,
                 params={
                     "asset_cfg": feet_selector,
-                    "target_height": 0.15,
+                    "target_height": 0.18,
                     "command_threshold": 0.05,
                     "contact_order": feet_contact_order,
                 },
@@ -258,8 +250,18 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 func=rf.flat_orientation,
                 weight=1.0,
                 params={
-                    "std": 0.447,
+                    "std": 0.25,
                     "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.trunk_body_name,)),
+                },
+            )
+            capture_point_support = RewardTermConfig(
+                func=k1_rf.capture_point_support_penalty,
+                weight=self.capture_point_weight,
+                params={
+                    "asset_cfg": feet_selector,
+                    "sigma": self.capture_point_sigma,
+                    "margin": self.capture_point_margin,
+                    "command_threshold": self.capture_point_command_threshold,
                 },
             )
             variable_posture = RewardTermConfig(func=rf.variable_posture, weight=1.0, params=posture_params)
@@ -286,17 +288,17 @@ class K1G1RecipeConfig(K1JoystickConfig):
                 weight=2.0,
                 params={
                     "asset_cfg": feet_selector,
-                    "target_height": 0.15,
+                    "target_height": 0.18,
                     "command_threshold": 0.05,
                 },
             )
             feet_swing_height = RewardTermConfig(
                 func=rf.feet_swing_height,
-                weight=0.25,
+                weight=0.75,
                 params={
                     "contact_group": "feet_ground_contact",
                     "asset_cfg": feet_selector,
-                    "target_height": 0.15,
+                    "target_height": 0.18,
                     "command_threshold": 0.05,
                     "contact_order": feet_contact_order,
                 },

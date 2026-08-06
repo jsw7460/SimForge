@@ -397,6 +397,74 @@ def contact_pair_penalty(env: World, contact_group: str) -> torch.Tensor:
     return env.contact_manager.is_contact(contact_group).any(dim=1).float()
 
 
+def _point_segment_distance_xy(p: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Distance from point ``p`` to segment ``[a, b]`` in the xy plane.
+
+    All inputs ``(N, 2)``; returns ``(N,)``. Used as the biped double-support
+    approximation: the support polygon is the segment between the two feet,
+    fattened by a foot-size ``margin`` in :func:`capture_point_support_penalty`.
+    """
+    ab = b - a
+    ap = p - a
+    t = (ap * ab).sum(dim=1) / (ab * ab).sum(dim=1).clamp(min=1e-9)
+    proj = a + t.clamp(0.0, 1.0).unsqueeze(1) * ab
+    return (p - proj).norm(dim=1)
+
+
+def capture_point_support_penalty(
+    env: World,
+    sigma: float = 0.10,
+    margin: float = 0.10,
+    command_threshold: float = 0.1,
+    command_term: str = "velocity",
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    r"""Standing-only penalty for the capture point leaving the support polygon.
+
+    The **capture point** (a.k.a. XCoM / extrapolated CoM) is the ground point
+    the robot is heading toward given its momentum, under the linear
+    inverted-pendulum model:
+
+    .. math::
+
+        \xi_{xy} = c_{xy} + \dot{c}_{xy} / \omega_0, \quad
+        \omega_0 = \sqrt{g / h}
+
+    with :math:`c` the CoM (proxied by ``root_com_pos_w`` — validated within
+    ~2 cm of the true CoM at standing), :math:`\dot c` its world-frame velocity,
+    and :math:`h` the CoM height above the feet. If :math:`\xi` lies inside the
+    support polygon the robot can stop with ankle torque alone; outside, it must
+    step or fall. Because a push changes velocity first, :math:`\xi` leaves the
+    support the instant balance is threatened — an earlier signal than the CoM
+    position, which is exactly what pushes the policy to correct promptly.
+
+    The support polygon is approximated by the segment between the two feet
+    fattened by ``margin`` (foot half-extent). The penalty is the smooth
+    outside-distance cost ``1 - exp(-d_out^2 / sigma^2)``, gated to the standing
+    regime (command norm < ``command_threshold``) so it never fights locomotion
+    or the stepping recovery that is the correct response to a large push.
+
+    Returns a per-env cost in ``[0, 1]`` (0 = :math:`\xi` within the support);
+    configure the term with a **negative** weight.
+    """
+    data = env.get_robot_data(asset_cfg.name)
+    feet = data.body_pos_w_by_ids(asset_cfg.body_ids)  # (N, 2, 3): [left, right]
+    a_xy, b_xy = feet[:, 0, :2], feet[:, 1, :2]
+
+    com = data.root_com_pos_w
+    com_vel_xy = data.root_com_lin_vel_w[:, :2]
+    h = (com[:, 2] - feet[..., 2].mean(dim=1)).clamp(min=0.15)
+    omega0 = (9.81 / h).sqrt()  # (N,)
+    xi = com[:, :2] + com_vel_xy / omega0.unsqueeze(1)
+
+    d_out = (_point_segment_distance_xy(xi, a_xy, b_xy) - margin).clamp(min=0.0)
+    cost = 1.0 - torch.exp(-(d_out * d_out) / (sigma * sigma))
+
+    cmd_norm = env.command_manager.get_term(command_term).command.norm(dim=1)
+    standing = (cmd_norm < command_threshold).float()
+    return standing * cost
+
+
 # ── Pose ──────────────────────────────────────────────────────────────
 
 
