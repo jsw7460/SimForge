@@ -56,6 +56,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_height,
     base_lin_vel,
     dof_pos_nominal_difference,
+    dof_pos_nominal_difference_biased,
     dof_vel,
     projected_gravity,
     raw_actions,
@@ -99,7 +100,7 @@ class K1JoystickConfig:
 
     # Commands (resampled every 10 s; 10% standing envs).
     lin_vel_x_range: tuple = (-1.0, 1.0)
-    lin_vel_y_range: tuple = (-0.8, 0.8)
+    lin_vel_y_range: tuple = (-1.0, 1.0)
     ang_vel_range: tuple = (-1.0, 1.0)
 
     # Push events.
@@ -211,9 +212,9 @@ class K1JoystickConfig:
     # with upstream's uniform noise scales. No obs scaling (scale=1.0
     # everywhere) — upstream normalizes via the running normalizer only.
     #
-    # Critic = the same 82-D block (noise: independent draw) + the
-    # noiseless privileged extras in upstream order (accelerometer
-    # omitted — see module docstring).
+    # Critic = the same block but CLEAN (no obs noise / no encoder bias — the
+    # privileged value function sees true state) + the noiseless privileged
+    # extras in upstream order (accelerometer omitted — see module docstring).
 
     def _uses_gait_phase(self) -> bool:
         """Whether the gait-phase clock feeds observations / command.
@@ -240,8 +241,11 @@ class K1JoystickConfig:
             gyro = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2), **_sd)
             gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05), **_sd)
             command = ObservationTermConfig(func=k1_obs.velocity_command, scale=1.0)
+            # Biased: (q + per-episode encoder_bias) - default. The bias is
+            # written by the dr_encoder_bias event; the critic keeps the
+            # unbiased dof_pos_nominal_difference below.
             joint_pos = ObservationTermConfig(
-                func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03), **_sd
+                func=dof_pos_nominal_difference_biased, scale=1.0, noise=Unoise(-0.03, 0.03), **_sd
             )
             joint_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5), **_sd)
             last_action = ObservationTermConfig(func=raw_actions, scale=1.0)
@@ -253,12 +257,15 @@ class K1JoystickConfig:
         # BEFORE the shared 82-D block and scramble the upstream layout.
         @dataclass
         class _CriticObsCfg(ObservationGroupConfig):
-            lin_vel = ObservationTermConfig(func=base_lin_vel, scale=1.0, noise=Unoise(-0.1, 0.1))
-            gyro = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
-            gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+            # Critic sees CLEAN state (no obs noise / no encoder bias) — the
+            # privileged value function does not benefit from the actor's sensor
+            # corruption. Deploy is unaffected (critic is training-only).
+            lin_vel = ObservationTermConfig(func=base_lin_vel, scale=1.0)
+            gyro = ObservationTermConfig(func=base_ang_vel, scale=1.0)
+            gravity = ObservationTermConfig(func=projected_gravity, scale=1.0)
             command = ObservationTermConfig(func=k1_obs.velocity_command, scale=1.0)
-            joint_pos = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0, noise=Unoise(-0.03, 0.03))
-            joint_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+            joint_pos = ObservationTermConfig(func=dof_pos_nominal_difference, scale=1.0)
+            joint_vel = ObservationTermConfig(func=dof_vel, scale=1.0)
             last_action = ObservationTermConfig(func=raw_actions, scale=1.0)
             if _use_phase:
                 phase = ObservationTermConfig(func=k1_obs.gait_phase_encoding, scale=1.0)
@@ -527,9 +534,15 @@ class K1JoystickConfig:
                 },
             ),
             "dr_joint_friction": joint_friction_term,
+            # STARTUP (fixed per-env), NOT reset_dr: on Genesis changing armature
+            # forces _init_invweight_and_meaninertia + a qpos re-set (collider/
+            # constraint reset) — a legitimate but ~220 ms mass-inertia recompute.
+            # At reset_dr that fires every episode and made Genesis ~8x slower than
+            # mujoco (k1_step_speed_diag / k1_genesis_reset_decompose_diag). Sampled
+            # once from the captured baseline, so per-env armature still varies.
             "dr_armature": EventTermConfig(
                 func=unified_dr.randomize_joint_armature,
-                mode="reset_dr",
+                mode="startup",
                 params={
                     "asset_cfg": all_joints,
                     "armature_range": (1.0, 1.05),
@@ -549,6 +562,18 @@ class K1JoystickConfig:
                     "asset_cfg": all_joints,
                     "damping_range": (0.0, 1.0),
                     "operation": "abs",
+                },
+            ),
+            # Joint encoder bias: a static per-episode, per-joint measurement
+            # offset written to act_manager._encoder_bias and consumed by the
+            # actor's dof_pos_nominal_difference_biased obs (critic stays
+            # unbiased). reset_dr → a fresh bias each episode. ±0.03 rad ≈ 1.7°.
+            "dr_encoder_bias": EventTermConfig(
+                func=unified_dr.randomize_encoder_bias,
+                mode="reset_dr",
+                params={
+                    "asset_cfg": all_joints,
+                    "bias_range": (-0.03, 0.03),
                 },
             ),
             "dr_kp": EventTermConfig(
@@ -580,8 +605,8 @@ class K1JoystickConfig:
             algorithm_name=self.algorithm_name,
             clip_param=0.2,
             obs_normalization=True,
-            entropy_coef=0.005,
-            gamma=0.97,
+            entropy_coef=0.01,
+            gamma=0.99,
             lam=0.95,
             actor_lr=3e-4,
             critic_lr=3e-4,
