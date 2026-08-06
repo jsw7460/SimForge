@@ -92,6 +92,28 @@ class IdealPDActuatorCfg(ActuatorBaseCfg):
     # scalar-or-dict format as ``stiffness``. ``None`` ⇒ plain box clip.
     knee_point_velocity: float | dict[str, float] | None = None
 
+    # First-order lag on the output torque: tau_out follows the PD torque
+    # with time constant ``tau_lpf_time_constant`` [s], discretized with
+    # ``physics_dt``. Models the motor/current-loop torque bandwidth the
+    # real-robot logs show on the hips: slow (static) commands pass with
+    # gain 1, walking-frequency content is attenuated. ``None`` disables;
+    # 0.0 is an exact passthrough with the per-env buffer allocated (so
+    # the value stays runtime-writable for DR / identification). Same
+    # scalar-or-dict format as ``stiffness``.
+    tau_lpf_time_constant: float | dict[str, float] | None = None
+    physics_dt: float = 0.005
+
+    # Velocity-gated transmission efficiency:
+    #   tau_out *= 1 - (1 - dyn_gain) * tanh(|vel| / dyn_gain_velocity).
+    # Models gear losses that vanish at standstill (full static torque)
+    # but scale in during motion, as the real-robot knee logs show:
+    # |vel| >> dyn_gain_velocity delivers only ``dyn_gain`` of the
+    # commanded torque. ``None`` disables; 1.0 is an exact passthrough
+    # with the buffer allocated. Same scalar-or-dict format as
+    # ``stiffness``.
+    dyn_gain: float | dict[str, float] | None = None
+    dyn_gain_velocity: float | dict[str, float] | None = None
+
 
 @dataclass
 class DelayedPDActuatorCfg(IdealPDActuatorCfg):

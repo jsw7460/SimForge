@@ -65,8 +65,32 @@ class IdealPDActuator(ActuatorBase):
             self._knee_point = self._resolve_per_joint_param(cfg.knee_point_velocity, default=0.0)
             self._tn_denom = (self._vel_limit - self._knee_point).clamp(min=1e-6)
 
+        # Optional first-order torque lag (motor/current-loop bandwidth).
+        # tau_lpf_tc == 0 is an exact passthrough; the buffer stays
+        # runtime-writable per env/joint for DR and identification.
+        self._use_lpf = cfg.tau_lpf_time_constant is not None
+        if self._use_lpf:
+            self.tau_lpf_tc = self._resolve_per_joint_param(cfg.tau_lpf_time_constant, default=0.0)
+            if bool((self.tau_lpf_tc < 0.0).any()):
+                raise ValueError("tau_lpf_time_constant must be >= 0")
+            self._lpf_dt = float(cfg.physics_dt)
+            self._lpf_state = torch.zeros(num_envs, num_joints, device=device)
+
+        # Optional velocity-gated transmission efficiency (full static
+        # torque, ``dyn_gain`` fraction during motion). dyn_gain == 1 is an
+        # exact passthrough with the buffers allocated.
+        self._use_dyn_gain = cfg.dyn_gain is not None and cfg.dyn_gain_velocity is not None
+        if self._use_dyn_gain:
+            self.dyn_gain = self._resolve_per_joint_param(cfg.dyn_gain, default=1.0)
+            self.dyn_gain_velocity = self._resolve_per_joint_param(cfg.dyn_gain_velocity, default=0.5)
+            if bool((self.dyn_gain <= 0.0).any()) or bool((self.dyn_gain_velocity <= 0.0).any()):
+                raise ValueError("dyn_gain and dyn_gain_velocity must be > 0")
+
     def reset(self, env_ids: Sequence[int]) -> None:
-        pass
+        # A stale lag state would inject a phantom torque transient on
+        # the first post-reset step.
+        if self._use_lpf and len(env_ids) > 0:
+            self._lpf_state[env_ids] = 0.0
 
     def compute(
         self,
@@ -81,6 +105,15 @@ class IdealPDActuator(ActuatorBase):
             effort = self.tau_scale * torch.tanh(self.computed_effort / self.tau_scale)
         else:
             effort = self.computed_effort
+        # Motor-side torque bandwidth (first-order lag), then the
+        # velocity-gated transmission efficiency downstream of it.
+        if self._use_lpf:
+            alpha = self._lpf_dt / (self.tau_lpf_tc + self._lpf_dt)
+            self._lpf_state = self._lpf_state + alpha * (effort - self._lpf_state)
+            effort = self._lpf_state
+        if self._use_dyn_gain:
+            gate = 1.0 - (1.0 - self.dyn_gain) * torch.tanh(joint_vel.abs() / self.dyn_gain_velocity)
+            effort = effort * gate
         if self._use_tn:
             self.applied_effort = self._clip_effort_tn(effort, joint_vel)
         else:

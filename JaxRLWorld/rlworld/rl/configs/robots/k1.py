@@ -1,33 +1,20 @@
 """Booster K1 humanoid robot configuration (22 actuated DOF).
 
 The kinematics/home keyframe are read verbatim from the MJCF at
-``assets/K1/k1_mjx_feetonly.xml``. The actuator bundle (PD gains, effort,
-armature, action-scale, torque-speed limits) is picked by the
-``K1_ACTUATOR_MODE`` env var (see below):
-
-- ``legacy``: the hand-tuned setup. PD gains from ``PD_PROFILE``
-  (only ``"stiff_legs"`` = arms 15, hip/knee 50, ankle 15, ``kd`` arm 2,
-  leg 5; ``K1_PD_PROFILE`` env var), derated MJCF effort limits
-  (``actuatorfrcrange``: hip 30, knee 40, ...), the recipe's own action
-  scale, and plain PD (no torque-speed curve). Reproduces earlier runs
-  (set ``K1_ACTUATOR_MODE=legacy``).
-- ``physical`` (default): the Booster motor spec the real K1 runs (booster_train
-  ``actuator.py``/``booster.py``). Per-joint kp = J·ω_n², kd = 2ζ·J·ω_n,
-  the real motor effort rating (2-3× the MJCF: hip 68, knee 112, ...),
-  action_scale = 0.25·effort/kp, plus the piecewise-linear torque-speed
-  curve (``velocity_limit``/``knee_point_velocity``). Legs run at
-  ω_n = 4 Hz (knee ζ=1, other legs ζ=1.5), arms/head at 10 Hz / ζ=2.
-
-Shared by both modes:
+``assets/K1/k1_mjx_feetonly.xml``. The actuator bundle is the Booster motor
+spec the real K1 runs (booster_train ``actuator.py``/``booster.py``): per-joint
+kp = J·ω_n², kd = 2ζ·J·ω_n, the real motor effort rating (hip 68, knee 112,
+...), action_scale = 0.25·effort/kp, plus the piecewise-linear torque-speed
+curve (``velocity_limit``/``knee_point_velocity``). Legs run at ω_n = 4 Hz
+(knee ζ=1, other legs ζ=1.5), arms/head at 10 Hz / ζ=2.
 
 - frictionloss 0.1 uniformly on every joint.
 - armature per joint from the Booster reference model
-  ``assets/K1/K1_22dof.xml`` (head 0.002, arm 0.001, legs
-  0.028-0.096; legacy and physical use the same values).  The feetonly
-  MJCF flattens all of these to a uniform 0.005, which understates the
-  leg reflected rotor inertia by roughly an order of magnitude; the
-  actuator configs override the XML value on every backend, so the
-  reference values win at runtime.
+  ``assets/K1/K1_22dof.xml`` (head 0.002, arm 0.001, legs 0.028-0.096). The
+  feetonly MJCF flattens all of these to a uniform 0.005, which understates the
+  leg reflected rotor inertia by roughly an order of magnitude; the actuator
+  configs override the XML value on every backend, so the reference values win
+  at runtime.
 
 Joint-name convention is the Booster family one (same as T1):
 ``AAHead_yaw``/``Head_pitch``, ``A{Left,Right}_Shoulder_Pitch``,
@@ -37,71 +24,10 @@ K1 has no waist joint.
 """
 
 import math
-import os
 from dataclasses import dataclass, field
 from typing import Dict, List
 
 from rlworld.rl.configs.robots.base import RobotConfig
-
-# ── PD gain profiles (kp = stiffness, kd = damping) ───────────────────
-# Two coherent gain sets selected by ``PD_PROFILE``. Both keep the softer
-# arms (kp 15, kd 2) and differ only in the legs; kd is scaled with kp so the
-# legs stay well-damped (the Booster SDK's kp-80/kd-2 legs shook badly). The
-# resolved kp/kd are baked into config.yaml per checkpoint.
-_PD_PROFILES: Dict[str, Dict[str, float]] = {
-    # Default: stiffer, well-damped legs that hold the body under load (kp 25
-    # sagged / looked underpowered on the real robot).
-    "stiff_legs": {
-        "stiffness_head": 15.0,
-        "stiffness_arm": 15.0,
-        "stiffness_hip": 50.0,
-        "stiffness_knee": 50.0,
-        "stiffness_ankle": 15.0,
-        "damping_head": 2.0,
-        "damping_arm": 2.0,
-        "damping_leg": 5.0,
-    },
-}
-
-# Active legacy profile (only ``stiff_legs`` remains). Selected by the
-# ``K1_PD_PROFILE`` env var; used ONLY when ``K1_ACTUATOR_MODE=legacy`` (the
-# default is now ``physical``). The resolved kp/kd are baked into the saved
-# config.yaml, so each checkpoint records the gains it trained with.
-PD_PROFILE = os.environ.get("K1_PD_PROFILE", "stiff_legs")
-if PD_PROFILE not in _PD_PROFILES:
-    raise ValueError(f"K1_PD_PROFILE={PD_PROFILE!r} unknown; choose from {sorted(_PD_PROFILES)}")
-_pd = _PD_PROFILES[PD_PROFILE]
-
-STIFFNESS_HEAD = _pd["stiffness_head"]
-STIFFNESS_ARM = _pd["stiffness_arm"]
-STIFFNESS_HIP = _pd["stiffness_hip"]
-STIFFNESS_KNEE = _pd["stiffness_knee"]
-STIFFNESS_ANKLE = _pd["stiffness_ankle"]
-DAMPING_HEAD = _pd["damping_head"]
-DAMPING_ARM = _pd["damping_arm"]
-DAMPING_LEG = _pd["damping_leg"]
-
-# Armature (reflected rotor inertia) per joint group, read from the
-# Booster reference model ``assets/K1/K1_22dof.xml``.  These override
-# the feetonly MJCF's flattened uniform 0.005 (see module docstring).
-ARMATURE_HEAD = 0.002
-ARMATURE_ARM = 0.001
-ARMATURE_HIP_PITCH = 0.0478125
-ARMATURE_HIP_ROLL = 0.0339552
-ARMATURE_HIP_YAW = 0.0282528
-ARMATURE_KNEE = 0.095625
-ARMATURE_ANKLE = 0.0565
-
-# ``actuatorfrcrange`` magnitudes per class.
-EFFORT_HEAD = 6.0
-EFFORT_SHOULDER = 14.0
-EFFORT_ELBOW = 14.0
-EFFORT_HIP_PITCH = 30.0
-EFFORT_HIP_ROLL = 35.0
-EFFORT_HIP_YAW = 20.0
-EFFORT_KNEE = 40.0
-EFFORT_ANKLE = 20.0
-
 
 # ── Joint-group regexes ───────────────────────────────────────────────
 # Patterns are fullmatch'd against fully-qualified joint labels on each
@@ -138,23 +64,14 @@ def _pattern_dict(value_by_group: Dict[str, float]) -> Dict[str, float]:
     return out
 
 
-# ── Actuator mode ─────────────────────────────────────────────────────
-# ``K1_ACTUATOR_MODE`` toggles the whole actuator bundle (kp/kd, effort,
-# action_scale, armature, torque-speed limits):
-#
-#   "legacy"   – the hand-tuned setup: PD gains from ``_PD_PROFILES``
-#                (``K1_PD_PROFILE``, default stiff_legs), the derated MJCF
-#                effort limits, per-recipe action_scale, plain PD (no
-#                torque-speed curve). Reproduces earlier runs exactly
-#                (opt in with ``K1_ACTUATOR_MODE=legacy``).
-#   "physical" – DEFAULT. The Booster motor spec the REAL K1 runs (booster_train
-#                actuator.py / booster.py): per-joint kp = J·ω_n²,
-#                kd = 2ζ·J·ω_n, effort = the real motor rating (2-3× the
-#                MJCF), action_scale = 0.25·effort/kp, plus the piecewise-
-#                linear torque-speed curve (velocity_limit / knee point).
-#                Legs run at ω_n = 4 Hz (knee ζ=1, others ζ=1.5); arms/head
-#                at the 10 Hz / ζ=2 class default. Overrides the recipe's
-#                action_scale.
+# ── Actuator bundle (Booster physical motor spec) ─────────────────────
+# The whole actuator bundle (kp/kd, effort, action_scale, armature, torque-
+# speed limits) comes from the Booster motor spec the REAL K1 runs
+# (booster_train actuator.py / booster.py): per-joint kp = J·ω_n²,
+# kd = 2ζ·J·ω_n, effort = the real motor rating, action_scale = 0.25·effort/kp,
+# plus the piecewise-linear torque-speed curve (velocity_limit / knee point).
+# Legs run at ω_n = 4 Hz (knee ζ=1, others ζ=1.5); arms/head at 10 Hz / ζ=2.
+# The action_scale overrides the recipe's own scale in the sim builders.
 #
 # Per-group Booster motor specs (armature[kg·m²], effort[N·m], velocity_limit
 # [rad/s], knee_point_velocity[rad/s], natural_freq[Hz], damping_ratio):
@@ -185,71 +102,14 @@ def _physical_bundle():
     return kp, kd, ascale, eff, arm, vel, knee
 
 
-K1_ACTUATOR_MODE = os.environ.get("K1_ACTUATOR_MODE", "physical")
-if K1_ACTUATOR_MODE not in ("legacy", "physical"):
-    raise ValueError(f"K1_ACTUATOR_MODE={K1_ACTUATOR_MODE!r} unknown; choose 'legacy' or 'physical'")
-
-if K1_ACTUATOR_MODE == "physical":
-    _kp, _kd, _ascale, _eff, _arm, _vel, _knee = _physical_bundle()
-    _P_GAINS = _pattern_dict(_kp)
-    _D_GAINS = _pattern_dict(_kd)
-    _ARMATURE = _pattern_dict(_arm)
-    _EFFORT = _pattern_dict(_eff)
-    _ACTION_SCALE = _pattern_dict(_ascale)
-    _VELOCITY_LIMIT = _pattern_dict(_vel)
-    _KNEE_POINT = _pattern_dict(_knee)
-else:  # legacy
-    _P_GAINS = _pattern_dict(
-        {
-            "head": STIFFNESS_HEAD,
-            "shoulder": STIFFNESS_ARM,
-            "elbow": STIFFNESS_ARM,
-            "hip_pitch": STIFFNESS_HIP,
-            "hip_roll": STIFFNESS_HIP,
-            "hip_yaw": STIFFNESS_HIP,
-            "knee": STIFFNESS_KNEE,
-            "ankle": STIFFNESS_ANKLE,
-        }
-    )
-    _D_GAINS = _pattern_dict(
-        {
-            "head": DAMPING_HEAD,
-            "shoulder": DAMPING_ARM,
-            "elbow": DAMPING_ARM,
-            "hip_pitch": DAMPING_LEG,
-            "hip_roll": DAMPING_LEG,
-            "hip_yaw": DAMPING_LEG,
-            "knee": DAMPING_LEG,
-            "ankle": DAMPING_LEG,
-        }
-    )
-    _ARMATURE = _pattern_dict(
-        {
-            "head": ARMATURE_HEAD,
-            "shoulder": ARMATURE_ARM,
-            "elbow": ARMATURE_ARM,
-            "hip_pitch": ARMATURE_HIP_PITCH,
-            "hip_roll": ARMATURE_HIP_ROLL,
-            "hip_yaw": ARMATURE_HIP_YAW,
-            "knee": ARMATURE_KNEE,
-            "ankle": ARMATURE_ANKLE,
-        }
-    )
-    _EFFORT = _pattern_dict(
-        {
-            "head": EFFORT_HEAD,
-            "shoulder": EFFORT_SHOULDER,
-            "elbow": EFFORT_ELBOW,
-            "hip_pitch": EFFORT_HIP_PITCH,
-            "hip_roll": EFFORT_HIP_ROLL,
-            "hip_yaw": EFFORT_HIP_YAW,
-            "knee": EFFORT_KNEE,
-            "ankle": EFFORT_ANKLE,
-        }
-    )
-    _ACTION_SCALE = None  # legacy: recipe decides the action scale
-    _VELOCITY_LIMIT = None  # legacy: no torque-speed curve (plain PD)
-    _KNEE_POINT = None
+_kp, _kd, _ascale, _eff, _arm, _vel, _knee = _physical_bundle()
+_P_GAINS = _pattern_dict(_kp)
+_D_GAINS = _pattern_dict(_kd)
+_ARMATURE = _pattern_dict(_arm)
+_EFFORT = _pattern_dict(_eff)
+_ACTION_SCALE = _pattern_dict(_ascale)
+_VELOCITY_LIMIT = _pattern_dict(_vel)
+_KNEE_POINT = _pattern_dict(_knee)
 
 
 @dataclass
@@ -293,8 +153,7 @@ class K1Config(RobotConfig):
     )
 
     # PD gains, effort, armature, action-scale and torque-speed limits all come
-    # from the resolved actuator bundle (``K1_ACTUATOR_MODE`` above): the
-    # hand-tuned legacy set or the Booster physical motor spec.
+    # from the Booster physical motor spec (``_physical_bundle`` above).
     p_gains: Dict[str, float] = field(default_factory=lambda: dict(_P_GAINS))
     d_gains: Dict[str, float] = field(default_factory=lambda: dict(_D_GAINS))
 
@@ -305,21 +164,15 @@ class K1Config(RobotConfig):
     # Per-joint motor saturation torques [N*m].
     effort_limits: Dict[str, float] = field(default_factory=lambda: dict(_EFFORT))
 
-    # Torque-speed curve (physical mode only; ``None`` ⇒ plain PD hard clip).
-    # When set, the actuator delivers full effort up to ``knee_point_velocity``,
-    # then ramps linearly to zero at ``velocity_limit`` (booster_train T-N curve).
-    velocity_limit: Dict[str, float] | None = field(
-        default_factory=lambda: dict(_VELOCITY_LIMIT) if _VELOCITY_LIMIT is not None else None
-    )
-    knee_point_velocity: Dict[str, float] | None = field(
-        default_factory=lambda: dict(_KNEE_POINT) if _KNEE_POINT is not None else None
-    )
+    # Piecewise-linear torque-speed (T-N) curve: full effort up to
+    # ``knee_point_velocity``, then ramp linearly to zero at ``velocity_limit``
+    # (booster_train T-N curve).
+    velocity_limit: Dict[str, float] = field(default_factory=lambda: dict(_VELOCITY_LIMIT))
+    knee_point_velocity: Dict[str, float] = field(default_factory=lambda: dict(_KNEE_POINT))
 
-    # Physical action scale (0.25·effort/kp). Physical mode only; ``None`` ⇒ the
-    # recipe's own action_scale is used. Builders prefer this when set.
-    physical_action_scale: Dict[str, float] | None = field(
-        default_factory=lambda: dict(_ACTION_SCALE) if _ACTION_SCALE is not None else None
-    )
+    # Per-joint action scale (0.25·effort/kp); the sim builders use this over the
+    # recipe's own action_scale.
+    physical_action_scale: Dict[str, float] = field(default_factory=lambda: dict(_ACTION_SCALE))
 
     # Actuator saturation scale kappa for the tanh torque model
     # ``tau_motor = kappa * tanh(tau_PD / kappa)``. DISABLED for K1 (``None`` ⇒
@@ -329,6 +182,17 @@ class K1Config(RobotConfig):
     # the saturation/DR diags); to re-enable, set this to a per-group dict like
     # ``effort_limits`` and add a ``dr_tau_scale`` event term back.
     tau_scale: Dict[str, float] | None = None
+
+    # First-order torque lag [s] and velocity-gated transmission
+    # efficiency — the two dynamic-delivery deficits the real-robot logs
+    # show (hip: ~20-40 ms torque bandwidth; knee: full static torque
+    # but only a fraction delivered during motion). Defaults are ACTIVE
+    # but NEUTRAL (tc=0 -> exact passthrough, gain=1 -> exact
+    # passthrough) so behavior is unchanged while the per-env actuator
+    # buffers exist for identification / DR to write.
+    tau_lpf_time_constant: float = 0.0
+    dyn_gain: float = 1.0
+    dyn_gain_velocity: float = 0.5
 
     # Foot bodies (ankle-roll links carrying the foot geoms/sites).
     foot_names: List[str] = field(default_factory=lambda: ["left_foot_link", "right_foot_link"])
