@@ -110,6 +110,13 @@ class K1JoystickConfig:
     push_interval_range_s: tuple = (5.0, 10.0)
     push_magnitude_range: tuple = (0.1, 1.0)
 
+    # Domain-randomization cadence. When set, the per-episode reset_dr DR terms
+    # (friction / mass / gains / damping / encoder-bias) instead re-sample
+    # together on ONE global timer every this many seconds (all envs at once,
+    # a single recompute per period) — see _build_dr_terms. None keeps per-reset
+    # DR. Validated by k1_interval_dr_prototype_diag.
+    dr_interval_period_s: float | None = None
+
     # Rewards (upstream reward_config; zero-weight terms omitted).
     tracking_sigma: float = 0.25
     max_foot_height: float = 0.15  # feet_phase bezier swing peak (foot-link z); ~0.11 m sole
@@ -524,7 +531,7 @@ class K1JoystickConfig:
                 },
             )
 
-        return {
+        terms: Dict[str, EventTermConfig] = {
             "dr_friction": friction_term,
             "dr_trunk_mass": trunk_mass_term,
             "dr_link_mass": EventTermConfig(
@@ -598,6 +605,18 @@ class K1JoystickConfig:
                 },
             ),
         }
+        # Move per-episode reset_dr DR onto a single global interval when a period
+        # is configured: all reset_dr terms then re-sample together every
+        # dr_interval_period_s seconds for all envs (one recompute per period)
+        # instead of once per reset — cuts the reset-path recompute cost
+        # (mujoco/newton) while still varying DR over time. Genesis armature stays
+        # startup regardless. Validated by k1_interval_dr_prototype_diag.
+        if self.dr_interval_period_s is not None:
+            for _term in terms.values():
+                if _term.mode == "reset_dr":
+                    _term.mode = "interval_dr"
+                    _term.interval_dr_period_s = self.dr_interval_period_s
+        return terms
 
     # ── Training configs ──────────────────────────────────────────────
 

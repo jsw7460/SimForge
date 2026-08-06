@@ -68,6 +68,34 @@ def _newton_notify(env: World, flag) -> None:
         env._dr_pending_notify_flags = pending | flag_int
 
 
+# Sentinel: distinguishes "not inside a reset_dr batch" (immediate recompute)
+# from "inside a batch, no recompute requested yet" (pending is None).
+_MUJOCO_NO_BATCH = object()
+
+
+def _mujoco_recompute(env: World, sim, level) -> None:
+    """Recompute derived MuJoCo constants after a DR write (MuJoCo-only).
+
+    ``sim.recompute_constants`` is model-GLOBAL and its most expensive level
+    (``set_const``, needed for body_mass) dominates the reset path when several
+    DR terms fire per reset — K1 has 2-3 body_mass terms + body_com, each of
+    which would otherwise trigger its own full set_const. During a ``reset_dr``
+    batch the event manager sets ``env._dr_pending_recompute_level``; we then
+    keep only the MAX level (``RecomputeLevel`` is an ordered IntEnum whose
+    higher levels recompute a superset of the lower), and the manager flushes a
+    SINGLE recompute after all terms run. Outside that context the call is
+    immediate, so nothing changes for non-batched callers. Mirrors the deferred
+    pattern in :func:`_newton_notify`.
+    """
+    pending = getattr(env, "_dr_pending_recompute_level", _MUJOCO_NO_BATCH)
+    if pending is _MUJOCO_NO_BATCH:
+        sim.recompute_constants(level)
+    elif pending is None:
+        env._dr_pending_recompute_level = level
+    else:
+        env._dr_pending_recompute_level = max(pending, level)
+
+
 # Newton stores the three friction axes (slide / torsional / rolling)
 # as separate per-shape float arrays.  The MuJoCo solver bridge inside
 # Newton repacks them into ``geom_friction[world, geom]`` whenever
@@ -489,8 +517,8 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
     )
     # mjlab's EventManager runs this after firing mass DR (derived inertial
     # constants like invweights go stale otherwise); we call the term
-    # directly, so recompute here.
-    adapter.sim.recompute_constants(RecomputeLevel.set_const)
+    # directly, so recompute here (deferred to one flush per reset_dr batch).
+    _mujoco_recompute(env, adapter.sim, RecomputeLevel.set_const)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -601,7 +629,7 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
         axes=axes,
         shared_random=shared_random,
     )
-    adapter.sim.recompute_constants(RecomputeLevel.set_const)
+    _mujoco_recompute(env, adapter.sim, RecomputeLevel.set_const)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -951,7 +979,7 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
         operation=operation,
         shared_random=shared_random,
     )
-    adapter.sim.recompute_constants(RecomputeLevel.set_const_0)
+    _mujoco_recompute(env, adapter.sim, RecomputeLevel.set_const_0)
 
 
 # ══════════════════════════════════════════════════════════════════════

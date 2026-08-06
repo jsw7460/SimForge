@@ -67,6 +67,31 @@ class _Timers:
 
         setattr(obj, attr, timed)
 
+    def wrap_by_mode(self, obj, attr: str, name_prefix: str) -> None:
+        """Like ``wrap`` but splits accumulation by the call's ``mode`` arg
+        (e.g. event_manager.apply(mode="reset") vs mode="reset_dr" vs the
+        step-loop's mode="interval"). One timer per distinct mode."""
+        import torch
+
+        orig = getattr(obj, attr)
+
+        def timed(*args, __orig=orig, __prefix=name_prefix, **kwargs):
+            if not self.enabled:
+                return __orig(*args, **kwargs)
+            mode = kwargs.get("mode")
+            if mode is None and args:
+                mode = args[0]
+            name = f"{__prefix}_{mode}"
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            out = __orig(*args, **kwargs)
+            torch.cuda.synchronize()
+            self.acc[name] = self.acc.get(name, 0.0) + (time.perf_counter() - t0)
+            self.calls[name] = self.calls.get(name, 0) + 1
+            return out
+
+        setattr(obj, attr, timed)
+
     def reset(self) -> None:
         self.acc.clear()
         self.calls.clear()
@@ -144,16 +169,66 @@ def _measure(
     }
 
 
-def run_cell(sim: str, num_envs: int, seed: int) -> dict:
+# Solver knobs: each maps a single JaxRLWorld K1 value -> its mjlab-velocity
+# value, so we can flip ONE at a time from the asis baseline and isolate which
+# knob dominates the mujoco physics-step cost.
+#   asis  (JaxRLWorld): 100/50 iters, elliptic, impratio 100, 2 substeps
+#   mjlab (velocity)  : 10/20 iters,  pyramidal, impratio 1,   1 substep
+_SOLVER_KNOBS = ("iters", "ls", "impratio", "cone", "substeps")
+
+
+def _apply_solver_knob(scene_cfg, knob: str) -> None:
+    """Flip ONE solver knob (or all, for ``mjlab``) from asis -> mjlab value.
+
+    Only the named knob changes; num_envs, managers, obs, reward, decimation
+    stay fixed, so the ``mj_scene_step`` delta vs the asis run is that single
+    knob's contribution to the physics-step cost.
+    """
+    mj = scene_cfg.mjlab_sim_cfg.mujoco
+    if knob in ("iters", "mjlab"):
+        mj.iterations = 10
+    if knob in ("ls", "mjlab"):
+        mj.ls_iterations = 20
+    if knob in ("impratio", "mjlab"):
+        mj.impratio = 1.0
+    if knob in ("cone", "mjlab"):
+        mj.cone = "pyramidal"
+    if knob in ("substeps", "mjlab"):
+        scene_cfg.substeps = 1  # 8 -> 4 mjwarp steps / control step (decimation 4)
+        mj.timestep = scene_cfg.physics_dt  # substeps=1 -> full physics_dt per step
+    if knob not in (*_SOLVER_KNOBS, "mjlab"):
+        raise ValueError(f"unknown solver knob: {knob}")
+
+
+def run_cell(
+    sim: str,
+    num_envs: int,
+    seed: int,
+    mujoco_solver: str = "asis",
+    reset_decompose: bool = False,
+    dr_interval_period: float | None = None,
+) -> dict:
     import torch
 
     torch.manual_seed(seed)
-    _stage(f"cell start: {sim} num_envs={num_envs}")
+    _stage(
+        f"cell start: {sim} num_envs={num_envs} mujoco_solver={mujoco_solver} "
+        f"dr_interval_period={dr_interval_period}"
+    )
 
     from rlworld.rl.configs.presets.k1_joystick.g1_recipe import K1G1RecipeConfig
     from rlworld.rl.evals.sim_initializers import get_initializer
 
-    cfgs = K1G1RecipeConfig(sim_type=sim, num_envs=num_envs, seed=seed).build()
+    kwargs = dict(sim_type=sim, num_envs=num_envs, seed=seed)
+    if dr_interval_period is not None:
+        # <=0 forces per-reset reset_dr (baseline); >0 sets the interval seconds.
+        kwargs["dr_interval_period_s"] = None if dr_interval_period <= 0 else dr_interval_period
+    cfgs = K1G1RecipeConfig(**kwargs).build()
+    if mujoco_solver != "asis":
+        if sim != "mujoco":
+            raise ValueError("--mujoco-solver only applies to the mujoco cell")
+        _apply_solver_knob(cfgs.scene, mujoco_solver)
+        _stage(f"applied solver knob '{mujoco_solver}' (asis -> mjlab value)")
     env = get_initializer(_SIM_KEY[sim]).init_environment(cfgs)
     _stage("env built")
 
@@ -179,6 +254,29 @@ def run_cell(sim: str, num_envs: int, seed: int) -> dict:
     else:
         timers.wrap(sm, "step", "gs_scene_step")
         timers.wrap(env.contact_manager, "refresh_after_reset", "gs_reset_refresh")
+
+    # reset_path decomposition: split _reset_idx into its sub-calls (world.py).
+    # ``rd_`` prefix; event_manager.apply is split by mode (rd_ev_reset,
+    # rd_ev_reset_dr, and the step-loop's rd_ev_interval). These are timed
+    # INSIDE reset_path, so sum(rd_* reset-side) ~= reset_path.
+    if reset_decompose:
+        timers.wrap(env.curriculum_manager, "compute", "rd_curr_compute")
+        timers.wrap(env.event_manager, "reset", "rd_ev_statereset")
+        timers.wrap_by_mode(env.event_manager, "apply", "rd_ev")
+        for _mname, _short in (
+            ("termination_manager", "term"),
+            ("command_manager", "cmd"),
+            ("act_manager", "act"),
+            ("obs_manager", "obs"),
+            ("reward_manager", "rew"),
+            ("curriculum_manager", "curr"),
+        ):
+            timers.wrap(getattr(env, _mname), "reset", f"rd_{_short}_reset")
+        timers.wrap(env.contact_manager, "reset", "rd_contact_reset")
+        # newton/genesis already time refresh_after_reset (nt_/gs_reset_refresh);
+        # only mujoco needs it added here to avoid double-wrapping.
+        if sim == "mujoco":
+            timers.wrap(env.contact_manager, "refresh_after_reset", "rd_contact_refresh")
 
     def _host_geom_stats(mj_model) -> dict[str, int]:
         import numpy as np
@@ -226,17 +324,153 @@ def run_cell(sim: str, num_envs: int, seed: int) -> dict:
 # ── Parent orchestration ─────────────────────────────────────────────
 
 
+def _run_mujoco_variants(args, variants: tuple[str, ...]) -> int:
+    """Run the mujoco cell once per solver variant (each is asis with exactly
+    one knob flipped to its mjlab value; ``asis`` = none, ``mjlab`` = all).
+    Everything else is held fixed, so each variant's ``mj_scene_step`` drop vs
+    asis isolates that single knob's share of the physics-step cost."""
+    logdir = Path.cwd() / "k1_step_speed_diag_logs"
+    logdir.mkdir(exist_ok=True)
+    results: dict = {}
+    for v in variants:
+        print(f"[sweep] mujoco solver={v} num_envs={args.num_envs} ...", flush=True)
+        t0 = time.time()
+        log_path = logdir / f"mujoco_{v}.log"
+        with open(log_path, "w") as fh:
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    _MODULE,
+                    "--cell",
+                    "mujoco",
+                    "--num-envs",
+                    str(args.num_envs),
+                    "--seed",
+                    str(args.seed),
+                    "--mujoco-solver",
+                    v,
+                ],
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                cwd=str(Path.cwd()),
+            )
+        dt = time.time() - t0
+        if proc.returncode != 0:
+            print(f"[sweep]   -> CRASH (see {log_path}) ({dt:.0f}s)")
+            continue
+        for line in log_path.read_text().splitlines():
+            if line.startswith("RESULT_JSON:"):
+                results[v] = json.loads(line[len("RESULT_JSON:") :])
+        print(f"[sweep]   -> ok ({dt:.0f}s)")
+
+    print("\n" + "=" * 100)
+    print(f"K1 mujoco solver-knob sweep (num_envs={args.num_envs}; ms per control step)")
+    print("  asis = JaxRLWorld baseline: 100/50 iters, elliptic, impratio 100, 2 substeps")
+    print("  each knob flips ONE value to mjlab-velocity: iters->10 ls->20 impratio->1 " "cone->pyramidal substeps->1")
+    print("  mjlab = all knobs at once. 'physics saved' = asis mj_scene_step - variant (bigger = more critical)")
+    print("=" * 100)
+    if "asis" not in results:
+        print("[sweep] MISSING asis baseline (crashed) — cannot compute deltas.")
+        return 1
+    for phase in ("zero_actions", "random_actions"):
+        base = results["asis"][phase]["components_ms_per_step"]["mj_scene_step"]["ms_per_step"]
+        print(f"\n[{phase}]  asis mj_scene_step baseline = {base} ms")
+        print(f"    {'variant':<12}{'mj_scene_step':>16}{'physics saved':>16}{'env total':>14}")
+        # Rank knobs by how much physics they save (most critical first).
+        order = (
+            ["asis"]
+            + sorted(
+                (v for v in variants if v not in ("asis", "mjlab")),
+                key=lambda v: -(base - _phys(results, v, phase)) if v in results else 0,
+            )
+            + (["mjlab"] if "mjlab" in variants else [])
+        )
+        for v in order:
+            if v not in results:
+                print(f"    {v:<12}{'MISSING (crashed)':>16}")
+                continue
+            phys = _phys(results, v, phase)
+            tot = results[v][phase]["ms_per_step_unsynced"]
+            saved = "—" if v == "asis" else f"{base - phys:+.3f}"
+            print(f"    {v:<12}{_fmt(phys):>16}{saved:>16}{_fmt(tot):>14}")
+    print(
+        "\nInterpretation: the knob with the largest 'physics saved' is the single"
+        "\nmost critical driver of the mujoco physics-step cost. impratio+cone interact"
+        "\n(high impratio + elliptic keeps the Newton solver from converging early, so"
+        "\nthe 100 iters are actually spent); substeps halves the mjwarp step COUNT."
+    )
+    return 0
+
+
+def _phys(results: dict, v: str, phase: str) -> float:
+    return results[v][phase]["components_ms_per_step"]["mj_scene_step"]["ms_per_step"]
+
+
+def _fmt(x) -> str:
+    return "-" if x is None else str(x)
+
+
+def _ratio(a, b) -> str:
+    if a is None or b is None or not b:
+        return "-"
+    return f"{a / b:.2f}x"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cell", choices=_SIMS)
     ap.add_argument("--num-envs", type=int, default=4096)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--mujoco-solver",
+        choices=("asis", *_SOLVER_KNOBS, "mjlab"),
+        default="asis",
+        help="Solver variant for the mujoco cell: asis (JaxRLWorld baseline), a "
+        "single knob flipped to its mjlab value, or mjlab (all knobs).",
+    )
+    ap.add_argument(
+        "--mujoco-knob-sweep",
+        action="store_true",
+        help="Run the mujoco cell once per solver variant (asis, each single knob, "
+        "mjlab) and print which knob is most critical to the physics-step cost.",
+    )
+    ap.add_argument(
+        "--mujoco-ab",
+        action="store_true",
+        help="Run ONLY asis vs mjlab (both extremes) for the mujoco cell.",
+    )
+    ap.add_argument(
+        "--reset-decompose",
+        action="store_true",
+        help="Split reset_path (_reset_idx) into sub-components (rd_* rows: "
+        "DR reset_dr, per-manager resets, contact refresh) to find what dominates.",
+    )
+    ap.add_argument(
+        "--dr-interval-period",
+        type=float,
+        default=None,
+        help="Override dr_interval_period_s: >0 = interval_dr seconds, 0 = per-reset "
+        "reset_dr (baseline), omit = preset default (g1_recipe = 10s).",
+    )
     args = ap.parse_args()
 
     if args.cell:
-        result = run_cell(args.cell, args.num_envs, args.seed)
+        result = run_cell(
+            args.cell,
+            args.num_envs,
+            args.seed,
+            args.mujoco_solver,
+            args.reset_decompose,
+            args.dr_interval_period,
+        )
         print("RESULT_JSON:" + json.dumps(result))
         return 0
+
+    if args.mujoco_knob_sweep:
+        return _run_mujoco_variants(args, ("asis", *_SOLVER_KNOBS, "mjlab"))
+    if args.mujoco_ab:
+        return _run_mujoco_variants(args, ("asis", "mjlab"))
 
     logdir = Path.cwd() / "k1_step_speed_diag_logs"
     logdir.mkdir(exist_ok=True)
@@ -257,7 +491,13 @@ def main() -> int:
                     str(args.num_envs),
                     "--seed",
                     str(args.seed),
-                ],
+                ]
+                + (["--reset-decompose"] if args.reset_decompose else [])
+                + (
+                    ["--dr-interval-period", str(args.dr_interval_period)]
+                    if args.dr_interval_period is not None
+                    else []
+                ),
                 stdout=fh,
                 stderr=subprocess.STDOUT,
                 cwd=str(Path.cwd()),

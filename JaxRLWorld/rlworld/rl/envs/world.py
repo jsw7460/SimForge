@@ -638,6 +638,11 @@ class World(ABC):
             if "interval" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="interval", dt=self.control_dt)
                 self._invalidate_cache()
+            # interval_dr: global-period domain randomization (mass/friction/gains
+            # re-sampled for all envs every interval_dr_period_s, one recompute).
+            if "interval_dr" in self.event_manager.available_modes:
+                self.event_manager.apply(mode="interval_dr", dt=self.control_dt)
+                self._invalidate_cache()
 
         # Advance managers
         self._advance_managers()

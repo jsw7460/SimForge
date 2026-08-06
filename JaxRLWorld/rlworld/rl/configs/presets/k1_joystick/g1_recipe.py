@@ -51,6 +51,10 @@ class K1G1RecipeConfig(K1JoystickConfig):
 
     sim_type: str = "newton"
     action_distribution: str = "gaussian"
+    # Domain randomization on a 10 s global interval instead of every reset:
+    # cuts the per-reset recompute cost (reset_dr -> interval_dr) while still
+    # varying DR over time. See _build_dr_terms / k1_interval_dr_prototype_diag.
+    dr_interval_period_s: float | None = 10.0
     # Placeholder: the sim builders override action_scale with the robot's
     # physical_action_scale (0.25·effort/kp), so this value is never used.
     action_scale: Any = 1.0

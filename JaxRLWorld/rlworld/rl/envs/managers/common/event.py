@@ -50,6 +50,21 @@ class EventManager(BaseManager):
             self._interval_ranges[local_idx] = term.interval_range_s
             self._interval_timers[local_idx] = self._sample_interval(local_idx)
 
+        # interval_dr: one GLOBAL timer shared by all interval_dr terms, so they
+        # fire together (single deferred recompute per period). All such terms
+        # must declare the same period. Timer starts at 0 -> fires on the first
+        # step, seeding the initial DR draw.
+        self._interval_dr_period: float | None = None
+        self._interval_dr_timer: float = 0.0
+        _interval_dr_terms = self._terms_by_mode.get("interval_dr", [])
+        if _interval_dr_terms:
+            periods = {t.interval_dr_period_s for _, t in _interval_dr_terms}
+            if None in periods:
+                raise ValueError("interval_dr terms require interval_dr_period_s.")
+            if len(periods) != 1:
+                raise ValueError(f"all interval_dr terms must share one period; got {sorted(periods)}.")
+            self._interval_dr_period = periods.pop()
+
     @property
     def available_modes(self) -> list[str]:
         return list(self._terms_by_mode.keys())
@@ -72,6 +87,10 @@ class EventManager(BaseManager):
             if dt is None:
                 raise ValueError("dt must be provided for interval mode")
             self._apply_interval(dt)
+        elif mode == "interval_dr":
+            if dt is None:
+                raise ValueError("dt must be provided for interval_dr mode")
+            self._apply_interval_dr(dt)
 
     def reset(self, env_ids: torch.Tensor) -> None:
         for idx in self._interval_timers:
@@ -90,26 +109,61 @@ class EventManager(BaseManager):
         for name, term in self._terms_by_mode["reset"]:
             self._call_event_fn(name, term, env_ids=env_ids)
 
-    def _apply_reset_dr(self, env_ids: torch.Tensor) -> None:
-        # Newton: each ``solver.notify_model_changed`` triggers a non-trivial
-        # GPU model-state refresh. When multiple DR terms fire in the same
-        # reset (e.g. body inertia + joint friction + foot friction), per-term
-        # notifies stack and dominate the reset path (~5 ms each, observed
-        # ~16 ms at 3 terms in g1_tracking). The Newton DR backends OR their
-        # flag into ``env._dr_pending_notify_flags`` instead of notifying
-        # immediately; we flush a single combined notify after all terms run.
-        # No-op for Genesis / MuJoCo (their backends never touch the
-        # attribute, so the accumulated value stays 0).
+    def _run_dr_batch(self, terms, env_ids: torch.Tensor) -> None:
+        """Run a batch of DR terms with a SINGLE deferred recompute/notify flush.
+
+        Newton: each ``solver.notify_model_changed`` triggers a non-trivial GPU
+        model-state refresh; when multiple DR terms fire together (body inertia +
+        joint friction + foot friction), per-term notifies stack (~5 ms each). The
+        Newton DR backends OR their flag into ``env._dr_pending_notify_flags``
+        instead of notifying immediately; we flush one combined notify after all
+        terms. No-op for Genesis (its backends never touch the attributes).
+
+        MuJoCo: symmetric. ``sim.recompute_constants`` is model-global and its
+        most expensive level (set_const, for body_mass) dominates the reset path
+        when several body_mass/body_com terms fire together. The MuJoCo DR
+        backends defer their recompute into ``env._dr_pending_recompute_level``
+        (keeping the MAX level — RecomputeLevel is an ordered IntEnum whose higher
+        levels are a superset), and we flush ONE recompute after all terms.
+
+        Shared by reset_dr (per-reset, env_ids = the reset envs) and interval_dr
+        (global period, env_ids = all envs).
+        """
         is_newton = self.env.sim_type == "newton"
+        is_mujoco = self.env.sim_type == "mujoco"
         if is_newton:
             self.env._dr_pending_notify_flags = 0
-        for name, term in self._terms_by_mode["reset_dr"]:
+        if is_mujoco:
+            self.env._dr_pending_recompute_level = None
+        for name, term in terms:
             self._call_event_fn(name, term, env_ids=env_ids)
         if is_newton:
             flags = self.env._dr_pending_notify_flags
             del self.env._dr_pending_notify_flags
             if flags:
                 self.env.scene_manager.solver.notify_model_changed(flags)
+        if is_mujoco:
+            level = self.env._dr_pending_recompute_level
+            del self.env._dr_pending_recompute_level
+            if level:  # None (no recompute term) or none(0) -> skip
+                self.env.scene_manager.sim.recompute_constants(level)
+
+    def _apply_reset_dr(self, env_ids: torch.Tensor) -> None:
+        self._run_dr_batch(self._terms_by_mode["reset_dr"], env_ids)
+
+    def _apply_interval_dr(self, dt: float) -> None:
+        """Global-interval DR: all interval_dr terms fire together on one shared
+        timer every ``interval_dr_period_s`` seconds, for ALL envs, with a single
+        deferred recompute. Unlike per-episode reset_dr (a recompute per reset),
+        this amortizes the recompute to one flush per period."""
+        self._interval_dr_timer -= dt
+        if self._interval_dr_timer > 0.0:
+            return
+        # Carry the remainder so the period doesn't drift; guard against a period
+        # shorter than dt (would fire every step anyway).
+        self._interval_dr_timer = max(self._interval_dr_timer + self._interval_dr_period, 0.0)
+        all_ids = torch.arange(self.num_envs, device=self.device)
+        self._run_dr_batch(self._terms_by_mode["interval_dr"], all_ids)
 
     def _apply_interval(self, dt: float) -> None:
         for local_idx, (name, term) in enumerate(self._terms_by_mode["interval"]):
