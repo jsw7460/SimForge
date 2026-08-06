@@ -66,9 +66,12 @@ from rlworld.rl.envs.mdp.rewards.common.reward_terms import raw_action_rate_l2, 
 
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
     # Upstream: sim_dt=0.002, ctrl_dt=0.02 → decimation 10.
-    "newton": {"dt": 0.005, "substeps": 2, "decimation": 4},
-    "genesis": {"dt": 0.005, "substeps": 2, "decimation": 4},
-    "mujoco": {"dt": 0.005, "substeps": 2, "decimation": 4},
+    # substeps=1 (mjlab parity): each control step is decimation(4) mjwarp/
+    # solver steps at dt=0.005, not 8. Halving the substep count is the single
+    # largest physics-step speedup (see k1_step_speed_diag --mujoco-knob-sweep).
+    "newton": {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "genesis": {"dt": 0.005, "substeps": 1, "decimation": 4},
+    "mujoco": {"dt": 0.005, "substeps": 1, "decimation": 4},
 }
 
 _SIM_DEFAULT_RUN_NAMES = {

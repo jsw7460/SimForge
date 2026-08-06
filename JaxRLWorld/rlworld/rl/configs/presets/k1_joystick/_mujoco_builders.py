@@ -1,16 +1,20 @@
 """MuJoCo (mjlab) builders for the K1 joystick task.
 
 The vendored MJCF is the upstream model verbatim (modulo the foot-
-sphere contact triplet). The solver options deliberately DEPART from
-the upstream scene (Euler + eulerdamp disabled + iterations=3/5 +
-pyramidal + impratio=1): on mjwarp that recipe never brings the
-standing robot to static rest — stance feet micro-bounce (per-step
-contact-force STD ~10 N vs ~1 N on genesis, contact toggling 9%/step
-vs 2%), which corrupts feet_air_time/feet_phase and lets a fraction of
-envs tip over. The canonical mjwarp humanoid recipe below (implicitfast
-+ 100/50 iterations + elliptic cone + impratio 100, eulerdamp on)
-settles to genesis-level contact quiet in the k1_feet_contact_parity
-diag.
+sphere contact triplet).
+
+Solver recipe: implicitfast + pyramidal cone + impratio 1 + 1 substep
+(``_SIM_TIMINGS``), matching mjlab's velocity task on the three knobs
+that dominate the mjwarp step cost (substeps, cone, impratio) for ~2-3x
+faster physics. iterations stay at 100/50 (they early-converge under
+pyramidal/impratio 1, so they add little cost).
+
+CONTACT TRADE-OFF: an earlier recipe used elliptic cone + impratio 100
++ 2 substeps to fully quiet stance-foot micro-bounce (per-step contact-
+force STD ~10 N -> ~1 N, contact toggling 9%/step -> 2%, genesis-level
+in the k1_feet_contact_parity diag). The current recipe trades some of
+that contact quiet for speed — re-check feet_air_time/feet_phase and
+gait quality if it regresses.
 """
 
 from __future__ import annotations
@@ -121,6 +125,10 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> MujocoSceneCon
                     tau_scale=r.tau_scale,
                     velocity_limit=r.velocity_limit,
                     knee_point_velocity=r.knee_point_velocity,
+                    tau_lpf_time_constant=r.tau_lpf_time_constant,
+                    physics_dt=timing["dt"],
+                    dyn_gain=r.dyn_gain,
+                    dyn_gain_velocity=r.dyn_gain_velocity,
                     frictionloss=0.1,
                     min_delay=cfg.action_delay_min,
                     max_delay=cfg.action_delay_max,
@@ -178,8 +186,13 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> MujocoSceneCon
                 integrator="implicitfast",
                 iterations=100,
                 ls_iterations=50,
-                impratio=100.0,
-                cone="elliptic",
+                # mjlab-parity on the two per-iteration-cost knobs (pyramidal
+                # cone + impratio 1). With substeps=1 these are the recipe's
+                # dominant speedups; see the module docstring for the contact
+                # trade-off. iterations stay at 100/50 (they early-converge
+                # under pyramidal/impratio 1, so they cost little).
+                impratio=1.0,
+                cone="pyramidal",
                 ccd_iterations=50,
             ),
         ),

@@ -1,15 +1,20 @@
 """Newton builders for the K1 joystick task.
 
-Loads the vendored MJCF through SolverMuJoCo (mjwarp). The solver
-options deliberately DEPART from the upstream scene (iterations=3/5,
-pyramidal cone, impratio=1): on mjwarp that recipe never brings the
-standing robot to static rest — stance feet micro-bounce and chatter,
-corrupting feet_air_time/feet_phase (see the k1_feet_contact_parity
-diag). We use the canonical mjwarp humanoid recipe instead — the
-SolverMuJoCoCfg defaults (implicitfast, elliptic cone, 100/50
-iterations, impratio 100), mirroring Newton's own G1 locomotion
-example. Feet contact tracking uses per-foot BODY matches (the four
-spheres share the foot link) against the terrain plane.
+Loads the vendored MJCF through SolverMuJoCo (mjwarp).
+
+Solver recipe: implicitfast + pyramidal cone + impratio 1 + 1 substep
+(``_SIM_TIMINGS``), matching mjlab's velocity task on the three knobs
+that dominate the mjwarp step cost (substeps, cone, impratio) for ~2-3x
+faster physics. iterations stay at the SolverMuJoCoCfg defaults 100/50.
+
+CONTACT TRADE-OFF: an earlier recipe used elliptic cone + impratio 100
++ 2 substeps (Newton's own G1 locomotion recipe) to quiet stance-foot
+micro-bounce/chatter that corrupts feet_air_time/feet_phase (see the
+k1_feet_contact_parity diag). The current recipe trades some of that
+contact quiet for speed — re-check gait quality if it regresses.
+
+Feet contact tracking uses per-foot BODY matches (the four spheres
+share the foot link) against the terrain plane.
 """
 
 from __future__ import annotations
@@ -81,6 +86,12 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         # (implicitfast, elliptic, 100/50 iterations, impratio 100);
         # see the module docstring for why this departs from upstream.
         solver_cfg=SolverMuJoCoCfg(
+            # mjlab-parity on the per-iteration-cost knobs (pyramidal cone +
+            # impratio 1); with substeps=1 (_SIM_TIMINGS) these are the
+            # recipe's dominant speedups. See module docstring for the contact
+            # trade-off. iterations stay at the SolverMuJoCoCfg defaults 100/50.
+            cone="pyramidal",
+            impratio=1.0,
             ccd_iterations=50,
             # mjwarp constraint kernels run at njmax*nworld; the framework
             # default of 1500 rows/world is ~25x the measured demand here
@@ -111,6 +122,10 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> NewtonSceneCon
                             tau_scale=r.tau_scale,
                             velocity_limit=r.velocity_limit,
                             knee_point_velocity=r.knee_point_velocity,
+                            tau_lpf_time_constant=r.tau_lpf_time_constant,
+                            physics_dt=timing["dt"],
+                            dyn_gain=r.dyn_gain,
+                            dyn_gain_velocity=r.dyn_gain_velocity,
                             frictionloss=0.1,
                             min_delay=cfg.action_delay_min,
                             max_delay=cfg.action_delay_max,
