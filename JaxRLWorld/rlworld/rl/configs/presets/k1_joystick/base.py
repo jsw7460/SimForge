@@ -539,6 +539,25 @@ class K1JoystickConfig:
         terms: Dict[str, EventTermConfig] = {
             "dr_friction": friction_term,
             "dr_trunk_mass": trunk_mass_term,
+            # Trunk COM offset DR (was missing on K1; G1/g1_tracking/t1_getup already
+            # have it). The training MJCF pins the trunk COM at x~=0; the real robot's
+            # COM is unknown and likely off-center, which shows up as the lateral->
+            # forward drift seen on hardware (clean in sim per k1_gait_direction_diag).
+            # Randomizing it makes the policy robust to wherever the real COM sits.
+            # operation="add" on the MJCF default; all three backends support it.
+            "dr_body_com": EventTermConfig(
+                func=unified_dr.randomize_body_com_offset,
+                mode="reset_dr",
+                params={
+                    "asset_cfg": trunk,
+                    "ranges": {
+                        0: (-0.03, 0.03),  # x (forward) — targets the lateral->forward drift
+                        1: (-0.025, 0.025),  # y (lateral)
+                        2: (-0.03, 0.03),  # z (height)
+                    },
+                    "operation": "add",
+                },
+            ),
             "dr_link_mass": EventTermConfig(
                 func=unified_dr.randomize_body_mass,
                 mode="reset_dr",
