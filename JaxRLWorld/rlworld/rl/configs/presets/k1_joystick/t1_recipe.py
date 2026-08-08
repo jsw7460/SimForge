@@ -70,7 +70,7 @@ class K1T1RecipeConfig(K1JoystickConfig):
     def _build_algorithm_config(self) -> PPOConfig:
         ppo = super()._build_algorithm_config()
         # robot_lab rsl_rl_ppo_cfg (flat): the RL_lab humanoid recipe.
-        ppo.entropy_coef = 0.008
+        ppo.entropy_coef = 0.01
         ppo.gamma = 0.99
         ppo.lam = 0.95
         ppo.desired_kl = 0.01
