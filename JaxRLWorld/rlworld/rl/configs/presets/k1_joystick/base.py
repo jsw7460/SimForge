@@ -23,7 +23,7 @@ import importlib
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
-from rlworld.rl.configs.algorithms.ppo import PPOConfig
+from rlworld.rl.configs.algorithms.ppo import PPOConfig, SymmetryConfig
 from rlworld.rl.configs.common_config_classes import (
     Activation,
     CommandConfig,
@@ -116,6 +116,11 @@ class K1JoystickConfig:
     # a single recompute per period) — see _build_dr_terms. None keeps per-reset
     # DR. Validated by k1_interval_dr_prototype_diag.
     dr_interval_period_s: float | None = None
+
+    # Left/right mirror-symmetry auxiliary loss coefficient (0 = off). When > 0,
+    # PPO adds mirror_loss_coeff * MSE(pi(mirror(o)), mirror(pi(o))) to enforce
+    # left/right equivariance. Mirror operator auto-built (see ppo.symmetry).
+    mirror_symmetry_coeff: float = 0.0
 
     # Rewards (upstream reward_config; zero-weight terms omitted).
     tracking_sigma: float = 0.25
@@ -639,6 +644,10 @@ class K1JoystickConfig:
             desired_kl=0.01,
             use_clipped_value_loss=True,
             value_loss_coef=1.0,
+            symmetry_cfg=SymmetryConfig(
+                use_mirror_loss=self.mirror_symmetry_coeff > 0.0,
+                mirror_loss_coeff=self.mirror_symmetry_coeff,
+            ),
         )
 
     def _build_nn_config(self) -> NNConfig:

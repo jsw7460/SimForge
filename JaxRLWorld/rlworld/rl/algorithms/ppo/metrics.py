@@ -26,10 +26,12 @@ class PPOActorMetrics(ActorMetrics):
     """PPO actor metrics (extends base)."""
 
     policy_loss: float = 0.0
+    mirror_loss: float = 0.0
 
     def to_wandb_dict(self, prefix: str = "actor") -> dict[str, float]:
         return {
             f"{prefix}/policy_loss": self.policy_loss,
+            f"{prefix}/mirror_loss": self.mirror_loss,
             f"{prefix}/entropy": self.entropy,
             f"{prefix}/std": self.std,
         }
@@ -71,6 +73,7 @@ class PPOMetrics(BaseMetrics):
             ConsoleMetric("Name", MetricType.VALUE, "PPO"),
             ConsoleMetric("Value Loss", MetricType.LOSS, self.critic.value_loss),
             ConsoleMetric("Surrogate Loss", MetricType.LOSS, self.actor.policy_loss),
+            ConsoleMetric("Mirror Loss", MetricType.LOSS, self.actor.mirror_loss),
             ConsoleMetric("Entropy", MetricType.ENTROPY, self.actor.entropy),
             ConsoleMetric("LR", MetricType.COEFFICIENT, self.learning_rate),
             ConsoleMetric("KL", MetricType.VALUE, self.kl.approx_kl),

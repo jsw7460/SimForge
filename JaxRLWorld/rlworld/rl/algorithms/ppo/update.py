@@ -11,6 +11,7 @@ from rlworld.rl.algorithms.ppo.losses import (
     compute_policy_loss,
     compute_value_loss,
 )
+from rlworld.rl.algorithms.ppo.symmetry import symmetry_mirror_loss
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.storages.rollout_storage import RolloutBatch
 
@@ -134,6 +135,8 @@ def compute_batch_loss(
     use_clipped_value_loss: bool,
     normalize_advantages: bool,
     key: jax.Array,
+    symmetry_spec=None,
+    symmetry_coef: float = 0.0,
 ) -> tuple[jax.Array, PPOLossInfo]:
     """Compute loss for a single batch."""
     model = eqx.combine(params, static)
@@ -175,7 +178,15 @@ def compute_batch_loss(
     entropy_mean = entropy.mean()
     total_loss = policy_loss + value_loss_coef * value_loss - entropy_coef * entropy_mean
 
-    aux = {**actor_aux, **critic_aux}
+    # Left/right symmetry (mirror) auxiliary loss. symmetry_coef is a Python
+    # static scalar, so this branch is resolved at trace time (no cost when off).
+    mirror_loss = jnp.zeros(())
+    if symmetry_coef > 0.0:
+        key, mkey = jax.random.split(key)
+        mirror_loss = symmetry_mirror_loss(model, batch.actor_observations, symmetry_spec, mkey)
+        total_loss = total_loss + symmetry_coef * mirror_loss
+
+    aux = {**actor_aux, **critic_aux, "mirror_loss": mirror_loss}
 
     loss_info = PPOLossInfo(
         policy_loss=policy_loss,
@@ -193,7 +204,7 @@ def compute_batch_loss(
 # ==================== Main Update Function ====================
 
 
-@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10))
+@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10, 12))
 def update_all_batches(
     params: Any,
     static: Any,
@@ -206,6 +217,8 @@ def update_all_batches(
     normalize_advantages: bool,
     use_early_stop: bool,
     desired_kl: float,
+    symmetry_spec: Any,
+    symmetry_coef: float,
     batches: RolloutBatch,
     key: jax.Array,
 ) -> tuple[Any, optax.OptState, ScanOutput, jax.Array]:
@@ -251,6 +264,8 @@ def update_all_batches(
                 use_clipped_value_loss,
                 normalize_advantages,
                 subkey,
+                symmetry_spec,
+                symmetry_coef,
             )
 
         # Compute loss and gradients

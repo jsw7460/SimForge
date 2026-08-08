@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from rlworld.rl.algorithms.ppo import PPO
+from rlworld.rl.algorithms.ppo.symmetry import build_mirror_spec
 from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.algorithms import PPOConfig
 from rlworld.rl.envs import World
@@ -77,6 +78,12 @@ class OnPolicyRunner(BaseRunner):
 
     def _init_ppo_algorithm(self, alg_cfg: PPOConfig, key: jax.Array) -> PPO:
         """Initialize PPO algorithm."""
+        symmetry_spec = None
+        symmetry_coef = 0.0
+        sc = alg_cfg.symmetry_cfg
+        if sc is not None and sc.use_mirror_loss:
+            symmetry_spec = build_mirror_spec(self.env.obs_manager, list(self.env.act_manager.actuated_joint_names))
+            symmetry_coef = sc.mirror_loss_coeff
         return PPO(
             actor_critic=self.actor_critic,
             num_learning_epochs=alg_cfg.num_learning_epochs,
@@ -95,6 +102,8 @@ class OnPolicyRunner(BaseRunner):
             use_value_normalization=alg_cfg.use_value_normalization,
             use_early_stop=alg_cfg.use_early_stop,
             normalize_advantage_per_minibatch=alg_cfg.normalize_advantage_per_minibatch,
+            symmetry_spec=symmetry_spec,
+            symmetry_coef=symmetry_coef,
             key=key,
         )
 

@@ -1,6 +1,20 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..base_config import BaseConfig
+
+
+@dataclass
+class SymmetryConfig(BaseConfig):
+    """Left/right mirror-symmetry auxiliary loss (option A: mirror loss).
+
+    Adds ``mirror_loss_coeff * MSE(pi(mirror(o)).mean, mirror(pi(o).mean))`` to
+    the PPO loss, enforcing left/right equivariance of the policy. The mirror
+    operator is built automatically from the observation layout + joint names
+    (see rl.algorithms.ppo.symmetry). No obs/action space change.
+    """
+
+    use_mirror_loss: bool = False
+    mirror_loss_coeff: float = 1.0
 
 
 @dataclass
@@ -37,3 +51,7 @@ class PPOConfig(BaseConfig):
     learning_starts: int = 10_000
     num_steps_per_env: int = 24
     obs_normalization: bool = False
+    # Default instance (not None) so from_dict/update_from_dict recurses into it
+    # and restores a real SymmetryConfig on checkpoint load; use_mirror_loss=False
+    # keeps the mirror loss off unless a preset turns it on.
+    symmetry_cfg: SymmetryConfig = field(default_factory=SymmetryConfig)

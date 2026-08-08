@@ -115,6 +115,8 @@ class PPO(OnPolicyAlgorithm):
         use_value_normalization: bool = False,
         use_early_stop: bool = False,
         normalize_advantage_per_minibatch: bool = True,
+        symmetry_spec=None,
+        symmetry_coef: float = 0.0,
         optimizer_class=None,
         key: jax.Array = None,
         **kwargs,
@@ -170,6 +172,10 @@ class PPO(OnPolicyAlgorithm):
         self.use_value_normalization = use_value_normalization
         self.use_early_stop = use_early_stop
         self.normalize_advantage_per_minibatch = normalize_advantage_per_minibatch
+        # Left/right mirror symmetry: static (perm/sign arrays) built once by the
+        # runner from the env's obs layout; coef 0 disables (no trace cost).
+        self.symmetry_spec = symmetry_spec
+        self.symmetry_coef = symmetry_coef
         self.optimizer_class = optimizer_class or optax.adam
 
         # Check if model has normalizers enabled
@@ -462,6 +468,8 @@ class PPO(OnPolicyAlgorithm):
             self.normalize_advantage_per_minibatch,
             self.use_early_stop,
             desired_kl,
+            self.symmetry_spec,
+            self.symmetry_coef,
             stacked_batches,
             subkey,
         )
@@ -520,12 +528,14 @@ class PPO(OnPolicyAlgorithm):
             mean_entropy = float((outputs.entropy * update_mask).sum() / num_actual_updates)
             mean_approx_kl = float((outputs.approx_kl * update_mask).sum() / num_actual_updates)
             mean_clip_fraction = float((outputs.clip_fraction * update_mask).sum() / num_actual_updates)
+            mean_mirror_loss = float((outputs.aux["mirror_loss"] * update_mask).sum() / num_actual_updates)
         else:
             mean_value_loss = float(outputs.value_loss.mean())
             mean_policy_loss = float(outputs.policy_loss.mean())
             mean_entropy = float(outputs.entropy.mean())
             mean_approx_kl = float(outputs.approx_kl.mean())
             mean_clip_fraction = float(outputs.clip_fraction.mean())
+            mean_mirror_loss = float(outputs.aux["mirror_loss"].mean())
 
         # Get current std
         sample_obs = stacked_batches.actor_observations[0]
@@ -544,6 +554,7 @@ class PPO(OnPolicyAlgorithm):
             ),
             actor=PPOActorMetrics(
                 policy_loss=mean_policy_loss,
+                mirror_loss=mean_mirror_loss,
                 entropy=mean_entropy,
                 std=current_std,
             ),
