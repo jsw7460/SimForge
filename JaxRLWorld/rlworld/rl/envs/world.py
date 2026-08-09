@@ -680,6 +680,30 @@ class World(ABC):
         """Override in subclass for pre-termination logic."""
         pass
 
+    def _reset_scene(self, env_ids: torch.Tensor) -> None:
+        """Simulator-side reset for ``env_ids``, before any reset event runs.
+
+        Called from :meth:`_reset_idx` immediately after
+        ``curriculum_manager.compute`` and before the ``reset`` /
+        ``reset_dr`` event modes.  That position is load-bearing:
+
+        * **After** curriculum compute, so curriculum terms still observe the
+          ending episode's terminal state.  Implementations must therefore not
+          disturb what a curriculum term reads (joint / body state) *before*
+          this point — the two backends that implement this hook either write
+          only solver-internal buffers (Newton) or are themselves the reset
+          the curriculum is deliberately ordered ahead of (MuJoCo).
+        * **Before** the reset events, so the new pose is written on top of a
+          clean simulator state and the post-reset
+          ``contact_manager.refresh_after_reset`` pass sees no stale
+          externally-applied force.
+
+        Mirrors the ``sim.reset(env_ids)`` slot in mjlab's and IsaacLab's
+        ``_reset_idx``.  Base implementation is a no-op — Genesis manages its
+        state internally and has nothing to clear here.
+        """
+        return None
+
     def _post_reset_forward(self) -> None:
         """Refresh derived quantities after resets, before observations.
 
@@ -722,6 +746,11 @@ class World(ABC):
         # curriculum.reset (stateful-term reset) is forwarded with the other
         # manager resets below.
         self.curriculum_manager.compute(env_ids=env_ids)
+
+        # Simulator-side reset (backend hook). Runs after the curriculum has
+        # read the terminal state and before any reset event writes the new
+        # pose — see :meth:`_reset_scene` for why that ordering matters.
+        self._reset_scene(env_ids)
 
         # State initialization via event manager
         self.event_manager.reset(env_ids)

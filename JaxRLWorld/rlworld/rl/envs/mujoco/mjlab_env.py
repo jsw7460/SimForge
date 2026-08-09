@@ -456,9 +456,28 @@ class MujocoEnv(World):
             body_ids=[int(body_id)],
         )
 
-    def _reset_idx(self, env_ids: torch.Tensor) -> None:
-        """Reset with mjlab-specific write to sim."""
+    def _reset_scene(self, env_ids: torch.Tensor) -> None:
+        """Reset mjwarp ``Data`` and the mjlab scene buffers for ``env_ids``.
+
+        ``scene_manager.reset`` runs ``mjwarp.reset_data`` (qpos -> qpos0,
+        qvel/qacc/warmstart/act/ctrl cleared for the masked worlds) followed by
+        ``Scene.reset``. It used to be the FIRST statement of
+        :meth:`_reset_idx`, i.e. ahead of ``curriculum_manager.compute`` — which
+        meant a curriculum term reading the ending episode's terminal state saw
+        ``qpos0`` instead. mjlab and IsaacLab both order curriculum compute
+        before ``sim.reset``; routing this through the
+        :meth:`~rlworld.rl.envs.world.World._reset_scene` hook restores that
+        order without duplicating the reset sequence here.
+        """
         self.scene_manager.reset(env_ids)
+
+    def _reset_idx(self, env_ids: torch.Tensor) -> None:
+        """Reset with mjlab-specific write to sim.
+
+        The mjwarp/scene reset itself now happens in :meth:`_reset_scene`,
+        which the base ``_reset_idx`` invokes at the correct point in the
+        sequence (after curriculum compute, before the reset events).
+        """
         super()._reset_idx(env_ids)
 
         if len(env_ids) > 0:
