@@ -252,8 +252,13 @@ def _state_assign_full(
     substep loop fires (odd substeps under CUDA graph capture) so
     consumers reading ``state.mujoco.qfrc_actuator`` via
     :attr:`NewtonRobotData.applied_torque` don't see stale zeros.
-    Remove (replace with plain ``dst.assign(src)``) once Newton's
-    ``State.assign`` recurses into namespaces upstream.
+
+    Status: Newton's own ``State.assign`` now walks every
+    ``Model.AttributeNamespace`` container and copies its arrays, so this
+    helper is redundant with upstream and could be collapsed to a plain
+    ``dst.assign(src)``. It is kept because the only remaining caller is the
+    xpbd substep path, which carries no namespaced attributes either way —
+    there is nothing to gain from churning it.
     """
     dst.assign(src)
     for ns in namespaces:
@@ -390,6 +395,11 @@ class NewtonSceneManager(BaseManager):
         self.control: newton.Control | None = None
         self.contacts: newton.Contacts | None = None
         self.collision_pipeline: Any = None
+
+        # Whether the solver accepts the same ``State`` object as both step
+        # input and output. Set per solver in :meth:`build_scene`; see
+        # :meth:`_substep_loop` for what it buys us.
+        self._use_single_state: bool = False
 
         # ArticulationView per entity (created in build_scene)
         self.articulation_views: dict[str, ArticulationView] = {}
@@ -961,6 +971,10 @@ class NewtonSceneManager(BaseManager):
         if self.config.solver_type == "xpbd":
             self.solver = newton.solvers.SolverXPBD(self.model)
             self._use_mujoco_contacts = False
+            # XPBD integrates directly on the State arrays, so input and output
+            # must be distinct buffers (matches isaaclab_newton's
+            # ``NewtonXPBDManager._use_single_state = False``).
+            self._use_single_state = False
         elif self.config.solver_type == "mujoco":
             scfg = self.config.solver_cfg
             # Perf-experiment escape hatch (default: preset value).
@@ -1008,6 +1022,15 @@ class NewtonSceneManager(BaseManager):
                     disable_bits |= int(getattr(mujoco.mjtDisableBit, f"mjDSBL_{flag_name.upper()}"))
                 self.solver.mj_model.opt.disableflags |= disable_bits
                 self.solver.mjw_model.opt.disableflags |= disable_bits
+            # SolverMuJoCo is a reduced-coordinate solver: the authoritative
+            # state lives in its own ``mjw_data`` (qpos/qvel) and the Newton
+            # ``State`` is only an in/out sync surface, so passing the same
+            # object as ``state_in`` and ``state_out`` is safe. Newton's own
+            # SolverMuJoCo example does exactly that
+            # (``newton/examples/sensors/example_sensor_contact.py``), as does
+            # ``isaaclab_newton``'s ``NewtonMJWarpManager``
+            # (``_use_single_state = True``). See :meth:`_substep_loop`.
+            self._use_single_state = True
         else:
             raise ValueError(f"Unsupported solver type: {self.config.solver_type}")
 
@@ -1479,7 +1502,10 @@ class NewtonSceneManager(BaseManager):
         # handles this by copying state on the final odd iteration
         # instead of swapping. We mirror that here line-for-line
         # against Newton's reference.
-        need_state_copy = self.use_cuda_graph and self.config.substeps % 2 == 1
+        # Only the double-buffered path can leave the two state references
+        # crossed on exit; the single-state path never swaps, so it needs no
+        # copy regardless of the substep parity.
+        need_state_copy = self.use_cuda_graph and self.config.substeps % 2 == 1 and not self._use_single_state
         last_idx = self.config.substeps - 1
 
         # With use_mujoco_contacts=True the mjwarp solver runs its own
@@ -1493,6 +1519,32 @@ class NewtonSceneManager(BaseManager):
         self._substep_loop(need_state_copy, last_idx)
 
     def _substep_loop(self, need_state_copy: bool, last_idx: int) -> None:
+        if self._use_single_state:
+            # Single-state path (SolverMuJoCo). ``state_0`` is both input and
+            # output, so there is no reference swap and no end-of-loop copy.
+            # Two consequences, both intended:
+            #
+            #  * The full ``State`` copy that ``need_state_copy`` forced on
+            #    every physics step at the (universally used) ``substeps=1``
+            #    setting is gone. With substeps=1 this is a mathematical
+            #    identity — the old path ran ``step(A -> B)`` and then copied
+            #    B back into A; this runs ``step(A -> A)`` from the same
+            #    inputs.
+            #  * External link wrenches survive the whole physics step. The
+            #    enclosing ``NewtonEnv._step_physics`` clears and writes
+            #    ``state_0.body_f`` once per decimation iteration; under the
+            #    old swap the write landed on a buffer that stopped being the
+            #    solver's input after the first substep, so with
+            #    ``substeps > 1`` a propeller thrust / viewer drag force was
+            #    silently dropped on the remaining substeps. Do NOT add a
+            #    per-substep ``clear_forces()`` here: ``_apply_mjc_control``
+            #    reads ``state_in.body_f`` every substep and
+            #    ``_update_newton_state`` never writes it back, so the single
+            #    write is exactly the intended constant force over the step.
+            for _ in range(self.config.substeps):
+                self.solver.step(self.state_0, self.state_0, self.control, self.contacts, self.substep_dt)
+            return
+
         for i in range(self.config.substeps):
             # NOTE: ``state_0.clear_forces()`` USED to live here. Moved
             # out to ``NewtonEnv._step_physics`` so that callers writing

@@ -360,6 +360,15 @@ class NewtonEnv(World):
              write to ``state_0.body_f``.
           3. Runs ``scene_manager.step()``, which now ONLY runs the
              solver substep loop — no clear inside.
+
+        The single write in step 1-2 is valid for *every* substep because
+        ``NewtonSceneManager._substep_loop`` runs SolverMuJoCo in single-state
+        mode: ``state_0`` is both step input and output, so the buffer holding
+        ``body_f`` never stops being the solver's input. (Under the previous
+        double-buffered swap the write only reached the first substep, which
+        scaled any external wrench down by roughly ``1/substeps``.) The xpbd
+        path still swaps and would need a per-substep re-write if it ever grows
+        an external-wrench consumer.
         """
         for _ in range(self.decimation):
             self.scene_manager.state_0.clear_forces()
