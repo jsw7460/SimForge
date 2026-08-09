@@ -162,6 +162,7 @@ class BaseRunner(ABC):
     @classmethod
     def create_with_env(cls, configs: ConfigsForRun, use_wandb: bool = True, seed: int = 0) -> "BaseRunner":
         from rlworld.rl.algorithms import get_runner_class
+        from rlworld.rl.utils.wandb_checkpoint import resolve_checkpoint_path
 
         runner_cls = get_runner_class(configs.algorithm.algorithm_name)
         env = cls._create_env_from_config(configs)
@@ -173,8 +174,12 @@ class BaseRunner(ABC):
         if configs.runner.resume_path is None:
             return runner_cls(env, configs, use_wandb=use_wandb, seed=seed)
         else:
+            # resume_path may be a local dir OR a wandb run path
+            # ("entity/project/run_id"); the latter downloads the latest
+            # checkpoint (re-resolved to the newest upload each run).
+            checkpoint_path = resolve_checkpoint_path(configs.runner.resume_path)
             return runner_cls.load_checkpoint(
-                checkpoint_path=configs.runner.resume_path,
+                checkpoint_path=checkpoint_path,
                 cfgs=configs,
                 env=env,
                 use_wandb=use_wandb,

@@ -80,6 +80,25 @@ def get_wandb_checkpoint(
     return download_root, False
 
 
+def resolve_checkpoint_path(path: str, iteration: int | None = None) -> str:
+    """Resolve a resume/checkpoint path that may be a wandb run path.
+
+    An existing local directory is returned unchanged. A wandb run path
+    ("entity/project/run_id" — exactly two slashes and not a local path) is
+    downloaded via :func:`get_wandb_checkpoint` and its local path returned.
+    Re-resolving the same run later picks up newer checkpoints as training
+    progresses: ``iteration=None`` selects the highest iteration and the digest
+    check replaces a stale cache, so a resume always continues from the most
+    recent uploaded model rather than a previously cached one.
+    """
+    if os.path.isdir(path):
+        return path
+    if path.count("/") == 2 and not os.path.exists(path):
+        local_path, _ = get_wandb_checkpoint(wandb_run_path=path, iteration=iteration)
+        return local_path
+    return path
+
+
 def list_wandb_checkpoints(wandb_run_path: str) -> list[dict]:
     """List available checkpoint artifacts for a wandb run.
 
