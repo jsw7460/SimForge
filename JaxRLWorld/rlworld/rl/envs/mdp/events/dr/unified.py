@@ -33,6 +33,7 @@ import torch
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.events.mujoco import _MujocoEnvAdapter
 
+from ._model_fields import RecomputeLevel, requires_model_fields
 from ._utils import apply_operation, sample
 
 if TYPE_CHECKING:
@@ -110,6 +111,7 @@ _NEWTON_FRICTION_AXIS_ATTR = {
 }
 
 
+@requires_model_fields("geom_friction")
 def randomize_friction(
     env: World,
     env_ids: torch.Tensor,
@@ -421,6 +423,7 @@ def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scen
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields("body_mass", recompute=RecomputeLevel.set_const)
 def randomize_body_mass(
     env: World,
     env_ids: torch.Tensor,
@@ -503,7 +506,6 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
 
 def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution, shared_random):
     from mjlab.envs.mdp.dr import body_mass as _mjlab_body_mass
-    from mjlab.managers.event_manager import RecomputeLevel
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
@@ -518,7 +520,7 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
     # mjlab's EventManager runs this after firing mass DR (derived inertial
     # constants like invweights go stale otherwise); we call the term
     # directly, so recompute here (deferred to one flush per reset_dr batch).
-    _mujoco_recompute(env, adapter.sim, RecomputeLevel.set_const)
+    _mujoco_recompute(env, adapter.sim, randomize_body_mass.recompute)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -526,6 +528,7 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields("body_ipos", recompute=RecomputeLevel.set_const)
 def randomize_body_com_offset(
     env: World,
     env_ids: torch.Tensor,
@@ -616,7 +619,6 @@ def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
 
 def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, axes, shared_random):
     from mjlab.envs.mdp.dr import body_com_offset as _mjlab_body_com_offset
-    from mjlab.managers.event_manager import RecomputeLevel
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
@@ -629,7 +631,7 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
         axes=axes,
         shared_random=shared_random,
     )
-    _mujoco_recompute(env, adapter.sim, RecomputeLevel.set_const)
+    _mujoco_recompute(env, adapter.sim, randomize_body_com_offset.recompute)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -637,6 +639,7 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields("actuator_gainprm", "actuator_biasprm")
 def randomize_pd_gains(
     env: World,
     env_ids: torch.Tensor,
@@ -892,6 +895,7 @@ def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields("dof_armature", recompute=RecomputeLevel.set_const_0)
 def randomize_joint_armature(
     env: World,
     env_ids: torch.Tensor,
@@ -967,7 +971,6 @@ def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
 
 def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution, shared_random):
     from mjlab.envs.mdp.dr import joint_armature as _mjlab_joint_armature
-    from mjlab.managers.event_manager import RecomputeLevel
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
@@ -979,7 +982,7 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
         operation=operation,
         shared_random=shared_random,
     )
-    _mujoco_recompute(env, adapter.sim, RecomputeLevel.set_const_0)
+    _mujoco_recompute(env, adapter.sim, randomize_joint_armature.recompute)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -987,6 +990,7 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields("dof_frictionloss")
 def randomize_joint_friction(
     env: World,
     env_ids: torch.Tensor,
@@ -1082,6 +1086,7 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields("dof_damping")
 def randomize_joint_damping(
     env: World,
     env_ids: torch.Tensor,
@@ -1187,6 +1192,7 @@ def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields()
 def randomize_tau_scale(
     env: World,
     env_ids: torch.Tensor,
@@ -1210,7 +1216,7 @@ def randomize_tau_scale(
         return
     if not env.act_manager.has_explicit_actuators:
         raise NotImplementedError(
-            "randomize_tau_scale requires explicit actuators (kappa lives on the actuator, " "not a sim PD store)."
+            "randomize_tau_scale requires explicit actuators (kappa lives on the actuator, not a sim PD store)."
         )
     selected = _selected_joint_ids(env, asset_cfg)
     for actuator, joint_idx in env.act_manager.actuators:
@@ -1239,6 +1245,7 @@ def randomize_tau_scale(
 # ══════════════════════════════════════════════════════════════════════
 
 
+@requires_model_fields()
 def randomize_encoder_bias(
     env: World,
     env_ids: torch.Tensor,
