@@ -74,6 +74,15 @@ class NewtonEnv(World):
         self.decimation = getattr(env_cfg, "decimation", 1)
         self.control_dt = self.physics_dt * self.decimation
 
+        # Per-world reset mask consumed by ``_reset_scene`` -> ``solver.reset``.
+        # Newton's ``SolverBase.reset`` expects shape ``(world_count + 1,)``:
+        # entries before the last select local worlds by index, the final entry
+        # selects global entities living in world -1 (we never reset those, so
+        # it stays False). Allocated once and refilled per reset — the warp
+        # view aliases the torch buffer, so the data pointer stays stable.
+        self._reset_world_mask = torch.zeros(self.num_envs + 1, dtype=torch.bool, device=self.device)
+        self._reset_world_mask_wp = wp.from_torch(self._reset_world_mask)
+
         # Initialize buffers
         self._init_buffers()
 
@@ -296,6 +305,43 @@ class NewtonEnv(World):
         """
         self._dr_baselines = snapshot_newton_dr_baselines(self)
         self.scene_manager.capture()
+
+    def _reset_scene(self, env_ids: torch.Tensor) -> None:
+        """Clear solver-internal state for the environments being reset.
+
+        MuJoCo carries buffers across ``step`` calls that belong to the *old*
+        episode: ``qacc_warmstart`` (the constraint solver's initial guess),
+        ``qfrc_applied`` / ``xfrc_applied`` (externally applied forces), ``act``
+        (actuator activation) and ``ctrl``. Writing a fresh joint pose does not
+        touch any of them, so without this call a reset environment warm-starts
+        its first constraint solve from a completely different configuration —
+        and, worse, a single NaN produced in one solve survives every
+        subsequent reset because the solver warm-starts from the NaN, leaving
+        that world permanently dead (newton-physics/newton#1266).
+
+        ``flags=0`` deliberately skips Newton's own joint-state reset: the reset
+        events own ``joint_q`` / ``joint_qd`` and have not written the new pose
+        yet at this point in :meth:`~rlworld.rl.envs.world.World._reset_idx`.
+        Only the solver-owned buffers above are zeroed, for the masked worlds
+        only, which is why this is safe to run before the curriculum-visible
+        state has been overwritten.
+
+        Mirrors ``isaaclab_newton``'s ``NewtonMJWarpManager._reset_solver_internals``.
+        """
+        scene_manager = self.scene_manager
+        # SolverXPBD keeps no cross-step solver buffers and inherits the
+        # ``SolverBase.reset`` no-op, so there is nothing to clear there.
+        if scene_manager.config.solver_type != "mujoco":
+            return
+        solver = scene_manager.solver
+        # The CPU MuJoCo path owns a single global ``MjData`` whose reset is not
+        # mask-aware: it would clear every world, including the ones still
+        # mid-episode. Skip rather than corrupt the non-reset environments.
+        if solver.use_mujoco_cpu:
+            return
+        self._reset_world_mask.zero_()
+        self._reset_world_mask[env_ids] = True
+        solver.reset(scene_manager.state_0, world_mask=self._reset_world_mask_wp, flags=0)
 
     def _step_physics(self) -> None:
         """Newton physics step with decimation.
