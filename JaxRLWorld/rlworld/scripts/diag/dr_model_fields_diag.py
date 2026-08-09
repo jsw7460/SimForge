@@ -340,16 +340,22 @@ def check_c5() -> bool:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _field_view(model, field: str):
+def _field_view(wp_model, field: str):
+    """Torch view of ``wp_model.<field>``, or ``None`` when the field is absent.
+
+    Reads the RAW mujoco-warp Model, not ``sim.model`` -- the latter is a
+    ``WarpBridge`` that hands back ``TorchArray`` wrappers, so the underlying
+    stored shape (the thing that tells us whether the field was expanded) is
+    not what a caller would observe there. Conversion errors are deliberately
+    left to propagate: a field that exists but cannot be read is a finding,
+    not something to paper over.
+    """
     import warp as wp
 
-    arr = getattr(model, field, None)
+    arr = getattr(wp_model, field, None)
     if arr is None:
         return None
-    try:
-        return wp.to_torch(arr)
-    except Exception:
-        return None
+    return wp.to_torch(arr)
 
 
 def check_live(num_envs: int, steps: int) -> bool:
@@ -365,54 +371,71 @@ def check_live(num_envs: int, steps: int) -> bool:
     env.reset()
 
     sim = env.scene_manager.sim
-    model = sim.model
+    wp_model = sim.wp_model
     print()
     _hdr("C6  collected fields are expanded per world; others are not")
     print(f"  num_envs = {env.num_envs}")
     print(f"  collected ({len(collected)}): {list(collected)}")
     print(f"  sim.expanded_fields ({len(sim.expanded_fields)}): {sorted(sim.expanded_fields)}")
+
+    # Independent of any array read: mjlab records what it expanded, so every
+    # field we asked for has to appear there.
+    not_expanded = [f for f in collected if f not in sim.expanded_fields]
+    print(f"  collected but NOT in sim.expanded_fields: {not_expanded or '-'}")
+    c6_ok = not not_expanded
+
     print()
-    print(f"  {'field':<24}{'shape':<22}{'per-world':>10}{'numel':>10}")
-    c6_ok = True
+    print(f"  {'field':<24}{'shape':<22}{'per-world':>12}{'numel':>10}")
+    checked = 0
     present: list[str] = []
     for field in collected:
-        view = _field_view(model, field)
+        view = _field_view(wp_model, field)
         if view is None:
-            print(f"  {field:<24}{'<absent from model>':<22}{'-':>10}{'-':>10}")
+            # Every collected field names a real mujoco-warp model field; an
+            # absent one means the declaration is wrong.
+            print(f"  {field:<24}{'<absent from model>':<22}{'-':>12}{'-':>10}")
+            c6_ok = False
             continue
         present.append(field)
-        per_world = view.shape[0] == env.num_envs
-        # A zero-size field (no cameras / lights / tendons in this robot) cannot
-        # be expanded and cannot be written either, so it is not a failure.
         if view.numel() == 0:
-            per_world_str = "n/a (empty)"
-        else:
-            per_world_str = str(per_world)
-            c6_ok &= per_world
-        print(f"  {field:<24}{str(tuple(view.shape)):<22}{per_world_str:>10}{view.numel():>10}")
+            # No cameras / lights / tendons on this robot: the field cannot be
+            # expanded and cannot be written either.
+            print(f"  {field:<24}{str(tuple(view.shape)):<22}{'n/a (empty)':>12}{0:>10}")
+            continue
+        per_world = view.shape[0] == env.num_envs
+        checked += 1
+        c6_ok &= per_world
+        print(f"  {field:<24}{str(tuple(view.shape)):<22}{str(per_world):>12}{view.numel():>10}")
+
+    if checked == 0:
+        print("\n  no non-empty collected field was inspected -- the check proved nothing.")
+        c6_ok = False
 
     control = next(
         (
             f
-            for f in ("body_pos", "body_quat", "geom_size", "jnt_range")
-            if f not in collected and _field_view(model, f) is not None
+            for f in ("body_pos", "body_quat", "dof_armature", "dof_damping", "body_ipos", "jnt_range")
+            if f not in collected and (v := _field_view(wp_model, f)) is not None and v.numel() > 0
         ),
         None,
     )
-    if control is not None:
-        view = _field_view(model, control)
+    if control is None:
+        print("\n  control: no unrequested non-empty field available -- selectivity unverified.")
+        c6_ok = False
+    else:
+        view = _field_view(wp_model, control)
         shared = view.shape[0] == 1
         c6_ok &= shared
         print(f"\n  control (never requested): {control} shape={tuple(view.shape)} still shared: {shared}")
-    else:
-        print("\n  control: no unrequested field available to sample")
-    print(f"\n  C6: {'PASS' if c6_ok else 'FAIL'}\n")
+
+    print(f"\n  C6: {'PASS' if c6_ok else 'FAIL'}  ({checked} fields inspected)\n")
 
     _hdr("C7  randomized fields actually differ across environments")
     print(f"  {'field':<24}{'across-env spread':>20}{'varies':>9}   note")
     c7_ok = True
+    seen_required: set[str] = set()
     for field in present:
-        view = _field_view(model, field)
+        view = _field_view(wp_model, field)
         if view.numel() == 0 or view.shape[0] != env.num_envs:
             print(f"  {field:<24}{'-':>20}{'-':>9}   skipped (empty or shared)")
             continue
@@ -420,11 +443,17 @@ def check_live(num_envs: int, steps: int) -> bool:
         spread = float((flat.max(dim=0).values - flat.min(dim=0).values).max())
         varies = spread > 0.0
         required = field in _GO2_DIRECTLY_RANDOMIZED
-        note = "REQUIRED" if required else "derived / not randomized by this preset"
         if required:
+            seen_required.add(field)
             c7_ok &= varies
+        note = "REQUIRED" if required else "derived / not randomized by this preset"
         print(f"  {field:<24}{spread:>20.6e}{str(varies):>9}   {note}")
-    print(f"\n  C7: {'PASS' if c7_ok else 'FAIL'}  (required fields: {list(_GO2_DIRECTLY_RANDOMIZED)})\n")
+
+    unchecked = [f for f in _GO2_DIRECTLY_RANDOMIZED if f not in seen_required]
+    if unchecked:
+        print(f"\n  required fields never evaluated: {unchecked}")
+        c7_ok = False
+    print(f"\n  C7: {'PASS' if c7_ok else 'FAIL'}  (required: {list(_GO2_DIRECTLY_RANDOMIZED)})\n")
 
     _hdr("C8  deferred set_const recompute leaves the state finite")
     zero_act = torch.zeros(env.num_envs, env.num_actions, device=env.device)
@@ -441,9 +470,8 @@ def check_live(num_envs: int, steps: int) -> bool:
     for name, tensor in checks.items():
         finite = bool(torch.isfinite(tensor).all())
         c8_ok &= finite
-        print(
-            f"  {name:<16} finite={finite}   max|.|={float(torch.nan_to_num(tensor.abs(), nan=float('inf')).max()):.6e}"
-        )
+        peak = float(torch.nan_to_num(tensor.abs(), nan=float("inf")).max())
+        print(f"  {name:<16} finite={finite}   max|.|={peak:.6e}")
     print(f"\n  C8: {'PASS' if c8_ok else 'FAIL'}  (after {steps} steps)\n")
 
     return c6_ok and c7_ok and c8_ok
