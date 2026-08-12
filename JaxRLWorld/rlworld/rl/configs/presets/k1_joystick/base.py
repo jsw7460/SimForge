@@ -403,6 +403,17 @@ class K1JoystickConfig:
                 lin_vel_y_range=self.lin_vel_y_range,
                 ang_vel_range=self.ang_vel_range,
                 rel_standing_envs=0.15,
+                # Heading control (always on): the ang_vel (wz) command is generated
+                # as wz = stiffness * (heading_target - heading_w), so the policy holds
+                # an ABSOLUTE heading instead of tracking a yaw RATE. Rate-only commands
+                # let a small yaw bias accumulate into a large heading rotation
+                # (k1_yaw_drift_diag: ~2.5 deg/s under wz=0 -> ~50 deg per episode),
+                # including the left/right-SYMMETRIC vy->wz coupling that the mirror
+                # loss cannot catch (it satisfies mirror symmetry). Heading control
+                # forces wz to null out any heading error, killing the drift at the source.
+                heading_command=True,
+                heading_control_stiffness=0.5,
+                rel_heading_envs=1.0,
             ),
         }
         if self._uses_gait_phase():

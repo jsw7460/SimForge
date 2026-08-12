@@ -147,8 +147,8 @@ class K1G1RecipeConfig(K1JoystickConfig):
             )
             track_ang_vel = RewardTermConfig(
                 func=rf_common.track_ang_vel,
-                weight=2.0,
-                params={"std": 0.707, "penalize_xy": True},
+                weight=1.0,
+                params={"std": 0.5, "penalize_xy": True},
             )
             flat_orientation = RewardTermConfig(func=rf_common.flat_orientation, weight=1.0, params={"std": 0.25})
             capture_point_support = RewardTermConfig(
@@ -247,8 +247,8 @@ class K1G1RecipeConfig(K1JoystickConfig):
             )
             track_ang_vel = RewardTermConfig(
                 func=rf_common.track_ang_vel,
-                weight=2.0,
-                params={"std": 0.707, "penalize_xy": True},
+                weight=1.0,
+                params={"std": 0.5, "penalize_xy": True},
             )
             flat_orientation = RewardTermConfig(
                 func=rf.flat_orientation,
