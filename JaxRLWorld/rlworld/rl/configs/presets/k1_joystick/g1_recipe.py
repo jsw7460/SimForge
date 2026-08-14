@@ -61,6 +61,9 @@ class K1G1RecipeConfig(K1JoystickConfig):
     action_clip: tuple = (-100.0, 100.0)
     run_name: str | None = None
 
+    # The g1-recipe enables the left/right mirror-symmetry loss by default.
+    mirror_symmetry_coeff: float = 1.0
+
     # Standing-only capture-point (XCoM) support-margin penalty. Weight <= 0;
     # set to 0.0 to disable. sigma/margin are the penalty decay length and the
     # foot-size fattening of the two-feet support segment (see

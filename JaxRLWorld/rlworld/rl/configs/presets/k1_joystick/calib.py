@@ -1,7 +1,7 @@
 """K1 G1-recipe (mirror) variant with log-replay calibrated actuator
 parameters.
 
-Same task/rewards/DR/mirror loss as :class:`K1G1RecipeMirrorConfig`;
+Same task/rewards/DR/mirror loss as :class:`K1G1RecipeConfig`;
 only the plant differs. The values come from replaying real K1 walking logs (the d6
 session, collected with a policy from this recipe) in Newton and
 fitting the plant so the replayed states match the hardware states —
@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 
 from rlworld.rl.configs.robots.k1 import K1Config, _pattern_dict
 
-from .g1_recipe_mirror import K1G1RecipeMirrorConfig
+from .g1_recipe import K1G1RecipeConfig
 
 # L/R-averaged calibrated armature [kg·m²] (head joints are unpaired
 # and keep their own fitted values).
@@ -81,12 +81,12 @@ def _calib_robot() -> K1Config:
 
 
 @dataclass
-class K1CalibConfig(K1G1RecipeMirrorConfig):
+class K1CalibConfig(K1G1RecipeConfig):
     """G1 recipe + mirror loss on the log-replay calibrated plant.
 
-    Extends the MIRROR recipe (not the plain one): the policy that
-    collected the calibration logs was a mirror-loss run, so the
-    calibrated retrain keeps the same training lineage.
+    Extends the g1-recipe (which now enables the mirror loss by default):
+    the policy that collected the calibration logs was a mirror-loss run,
+    so the calibrated retrain keeps the same training lineage.
     """
 
     robot: K1Config = field(default_factory=_calib_robot)

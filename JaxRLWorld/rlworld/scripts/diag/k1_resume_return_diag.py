@@ -48,7 +48,6 @@ import numpy as np
 from rlworld.rl.algorithms.ppo.ppo import PPO
 from rlworld.rl.configs.presets.k1_joystick.calib import K1CalibConfig
 from rlworld.rl.configs.presets.k1_joystick.g1_recipe import K1G1RecipeConfig
-from rlworld.rl.configs.presets.k1_joystick.g1_recipe_mirror import K1G1RecipeMirrorConfig
 from rlworld.rl.envs.stats_collector import EpisodeStatsCollector
 from rlworld.rl.modules.normalization import EmpiricalNormalization
 from rlworld.rl.runners import BaseRunner
@@ -57,8 +56,7 @@ from rlworld.rl.utils.wandb_checkpoint import get_wandb_checkpoint
 
 _PRESETS = {
     "calib": K1CalibConfig,
-    "mirror": K1G1RecipeMirrorConfig,
-    "g1": K1G1RecipeConfig,
+    "g1": K1G1RecipeConfig,  # g1-recipe now includes the mirror-symmetry loss
 }
 
 
