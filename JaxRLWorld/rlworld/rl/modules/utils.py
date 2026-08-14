@@ -15,6 +15,7 @@ from rlworld.rl.utils.console import (
     RESET,
     YELLOW,
 )
+from rlworld.rl.utils.verbosity import build_summary_enabled
 
 
 def count_parameters(model: eqx.Module) -> int:
@@ -27,11 +28,21 @@ def print_model_summary(model: eqx.Module, name: str = "Model", max_depth: int =
     """
     Print complete model summary for any Equinox module.
 
+    Off unless ``JAXRLWORLD_BUILD_SUMMARY`` is set — see
+    :mod:`rlworld.rl.utils.verbosity`. The parameter count is still returned
+    either way, so callers that log it keep working.
+
     Args:
         model: Equinox module to summarize
         name: Display name for the model
         max_depth: Maximum depth to display (default: 2)
+
+    Returns:
+        Total number of parameters in the model.
     """
+    if not build_summary_enabled():
+        return count_parameters(model)
+
     params = eqx.filter(model, eqx.is_array)
     flat, _ = jax.tree_util.tree_flatten_with_path(params)
 

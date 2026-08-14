@@ -18,6 +18,7 @@ from rlworld.rl.envs.managers.newton import (
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.utils.newton.dr_baselines import snapshot_newton_dr_baselines
+from rlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed, string as _su
 
@@ -46,6 +47,7 @@ class NewtonEnv(World):
         event_cfg: EventConfig,
         curriculum_cfg: CurriculumManagerConfig,
     ):
+        configure_warp_logging()
         set_seed(env_cfg.seed)
         # Seed warp's kernel RNG too. Newton's solvers don't sample
         # randoms themselves, but anything else running through warp

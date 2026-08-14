@@ -6,7 +6,6 @@ environment and manager information in a colorful, structured format.
 
 from __future__ import annotations
 
-import os
 from io import StringIO
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +13,8 @@ from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
+from rlworld.rl.utils.verbosity import build_summary_enabled
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -206,14 +207,13 @@ def print_env_summary(env: World) -> None:
     This is the main function to call when displaying environment info.
     Prints panels and tables for all registered managers.
 
+    Off unless ``JAXRLWORLD_BUILD_SUMMARY`` is set — see
+    :mod:`rlworld.rl.utils.verbosity`.
+
     Args:
         env: The environment instance (GenesisEnv or NewtonEnv).
-
-    Verbosity is controlled by the ``JAXRLWORLD_ENV_SUMMARY`` env var:
-    set it to ``0`` / ``false`` / ``off`` to suppress the per-build manager
-    tables (default: enabled, preserving the previous behavior).
     """
-    if os.environ.get("JAXRLWORLD_ENV_SUMMARY", "1").lower() in ("0", "false", "off", "no"):
+    if not build_summary_enabled():
         return
 
     console = get_console()

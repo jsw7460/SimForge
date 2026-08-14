@@ -20,6 +20,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
 )
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.managers.registry import ManagerRegistry
+from rlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
 
@@ -67,6 +68,7 @@ class MujocoEnv(World):
         event_cfg: EventConfig,
         curriculum_cfg: CurriculumManagerConfig,
     ):
+        configure_warp_logging()
         set_seed(env_cfg.seed)
         # Seed warp's kernel RNG (mjwarp uses it). We don't go through
         # mjlab's ``ManagerBasedRlEnv`` so its ``seed_rng`` never fires;
