@@ -2,7 +2,7 @@
 
 These terms mirror the fall-recovery reward shaping used by
 ``mjlab_playground/getup/mdp/rewards.py``. They read state exclusively
-through ``env.get_robot_data(asset_cfg.name)`` and ``env.act_manager``,
+through ``env.get_entity_data(asset_cfg.name)`` and ``env.act_manager``,
 so they work uniformly on Newton, Genesis, and MuJoCo.
 
 Exposed symbols:
@@ -50,7 +50,7 @@ def power_penalty(
     contribution until that phase is over.
 
     Args:
-        env: Any environment with ``get_robot_data``.
+        env: Any environment with ``get_entity_data``.
         skip_steps: Post-reset control steps during which the penalty
             is suppressed (typically ``act_manager.settle_steps``).
         asset_cfg: Selector identifying the robot entity.
@@ -58,7 +58,7 @@ def power_penalty(
     Returns:
         Tensor of shape ``(num_envs,)``, always ``<= 0``.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     power = torch.sum(torch.abs(rd.applied_torque * rd.joint_vel), dim=-1)
     if skip_steps > 0:
         mask = (env.episode_length_buf >= skip_steps).float()
@@ -87,7 +87,7 @@ def orientation_upright(
         return exp(-err / std^2)
 
     Args:
-        env: Any environment with ``get_robot_data``.
+        env: Any environment with ``get_entity_data``.
         std: Standard deviation of the exponential kernel. The default of
             ``0.707 ≈ 1/sqrt(2)`` matches the common ``exp(-2 * err)``
             form from mjlab_playground when err is the squared L2
@@ -97,7 +97,7 @@ def orientation_upright(
     Returns:
         Tensor of shape ``(num_envs,)``, in ``[0, 1]``.
     """
-    gravity_b = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    gravity_b = env.get_entity_data(asset_cfg.name).projected_gravity_b
     up = torch.tensor([0.0, 0.0, -1.0], device=gravity_b.device)
     err = torch.sum(torch.square(up - gravity_b), dim=-1)
     return torch.exp(-err / (std**2))
@@ -122,7 +122,7 @@ def height_to_target(
     does not incentivize overshoot.
 
     Args:
-        env: Any environment with ``get_robot_data``.
+        env: Any environment with ``get_entity_data``.
         desired_height: Target world-z height (m).
         body_name: Name of the body whose z-height is rewarded. If
             ``None``, the root link's z is used. Pass the trunk body
@@ -134,7 +134,7 @@ def height_to_target(
     Returns:
         Tensor of shape ``(num_envs,)``, in ``[0, 1]``.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     if body_name is None:
         h = rd.root_link_pos_w[:, 2]
     else:
@@ -167,7 +167,7 @@ class GatedPostureTracker:
     both absolute and relative action presets.
 
     Args:
-        env: Any environment with ``get_robot_data`` and ``act_manager``.
+        env: Any environment with ``get_entity_data`` and ``act_manager``.
         std_dict: Mapping of joint-name regex to std value. Every
             actuated joint must match at least one pattern.
         gate_threshold: Upper bound on ``sum((UP - g_b)^2)`` for the
@@ -193,7 +193,7 @@ class GatedPostureTracker:
         self._std = torch.tensor(std_vals, device=env.device, dtype=torch.float32)
 
     def __call__(self, env: World) -> torch.Tensor:
-        rd = env.get_robot_data(self._entity_name)
+        rd = env.get_entity_data(self._entity_name)
         gravity_b = rd.projected_gravity_b
         up = torch.tensor([0.0, 0.0, -1.0], device=gravity_b.device)
         orient_err = torch.sum(torch.square(up - gravity_b), dim=-1)
@@ -230,7 +230,7 @@ class GetupSuccessTracker:
     is safe to use as a regular reward term.
 
     Args:
-        env: Any environment with ``get_robot_data``.
+        env: Any environment with ``get_entity_data``.
         desired_height: Target body z-height (same value as the height
             reward).
         body_name: Body whose z is measured, or ``None`` for root link.
@@ -261,7 +261,7 @@ class GetupSuccessTracker:
         self.success = torch.zeros((env.num_envs,), device=env.device, dtype=torch.float32)
 
     def __call__(self, env: World) -> torch.Tensor:
-        rd = env.get_robot_data(self._entity_name)
+        rd = env.get_entity_data(self._entity_name)
         gravity_b = rd.projected_gravity_b
         up = torch.tensor([0.0, 0.0, -1.0], device=gravity_b.device)
         orient_err = torch.sum(torch.square(up - gravity_b), dim=-1)

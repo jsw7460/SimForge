@@ -84,6 +84,12 @@ class World(ABC):
         self._env_step_counter = 0
         self.lifecycle = LifecycleManager()
 
+        # Per-entity RobotData cache for articulations. Populated by each
+        # backend's env at build time; read via :meth:`get_robot_data`.
+        # Initialized here so a read before the backend fills it fails with a
+        # KeyError naming the entity rather than an AttributeError.
+        self._robot_data_cache: dict = {}
+
         # Per-entity RigidObjectData cache for passive (non-articulated) scene
         # entities declared in ``scene.rigid_objects`` — a table, a graspable
         # object. Empty unless a backend's env populates it at build time;
@@ -228,6 +234,39 @@ class World(ABC):
         Returns:
             An object satisfying the ``RigidObjectData`` protocol.
         """
+        return self._rigid_object_data_cache[entity_name]
+
+    def get_entity_data(self, entity_name: str = "robot") -> RigidObjectData | RobotData:
+        """State reader for any scene entity — articulation or rigid object.
+
+        The read-side counterpart of :meth:`get_root_state_writer`, and the
+        accessor MDP terms should use: an observation like "how high is X" is
+        meaningful for a robot and for a graspable object alike, so the term
+        cannot know in advance which registry ``asset_cfg.name`` lives in.
+        Articulations resolve to their :class:`RobotData`
+        (``_robot_data_cache``); passive bodies resolve to their
+        :class:`RigidObjectData` (``_rigid_object_data_cache``).
+
+        Mirrors IsaacLab's ``InteractiveScene.__getitem__``, which likewise
+        keeps one dict per asset family and searches them in turn.
+
+        The returned object's capability follows the entity: a term that reads
+        ``joint_pos`` off a rigid object raises ``AttributeError`` naming the
+        missing attribute, which is the protocol split doing its job — a cube
+        has no joints to report.
+
+        Args:
+            entity_name: Name of the entity in either scene registry.
+
+        Returns:
+            :class:`RobotData` for an articulation, :class:`RigidObjectData`
+            for a passive rigid object.
+
+        Raises:
+            KeyError: If the name is in neither registry.
+        """
+        if entity_name in self._robot_data_cache:
+            return self._robot_data_cache[entity_name]
         return self._rigid_object_data_cache[entity_name]
 
     def get_root_state_writer(self, entity_name: str = "robot"):

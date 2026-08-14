@@ -32,7 +32,7 @@ def _uprightness(env: World, asset_cfg: ResolvedEntity) -> torch.Tensor:
     """robot_lab's ``clamp(-g_z, 0, 0.7) / 0.7`` gate: 1 when upright, ramps to
     0 past ~45deg tilt. Zeroes a reward once the robot is tipping so tracking /
     step rewards cannot be farmed while falling."""
-    g = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    g = env.get_entity_data(asset_cfg.name).projected_gravity_b
     return torch.clamp(-g[:, 2], 0.0, 0.7) / 0.7
 
 
@@ -47,7 +47,7 @@ def track_lin_vel_xy_exp(
 ) -> torch.Tensor:
     """``exp(-sum((cmd_xy - v_xy)^2) / sigma)`` with body-frame linvel."""
     cmd = env.command_manager.get_term(command_term).command
-    v = env.get_robot_data(asset_cfg.name).root_link_lin_vel_b
+    v = env.get_entity_data(asset_cfg.name).root_link_lin_vel_b
     err = torch.sum(torch.square(cmd[:, :2] - v[:, :2]), dim=1)
     return torch.exp(-err / tracking_sigma)
 
@@ -60,7 +60,7 @@ def track_ang_vel_z_exp(
 ) -> torch.Tensor:
     """``exp(-(cmd_yaw - gyro_z)^2 / sigma)``."""
     cmd = env.command_manager.get_term(command_term).command
-    w = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b
+    w = env.get_entity_data(asset_cfg.name).root_link_ang_vel_b
     err = torch.square(cmd[:, 2] - w[:, 2])
     return torch.exp(-err / tracking_sigma)
 
@@ -75,7 +75,7 @@ def track_lin_vel_xy_yaw_frame_exp(
     gravity-aligned (yaw-only) robot frame, ``exp(-err / std^2)``, gated by
     uprightness. Differs from :func:`track_lin_vel_xy_exp` (full body frame,
     no gate); on flat ground the two nearly coincide."""
-    data = env.get_robot_data(asset_cfg.name)
+    data = env.get_entity_data(asset_cfg.name)
     cmd = env.command_manager.get_term(command_term).command
     vel_yaw = quat_rotate_inverse_wxyz(yaw_quat_wxyz(data.root_link_quat_w), data.root_link_lin_vel_w)
     err = torch.sum(torch.square(cmd[:, :2] - vel_yaw[:, :2]), dim=1)
@@ -91,7 +91,7 @@ def track_ang_vel_z_world_exp(
     """robot_lab ``track_ang_vel_z_world_exp``: track yaw-rate command against
     the WORLD-frame z angular velocity, ``exp(-err / std^2)``, gated by
     uprightness. On flat ground world-z ~= body-z yaw rate."""
-    data = env.get_robot_data(asset_cfg.name)
+    data = env.get_entity_data(asset_cfg.name)
     cmd = env.command_manager.get_term(command_term).command
     w = data.root_link_ang_vel_w
     err = torch.square(cmd[:, 2] - w[:, 2])
@@ -103,13 +103,13 @@ def track_ang_vel_z_world_exp(
 
 def ang_vel_xy_l2(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """``sum(gyro_xy^2)``."""
-    w = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b
+    w = env.get_entity_data(asset_cfg.name).root_link_ang_vel_b
     return torch.sum(torch.square(w[:, :2]), dim=1)
 
 
 def orientation_l2(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """``sum(upvector_xy^2)``; equal to projected-gravity xy squared."""
-    g = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    g = env.get_entity_data(asset_cfg.name).projected_gravity_b
     return torch.sum(torch.square(g[:, :2]), dim=1)
 
 
@@ -118,7 +118,7 @@ def upward(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.T
     horizontal, 0 inverted. Rewards keeping the base upright (robot_lab
     ``upward``; despite its misleading upstream docstring the code uses
     projected gravity, not linear velocity). Pair with a POSITIVE weight."""
-    g = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    g = env.get_entity_data(asset_cfg.name).projected_gravity_b
     return torch.square(1.0 - g[:, 2])
 
 
@@ -137,7 +137,7 @@ def joint_pos_penalty(
     (``clamp(-g_z, 0, 0.7) / 0.7``) so a tipped robot is not pose-penalised.
     Default pose is ``act_manager.offset`` (as ``joint_deviation_l1``). Pair
     with a NEGATIVE weight."""
-    data = env.get_robot_data(asset_cfg.name)
+    data = env.get_entity_data(asset_cfg.name)
     ids = asset_cfg.joint_ids
     cmd = env.command_manager.get_term(command_term).command.norm(dim=1)
     body_vel = data.root_link_lin_vel_b[:, :2].norm(dim=1)
@@ -154,7 +154,7 @@ def joint_torques_l2(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) 
     """``sum(tau_sel^2)`` on the selected joints (robot_lab ``joint_torques_l2``).
     Uses ``RobotData.applied_torque`` (the torque actually written to the sim on
     every backend). Pair with a NEGATIVE weight."""
-    tau = env.get_robot_data(asset_cfg.name).applied_torque[:, asset_cfg.joint_ids]
+    tau = env.get_entity_data(asset_cfg.name).applied_torque[:, asset_cfg.joint_ids]
     return torch.sum(torch.square(tau), dim=1)
 
 
@@ -170,11 +170,11 @@ class K1JointAccL2:
 
     def __init__(self, env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> None:
         self._asset_cfg = asset_cfg
-        n = env.get_robot_data(asset_cfg.name).joint_vel.shape[1]
+        n = env.get_entity_data(asset_cfg.name).joint_vel.shape[1]
         self.prev_vel = torch.zeros(env.num_envs, n, device=env.device)
 
     def __call__(self, env: World) -> torch.Tensor:
-        v = env.get_robot_data(self._asset_cfg.name).joint_vel
+        v = env.get_entity_data(self._asset_cfg.name).joint_vel
         acc = (v - self.prev_vel) / env.control_dt
         self.prev_vel = v.clone()
         return torch.sum(torch.square(acc[:, self._asset_cfg.joint_ids]), dim=1)
@@ -310,7 +310,7 @@ def feet_slide(
     minus root world velocity, rotated into the base frame, xy-norm, summed
     over contacting feet, gated by uprightness. ``asset_cfg.body_names`` =
     (left foot, right foot). Pair with a NEGATIVE weight."""
-    data = env.get_robot_data(asset_cfg.name)
+    data = env.get_entity_data(asset_cfg.name)
     foot_vel_w = data.body_lin_vel_w_by_ids(asset_cfg.body_ids)  # (E, n_foot, 3)
     rel = foot_vel_w - data.root_link_lin_vel_w.unsqueeze(1)  # base-relative (world)
     q = data.root_link_quat_w  # (E, 4) wxyz
@@ -332,7 +332,7 @@ def feet_slip_base_vel(
 
         sum_f ||base_linvel_xy_world|| * contact_f
     """
-    base_speed = env.get_robot_data(asset_cfg.name).root_link_lin_vel_w[:, :2].norm(dim=1)
+    base_speed = env.get_entity_data(asset_cfg.name).root_link_lin_vel_w[:, :2].norm(dim=1)
     contact = env.contact_manager.is_contact(contact_group)
     return base_speed * contact.float().sum(dim=1)
 
@@ -366,7 +366,7 @@ def feet_phase_bezier(
     command gate: upstream has it commented out.
     """
     phase = env.command_manager.get_term(command_term).command
-    foot_z = env.get_robot_data(asset_cfg.name).body_pos_w_by_ids(asset_cfg.body_ids)[..., 2]
+    foot_z = env.get_entity_data(asset_cfg.name).body_pos_w_by_ids(asset_cfg.body_ids)[..., 2]
     rz = _bezier_rz(phase, swing_height)
     err = torch.sum(torch.square(foot_z - rz), dim=1)
     return torch.exp(-err / sigma)
@@ -381,8 +381,8 @@ def feet_distance_lateral(
     """``clip(min_distance - lateral_feet_distance, 0, cap)`` in the
     base-yaw frame. ``asset_cfg.body_names`` = (left foot, right foot).
     """
-    feet = env.get_robot_data(asset_cfg.name).body_pos_w_by_ids(asset_cfg.body_ids)
-    quat = env.get_robot_data(asset_cfg.name).root_link_quat_w  # wxyz
+    feet = env.get_entity_data(asset_cfg.name).body_pos_w_by_ids(asset_cfg.body_ids)
+    quat = env.get_entity_data(asset_cfg.name).root_link_quat_w  # wxyz
     w, x, y, z = quat.unbind(dim=1)
     yaw = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
     dy = feet[:, 0, 1] - feet[:, 1, 1]
@@ -447,7 +447,7 @@ def capture_point_support_penalty(
     Returns a per-env cost in ``[0, 1]`` (0 = :math:`\xi` within the support);
     configure the term with a **negative** weight.
     """
-    data = env.get_robot_data(asset_cfg.name)
+    data = env.get_entity_data(asset_cfg.name)
     feet = data.body_pos_w_by_ids(asset_cfg.body_ids)  # (N, 2, 3): [left, right]
     a_xy, b_xy = feet[:, 0, :2], feet[:, 1, :2]
 
@@ -488,7 +488,7 @@ class K1PoseCost:
         self._weights = torch.tensor(resolved, device=env.device)
 
     def __call__(self, env: World) -> torch.Tensor:
-        q = env.get_robot_data().joint_pos
+        q = env.get_entity_data().joint_pos
         q0 = env.act_manager.offset
         return torch.sum(self._weights * torch.square(q - q0), dim=1)
 
@@ -503,7 +503,7 @@ def joint_deviation_l1(
     """``sum(|q_sel - q0_sel|)``, optionally gated on ``|cmd[:, col]| >
     threshold`` (upstream hip deviation gates on lateral command)."""
     ids = asset_cfg.joint_ids
-    q = env.get_robot_data(asset_cfg.name).joint_pos[:, ids]
+    q = env.get_entity_data(asset_cfg.name).joint_pos[:, ids]
     q0 = env.act_manager.offset[:, ids]
     cost = torch.sum(torch.abs(q - q0), dim=1)
     if gate_column is not None:
@@ -523,7 +523,7 @@ def dof_pos_limits_soft(
     ``mid ± 0.5 * range * factor`` derivation as upstream, with the
     factor coming from ``ArticulationCfg.soft_joint_pos_limit_factor``
     (the preset pins 0.95, the upstream value)."""
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     soft_lo, soft_hi = rd.soft_joint_pos_limits
     q = rd.joint_pos
     out = torch.clamp(soft_lo - q, min=0.0) + torch.clamp(q - soft_hi, min=0.0)

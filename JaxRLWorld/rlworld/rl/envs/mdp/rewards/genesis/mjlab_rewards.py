@@ -102,7 +102,7 @@ def track_ang_vel_mjlab(
     command_z = env.command_manager.ang_vel  # (num_envs,)
 
     # Get actual angular velocity in body frame
-    actual = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b  # (num_envs, 3)
+    actual = env.get_entity_data(asset_cfg.name).root_link_ang_vel_b  # (num_envs, 3)
 
     # z error + xy error (xy command assumed zero)
     z_error = torch.square(command_z - actual[:, 2])
@@ -151,7 +151,7 @@ def flat_orientation_mjlab(
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
     else:
         # Use root link projected gravity (unit gravity vector via robot_data)
-        projected_gravity_b = env.get_robot_data(asset_cfg.name).projected_gravity_b  # (num_envs, 3)
+        projected_gravity_b = env.get_entity_data(asset_cfg.name).projected_gravity_b  # (num_envs, 3)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
 
     return torch.exp(-xy_squared / (std**2))

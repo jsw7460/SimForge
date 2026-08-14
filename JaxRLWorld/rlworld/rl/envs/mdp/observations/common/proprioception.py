@@ -1,7 +1,7 @@
 """Unified proprioception observations using the RobotData interface.
 
 All functions accept any ``World`` subclass and read state exclusively
-through ``env.get_robot_data(asset_cfg.name)`` or ``env.contact_manager``,
+through ``env.get_entity_data(asset_cfg.name)`` or ``env.contact_manager``,
 making them simulator-agnostic.  ``asset_cfg`` is a
 :class:`~rlworld.rl.configs.scene.entity_selector.ResolvedEntity` —
 ObservationManager pre-resolves the :data:`_DEFAULT_SELECTOR` default at
@@ -33,7 +33,7 @@ def base_lin_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> t
     Returns:
         Tensor of shape (num_envs, 3).
     """
-    return env.get_robot_data(asset_cfg.name).root_link_lin_vel_b
+    return env.get_entity_data(asset_cfg.name).root_link_lin_vel_b
 
 
 @EnvStepCache()
@@ -43,7 +43,7 @@ def base_ang_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> t
     Returns:
         Tensor of shape (num_envs, 3).
     """
-    return env.get_robot_data(asset_cfg.name).root_link_ang_vel_b
+    return env.get_entity_data(asset_cfg.name).root_link_ang_vel_b
 
 
 @EnvStepCache()
@@ -53,7 +53,7 @@ def projected_gravity(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR)
     Returns:
         Tensor of shape (num_envs, 3).
     """
-    return env.get_robot_data(asset_cfg.name).projected_gravity_b
+    return env.get_entity_data(asset_cfg.name).projected_gravity_b
 
 
 @EnvStepCache()
@@ -70,7 +70,7 @@ def base_quat(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torc
         mjlab, and the ``RobotData`` protocol — old Newton checkpoints
         whose critic obs included ``base_quat`` will need to retrain.
     """
-    return env.get_robot_data(asset_cfg.name).root_link_quat_w
+    return env.get_entity_data(asset_cfg.name).root_link_quat_w
 
 
 @EnvStepCache()
@@ -85,7 +85,7 @@ def base_euler(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, degree
     Returns:
         Tensor of shape (num_envs, 3) — ``[roll, pitch, yaw]``.
     """
-    quat_wxyz = env.get_robot_data(asset_cfg.name).root_link_quat_w
+    quat_wxyz = env.get_entity_data(asset_cfg.name).root_link_quat_w
     euler = quat_to_euler_wxyz(quat_wxyz)
     if degrees:
         euler = euler * (180.0 / torch.pi)
@@ -111,7 +111,7 @@ def dof_pos(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    pos = env.get_robot_data(asset_cfg.name).joint_pos
+    pos = env.get_entity_data(asset_cfg.name).joint_pos
     return pos
 
 
@@ -136,7 +136,7 @@ def dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    vel = env.get_robot_data(asset_cfg.name).joint_vel
+    vel = env.get_entity_data(asset_cfg.name).joint_vel
     return vel
 
 
@@ -154,7 +154,7 @@ def applied_torque(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) ->
     Returns:
         Tensor of shape (num_envs, num_joints) in act_manager order.
     """
-    return env.get_robot_data(asset_cfg.name).applied_torque
+    return env.get_entity_data(asset_cfg.name).applied_torque
 
 
 @EnvStepCache()
@@ -172,7 +172,7 @@ def dof_pos_nominal_difference(env: World, asset_cfg: ResolvedEntity = _DEFAULT_
     Returns:
         Tensor of shape (num_envs, num_joints).
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     return rd.joint_pos - rd.default_joint_pos.unsqueeze(0)
 
 
@@ -187,7 +187,7 @@ def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _D
     the critic keeps the unbiased version. On the real robot the encoder already
     reads ``q + bias`` physically, so ``(q + bias) - default`` matches deploy.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     return rd.joint_pos + env.act_manager.encoder_bias - rd.default_joint_pos.unsqueeze(0)
 
 
@@ -207,7 +207,7 @@ def foot_height(
     Returns:
         Tensor of shape ``(num_envs, num_feet)``.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     if body_names is not None:
         return rd.body_pos_w(list(body_names))[:, :, 2]
     elif site_names is not None:
@@ -222,7 +222,7 @@ def base_height(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> to
     Returns:
         Tensor of shape (num_envs, 1).
     """
-    return env.get_robot_data(asset_cfg.name).root_link_pos_w[:, 2:3]
+    return env.get_entity_data(asset_cfg.name).root_link_pos_w[:, 2:3]
 
 
 @EnvStepCache()

@@ -155,7 +155,7 @@ class MotionCommand(CommandTerm):
 
     def __init__(self, env: World, cfg: MotionCommandCfg):
         super().__init__(env, cfg)
-        self._rd = env.get_robot_data(cfg.entity_name)
+        self._rd = env.get_entity_data(cfg.entity_name)
         self._writer = env.get_robot_state_writer(cfg.entity_name)
 
         self.robot_anchor_body_index = self._rd.find_body_index(cfg.anchor_body_name)
@@ -997,7 +997,7 @@ class MotionCommandCfg(CommandTermCfg):
 
     entity_name: str = "robot"
     """Scene entity name; passed to
-    ``env.get_robot_data()`` / ``env.get_robot_state_writer()``."""
+    ``env.get_entity_data()`` / ``env.get_robot_state_writer()``."""
 
     pose_range: dict[str, tuple[float, float]] = field(default_factory=dict)
     """Per-axis RSI ranges for root pose. Keys: ``x`` / ``y`` / ``z``

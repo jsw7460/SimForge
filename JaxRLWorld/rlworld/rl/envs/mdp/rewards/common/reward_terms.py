@@ -1,7 +1,7 @@
 """Unified reward terms using the RobotData interface.
 
 All functions accept any ``World`` subclass and read state exclusively
-through ``env.get_robot_data(asset_cfg.name)``, making them simulator-agnostic.
+through ``env.get_entity_data(asset_cfg.name)``, making them simulator-agnostic.
 
 Selector convention: every term takes
 :class:`~rlworld.rl.configs.scene.entity_selector.ResolvedEntity` as
@@ -63,7 +63,7 @@ def track_lin_vel(
 ) -> torch.Tensor:
     """Reward for tracking commanded linear velocity in xy plane."""
     target = torch.stack([env.command_manager.lin_vel_x, env.command_manager.lin_vel_y], dim=1)
-    actual = env.get_robot_data(asset_cfg.name).root_link_lin_vel_b
+    actual = env.get_entity_data(asset_cfg.name).root_link_lin_vel_b
     xy_error = torch.sum(torch.square(target - actual[:, :2]), dim=1)
     if penalize_z:
         xy_error = xy_error + torch.square(actual[:, 2])
@@ -77,7 +77,7 @@ def track_ang_vel(
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Reward for tracking commanded angular velocity (yaw)."""
-    actual = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b
+    actual = env.get_entity_data(asset_cfg.name).root_link_ang_vel_b
     z_error = torch.square(env.command_manager.ang_vel - actual[:, 2])
     if penalize_xy:
         z_error = z_error + torch.sum(torch.square(actual[:, :2]), dim=1)
@@ -102,7 +102,7 @@ def flat_orientation(
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Penalty for non-flat orientation (roll/pitch deviation from upright)."""
-    gravity_b = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    gravity_b = env.get_entity_data(asset_cfg.name).projected_gravity_b
     xy_squared = torch.sum(torch.square(gravity_b[:, :2]), dim=1)
     if std is not None:
         return torch.exp(-xy_squared / (std**2))
@@ -114,19 +114,19 @@ def flat_orientation(
 
 def penalize_lin_vel_z(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalize z-axis base linear velocity. WTW: _reward_lin_vel_z."""
-    vel_z = env.get_robot_data(asset_cfg.name).root_link_lin_vel_b[:, 2]
+    vel_z = env.get_entity_data(asset_cfg.name).root_link_lin_vel_b[:, 2]
     return -torch.square(vel_z)
 
 
 def penalize_ang_vel_xy(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalize xy-axis base angular velocity. WTW: _reward_ang_vel_xy."""
-    ang_vel_xy = env.get_robot_data(asset_cfg.name).root_link_ang_vel_b[:, :2]
+    ang_vel_xy = env.get_entity_data(asset_cfg.name).root_link_ang_vel_b[:, :2]
     return -torch.sum(torch.square(ang_vel_xy), dim=1)
 
 
 def penalize_dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalize joint velocities. WTW: _reward_dof_vel."""
-    return -torch.sum(torch.square(env.get_robot_data(asset_cfg.name).joint_vel), dim=1)
+    return -torch.sum(torch.square(env.get_entity_data(asset_cfg.name).joint_vel), dim=1)
 
 
 def similar_to_default(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
@@ -139,7 +139,7 @@ def similar_to_default(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR
     limit midpoint. Both tensors are in canonical actuated-joint order,
     so the per-joint subtraction stays aligned.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     return -torch.sum(
         torch.abs(rd.joint_pos - rd.default_joint_pos),
         dim=1,
@@ -185,7 +185,7 @@ def is_terminated(env: World) -> torch.Tensor:
 
 def base_height_penalty(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Penalty for deviating from target base height."""
-    height_z = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, 2]
+    height_z = env.get_entity_data(asset_cfg.name).root_link_pos_w[:, 2]
     return -torch.square(height_z - env.command_manager.base_height)
 
 
@@ -226,7 +226,7 @@ def penalize_angular_momentum_l2(
     Returns:
         Tensor of shape ``(num_envs,)``.
     """
-    angmom = env.get_robot_data(asset_cfg.name).angular_momentum_w(sensor_name=sensor_name)
+    angmom = env.get_entity_data(asset_cfg.name).angular_momentum_w(sensor_name=sensor_name)
     return -torch.sum(torch.square(angmom), dim=-1)
 
 
@@ -328,7 +328,7 @@ def penalize_body_ang_vel_xy(
     """
     if asset_cfg.body_ids is None:
         raise ValueError("penalize_body_ang_vel_xy requires asset_cfg with body_names (got none).")
-    ang_vel = env.get_robot_data(asset_cfg.name).body_ang_vel_w_all[:, asset_cfg.body_ids, :2]
+    ang_vel = env.get_entity_data(asset_cfg.name).body_ang_vel_w_all[:, asset_cfg.body_ids, :2]
     return -torch.sum(torch.square(ang_vel), dim=(1, 2))
 
 
@@ -375,7 +375,7 @@ def _foot_ids(asset_cfg: ResolvedEntity) -> tuple[bool, torch.Tensor]:
 def _foot_pos_vel(env: World, asset_cfg: ResolvedEntity) -> tuple[torch.Tensor, torch.Tensor]:
     """Return (foot_pos_w, foot_lin_vel_w) for the feet selected by ``asset_cfg``."""
     use_bodies, ids = _foot_ids(asset_cfg)
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     if use_bodies:
         return rd.body_pos_w_by_ids(ids), rd.body_lin_vel_w_by_ids(ids)
     return rd.site_pos_w_by_ids(ids), rd.site_lin_vel_w_by_ids(ids)
@@ -573,7 +573,7 @@ class FeetSwingHeightTracker:
         self.peak_heights = torch.zeros((env.num_envs, num_feet), device=env.device, dtype=torch.float32)
 
     def _foot_heights(self, env: World) -> torch.Tensor:
-        rd = env.get_robot_data(self._asset_cfg.name)
+        rd = env.get_entity_data(self._asset_cfg.name)
         if self._use_bodies:
             return rd.body_pos_w_by_ids(self._foot_ids)[..., 2]
         return rd.site_pos_w_by_ids(self._foot_ids)[..., 2]
@@ -758,7 +758,7 @@ def penalize_joint_pos_limits_l1(
         Tensor of shape ``(num_envs,)`` — negative sum of soft-limit
         violations across joints.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     dof_pos = rd.joint_pos
     lower, upper = rd.soft_joint_pos_limits
     out_of_limits = -(dof_pos - lower).clamp(max=0.0)

@@ -1,7 +1,7 @@
 """Unified termination conditions using the RobotData interface.
 
 All functions accept any ``World`` subclass and read state exclusively
-through ``env.get_robot_data(asset_cfg.name)``, making them simulator-agnostic.
+through ``env.get_entity_data(asset_cfg.name)``, making them simulator-agnostic.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def energy_termination(
     the settle hook.
 
     Args:
-        env: Any environment with ``get_robot_data``.
+        env: Any environment with ``get_entity_data``.
         threshold: Maximum allowed mechanical power in watts. Set to
             ``float("inf")`` to disable the check (e.g. as the initial
             value of a curriculum schedule).
@@ -60,7 +60,7 @@ def energy_termination(
     Returns:
         TerminationResult indicating which envs exceeded the threshold.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     power = torch.sum(torch.abs(rd.applied_torque * rd.joint_vel), dim=-1)
     exceeded = power > threshold
     if skip_steps > 0:
@@ -81,7 +81,7 @@ def nan_detection(
     Returns:
         TerminationResult flagging envs with NaN state.
     """
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     has_nan = (
         torch.any(torch.isnan(rd.joint_pos), dim=1)
         | torch.any(torch.isnan(rd.joint_vel), dim=1)
@@ -99,7 +99,7 @@ def roll_pitch_violation(
     """Terminate if robot's roll or pitch exceeds safe thresholds.
 
     Args:
-        env: Any environment with ``get_robot_data``.
+        env: Any environment with ``get_entity_data``.
         roll_threshold_degree: Maximum allowed roll angle in degrees.
         pitch_threshold_degree: Maximum allowed pitch angle in degrees.
         entity_name: Name of the entity to check.
@@ -107,7 +107,7 @@ def roll_pitch_violation(
     Returns:
         TerminationResult indicating which envs should reset.
     """
-    quat_wxyz = env.get_robot_data(asset_cfg.name).root_link_quat_w
+    quat_wxyz = env.get_entity_data(asset_cfg.name).root_link_quat_w
     euler = quat_to_euler_wxyz(quat_wxyz)  # (num_envs, 3) radians
 
     roll_deg = torch.abs(euler[:, 0]) * (180.0 / torch.pi)
@@ -135,7 +135,7 @@ def terrain_out_of_bounds(
     data on the scene manager), so it is safe to register unconditionally.
 
     Args:
-        env: Any environment with ``get_robot_data`` and a scene manager.
+        env: Any environment with ``get_entity_data`` and a scene manager.
         margin: Safety distance (m) inside the terrain edge at which to
             terminate.
         asset_cfg: Entity whose root position is checked.
@@ -151,7 +151,7 @@ def terrain_out_of_bounds(
     limit_x = max(0.0, half_x - margin)
     limit_y = max(0.0, half_y - margin)
 
-    root_xy = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, :2]
+    root_xy = env.get_entity_data(asset_cfg.name).root_link_pos_w[:, :2]
     out = (root_xy[:, 0].abs() > limit_x) | (root_xy[:, 1].abs() > limit_y)
     return TerminationResult(out)
 

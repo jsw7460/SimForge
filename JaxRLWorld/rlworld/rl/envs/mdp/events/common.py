@@ -1,7 +1,7 @@
 """Sim-agnostic event / reset terms.
 
 These functions work on any ``World`` subclass by reading state through
-``env.get_robot_data()`` and writing through
+``env.get_entity_data()`` and writing through
 ``env.get_robot_state_writer()``. They replace the per-simulator
 ``push_robot`` / ``reset_root_state_uniform`` implementations that
 lived in ``newton_event_terms.py``, ``event_terms.py`` (Genesis), and
@@ -66,7 +66,7 @@ def push_by_setting_velocity(
     if len(env_ids) == 0:
         return
 
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     writer = env.get_robot_state_writer(asset_cfg.name)
     device = env.device
     n = len(env_ids)
@@ -108,7 +108,7 @@ def push_by_planar_impulse(
     if len(env_ids) == 0:
         return
 
-    rd = env.get_robot_data(asset_cfg.name)
+    rd = env.get_entity_data(asset_cfg.name)
     writer = env.get_robot_state_writer(asset_cfg.name)
     device = env.device
     n = len(env_ids)
@@ -491,7 +491,7 @@ def reset_fallen_or_standing(
     # action offset, so relying on it produces an all-zero home
     # pose instead of the real standing configuration.
     if default_joint_pos_dict is not None:
-        rd = env.get_robot_data(asset_cfg.name)
+        rd = env.get_entity_data(asset_cfg.name)
         default_joint_pos = rd.default_joint_pos.unsqueeze(0).expand(n, -1).clone()
     else:
         default_joint_pos = env.act_manager.offset[env_ids].clone()
@@ -504,7 +504,7 @@ def reset_fallen_or_standing(
         # full soft joint limit range so fallen poses span the whole
         # reachable configuration space. Requires
         # ``rd.soft_joint_pos_limits`` (all 3 sims implement it).
-        rd = env.get_robot_data(asset_cfg.name)
+        rd = env.get_entity_data(asset_cfg.name)
         jp_lo, jp_hi = rd.soft_joint_pos_limits
         u = torch.rand((n, num_joints), device=device)
         fallen_joint_pos = jp_lo + u * (jp_hi - jp_lo)

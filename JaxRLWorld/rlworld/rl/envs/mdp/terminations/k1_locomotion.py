@@ -20,5 +20,5 @@ def gravity_z_positive(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR
     projected gravity is the negated upvector, this is
     ``projected_gravity_b.z > 0``.
     """
-    g = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    g = env.get_entity_data(asset_cfg.name).projected_gravity_b
     return TerminationResult(g[:, 2] > 0.0)

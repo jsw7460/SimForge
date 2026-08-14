@@ -605,8 +605,8 @@ def wtw_raibert_heuristic(
     reindex = [foot_name_to_site_idx[fn.replace("_foot", "")] for fn in feet_names]
     foot_positions = all_site_positions[:, reindex, :]
 
-    base_pos = env.get_robot_data().root_link_pos_w
-    base_quat = env.get_robot_data().root_link_quat_w
+    base_pos = env.get_entity_data().root_link_pos_w
+    base_quat = env.get_entity_data().root_link_quat_w
 
     num_feet = foot_positions.shape[1]
     cur_footsteps_translated = foot_positions - base_pos.unsqueeze(1)

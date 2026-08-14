@@ -112,10 +112,19 @@ class MujocoEnv(World):
         return self.get_robot_data("robot")
 
     def get_robot_data(self, entity_name: str = "robot"):
-        if hasattr(self, "_robot_data_cache") and entity_name in self._robot_data_cache:
-            return self._robot_data_cache[entity_name]
-        # Fallback before cache is built (e.g. during setup)
-        return self.scene_manager.get_entity(entity_name).data
+        """Articulation state reader; see :meth:`World.get_entity_data` for any entity.
+
+        This used to fall back to ``scene_manager.get_entity(name).data`` when
+        the name was absent from the cache. mjlab keeps articulations and
+        passive bodies in ONE ``Scene.entities`` registry, so that fallback
+        resolved rigid objects too — and handed back mjlab's raw ``EntityData``
+        instead of the ``MujocoRigidObjectData`` wrapper, while Genesis and
+        Newton raised ``KeyError`` for the same call. Same preset, different
+        outcome per backend. Rigid objects now go through
+        :meth:`World.get_entity_data`, so this stays articulation-only and
+        matches the other two backends.
+        """
+        return self._robot_data_cache[entity_name]
 
     def get_robot_state_writer(self, entity_name: str = "robot"):
         """Return the write-API companion to ``get_robot_data``.

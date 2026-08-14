@@ -127,8 +127,8 @@ def wtw_raibert_heuristic(
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
 
     foot_positions = entity.get_links_pos(links_idx_local=links_idx_local)
-    base_pos = env.get_robot_data(asset_cfg.name).root_link_pos_w
-    base_quat = env.get_robot_data(asset_cfg.name).root_link_quat_w
+    base_pos = env.get_entity_data(asset_cfg.name).root_link_pos_w
+    base_quat = env.get_entity_data(asset_cfg.name).root_link_quat_w
 
     num_feet = foot_positions.shape[1]
     cur_footsteps_translated = foot_positions - base_pos.unsqueeze(1)

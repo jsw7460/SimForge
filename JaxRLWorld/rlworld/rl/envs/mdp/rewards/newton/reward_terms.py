@@ -107,8 +107,8 @@ def wtw_raibert_heuristic(env: "NewtonLocomotionEnv") -> torch.Tensor:
     result = get_bodies_pos(env, feet_bodies)
     foot_positions = result.data  # (num_envs, num_feet, 3)
 
-    base_pos = env.get_robot_data().root_link_pos_w
-    base_quat = env.get_robot_data().root_link_quat_w
+    base_pos = env.get_entity_data().root_link_pos_w
+    base_quat = env.get_entity_data().root_link_quat_w
 
     num_feet = foot_positions.shape[1]
     cur_footsteps_translated = foot_positions - base_pos.unsqueeze(1)

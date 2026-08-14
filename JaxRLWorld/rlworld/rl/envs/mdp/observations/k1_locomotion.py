@@ -31,7 +31,7 @@ def velocity_command(env: World, command_term: str = "velocity") -> torch.Tensor
 @EnvStepCache()
 def base_ang_vel_w(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Root angular velocity in the WORLD frame (upstream ``global_angvel``)."""
-    return env.get_robot_data(asset_cfg.name).root_link_ang_vel_w
+    return env.get_entity_data(asset_cfg.name).root_link_ang_vel_w
 
 
 def gait_phase_encoding(env: World, command_term: str = "gait_phase") -> torch.Tensor:
@@ -51,7 +51,7 @@ def feet_lin_vel_w(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) ->
 
     ``asset_cfg.body_names`` selects the feet (left, right) → (N, 6).
     """
-    vel = env.get_robot_data(asset_cfg.name).body_lin_vel_w_by_ids(asset_cfg.body_ids)
+    vel = env.get_entity_data(asset_cfg.name).body_lin_vel_w_by_ids(asset_cfg.body_ids)
     return vel.reshape(env.num_envs, -1)
 
 

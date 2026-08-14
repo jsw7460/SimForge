@@ -82,7 +82,7 @@ def penalize_orientation_control(env: World, asset_cfg: ResolvedEntity = _DEFAUL
     gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=device).expand(len(body_pitch), -1)
     desired_gravity = quat_rotate_inverse_wxyz(desired_quat, gravity_vec)
 
-    actual_gravity = env.get_robot_data(asset_cfg.name).projected_gravity_b
+    actual_gravity = env.get_entity_data(asset_cfg.name).projected_gravity_b
     return -torch.sum(torch.square(actual_gravity[:, :2] - desired_gravity[:, :2]), dim=1)
 
 
@@ -95,6 +95,6 @@ def reward_body_height_cmd(
 
     Target height = body_height command + base_height_target.
     """
-    body_height = env.get_robot_data(asset_cfg.name).root_link_pos_w[:, 2]
+    body_height = env.get_entity_data(asset_cfg.name).root_link_pos_w[:, 2]
     target = env.command_manager.body_height + base_height_target
     return -torch.square(body_height - target)

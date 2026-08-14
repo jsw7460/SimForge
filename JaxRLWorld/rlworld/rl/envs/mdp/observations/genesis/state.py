@@ -46,7 +46,7 @@ def feet_height(env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR):
     """World-frame z of the bodies selected by ``asset_cfg.body_names``. Shape (num_envs, num_feet)."""
     if asset_cfg.body_ids is None:
         raise ValueError("feet_height requires asset_cfg with body_names (got none).")
-    return env.get_robot_data(asset_cfg.name).body_pos_w_by_ids(asset_cfg.body_ids)[:, :, 2]
+    return env.get_entity_data(asset_cfg.name).body_pos_w_by_ids(asset_cfg.body_ids)[:, :, 2]
 
 
 @EnvStepCache()
