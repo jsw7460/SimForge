@@ -160,6 +160,10 @@ class GenesisRigidObjectData:
         euler = quat_to_euler_wxyz(self.root_link_quat_w)
         return euler[:, 2]
 
+    @property
+    def is_fixed_base(self) -> bool:
+        return self._entity.base_link.is_fixed
+
     # ------------------------------------------------------------------
     # Body-level reads
     # ------------------------------------------------------------------

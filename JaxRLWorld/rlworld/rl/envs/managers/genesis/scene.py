@@ -238,6 +238,15 @@ class SceneManager(BaseManager):
                 "file": cfg.urdf_path,
                 "fixed": not cfg.floating,
                 "convexify": convexify,
+                # Required before a fixed link carrying geometry can hold a
+                # different pose per environment: without it Genesis keeps one
+                # shared vertex buffer for such links and refuses the write
+                # ("Specifying env-specific pos for fixed links with at least
+                # one geometry requires setting morph option
+                # 'batch_fixed_verts=True'"). That is exactly what a reset
+                # event does to a table or tank, and the MJCF branch above
+                # already sets it.
+                "batch_fixed_verts": True,
             }
             if cfg.links_to_keep:
                 urdf_kwargs["links_to_keep"] = cfg.links_to_keep
@@ -270,8 +279,40 @@ class SceneManager(BaseManager):
 
     def build_scene(self):
         self.scene.build(n_envs=self.env.num_envs, env_spacing=self.config.env_spacing, center_envs_at_origin=False)
+        self._place_fixed_entities()
         self._configure_robot_dynamics()
         self.env.vis_manager.inject_custom_context()
+
+    def _place_fixed_entities(self) -> None:
+        """Put every welded entity at its declared ``init_state`` pose.
+
+        Free-floating entities are placed by reset events, which is why every
+        morph above stays at the origin. A welded entity has no root joint, so
+        no reset event can ever move it — its pose has to be written once,
+        here, or it stays at the origin no matter what the config declared.
+        Newton bakes the same pose into ``add_urdf(xform=...)`` and mjlab
+        writes ``root_body.pos`` on the spec, so this is what makes
+        ``init_state.pos`` mean the same thing on all three backends.
+
+        The write goes through ``relative=False`` (world frame) rather than a
+        morph offset: a morph offset would also shift the frame that the
+        ``relative=True`` default of ``get_pos`` / ``get_quat`` reports in, and
+        every read would come back relative to the object instead of the world.
+
+        ``base_link.is_fixed`` is the predicate rather than ``cfg.floating``
+        because the MJCF path never passes ``floating`` to the morph at all —
+        Genesis infers the base joint from the file, so only the built entity
+        knows the answer.
+        """
+        for cfgs, entities in ((self.config.entities, self.entities), (self.config.rigid_objects, self.rigid_objects)):
+            for name, entity in entities.items():
+                if not entity.base_link.is_fixed:
+                    continue
+                init_state = cfgs[name].init_state
+                pos = torch.tensor(init_state.pos, dtype=torch.float32, device=self.env.device)
+                quat = torch.tensor(init_state.rot, dtype=torch.float32, device=self.env.device)
+                entity.set_pos(pos.expand(self.env.num_envs, 3).contiguous(), relative=False, zero_velocity=False)
+                entity.set_quat(quat.expand(self.env.num_envs, 4).contiguous(), relative=False, zero_velocity=False)
 
     def _set_kinematic_tree(self):
         def _resolve(name: str):

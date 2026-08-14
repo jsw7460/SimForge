@@ -84,6 +84,28 @@ class GenesisRobotStateWriter:
     # Root writes
     # ------------------------------------------------------------------
 
+    def _reject_velocity_if_fixed_base(self) -> None:
+        """Refuse a root *velocity* write on a welded entity.
+
+        A fixed-base entity has no root joint, so it has no velocity DOFs.
+        Genesis would index six free-joint DOFs that do not exist and trip a
+        device-side assert, poisoning the CUDA context for the rest of the
+        process — the failure then surfaces somewhere unrelated. mjlab refuses
+        the same call with a ``ValueError``, so raising here keeps the contract
+        identical across backends.
+
+        The *pose* write is a different matter and is allowed: see
+        :meth:`set_root_pose`.
+
+        Raises:
+            ValueError: If this entity is welded to the world.
+        """
+        if self._entity.base_link.is_fixed:
+            raise ValueError(
+                "Cannot write root velocity for fixed-base entity: it is welded to the world and has "
+                "no velocity DOFs. Its pose can still be set per environment."
+            )
+
     def set_root_pose(
         self,
         pos: Tensor,
@@ -91,6 +113,13 @@ class GenesisRobotStateWriter:
         env_ids: torch.Tensor | None = None,
     ) -> None:
         """Write root link position + orientation. Genesis is wxyz native.
+
+        Works for welded entities too: Genesis's solver writes a fixed link's
+        pose straight into ``dyn_state.links.pos`` / ``.quat`` instead of the
+        free-joint coordinates (``rigid_solver.set_base_links_pos``), and those
+        buffers are per-environment. That is what lets a table or tank be
+        placed per env by a reset event — the same capability mjlab provides
+        through its mocap base and Newton through its fixed-root mocap bodies.
 
         ``zero_velocity=False``: see :meth:`set_dof_positions`.
         """
@@ -118,6 +147,7 @@ class GenesisRobotStateWriter:
         """
         import torch
 
+        self._reject_velocity_if_fixed_base()
         quat_wxyz = self._entity.get_quat(envs_idx=env_ids)
         ang_local = quat_rotate_inverse_wxyz(quat_wxyz, ang_vel)
         combined = torch.cat([lin_vel, ang_local], dim=-1)
