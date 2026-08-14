@@ -132,7 +132,11 @@ class NewtonRobotStateWriter:
 
 
 class NewtonRigidObjectStateWriter:
-    """Root-only write API for a passive rigid object (free-floating body).
+    """Root-only write API for a passive rigid object.
+
+    Covers both a free body and an immovable fixture: the scene manager loads
+    ``floating=False`` rigid objects as *kinematic* free bodies, so every
+    passive object has a real root joint and the same write path.
 
     Unlike :class:`NewtonRobotStateWriter`, which writes the *first*
     articulation's root via a hardcoded ``joint_q[0:7]`` slice, a rigid
@@ -148,9 +152,10 @@ class NewtonRigidObjectStateWriter:
     full-width buffer and only fill the reset rows.
     """
 
-    def __init__(self, env: NewtonEnv, view: ArticulationView) -> None:
+    def __init__(self, env: NewtonEnv, view: ArticulationView, immovable: bool = False) -> None:
         self._env = env
         self._view = view
+        self._immovable = immovable
 
     def _staged(self, env_ids: Tensor | None, values: Tensor, width: int) -> Tensor:
         """Full ``(num_worlds, width)`` buffer with ``values`` at the reset rows.
@@ -164,14 +169,35 @@ class NewtonRigidObjectStateWriter:
         return buf
 
     def set_root_pose(self, pos: Tensor, quat_wxyz: Tensor, env_ids: Tensor | None = None) -> None:
-        """Write root pose (wxyz → Newton-native xyzw transform)."""
+        """Write root pose (wxyz → Newton-native xyzw transform).
+
+        Immovable fixtures take this same path: the scene manager loads a
+        ``floating=False`` rigid object as a *kinematic* free body rather than
+        welding it, so its pose is ordinary per-environment joint state.
+        (A welded body's pose lives in ``model.joint_X_p``, which Newton's
+        ``ArticulationView`` cannot write at all — it slices the root joint out
+        with an integer index and the masked-write kernels only implement the
+        resulting array's ndim 3 and 4, never 2.)
+        """
         quat_xyzw = quat_wxyz[..., [1, 2, 3, 0]]
         transforms = self._staged(env_ids, torch.cat([pos, quat_xyzw], dim=-1), 7)
         state = self._env.scene_manager.state
         self._view.set_root_transforms(state, wp.from_torch(transforms, dtype=wp.transform), mask=self._mask(env_ids))
 
     def set_root_velocity(self, lin_vel: Tensor, ang_vel: Tensor, env_ids: Tensor | None = None) -> None:
-        """Write root spatial velocity (Newton layout: linear, angular)."""
+        """Write root spatial velocity (Newton layout: linear, angular).
+
+        Raises:
+            ValueError: If the entity is immovable. A kinematic body does have
+                velocity DOFs, but they are pinned by a huge armature and mean
+                nothing; refusing matches Genesis and mjlab so a preset that
+                tries fails the same way everywhere.
+        """
+        if self._immovable:
+            raise ValueError(
+                "Cannot write root velocity for fixed-base entity: it does not respond to applied "
+                "forces. Its pose can still be set per environment."
+            )
         velocities = self._staged(env_ids, torch.cat([lin_vel, ang_vel], dim=-1), 6)
         state = self._env.scene_manager.state
         self._view.set_root_velocities(

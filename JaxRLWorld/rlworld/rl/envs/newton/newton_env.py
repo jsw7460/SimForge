@@ -294,8 +294,13 @@ class NewtonEnv(World):
         # each object's own ArticulationView (free-joint single body).
         for name in self.scene_manager.rigid_objects:
             view = self.scene_manager.articulation_views[name]
-            self._rigid_object_data_cache[name] = NewtonRigidObjectData(self, view, default_joint_pos=None)
-            self._rigid_object_state_writer_cache[name] = NewtonRigidObjectStateWriter(self, view)
+            data = NewtonRigidObjectData(self, view, default_joint_pos=None)
+            self._rigid_object_data_cache[name] = data
+            # Immovability is read off the model once (welded, or kinematic)
+            # and handed to the writer so both sides agree on one source.
+            self._rigid_object_state_writer_cache[name] = NewtonRigidObjectStateWriter(
+                self, view, immovable=data.is_fixed_base
+            )
 
     def _post_setup(self) -> None:
         """Snapshot DR baselines, then capture CUDA graph.

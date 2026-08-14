@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import newton
 import torch
 import warp as wp
 from torch import Tensor
@@ -31,7 +32,7 @@ class NewtonRigidObjectData:
 
     Joint-free entity state backed by an ``ArticulationView``.
     :class:`NewtonRobotData` extends this with the actuated-joint accessors. A
-    passive rigid object (a free-floating box, a table) is a 0-joint
+    passive rigid object (a graspable box, a table) is a 0-actuator
     articulation in Newton, so it uses this base directly; an articulated robot
     uses :class:`NewtonRobotData`.
     """
@@ -49,9 +50,13 @@ class NewtonRigidObjectData:
         # Per-body CoM offset *in the body frame* (model.body_com), shape
         # (bodies_per_env, 3) — constant; lazily fetched once. Same per-world
         # layout as state.body_q / body_qd (parallel Model/State arrays), so it
-        # broadcasts against _body_q_view() / _body_qd_view() and its row 0 is
-        # the floating-base root body.
+        # broadcasts against _body_q_view() / _body_qd_view().
         self._body_com_local: Tensor | None = None
+        # Index of THIS entity's root body within that per-world layout; see
+        # :attr:`_root_body_index`. Lazily resolved once.
+        self._root_body_idx: int | None = None
+        # Immovability, resolved once from the model — see :attr:`is_fixed_base`.
+        self._is_fixed_base: bool | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -80,9 +85,42 @@ class NewtonRigidObjectData:
         return wp.to_torch(wp_arr).reshape(-1, 7)
 
     def _root_velocity_floats(self, state: State) -> Tensor:
-        """(W, 6) float tensor from root velocities."""
+        """(W, 6) float tensor from root velocities.
+
+        A welded articulation has no free joint, so Newton's
+        ``ArticulationView`` returns ``None`` for its root velocities —
+        "Non-floating articulations have no root velocities"
+        (``newton/_src/utils/selection.py``). Such a body cannot move, so zero
+        is what the protocol reports; without the branch the read dies inside
+        ``wp.to_torch(None)``. Passive fixtures do not come through here — they
+        are loaded as kinematic free bodies and keep real velocity DOFs (pinned
+        by a huge armature).
+        """
+        if not self._view.is_floating_base:
+            return torch.zeros(self._env.num_envs, 6, device=self._env.device, dtype=torch.float32)
         wp_arr = self._view.get_root_velocities(state)
         return wp.to_torch(wp_arr).reshape(-1, 6)
+
+    @property
+    def _root_body_index(self) -> int:
+        """Index of *this entity's* root body in the flat per-world body arrays.
+
+        ``_body_q_view`` / ``_body_qd_view`` / ``_body_com_local_view`` span
+        every body in a world, because Newton keeps one flat ``body_q`` for the
+        whole model. Row 0 is therefore the first entity's root body — the
+        robot's — not necessarily this entity's, so a rigid object must locate
+        its own row. The view's ``link_labels`` are the very strings
+        ``model.body_label`` holds (``selection.py`` copies them), and a
+        Newton articulation lists its root link first, so the label lookup is
+        exact.
+        """
+        if self._root_body_idx is None:
+            from rlworld.rl.envs.utils.newton.body_cache import get_cache
+
+            cache = get_cache(self._env)
+            labels = self._env.scene_manager.model.body_label[: cache.bodies_per_env]
+            self._root_body_idx = labels.index(self._view.link_labels[0])
+        return self._root_body_idx
 
     # ------------------------------------------------------------------
     # Read: raw state (used by observations, event terms, etc.)
@@ -149,7 +187,7 @@ class NewtonRigidObjectData:
         v_com = self.root_lin_vel_w(state)  # (W, 3) — at CoM
         omega = self.root_ang_vel_w(state)  # (W, 3) — world frame
         quat_wxyz = self.root_quat_wxyz(state)  # (W, 4)
-        c = self._body_com_local_view()[0]  # (3,) — root body's CoM offset, body frame
+        c = self._body_com_local_view()[self._root_body_index]  # (3,) — CoM offset, body frame
         r_world = quat_rotate_wxyz(quat_wxyz, c.expand_as(v_com))  # R @ c, world
         return v_com - torch.cross(omega, r_world, dim=-1)
 
@@ -175,7 +213,7 @@ class NewtonRigidObjectData:
     def root_com_pos_w(self) -> Tensor:
         # r_C = r_O + R @ c
         quat_wxyz = self.root_quat_wxyz(self._state)
-        c = self._body_com_local_view()[0]  # (3,)
+        c = self._body_com_local_view()[self._root_body_index]  # (3,)
         link_pos = self.root_link_pos_w  # (W, 3) — link frame origin
         return link_pos + quat_rotate_wxyz(quat_wxyz, c.expand_as(link_pos))
 
@@ -194,6 +232,26 @@ class NewtonRigidObjectData:
     @property
     def heading_w(self) -> Tensor:
         return quat_to_euler_wxyz(self.root_link_quat_w)[:, 2]
+
+    @property
+    def is_fixed_base(self) -> bool:
+        """Whether this entity is immovable — welded, or kinematic.
+
+        Two Newton shapes mean "does not move under physics". An articulation
+        with no root joint is welded outright. A passive fixture is instead a
+        free body flagged ``BodyFlags.KINEMATIC``: it keeps a writable pose
+        (which is what lets a reset event place it per environment) but does
+        not respond to applied forces. Both report True, because what callers
+        branch on is the behaviour — no velocity state worth writing — not the
+        joint topology underneath.
+        """
+        if self._is_fixed_base is None:
+            if not self._view.is_floating_base:
+                self._is_fixed_base = True
+            else:
+                flags = wp.to_torch(self._env.scene_manager.model.body_flags)
+                self._is_fixed_base = bool(int(flags[self._root_body_index]) & int(newton.BodyFlags.KINEMATIC))
+        return self._is_fixed_base
 
     # ------------------------------------------------------------------
     # Body-level reads
@@ -265,7 +323,8 @@ class NewtonRigidObjectData:
         ``model.body_com`` is a parallel array to ``state.body_q`` (same
         per-world layout), so taking the first ``bodies_per_env`` rows yields
         world 0's bodies in the same order ``_body_q_view`` / ``_body_qd_view``
-        use, and row 0 is the floating-base root body.
+        use. Row 0 is the first entity's root body, which is this entity's root
+        only for the robot — use :attr:`_root_body_index` for the root row.
         """
         if self._body_com_local is None:
             from rlworld.rl.envs.utils.newton.body_cache import get_cache

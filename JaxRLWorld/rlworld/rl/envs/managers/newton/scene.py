@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Dict, Literal
 
 import mujoco
@@ -542,8 +542,27 @@ class NewtonSceneManager(BaseManager):
         zero-actuator entity), but tracked in the separate ``rigid_objects``
         registry and built into each world by :meth:`build_scene` alongside the
         robots.
+
+        ``floating=False`` — a table, a tank, a machine frame — is loaded as a
+        **kinematic free body**, not as a body welded to the world: the root
+        joint is a free joint and every body carries
+        ``BodyFlags.KINEMATIC``, "a user-prescribed body that does not respond
+        to applied forces". Gravity and contacts leave it exactly where it was
+        put (``SolverMuJoCo`` gives its DOFs ``KINEMATIC_ARMATURE = 1e10``),
+        while the pose stays ordinary per-environment state that a reset event
+        can write — which a welded body does not have. That is what makes an
+        immovable fixture placeable per env at all.
+
+        This mirrors IsaacLab, whose manipulation tasks declare their table as
+        a ``RigidObjectCfg`` with ``kinematic_enabled=True`` rather than as a
+        fixed-base entity. Welding is left to articulations (``entities``),
+        whose bases are structural.
         """
-        builder, info = self._build_entity(object_name, cfg)
+        immovable = not cfg.floating
+        builder, info = self._build_entity(object_name, replace(cfg, floating=True) if immovable else cfg)
+        if immovable:
+            builder.body_flags = [int(newton.BodyFlags.KINEMATIC)] * len(builder.body_flags)
+        info["kinematic"] = immovable
         self._rigid_object_builders[object_name] = builder
         self.rigid_objects[object_name] = info
 
