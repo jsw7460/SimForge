@@ -173,7 +173,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         solver_cfg=SolverMuJoCoCfg(
             impratio=1.0,
             ccd_iterations=50,
-            cone="elliptic",
+            cone="pyramidal",
             ls_iterations=20,
             iterations=10,
             # mjwarp-native collision on BOTH flat and rough. The old
@@ -409,6 +409,12 @@ def customize_reset_root_params(cfg: Go2FlatConfig, params: Dict[str, Any]) -> N
     )
 
 
+# All DR terms below run on a single global interval_dr timer: every
+# _DR_INTERVAL_PERIOD_S seconds they re-sample together for all envs (one
+# deferred recompute per period) instead of once per episode reset.
+_DR_INTERVAL_PERIOD_S = 10.0
+
+
 def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """Newton-specific domain randomization terms.
 
@@ -429,7 +435,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     terms: Dict[str, EventTermConfig] = {
         "randomize_body_mass": EventTermConfig(
             func=unified_dr.randomize_body_mass,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(name="robot", body_names=(cfg.robot.base_link_name,)),
                 "mass_range": (0.8, 1.2),
@@ -444,7 +451,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         # resolver uses.
         "randomize_friction": EventTermConfig(
             func=unified_dr.randomize_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(
                     name="robot",
@@ -464,7 +472,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         # whole-DOF scope as mjlab's randomize_joint_friction term.
         "randomize_joint_friction": EventTermConfig(
             func=unified_dr.randomize_joint_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.0, 0.05),
@@ -480,12 +489,13 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     # plus the wide friction-range terms.
     # Per-foot heterogeneous friction takes precedence over the scalar
     # override. Installed after the wide ``randomize_friction`` term so it
-    # runs later in the reset_dr list and wins the final write (same
+    # runs later in the interval_dr list and wins the final write (same
     # mechanism the scalar setter relies on).
     if r.foot_friction_per_foot_override is not None:
         terms["set_foot_friction_per_foot"] = EventTermConfig(
             func=newton_dr.set_foot_friction_per_foot,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "values": list(r.foot_friction_per_foot_override),
             },
@@ -499,7 +509,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         # neighbouring shape and leave the foot at its default mu.
         terms["set_foot_friction"] = EventTermConfig(
             func=newton_dr.set_foot_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "value": float(r.foot_friction_override),
                 # "dr_scale": (0.99, 1.01),
@@ -507,11 +518,12 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         )
 
     # Per-DOF heterogeneous joint friction takes precedence over the
-    # scalar override (same reset_dr ordering rationale as above).
+    # scalar override (same interval_dr ordering rationale as above).
     if r.joint_friction_per_joint_override is not None:
         terms["set_joint_friction_per_dim"] = EventTermConfig(
             func=newton_dr.set_joint_friction_per_dim,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "values": list(r.joint_friction_per_joint_override),
             },
@@ -519,7 +531,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     elif r.joint_frictionloss_override is not None:
         terms["set_joint_friction"] = EventTermConfig(
             func=newton_dr.set_joint_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "value": float(r.joint_frictionloss_override),
                 # "dr_scale": (0.99, 1.01),

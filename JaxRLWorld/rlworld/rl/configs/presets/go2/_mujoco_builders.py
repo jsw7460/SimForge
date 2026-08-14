@@ -196,7 +196,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         sensors=(feet_ground_cfg, body_ground_cfg),
         # terrain (flat plane or generated) — single source of truth.
         terrain_cfg=cfg.make_terrain_cfg(),
-        cone="elliptic",
+        cone="pyramidal",
         solver_iterations=10,
         solver_ls_iterations=20,
         ccd_iterations=50,
@@ -331,6 +331,12 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
     return _RewardsCfg()
 
 
+# All DR terms below run on a single global interval_dr timer: every
+# _DR_INTERVAL_PERIOD_S seconds they re-sample together for all envs (one
+# deferred recompute per period) instead of once per episode reset.
+_DR_INTERVAL_PERIOD_S = 10.0
+
+
 def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
     r = cfg.robot
@@ -344,7 +350,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     terms: Dict[str, EventTermConfig] = {
         "randomize_friction": EventTermConfig(
             func=unified_dr.randomize_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(name="robot", geom_names=foot_geom_names),
                 "friction_range": (0.3, 1.2),
@@ -354,7 +361,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         ),
         "randomize_base_mass": EventTermConfig(
             func=unified_dr.randomize_body_mass,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.base_link_name,)),
                 "mass_range": (0.8, 1.2),
@@ -363,7 +371,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         ),
         "randomize_joint_friction": EventTermConfig(
             func=unified_dr.randomize_joint_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.0, 0.05),
@@ -380,7 +389,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     if r.foot_friction_override is not None:
         terms["set_foot_friction"] = EventTermConfig(
             func=mujoco_dr.set_foot_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "value": float(r.foot_friction_override),
                 "dr_scale": (0.9, 1.1),
@@ -394,7 +404,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     if r.joint_frictionloss_override is not None:
         terms["set_joint_friction"] = EventTermConfig(
             func=mujoco_dr.set_joint_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "value": float(r.joint_frictionloss_override),
                 "dr_scale": (0.9, 1.1),
