@@ -90,22 +90,54 @@ class MujocoRigidObjectData:
         return self._entity.data.root_link_ang_vel_b
 
     # ── Root center-of-mass variants ─────────────────────────────────
-    # mjlab's EntityData already exposes both: ``root_link_*`` uses
-    # ``data.xpos`` (body frame origin) + cvel transferred there;
-    # ``root_com_*`` uses ``data.xipos`` (the inertial / CoM frame origin)
-    # + cvel transferred to xipos. We just forward them.
+    # mjlab's EntityData exposes both: ``root_link_*`` uses ``data.xpos``
+    # (body frame origin) + cvel transferred there; ``root_com_*`` uses
+    # ``data.xipos`` (the inertial / CoM frame origin) + cvel transferred to
+    # xipos. Both index ``indexing.root_body_id``, which is where the mocap
+    # wrapper below gets in the way of the CoM variants.
+
+    @property
+    def _mocap_wrapped(self) -> bool:
+        """Whether mjlab inserted a ``mocap_base`` body above this entity's root.
+
+        mjlab wraps every fixed-base entity in a massless, geom-less mocap body
+        so it can be repositioned per environment (``mjlab/utils/spec.py``),
+        and ``EntityIndexing.root_body_id`` then names that wrapper rather than
+        the entity's own root body. The wrapper's *link* frame coincides with
+        the real root, so pose and link-velocity reads are unaffected — but its
+        *inertial* frame is meaningless, because MuJoCo has no mass or geometry
+        from which to place one. Reading it put a welded table's
+        ``root_com_pos_w`` at exactly twice its position.
+        """
+        return self._entity.is_mocap
+
+    @property
+    def _root_com_index(self) -> int:
+        """Row of the body arrays holding this entity's real root body.
+
+        The mocap wrapper, when present, is the entity's first body, so the
+        real root is the next one. Without a wrapper the root already is body
+        0 and these reads are identical to mjlab's own.
+        """
+        return 1 if self._mocap_wrapped else 0
 
     @property
     def root_com_pos_w(self) -> Tensor:
-        return self._entity.data.root_com_pos_w
+        if not self._mocap_wrapped:
+            return self._entity.data.root_com_pos_w
+        return self.body_com_pos_w_all[:, self._root_com_index, :]
 
     @property
     def root_com_lin_vel_w(self) -> Tensor:
-        return self._entity.data.root_com_lin_vel_w
+        if not self._mocap_wrapped:
+            return self._entity.data.root_com_lin_vel_w
+        return self.body_com_lin_vel_w_all[:, self._root_com_index, :]
 
     @property
     def root_com_lin_vel_b(self) -> Tensor:
-        return self._entity.data.root_com_lin_vel_b
+        if not self._mocap_wrapped:
+            return self._entity.data.root_com_lin_vel_b
+        return quat_rotate_inverse_wxyz(self.root_link_quat_w, self.root_com_lin_vel_w)
 
     @property
     def projected_gravity_b(self) -> Tensor:
@@ -116,6 +148,10 @@ class MujocoRigidObjectData:
     def heading_w(self) -> Tensor:
         euler = quat_to_euler_wxyz(self.root_link_quat_w)
         return euler[:, 2]
+
+    @property
+    def is_fixed_base(self) -> bool:
+        return self._entity.is_fixed_base
 
     # ------------------------------------------------------------------
     # Body-level reads
