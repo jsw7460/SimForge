@@ -135,6 +135,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
         solver_type="mujoco",
         robot_cfg=r,
         solver_cfg=SolverMuJoCoCfg(
+            cone="pyramidal",
             iterations=50,
             ls_iterations=50,
             ccd_iterations=50,
