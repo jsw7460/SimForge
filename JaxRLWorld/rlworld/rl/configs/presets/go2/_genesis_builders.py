@@ -297,12 +297,19 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
     return _RewardsCfg()
 
 
+# All DR terms below run on a single global interval_dr timer: every
+# _DR_INTERVAL_PERIOD_S seconds they re-sample together for all envs (one
+# deferred recompute per period) instead of once per episode reset.
+_DR_INTERVAL_PERIOD_S = 10.0
+
+
 def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
     """Genesis-specific domain randomization terms."""
     return {
         "randomize_base_mass": EventTermConfig(
             func=unified_dr.randomize_body_mass,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(name="robot", body_names=(cfg.robot.base_link_name,)),
                 "mass_range": (0.8, 1.2),
@@ -311,7 +318,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         ),
         "randomize_friction": EventTermConfig(
             func=unified_dr.randomize_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 # mjlab parity: mjlab abs (0.3, 1.2) divided by the mjcf
                 # class-default foot friction 0.4 → ratio (0.75, 3.0).
@@ -328,7 +336,8 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
         ),
         "randomize_joint_friction": EventTermConfig(
             func=unified_dr.randomize_joint_friction,
-            mode="reset_dr",
+            mode="interval_dr",
+            interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
                 "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.0, 0.05),
