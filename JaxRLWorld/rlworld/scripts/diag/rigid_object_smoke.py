@@ -1,15 +1,27 @@
 """Multi-entity rigid-object (RigidObjectCfg) read-path smoke / verification.
 
-Verifies the multi-entity read path on a chosen backend end-to-end: declare a
+Verifies the multi-entity path on a chosen backend end-to-end: declare a
 passive rigid object (a free-floating cube) in ``scene.rigid_objects``
-alongside the Go2 robot, build the env, and read the cube's root pose/velocity
-via ``env.get_rigid_object_data("cube")`` (the RigidObjectData root-only API),
-while confirming the robot path (``get_robot_data("robot")``) is unaffected.
+alongside the Go2 robot, build the env, and check two layers.
+
+**Env layer** — the cube's root pose/velocity reads back through
+``env.get_rigid_object_data("cube")`` (the RigidObjectData root-only API), a
+reset event places it, and the robot path (``get_robot_data("robot")``) is
+unaffected.
+
+**MDP layer** — a shipped observation term reaches the cube. Terms address
+entities by NAME (``asset_cfg``) and cannot know which registry the name lives
+in, so they read through the polymorphic ``World.get_entity_data``. Without
+that accessor a manipulation task cannot observe or reward anything about the
+object it manipulates, which is the whole point of having one in the scene.
+These checks also pin the failure modes: a joint read on a passive body must
+surface as a missing attribute (the protocol split working), and
+``get_robot_data`` must stay articulation-only on all three backends.
 
 Run (GPU box):
-    jaxpy rlworld/scripts/diag/rigid_object_smoke.py --sim genesis
-    jaxpy rlworld/scripts/diag/rigid_object_smoke.py --sim newton
-    jaxpy rlworld/scripts/diag/rigid_object_smoke.py --sim mujoco
+    jaxpy -m rlworld.scripts.diag.rigid_object_smoke --sim genesis
+    jaxpy -m rlworld.scripts.diag.rigid_object_smoke --sim newton
+    jaxpy -m rlworld.scripts.diag.rigid_object_smoke --sim mujoco
 """
 
 from __future__ import annotations
@@ -25,6 +37,7 @@ from rlworld.rl.configs.scene import RigidObjectCfg
 from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import InitialStateCfg
 from rlworld.rl.envs.mdp.events import common as common_ef
+from rlworld.rl.envs.mdp.observations.common import proprioception as obs_common
 from rlworld.rl.runners import BaseRunner
 
 CUBE_SPAWN = (0.3, 0.0, 0.6)
@@ -134,6 +147,71 @@ def main() -> int:
     has_joint_attr = hasattr(env.get_rigid_object_data("cube"), "joint_pos")
     print(f"[cube]   exposes joint_pos? {has_joint_attr} (expect False — RigidObjectData)")
     results["object_is_rigid_only"] = not has_joint_attr
+
+    # ── 4) MDP-layer reach: can a term actually observe the object? ──────
+    #
+    # Everything above goes through env.get_rigid_object_data(), which only the
+    # diags call. Observation/reward/termination terms take an entity by NAME
+    # (asset_cfg) and cannot know which registry it lives in, so they read
+    # through the polymorphic World.get_entity_data(). These checks are what
+    # decide whether a manipulation task can be written at all.
+    print("-" * 70)
+    robot_sel = env.resolve_selector(SceneEntitySelector(name="robot"))
+    cube_sel = env.resolve_selector(SceneEntitySelector(name="cube"))
+
+    # 4a) The same shipped observation term, pointed at the robot and at the
+    #     cube. Robot is the regression half; cube is the new capability.
+    try:
+        h_robot = float(obs_common.base_height(env, robot_sel)[0, 0])
+        print(f"[mdp]    base_height(robot) = {h_robot:.4f}")
+        results["mdp_reads_robot"] = h_robot == h_robot  # not NaN
+    except Exception as e:  # noqa: BLE001
+        print(f"[mdp]    base_height(robot) ERROR: {type(e).__name__}: {e}")
+        results["mdp_reads_robot"] = False
+
+    try:
+        h_cube = float(obs_common.base_height(env, cube_sel)[0, 0])
+        print(f"[mdp]    base_height(cube)  = {h_cube:.4f}  (target {CUBE_SPAWN[2]})")
+        results["mdp_reads_object"] = abs(h_cube - CUBE_SPAWN[2]) < 1e-3
+    except Exception as e:  # noqa: BLE001
+        print(f"[mdp]    base_height(cube)  ERROR: {type(e).__name__}: {e}")
+        results["mdp_reads_object"] = False
+
+    # 4b) get_entity_data must hand back the very same object get_robot_data
+    #     does for an articulation — that identity is what makes the migration
+    #     behaviour-preserving for every existing preset.
+    same = env.get_entity_data("robot") is env.get_robot_data("robot")
+    print(f"[mdp]    get_entity_data('robot') is get_robot_data('robot')? {same} (expect True)")
+    results["entity_data_identity"] = same
+
+    # 4c) A joint read on a passive body must fail as a MISSING ATTRIBUTE (the
+    #     protocol split reporting "a cube has no joints"), not as a KeyError
+    #     from looking in the wrong registry.
+    try:
+        obs_common.dof_pos(env, cube_sel)
+        print("[mdp]    dof_pos(cube) returned a value (expected AttributeError)")
+        results["joint_read_on_object_rejected"] = False
+    except AttributeError as e:
+        print(f"[mdp]    dof_pos(cube) -> AttributeError: {e}")
+        results["joint_read_on_object_rejected"] = True
+    except Exception as e:  # noqa: BLE001
+        print(f"[mdp]    dof_pos(cube) -> {type(e).__name__} (expected AttributeError): {e}")
+        results["joint_read_on_object_rejected"] = False
+
+    # 4d) get_robot_data stays articulation-only on EVERY backend. mjlab used to
+    #     fall back to its single Scene.entities registry here and return raw
+    #     mjlab EntityData for a rigid object, so the same preset behaved
+    #     differently on mujoco than on Newton/Genesis.
+    try:
+        env.get_robot_data("cube")
+        print("[mdp]    get_robot_data('cube') SUCCEEDED (expected KeyError)")
+        results["robot_accessor_is_strict"] = False
+    except KeyError:
+        print("[mdp]    get_robot_data('cube') -> KeyError (correct: not an articulation)")
+        results["robot_accessor_is_strict"] = True
+    except Exception as e:  # noqa: BLE001
+        print(f"[mdp]    get_robot_data('cube') -> {type(e).__name__} (expected KeyError): {e}")
+        results["robot_accessor_is_strict"] = False
 
     # 4) Dynamics dump (informational): step and watch the free cube move.
     print("-" * 70)
