@@ -93,9 +93,26 @@ class MujocoRobotStateWriter:
         quat_wxyz: Tensor,
         env_ids: Tensor | None = None,
     ) -> None:
-        """Write root link pose. mjlab is wxyz native."""
+        """Write root link pose. mjlab is wxyz native.
+
+        A welded entity has no free joint, so its pose does not live in
+        ``qpos`` and ``write_root_link_pose_to_sim`` refuses it. mjlab's answer
+        is to wrap every fixed-base entity in a ``mocap_base`` body
+        (``mjlab/utils/spec.py``), whose pose lives in ``data.mocap_pos`` —
+        per-environment state, which is what makes a table placeable per env at
+        all. Route there, as mjlab's own reset events do.
+        """
         env_ids = self._resolve_env_ids(env_ids)
         pose = torch.cat([pos, quat_wxyz], dim=-1)
+        if self._entity.is_fixed_base:
+            if not self._entity.is_mocap:
+                raise ValueError(
+                    "Cannot write root pose for a fixed-base entity without a mocap base. mjlab wraps "
+                    "fixed-base entities in one automatically, so this entity was built from a spec that "
+                    "already had a non-mocap root body."
+                )
+            self._entity.write_mocap_pose_to_sim(pose, env_ids=env_ids)
+            return
         self._entity.write_root_link_pose_to_sim(pose, env_ids=env_ids)
 
     def set_root_velocity(
@@ -104,8 +121,19 @@ class MujocoRobotStateWriter:
         ang_vel: Tensor,
         env_ids: Tensor | None = None,
     ) -> None:
-        """Write root link linear + angular velocity."""
+        """Write root link linear + angular velocity.
+
+        Raises:
+            ValueError: If the entity is welded to the world. A fixed base has
+                no root velocity to write — the same refusal Genesis and Newton
+                give, so a preset that tries fails identically everywhere.
+        """
         env_ids = self._resolve_env_ids(env_ids)
+        if self._entity.is_fixed_base:
+            raise ValueError(
+                "Cannot write root velocity for fixed-base entity: it is welded to the world. Its pose "
+                "can still be set per environment (mocap), but it has no velocity state."
+            )
         vel = torch.cat([lin_vel, ang_vel], dim=-1)
         self._entity.write_root_link_velocity_to_sim(vel, env_ids=env_ids)
 

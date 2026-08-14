@@ -124,6 +124,18 @@ class RigidObjectData(Protocol):
         """Heading angle (yaw) in world frame. Shape (num_envs,)."""
         ...
 
+    @property
+    def is_fixed_base(self) -> bool:
+        """Whether this entity is welded to the world (no root joint).
+
+        Lets sim-agnostic MDP terms branch on the one behavioural difference a
+        welded entity has: its pose can still be written per environment — each
+        backend has a mechanism for that — but it has no root velocity state,
+        so writing one raises. Mirrors mjlab's self-describing
+        ``Entity.is_fixed_base``.
+        """
+        ...
+
     # ── Body-level reads (named bodies / links) ──────────────────────
 
     def find_body_index(self, body_name: str) -> int:

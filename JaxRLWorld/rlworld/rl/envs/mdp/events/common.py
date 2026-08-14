@@ -210,8 +210,14 @@ def reset_root_state_uniform(
         ang_vel = vel_samples[:, 3:6]
 
     # ── Write ─────────────────────────────────────────────────────
+    # A welded entity (a table, a tank, a machine frame) takes the pose but has
+    # no root velocity state, so the velocity write is skipped rather than
+    # refused — same split mjlab's own reset event makes. This is also the ONLY
+    # way such an entity ends up in the right place once ``env_origins`` is
+    # non-zero: its build-time pose is one value shared by every environment.
     writer.set_root_pose(pos, quat_wxyz, env_ids=env_ids)
-    writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
+    if not env.get_entity_data(asset_cfg.name).is_fixed_base:
+        writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
 
 
