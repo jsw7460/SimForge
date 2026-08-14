@@ -110,6 +110,13 @@ class G1FlatConfig:
     episode_length_s: float = 20.0
     seed: int = 42
 
+    # Domain-randomization cadence. When set, the sim builders' per-reset
+    # reset_dr DR terms instead re-sample together on ONE global timer every
+    # this many seconds (all envs at once, a single recompute per period) —
+    # cuts the reset-path recompute cost. None keeps per-reset reset_dr.
+    # Applied in _build_event_config.
+    dr_interval_period_s: float | None = 10.0
+
     # Command ranges (smaller ang_vel range than Go2)
     lin_vel_x_range: tuple[float, float] = (-1.0, 1.0)
     lin_vel_y_range: tuple[float, float] = (-1.0, 1.0)
@@ -287,6 +294,16 @@ class G1FlatConfig:
         builders = _get_sim_builders(self.sim_type)
         common_terms = self._build_common_event_terms()
         dr_terms = builders.build_dr_terms(self)
+
+        # Move per-reset reset_dr DR onto a single global interval timer when a
+        # period is configured (all envs re-sample together every
+        # dr_interval_period_s seconds, one recompute per period), across all
+        # three sims. See dr_interval_period_s.
+        if self.dr_interval_period_s is not None:
+            for term in dr_terms.values():
+                if term.mode == "reset_dr":
+                    term.mode = "interval_dr"
+                    term.interval_dr_period_s = self.dr_interval_period_s
 
         cfg = EventConfig()
         for name, term in {**common_terms, **dr_terms}.items():
