@@ -174,7 +174,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         num_envs=cfg.num_envs,
         env_spacing=2.0,
         robot_entity_name="robot",
-        cone="elliptic",
+        cone="pyramidal",
         entities={"robot": robot_entity},
         sensors=(feet_ground_cfg, self_collision_cfg),
         solver_iterations=50,
