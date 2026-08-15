@@ -39,58 +39,67 @@ class NewtonActionManager(ActionManagerBase):
         super().__init__(env, config)
 
     def _apply_position(self, targets: torch.Tensor) -> None:
-        """Apply position targets via Newton/Warp."""
+        """Apply position targets via Newton/Warp.
+
+        Written **in place**, into a view of ``control.joint_target_q``
+        itself, so the per-world stride comes from the array rather than
+        from a count that can disagree with it. Newton sizes that array
+        more generously than ``joint_dof_count`` for a model that keeps its
+        FIXED joints (``collapse_fixed_joints=False``): a bench-mounted arm
+        with a linkage gripper measured 13 slots per world against a dof
+        count of 8. Building a separate ``(worlds, dof_per_world)`` buffer
+        and copying it over therefore packed four worlds' targets into the
+        space of two and a half — world 0 landed correctly, every later
+        world read someone else's joint angles, and nothing raised, because
+        a short ``wp.copy`` into a longer array is legal.
+
+        Writing in place also leaves the FREE joint's quaternion slot as
+        the simulator set it, rather than reconstructing it from zeros
+        (``newton.Control.clear`` documents that zeroing this array
+        corrupts that slot).
+        """
         control = self.env.scene_manager.control
-        model = self.env.scene_manager.model
+        num_worlds = self.env.scene_manager.model.world_count
 
-        num_worlds = model.world_count
-        # Under the coord layout introduced in Newton PR #2965, ``joint_target_q``
-        # follows the ``joint_q`` stride (7 slots for a FREE joint) and is indexed
-        # by ``newton_q_indices``; under the legacy DOF layout it follows
-        # ``joint_qd`` (6 slots for a FREE joint) and is indexed by
-        # ``newton_qd_indices``. The FREE joint quaternion slot needs identity
-        # init under coord layout so a fresh zero buffer does not corrupt it.
-        if newton.use_coord_layout_targets:
-            slots_per_world = model.joint_coord_count // num_worlds
-            write_indices = self._indexing.newton_q_indices
-        else:
-            slots_per_world = model.joint_dof_count // num_worlds
-            write_indices = self._indexing.newton_qd_indices
-
-        full_targets = torch.zeros(
-            (num_worlds, slots_per_world),
-            device=self.device,
-            dtype=torch.float32,
+        # Under the coord layout introduced in Newton PR #2965,
+        # ``joint_target_q`` follows the ``joint_q`` stride (7 slots for a
+        # FREE joint) and is indexed by ``newton_q_indices``; under the
+        # legacy DOF layout it follows ``joint_qd`` (6 slots for a FREE
+        # joint) and is indexed by ``newton_qd_indices``.
+        write_indices = (
+            self._indexing.newton_q_indices if newton.use_coord_layout_targets else self._indexing.newton_qd_indices
         )
-        if newton.use_coord_layout_targets:
-            # FREE joint coord order is [x, y, z, qx, qy, qz, qw] — set qw = 1.
-            full_targets[:, 6] = 1.0
-        full_targets[:, write_indices] = targets
 
-        wp.copy(
-            control.joint_target_q,
-            wp.from_torch(full_targets.flatten(), dtype=wp.float32, requires_grad=False),
-        )
+        dest = wp.to_torch(control.joint_target_q)
+        if dest.numel() % num_worlds != 0:
+            raise RuntimeError(
+                f"Newton joint_target_q has {dest.numel()} slots, which is not divisible by "
+                f"world_count={num_worlds}; the per-world layout cannot be derived."
+            )
+        dest.view(num_worlds, -1)[:, write_indices] = targets
 
     def _apply_force(self, torques: torch.Tensor) -> None:
-        """Apply torques directly via Newton/Warp."""
+        """Apply torques directly via Newton/Warp.
+
+        In place, for the same reason as :meth:`_apply_position`: the
+        destination's own length is the only trustworthy source of the
+        per-world stride, and every non-actuated slot keeps whatever the
+        simulator had there instead of being zeroed by a wholesale copy.
+        """
         control = self.env.scene_manager.control
-        model = self.env.scene_manager.model
+        num_worlds = self.env.scene_manager.model.world_count
 
-        num_worlds = model.world_count
-        dof_per_world = model.joint_dof_count // num_worlds
-
-        full_forces = torch.zeros(
-            (num_worlds, dof_per_world),
-            device=self.device,
-            dtype=torch.float32,
-        )
-        full_forces[:, self._indexing.newton_qd_indices] = torques
-
-        wp.copy(
-            control.joint_f,
-            wp.from_torch(full_forces.flatten(), dtype=wp.float32, requires_grad=False),
-        )
+        dest = wp.to_torch(control.joint_f)
+        if dest.numel() % num_worlds != 0:
+            raise RuntimeError(
+                f"Newton joint_f has {dest.numel()} slots, which is not divisible by "
+                f"world_count={num_worlds}; the per-world layout cannot be derived."
+            )
+        rows = dest.view(num_worlds, -1)
+        # A torque left over from the previous step would keep being applied,
+        # so this buffer does have to be cleared before the scatter.
+        rows.zero_()
+        rows[:, self._indexing.newton_qd_indices] = torques
 
     # -- Backward compat properties ------------------------------------------
 
