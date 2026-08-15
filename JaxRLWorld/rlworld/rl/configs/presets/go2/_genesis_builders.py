@@ -157,7 +157,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                 # foot names ("FL_foot", ...) have no regex metacharacters, so
                 # find_links treats each as an exact-match pattern.
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
-                secondary=ContactMatch(mode="body", pattern=".*", entity="terrain"),
+                secondary=ContactMatch(mode="entity", entity="terrain"),
                 history_length=timing["decimation"],
             ),
             ContactSensorCfg(
@@ -168,7 +168,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                     entity="robot",
                     exclude=(".*foot.*", ".*calf.*"),
                 ),
-                secondary=ContactMatch(mode="body", pattern=".*", entity="terrain"),
+                secondary=ContactMatch(mode="entity", entity="terrain"),
                 history_length=timing["decimation"],
             ),
         ],

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import torch
 
@@ -74,21 +74,45 @@ def _canonical_joint_order_mujoco(mj_model) -> list[str]:
     return out
 
 
-def _to_mjlab_sensor_cfg(cfg: Any) -> Any:
+def _to_mjlab_sensor_cfg(cfg: Any, root_body_of: Callable[[str], str]) -> Any:
     """Convert a sim-agnostic ContactSensorCfg to mjlab's ContactSensorCfg.
 
     Other sensor-config types are returned unchanged (the mjlab scene
     only needs ContactSensorCfg conversion today). The ``mjlab`` import
     stays function-local: ``mujoco/scene.py`` imports mjlab lazily
     everywhere so the module loads without mjlab installed.
+
+    Args:
+        cfg: The sim-agnostic sensor config.
+        root_body_of: Entity name -> its root body name, needed to express
+            ``mode="entity"`` as a MuJoCo subtree reference.
     """
     if not isinstance(cfg, ContactSensorCfg):
         return cfg
     from mjlab.sensor import ContactMatch as MjContactMatch, ContactSensorCfg as MjContactSensorCfg
 
     def _match(m):
-        return None if m is None else MjContactMatch(mode=m.mode, pattern=m.pattern, entity=m.entity, exclude=m.exclude)
+        if m is None:
+            return None
+        if m.mode == "entity":
+            # MuJoCo's contact sensor takes ONE reference object, so "any part
+            # of X" cannot be a body list — it has to be a subtree. mjlab
+            # resolves the pattern against the entity's bodies and, with the
+            # "first" policy below, keeps its first one, which is always the
+            # entity's root body; the subtree rooted there spans the entity.
+            # mjlab passes a subtree pattern through VERBATIM as the sensor's
+            # reference name, so it has to be the real root body, not a
+            # wildcard.
+            return MjContactMatch(mode="subtree", pattern=root_body_of(m.entity), entity=m.entity, exclude=m.exclude)
+        return MjContactMatch(mode=m.mode, pattern=m.pattern, entity=m.entity, exclude=m.exclude)
 
+    # A named secondary that expands to several elements has no MuJoCo
+    # representation: one sensor, one reference. mjlab's default is to keep the
+    # first match silently — which watches one jaw of a gripper and reports the
+    # other as never touching. Make it raise instead; "entity" mode is the
+    # supported way to mean "all of them", and its single subtree reference is
+    # correct by construction rather than by truncation.
+    entity_scoped = cfg.secondary is not None and cfg.secondary.mode == "entity"
     return MjContactSensorCfg(
         name=cfg.name,
         primary=_match(cfg.primary),
@@ -96,6 +120,7 @@ def _to_mjlab_sensor_cfg(cfg: Any) -> Any:
         fields=cfg.fields,
         reduce=cfg.reduce,
         num_slots=cfg.num_slots,
+        secondary_policy="first" if entity_scoped else "error",
         global_frame=cfg.global_frame,
         history_length=cfg.history_length,
     )
@@ -204,6 +229,7 @@ class MujocoSceneManager(BaseManager):
         # registry). The ``entities`` / ``rigid_objects`` properties partition
         # the single mjlab registry by this list.
         self._rigid_object_names: list[str] = []
+        self._entity_root_body_cache: dict[str, str] = {}
 
         # Kinematic trees for each entity
         self.trees: dict[str, KinematicTree] = {}
@@ -329,7 +355,7 @@ class MujocoSceneManager(BaseManager):
                 env_spacing=self.config.env_spacing,
                 terrain=None if terrain_spec_fn is not None else TerrainEntityCfg(terrain_type="plane"),
                 entities={},
-                sensors=tuple(_to_mjlab_sensor_cfg(s) for s in self.config.sensors),
+                sensors=(),
                 spec_fn=terrain_spec_fn,
             )
             self.config.mjlab_scene_cfg = scene_cfg
@@ -340,6 +366,13 @@ class MujocoSceneManager(BaseManager):
 
         # Convert passive rigid objects → actuator-free mjlab entities.
         self._build_mjlab_rigid_objects()
+
+        # Sensors last: a ``mode="entity"`` match needs the entity's root body
+        # name, which only its (now registered) mjlab spec knows.
+        if self.config.mjlab_scene_cfg is scene_cfg:
+            scene_cfg.sensors = tuple(
+                _to_mjlab_sensor_cfg(s, self._mjlab_entity_root_body) for s in self.config.sensors
+            )
 
         # Create scene
         self._scene = Scene(scene_cfg, device=self.config.device)
@@ -539,6 +572,30 @@ class MujocoSceneManager(BaseManager):
             )
             self.config.mjlab_scene_cfg.entities[object_name] = mjlab_cfg
             self._rigid_object_names.append(object_name)
+
+    def _mjlab_entity_root_body(self, entity_name: str) -> str:
+        """Root body name of a registered mjlab entity.
+
+        Built from the entity's own spec (``spec.bodies[1]`` — index 0 is the
+        worldbody), which is what mjlab's ``Entity.root_body`` reads. The spec
+        is the pre-attach one, so for a fixed-base entity this is the real root
+        rather than the ``mocap_base`` wrapper mjlab adds above it; a subtree
+        rooted there still spans every body that can carry contact geometry.
+        Cached because building a spec parses the asset.
+        """
+        cached = self._entity_root_body_cache.get(entity_name)
+        if cached is not None:
+            return cached
+        entities = self.config.mjlab_scene_cfg.entities
+        if entity_name not in entities:
+            raise ValueError(
+                f"MuJoCo backend: contact sensor references entity {entity_name!r}, which is not in "
+                f"the scene (known: {sorted(entities)})."
+            )
+        spec = entities[entity_name].spec_fn()
+        root = spec.bodies[1].name
+        self._entity_root_body_cache[entity_name] = root
+        return root
 
     def build_articulation_indexing(
         self,

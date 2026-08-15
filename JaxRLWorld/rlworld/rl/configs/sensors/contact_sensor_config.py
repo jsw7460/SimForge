@@ -20,8 +20,11 @@ field / value             mjlab   Genesis    Newton
 primary mode="body"        yes     yes        yes
 primary mode="geom"        yes     no         yes
 primary mode="subtree"     yes     no         no
+primary mode="entity"      no      no         no
 primary pattern/exclude    yes     yes        yes
-secondary (entity-scoped)  yes     yes        yes
+secondary mode="entity"    yes     yes        yes
+secondary named element    yes     yes        yes
+secondary multi-match      no      yes        yes
 fields={"found","force"}   yes     yes        yes
 fields w/ torque/dist/...  yes     no         no
 reduce="netforce"          yes     yes        yes
@@ -52,9 +55,19 @@ class ContactMatch:
     """Specifies what to match on one side of a contact pair.
 
     Args:
-        mode: Element type to match against — ``"geom"`` or ``"body"``.
-            (``"subtree"`` is mjlab-only; the Genesis / Newton backends
-            reject it.)
+        mode: What to match. ``"geom"`` / ``"body"`` expand ``pattern``
+            within ``entity``. ``"entity"`` means **every element of the
+            entity** — ``pattern`` is unused — and is the portable way to
+            say "any part of X"; each backend maps it to its own native
+            mechanism (Genesis: the entity's link range; Newton: all of its
+            bodies; mjlab: a ``subtree`` reference rooted at the entity,
+            which is the only form MuJoCo's single-reference contact sensor
+            can express). ``"subtree"`` is mjlab-only; the Genesis / Newton
+            backends reject it.
+
+            Prefer ``"entity"`` over ``pattern=".*"``: a wildcard means
+            "all matching elements", which MuJoCo cannot represent with one
+            sensor, so it is rejected there rather than silently narrowed.
         pattern: A regex (or tuple of regexes) matched against element
             names within ``entity``. If ``entity`` is ``None`` / ``""``
             the pattern is taken as a literal element name (no regex
@@ -73,10 +86,14 @@ class ContactMatch:
             metacharacters, otherwise as an exact name.
     """
 
-    mode: Literal["geom", "body", "subtree"]
-    pattern: str | tuple[str, ...]
+    mode: Literal["geom", "body", "subtree", "entity"]
+    pattern: str | tuple[str, ...] = ""
     entity: str | None = None
     exclude: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.mode == "entity" and not self.entity:
+            raise ValueError("ContactMatch(mode='entity') requires entity=<name>.")
 
 
 @dataclass

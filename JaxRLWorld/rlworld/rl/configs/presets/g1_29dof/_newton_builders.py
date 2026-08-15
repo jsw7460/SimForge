@@ -236,7 +236,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             ContactSensorCfg(
                 name="self_collision",
                 primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
-                secondary=ContactMatch(mode="body", pattern=".*", entity="self"),
+                secondary=ContactMatch(mode="entity", entity="self"),
                 history_length=timing["decimation"],
             ),
         ],

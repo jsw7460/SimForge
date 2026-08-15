@@ -40,6 +40,19 @@ Everything else a passive body must do — load, read back finite and
 well-formed, hold still under stepping, catch a falling object with its
 collision geometry, agree across its body/CoM/selector reads — is checked too.
 
+**Contact matching.** A manipulation task asks "did the tool touch the
+workpiece", which no existing sensor has ever expressed: every one of them
+watches robot-vs-terrain. The scene therefore carries a three-body gripper
+fixture, and the same primary is matched against its counterpart three ways —
+``mode="entity"`` (any part of the tool), one named jaw, and both jaws as
+primaries. With the cube resting on one jaw the answers must be
+``entity=True, left=True, right=False``; anything else means a backend widened
+a named body into its entity or narrowed an entity to its first body. A final
+probe, in its own process, builds a scene whose secondary names several bodies:
+Genesis and Newton must accept it, MuJoCo must refuse at build time, because
+its contact sensor carries a single reference and would otherwise watch one jaw
+and call the other untouched.
+
 **Protocol sweep.** Reading back *a* number proves nothing about whether it
 is the RIGHT number, so the last section walks the entire
 :class:`RigidObjectData` surface — every root property, both body-frame
@@ -66,6 +79,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 # Diags never log to wandb; set before any rlworld import so the logger's
@@ -81,6 +95,7 @@ from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from rlworld.rl.configs.scene import RigidObjectCfg
 from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from rlworld.rl.configs.scene.unified_entity_config import InitialStateCfg
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from rlworld.rl.envs.mdp.events import common as common_ef
 from rlworld.rl.envs.mdp.observations.common import proprioception as obs_common
 from rlworld.rl.runners import BaseRunner
@@ -96,12 +111,75 @@ _SIMS = ("genesis", "newton", "mujoco")
 
 CUBE_SPAWN = (0.3, 0.0, 0.6)
 CUBE_HALF = 0.03  # half the 0.06 box
+CUBE_MASS = 0.2  # matches CUBE_URDF; the contact checks predict its weight
 
 # Far from the robot (pinned to the origin below) so the two never interact and
 # the table's own numbers stay clean.
 TABLE_SPAWN = (2.0, 0.0, 0.2)
+# Declared explicitly (not left to the default) so the spawn-orientation
+# check below compares against something the scene really stated.
+TABLE_ROT = (1.0, 0.0, 0.0, 0.0)
 TABLE_HALF_Z = 0.2  # half the 0.4 box height
 TABLE_HALF_XY = 0.6  # half the 1.2 box footprint
+
+# A three-body fixture: a base plate carrying two jaws. Everything the
+# contact-matching rules need is here — an entity with several bodies, of which
+# only some touch a given object — and it is the shape of the real task (a tool
+# whose two jaws must BOTH touch the workpiece to count as a grasp).
+#
+# The jaws are on HINGES, not welds, for the same reason the real tool has
+# them: a welded part is one rigid body, and Newton's MuJoCo conversion folds
+# such a part into its parent, so a contact on a jaw gets reported against the
+# base and the jaw's name stops meaning anything. A joint keeps the bodies
+# distinct on every backend. The hinges are clamped to +-0.001 rad so the
+# fixture's geometry stays exact while remaining articulated. A non-zero
+# ``effort`` is required: Newton maps it to MuJoCo's actuator force range, and
+# zero would make that range empty, which MuJoCo rejects at compile time.
+#
+# Geometry, in the gripper's frame: the base spans z in [-0.01, 0.01]; each jaw
+# sits on it, spanning z in [0.01, 0.07]. Jaw centres are at y = +-0.048 with
+# half-width 0.02, so the inner faces are at y = +-0.028 and the gap between
+# them is 0.056 — narrower than the 0.06 cube, so a cube placed in the gap
+# interferes with BOTH jaws by 2 mm.
+GRIPPER_SPAWN = (-2.0, -2.0, 0.5)
+GRIPPER_BASE_HALF_Z = 0.01
+GRIPPER_JAW_HALF_Z = 0.03
+GRIPPER_JAW_Y = 0.048
+# Top of a jaw, in the gripper's frame.
+GRIPPER_JAW_TOP = GRIPPER_BASE_HALF_Z + 2 * GRIPPER_JAW_HALF_Z
+
+GRIPPER_URDF = """<?xml version="1.0"?>
+<robot name="gripper">
+  <link name="grip_base">
+    <inertial><origin xyz="0 0 0"/><mass value="5.0"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/></inertial>
+    <visual><origin xyz="0 0 0"/><geometry><box size="0.10 0.16 0.02"/></geometry></visual>
+    <collision><origin xyz="0 0 0"/><geometry><box size="0.10 0.16 0.02"/></geometry></collision>
+  </link>
+  <link name="jaw_left">
+    <inertial><origin xyz="0 0 0"/><mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial>
+    <visual><origin xyz="0 0 0"/><geometry><box size="0.04 0.04 0.06"/></geometry></visual>
+    <collision><origin xyz="0 0 0"/><geometry><box size="0.04 0.04 0.06"/></geometry></collision>
+  </link>
+  <link name="jaw_right">
+    <inertial><origin xyz="0 0 0"/><mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial>
+    <visual><origin xyz="0 0 0"/><geometry><box size="0.04 0.04 0.06"/></geometry></visual>
+    <collision><origin xyz="0 0 0"/><geometry><box size="0.04 0.04 0.06"/></geometry></collision>
+  </link>
+  <joint name="joint_jaw_left" type="revolute">
+    <parent link="grip_base"/><child link="jaw_left"/>
+    <origin xyz="0 0.048 0.04"/><axis xyz="1 0 0"/>
+    <limit lower="-0.001" upper="0.001" effort="10" velocity="1"/>
+  </joint>
+  <joint name="joint_jaw_right" type="revolute">
+    <parent link="grip_base"/><child link="jaw_right"/>
+    <origin xyz="0 -0.048 0.04"/><axis xyz="1 0 0"/>
+    <limit lower="-0.001" upper="0.001" effort="10" velocity="1"/>
+  </joint>
+</robot>
+"""
 
 CUBE_URDF = """<?xml version="1.0"?>
 <robot name="cube">
@@ -380,6 +458,78 @@ def _mjlab_body_evidence(env, name: str) -> None:
         )
 
 
+def _newton_raw_contacts(env, name: str) -> None:
+    """Dump every raw rigid contact that touches one entity's shapes.
+
+    The sensor answers "was body X touched", so a disagreement with the other
+    backends is either the sensor asking about the wrong body or the solver
+    reporting the contact against a different body than the geometry implies.
+    Printing the raw ``(shape0, shape1)`` pairs and the body each shape hangs
+    off separates the two: the pair is what the collision pipeline actually
+    produced, before any sensor filtering.
+    """
+    sm = env.scene_manager
+    contacts = sm.sensor_contacts if sm.sensor_contacts is not None else sm.contacts
+    if contacts is None:
+        print(f"[{name}/newton] no contact buffer to dump")
+        return
+    leaf = lambda label: label.rsplit("/", 1)[-1]  # noqa: E731
+    shape_body = sm.model.shape_body.numpy()
+    body_labels = list(sm.model.body_label)
+    shape_labels = list(sm.model.shape_label)
+    view = sm.articulation_views[name]
+    wanted = set(view.link_names)
+    # shape_body == -1 is the static world (the ground plane); a Python
+    # negative index would silently label it as the last body in the model.
+    ours = {
+        s
+        for s in range(len(shape_labels))
+        if int(shape_body[s]) >= 0 and leaf(body_labels[int(shape_body[s])]) in wanted
+    }
+
+    # Where the bodies actually ARE, and whether their shapes collide at all.
+    # "the sensor says the base was touched" is only surprising if the jaw is
+    # where the geometry says it is and its shape is collidable.
+    body_q = sm.state_0.body_q.numpy()
+    shape_flags = sm.model.shape_flags.numpy()
+    cube_body = env.get_entity_data("cube").find_body_index("cube")
+    for b in sorted({int(shape_body[s]) for s in ours})[: view.link_count] + [cube_body]:
+        pos = body_q[b][:3]
+        flags = [
+            f"{leaf(shape_labels[s])}:flags={int(shape_flags[s])}"
+            f"{'/COLLIDE' if int(shape_flags[s]) & 2 else '/NO-COLLIDE'}"
+            for s in range(len(shape_labels))
+            if int(shape_body[s]) == b
+        ]
+        print(
+            f"[{name}/newton]   body {b} ({leaf(body_labels[b])}) at "
+            f"[{pos[0]:+.5f}, {pos[1]:+.5f}, {pos[2]:+.5f}]  {' '.join(flags)}"
+        )
+
+    n = int(contacts.rigid_contact_count.numpy()[0])
+    s0 = contacts.rigid_contact_shape0.numpy()
+    s1 = contacts.rigid_contact_shape1.numpy()
+    print(f"[{name}/newton] raw rigid contacts = {n} total; ones touching this entity:")
+    shown = 0
+    for c in range(min(n, len(s0))):
+        a, b = int(s0[c]), int(s1[c])
+        if a not in ours and b not in ours:
+            continue
+        if shown >= 12:
+            print(f"[{name}/newton]   ... (truncated)")
+            break
+        pair = []
+        for s in (a, b):
+            if s < 0:
+                pair.append("(-1)")
+            else:
+                pair.append(f"{leaf(shape_labels[s])}[shape {s}] on body {int(shape_body[s])} ")
+        print(f"[{name}/newton]   {pair[0]} <-> {pair[1]}")
+        shown += 1
+    if shown == 0:
+        print(f"[{name}/newton]   (none — the pipeline produced no contact on this entity's shapes)")
+
+
 def _newton_view_evidence(env, name: str) -> None:
     """Dump the ArticulationView layout behind a Newton entity's root writes.
 
@@ -400,6 +550,34 @@ def _newton_view_evidence(env, name: str) -> None:
     )
     print(f"[{name}/newton] get_root_transforms -> shape={arr.shape} ndim={arr.ndim} dtype={arr.dtype}")
     print(f"[{name}/newton] joint_names={list(view.joint_names)}  link_names={list(view.link_names)}")
+    # What the contact-sensor resolver actually sees for this entity: the label
+    # pool it matches patterns against, and the global body indices a per-body
+    # pattern lands on. A primary that resolves to the wrong index reports no
+    # contact while the entity-wide sensor still fires.
+    idx = env.scene_manager.label_indexing.get(name)
+    if idx is not None:
+        n_per_world = idx.bodies.n_per_world
+        print(f"[{name}/newton] label pool leaves (world 0) = {list(idx.bodies.leaves[:n_per_world])}")
+        for leaf in list(idx.bodies.leaves[:n_per_world]):
+            print(f"[{name}/newton]   find_bodies({leaf!r}) -> {idx.find_bodies((leaf,))}")
+
+    # Which body each collision shape is PARENTED to. A contact is reported
+    # against the shape's parent body, so a multi-body tool whose child shapes
+    # were folded onto the root at import time reports every contact on the
+    # root while still exposing the child bodies and their joints.
+    leaf = lambda label: label.rsplit("/", 1)[-1]  # noqa: E731
+    model = env.scene_manager.model
+    shape_body = model.shape_body.numpy()
+    body_flags = model.body_flags.numpy()
+    body_labels = list(model.body_label)
+    wanted = set(view.link_names)
+    world0 = [b for b in range(len(body_labels)) if leaf(body_labels[b]) in wanted][: view.link_count]
+    for b in world0:
+        shapes = [i for i in range(len(model.shape_label)) if int(shape_body[i]) == b]
+        names = [leaf(model.shape_label[i]) for i in shapes]
+        print(
+            f"[{name}/newton]   body {b} ({leaf(body_labels[b])}): flags={int(body_flags[b])} shapes={shapes} {names}"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -407,13 +585,16 @@ def _newton_view_evidence(env, name: str) -> None:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _build_env(sim: str, num_envs: int):
+def _build_env(sim: str, num_envs: int, extra_sensors: tuple = ()):
     with tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False) as f:
         f.write(CUBE_URDF)
         cube_urdf = f.name
     with tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False) as f:
         f.write(TABLE_URDF)
         table_urdf = f.name
+    with tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False) as f:
+        f.write(GRIPPER_URDF)
+        gripper_urdf = f.name
 
     cfgs = Go2FlatConfig(sim_type=sim, num_envs=num_envs).build()
 
@@ -428,13 +609,116 @@ def _build_env(sim: str, num_envs: int):
         "table": RigidObjectCfg(
             urdf_path=table_urdf,
             floating=False,
-            init_state=InitialStateCfg(pos=TABLE_SPAWN),
+            init_state=InitialStateCfg(pos=TABLE_SPAWN, rot=TABLE_ROT),
+        ),
+        # Passive: the hinges carry no actuator. Genesis's default link merging
+        # only folds FIXED joints, so hinged jaws survive without
+        # ``links_to_keep``; ``grip_primary_expands`` below fails loudly if any
+        # backend collapses them anyway.
+        "gripper": RigidObjectCfg(
+            urdf_path=gripper_urdf,
+            floating=False,
+            init_state=InitialStateCfg(pos=GRIPPER_SPAWN),
         ),
     }
 
     # Pin the robot's spawn. The preset randomizes it over +-0.5 m in x/y and a
     # full yaw turn, which would make every cross-backend number below noise.
     cfgs.event.reset_root.params["pose_range"] = {}
+
+    # Contact sensors whose entities are NOT the robot and NOT the terrain —
+    # the shape a manipulation task needs and the one no preset has ever used.
+    # "cube_table" is object<->object (the tool<->workpiece case); "cube_robot"
+    # is object<->robot. Both name a passive rigid object as the PRIMARY, which
+    # is the side every existing sensor fills with the robot.
+    #
+    # The field these live in is NOT the same on every backend: Genesis and
+    # Newton keep contact sensors in `contact_sensors` (their `sensors` field
+    # holds IMU-style sensors), while the mjlab scene keeps them in `sensors`.
+    # Appending to the wrong one registers nothing, silently.
+    field = "sensors" if sim == "mujoco" else "contact_sensors"
+    existing = tuple(getattr(cfgs.scene, field) or ())
+    # history_length must equal the decimation on the Genesis backend, so it is
+    # taken from a sensor the preset already built rather than hardcoded.
+    history_length = existing[0].history_length if existing else 0
+    setattr(
+        cfgs.scene,
+        field,
+        list(existing)
+        + [
+            # Both sides name ONE body, never ".*". MuJoCo's contact sensor
+            # takes a single reference object, so mjlab silently keeps the
+            # first match of a multi-body pattern — which for the table is its
+            # massless "mocap_base" wrapper, a body that can never touch
+            # anything. Genesis (whole entity) and Newton (all matches) would
+            # have read the same config as "any body of that entity".
+            ContactSensorCfg(
+                name="cube_table_contact",
+                primary=ContactMatch(mode="body", pattern="cube", entity="cube"),
+                secondary=ContactMatch(mode="body", pattern="table", entity="table"),
+                history_length=history_length,
+            ),
+            ContactSensorCfg(
+                name="cube_robot_contact",
+                primary=ContactMatch(mode="body", pattern="cube", entity="cube"),
+                secondary=ContactMatch(mode="body", pattern="trunk", entity="robot"),
+                history_length=history_length,
+            ),
+            # ── the matching-rule set ─────────────────────────────────────
+            # With the cube touching ONE jaw, a correct backend answers
+            # entity=True, left=True, right=False. A backend that widens a
+            # named body to its whole entity answers right=True; one that
+            # narrows an entity to its first body answers entity=False.
+            ContactSensorCfg(
+                name="cube_gripper_entity",
+                primary=ContactMatch(mode="body", pattern="cube", entity="cube"),
+                secondary=ContactMatch(mode="entity", entity="gripper"),
+                history_length=history_length,
+            ),
+            # Mirror of cube_gripper_left with the two sides swapped. Contact
+            # is symmetric, so these must agree; if one reports a touch and the
+            # other does not, the fault is on the side that changed.
+            ContactSensorCfg(
+                name="mirror_cube_vs_jaw_left",
+                primary=ContactMatch(mode="body", pattern="cube", entity="cube"),
+                secondary=ContactMatch(mode="body", pattern="jaw_left", entity="gripper"),
+                history_length=history_length,
+            ),
+            # Where did the contact actually land? A backend that folded the
+            # jaws into their parent reports the touch here instead of on a
+            # jaw. That is what a welded fixture does on Newton; with hinges it
+            # must not happen anywhere.
+            ContactSensorCfg(
+                name="cube_gripper_base",
+                primary=ContactMatch(mode="body", pattern="cube", entity="cube"),
+                secondary=ContactMatch(mode="body", pattern="grip_base", entity="gripper"),
+                history_length=history_length,
+            ),
+            ContactSensorCfg(
+                name="cube_gripper_left",
+                primary=ContactMatch(mode="body", pattern="jaw_left", entity="gripper"),
+                secondary=ContactMatch(mode="entity", entity="cube"),
+                history_length=history_length,
+            ),
+            ContactSensorCfg(
+                name="cube_gripper_right",
+                primary=ContactMatch(mode="body", pattern="jaw_right", entity="gripper"),
+                secondary=ContactMatch(mode="entity", entity="cube"),
+                history_length=history_length,
+            ),
+            # The grasp shape: BOTH jaws as primaries (two output columns) vs
+            # the workpiece as a whole. "grasped" = both columns True.
+            ContactSensorCfg(
+                name="jaws_vs_cube",
+                primary=ContactMatch(mode="body", pattern="jaw_.*", entity="gripper"),
+                secondary=ContactMatch(mode="entity", entity="cube"),
+                history_length=history_length,
+            ),
+            # Genesis requires history_length == decimation on every contact
+            # sensor, so probe sensors inherit it rather than declaring one.
+            *[replace(x, history_length=history_length) for x in extra_sensors],
+        ],
+    )
 
     # Place the cube at reset via the SAME event the robot uses, targeting it
     # through a SceneEntitySelector. No perturbation, so it should land exactly
@@ -617,6 +901,22 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         and abs(qnorm - 1.0) < 1e-4
     )
     results["fixed_at_rest"] = float(tlin.abs().max()) < 1e-6 and float(tang.abs().max()) < 1e-6
+
+    # C3b — the spawn ORIENTATION, against what the config declared. A unit norm
+    #       is not enough: the two quaternion layouts in play (config wxyz vs
+    #       Newton/warp xyzw) map each other's identity onto a 180-degree flip
+    #       about X, which is still unit-norm and invisible on a symmetric box.
+    #       It is only visible on a multi-body entity, where the children end up
+    #       mirrored through the root.
+    decl_rot = list(TABLE_ROT)
+    got_rot = [float(v) for v in tquat[0]]
+    # q and -q are the same rotation.
+    rot_err = min(
+        max(abs(got_rot[i] - decl_rot[i]) for i in range(4)),
+        max(abs(got_rot[i] + decl_rot[i]) for i in range(4)),
+    )
+    print(f"[table]  declared init_state.rot = {_fmt3(decl_rot)}   actual = {_fmt3(got_rot)}   err = {rot_err:.2e}")
+    results["fixed_spawn_rot_matches_decl"] = rot_err < 1e-5
 
     # C4 — WHERE it landed. Reported, not asserted: the three backends take
     #      different routes to placing a welded body and no design decision has
@@ -903,6 +1203,188 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
     print("-" * 78)
     _protocol_sweep(env, "table", results, measured, tag="table")
 
+    # ══════════════════════════════════════════════════════════════════
+    # E. CONTACT SENSING BETWEEN NON-TERRAIN ENTITIES
+    # ══════════════════════════════════════════════════════════════════
+    # Every existing sensor watches robot-vs-terrain. A manipulation task
+    # needs robot-vs-object and object-vs-object — tool touching workpiece —
+    # and that path has never been exercised. The config expresses it
+    # (ContactMatch.entity), and all three backends resolve a rigid-object
+    # name, but resolving a name is not the same as reporting a contact.
+    print("-" * 78)
+    print("CONTACT SENSING (object<->object, object<->robot)")
+    print("-" * 78)
+
+    groups = env.contact_manager.group_names()
+    have_both = env.contact_manager.has_group("cube_table_contact") and env.contact_manager.has_group(
+        "cube_robot_contact"
+    )
+    print(f"[contact] groups = {groups}")
+    if have_both:
+        print(f"[contact] cube_table tracked = {env.contact_manager.tracked_names('cube_table_contact')}")
+        print(f"[contact] cube_robot tracked = {env.contact_manager.tracked_names('cube_robot_contact')}")
+    results["contact_groups_registered"] = have_both
+
+    def _place_cube(pos: torch.Tensor) -> None:
+        w = env.get_root_state_writer("cube")
+        q = torch.zeros(env.num_envs, 4, device=env.device)
+        q[:, 0] = 1.0
+        zero = torch.zeros(env.num_envs, 3, device=env.device)
+        w.set_root_pose(pos, q, env_ids=all_ids)
+        w.set_root_velocity(zero, zero, env_ids=all_ids)
+        w.eval_fk(env_ids=all_ids)
+        env._invalidate_cache()
+
+    if have_both:
+        # E1 — cube resting on the table. The contact force is predictable:
+        #      a body at rest is held up by exactly its own weight, so this is
+        #      the check that the reported magnitude is a real force and not an
+        #      arbitrary number that merely happens to be non-zero.
+        table_pos = env.get_entity_data("table").root_link_pos_w
+        rest_pos = table_pos.clone()
+        rest_pos[:, 2] = table_pos[:, 2] + TABLE_HALF_Z + CUBE_HALF
+        _place_cube(rest_pos)
+        reset_settling = _step_n(env, zeros, settle_steps * 2)
+        on_table = env.contact_manager.is_contact("cube_table_contact")
+        f_table = env.contact_manager.contact_force("cube_table_contact")
+        f_mag = f_table.reshape(env.num_envs, -1, 3).norm(dim=-1).max(dim=-1).values
+        weight = CUBE_MASS * 9.81
+        print(f"[contact] cube on table -> is_contact = {[bool(v) for v in on_table.reshape(env.num_envs, -1)[:, 0]]}")
+        print(f"[contact] |force| per env = {[round(float(v), 3) for v in f_mag]} N   weight = {weight:.3f} N")
+        print(f"[contact] (reset during settling: {reset_settling})")
+        results["contact_object_object_detected"] = bool(on_table.all())
+        results["contact_force_matches_weight"] = bool(((f_mag - weight).abs() < 0.5 * weight).all())
+        measured["contact_force_on_table"] = [round(float(v), 3) for v in f_mag]
+        measured["contact_expected_weight"] = round(weight, 3)
+
+        # E2 — and it must report NO contact once the object is elsewhere. A
+        #      sensor stuck at True is as useless as one stuck at False.
+        away = table_pos.clone()
+        away[:, 0] -= 3.0
+        away[:, 2] = 1.5
+        _place_cube(away)
+        _step_n(env, zeros, 2)
+        off_table = env.contact_manager.is_contact("cube_table_contact")
+        f_off = env.contact_manager.contact_force("cube_table_contact")
+        f_off_mag = float(f_off.reshape(env.num_envs, -1, 3).norm(dim=-1).max())
+        print(f"[contact] cube in mid-air -> any is_contact = {bool(off_table.any())}   max|force| = {f_off_mag:.4f} N")
+        results["contact_clears_when_apart"] = (not bool(off_table.any())) and f_off_mag < 1e-2
+
+        # E3 — object<->robot. The cube is written into the trunk so the
+        #      contact exists on the very next step regardless of how the
+        #      robot happens to be standing; the penetration force is not
+        #      predictable, so only the detection is asserted.
+        trunk = env.get_entity_data("robot").body_pos_w(["trunk"])[:, 0, :]
+        _place_cube(trunk.clone())
+        _step_n(env, zeros, 1)
+        on_robot = env.contact_manager.is_contact("cube_robot_contact")
+        f_robot = env.contact_manager.contact_force("cube_robot_contact")
+        f_robot_mag = f_robot.reshape(env.num_envs, -1, 3).norm(dim=-1).max(dim=-1).values
+        print(
+            f"[contact] cube inside trunk -> is_contact = {[bool(v) for v in on_robot.reshape(env.num_envs, -1)[:, 0]]}"
+        )
+        print(
+            f"[contact] |force| per env = {[round(float(v), 2) for v in f_robot_mag]} N (penetration, magnitude not asserted)"
+        )
+        results["contact_object_robot_detected"] = bool(on_robot.all())
+        measured["contact_force_on_robot"] = [round(float(v), 2) for v in f_robot_mag]
+
+        # E4 — the accumulators every gait/grasp reward reads. Contact time
+        #      must have advanced while the cube sat on the table, and air time
+        #      while it hung in the air.
+        air = env.contact_manager.current_air_time("cube_table_contact")
+        print(
+            f"[contact] cube_table current_air_time = {[round(float(v), 3) for v in air.reshape(env.num_envs, -1)[:, 0]]} s"
+        )
+        results["contact_air_time_accumulates"] = bool((air > 0).all())
+        measured["contact_air_time"] = [round(float(v), 3) for v in air.reshape(env.num_envs, -1)[:, 0]]
+
+    # ══════════════════════════════════════════════════════════════════
+    # F. CONTACT MATCHING RULES (the tool-and-workpiece shape)
+    # ══════════════════════════════════════════════════════════════════
+    # One primary, three spellings of the counterpart, against a fixture whose
+    # jaws are separate bodies. This is where the backends used to disagree
+    # silently: Genesis ignored a named secondary and watched the whole entity,
+    # mjlab kept only the first match of a multi-body one.
+    print("-" * 78)
+    print("CONTACT MATCHING RULES (multi-body tool)")
+    print("-" * 78)
+
+    grip_groups = ("cube_gripper_entity", "cube_gripper_left", "cube_gripper_right", "jaws_vs_cube")
+    have_grip = all(env.contact_manager.has_group(g) for g in grip_groups)
+    print(f"[grip] groups present: {have_grip}")
+    if have_grip:
+        jaw_names = env.contact_manager.tracked_names("jaws_vs_cube")
+        print(f"[grip] jaws_vs_cube primaries = {jaw_names} (expect both jaws -> 2 columns)")
+        # A multi-element PRIMARY must expand to one column per element on every
+        # backend; mjlab does it by emitting one MuJoCo sensor per primary.
+        results["grip_primary_expands"] = sorted(jaw_names) == ["jaw_left", "jaw_right"]
+    else:
+        results["grip_primary_expands"] = False
+
+    def _grip_state(label: str) -> dict[str, bool]:
+        """Read the four groups and print them as one row."""
+        ent = bool(env.contact_manager.is_contact("cube_gripper_entity").all())
+        mirror = bool(env.contact_manager.is_contact("mirror_cube_vs_jaw_left").all())
+        base = bool(env.contact_manager.is_contact("cube_gripper_base").all())
+        left = bool(env.contact_manager.is_contact("cube_gripper_left").all())
+        right = bool(env.contact_manager.is_contact("cube_gripper_right").all())
+        jaws = env.contact_manager.is_contact("jaws_vs_cube")
+        grasped = bool(jaws.all(dim=-1).all())
+        cols = [bool(v) for v in jaws.reshape(env.num_envs, -1)[0]]
+        print(
+            f"[grip] {label:<22} entity={ent!s:<5} left={left!s:<5} right={right!s:<5} "
+            f"jaws={cols} grasped={grasped}   mirror={mirror} base={base}"
+        )
+        return {"entity": ent, "left": left, "right": right, "grasped": grasped, "mirror": mirror, "base": base}
+
+    if have_grip:
+        grip_pos = env.get_entity_data("gripper").root_link_pos_w
+        cube_writer = env.get_root_state_writer("cube")
+        cube_quat = torch.zeros(env.num_envs, 4, device=env.device)
+        cube_quat[:, 0] = 1.0
+        z3 = torch.zeros(env.num_envs, 3, device=env.device)
+
+        def _put_cube(offset: tuple[float, float, float]) -> None:
+            pos = grip_pos + torch.tensor(offset, device=env.device).unsqueeze(0)
+            cube_writer.set_root_pose(pos, cube_quat, env_ids=all_ids)
+            cube_writer.set_root_velocity(z3, z3, env_ids=all_ids)
+            cube_writer.eval_fk(env_ids=all_ids)
+            env._invalidate_cache()
+
+        # F1 — cube resting on the LEFT jaw only. Gravity holds it there, so the
+        #      reading is a settled contact rather than a teleport artefact.
+        _put_cube((0.0, GRIPPER_JAW_Y, GRIPPER_JAW_TOP + CUBE_HALF))
+        reset_a = _step_n(env, zeros, settle_steps)
+        one_jaw = _grip_state("on left jaw:")
+        print(f"[grip] (reset during settle: {reset_a})")
+        if sim == "newton":
+            _newton_raw_contacts(env, "gripper")
+        results["grip_entity_sees_any_body"] = one_jaw["entity"]
+        results["grip_named_body_is_exact"] = one_jaw["left"] and not one_jaw["right"]
+        # Contact is symmetric: naming the jaw as primary or as secondary must
+        # give the same answer.
+        results["grip_primary_secondary_symmetric"] = one_jaw["left"] == one_jaw["mirror"]
+        # The cube sits on a jaw, nowhere near the base plate. A backend that
+        # merged the fixed-jointed bodies reports the touch on the base.
+        results["grip_contact_not_attributed_to_parent"] = not one_jaw["base"]
+        results["grip_not_grasped_on_one_jaw"] = not one_jaw["grasped"]
+        measured["grip_one_jaw_state"] = one_jaw
+
+        # F2 — cube in the gap, interfering with BOTH jaws. This is the grasp.
+        _put_cube((0.0, 0.0, GRIPPER_JAW_TOP - GRIPPER_JAW_HALF_Z))
+        _step_n(env, zeros, 1)
+        both = _grip_state("wedged in jaws:")
+        results["grip_both_jaws_detected"] = both["left"] and both["right"]
+        results["grip_grasp_detected"] = both["grasped"]
+        measured["grip_both_jaw_state"] = both
+
+        # F3 — and nothing at all once the workpiece is elsewhere.
+        _put_cube((0.0, 0.0, 3.0))
+        _step_n(env, zeros, 2)
+        away = _grip_state("far away:")
+        results["grip_clears_when_apart"] = not (away["entity"] or away["left"] or away["right"])
+
     # Backend-specific raw evidence for the places where the backends diverge
     # internally. Printed unconditionally so a passing run still records the
     # indices and shapes a future regression would change.
@@ -918,6 +1400,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         print("-" * 78)
         _newton_view_evidence(env, "cube")
         _newton_view_evidence(env, "table")
+        _newton_view_evidence(env, "gripper")
 
     # ── verdict ──────────────────────────────────────────────────────────
     print("=" * 78)
@@ -932,6 +1415,62 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
     print("=" * 78)
 
     return {"sim": sim, "ok": ok, "results": results, "measured": measured}
+
+
+def run_multimatch_probe(sim: str, num_envs: int) -> dict:
+    """Build a scene whose secondary names SEVERAL bodies, and report what happens.
+
+    MuJoCo's contact sensor carries one reference object. "Both jaws but not the
+    handle" therefore has no MuJoCo representation — it is neither the whole
+    entity (a subtree) nor a single body. Genesis and Newton filter contacts
+    against a set of bodies and can express it.
+
+    So the correct behaviour is backend-specific, and both halves matter: the
+    two backends that can do it must build, and the one that cannot must say so
+    at build time instead of quietly watching one jaw. Runs as its own process
+    because a correct mjlab result is a failed build.
+    """
+    print("=" * 78)
+    print(f"MULTI-MATCH SECONDARY PROBE  [sim={sim}]")
+    print("=" * 78)
+    outcome: str
+    try:
+        env = _build_env(
+            sim,
+            num_envs,
+            extra_sensors=(
+                ContactSensorCfg(
+                    name="cube_vs_both_jaws",
+                    primary=ContactMatch(mode="body", pattern="cube", entity="cube"),
+                    secondary=ContactMatch(mode="body", pattern="jaw_.*", entity="gripper"),
+                ),
+            ),
+        )
+        names = env.contact_manager.tracked_names("cube_vs_both_jaws")
+        outcome = f"built (tracked={names})"
+    except Exception as e:  # noqa: BLE001
+        outcome = f"{type(e).__name__}: {e}"
+
+    expected_to_build = sim != "mujoco"
+    built = outcome.startswith("built")
+    print(f"[probe] outcome  : {outcome}")
+    print(
+        f"[probe] expected : {'builds (backend supports a body set)' if expected_to_build else 'raises at build (MuJoCo takes one reference)'}"
+    )
+    ok = built == expected_to_build
+    # When it must fail, the message has to name the cause; a bare crash would
+    # leave a preset author guessing.
+    if not expected_to_build and not built:
+        informative = "single" in outcome.lower() or "multiple" in outcome.lower() or "matched" in outcome.lower()
+        print(f"[probe] message names the cause: {informative}")
+        ok = ok and informative
+    print(f"[probe] verdict  : {'PASS' if ok else 'FAIL'}")
+    return {
+        "sim": sim,
+        "ok": ok,
+        "results": {"secondary_multimatch_policy": ok},
+        "measured": {"multimatch_outcome": outcome},
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -973,6 +1512,38 @@ def run_parent(args) -> int:
                     "measured": {},
                     "crash": proc.stderr or f"rc={proc.returncode}",
                 }
+
+            # Second child: the multi-body-secondary probe. Separate process
+            # because on mjlab the correct outcome is a failed build, which
+            # would otherwise take the whole run down with it.
+            probe_out = Path(tmp) / f"{sim}_probe.json"
+            probe_cmd = [
+                sys.executable,
+                "-m",
+                _MODULE,
+                "--sim",
+                sim,
+                "--probe-multimatch",
+                "--result-json",
+                str(probe_out),
+                "--num-envs",
+                "1",
+            ]
+            print("\n" + "#" * 78)
+            print(f"# $ {' '.join(probe_cmd)}")
+            print("#" * 78, flush=True)
+            probe_proc = subprocess.run(probe_cmd, stderr=subprocess.PIPE, text=True)
+            if probe_out.exists():
+                probe = json.loads(probe_out.read_text())
+                payloads[sim]["results"].update(probe["results"])
+                payloads[sim]["measured"].update(probe["measured"])
+                payloads[sim]["ok"] = payloads[sim]["ok"] and probe["ok"]
+            else:
+                tail = [ln for ln in (probe_proc.stderr or "").splitlines() if ln.strip()][-5:]
+                print("\n".join(tail), file=sys.stderr)
+                payloads[sim]["results"]["secondary_multimatch_policy"] = False
+                payloads[sim]["measured"]["multimatch_outcome"] = f"probe crashed (rc={probe_proc.returncode})"
+                payloads[sim]["ok"] = False
 
     print("\n" + "=" * 78)
     print("CROSS-SIM SUMMARY")
@@ -1034,6 +1605,11 @@ def main() -> int:
         help="Run a single backend. Omit to run all three and cross-compare.",
     )
     ap.add_argument("--result-json", default=None, help="Child mode: where to write this backend's result.")
+    ap.add_argument(
+        "--probe-multimatch",
+        action="store_true",
+        help="Child mode: build a scene with a multi-body secondary and report whether it builds.",
+    )
     # Four, not one: the per-environment placement checks are vacuous at
     # num_envs=1, and a backend that collapses per-env state into one shared
     # value passes every single-env check.
@@ -1044,7 +1620,10 @@ def main() -> int:
     if args.sim is None:
         return run_parent(args)
 
-    payload = run_one_sim(args.sim, args.num_envs, args.settle_steps)
+    if args.probe_multimatch:
+        payload = run_multimatch_probe(args.sim, args.num_envs)
+    else:
+        payload = run_one_sim(args.sim, args.num_envs, args.settle_steps)
     if args.result_json:
         Path(args.result_json).write_text(json.dumps(payload, default=str))
     return 0 if payload["ok"] else 1

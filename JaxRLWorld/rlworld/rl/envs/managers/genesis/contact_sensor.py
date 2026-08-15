@@ -35,10 +35,11 @@ quaternions.
 The agnostic config's ``secondary`` resolves to a POSITIVE counterpart
 link set (the native path inverted it into a blacklist):
 
-* ``secondary is None``          → every link counts
-* ``secondary.entity == <name>`` → only that entity's links count
-* ``secondary.entity == "self"`` → only the primary entity's links count
-* ``secondary.entity == "terrain"`` → only the terrain links count
+* ``secondary is None``            → every link counts
+* ``mode="entity"``                → every link of ``secondary.entity``
+* ``mode="body"``                  → only the links ``pattern`` names
+* ``secondary.entity == "self"``   → scoped to the primary entity
+* ``secondary.entity == "terrain"``→ scoped to the terrain
 """
 
 from __future__ import annotations
@@ -145,8 +146,7 @@ class GenesisContactSensor:
         # ---- backend support matrix ---------------------------------
         if cfg.primary.mode == "subtree":
             raise NotImplementedError(
-                f"Genesis backend: ContactSensorCfg {cfg.name!r} primary.mode='subtree' "
-                "is not supported (mjlab-only)."
+                f"Genesis backend: ContactSensorCfg {cfg.name!r} primary.mode='subtree' is not supported (mjlab-only)."
             )
         if cfg.primary.mode == "geom":
             raise NotImplementedError(
@@ -242,9 +242,38 @@ class GenesisContactSensor:
             else:
                 sec_entity = env.scene_manager[sec.entity]
             self._counterpart_is_all = False
-            self._counterpart_links = torch.arange(
-                sec_entity.link_start, sec_entity.link_end, dtype=torch.long, device=self.device
-            )
+            if sec.mode == "entity":
+                # Whole entity: its links are contiguous in the solver.
+                counterpart = list(range(sec_entity.link_start, sec_entity.link_end))
+            elif sec.mode == "body":
+                # Named links only. The counterpart set is a membership test, so
+                # any subset works — this used to take the entity's whole range
+                # and ignore the pattern, which silently widened "the left jaw"
+                # into "any part of the tool" while Newton and mjlab honoured it.
+                sec_patterns = (sec.pattern,) if isinstance(sec.pattern, str) else list(sec.pattern)
+                link_ids, link_names = eu.find_links(
+                    sec_entity, list(sec_patterns), global_ids=True, preserve_order=True
+                )
+                if sec.exclude:
+                    kept = [
+                        (lid, lname) for lid, lname in zip(link_ids, link_names) if not _matches_any(lname, sec.exclude)
+                    ]
+                    link_ids = [lid for lid, _ in kept]
+                    link_names = [lname for _, lname in kept]
+                if not link_names:
+                    raise ValueError(
+                        f"Genesis backend: ContactSensorCfg {cfg.name!r} secondary pattern "
+                        f"{sec.pattern!r} (entity {sec.entity!r}, after exclude {sec.exclude}) "
+                        f"matched no links."
+                    )
+                counterpart = link_ids
+            else:
+                raise NotImplementedError(
+                    f"Genesis backend: ContactSensorCfg {cfg.name!r} secondary.mode={sec.mode!r}; "
+                    f"Genesis resolves contacts by link, so only 'body' (named links) and 'entity' "
+                    f"(every link of the entity) are supported."
+                )
+            self._counterpart_links = torch.tensor(counterpart, dtype=torch.long, device=self.device)
 
         # ---- per-substep capture rings (newest-first, native layout) --
         h = cfg.history_length

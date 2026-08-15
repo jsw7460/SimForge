@@ -90,8 +90,7 @@ class NewtonContactSensor:
         # ---- backend support matrix ---------------------------------
         if cfg.primary.mode == "subtree":
             raise NotImplementedError(
-                f"Newton backend: ContactSensorCfg {cfg.name!r} primary.mode='subtree' "
-                "is not supported (mjlab-only)."
+                f"Newton backend: ContactSensorCfg {cfg.name!r} primary.mode='subtree' is not supported (mjlab-only)."
             )
         if cfg.primary.mode not in ("body", "geom"):
             raise NotImplementedError(
@@ -141,12 +140,12 @@ class NewtonContactSensor:
         if sec is not None:
             if sec.mode == "subtree":
                 raise NotImplementedError(
-                    f"Newton backend: ContactSensorCfg {cfg.name!r} secondary.mode='subtree' " "is not supported."
+                    f"Newton backend: ContactSensorCfg {cfg.name!r} secondary.mode='subtree' is not supported."
                 )
-            if sec.mode not in ("body", "geom"):
+            if sec.mode not in ("body", "geom", "entity"):
                 raise NotImplementedError(
                     f"Newton backend: ContactSensorCfg {cfg.name!r} secondary.mode={sec.mode!r}; "
-                    "only 'body' and 'geom' are supported."
+                    "only 'body', 'geom' and 'entity' are supported."
                 )
             if not sec.entity:
                 raise NotImplementedError(
@@ -155,15 +154,22 @@ class NewtonContactSensor:
                     "secondary.entity='self'."
                 )
             sec_entity = primary_entity if sec.entity == "self" else sec.entity
-            sec_patterns = (sec.pattern,) if isinstance(sec.pattern, str) else tuple(sec.pattern)
+            # ``entity`` mode = every body of that entity, which on Newton is
+            # just the widest body pattern over its own (prefix-scoped) label
+            # pool. ``pattern`` carries no meaning in that mode.
+            sec_mode = "body" if sec.mode == "entity" else sec.mode
+            if sec.mode == "entity":
+                sec_patterns: tuple[str, ...] = (".*",)
+            else:
+                sec_patterns = (sec.pattern,) if isinstance(sec.pattern, str) else tuple(sec.pattern)
             sec_indices = self._resolve_indices(
                 entity_name=sec_entity,
-                mode=sec.mode,
+                mode=sec_mode,
                 patterns=sec_patterns,
                 exclude=sec.exclude,
                 what=f"ContactSensorCfg {cfg.name!r} secondary",
             )
-            if sec.mode == "body":
+            if sec_mode == "body":
                 counterpart_kwargs["counterpart_bodies"] = sec_indices
             else:
                 counterpart_kwargs["counterpart_shapes"] = sec_indices

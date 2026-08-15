@@ -108,7 +108,7 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
             ContactSensorCfg(
                 name="feet_ground_contact",
                 primary=ContactMatch(mode="body", pattern=tuple(r.foot_names), entity="robot"),
-                secondary=ContactMatch(mode="body", pattern=".*", entity="terrain"),
+                secondary=ContactMatch(mode="entity", entity="terrain"),
                 history_length=timing["decimation"],
             ),
             ContactSensorCfg(
