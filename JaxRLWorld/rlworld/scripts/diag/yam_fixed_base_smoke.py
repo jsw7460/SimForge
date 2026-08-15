@@ -57,8 +57,12 @@ from rlworld.rl.runners import BaseRunner
 _SIMS = ("genesis", "newton", "mujoco")
 
 GRIPPER_JOINT = "left_finger"
-LEFT_FINGER_BODY = "link_left_finger"
-RIGHT_FINGER_BODY = "link_right_finger"
+# The links that actually carry the contact pads. NOT the finger mounts
+# (``link_left_finger`` / ``link_right_finger``): the finger is a linkage,
+# so mount separation moves OPPOSITE to pad separation, and measuring the
+# mounts reports the gripper closing while the jaws are opening.
+LEFT_FINGER_BODY = "lf_down"
+RIGHT_FINGER_BODY = "rf_down"
 WRIST_BODY = "link_6"
 
 
@@ -286,16 +290,16 @@ def run_single(sim: str, num_envs: int, settle_steps: int) -> dict:
         right = data.body_pos_w((RIGHT_FINGER_BODY,))[:, 0, :]
         return left - wrist, right - wrist
 
-    # Sign convention, measured rather than assumed: the finger slide runs
-    # from -0.002 (jaws apart) to +0.0375 (jaws together), so a POSITIVE
-    # action closes the gripper.
+    # Sign convention, measured at the pads: a POSITIVE command spreads
+    # them. (The finger slide's own coordinate runs the other way, which is
+    # why the linkage has to be measured rather than reasoned about.)
     open_action = zeros.clone()
-    open_action[:, grip_idx] = -1.0
+    open_action[:, grip_idx] = 1.0
     _step_n(env, open_action, settle_steps * 3)
     left_open, right_open = _finger_offsets()
 
     close_action = zeros.clone()
-    close_action[:, grip_idx] = 1.0
+    close_action[:, grip_idx] = -1.0
     _step_n(env, close_action, settle_steps * 3)
     left_closed, right_closed = _finger_offsets()
 

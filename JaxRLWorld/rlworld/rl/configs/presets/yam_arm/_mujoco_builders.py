@@ -35,6 +35,8 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 
+from .base import build_rigid_objects
+
 if TYPE_CHECKING:
     from .base import YamArmConfig
 
@@ -77,12 +79,15 @@ class YamSpecFn:
 _FINGER_PADS = "[lr]f_down(6|7|8|9|10|11)_collision"
 _ALL_COLLISION = ".*_collision"
 
-GRIPPER_ONLY_COLLISION = CollisionCfg(
+FULL_COLLISION = CollisionCfg(
     geom_names_expr=(_ALL_COLLISION,),
-    # Only the wrist and the fingers collide. The upper links have
-    # nothing to reach in this preset, and every enabled pair costs.
-    contype={"(link6|[lr]f)_.*_collision": 1, _ALL_COLLISION: 0},
-    conaffinity={"(link6|[lr]f)_.*_collision": 1, _ALL_COLLISION: 0},
+    # Every link collides, which is what the other two backends do with the
+    # same model. A gripper-only policy is cheaper, but it makes this
+    # backend the only one where the arm can sweep through its own bench —
+    # and a workspace where the table is solid for two simulators and not
+    # for the third is worse than the saved contact pairs.
+    contype=1,
+    conaffinity=1,
     condim={_FINGER_PADS: 6, _ALL_COLLISION: 3},
     friction={_FINGER_PADS: (1.0, 5e-3, 5e-4), _ALL_COLLISION: (0.6,)},
     solref={_FINGER_PADS: (0.01, 1.0)},
@@ -136,7 +141,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         ),
         # mjlab builds articulations from a spec function, not a path.
         spec_fn=YamSpecFn(mjcf_path=r.mjcf_path),
-        collisions=(GRIPPER_ONLY_COLLISION,),
+        collisions=(FULL_COLLISION,),
     )
 
     return MujocoSceneConfig(
@@ -146,6 +151,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         env_spacing=2.0,
         robot_entity_name="robot",
         entities={"robot": robot_entity},
+        rigid_objects=build_rigid_objects(cfg),
         solver_iterations=10,
         solver_ls_iterations=20,
         ccd_iterations=50,
@@ -153,6 +159,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         # buffer; an overflow silently DROPS constraints rather than
         # erroring, so joints escape their limits.
         njmax=400,
+        nconmax=400,
         impratio=10.0,
         cone="elliptic",
         preset_class_name=type(cfg).__name__,

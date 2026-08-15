@@ -32,6 +32,8 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 
+from .base import build_rigid_objects
+
 if TYPE_CHECKING:
     from .base import YamArmConfig
 
@@ -78,7 +80,10 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             iterations=50,
             ls_iterations=50,
             ccd_iterations=50,
-            nconmax=100,
+            # The gripper's many small pad geoms against a workpiece
+            # overflow a tight budget, and an overflow silently DROPS
+            # contacts rather than erroring.
+            nconmax=400,
         ),
         entities={
             "robot": NewtonEntityCfg(
@@ -113,6 +118,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
                 enable_self_collisions=False,
             ),
         },
+        rigid_objects=build_rigid_objects(cfg),
         env_spacing=(2.0, 2.0, 0.0),
     )
 

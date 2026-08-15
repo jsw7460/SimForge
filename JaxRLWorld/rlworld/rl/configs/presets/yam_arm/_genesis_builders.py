@@ -35,6 +35,8 @@ from rlworld.rl.configs.scene.unified_entity_config import (
 )
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 
+from .base import build_rigid_objects
+
 if TYPE_CHECKING:
     from .base import YamArmConfig
 
@@ -123,6 +125,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> SceneConfig:
             integrator=gs.integrator.implicitfast,
             tolerance=1e-5,
         ),
+        rigid_objects=build_rigid_objects(cfg),
         robot_cfg=r,
     )
 

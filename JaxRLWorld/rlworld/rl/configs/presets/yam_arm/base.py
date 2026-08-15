@@ -54,12 +54,30 @@ from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.robots.yam import YamConfig
+from rlworld.rl.configs.scene import RigidObjectCfg
+from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
+from rlworld.rl.configs.scene.unified_entity_config import InitialStateCfg
 from rlworld.rl.envs.mdp.events import common as common_ef
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     dof_pos,
     dof_vel,
     raw_actions,
 )
+
+TABLE_URDF = "./JaxRLWorld/rlworld/assets/props/table.urdf"
+CUBE_URDF = "./JaxRLWorld/rlworld/assets/props/cube.urdf"
+
+TABLE_TOP_Z = 0.40
+"""Top face of the workbench, given its 0.4 m thickness and a body placed
+at z = 0.2. Everything on the bench is positioned from this."""
+
+BASE_CLEARANCE = 0.02
+"""Gap between the bench top and the arm's mounting flange. The base
+collision capsule reaches 17 mm below the body origin, so a flush mount
+would leave the arm permanently pressing into the table and every
+contact-derived signal contaminated by that force."""
+
+CUBE_HALF = 0.02
 
 # ── Per-simulator constants ──────────────────────────────────────────
 _SIM_TIMINGS: Dict[str, Dict[str, Any]] = {
@@ -73,6 +91,27 @@ _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
     "genesis": "YamArm_Genesis",
     "mujoco": "YamArm_Mujoco",
 }
+
+
+def build_rigid_objects(cfg: YamArmConfig) -> Dict[str, RigidObjectCfg]:
+    """The bench and the workpiece, identical on all three backends.
+
+    Defined once here rather than in each ``_{sim}_builders`` module: the
+    props carry no simulator-specific settings, and three copies of the
+    same placement would be free to drift apart.
+    """
+    return {
+        "table": RigidObjectCfg(
+            urdf_path=TABLE_URDF,
+            floating=False,
+            init_state=InitialStateCfg(pos=cfg.table_pos),
+        ),
+        "cube": RigidObjectCfg(
+            urdf_path=CUBE_URDF,
+            floating=True,
+            init_state=InitialStateCfg(pos=cfg.cube_pos),
+        ),
+    }
 
 
 def _get_sim_builders(sim_type: str):
@@ -100,15 +139,21 @@ class YamArmConfig:
     episode_length_s: float = 10.0
     seed: int = 42
 
-    base_pos: tuple[float, float, float] = (0.0, 0.0, 0.05)
+    base_pos: tuple[float, float, float] = (0.0, 0.0, TABLE_TOP_Z + BASE_CLEARANCE)
     """Where the arm is bolted down, in the environment's own frame.
 
-    Baked into the model at build time on every backend, because a welded
-    root is structure rather than state. The default clears the ground
-    plane: the base collision capsule reaches ~17 mm below the body
-    origin, and a base sunk into the floor would generate a permanent
-    contact force that quietly pollutes every contact-derived signal.
+    On the near edge of the bench, clear of its top by
+    ``BASE_CLEARANCE``. Baked into the model at build time on every
+    backend, because a welded root is structure rather than state.
     """
+
+    table_pos: tuple[float, float, float] = (0.35, 0.0, TABLE_TOP_Z / 2.0)
+    """Bench centre. Half its thickness up, so its top lands on
+    ``TABLE_TOP_Z``; offset in +x so it extends in front of the arm."""
+
+    cube_pos: tuple[float, float, float] = (0.35, 0.0, TABLE_TOP_Z + CUBE_HALF)
+    """Workpiece, resting on the bench within the arm's reach (the arm
+    spans roughly 0.5 m from its shoulder)."""
 
     reset_joint_position_noise: tuple[float, float] = (-0.05, 0.05)
 
@@ -215,16 +260,25 @@ class YamArmConfig:
         """
         builders = _get_sim_builders(self.sim_type)
 
-        common_terms = {
-            "reset_root": EventTermConfig(
+        def _place(name: str, pos: tuple[float, float, float]) -> EventTermConfig:
+            return EventTermConfig(
                 func=common_ef.reset_root_state_uniform,
                 mode="reset",
                 params={
                     "pose_range": {},
                     "velocity_range": {},
-                    "default_pos": self.base_pos,
+                    "default_pos": pos,
+                    "asset_cfg": SceneEntitySelector(name=name),
                 },
-            ),
+            )
+
+        common_terms = {
+            "reset_root": _place("robot", self.base_pos),
+            # The props need the same treatment for the same reason, and the
+            # cube additionally has to be put back on the bench after an
+            # episode has knocked it off.
+            "reset_table": _place("table", self.table_pos),
+            "reset_cube": _place("cube", self.cube_pos),
             "reset_dof_pos": EventTermConfig(
                 func=common_ef.reset_joints_by_offset,
                 mode="reset",
