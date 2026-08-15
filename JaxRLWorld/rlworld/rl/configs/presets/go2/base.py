@@ -111,7 +111,7 @@ class Go2FlatConfig:
     robot: Go2Config = field(default_factory=Go2Config)
 
     # Environment / training settings (sim-agnostic)
-    num_envs: int = 4096
+    num_envs: int = 8192
     episode_length_s: float = 20.0
     seed: int = 42
 

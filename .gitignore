@@ -82,6 +82,9 @@ checkpoints/
 *.pth
 *.mp4
 
+# Locally downloaded wheels (platform-specific install artefacts)
+*.whl
+
 # --- Misc ---
 *.log
 *.mov
