@@ -280,6 +280,15 @@ def reset_joints_by_offset(
             velocity_range[1],
         )
 
+    # Clamp to the soft limits, as the docstring has always claimed and as
+    # IsaacLab's own ``reset_joints_by_offset`` does. Without it a single
+    # ``position_range`` applied to every joint puts the narrow ones outside
+    # their travel — a gripper finger with 40 mm of range cannot absorb the
+    # +-0.05 that an arm joint shrugs off — and the solver spends the start
+    # of every episode dragging them back.
+    mid, soft_half = env.act_manager._soft_joint_limits()
+    default_pos = default_pos.clamp(mid - soft_half, mid + soft_half)
+
     writer.set_dof_positions(default_pos, env_ids=env_ids)
     writer.set_dof_velocities(joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
