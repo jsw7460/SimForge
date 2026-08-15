@@ -154,7 +154,9 @@ class MujocoEnv(World):
         mjlab_cfg.resolve(self.scene_manager.scene)
 
         joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
-            selector.joint_names, preserve_order=selector.preserve_order
+            selector.joint_names,
+            preserve_order=selector.preserve_order,
+            entity_name=selector.name,
         )
 
         def _to_tensor(ids, requested) -> torch.Tensor | None:
@@ -255,19 +257,18 @@ class MujocoEnv(World):
 
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
-        indexing = self.act_manager.indexing
-        _default_jp = self._resolve_default_joint_pos()
-        # Per-entity caches (mirrors GenesisEnv). The "robot" entry is built
-        # exactly as before; additional entities (rigid objects, extra robots)
-        # get their own entry keyed by name.
+        # One indexing and one home pose PER entity, for the reason spelled
+        # out in GenesisEnv: a shared indexing points a second robot's reads
+        # and writes at the first robot's joints without complaint.
         for name, entity in self.scene_manager.entities.items():
+            indexing = self.entity_indexing(name)
             self._robot_data_cache[name] = MujocoRobotData(
                 entity=entity,
                 joint_ids=indexing.sim_indices,
                 num_envs=self.num_envs,
                 device=self.device,
                 env=self,
-                default_joint_pos=_default_jp,
+                default_joint_pos=self._resolve_default_joint_pos(name),
             )
             self._robot_state_writer_cache[name] = MujocoRobotStateWriter(
                 env=self,

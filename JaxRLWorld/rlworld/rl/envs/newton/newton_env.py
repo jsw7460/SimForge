@@ -115,7 +115,9 @@ class NewtonEnv(World):
         view = self.scene_manager.articulation_views[selector.name]
 
         joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
-            selector.joint_names, preserve_order=selector.preserve_order
+            selector.joint_names,
+            preserve_order=selector.preserve_order,
+            entity_name=selector.name,
         )
 
         body_ids: torch.Tensor | None = None
@@ -153,7 +155,9 @@ class NewtonEnv(World):
         actuator_names_resolved: list[str] | None = None
         if selector.actuator_names is not None:
             actuator_ids, actuator_names_resolved = self._resolve_canonical_joint_ids(
-                selector.actuator_names, preserve_order=selector.preserve_order
+                selector.actuator_names,
+                preserve_order=selector.preserve_order,
+                entity_name=selector.name,
             )
 
         if selector.site_names is not None:
@@ -277,13 +281,15 @@ class NewtonEnv(World):
         # extra robots) get their own entry keyed by name.
         self._robot_data_cache: dict[str, NewtonRobotData] = {}
         self._robot_state_writer_cache: dict[str, NewtonRobotStateWriter] = {}
-        _default_jp = self._resolve_default_joint_pos()
+        # Home pose per entity: taking the first entity that declared any
+        # joint_pos and applying it everywhere gave a second robot the
+        # first one's pose.
         for name in self.scene_manager.entities:
             view = self.scene_manager.articulation_views[name]
             self._robot_data_cache[name] = NewtonRobotData(
                 self,
                 view,
-                default_joint_pos=_default_jp,
+                default_joint_pos=self._resolve_default_joint_pos(name),
                 soft_joint_pos_limit_factor=self.scene_cfg.entities[name].articulation.soft_joint_pos_limit_factor,
             )
             self._robot_state_writer_cache[name] = NewtonRobotStateWriter(self, view)

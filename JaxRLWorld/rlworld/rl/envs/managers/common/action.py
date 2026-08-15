@@ -200,10 +200,16 @@ class ActionManagerBase(BaseManager):
         return self._indexing
 
     def _build_indexing(self):
-        """Build ArticulationIndexing from scene manager."""
+        """Build ArticulationIndexing for the entity this manager drives.
+
+        The entity name has to be passed: every backend's builder already
+        takes one, and leaving it at the default pinned all three to an
+        entity literally named ``"robot"``.
+        """
         scene_mgr = self.env.scene_manager
         return scene_mgr.build_articulation_indexing(
             actuated_dof_names=self.config.actuated_dof_names,
+            entity_name=self.env.robot_entity_name,
         )
 
     def _estimate_term_action_dim(self, term_cfg) -> int:

@@ -1434,7 +1434,7 @@ class NewtonSceneManager(BaseManager):
             self._step()
         self.graph = capture.graph
 
-    def build_articulation_indexing(self, actuated_dof_names: list[str]):
+    def build_articulation_indexing(self, actuated_dof_names: list[str], entity_name: str = "robot"):
         """Build ArticulationIndexing for the Newton model in canonical joint order.
 
         Joint order is computed by a DFS walk of the kinematic body tree
@@ -1451,7 +1451,7 @@ class NewtonSceneManager(BaseManager):
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-        view = self.articulation_views.get("robot")
+        view = self.articulation_views.get(entity_name)
         if view is None:
             raise ValueError(
                 "build_articulation_indexing called before _build_robot_view; "
@@ -1462,7 +1462,15 @@ class NewtonSceneManager(BaseManager):
             raise ValueError("Newton model has no joint labels")
         num_worlds = self.model.world_count
         joints_per_world = len(joint_names_raw) // num_worlds
-        flat_world0 = [leaf_name(n) for n in joint_names_raw[:joints_per_world]]
+        # Map each of THIS entity's joints to its world-0 joint index through
+        # the view's full labels. Matching on leaf names against world 0's
+        # whole joint list — the previous approach — picks the first entity
+        # that happens to own a joint of that name, so two arms that both
+        # call a joint "joint1" resolve to the same one. Restricted to world
+        # 0 because ``replicate`` copies labels verbatim into every world, so
+        # a map over the full list would resolve to the last world's copy.
+        label_to_world0 = {label: i for i, label in enumerate(joint_names_raw[:joints_per_world])}
+        view_label_of = dict(zip(view.joint_names, view.joint_labels, strict=True))
 
         # Canonical joint order from a DFS walk of the kinematic body tree.
         # Filtered to joints that ArticulationView surfaced (multi-DOF roots
@@ -1487,8 +1495,8 @@ class NewtonSceneManager(BaseManager):
                 newton_qd_indices=empty_long.clone(),
             )
 
-        # Map matched bare names → world-0 joint indices (for q/qd lookup).
-        original_indices = [flat_world0.index(n) for n in matched_names]
+        # Matched bare names → model-global joint indices (for q/qd lookup).
+        original_indices = [label_to_world0[view_label_of[n]] for n in matched_names]
 
         joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
         joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()

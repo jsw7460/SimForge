@@ -17,6 +17,21 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.robot_data import RigidObjectData, RobotData
 
 
+def _empty_articulation_indexing(device):
+    """An :class:`ArticulationIndexing` describing something with no joints."""
+    from rlworld.rl.envs.indexing import ArticulationIndexing
+
+    empty_long = torch.zeros(0, device=device, dtype=torch.long)
+    empty_float = torch.zeros(0, device=device, dtype=torch.float32)
+    return ArticulationIndexing(
+        joint_names=(),
+        sim_indices=empty_long,
+        sim_to_canonical=empty_long.clone(),
+        joint_limits_lower=empty_float,
+        joint_limits_upper=empty_float.clone(),
+    )
+
+
 class World(ABC):
     """Abstract base class for all RL environments."""
 
@@ -103,6 +118,11 @@ class World(ABC):
         # time; resolved together with the articulation writers in
         # :meth:`get_root_state_writer`.
         self._rigid_object_state_writer_cache: dict = {}
+
+        # One ArticulationIndexing per articulation entity, built on first
+        # use by :meth:`entity_indexing`. The driven entity is not stored
+        # here — it defers to the action manager's own indexing.
+        self._entity_indexing_cache: dict = {}
 
     def _init_buffers(self) -> None:
         """Initialize common buffers. Call after setting num_envs and device."""
@@ -307,25 +327,86 @@ class World(ABC):
             f"(no scene-entity concept on this World subclass)."
         )
 
+    @property
+    def robot_entity_name(self) -> str:
+        """Name of the entity the action manager drives.
+
+        A single name while one action manager owns one articulation.
+        Everything that needs to name *an* entity should take the name as
+        an argument instead of reaching for this.
+        """
+        return getattr(self.scene_manager.config, "robot_entity_name", "robot")
+
+    def entity_indexing(self, entity_name: str):
+        """The :class:`ArticulationIndexing` for one articulation entity.
+
+        Every entity gets its own. Sharing one entity's indexing across
+        all of them — which is what happened before — means a second
+        robot's joint reads, writes and selector lookups silently use the
+        first robot's joint order and simulator indices. Nothing raises;
+        the numbers are simply wrong.
+
+        The driven entity returns the action manager's own indexing
+        rather than an equal copy, because ``RobotData`` column order has
+        to *be* the action manager's order, not merely match it.
+        """
+        act_manager = getattr(self, "act_manager", None)
+        if act_manager is not None and entity_name == self.robot_entity_name:
+            return act_manager.indexing
+
+        cached = self._entity_indexing_cache.get(entity_name)
+        if cached is None:
+            if entity_name in self.scene_manager.config.entities:
+                cached = self.scene_manager.build_articulation_indexing(
+                    actuated_dof_names=self._actuated_dof_names_for(entity_name),
+                    entity_name=entity_name,
+                )
+            else:
+                # A passive rigid object. It has no joints, so it has no
+                # joint indexing — answered here rather than per backend,
+                # both because the answer is the same everywhere and
+                # because the backends disagree about which registry a
+                # prop lives in.
+                cached = _empty_articulation_indexing(self.device)
+            self._entity_indexing_cache[entity_name] = cached
+        return cached
+
+    def _actuated_dof_names_for(self, entity_name: str) -> list[str]:
+        """Which of an entity's joints the framework should index.
+
+        Only the driven entity has a declared actuated set; anything else
+        in the scene is indexed whole, so its state can still be read and
+        its joints named by a selector.
+        """
+        if entity_name == self.robot_entity_name:
+            return list(self.act_cfg.actuated_dof_names)
+        return [".*"]
+
     def _resolve_canonical_joint_ids(
         self,
         joint_name_patterns: tuple[str, ...] | None,
         preserve_order: bool = False,
+        entity_name: str | None = None,
     ) -> tuple[torch.Tensor, list[str]]:
-        """Resolve joint regex patterns against ``actuated_joint_names``.
+        """Resolve joint regex patterns against one entity's joint list.
 
         Used by every backend's :meth:`resolve_selector` to fill the
         canonical-order ``joint_ids`` field.  When ``joint_name_patterns``
-        is ``None`` returns an arange covering all actuated joints.
+        is ``None`` returns an arange covering that entity's joints.
+
+        ``entity_name`` must be the entity the selector points at.
+        Resolving every selector against the driven robot's joint list —
+        the previous behaviour — hands back indices into the wrong
+        articulation for any other entity.
 
         ``preserve_order`` mirrors mjlab's ``find_*`` semantics — when
         True the result follows the order of the regex patterns; when
-        False (default) the result follows the canonical actuated-joint
-        order.
+        False (default) the result follows the canonical joint order.
         """
         from rlworld.rl.utils import string as _su
 
-        all_names = list(self.act_manager.actuated_joint_names)
+        name = entity_name if entity_name is not None else self.robot_entity_name
+        all_names = list(self.entity_indexing(name).joint_names)
         if joint_name_patterns is None:
             return (
                 torch.arange(len(all_names), device=self.device, dtype=torch.long),
@@ -334,30 +415,29 @@ class World(ABC):
         idx, names = _su.resolve_matching_names(list(joint_name_patterns), all_names, preserve_order=preserve_order)
         return torch.tensor(idx, device=self.device, dtype=torch.long), names
 
-    def _resolve_default_joint_pos(self) -> torch.Tensor:
-        """Resolve ``init_state.joint_pos`` dict into a per-joint tensor.
+    def _resolve_default_joint_pos(self, entity_name: str | None = None) -> torch.Tensor:
+        """Resolve one entity's ``init_state.joint_pos`` into a per-joint tensor.
 
-        Uses ``act_manager.actuated_joint_names`` for regex matching,
-        so the returned tensor is in canonical actuated-joint order
-        and can be stored directly on ``RobotData.default_joint_pos``.
+        In that entity's own canonical joint order, so it can be stored
+        directly on its ``RobotData.default_joint_pos``.
+
+        The entity is named, not searched for: the previous version took
+        the first entity in the scene that declared any ``joint_pos`` and
+        applied it to every robot, so a second robot inherited the
+        first's home pose.
 
         Called once per env init — not per reset.
         """
         from rlworld.rl.utils import string as _su
 
-        all_names = list(self.act_manager.actuated_joint_names)
+        name = entity_name if entity_name is not None else self.robot_entity_name
+        all_names = list(self.entity_indexing(name).joint_names)
         base = torch.zeros(len(all_names), device=self.device, dtype=torch.float32)
 
-        # Find the robot entity config's init_state.joint_pos dict.
-        robot_cfg = None
-        for cfg in self.scene_manager.config.entities.values():
-            joint_pos = getattr(getattr(cfg, "init_state", None), "joint_pos", None)
-            if joint_pos and isinstance(joint_pos, dict):
-                robot_cfg = joint_pos
-                break
-
-        if robot_cfg:
-            matched_idx, _, matched_vals = _su.resolve_matching_names_values(robot_cfg, all_names)
+        cfg = self.scene_manager.config.entities.get(name)
+        joint_pos = getattr(getattr(cfg, "init_state", None), "joint_pos", None)
+        if joint_pos and isinstance(joint_pos, dict):
+            matched_idx, _, matched_vals = _su.resolve_matching_names_values(joint_pos, all_names)
             for idx, val in zip(matched_idx, matched_vals):
                 base[idx] = val
 

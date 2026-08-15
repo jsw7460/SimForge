@@ -115,7 +115,9 @@ class GenesisEnv(World):
         entity = self.scene_manager[selector.name]
 
         joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
-            selector.joint_names, preserve_order=selector.preserve_order
+            selector.joint_names,
+            preserve_order=selector.preserve_order,
+            entity_name=selector.name,
         )
 
         body_ids = None
@@ -137,7 +139,9 @@ class GenesisEnv(World):
         actuator_names_resolved = None
         if selector.actuator_names is not None:
             actuator_ids, actuator_names_resolved = self._resolve_canonical_joint_ids(
-                selector.actuator_names, preserve_order=selector.preserve_order
+                selector.actuator_names,
+                preserve_order=selector.preserve_order,
+                entity_name=selector.name,
             )
 
         if selector.geom_names is not None:
@@ -271,16 +275,18 @@ class GenesisEnv(World):
 
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
-        indexing = self.act_manager.indexing
-        _default_jp = self._resolve_default_joint_pos()
+        # One indexing and one home pose PER entity. Handing every entity the
+        # driven robot's indexing made a second robot's joint reads and
+        # writes address the first robot's DOFs, silently.
         for name, entity in self.scene_manager.entities.items():
+            indexing = self.entity_indexing(name)
             self._robot_data_cache[name] = GenesisRobotData(
                 entity=entity,
                 actuated_dof_ids=indexing.sim_indices,
                 num_envs=self.num_envs,
                 device=self.device,
                 env=self,
-                default_joint_pos=_default_jp,
+                default_joint_pos=self._resolve_default_joint_pos(name),
                 soft_joint_pos_limit_factor=self.scene_cfg.entities[name].articulation.soft_joint_pos_limit_factor,
             )
             self._robot_state_writer_cache[name] = GenesisRobotStateWriter(
