@@ -38,6 +38,7 @@ from rlworld.rl.envs.managers.newton.label_indexing import NewtonLabelIndexing
 from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.utils import string as string_utils
+from rlworld.rl.utils.quat_utils import wxyz_to_xyzw_tuple
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -545,13 +546,14 @@ class NewtonSceneManager(BaseManager):
 
         ``floating=False`` — a table, a tank, a machine frame — is loaded as a
         **kinematic free body**, not as a body welded to the world: the root
-        joint is a free joint and every body carries
+        joint is a free joint and the root body carries
         ``BodyFlags.KINEMATIC``, "a user-prescribed body that does not respond
         to applied forces". Gravity and contacts leave it exactly where it was
         put (``SolverMuJoCo`` gives its DOFs ``KINEMATIC_ARMATURE = 1e10``),
         while the pose stays ordinary per-environment state that a reset event
         can write — which a welded body does not have. That is what makes an
-        immovable fixture placeable per env at all.
+        immovable fixture placeable per env at all. Anything hanging off that
+        root (a hinged jaw, a lid) stays dynamic and articulates normally.
 
         This mirrors IsaacLab, whose manipulation tasks declare their table as
         a ``RigidObjectCfg`` with ``kinematic_enabled=True`` rather than as a
@@ -561,7 +563,21 @@ class NewtonSceneManager(BaseManager):
         immovable = not cfg.floating
         builder, info = self._build_entity(object_name, replace(cfg, floating=True) if immovable else cfg)
         if immovable:
-            builder.body_flags = [int(newton.BodyFlags.KINEMATIC)] * len(builder.body_flags)
+            # ROOT ONLY. Newton rejects a kinematic body whose joint parent is
+            # another body ("Only root bodies ... can be kinematic",
+            # ModelBuilder._validate_kinematic_joint_attachment). Flagging a
+            # whole multi-body entity builds a model Newton would have refused
+            # had the flags been set before the joints, and its solver then
+            # folds the chain into one prescribed body — a contact on a child
+            # link gets reported against the root. Pinning the root alone is
+            # what makes the fixture immovable anyway.
+            roots = [j for j in range(len(builder.joint_parent)) if builder.joint_parent[j] == -1]
+            if len(roots) != 1:
+                raise ValueError(
+                    f"Rigid object '{object_name}' has {len(roots)} world-rooted joints; "
+                    "a non-floating rigid object must have exactly one root body."
+                )
+            builder.body_flags[builder.joint_child[roots[0]]] = int(newton.BodyFlags.KINEMATIC)
         info["kinematic"] = immovable
         self._rigid_object_builders[object_name] = builder
         self.rigid_objects[object_name] = info
@@ -602,7 +618,7 @@ class NewtonSceneManager(BaseManager):
         if shape_cfg is not None:
             builder.default_shape_cfg = shape_cfg
 
-        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*cfg.init_state.rot))
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
         ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
         builder.add_urdf(
             cfg.urdf_path,
@@ -638,7 +654,7 @@ class NewtonSceneManager(BaseManager):
         if shape_cfg is not None:
             builder.default_shape_cfg = shape_cfg
 
-        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*cfg.init_state.rot))
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
         ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
         builder.add_mjcf(
             cfg.mjcf_path,
@@ -843,7 +859,7 @@ class NewtonSceneManager(BaseManager):
         if shape_cfg is not None:
             builder.default_shape_cfg = shape_cfg
 
-        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*cfg.init_state.rot))
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
 
         builder.add_usd(
             cfg.usd_path,

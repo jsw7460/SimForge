@@ -5,6 +5,8 @@ All quaternion functions use **wxyz** convention unless otherwise noted.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import torch
 from torch import Tensor
 
@@ -140,6 +142,22 @@ def wxyz_to_xyzw(q: Tensor) -> Tensor:
         Quaternion in (x, y, z, w) format, shape (..., 4).
     """
     return q[..., [1, 2, 3, 0]]
+
+
+def wxyz_to_xyzw_tuple(q: Sequence[float]) -> tuple[float, float, float, float]:
+    """Scalar-tuple form of :func:`wxyz_to_xyzw`.
+
+    Used at scene-build time, where an orientation is four Python floats
+    off a config rather than a batched tensor — Newton's ``wp.quat``
+    takes ``(x, y, z, w)`` while every unified config states ``(w, x, y,
+    z)``. The two identities are each other's 180-degree rotation about
+    X, so an unconverted quaternion does not fail, it silently spawns the
+    entity upside down.
+    """
+    if len(q) != 4:
+        raise ValueError(f"Expected a 4-component (w, x, y, z) quaternion, got {len(q)} components: {q!r}")
+    w, x, y, z = (float(v) for v in q)
+    return x, y, z, w
 
 
 def quat_to_euler_wxyz(q: Tensor) -> Tensor:
