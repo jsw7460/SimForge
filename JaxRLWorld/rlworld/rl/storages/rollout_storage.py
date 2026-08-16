@@ -1,7 +1,37 @@
+from functools import partial
 from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
+
+
+@partial(jax.jit, donate_argnums=(0,))
+def _write_step(buffers: tuple[jax.Array, ...], index: jax.Array, values: tuple[jax.Array, ...]):
+    """Write one timestep into every buffer, in place, in one dispatch.
+
+    Both properties matter, and neither is free.
+
+    ONE dispatch: written as ten separate ``at[].set()`` statements
+    outside ``jit``, this is ten XLA programs per environment step, each
+    paying the launch overhead for a write of a single row.
+
+    IN PLACE: ``at[].set()`` is functional. Outside ``jit`` there is
+    nothing to alias the result onto the input, so each call allocates a
+    fresh ``(num_steps, num_envs, ...)`` buffer and copies the whole
+    thing — the cost of recording one step scales with the length of the
+    entire rollout, and ten copies per step churn the allocator hard
+    enough to show up as periodic multi-millisecond stalls.
+    ``donate_argnums`` lets XLA alias the output onto the donated input
+    and write the row where it stands.
+
+    ``index`` is traced, not a Python int, so the step counter does not
+    retrigger compilation on every step of the rollout.
+
+    Donation invalidates the caller's references: the buffers passed in
+    are dead once this returns, and using one raises rather than reading
+    stale data. The only caller reassigns all ten immediately.
+    """
+    return tuple(buffer.at[index].set(value) for buffer, value in zip(buffers, values))
 
 
 class RolloutBatch(NamedTuple):
@@ -38,11 +68,11 @@ class RolloutStorage:
 
     Each per-step field is held as a single ``(num_steps, num_envs, ...)``
     JAX array allocated once at construction time. Adding a transition
-    issues an ``at[step].set(...)`` functional update that XLA can fuse
-    into in-place writes; clearing the rollout just resets the step
-    counter, so the buffers themselves are reused across iterations and
-    no ``jnp.stack`` happens at the boundary between collection and
-    learning.
+    writes one row into every buffer through ``_write_step``, a single
+    donated ``jit`` that updates them in place; clearing the rollout just
+    resets the step counter, so the buffers themselves are reused across
+    iterations and no ``jnp.stack`` happens at the boundary between
+    collection and learning.
 
     Public API (PPO / PPO-DR3):
         - add_transition(...): record one timestep's data
@@ -107,17 +137,44 @@ class RolloutStorage:
         if self.step >= self.num_steps:
             raise RuntimeError("Storage overflow.")
 
-        s = self.step
-        self.actor_obs = self.actor_obs.at[s].set(actor_obs)
-        self.critic_obs = self.critic_obs.at[s].set(critic_obs)
-        self.actions = self.actions.at[s].set(actions)
-        self.rewards = self.rewards.at[s].set(rewards)
-        self.dones = self.dones.at[s].set(dones)
-        self.episode_starts = self.episode_starts.at[s].set(episode_starts)
-        self.values = self.values.at[s].set(values)
-        self.log_probs = self.log_probs.at[s].set(log_probs)
-        self.mu = self.mu.at[s].set(mu)
-        self.sigma = self.sigma.at[s].set(sigma)
+        (
+            self.actor_obs,
+            self.critic_obs,
+            self.actions,
+            self.rewards,
+            self.dones,
+            self.episode_starts,
+            self.values,
+            self.log_probs,
+            self.mu,
+            self.sigma,
+        ) = _write_step(
+            (
+                self.actor_obs,
+                self.critic_obs,
+                self.actions,
+                self.rewards,
+                self.dones,
+                self.episode_starts,
+                self.values,
+                self.log_probs,
+                self.mu,
+                self.sigma,
+            ),
+            jnp.asarray(self.step),
+            (
+                actor_obs,
+                critic_obs,
+                actions,
+                rewards,
+                dones,
+                episode_starts,
+                values,
+                log_probs,
+                mu,
+                sigma,
+            ),
+        )
         self.step += 1
 
     def clear(self) -> None:
