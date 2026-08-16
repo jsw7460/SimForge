@@ -37,7 +37,9 @@ class ActuatorBaseCfg:
         velocity_limit: Maximum joint velocity [rad/s].
             Used by velocity-dependent saturation models (e.g. DCMotor).
         armature: Reflected rotor inertia added to the joint [kg*m^2].
-        frictionloss: Static friction at the joint [N*m].
+        frictionloss: Static friction at the joint [N*m]. ``None`` (the
+            default) leaves whatever the asset declares — a value forces
+            it on every matched joint, zero included.
     """
 
     target_names_expr: tuple[str, ...] = ()
@@ -46,7 +48,7 @@ class ActuatorBaseCfg:
     effort_limit: float | dict[str, float] | None = None
     velocity_limit: float | dict[str, float] | None = None
     armature: float | dict[str, float] = 0.0
-    frictionloss: float = 0.0
+    frictionloss: float | None = None
 
 
 @dataclass

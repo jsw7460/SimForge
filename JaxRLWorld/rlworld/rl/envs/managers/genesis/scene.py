@@ -426,7 +426,9 @@ class SceneManager(BaseManager):
                     )
 
                 # Friction loss — static joint friction [N*m]. Scalar only.
-                if act_cfg.frictionloss > 0:
+                # ``None`` keeps whatever the asset declares; a number forces
+                # it on every matched joint, zero included.
+                if act_cfg.frictionloss is not None:
                     entity.set_dofs_frictionloss(
                         [float(act_cfg.frictionloss)] * num_dofs,
                         dof_ids,

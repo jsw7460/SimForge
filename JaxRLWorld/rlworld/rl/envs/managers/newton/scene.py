@@ -824,7 +824,10 @@ class NewtonSceneManager(BaseManager):
             # Frictionloss — overrides XML-declared joint frictionloss.
             # Mirrors MuJoCo's dof_frictionloss / Genesis' set_dofs_frictionloss
             # so the three sims share one authoritative value at build time.
-            if isinstance(act_cfg.frictionloss, int | float) and act_cfg.frictionloss > 0:
+            # ``None`` keeps the asset's own value; a number forces it,
+            # zero included. Testing ``> 0`` instead made a configured zero
+            # indistinguishable from saying nothing.
+            if act_cfg.frictionloss is not None:
                 for pattern in act_cfg.target_names_expr:
                     friction_map[pattern] = float(act_cfg.frictionloss)
 
@@ -922,7 +925,7 @@ class NewtonSceneManager(BaseManager):
                     armature_map[pattern] = act_cfg.armature
                 if isinstance(act_cfg.effort_limit, int | float) and act_cfg.effort_limit > 0:
                     effort_limit_map[pattern] = float(act_cfg.effort_limit)
-                if isinstance(act_cfg.frictionloss, int | float) and act_cfg.frictionloss > 0:
+                if act_cfg.frictionloss is not None:
                     friction_map[pattern] = float(act_cfg.frictionloss)
 
         if ke_map or kd_map or armature_map or effort_limit_map or friction_map:
