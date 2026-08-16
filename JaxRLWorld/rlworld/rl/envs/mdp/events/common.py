@@ -233,9 +233,8 @@ def reset_joints_by_offset(
 ) -> None:
     """Reset actuated joint positions/velocities with uniform noise.
 
-    Uses ``act_manager.offset`` as the default joint positions (the
-    canonical cross-sim source for default DOF values) and
-    ``joint_pos_limits`` from ``RobotData`` for clamping.
+    Starts from the entity's declared ``init_state.joint_pos`` and clamps
+    to that entity's soft joint limits.
 
     Works identically across Newton, Genesis, and MuJoCo.
 
@@ -254,14 +253,14 @@ def reset_joints_by_offset(
     device = env.device
     n = len(env_ids)
 
-    # Default joint positions from action manager offset.
-    # offset shape: (num_envs, num_actuated) — slice by env_ids.
-    default_pos = env.act_manager.offset[env_ids].clone()
-    num_joints = default_pos.shape[-1]
-
-    # Ensure default_pos is always 2-D (n, num_joints) even for 1 env.
-    if default_pos.dim() == 1:
-        default_pos = default_pos.unsqueeze(0)
+    # The entity's own declared home pose, in its own joint order and
+    # width. The action manager's ``offset`` is the same values for the
+    # driven robot on the presets that use this term, but it is the
+    # ACTION space: with several action terms it is the sum of their
+    # widths, and it says nothing at all about a second robot.
+    home = env._resolve_default_joint_pos(asset_cfg.name)
+    num_joints = home.shape[-1]
+    default_pos = home.unsqueeze(0).repeat(n, 1)
 
     # Add position noise
     if position_range != (0.0, 0.0):
@@ -286,7 +285,7 @@ def reset_joints_by_offset(
     # their travel — a gripper finger with 40 mm of range cannot absorb the
     # +-0.05 that an arm joint shrugs off — and the solver spends the start
     # of every episode dragging them back.
-    mid, soft_half = env.act_manager._soft_joint_limits()
+    mid, soft_half = env.act_manager.soft_joint_limits_of(asset_cfg.name)
     default_pos = default_pos.clamp(mid - soft_half, mid + soft_half)
 
     writer.set_dof_positions(default_pos, env_ids=env_ids)
