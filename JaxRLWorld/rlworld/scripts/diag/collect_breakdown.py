@@ -186,17 +186,31 @@ def main() -> int:
 
     means = {name: statistics.mean(vals) for name, vals in timer.samples.items()}
     total = sum(means.values())
-    for name, mean_ms in sorted(means.items(), key=lambda kv: -kv[1]):
-        median_ms = statistics.median(timer.samples[name])
-        share = 100.0 * mean_ms / total
-        print(f"  {name:<32} {mean_ms:7.3f} ms  (median {median_ms:7.3f})  {share:5.1f}%")
+
+    # A mean far above the median is the interesting case, not a rounding
+    # detail: it means a handful of steps cost hundreds of times what the
+    # typical one does, and an average spreads that evenly across all of
+    # them so it reads as a uniformly slow section. ``spikes`` counts the
+    # steps responsible.
+    print(f"  {'section':<32}{'mean':>9}{'median':>9}{'p95':>9}{'max':>9}{'spikes':>8}{'share':>8}")
     print("-" * 78)
-    print(f"  {'TOTAL per collect step':<32} {total:7.3f} ms")
+    for name, mean_ms in sorted(means.items(), key=lambda kv: -kv[1]):
+        vals = sorted(timer.samples[name])
+        median_ms = statistics.median(vals)
+        spikes = sum(1 for v in vals if v > 10.0 * max(median_ms, 1e-6))
+        print(
+            f"  {name:<32}{mean_ms:9.3f}{median_ms:9.3f}{vals[int(0.95 * len(vals))]:9.3f}"
+            f"{vals[-1]:9.3f}{spikes:8d}{100.0 * mean_ms / total:7.1f}%"
+        )
+    print("-" * 78)
+    medians_total = sum(statistics.median(v) for v in timer.samples.values())
+    print(f"  {'TOTAL per collect step':<32}{total:9.3f}   (medians sum to {medians_total:.3f} ms)")
     sim_share = 100.0 * means["env.step (the simulator)"] / total
-    print(f"  {'of which the simulator':<32} {sim_share:5.1f}%")
+    print(f"  {'of which the simulator':<32}{sim_share:8.1f}%")
     print("=" * 78)
     print("  Sections are drained before and after, so each number is that")
     print("  section's own work, not the previous section's queue.")
+    print("  spikes = steps costing more than 10x that section's median.")
     return 0
 
 
