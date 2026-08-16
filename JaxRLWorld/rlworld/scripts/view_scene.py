@@ -35,6 +35,7 @@ _PRESETS: dict[str, str] = {
     "yam_arm": "rlworld.rl.configs.presets.yam_arm.base:YamArmConfig",
     "yam_dual": "rlworld.rl.configs.presets.yam_dual.base:YamDualArmConfig",
     "lab_cell": "rlworld.rl.configs.presets.lab_cell.base:LabCellConfig",
+    "yam_lift": "rlworld.rl.configs.presets.yam_lift.base:YamLiftConfig",
     "go2": "rlworld.rl.configs.presets.go2.base:Go2FlatConfig",
     "g1_29dof": "rlworld.rl.configs.presets.g1_29dof.base:G1FlatConfig",
 }
