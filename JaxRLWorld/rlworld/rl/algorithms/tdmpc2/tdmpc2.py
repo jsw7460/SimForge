@@ -24,6 +24,30 @@ from rlworld.rl.modules.normalization import EmpiricalNormalization
 from rlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
 from rlworld.rl.storages.sequence_replay_buffer import SequenceBatch, SequenceReplayBuffer
 
+
+@eqx.filter_jit
+def _encode_and_sample_policy(
+    model: TDMPC2WorldModel,
+    obs: jax.Array,
+    key: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """Encode an observation and sample the policy prior, compiled.
+
+    The MPPI path this sits beside is one jitted call by design. Written
+    as bare method calls, the planner-free path instead dispatches the
+    encoder and the policy head layer by layer, on every environment step
+    of collection — the same defect the PPO bootstrap had, where an
+    un-jitted critic forward cost five times a jitted actor AND critic on
+    the same batch.
+
+    Returns the sampled action and the distribution mean, so the caller
+    picks between them without pulling a dict back out of the trace.
+    """
+    z = model.encode(obs)
+    action, info = model.pi(z, key=key)
+    return action, info["mean"]
+
+
 # ==================== Running Scale ====================
 
 
@@ -356,18 +380,12 @@ class TDMPC2(OffPolicyAlgorithm):
         For MPPI planning, call act_with_t0 instead (requires t0 flag).
         Without MPPI, uses direct policy forward pass.
         """
-        model = self.train_state.model
         key = self.train_state.key
         key, subkey = jax.random.split(key)
         self.train_state = self.train_state._replace(key=key)
 
-        z = model.encode(obs.actor_obs)
-        action, info = model.pi(z, key=subkey)
-
-        if deterministic:
-            action = info["mean"]
-
-        return action
+        action, mean = _encode_and_sample_policy(self.train_state.model, obs.actor_obs, subkey)
+        return mean if deterministic else action
 
     def act_with_t0(
         self,
@@ -381,11 +399,8 @@ class TDMPC2(OffPolicyAlgorithm):
         self.train_state = self.train_state._replace(key=key)
 
         if not self.mpc:
-            z = model.encode(obs)
-            action, info = model.pi(z, key=subkey)
-            if eval_mode:
-                return info["mean"]
-            return action
+            action, mean = _encode_and_sample_policy(model, obs, subkey)
+            return mean if eval_mode else action
 
         num_envs = obs.shape[0]
         keys = jax.random.split(subkey, num_envs)

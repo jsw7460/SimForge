@@ -33,6 +33,21 @@ from rlworld.rl.storages.rollout_storage import RolloutStorage
 
 
 @eqx.filter_jit
+def _evaluate_bootstrap_values(model: PPOActorCritic, critic_obs: jax.Array) -> jax.Array:
+    """Critic forward for the timeout bootstrap.
+
+    Compiled, like every other forward in the collection loop. Called as
+    a plain method it runs eagerly — one dispatch per layer, per
+    activation, per normalizer op — which cost 4.1 ms per step against
+    0.79 ms for the jitted actor AND critic together, on the same batch.
+    A truncation happens somewhere in the batch on essentially every
+    step, so this runs on essentially every step.
+    """
+    values, _ = model.evaluate_value(critic_obs)
+    return values.squeeze(-1)
+
+
+@eqx.filter_jit
 def _update_normalizers(
     model: PPOActorCritic,
     actor_obs: jax.Array,
@@ -374,8 +389,7 @@ class PPO(OnPolicyAlgorithm):
             return
 
         final_critic = infos["final_observation"]["critic"]
-        bootstrap_values, _ = self.train_state.model.evaluate_value(final_critic)
-        bootstrap_values = bootstrap_values.squeeze(-1)
+        bootstrap_values = _evaluate_bootstrap_values(self.train_state.model, final_critic)
 
         # Hook 2 (value normalization, opt-in): critic outputs in
         # normalized space; convert to raw before adding to raw rewards.
@@ -399,8 +413,7 @@ class PPO(OnPolicyAlgorithm):
         Args:
             last_critic_obs: Critic observations for the last state
         """
-        last_values, _ = self.train_state.model.evaluate_value(last_critic_obs)
-        last_values = last_values.squeeze(-1)
+        last_values = _evaluate_bootstrap_values(self.train_state.model, last_critic_obs)
 
         # Hook 3a (value normalization, opt-in): last_values comes from the
         # critic in normalized space; GAE runs in raw space along with the
