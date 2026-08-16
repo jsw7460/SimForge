@@ -12,11 +12,16 @@ Usage::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict
 
-from rlworld.rl.configs.common_config_classes import EventConfig
+from rlworld.rl.configs.common_config_classes import (
+    EventConfig,
+    ObservationGroupConfig,
+)
 from rlworld.rl.configs.events import EventTermConfig
+from rlworld.rl.configs.observations import ObservationTermConfig
+from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets.yam_arm.base import (
     BASE_CLEARANCE,
     CUBE_HALF,
@@ -34,6 +39,11 @@ from rlworld.rl.envs.mdp.actions.joint_actions import (
     JointPositionActionCfg,
 )
 from rlworld.rl.envs.mdp.events import common as common_ef
+from rlworld.rl.envs.mdp.observations.common.proprioception import (
+    dof_pos,
+    dof_vel,
+    raw_actions,
+)
 
 RIGHT_ROBOT = "robot_right"
 """Scene name of the second arm. The first keeps the name ``robot``,
@@ -119,6 +129,44 @@ class YamDualArmConfig(YamArmConfig):
 
     def _sim_builders(self):
         return _get_sim_builders(self.sim_type)
+
+    def _build_observation_config(self):
+        """The single-arm observation, once per arm.
+
+        One policy drives both arms from one action vector, so both arms'
+        joint state belongs in the same group — the arms have to be
+        coordinated, and a policy that cannot see one of them cannot
+        coordinate it. Each term names the arm it reads through
+        ``asset_cfg``, which is how IsaacLab scopes an observation to an
+        asset, so splitting the group later is a matter of moving terms
+        rather than rewriting them.
+        """
+        builders = self._sim_builders()
+        ObsCfgClass = builders.OBSERVATION_CFG_CLS
+        right = SceneEntitySelector(name=RIGHT_ROBOT)
+
+        @dataclass
+        class _ActorObsCfg(ObservationGroupConfig):
+            dof_pos_obs = ObservationTermConfig(func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01))
+            dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5))
+            dof_pos_obs_right = ObservationTermConfig(
+                func=dof_pos, scale=1.0, noise=Unoise(-0.01, 0.01), params={"asset_cfg": right}
+            )
+            dof_vel_obs_right = ObservationTermConfig(
+                func=dof_vel, scale=0.05, noise=Unoise(-1.5, 1.5), params={"asset_cfg": right}
+            )
+            prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+
+        @dataclass
+        class _CriticObsCfg(_ActorObsCfg):
+            enable_corruption = False
+
+        @dataclass
+        class _ObsCfg(ObsCfgClass):
+            actor: _ActorObsCfg = field(default_factory=_ActorObsCfg)
+            critic: _CriticObsCfg = field(default_factory=_CriticObsCfg)
+
+        return _ObsCfg()
 
     def _build_event_config(self) -> EventConfig:
         """The single-arm events plus the second arm's placement and reset.

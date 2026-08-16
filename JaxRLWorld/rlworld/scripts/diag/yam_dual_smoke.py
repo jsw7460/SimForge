@@ -27,6 +27,13 @@ number rather than an error, so this diag measures them:
 * **Reset restores both.** The joint reset acts on a named entity, so
   the second arm needs its own term — an env that resets only the first
   arm looks fine until the second one drifts across an episode.
+* **The observation separates the arms.** The same isolation argument
+  from the other direction: move one arm and the other's observation
+  columns must not move. A policy driving two robots off an observation
+  that carries only one is being scored on a state it cannot see.
+* **An action term can observe its own actions.** ``raw_actions`` takes
+  a term name and returns that term's slice, so a per-robot observation
+  need not carry every robot's commands.
 
 Commanded targets are computed by inverting each term's own
 ``scale``/``offset``, and every comparison is against a MEASURED resting
@@ -56,6 +63,7 @@ from pathlib import Path
 import torch
 
 from rlworld.rl.configs.presets.yam_dual.base import RIGHT_ROBOT, YamDualArmConfig
+from rlworld.rl.envs.mdp.observations.common import proprioception as obs_mdp
 from rlworld.rl.runners import BaseRunner
 
 _SIMS = ("genesis", "newton", "mujoco")
@@ -77,6 +85,11 @@ HOLD_TOL = 0.02
 """rad — how far an UNcommanded joint may move from its resting pose. The
 reference is the measured resting pose, not the declared home: this arm
 sags ~0.16 rad at joint4 under gravity even when commanded home."""
+
+OBS_HOLD_TOL = 0.05
+"""How far an untouched arm's observation columns may move. Looser than
+HOLD_TOL because the observation terms carry noise: dof_pos +-0.01 and
+dof_vel scaled 0.05 with +-1.5 of noise."""
 
 COMPOSE_TOL = 0.02
 """rad — how far a joint may land from where the same command put it when
@@ -334,8 +347,8 @@ def run_single(sim: str, num_envs: int) -> dict:
     measured["compose_grip_delta"] = round(d_grip, 5)
     measured["compose_right_delta"] = round(d_right, 5)
 
-    # ── E. reset ─────────────────────────────────────────────────────────
-    print("\n-- E. reset --")
+    # ── F. reset ─────────────────────────────────────────────────────────
+    print("\n-- F. reset --")
     env.reset()
     env._invalidate_cache()
     back_left = (_joint_pos(LEFT_ROBOT, list(left_idx.joint_names)) - home_left).abs().max()
@@ -348,16 +361,63 @@ def run_single(sim: str, num_envs: int) -> dict:
     measured["reset_left_offset"] = round(float(back_left), 5)
     measured["reset_right_offset"] = round(float(back_right), 5)
 
-    # ── F. what the policy currently sees ────────────────────────────────
-    # Reported, not asserted: the observation terms read the driven robot
-    # through the single-robot shortcut, so the second arm is not in the
-    # observation yet. Stated here so the number is on the record rather
-    # than discovered later.
-    obs = env.obs_manager.get_observation()
-    obs_dim = int(obs["actor"].shape[-1])
-    print(f"\n-- F. observation width = {obs_dim} (actor group) --")
-    print("     Reads the driven robot only — the second arm is not observed yet.")
+    # ── G. the observation carries both arms, in separable halves ────────
+    # The same isolation argument as the action side, from the other
+    # direction: move one arm and the columns belonging to the other must
+    # not move. Without it a policy driving two robots is reading one
+    # robot's state and being scored on both.
+    print("\n-- G. observation separates the two arms --")
+    env.reset()
+    _step_n(env, zeros, SETTLE_STEPS)
+    obs_base = env.obs_manager.get_observation()["actor"].clone()
+    _step_n(env, action_left, SETTLE_STEPS)
+    obs_left_cmd = env.obs_manager.get_observation()["actor"].clone()
+    env.reset()
+    _step_n(env, action_right, SETTLE_STEPS)
+    obs_right_cmd = env.obs_manager.get_observation()["actor"].clone()
+
+    n_left = len(left_idx.joint_names)
+    n_right = len(right_idx.joint_names)
+    # Column ranges come from the observation manager, not from counting
+    # the preset's terms by hand: a diag that assumes a layout keeps
+    # passing after the layout changes, while silently testing the wrong
+    # columns.
+    om = env.obs_manager
+
+    def _term(snapshot: torch.Tensor, term: str) -> torch.Tensor:
+        return om.extract_term("actor", term, observations=snapshot)
+
+    obs_dim = int(obs_base.shape[-1])
+    expected_dim = 2 * n_left + 2 * n_right + n_act
+    print(f"  obs width = {obs_dim} (expect {expected_dim} = 2x{n_left} + 2x{n_right} + {n_act} actions)")
+    results["observation_covers_both_arms"] = obs_dim == expected_dim
     measured["obs_dim"] = obs_dim
+
+    d_left_cols = float((_term(obs_left_cmd, "dof_pos_obs") - _term(obs_base, "dof_pos_obs")).abs().max())
+    d_right_cols = float((_term(obs_left_cmd, "dof_pos_obs_right") - _term(obs_base, "dof_pos_obs_right")).abs().max())
+    print(f"  after commanding LEFT:  left obs columns moved {d_left_cols:.5f}, right columns {d_right_cols:.5f}")
+    results["left_motion_shows_only_in_the_left_columns"] = d_left_cols > MOVED_MIN and d_right_cols < OBS_HOLD_TOL
+    measured["obs_left_cmd_left_cols"] = round(d_left_cols, 5)
+    measured["obs_left_cmd_right_cols"] = round(d_right_cols, 5)
+
+    d_right_cols2 = float(
+        (_term(obs_right_cmd, "dof_pos_obs_right") - _term(obs_base, "dof_pos_obs_right")).abs().max()
+    )
+    d_left_cols2 = float((_term(obs_right_cmd, "dof_pos_obs") - _term(obs_base, "dof_pos_obs")).abs().max())
+    print(f"  after commanding RIGHT: right obs columns moved {d_right_cols2:.5f}, left columns {d_left_cols2:.5f}")
+    results["right_motion_shows_only_in_the_right_columns"] = d_right_cols2 > MOVED_MIN and d_left_cols2 < OBS_HOLD_TOL
+    measured["obs_right_cmd_right_cols"] = round(d_right_cols2, 5)
+    measured["obs_right_cmd_left_cols"] = round(d_left_cols2, 5)
+
+    # ── H. an action term's own slice of the action observation ──────────
+    print("\n-- H. per-term action observation --")
+    whole = obs_mdp.raw_actions(env)
+    per_term = {name: obs_mdp.raw_actions(env, term_name=name) for name in terms}
+    widths = {name: int(t.shape[-1]) for name, t in per_term.items()}
+    print(f"  whole action vector = {int(whole.shape[-1])}   per term = {widths}")
+    matches = all(torch.equal(per_term[name], whole[:, slices[name]]) for name in terms)
+    results["term_scoped_action_obs_matches_its_slice"] = matches and sum(widths.values()) == int(whole.shape[-1])
+    measured["per_term_action_widths"] = widths
 
     print("=" * 78)
     print("VERDICT")
