@@ -36,6 +36,7 @@ from pathlib import Path
 import torch
 
 from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
+from rlworld.rl.configs.presets.k1_joystick.base import K1JoystickConfig
 from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from rlworld.rl.runners import BaseRunner
 
@@ -45,8 +46,14 @@ _SIMS = ("genesis", "newton", "mujoco")
 # the framework: a locomotion robot on flat ground and an arm holding a
 # contact-rich grasp stress entirely different parts of a simulator, so a
 # ratio measured on one says nothing about the other.
+#
+# The three here span the interesting axis, which is NOT joint count: a
+# 23-DOF humanoid, a 12-DOF quadruped and a 7-DOF arm. If the arm is the
+# slowest of the three, the time is going somewhere other than the
+# articulation — the scene it sits in, or the terms read off it.
 _PRESETS = {
     "go2": Go2FlatConfig,
+    "k1_joystick": K1JoystickConfig,
     "yam_lift": YamLiftConfig,
 }
 
