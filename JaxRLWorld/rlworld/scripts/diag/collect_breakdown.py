@@ -35,6 +35,7 @@ import argparse
 import statistics
 import time
 from collections import defaultdict
+from copy import deepcopy
 
 import jax.numpy as jnp
 import torch
@@ -89,6 +90,11 @@ def main() -> int:
     ap.add_argument("--num-envs", type=int, default=8192)
     ap.add_argument("--warmup", type=int, default=24)
     ap.add_argument("--steps", type=int, default=96)
+    ap.add_argument(
+        "--no-stagger",
+        action="store_true",
+        help="Start every episode together instead of spreading their ends out.",
+    )
     args = ap.parse_args()
 
     cfgs = _PRESETS[args.preset](sim_type=args.sim, num_envs=args.num_envs).build()
@@ -101,10 +107,24 @@ def main() -> int:
     steps_per_iteration = runner.num_steps_per_env
 
     obs_dict, _ = env.reset()
+
+    # Spread the episode ends out, the way ``learn(init_at_random_ep_len=)``
+    # does. Straight after a reset every environment is the same age, so
+    # nothing finishes for a full episode and the loop measures only the
+    # cheap case: no ``final_observation`` to build, no bootstrap value to
+    # evaluate, no ``_reset_idx``. Training spends almost every step in
+    # the other case — 8192 environments averaging 946 steps means about
+    # nine of them end per step — so measuring without staggering
+    # describes a loop the trainer is almost never in.
+    if not args.no_stagger:
+        env.termination_manager.episode_length_buf = torch.randint_like(
+            env.episode_length_buf, high=int(env.max_episode_length)
+        )
     actor_obs = torch_to_jax(obs_dict["actor"])
     critic_obs = torch_to_jax(obs_dict["critic"])
 
     timer = _Timer()
+    done_steps: list[int] = []
 
     for step_i in range(args.warmup + args.steps):
         # Warmup covers JAX tracing and the first CUDA-graph capture, both
@@ -178,10 +198,19 @@ def main() -> int:
         )
         if record:
             timer.stop("reward statistics")
+            # Outside every timed section: how often the expensive branch
+            # is taken is the first thing to check before believing any of
+            # the numbers above.
+            done_steps.append(int(dones.sum()))
 
     print("=" * 78)
     print(f"COLLECT BREAKDOWN  [preset={args.preset}  sim={args.sim}  num_envs={args.num_envs}]")
     print(f"  {args.steps} steps after {args.warmup} warmup, {env.act_manager.num_actions} actions")
+    with_dones = sum(1 for d in done_steps if d > 0)
+    print(
+        f"  {with_dones}/{len(done_steps)} steps had at least one done, "
+        f"{statistics.mean(done_steps):.1f} envs per step on average"
+    )
     print("=" * 78)
 
     means = {name: statistics.mean(vals) for name, vals in timer.samples.items()}
@@ -211,7 +240,54 @@ def main() -> int:
     print("  Sections are drained before and after, so each number is that")
     print("  section's own work, not the previous section's queue.")
     print("  spikes = steps costing more than 10x that section's median.")
+
+    _probe_done_branch(env, timer)
     return 0
+
+
+def _probe_done_branch(env, timer: _Timer) -> None:
+    """Time the pieces ``step`` runs only when something terminated.
+
+    Staggering episode ends moved ``env.step`` from 15.3 ms to 23.0 ms
+    while terminating about 8 environments out of 8192 — resetting a
+    tenth of a percent of the batch costs more than stepping all of it.
+    That branch is five operations, and four of them work on the whole
+    batch regardless of how many environments actually ended, so knowing
+    which one carries the 7.7 ms decides whether there is anything to fix.
+
+    These are the calls ``step`` makes, invoked directly and out of their
+    usual order. That is fine for timing and wrong for state, so nothing
+    should read this environment afterwards.
+    """
+    env_ids = torch.arange(8, device=env.device)
+    repeats = 20
+    print()
+    print("=" * 78)
+    print(f"THE DONE BRANCH, PIECE BY PIECE  ({len(env_ids)} environments terminating)")
+    print("=" * 78)
+
+    probes = {
+        "obs rebuild (whole batch)": lambda: (
+            env.obs_manager.process_observations(update_history=True),
+            env.obs_manager.rollback_last_history_append(),
+        ),
+        "clone the observations": lambda: {key: obs.clone() for key, obs in env.obs_manager.obs_dict.items()},
+        "deepcopy(episode_sums)": lambda: deepcopy(env.episode_sums),
+        "_reset_idx(env_ids)": lambda: env._reset_idx(env_ids),
+        "_post_reset_forward (whole batch)": lambda: env._post_reset_forward(),
+    }
+
+    for name, call in probes.items():
+        for _ in range(3):
+            call()
+        timer.samples.pop(name, None)
+        for _ in range(repeats):
+            timer.start()
+            call()
+            timer.stop(name)
+        vals = timer.samples[name]
+        print(f"  {name:<38}{statistics.mean(vals):8.3f} ms   median {statistics.median(vals):8.3f}")
+    print("=" * 78)
 
 
 if __name__ == "__main__":
