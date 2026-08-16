@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 
-def _canonical_joint_order_newton(model, num_worlds: int) -> list[str]:
+def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | None = None) -> list[str]:
     """Canonical joint name list — DFS walk of Newton's world-0 body tree with
     siblings sorted alphabetically by bare body name at each node, collecting
     each body's inbound joint when visited.
@@ -58,6 +58,12 @@ def _canonical_joint_order_newton(model, num_worlds: int) -> list[str]:
 
     Returns bare joint leaf names (entity / XPath prefixes stripped) in
     canonical DFS order.
+
+    ``body_prefix`` restricts the walk to one entity's bodies, using the
+    same delimiter rule as :class:`NewtonLabelIndexing` (the label either
+    IS the prefix or lies under ``prefix/``). Names come back bare, so two
+    entities loaded from the same model otherwise contribute the same joint
+    names twice and a caller filtering by name cannot tell them apart.
     """
     body_labels = list(getattr(model, "body_label", []))
     n_total = len(body_labels)
@@ -67,6 +73,10 @@ def _canonical_joint_order_newton(model, num_worlds: int) -> list[str]:
 
     body_labels_w0 = body_labels[:bodies_per_world]
     bare_body_names = [leaf_name(b) for b in body_labels_w0]
+    if body_prefix is None:
+        in_scope = [True] * bodies_per_world
+    else:
+        in_scope = [lbl == body_prefix or lbl.startswith(f"{body_prefix}/") for lbl in body_labels_w0]
 
     # Reconstruct parent_of(body) from joint_parent + joint_child arrays.
     joint_labels_all = list(getattr(model, "joint_label", None) or getattr(model, "joint_key", []))
@@ -97,8 +107,10 @@ def _canonical_joint_order_newton(model, num_worlds: int) -> list[str]:
     children: dict[int, list[int]] = {}
     roots: list[int] = []
     for i in range(bodies_per_world):
+        if not in_scope[i]:
+            continue
         p = parent_of.get(i, -1)
-        if p < 0 or p >= bodies_per_world:
+        if p < 0 or p >= bodies_per_world or not in_scope[p]:
             roots.append(i)
         else:
             children.setdefault(p, []).append(i)
@@ -1265,7 +1277,13 @@ class NewtonSceneManager(BaseManager):
         for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
             cfg = entity_info["config"]
             prefix = getattr(cfg, "body_label_prefix", None)
-            pattern = f"{prefix}*" if prefix else "*"
+            # Delimited on "/", matching the rule NewtonLabelIndexing uses:
+            # the label either IS the prefix or lies under it. A bare
+            # ``f"{prefix}*"`` glob also swallows every sibling whose name
+            # merely starts with the same characters, so an entity named
+            # "robot" would take "robot_right"'s articulation into its own
+            # view and report two articulations per world.
+            pattern = [prefix, f"{prefix}/*"] if prefix else "*"
             self.articulation_views[entity_name] = ArticulationView(
                 self.model,
                 pattern=pattern,
@@ -1476,7 +1494,12 @@ class NewtonSceneManager(BaseManager):
         # Filtered to joints that ArticulationView surfaced (multi-DOF roots
         # like ``floating_base`` are excluded by ``view.joint_names``).
         actuatable_names = list(view.joint_names)
-        canonical_full = _canonical_joint_order_newton(self.model, num_worlds=num_worlds)
+        entity_info = self.entities.get(entity_name) or self.rigid_objects[entity_name]
+        canonical_full = _canonical_joint_order_newton(
+            self.model,
+            num_worlds=num_worlds,
+            body_prefix=getattr(entity_info["config"], "body_label_prefix", None),
+        )
         canonical_actuatable = [n for n in canonical_full if n in set(actuatable_names)]
         matched_names, _ = filter_canonical_to_actuated(canonical_actuatable, actuated_dof_names)
         # An entity with zero actuated joints (e.g. a free-flying drone)

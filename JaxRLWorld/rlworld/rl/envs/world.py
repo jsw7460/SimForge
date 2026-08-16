@@ -384,13 +384,20 @@ class World(ABC):
     def _actuated_dof_names_for(self, entity_name: str) -> list[str]:
         """Which of an entity's joints the framework should index.
 
-        Only the driven entity has a declared actuated set; anything else
-        in the scene is indexed whole, so its state can still be read and
-        its joints named by a selector.
+        The driven entity's set is the one the action config declares.
+        Any other entity takes its set from its own declared actuators,
+        which is the same thing said in the scene rather than in the
+        action config — and it has to be narrowed the same way, because
+        a joint with no actuator has no drive slot to write a target
+        into. An entity with no actuators at all is indexed whole, so a
+        passive mechanism's joints can still be read and named by a
+        selector.
         """
         if entity_name == self.robot_entity_name:
             return list(self.act_cfg.actuated_dof_names)
-        return [".*"]
+        actuators = self.scene_manager.config.entities[entity_name].articulation.actuators
+        patterns = [p for actuator in actuators for p in actuator.target_names_expr]
+        return patterns or [".*"]
 
     def _resolve_canonical_joint_ids(
         self,

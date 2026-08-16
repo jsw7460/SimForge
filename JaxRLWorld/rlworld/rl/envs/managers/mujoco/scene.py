@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 
-def _canonical_joint_order_mujoco(mj_model) -> list[str]:
+def _canonical_joint_order_mujoco(mj_model, body_prefix: str | None = None) -> list[str]:
     """Canonical joint name list — DFS walk of the MjModel body tree with
     siblings sorted alphabetically by bare body name at each node, collecting
     each body's joints (sorted alphabetically when a body owns multiple) when
@@ -34,6 +34,12 @@ def _canonical_joint_order_mujoco(mj_model) -> list[str]:
 
     Returns bare joint names (entity prefix stripped); the world body (id 0)
     is skipped.
+
+    ``body_prefix`` restricts the walk to one attached entity. mjlab attaches
+    each entity under ``"{name}/"`` and this function reports bare names, so
+    two entities built from the same model contribute the SAME joint names to
+    an unrestricted walk — and a caller filtering by name then cannot tell
+    which arm a joint belongs to, silently mapping both to the first one.
     """
     import mujoco
 
@@ -43,16 +49,29 @@ def _canonical_joint_order_mujoco(mj_model) -> list[str]:
     def _bare(name: str) -> str:
         return name.rsplit("/", 1)[-1] if "/" in name else name
 
+    if body_prefix is None:
+        in_scope = [True] * n
+    else:
+        in_scope = [name.startswith(body_prefix) for name in raw_body_names]
+
     bare_body_names = [_bare(b) for b in raw_body_names]
     children: dict[int, list[int]] = {}
+    roots: list[int] = []
     for i in range(n):
+        if not in_scope[i]:
+            continue
         p = int(mj_model.body_parentid[i])
         if p == i:  # world body: parent is itself (id 0).
             continue
-        children.setdefault(p, []).append(i)
+        if in_scope[p] and p != 0:
+            children.setdefault(p, []).append(i)
+        else:
+            # Parent is out of scope (or the world): this body is a root of
+            # the scoped subtree.
+            roots.append(i)
     for k in children:
         children[k].sort(key=lambda i: bare_body_names[i])
-    roots = list(children.get(0, []))  # already sorted by the loop above.
+    roots.sort(key=lambda i: bare_body_names[i])
 
     out: list[str] = []
     stack = list(reversed(roots))
@@ -623,7 +642,10 @@ class MujocoSceneManager(BaseManager):
 
         entity = self._scene[entity_name]
         all_entity_joint_names = list(entity.joint_names)
-        canonical_full = _canonical_joint_order_mujoco(self._sim.mj_model)
+        # Scoped to this entity's own subtree — mjlab attaches it under
+        # "{entity_name}/", and without the scope a second entity built from
+        # the same model contributes identical bare joint names.
+        canonical_full = _canonical_joint_order_mujoco(self._sim.mj_model, body_prefix=f"{entity_name}/")
         # Restrict canonical list to joints the entity actually exposes.
         entity_joint_set = set(all_entity_joint_names)
         canonical_actuatable = [n for n in canonical_full if n in entity_joint_set]
