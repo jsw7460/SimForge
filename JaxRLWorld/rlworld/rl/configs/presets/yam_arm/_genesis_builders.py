@@ -120,7 +120,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> SceneConfig:
             max_collision_pairs=100,
             batch_dofs_info=True,
             contact_pruning_tolerance=None,
-            friction_cone=gs.friction_cone.elliptic,
+            friction_cone=gs.friction_cone.pyramidal,
             impratio=1.0,
             integrator=gs.integrator.implicitfast,
             tolerance=1e-5,

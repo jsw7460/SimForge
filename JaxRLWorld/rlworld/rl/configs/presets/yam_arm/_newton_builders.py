@@ -76,7 +76,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
         robot_cfg=r,
         solver_cfg=SolverMuJoCoCfg(
             impratio=10.0,
-            cone="elliptic",
+            cone="pyramidal",
             iterations=50,
             ls_iterations=50,
             ccd_iterations=50,

@@ -159,10 +159,10 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         # The arm's own limit + contact constraints overflow a small
         # buffer; an overflow silently DROPS constraints rather than
         # erroring, so joints escape their limits.
-        njmax=400,
+        njmax=600,
         nconmax=400,
         impratio=10.0,
-        cone="elliptic",
+        cone="pyramidal",
         preset_class_name=type(cfg).__name__,
         preset_module_path=type(cfg).__module__,
     )
