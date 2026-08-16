@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import newton
 import torch
 import warp as wp
 
@@ -14,6 +13,28 @@ from rlworld.rl.envs.managers.common.action import (
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
+
+
+def _reject_out_of_range(indices, width: int, entity_name: str, indexing, array_name: str) -> None:
+    """Raise before writing an index past one world's share of an array.
+
+    The destination's own per-world width is the only bound that counts
+    here: Newton sizes ``joint_target_q`` to whichever layout is active,
+    which need not match the model's coordinate count. An index past it
+    is written anyway on the GPU and surfaces later as a device-side
+    assert whose stack points at whatever kernel ran next — several
+    manager calls away, with nothing naming the entity that caused it.
+    """
+    values = indices.tolist()
+    bad = [i for i, v in enumerate(values) if not 0 <= v < width]
+    if not bad:
+        return
+    names = list(indexing.joint_names)
+    detail = ", ".join(f"{names[i]}->{values[i]}" for i in bad)
+    raise IndexError(
+        f"Entity {entity_name!r} writes {array_name} at {detail}, outside this world's {width} slots. "
+        f"Its {len(names)} joints resolved to indices {values}."
+    )
 
 
 @dataclass
@@ -67,7 +88,14 @@ class NewtonActionManager(ActionManagerBase):
         # legacy DOF layout it follows ``joint_qd`` (6 slots for a FREE
         # joint) and is indexed by ``newton_qd_indices``.
         indexing = self.env.entity_indexing(entity_name)
-        write_indices = indexing.newton_q_indices if newton.use_coord_layout_targets else indexing.newton_qd_indices
+        # The MODEL's snapshot, not the module-level global. Newton takes
+        # the flag once at ``finalize()`` and states that every layout
+        # decision for that model consults the snapshot, so reading the
+        # global would pick the wrong index array for any model finalized
+        # under a different setting — and the two differ by exactly one
+        # slot per FREE joint, which lands a write just past the end.
+        model = self.env.scene_manager.model
+        write_indices = indexing.newton_q_indices if model.use_coord_layout_targets else indexing.newton_qd_indices
 
         dest = wp.to_torch(control.joint_target_q)
         if dest.numel() % num_worlds != 0:
@@ -75,7 +103,9 @@ class NewtonActionManager(ActionManagerBase):
                 f"Newton joint_target_q has {dest.numel()} slots, which is not divisible by "
                 f"world_count={num_worlds}; the per-world layout cannot be derived."
             )
-        dest.view(num_worlds, -1)[:, write_indices] = targets
+        rows = dest.view(num_worlds, -1)
+        _reject_out_of_range(write_indices, rows.shape[1], entity_name, indexing, "joint_target_q")
+        rows[:, write_indices] = targets
 
     def _apply_force(self, torques: torch.Tensor, entity_name: str) -> None:
         """Apply torques directly via Newton/Warp.
@@ -100,7 +130,15 @@ class NewtonActionManager(ActionManagerBase):
         # the same step. Nothing goes stale: the caller hands over a
         # full-width buffer covering every one of this entity's actuated
         # joints, zeros included, so each of them is rewritten every step.
-        rows[:, self.env.entity_indexing(entity_name).newton_qd_indices] = torques
+        write_indices = self.env.entity_indexing(entity_name).newton_qd_indices
+        _reject_out_of_range(
+            write_indices,
+            rows.shape[1],
+            entity_name,
+            self.env.entity_indexing(entity_name),
+            "joint_f",
+        )
+        rows[:, write_indices] = torques
 
     # -- Backward compat properties ------------------------------------------
 
