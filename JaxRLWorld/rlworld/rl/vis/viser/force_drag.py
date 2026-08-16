@@ -73,10 +73,26 @@ class ForceDragController:
         self._spring_line: Any | None = None
 
         # Selectable robot links (exclude world-fixed bodies).
+        #
+        # Entries are made unique before they reach the dropdown. Two
+        # copies of one robot give their links identical names, and a
+        # duplicated option value takes the whole web client down — the
+        # page renders blank, with no controls at all, so the failure
+        # does not look like it came from here. The lookup below would
+        # also have silently kept only the last body of each name, which
+        # sends every drag on the first robot to the second.
         scene = play_scene._scene
         groups = [g for g in scene.geometry.mesh_groups if not g.is_fixed]
-        self._link_names: list[str] = [g.body_name for g in groups]
-        self._link_body_id: dict[str, int] = {g.body_name: g.body_id for g in groups}
+        seen: dict[str, int] = {}
+        self._link_names: list[str] = []
+        self._link_body_id: dict[str, int] = {}
+        for group in groups:
+            label = group.body_name
+            if label in seen:
+                label = f"{group.body_name} #{group.body_id}"
+            seen[group.body_name] = seen.get(group.body_name, 0) + 1
+            self._link_names.append(label)
+            self._link_body_id[label] = group.body_id
         default = scene.geometry.tracked_body_name
         if default not in self._link_body_id and self._link_names:
             default = self._link_names[0]
