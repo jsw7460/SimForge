@@ -18,6 +18,7 @@ import torch
 import warp as wp
 from torch import Tensor
 
+from rlworld.rl.envs.site_frames import SiteReaderMixin
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_rotate_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.newton.newton_env import NewtonEnv
 
 
-class NewtonRigidObjectData:
+class NewtonRigidObjectData(SiteReaderMixin):
     """RigidObjectData implementation (root + body reads) for Newton entities.
 
     Joint-free entity state backed by an ``ArticulationView``.
@@ -41,10 +42,12 @@ class NewtonRigidObjectData:
         self,
         env: NewtonEnv,
         view: ArticulationView,
+        entity_name: str,
         default_joint_pos: Tensor | None = None,
     ) -> None:
         self._env = env
         self._view = view
+        self._entity_name = entity_name
         self._gravity_vec: Tensor | None = None
         self._default_joint_pos = default_joint_pos
         # Per-body CoM offset *in the body frame* (model.body_com), shape
@@ -416,35 +419,11 @@ class NewtonRigidObjectData:
         idxs = self._resolve_body_indices(list(names))
         return self.body_lin_vel_w_all[:, idxs, :]
 
-    def site_pos_w(self, names: list[str]) -> Tensor:
-        raise NotImplementedError(
-            "NewtonRobotData does not implement site_pos_w. Newton has "
-            "no equivalent of MuJoCo sites — use body_pos_w with body names."
-        )
-
-    def site_lin_vel_w(self, names: list[str]) -> Tensor:
-        raise NotImplementedError(
-            "NewtonRobotData does not implement site_lin_vel_w. Newton has "
-            "no equivalent of MuJoCo sites — use body_lin_vel_w with body names."
-        )
-
     def body_pos_w_by_ids(self, body_ids: Tensor) -> Tensor:
         return self.body_pos_w_all[:, body_ids, :]
 
     def body_lin_vel_w_by_ids(self, body_ids: Tensor) -> Tensor:
         return self.body_lin_vel_w_all[:, body_ids, :]
-
-    def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
-        raise NotImplementedError(
-            "NewtonRobotData does not implement site_pos_w_by_ids. Newton has "
-            "no equivalent of MuJoCo sites — use body_pos_w_by_ids with body ids."
-        )
-
-    def site_lin_vel_w_by_ids(self, site_ids: Tensor) -> Tensor:
-        raise NotImplementedError(
-            "NewtonRobotData does not implement site_lin_vel_w_by_ids. Newton has "
-            "no equivalent of MuJoCo sites — use body_lin_vel_w_by_ids with body ids."
-        )
 
     # ------------------------------------------------------------------
     # Aggregate quantities
@@ -519,8 +498,7 @@ class NewtonRobotData(NewtonRigidObjectData):
     """
 
     def __init__(self, env, view, *, entity_name: str, soft_joint_pos_limit_factor: float, **kwargs) -> None:
-        super().__init__(env, view, **kwargs)
-        self._entity_name = entity_name
+        super().__init__(env, view, entity_name=entity_name, **kwargs)
         # From ArticulationCfg — used by soft_joint_pos_limits (the same
         # factor mjlab applies to its data.soft_joint_pos_limits).
         self._soft_joint_pos_limit_factor = float(soft_joint_pos_limit_factor)

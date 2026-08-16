@@ -165,6 +165,8 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
             ),
         ),
         spec_fn=g1_get_spec,
+        # The file the spec function loads — see the go2 builder.
+        mjcf_path=r.mjcf_path,
         collisions=(G1_FULL_COLLISION,),
     )
 

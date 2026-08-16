@@ -20,6 +20,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
 )
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.managers.registry import ManagerRegistry
+from rlworld.rl.envs.site_frames import resolve_site_ids
 from rlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
@@ -181,7 +182,7 @@ class MujocoEnv(World):
             joint_ids_native=_to_tensor(mjlab_cfg.joint_ids, selector.joint_names),
             body_ids=_to_tensor(mjlab_cfg.body_ids, selector.body_names),
             geom_ids=_to_tensor(mjlab_cfg.geom_ids, selector.geom_names),
-            site_ids=_to_tensor(mjlab_cfg.site_ids, selector.site_names),
+            site_ids=resolve_site_ids(self, selector.name, selector.site_names),
             actuator_ids=_to_tensor(mjlab_cfg.actuator_ids, selector.actuator_names),
             joint_names=joint_names_resolved if selector.joint_names is not None else None,
             body_names=_names(mjlab_cfg.body_names, selector.body_names),
@@ -268,6 +269,7 @@ class MujocoEnv(World):
                 num_envs=self.num_envs,
                 device=self.device,
                 env=self,
+                entity_name=name,
                 default_joint_pos=self._resolve_default_joint_pos(name),
             )
             self._robot_state_writer_cache[name] = MujocoRobotStateWriter(
@@ -285,6 +287,7 @@ class MujocoEnv(World):
                 num_envs=self.num_envs,
                 device=self.device,
                 env=self,
+                entity_name=name,
                 default_joint_pos=None,
             )
             # mjlab's root writes go through the per-entity Entity object, so the

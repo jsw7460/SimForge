@@ -183,6 +183,9 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
             ),
         ),
         spec_fn=go2_get_spec,
+        # The file the spec function loads. Sites are read from it, since
+        # their ids must mean the same thing on every backend.
+        mjcf_path=r.mjcf_path,
         collisions=(FULL_COLLISION,),
     )
 

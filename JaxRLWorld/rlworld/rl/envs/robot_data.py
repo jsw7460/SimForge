@@ -256,8 +256,9 @@ class RigidObjectData(Protocol):
     def site_pos_w(self, names: list[str]) -> Tensor:
         """World-frame positions of the named sites, ordered by ``names``.
 
-        Sites are MuJoCo-only coordinate markers. Newton and Genesis
-        implementations raise ``NotImplementedError``.
+        A site is a frame rigidly attached to a body, declared in an
+        MJCF. Composed from the parent body's pose on every backend, so
+        an entity built from a URDF (which has no sites) raises.
 
         Returns:
             Tensor of shape ``(num_envs, len(names), 3)``.
@@ -267,8 +268,9 @@ class RigidObjectData(Protocol):
     def site_lin_vel_w(self, names: list[str]) -> Tensor:
         """World-frame linear velocities of the named sites, ordered by ``names``.
 
-        Sites are MuJoCo-only coordinate markers. Newton and Genesis
-        implementations raise ``NotImplementedError``.
+        A site is a frame rigidly attached to a body, declared in an
+        MJCF. Composed from the parent body's pose on every backend, so
+        an entity built from a URDF (which has no sites) raises.
 
         Returns:
             Tensor of shape ``(num_envs, len(names), 3)``.
@@ -301,7 +303,8 @@ class RigidObjectData(Protocol):
     def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
         """World-frame positions of the sites at ``site_ids``.
 
-        Sites are MuJoCo-only. Newton and Genesis raise ``NotImplementedError``.
+        Site ids index the entity's MJCF site table, the same on every
+        backend. See :meth:`site_pos_w`.
 
         Returns:
             Tensor of shape ``(num_envs, len(site_ids), 3)``.
@@ -311,7 +314,8 @@ class RigidObjectData(Protocol):
     def site_lin_vel_w_by_ids(self, site_ids: Tensor) -> Tensor:
         """World-frame linear velocities of the sites at ``site_ids``.
 
-        Sites are MuJoCo-only. Newton and Genesis raise ``NotImplementedError``.
+        Site ids index the entity's MJCF site table, the same on every
+        backend. See :meth:`site_pos_w`.
 
         Returns:
             Tensor of shape ``(num_envs, len(site_ids), 3)``.

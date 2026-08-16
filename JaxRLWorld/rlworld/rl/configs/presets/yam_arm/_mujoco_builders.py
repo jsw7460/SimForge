@@ -141,6 +141,7 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         ),
         # mjlab builds articulations from a spec function, not a path.
         spec_fn=YamSpecFn(mjcf_path=r.mjcf_path),
+        mjcf_path=r.mjcf_path,
         collisions=(FULL_COLLISION,),
     )
 

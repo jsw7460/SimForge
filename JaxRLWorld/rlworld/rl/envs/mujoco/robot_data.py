@@ -17,13 +17,14 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch import Tensor
 
+from rlworld.rl.envs.site_frames import SiteReaderMixin
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
     from mjlab.entity import Entity
 
 
-class MujocoRigidObjectData:
+class MujocoRigidObjectData(SiteReaderMixin):
     """RigidObjectData implementation (root + body reads) for a mjlab entity.
 
     Joint-free entity state for a MuJoCo/mjlab ``Entity``.
@@ -39,9 +40,11 @@ class MujocoRigidObjectData:
         num_envs: int,
         device: torch.device,
         env: Any | None = None,
+        entity_name: str = "robot",
         default_joint_pos: Tensor | None = None,
     ) -> None:
         self._entity = entity
+        self._entity_name = entity_name
         self._joint_ids = joint_ids
         self._gravity_vec: Tensor | None = None
         self._num_envs = num_envs
@@ -234,11 +237,19 @@ class MujocoRigidObjectData:
         body_ids, _ = self._entity.find_bodies(list(names), preserve_order=True)
         return self._entity.data.body_link_lin_vel_w[:, body_ids, :]
 
-    def site_pos_w(self, names: list[str]) -> Tensor:
+    def site_pos_w_mjlab_native(self, names: list[str]) -> Tensor:
+        """Site positions straight from MuJoCo, for cross-checking only.
+
+        The shared implementation composes a site's world pose from its
+        parent body, which is what MuJoCo does internally; this is the
+        answer MuJoCo itself computed, kept so ``site_parity_diag`` can
+        hold the shared path to it. Nothing else calls it.
+        """
         site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
         return self._entity.data.site_pos_w[:, site_ids, :]
 
-    def site_lin_vel_w(self, names: list[str]) -> Tensor:
+    def site_lin_vel_w_mjlab_native(self, names: list[str]) -> Tensor:
+        """Site linear velocities straight from MuJoCo. See above."""
         site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
         return self._entity.data.site_lin_vel_w[:, site_ids, :]
 
@@ -247,12 +258,6 @@ class MujocoRigidObjectData:
 
     def body_lin_vel_w_by_ids(self, body_ids: Tensor) -> Tensor:
         return self._entity.data.body_link_lin_vel_w[:, body_ids, :]
-
-    def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
-        return self._entity.data.site_pos_w[:, site_ids, :]
-
-    def site_lin_vel_w_by_ids(self, site_ids: Tensor) -> Tensor:
-        return self._entity.data.site_lin_vel_w[:, site_ids, :]
 
     # ------------------------------------------------------------------
     # Aggregate quantities

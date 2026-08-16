@@ -14,6 +14,7 @@ import torch
 from genesis.utils.misc import qd_to_torch
 from torch import Tensor
 
+from rlworld.rl.envs.site_frames import SiteReaderMixin
 from rlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_rotate_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ def _per_step_read(fn):
     return wrapper
 
 
-class GenesisRigidObjectData:
+class GenesisRigidObjectData(SiteReaderMixin):
     """RigidObjectData implementation (root + body reads) for a Genesis entity.
 
     Joint-free entity state for a Genesis ``RigidEntity``.
@@ -67,10 +68,12 @@ class GenesisRigidObjectData:
         num_envs: int,
         device: torch.device,
         env,
+        entity_name: str,
         default_joint_pos: Tensor | None = None,
     ) -> None:
         self._entity = entity
         self._env = env
+        self._entity_name = entity_name
         # Per-step read memoization — see :func:`_per_step_read`.
         self._read_cache: dict[str, tuple[int, Tensor]] = {}
         self._actuated_dof_ids = actuated_dof_ids
@@ -249,35 +252,11 @@ class GenesisRigidObjectData:
         idxs = self._resolve_link_indices(list(names))
         return self._entity.get_links_vel(links_idx_local=idxs)
 
-    def site_pos_w(self, names: list[str]) -> Tensor:
-        raise NotImplementedError(
-            "GenesisRobotData does not implement site_pos_w. Genesis has "
-            "no equivalent of MuJoCo sites — use body_pos_w with link names."
-        )
-
-    def site_lin_vel_w(self, names: list[str]) -> Tensor:
-        raise NotImplementedError(
-            "GenesisRobotData does not implement site_lin_vel_w. Genesis has "
-            "no equivalent of MuJoCo sites — use body_lin_vel_w with link names."
-        )
-
     def body_pos_w_by_ids(self, body_ids: Tensor) -> Tensor:
         return self.body_pos_w_all[:, body_ids, :]
 
     def body_lin_vel_w_by_ids(self, body_ids: Tensor) -> Tensor:
         return self.body_lin_vel_w_all[:, body_ids, :]
-
-    def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
-        raise NotImplementedError(
-            "GenesisRobotData does not implement site_pos_w_by_ids. Genesis has "
-            "no equivalent of MuJoCo sites — use body_pos_w_by_ids with link ids."
-        )
-
-    def site_lin_vel_w_by_ids(self, site_ids: Tensor) -> Tensor:
-        raise NotImplementedError(
-            "GenesisRobotData does not implement site_lin_vel_w_by_ids. Genesis has "
-            "no equivalent of MuJoCo sites — use body_lin_vel_w_by_ids with link ids."
-        )
 
     # ------------------------------------------------------------------
     # Aggregate quantities
