@@ -28,7 +28,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--sim", default="mujoco", choices=("genesis", "newton", "mujoco"))
     ap.add_argument("--difficulty", default="fixed", choices=("fixed", "dynamic"))
-    ap.add_argument("--num-envs", type=int, default=4096)
+    ap.add_argument("--num-envs", type=int, default=8192)
     args, rest = ap.parse_known_args()
     # Hand the remainder to the config's own override parser.
     sys.argv = [sys.argv[0], *rest]
