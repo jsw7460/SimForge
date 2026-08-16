@@ -126,14 +126,6 @@ class NewtonRigidObjectData:
     # Read: raw state (used by observations, event terms, etc.)
     # ------------------------------------------------------------------
 
-    def dof_positions(self, state: State) -> Tensor:
-        """Joint coordinate positions. Shape: (W, joint_coord_count)."""
-        return wp.to_torch(self._view.get_dof_positions(state)).squeeze(1)
-
-    def dof_velocities(self, state: State) -> Tensor:
-        """Joint coordinate velocities. Shape: (W, joint_dof_count)."""
-        return wp.to_torch(self._view.get_dof_velocities(state)).squeeze(1)
-
     def root_pos_w(self, state: State) -> Tensor:
         """Root position in world frame. Shape: (W, 3)."""
         return self._root_transform_floats(state)[:, 0:3]
@@ -526,11 +518,44 @@ class NewtonRobotData(NewtonRigidObjectData):
     the base ``__init__``.
     """
 
-    def __init__(self, env, view, *, soft_joint_pos_limit_factor: float, **kwargs) -> None:
+    def __init__(self, env, view, *, entity_name: str, soft_joint_pos_limit_factor: float, **kwargs) -> None:
         super().__init__(env, view, **kwargs)
+        self._entity_name = entity_name
         # From ArticulationCfg — used by soft_joint_pos_limits (the same
         # factor mjlab applies to its data.soft_joint_pos_limits).
         self._soft_joint_pos_limit_factor = float(soft_joint_pos_limit_factor)
+
+    @property
+    def _indexing(self):
+        """This entity's joint indexing.
+
+        Every joint read below used to go through the ACTION MANAGER's,
+        which belongs to the driven robot: a second robot's joint_pos
+        returned the first robot's joints, in the first robot's count.
+        Nothing raised, because those indices are valid — they simply
+        describe another machine.
+        """
+        return self._env.entity_indexing(self._entity_name)
+
+    def _joint_coords(self) -> Tensor:
+        """One world's slice of the model-wide joint coordinate array.
+
+        The reads are indexed the same way the writes are — Newton keeps
+        one flat ``joint_q`` for the whole model and ``newton_q_indices``
+        addresses it. Reading the entity VIEW's own array instead would
+        need view-local offsets, and mixing the two is what made the
+        driven robot work by coincidence: as the first entity its global
+        offsets start at zero and happen to equal its local ones.
+        """
+        model = self._env.scene_manager.model
+        worlds = model.world_count
+        return wp.to_torch(self._state.joint_q).view(worlds, model.joint_coord_count // worlds)
+
+    def _joint_dofs(self) -> Tensor:
+        """One world's slice of the model-wide joint velocity array."""
+        model = self._env.scene_manager.model
+        worlds = model.world_count
+        return wp.to_torch(self._state.joint_qd).view(worlds, model.joint_dof_count // worlds)
 
     @property
     def default_joint_pos(self) -> Tensor:
@@ -538,13 +563,11 @@ class NewtonRobotData(NewtonRigidObjectData):
 
     @property
     def joint_pos(self) -> Tensor:
-        dof_pos = self.dof_positions(self._state)
-        return dof_pos[:, self._env.act_manager.indexing.newton_q_indices]
+        return self._joint_coords()[:, self._indexing.newton_q_indices]
 
     @property
     def joint_vel(self) -> Tensor:
-        dof_vel = self.dof_velocities(self._state)
-        return dof_vel[:, self._env.act_manager.indexing.newton_qd_indices]
+        return self._joint_dofs()[:, self._indexing.newton_qd_indices]
 
     @property
     def applied_torque(self) -> Tensor:
@@ -578,7 +601,7 @@ class NewtonRobotData(NewtonRigidObjectData):
         dofs_per_world = model.joint_dof_count // model.world_count
         qfrc_flat = wp.to_torch(state.mujoco.qfrc_actuator)
         qfrc = qfrc_flat.view(model.world_count, dofs_per_world)
-        return qfrc[:, self._env.act_manager.indexing.newton_qd_indices]
+        return qfrc[:, self._indexing.newton_qd_indices]
 
     @property
     def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
@@ -596,7 +619,7 @@ class NewtonRobotData(NewtonRigidObjectData):
         dofs_per_world = model.joint_dof_count // model.world_count
         lower_all = wp.to_torch(model.joint_limit_lower)[:dofs_per_world]
         upper_all = wp.to_torch(model.joint_limit_upper)[:dofs_per_world]
-        qd_indices = self._env.act_manager.indexing.newton_qd_indices
+        qd_indices = self._indexing.newton_qd_indices
         return lower_all[qd_indices], upper_all[qd_indices]
 
     @property

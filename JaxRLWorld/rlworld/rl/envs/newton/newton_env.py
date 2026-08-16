@@ -289,6 +289,7 @@ class NewtonEnv(World):
             self._robot_data_cache[name] = NewtonRobotData(
                 self,
                 view,
+                entity_name=name,
                 default_joint_pos=self._resolve_default_joint_pos(name),
                 soft_joint_pos_limit_factor=self.scene_cfg.entities[name].articulation.soft_joint_pos_limit_factor,
             )
