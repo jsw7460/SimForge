@@ -8,16 +8,35 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import newton
 import numpy as np
 import trimesh
 import trimesh.visual
-from newton import Heightfield, ShapeFlags
+from newton import GeoType, Heightfield, Mesh, ShapeFlags
 from scipy.spatial.transform import Rotation
 
 from ..bridge import BodyMeshGroup, SimulatorBridge, SimulatorGeometry
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.managers.newton.scene import NewtonSceneManager
+
+
+# Primitives carry no source geometry; Newton's own viewer tessellates them
+# from ``shape_scale`` through these same factories (``viewer.py:1640``).
+# GeoType.PLANE is deliberately absent — the viewer draws its own ground,
+# and an analytic plane has no finite extent to mesh.
+_PRIMITIVE_MESH_FACTORIES = {
+    GeoType.BOX: lambda s: Mesh.create_box(float(s[0]), float(s[1]), float(s[2]), compute_inertia=False),
+    GeoType.SPHERE: lambda s: Mesh.create_sphere(float(s[0]), compute_inertia=False),
+    GeoType.ELLIPSOID: lambda s: Mesh.create_ellipsoid(float(s[0]), float(s[1]), float(s[2]), compute_inertia=False),
+    GeoType.CAPSULE: lambda s: Mesh.create_capsule(
+        float(s[0]), float(s[1]), up_axis=newton.Axis.Z, compute_inertia=False
+    ),
+    GeoType.CYLINDER: lambda s: Mesh.create_cylinder(
+        float(s[0]), float(s[1]), up_axis=newton.Axis.Z, compute_inertia=False
+    ),
+    GeoType.CONE: lambda s: Mesh.create_cone(float(s[0]), float(s[1]), up_axis=newton.Axis.Z, compute_inertia=False),
+}
 
 
 class NewtonBridge(SimulatorBridge):
@@ -64,7 +83,14 @@ class NewtonBridge(SimulatorBridge):
                 continue
 
             geo_src = model.shape_source[shape_idx]
-            if geo_src is None:
+            geo_type = GeoType(int(model.shape_type.numpy()[shape_idx]))
+            # A primitive carries no source geometry — its dimensions live in
+            # ``shape_scale`` and are turned into a mesh below. Skipping every
+            # sourceless shape, which is what this used to do, made every box,
+            # sphere and capsule in the scene invisible while mesh-based
+            # robots rendered normally: a bench and a workpiece loaded from
+            # URDF boxes simply were not there.
+            if geo_src is None and geo_type not in _PRIMITIVE_MESH_FACTORIES:
                 continue
 
             body_idx = int(model.shape_body.numpy()[shape_idx])
@@ -86,7 +112,7 @@ class NewtonBridge(SimulatorBridge):
                 body_names[local_body_idx] = label
 
             # Build trimesh from Newton mesh data.
-            mesh = self._newton_mesh_to_trimesh(geo_src, shape_idx)
+            mesh = self._newton_mesh_to_trimesh(geo_src, shape_idx, geo_type)
             if mesh is not None:
                 body_meshes[local_body_idx].append(mesh)
 
@@ -204,9 +230,21 @@ class NewtonBridge(SimulatorBridge):
         self,
         geo_src,
         shape_idx: int,
+        geo_type: GeoType,
     ) -> trimesh.Trimesh | None:
-        """Convert a Newton mesh or heightfield to trimesh.Trimesh."""
-        if isinstance(geo_src, Heightfield):
+        """Convert a Newton mesh, heightfield or primitive to trimesh."""
+        scale = self._model.shape_scale.numpy()[shape_idx]  # (3,)
+
+        if geo_src is None:
+            # Tessellated by Newton's own factories, from the same
+            # ``shape_scale`` its viewer reads (``viewer.py:1650``), so a box
+            # here is the box the simulator collides with rather than one
+            # this bridge guessed the convention for. The vertices come out
+            # in world units, so the scale must NOT be applied again.
+            primitive = _PRIMITIVE_MESH_FACTORIES[geo_type](scale)
+            vertices, indices = primitive.vertices, primitive.indices
+            scale = np.ones(3)
+        elif isinstance(geo_src, Heightfield):
             # Heightfields carry a 2D elevation grid, not a vertex/index mesh.
             vertices, indices = self._heightfield_to_vertices_faces(geo_src)
         else:
@@ -216,8 +254,6 @@ class NewtonBridge(SimulatorBridge):
         if vertices is None or len(vertices) == 0:
             return None
 
-        # Apply shape scale.
-        scale = self._model.shape_scale.numpy()[shape_idx]  # (3,)
         scaled_verts = vertices * scale
 
         # Apply shape local transform.
@@ -231,8 +267,12 @@ class NewtonBridge(SimulatorBridge):
 
         faces = indices.reshape(-1, 3)
 
-        # Color.
+        # Color: the source mesh's own, else the colour Newton assigned the
+        # shape (its palette gives adjacent shapes distinguishable colours,
+        # which a single default grey does not).
         color = getattr(geo_src, "color", None)
+        if color is None:
+            color = self._model.shape_color.numpy()[shape_idx]
         if color is not None:
             rgba = [int(c * 255) for c in color[:3]] + [255]
             visual = trimesh.visual.ColorVisuals(face_colors=np.tile(rgba, (len(faces), 1)))
