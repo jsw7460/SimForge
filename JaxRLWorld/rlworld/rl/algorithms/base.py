@@ -49,7 +49,15 @@ def create_optimizer_with_labels(
 
     param_labels = get_labels(params)
 
-    transforms = {label: optimizer_class(learning_rate=lr) for label, lr in lr_config.items()}
+    # ``inject_hyperparams`` puts the learning rate INSIDE the optimizer
+    # state instead of baking it into the transformation. Changing it then
+    # costs one field write, where rebuilding the optimizer would cost the
+    # whole Adam moment history — ``init`` returns zeroed moments, so an
+    # adaptive-KL schedule that rebuilds on every adjustment restarts the
+    # optimizer from scratch each time, most often early in training when
+    # the KL swings hardest and the rate changes most. rsl_rl assigns to
+    # ``param_group["lr"]`` for the same reason; this is the equivalent.
+    transforms = {label: optax.inject_hyperparams(optimizer_class)(learning_rate=lr) for label, lr in lr_config.items()}
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_grad_norm),

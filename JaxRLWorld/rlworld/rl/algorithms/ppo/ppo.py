@@ -583,32 +583,36 @@ class PPO(OnPolicyAlgorithm):
         Adjusts actor learning rate to maintain KL divergence near desired_kl.
         """
         if kl_mean > self.desired_kl * 2.0:
-            self.actor_lr = max(1e-5, self.actor_lr / 1.5)
-            self._rebuild_optimizer()
+            self._set_actor_lr(max(1e-5, self.actor_lr / 1.5))
         elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-            self.actor_lr = min(1e-2, self.actor_lr * 1.5)
-            self._rebuild_optimizer()
+            self._set_actor_lr(min(1e-2, self.actor_lr * 1.5))
 
-    def _rebuild_optimizer(self) -> None:
-        """Rebuild optimizer with updated learning rates."""
-        model_for_optimizer = self.train_state.model
-        if self.obs_normalization:
-            model_for_optimizer = eqx.tree_at(
-                lambda m: (m.actor_obs_normalizer, m.critic_obs_normalizer),
-                self.train_state.model,
-                (None, None),
-            )
+    def _set_actor_lr(self, lr: float) -> None:
+        """Change the actor learning rate, keeping the optimizer's state.
 
-        self.optimizer = self._create_optimizers(model_for_optimizer)
+        This used to rebuild the optimizer and call ``init`` again, which
+        returns ZEROED Adam moments — so every adjustment threw away the
+        gradient history, most often early on where the KL swings hardest
+        and the rate is adjusted most. It also replaced the optimizer
+        object, forcing a recompile of the update step each time.
 
-        params, _ = eqx.partition(
-            self.train_state.model,
-            eqx.is_inexact_array,
-            is_leaf=lambda x: isinstance(x, EmpiricalNormalization),
-        )
-        new_opt_state = self.optimizer.init(params)
+        The rate now lives in the optimizer state (see
+        ``create_optimizer_with_labels``), so it is written in place: the
+        moments survive and nothing is retraced. The critic keeps its own
+        rate, which the adaptive schedule does not touch.
+        """
+        self.actor_lr = lr
+        # The std module is trained at the actor's rate, so it follows.
+        self._write_injected_lr(("actor", "std"), lr)
 
-        self.train_state = self.train_state._replace(opt_state=new_opt_state)
+    def _write_injected_lr(self, labels: tuple[str, ...], lr: float) -> None:
+        """Write ``lr`` into the optimizer state for the given labels."""
+        # create_optimizer_with_labels builds chain(clip, multi_transform),
+        # so element 1 is the multi_transform state: one inner state per label.
+        inner_states = self.train_state.opt_state[1].inner_states
+        for label in labels:
+            hyperparams = inner_states[label].inner_state.hyperparams
+            hyperparams["learning_rate"] = jnp.asarray(lr, dtype=jnp.float32)
 
     def get_value(self, critic_obs: jax.Array) -> jax.Array:
         """Get value estimate for observations."""
@@ -660,3 +664,11 @@ class PPO(OnPolicyAlgorithm):
 
         self.actor_lr = metadata.get("actor_lr", self.actor_lr)
         self.critic_lr = metadata.get("critic_lr", self.critic_lr)
+
+        # ``self.optimizer`` was built from the config's rates, so the fresh
+        # opt_state carries those and not the ones the run had reached. The
+        # adaptive schedule would eventually pull the actor back, but never
+        # the critic, and a run resumed from a decayed rate would silently
+        # restart at the config value.
+        self._write_injected_lr(("actor", "std"), self.actor_lr)
+        self._write_injected_lr(("critic",), self.critic_lr)
