@@ -611,7 +611,7 @@ class K1JoystickConfig:
                 },
             ),
             # Joint encoder bias: a static per-episode, per-joint measurement
-            # offset written to act_manager._encoder_bias and consumed by the
+            # offset written to the entity's encoder-bias buffer, consumed by the
             # actor's dof_pos_nominal_difference_biased obs (critic stays
             # unbiased). reset_dr → a fresh bias each episode. ±0.03 rad ≈ 1.7°.
             "dr_encoder_bias": EventTermConfig(

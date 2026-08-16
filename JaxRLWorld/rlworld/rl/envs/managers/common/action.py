@@ -140,13 +140,13 @@ class ActionManagerBase(BaseManager):
         # need the mechanical power, e.g. getup's energy termination.
         self._applied_torque = _z()
 
-        # Per-env per-joint encoder bias, shape ``(num_envs, action_dim)``.
-        # Written by ``randomize_encoder_bias`` (a startup / reset-DR
-        # event term) and read by the biased ``dof_pos_biased``
-        # observation so the policy sees a calibration-offset version
-        # of the joint state. Zero-initialized so this is a no-op until
-        # a DR term writes to it.
-        self._encoder_bias = _z()
+        # Per-entity per-joint encoder bias, created on first use by
+        # ``encoder_bias_of``. Written by ``randomize_encoder_bias`` (a
+        # startup / reset-DR event term) and read by the biased
+        # ``dof_pos_biased`` observation so the policy sees a
+        # calibration-offset version of the joint state. Absent until a
+        # DR term or an observation asks for it, and zero until written.
+        self._encoder_bias: dict[str, torch.Tensor] = {}
 
         # Initialize offset first (needed for joint_limit clip computation)
         self._offset = self._initialize_offsets()
@@ -483,26 +483,45 @@ class ActionManagerBase(BaseManager):
         """
         return self._applied_torque
 
-    @property
-    def encoder_bias(self) -> torch.Tensor:
-        """Per-env per-joint encoder bias, shape ``(num_envs, action_dim)``.
+    def encoder_bias_of(self, entity_name: str | None = None) -> torch.Tensor:
+        """Per-env per-joint encoder bias for one entity.
 
-        Written by ``randomize_encoder_bias`` (typically at startup /
-        reset-DR) and read by the biased observation so the policy
-        sees a calibration-offset version of the joint state. Zero
-        when no DR term has written to it.
+        Shape ``(num_envs, that entity's joint count)``. Written by
+        ``randomize_encoder_bias`` (typically at startup / reset-DR) and
+        read by the biased observation so the policy sees a
+        calibration-offset version of the joint state. Zero when no DR
+        term has written to it.
+
+        Keyed by entity rather than shaped to the action dim: with
+        several action terms the action dim is their sum, which is no
+        robot's joint count, so adding it to a joint reading would not
+        even have matching widths.
         """
-        return self._encoder_bias
+        name = entity_name or self.env.robot_entity_name
+        bias = self._encoder_bias.get(name)
+        if bias is None:
+            bias = torch.zeros(
+                (self.env.num_envs, len(self.env.entity_indexing(name).joint_names)),
+                device=self.device,
+            )
+            self._encoder_bias[name] = bias
+        return bias
 
-    def set_encoder_bias(self, bias: torch.Tensor, env_ids: torch.Tensor | None = None) -> None:
-        """Write the encoder bias tensor for the given envs (or all).
+    def set_encoder_bias(
+        self,
+        bias: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+        entity_name: str | None = None,
+    ) -> None:
+        """Write one entity's encoder bias for the given envs (or all).
 
         Used by the ``randomize_encoder_bias`` event term.
         """
+        target = self.encoder_bias_of(entity_name)
         if env_ids is None:
-            self._encoder_bias.copy_(bias)
+            target.copy_(bias)
         else:
-            self._encoder_bias[env_ids] = bias
+            target[env_ids] = bias
 
     @property
     def actuated_joint_names(self) -> list[str]:

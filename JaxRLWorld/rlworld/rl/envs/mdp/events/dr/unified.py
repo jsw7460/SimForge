@@ -1255,7 +1255,7 @@ def randomize_encoder_bias(
     """Randomize per-joint encoder bias (sim-agnostic, obs-side).
 
     Samples ``bias ~ U(bias_range)`` per (env, joint) and writes to
-    ``env.act_manager._encoder_bias`` via ``set_encoder_bias``. The biased
+    the entity's buffer via ``set_encoder_bias``. The biased
     value is consumed by the ``dof_pos_biased`` observation
     (``q + encoder_bias``); the underlying physics state is unchanged.
 
@@ -1274,7 +1274,7 @@ def randomize_encoder_bias(
         return
 
     n_envs = len(env_ids)
-    n_joints = env.act_manager._encoder_bias.shape[1]
+    n_joints = env.act_manager.encoder_bias_of(asset_cfg.name).shape[1]
     lo, hi = bias_range
     bias_samples = torch.empty(n_envs, n_joints, device=env.device).uniform_(lo, hi)
-    env.act_manager.set_encoder_bias(bias_samples, env_ids=env_ids)
+    env.act_manager.set_encoder_bias(bias_samples, env_ids=env_ids, entity_name=asset_cfg.name)

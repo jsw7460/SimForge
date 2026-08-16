@@ -119,14 +119,14 @@ def dof_pos(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.
 def dof_pos_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Actuated joint positions plus per-env encoder bias.
 
-    Same as :func:`dof_pos` but adds ``env.act_manager.encoder_bias``
+    Same as :func:`dof_pos` but adds ``act_manager.encoder_bias_of``
     to simulate a static, per-episode joint encoder miscalibration
     (mirrors mjlab's ``biased=True`` observation flag used by the
     getup task). Register this in place of :func:`dof_pos` in the
     actor observation group when ``randomize_encoder_bias`` is
     active; the critic typically keeps the unbiased ``dof_pos``.
     """
-    return dof_pos(env, asset_cfg) + env.act_manager.encoder_bias
+    return dof_pos(env, asset_cfg) + env.act_manager.encoder_bias_of(asset_cfg.name)
 
 
 @EnvStepCache()
@@ -180,7 +180,7 @@ def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _D
     """:func:`dof_pos_nominal_difference` plus the per-env encoder bias.
 
     ``(q + encoder_bias) - default_pos`` — the nominal-difference joint obs with
-    a static per-episode encoder miscalibration (``act_manager.encoder_bias``,
+    a static per-episode encoder miscalibration (``act_manager.encoder_bias_of``,
     written by ``randomize_encoder_bias``). Mirrors mjlab's
     ``joint_pos_rel(biased=True)``. Register in the ACTOR group in place of
     :func:`dof_pos_nominal_difference` when ``randomize_encoder_bias`` is active;
@@ -188,7 +188,7 @@ def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _D
     reads ``q + bias`` physically, so ``(q + bias) - default`` matches deploy.
     """
     rd = env.get_entity_data(asset_cfg.name)
-    return rd.joint_pos + env.act_manager.encoder_bias - rd.default_joint_pos.unsqueeze(0)
+    return rd.joint_pos + env.act_manager.encoder_bias_of(asset_cfg.name) - rd.default_joint_pos.unsqueeze(0)
 
 
 @EnvStepCache()
@@ -225,46 +225,77 @@ def base_height(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> to
     return env.get_entity_data(asset_cfg.name).root_link_pos_w[:, 2:3]
 
 
+def _term_action_slice(env: World, term_name: str | None) -> slice:
+    """Columns of the action vector belonging to one action term.
+
+    ``None`` selects the whole vector, which is what a single-robot preset
+    wants. Naming a term selects the slice that term owns, so a robot's
+    observation can carry its own actions rather than every robot's — the
+    role IsaacLab's ``last_action(env, action_name)`` fills
+    (``isaaclab/envs/mdp/observations.py:762``).
+    """
+    if term_name is None:
+        return slice(None)
+    slices = env.act_manager.term_action_slices
+    if term_name not in slices:
+        raise KeyError(
+            f"No action term named {term_name!r}. The action config declares: {sorted(slices) or 'no terms'}."
+        )
+    return slices[term_name]
+
+
 @EnvStepCache()
-def prev_processed_actions(env: World) -> torch.Tensor:
+def prev_processed_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     """Current step's processed actions (used as observation input).
 
     Note: Despite the name, this returns the *current* processed actions,
     matching the existing Newton/Genesis observation behavior.
 
+    Args:
+        term_name: Restrict to one action term's columns. ``None`` (the
+            default) returns the whole action vector.
+
     Returns:
-        Tensor of shape (num_envs, num_actions).
+        Tensor of shape (num_envs, num_actions) or the term's width.
     """
-    return env.act_manager.processed_actions.clone()
+    return env.act_manager.processed_actions[:, _term_action_slice(env, term_name)].clone()
 
 
 @EnvStepCache()
-def prev_raw_actions(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
-    """Previous step's raw actions."""
-    return env.act_manager.prev_raw_actions
+def prev_raw_actions(env: World, term_name: str | None = None) -> torch.Tensor:
+    """Previous step's raw actions, optionally for one action term."""
+    return env.act_manager.prev_raw_actions[:, _term_action_slice(env, term_name)]
 
 
 @EnvStepCache()
-def raw_actions(env: World) -> torch.Tensor:
+def raw_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     """Current step's raw (unprocessed) actions.
 
+    Args:
+        term_name: Restrict to one action term's columns. ``None`` (the
+            default) returns the whole action vector.
+
     Returns:
-        Tensor of shape (num_envs, num_actions).
+        Tensor of shape (num_envs, num_actions) or the term's width.
     """
-    return env.act_manager.raw_actions
+    return env.act_manager.raw_actions[:, _term_action_slice(env, term_name)]
 
 
 @EnvStepCache()
-def last_processed_actions(env: World) -> torch.Tensor:
+def last_processed_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     """Previous step's processed actions.
 
     This is the action applied one step before the current one.
     Matches Walk-These-Ways ``self.last_actions`` in observations.
 
+    Args:
+        term_name: Restrict to one action term's columns. ``None`` (the
+            default) returns the whole action vector.
+
     Returns:
-        Tensor of shape (num_envs, num_actions).
+        Tensor of shape (num_envs, num_actions) or the term's width.
     """
-    return env.act_manager.prev_processed_actions.clone()
+    return env.act_manager.prev_processed_actions[:, _term_action_slice(env, term_name)].clone()
 
 
 @EnvStepCache()

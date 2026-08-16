@@ -342,11 +342,12 @@ def randomize_encoder_bias(
     env: World,
     env_ids: torch.Tensor,
     bias_range: tuple[float, float] = (-0.015, 0.015),
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
     """Sample a per-env per-joint encoder bias.
 
     Mirrors mjlab's ``dr.encoder_bias`` — writes a uniform random bias
-    in ``bias_range`` into ``env.act_manager._encoder_bias`` so the
+    in ``bias_range`` into the entity's encoder-bias buffer so the
     biased observation (:func:`dof_pos_biased`) reflects a static
     calibration offset for each episode. Typically registered with
     mode ``"reset_dr"`` so the bias is resampled on each env reset.
@@ -358,10 +359,12 @@ def randomize_encoder_bias(
         return
     device = env.device
     n = len(env_ids)
-    num_joints = env.act_manager.offset.shape[-1]
+    # The entity's joint count, not the action dim: with several action
+    # terms the action dim is their sum and matches no robot's joints.
+    num_joints = env.act_manager.encoder_bias_of(asset_cfg.name).shape[-1]
     lo, hi = bias_range
     bias = torch.empty((n, num_joints), device=device).uniform_(lo, hi)
-    env.act_manager.set_encoder_bias(bias, env_ids=env_ids)
+    env.act_manager.set_encoder_bias(bias, env_ids=env_ids, entity_name=asset_cfg.name)
 
 
 # ── Getup: mixed fallen / standing reset ────────────────────────────
