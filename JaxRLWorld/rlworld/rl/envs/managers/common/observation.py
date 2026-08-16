@@ -136,6 +136,7 @@ class ObservationManager(BaseManager):
 
                 self._group_term_indices[group_name][term_name] = (current_idx, current_idx + term_dim)
                 current_idx += term_dim
+        self._is_term_indices_built = True
 
     # ========== Public API ==========
 
@@ -186,10 +187,24 @@ class ObservationManager(BaseManager):
         term_name: str,
         observations: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """The columns one observation term contributes to its group.
+
+        Builds the column map on first use. It used to be built only by
+        :meth:`calculate_obs_dim`, so whether this method worked depended
+        on whether something else had asked for the observation dimension
+        first — and the dependency was invisible at the call site.
+        """
+        if not self._is_term_indices_built:
+            self._build_term_indices()
+        if group_name not in self._group_term_indices:
+            raise KeyError(f"No observation group {group_name!r}. Groups: {sorted(self._group_term_indices)}.")
+        group_indices = self._group_term_indices[group_name]
+        if term_name not in group_indices:
+            raise KeyError(f"Group {group_name!r} has no term {term_name!r}. Terms: {sorted(group_indices)}.")
         if observations is None:
             observations = self.obs_dict[group_name]
         with torch.no_grad():
-            start_idx, end_idx = self._group_term_indices[group_name][term_name]
+            start_idx, end_idx = group_indices[term_name]
             result = observations[:, start_idx:end_idx]
         return result
 
