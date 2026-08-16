@@ -10,9 +10,15 @@ it before the change, keep the output, run it again after.
 
     python -m rlworld.scripts.diag.step_speed_baseline --num-envs 4096
 
-or one backend:
+or one backend, or another preset:
 
     python -m rlworld.scripts.diag.step_speed_baseline --sim newton --num-envs 4096
+    python -m rlworld.scripts.diag.step_speed_baseline --preset yam_lift --num-envs 4096
+
+or with a solver budget the presets do not carry, to find out whether the
+budget is what a cross-backend gap is made of:
+
+    python -m rlworld.scripts.diag.step_speed_baseline --preset yam_lift --iterations 10 --ls-iterations 20
 """
 
 from __future__ import annotations
@@ -30,9 +36,19 @@ from pathlib import Path
 import torch
 
 from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
+from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from rlworld.rl.runners import BaseRunner
 
 _SIMS = ("genesis", "newton", "mujoco")
+
+# Preset by name. A cross-backend gap is a property of the SCENE, not of
+# the framework: a locomotion robot on flat ground and an arm holding a
+# contact-rich grasp stress entirely different parts of a simulator, so a
+# ratio measured on one says nothing about the other.
+_PRESETS = {
+    "go2": Go2FlatConfig,
+    "yam_lift": YamLiftConfig,
+}
 
 
 def _sync() -> None:
@@ -45,9 +61,75 @@ def _sync() -> None:
         torch.cuda.synchronize()
 
 
-def run_single(sim: str, num_envs: int, warmup: int, steps: int, resets: int) -> dict:
-    cfgs = Go2FlatConfig(sim_type=sim, num_envs=num_envs).build()
+def _override_solver_iterations(sim: str, scene, iterations: int, ls_iterations: int) -> None:
+    """Set the solver's iteration budget, whatever the backend calls it.
+
+    The three presets carry different budgets — mujoco 10/20 (mjlab's own
+    numbers for this task), genesis 30/40, newton 50/50 — and the budget
+    is the first thing to rule in or out when one backend is slower than
+    another. Overriding it here answers that with a measurement instead of
+    an edit to three preset files that then has to be undone.
+    """
+    if sim == "newton":
+        scene.solver_cfg.iterations = iterations
+        scene.solver_cfg.ls_iterations = ls_iterations
+    elif sim == "mujoco":
+        scene.solver_iterations = iterations
+        scene.solver_ls_iterations = ls_iterations
+    elif sim == "genesis":
+        scene.rigid_options.iterations = iterations
+        scene.rigid_options.ls_iterations = ls_iterations
+    else:
+        raise ValueError(f"Unknown sim {sim!r}")
+
+
+def _effective_solver_iterations(sim: str, env) -> tuple[int, int]:
+    """The iteration budget the LIVE simulator ended up with.
+
+    Read from the built solver, never from the config that was handed to
+    it. A config field that no longer reaches the backend still reads back
+    fine, and the timing would then be flat for a reason that has nothing
+    to do with physics — a null result and a broken knob look identical
+    from the outside.
+    """
+    if sim == "newton":
+        opt = env.scene_manager.solver.mj_model.opt
+        return int(opt.iterations), int(opt.ls_iterations)
+    if sim == "mujoco":
+        opt = env.scene_manager.sim.mj_model.opt
+        return int(opt.iterations), int(opt.ls_iterations)
+    if sim == "genesis":
+        constraint_solver = env.scene_manager.scene.rigid_solver.constraint_solver
+        return int(constraint_solver._n_iterations), int(constraint_solver.ls_iterations)
+    raise ValueError(f"Unknown sim {sim!r}")
+
+
+def run_single(
+    preset: str,
+    sim: str,
+    num_envs: int,
+    warmup: int,
+    steps: int,
+    resets: int,
+    iterations: int | None = None,
+    ls_iterations: int | None = None,
+) -> dict:
+    config = _PRESETS[preset](sim_type=sim, num_envs=num_envs)
+    cfgs = config.build()
+    if (iterations is None) != (ls_iterations is None):
+        raise ValueError("Pass --iterations and --ls-iterations together; one alone is half an experiment.")
+    if iterations is not None:
+        _override_solver_iterations(sim, cfgs.scene, iterations, ls_iterations)
     env = BaseRunner._create_env_from_config(cfgs)
+
+    live_iterations, live_ls_iterations = _effective_solver_iterations(sim, env)
+    if iterations is not None and (live_iterations, live_ls_iterations) != (iterations, ls_iterations):
+        raise RuntimeError(
+            f"[{sim}] asked for {iterations}/{ls_iterations} but the solver runs "
+            f"{live_iterations}/{live_ls_iterations}. The override did not reach the backend, so any "
+            "timing measured here would say nothing about the iteration budget."
+        )
+
     env.reset()
 
     n_act = env.act_manager.num_actions
@@ -77,8 +159,11 @@ def run_single(sim: str, num_envs: int, warmup: int, steps: int, resets: int) ->
         per_reset.append((time.perf_counter() - t0) * 1e3)
 
     result = {
+        "preset": preset,
         "sim": sim,
         "num_envs": num_envs,
+        "iterations": live_iterations,
+        "ls_iterations": live_ls_iterations,
         "step_mean_ms": round(statistics.mean(per_step), 4),
         "step_median_ms": round(statistics.median(per_step), 4),
         "step_p95_ms": round(sorted(per_step)[int(0.95 * len(per_step))], 4),
@@ -88,7 +173,10 @@ def run_single(sim: str, num_envs: int, warmup: int, steps: int, resets: int) ->
     }
 
     print("=" * 78)
-    print(f"STEP SPEED  [sim={sim}  num_envs={num_envs}  actions={n_act}]")
+    # The LIVE budget, so the header cannot claim a setting the solver
+    # is not running.
+    budget = f"{live_iterations}/{live_ls_iterations}"
+    print(f"STEP SPEED  [preset={preset}  sim={sim}  num_envs={num_envs}  actions={n_act}  solver={budget}]")
     print("=" * 78)
     print(f"  step   mean {result['step_mean_ms']:8.3f} ms   median {result['step_median_ms']:8.3f} ms")
     print(f"         p95  {result['step_p95_ms']:8.3f} ms   max    {result['step_max_ms']:8.3f} ms")
@@ -97,7 +185,15 @@ def run_single(sim: str, num_envs: int, warmup: int, steps: int, resets: int) ->
     return result
 
 
-def run_all(num_envs: int, warmup: int, steps: int, resets: int) -> int:
+def run_all(
+    preset: str,
+    num_envs: int,
+    warmup: int,
+    steps: int,
+    resets: int,
+    iterations: int | None,
+    ls_iterations: int | None,
+) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="step_speed_"))
     out: dict[str, dict] = {}
     env_vars = dict(os.environ, JAXRLWORLD_ALLOW_MULTI_SIM="1")
@@ -108,6 +204,8 @@ def run_all(num_envs: int, warmup: int, steps: int, resets: int) -> int:
             sys.executable,
             "-m",
             "rlworld.scripts.diag.step_speed_baseline",
+            "--preset",
+            preset,
             "--sim",
             sim,
             "--result-json",
@@ -121,6 +219,8 @@ def run_all(num_envs: int, warmup: int, steps: int, resets: int) -> int:
             "--resets",
             str(resets),
         ]
+        if iterations is not None:
+            cmd += ["--iterations", str(iterations), "--ls-iterations", str(ls_iterations)]
         print()
         print("#" * 78)
         print(f"# $ {' '.join(cmd)}")
@@ -135,10 +235,18 @@ def run_all(num_envs: int, warmup: int, steps: int, resets: int) -> int:
 
     print()
     print("=" * 78)
-    print(f"BASELINE SUMMARY  (num_envs={num_envs})")
+    print(f"BASELINE SUMMARY  (preset={preset}  num_envs={num_envs})")
     print("=" * 78)
     print(f"{'metric':<20}" + "".join(f"{s:>14}" for s in _SIMS))
     print("-" * 78)
+    # The budget each backend actually ran at, so a flat comparison cannot
+    # be read as "the budget does not matter" when it never changed.
+    row = f"{'solver_iters':<20}"
+    for sim in _SIMS:
+        result = out.get(sim)
+        cell = "—" if result is None else f"{result['iterations']}/{result['ls_iterations']}"
+        row += f"{cell:>14}"
+    print(row)
     for key in ("step_mean_ms", "step_median_ms", "step_p95_ms", "step_max_ms", "reset_mean_ms"):
         row = f"{key:<20}"
         for s in _SIMS:
@@ -153,17 +261,24 @@ def run_all(num_envs: int, warmup: int, steps: int, resets: int) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", choices=list(_SIMS), default=None, help="Run one backend. Omit to run all three.")
+    ap.add_argument("--preset", choices=list(_PRESETS), default="go2")
     ap.add_argument("--result-json", default=None)
     ap.add_argument("--num-envs", type=int, default=4096)
     ap.add_argument("--warmup", type=int, default=50)
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--resets", type=int, default=20)
+    ap.add_argument("--iterations", type=int, default=None, help="Override the solver iteration budget.")
+    ap.add_argument("--ls-iterations", type=int, default=None, help="Override the line-search budget.")
     args = ap.parse_args()
 
     if args.sim is None:
-        return run_all(args.num_envs, args.warmup, args.steps, args.resets)
+        return run_all(
+            args.preset, args.num_envs, args.warmup, args.steps, args.resets, args.iterations, args.ls_iterations
+        )
 
-    result = run_single(args.sim, args.num_envs, args.warmup, args.steps, args.resets)
+    result = run_single(
+        args.preset, args.sim, args.num_envs, args.warmup, args.steps, args.resets, args.iterations, args.ls_iterations
+    )
     if args.result_json:
         Path(args.result_json).write_text(json.dumps(result))
     return 0
