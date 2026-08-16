@@ -44,6 +44,23 @@ if TYPE_CHECKING:
     from rlworld.rl.envs import World
 
 
+def _reject_out_of_range(
+    indices: torch.Tensor,
+    limit: int,
+    entity_name: str,
+    joint_names: list[str],
+    kind: str,
+) -> None:
+    """Raise if any index falls outside one world's share of an array."""
+    bad = [i for i, v in enumerate(indices.tolist()) if not 0 <= v < limit]
+    if bad:
+        detail = ", ".join(f"{joint_names[i]}->{int(indices[i])}" for i in bad)
+        raise ValueError(
+            f"Newton {kind} indices for entity {entity_name!r} fall outside world 0's "
+            f"{limit} {kind}s: {detail}. The joint list and the model's per-world layout disagree."
+        )
+
+
 def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | None = None) -> list[str]:
     """Canonical joint name list — DFS walk of Newton's world-0 body tree with
     siblings sorted alphabetically by bare body name at each node, collecting
@@ -1429,25 +1446,18 @@ class NewtonSceneManager(BaseManager):
             self.graph = None
             return
 
-        num_worlds = self.model.world_count
-        # Free-joint slot count is layout-dependent: 6 DOFs (lin+ang vel) under the
-        # legacy DOF layout vs. 7 coords (pos+quat) under the coord layout introduced
-        # in Newton PR #2965 and gated by ``newton.use_coord_layout_targets``. Under
-        # coord layout the quaternion slot must be a valid rotation — a zero-fill
-        # would corrupt the FREE joint to (0,0,0,0) and propagate NaN through the
-        # captured ``_step()``.
-        base_width = 7 if newton.use_coord_layout_targets else 6
-        base_init = torch.zeros((num_worlds, base_width), device=self.device, dtype=torch.float32)
-        if newton.use_coord_layout_targets:
-            # FREE joint coord order is [x, y, z, qx, qy, qz, qw] — set qw to 1 for identity.
-            base_init[:, 6] = 1.0
-        dummy_actions = torch.zeros(
-            (num_worlds, self.env.act_manager.num_actions), device=self.device, dtype=torch.float32
-        )
-
-        full_targets = torch.cat([base_init, dummy_actions], dim=-1).flatten()
-        self.control.joint_target_q = wp.from_torch(full_targets, dtype=wp.float32, requires_grad=False)
-
+        # ``control.joint_target_q`` is left exactly as Newton allocated it.
+        # This used to build a replacement from "one floating base plus one
+        # target per action", which describes a scene holding a single robot
+        # and nothing else. Two robots make that description wrong in both
+        # length and order: the array is sized for the whole model — every
+        # joint of every entity, including the slots a FIXED joint keeps
+        # when its entity does not collapse them — while the replacement was
+        # sized by the action dim, so the second robot's targets were written
+        # past its end. Newton's own array is already the right length, in
+        # the layout its model snapshot chose, with the FREE joint's
+        # quaternion slot valid; the writers index it in place through
+        # ``joint_target_q_start``.
         with wp.ScopedCapture() as capture:
             self._step()
         self.graph = capture.graph
@@ -1532,6 +1542,14 @@ class NewtonSceneManager(BaseManager):
             sim_to_canonical[canonical_i] = canonical_i  # identity since RobotData indexes via sim_indices.
 
         dofs_per_world = self.model.joint_dof_count // num_worlds
+        coords_per_world = self.model.joint_coord_count // num_worlds
+        # These index world 0 of arrays the whole scene shares, so an index
+        # past that world's share addresses another world's memory — or,
+        # past the array, trips a device-side assert several kernels later
+        # with a stack pointing at whatever ran next. Checked here, where
+        # the entity that produced it is still known.
+        _reject_out_of_range(q_indices, coords_per_world, entity_name, matched_names, "coordinate")
+        _reject_out_of_range(qd_indices, dofs_per_world, entity_name, matched_names, "dof")
         lower_all = wp.to_torch(self.model.joint_limit_lower)[:dofs_per_world]
         upper_all = wp.to_torch(self.model.joint_limit_upper)[:dofs_per_world]
         lower = lower_all[qd_indices]
