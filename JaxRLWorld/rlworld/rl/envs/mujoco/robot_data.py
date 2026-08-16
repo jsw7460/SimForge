@@ -253,6 +253,11 @@ class MujocoRigidObjectData(SiteReaderMixin):
         site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
         return self._entity.data.site_lin_vel_w[:, site_ids, :]
 
+    def site_quat_w_mjlab_native(self, names: list[str]) -> Tensor:
+        """Site orientations straight from MuJoCo, wxyz. See above."""
+        site_ids, _ = self._entity.find_sites(list(names), preserve_order=True)
+        return self._entity.data.site_quat_w[:, site_ids, :]
+
     def body_pos_w_by_ids(self, body_ids: Tensor) -> Tensor:
         return self._entity.data.body_link_pos_w[:, body_ids, :]
 

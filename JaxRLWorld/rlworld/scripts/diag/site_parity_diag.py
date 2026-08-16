@@ -60,6 +60,7 @@ from rlworld.rl.configs.presets.yam_arm.base import YamArmConfig
 from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from rlworld.rl.envs.site_frames import sites_from_mjcf
 from rlworld.rl.runners import BaseRunner
+from rlworld.rl.utils.quat_utils import quat_inv_wxyz, quat_mul_wxyz
 
 _SIMS = ("genesis", "newton", "mujoco")
 
@@ -174,6 +175,39 @@ def run_single(sim: str, num_envs: int) -> dict:
         results["rest_position_matches_mujoco"] = err < POS_TOL
         measured["rest_pos_err_vs_native"] = f"{err:.3e}"
 
+    # ── B2. orientation ──────────────────────────────────────────────────
+    # A site is a frame, and ``body_quat * local_quat`` has an order.
+    # Getting it backwards still yields a unit quaternion, so nothing
+    # raises and every length check above still passes — the frame is
+    # simply wrong. Undoing the parent's rotation must give back exactly
+    # the local rotation the asset declared, which pins the order down
+    # and needs no reference backend to do it.
+    print("\n-- B2. orientation --")
+    quat_rest = data.site_quat_w([SITE])[:, 0]
+    body_quat = data.body_quat_w_all[:, parent_idx]
+    recovered = quat_mul_wxyz(quat_inv_wxyz(body_quat), quat_rest)
+    declared = torch.tensor(named[SITE].local_quat_wxyz, device=quat_rest.device).expand_as(recovered)
+    # A quaternion and its negation are the same rotation, so compare on
+    # whichever sign the declared one uses.
+    aligned = torch.where((recovered * declared).sum(-1, keepdim=True) < 0, -recovered, recovered)
+    quat_err = float((aligned - declared).abs().max())
+    norm_err = float((quat_rest.norm(dim=-1) - 1.0).abs().max())
+    print(f"  site quat        = {_fmt(quat_rest[0])}")
+    print(f"  parent^-1 * site = {_fmt(aligned[0])}   declared = {_fmt(named[SITE].local_quat_wxyz)}")
+    print(f"  max err = {quat_err:.3e}   |q| - 1 = {norm_err:.3e}")
+    results["orientation_composes_in_the_right_order"] = quat_err < 1e-5
+    results["site_orientation_is_a_unit_quaternion"] = norm_err < 1e-5
+    measured["quat_local_recovery_err"] = f"{quat_err:.3e}"
+    measured["rest_quat"] = [round(float(v), 5) for v in quat_rest[0]]
+
+    if sim == "mujoco":
+        native_q = data.site_quat_w_mjlab_native([SITE])[:, 0]
+        signed = torch.where((quat_rest * native_q).sum(-1, keepdim=True) < 0, -quat_rest, quat_rest)
+        err = float((signed - native_q).abs().max())
+        print(f"  mujoco native    = {_fmt(native_q[0])}   max err = {err:.3e}")
+        results["rest_orientation_matches_mujoco"] = err < POS_TOL
+        measured["rest_quat_err_vs_native"] = f"{err:.3e}"
+
     # ── C. moving ────────────────────────────────────────────────────────
     print("\n-- C. driven, sampled mid-motion --")
     env.reset()
@@ -199,6 +233,26 @@ def run_single(sim: str, num_envs: int) -> dict:
         results["moving_velocity_matches_mujoco"] = vel_err < VEL_TOL
         measured["moving_pos_err_vs_native"] = f"{pos_err:.3e}"
         measured["moving_vel_err_vs_native"] = f"{vel_err:.3e}"
+
+    # Repeated with the body rotated well away from identity: with the
+    # parent upright the two multiplication orders can agree by accident.
+    quat_moving = data.site_quat_w([SITE])[:, 0]
+    body_quat_moving = data.body_quat_w_all[:, parent_idx]
+    recovered_moving = quat_mul_wxyz(quat_inv_wxyz(body_quat_moving), quat_moving)
+    aligned_moving = torch.where(
+        (recovered_moving * declared).sum(-1, keepdim=True) < 0, -recovered_moving, recovered_moving
+    )
+    moving_quat_err = float((aligned_moving - declared).abs().max())
+    print(f"  orientation still composes with the body turned: err = {moving_quat_err:.3e}")
+    results["orientation_holds_with_the_body_turned"] = moving_quat_err < 1e-5
+    measured["moving_quat_recovery_err"] = f"{moving_quat_err:.3e}"
+    if sim == "mujoco":
+        native_qm = data.site_quat_w_mjlab_native([SITE])[:, 0]
+        signed_m = torch.where((quat_moving * native_qm).sum(-1, keepdim=True) < 0, -quat_moving, quat_moving)
+        err_qm = float((signed_m - native_qm).abs().max())
+        print(f"  mujoco native orientation while moving: err = {err_qm:.3e}")
+        results["moving_orientation_matches_mujoco"] = err_qm < POS_TOL
+        measured["moving_quat_err_vs_native"] = f"{err_qm:.3e}"
 
     # ── D. velocity is the derivative of position ────────────────────────
     # Independent of MuJoCo: catches a formula that is self-consistently
