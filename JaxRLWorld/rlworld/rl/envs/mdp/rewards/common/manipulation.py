@@ -86,12 +86,18 @@ def joint_velocity_hinge_penalty(
     approach the task wants. This one is silent until a joint exceeds
     ``max_vel`` and then grows quadratically, which bounds the speed
     without discouraging moving at all.
+
+    Returns a NEGATIVE value, the convention every ``penalize_*`` term in
+    this repo follows, so its weight is positive. mjlab's own version
+    returns the positive excess and is given a negative weight; carrying
+    that convention across along with the formula is how a penalty
+    silently becomes a bonus.
     """
     joint_vel = env.get_entity_data(asset_cfg.name).joint_vel
     if asset_cfg.joint_ids is not None:
         joint_vel = joint_vel[:, asset_cfg.joint_ids]
     excess = (joint_vel.abs() - max_vel).clamp_min(0.0)
-    return (excess**2).sum(dim=-1)
+    return -(excess**2).sum(dim=-1)
 
 
 def object_dropped(
@@ -99,11 +105,13 @@ def object_dropped(
     object_name: str,
     min_height: float,
 ) -> torch.Tensor:
-    """1.0 where the object has fallen below ``min_height``.
+    """-1.0 where the object has fallen below ``min_height``, else 0.
+
+    Negative, like every other penalty here, so its weight is positive.
 
     Not in mjlab's set. Added because this scene has a table: an object
     knocked off it lands on the floor and stays there, and without a term
     that notices, the episode runs to its time-out collecting a reaching
     reward for hovering over an empty table.
     """
-    return (env.get_entity_data(object_name).root_link_pos_w[:, 2] < min_height).float()
+    return -(env.get_entity_data(object_name).root_link_pos_w[:, 2] < min_height).float()

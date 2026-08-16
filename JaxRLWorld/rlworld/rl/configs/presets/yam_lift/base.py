@@ -39,7 +39,10 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import manipulation as manip_rew
-from rlworld.rl.envs.mdp.rewards.common.reward_terms import raw_action_rate_l2
+from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    penalize_joint_pos_limits_l1,
+    raw_action_rate_l2,
+)
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
 from rlworld.rl.envs.mdp.terminations.common.terminations import illegal_contact
 
@@ -89,32 +92,53 @@ def _get_sim_builders(sim_type: str):
 class YamLiftConfig(YamArmConfig):
     """Bring the cube from the table to a commanded point above it."""
 
-    episode_length_s: float = 5.0
+    episode_length_s: float = 20.0
+    """mjlab's own length for this task. Five seconds was mine, and it is
+    barely enough to approach, close and lift once — a policy that has
+    not yet learned any of those three needs room to stumble into them."""
 
     difficulty: str = "dynamic"
     """``"fixed"`` aims at one point every episode. Worth starting there:
     a policy that cannot solve a single goal will not solve a
     distribution of them, and the failure is far easier to read."""
 
-    reaching_std: float = 0.10
-    """m — the width of the reaching kernel. About the size of the
-    gripper, so the reward starts to rise when the hand is in the
-    neighbourhood rather than only once it has arrived."""
+    reaching_std: float = 0.20
+    """m — the width of the reaching kernel, from mjlab. Wide on purpose:
+    the reward has to be felt from where the hand STARTS, not only once
+    it has arrived. At half this width the same starting gap pays 0.02
+    instead of 0.38, and a policy facing that gradient does the thing
+    that pays immediately instead — it stops moving, which is what the
+    action-rate penalty rewards."""
 
-    bringing_std: float = 0.15
+    bringing_std: float = 0.30
+    """m — the width of the bringing kernel inside the staged term.
+    Wider than the precise one below: this half only has to point the
+    way, while ``w_bring`` pays for actually arriving."""
+
+    precise_std: float = 0.05
+    """m — the standalone bringing term is narrow, which is what makes
+    it a precision bonus rather than a second copy of the coarse one."""
+
     success_threshold: float = 0.05
-    max_joint_vel: float = 8.0
+    max_joint_vel: float = 0.5
 
-    w_staged: float = 4.0
-    w_bring: float = 2.0
-    w_action_rate: float = -0.01
-    w_joint_vel: float = -0.001
-    w_dropped: float = -5.0
+    # Every weight here is POSITIVE. The penalty terms this repo uses
+    # already return a negative value — ``raw_action_rate_l2`` and
+    # ``penalize_joint_pos_limits_l1`` both end in a unary minus — so a
+    # negative weight multiplies two of them together and pays the policy
+    # for the very thing the term exists to discourage. mjlab's terms
+    # return the positive quantity and take a negative weight; carrying
+    # its numbers across unchanged is what flipped these.
+    w_staged: float = 1.0
+    w_bring: float = 1.0
+    w_action_rate: float = 0.01
+    w_joint_pos_limits: float = 10.0
+    w_dropped: float = 5.0
 
     joint_vel_curriculum: tuple[tuple[int, float], ...] = (
-        (0, -0.01),
-        (500 * 24, -0.1),
-        (1000 * 24, -1.0),
+        (0, 0.01),
+        (500 * 24, 0.1),
+        (1000 * 24, 1.0),
     )
     """Steps and weights for the joint-speed penalty, from mjlab's own
     lift config. It grows a hundredfold across training on purpose: at
@@ -163,6 +187,11 @@ class YamLiftConfig(YamArmConfig):
                     target_x=(0.30, 0.50),
                     target_y=(-0.20, 0.20),
                     target_z=(0.60, 0.80),
+                    # mjlab draws the cube from x(0.2, 0.4) y(+-0.2). Kept
+                    # narrower here until the reach envelope has been
+                    # measured over that wider patch — it was measured at
+                    # the cube's nominal xy only, and a start pose the arm
+                    # cannot reach is an episode lost before it begins.
                     object_x=(0.30, 0.35),
                     object_y=(-0.10, 0.10),
                     object_z=(CUBE_REST_Z, CUBE_REST_Z + 0.03),
@@ -244,12 +273,18 @@ class YamLiftConfig(YamArmConfig):
             bring = RewardTermConfig(
                 func=manip_rew.bring_object_reward,
                 weight=cfg.w_bring,
-                params={"command_name": "lift", "object_name": CUBE, "std": cfg.bringing_std},
+                params={"command_name": "lift", "object_name": CUBE, "std": cfg.precise_std},
             )
             action_rate = RewardTermConfig(func=raw_action_rate_l2, weight=cfg.w_action_rate)
+            # Large, and in mjlab's set from the start. An arm learning to
+            # reach finds the joint stops long before it finds the cube.
+            joint_pos_limits = RewardTermConfig(
+                func=penalize_joint_pos_limits_l1,
+                weight=cfg.w_joint_pos_limits,
+            )
             joint_vel = RewardTermConfig(
                 func=manip_rew.joint_velocity_hinge_penalty,
-                weight=cfg.w_joint_vel,
+                weight=cfg.joint_vel_curriculum[0][1],
                 params={"max_vel": cfg.max_joint_vel},
             )
             # Knocking the cube off the table ends the episode, but the

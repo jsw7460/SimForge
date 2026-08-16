@@ -46,6 +46,7 @@ from pathlib import Path
 import torch
 
 from rlworld.rl.configs.presets.yam_lift.base import CUBE, DROPPED_Z, GRASP_SITE, YamLiftConfig
+from rlworld.rl.configs.rewards.reward_term_config import get_weight_value
 from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.utils.quat_utils import quat_inv_wxyz, quat_rotate_wxyz
@@ -212,6 +213,47 @@ def run_single(sim: str, num_envs: int) -> dict:
     results["dropping_is_penalised_and_terminal"] = drop_penalty_off > 0.5 and term_off
     measured["drop_penalty_on_table"] = round(drop_penalty_on_table, 5)
     measured["drop_penalty_off_table"] = round(drop_penalty_off, 5)
+
+    # ── E2. every term's WEIGHTED sign ───────────────────────────────────
+    # The check that was missing, and it cost a training run. Each term is
+    # read here after its weight, which is the number the policy actually
+    # optimises. A penalty whose function already returns a negative value
+    # and is then given a negative weight becomes a BONUS for the thing it
+    # exists to discourage — no error, no shape mismatch, and a training
+    # curve that rises on the one term that should be falling.
+    print("\n-- E2. weighted sign of every reward term --")
+    manager = env.reward_manager
+    # A state where every penalty should be biting: joints driven hard
+    # into their stops, actions changing every step, cube off the table.
+    env.reset()
+    big = torch.full((env.num_envs, env.act_manager.num_actions), 60.0, device=env.device)
+    for step in range(20):
+        env.step(big if step % 2 == 0 else -big)
+    env._invalidate_cache()
+    _place_cube(env, below)
+
+    expected_sign = {
+        "staged": +1,
+        "bring": +1,
+        "action_rate": -1,
+        "joint_pos_limits": -1,
+        "joint_vel": -1,
+        "dropped": -1,
+    }
+    sign_ok = True
+    for name, term in manager.reward_terms.items():
+        raw = float(_reward(env, name).mean())
+        weight = float(get_weight_value(term.weight, manager.env_step_calls))
+        weighted = raw * weight
+        want = expected_sign.get(name)
+        mark = ""
+        if want is not None:
+            good = weighted >= -1e-9 if want > 0 else weighted <= 1e-9
+            sign_ok = sign_ok and good
+            mark = "  <-- WRONG SIGN" if not good else ""
+        print(f"  {name:<18} raw {raw:+.5f}  x weight {weight:+.4f}  = {weighted:+.5f}{mark}")
+    print("  (penalties must be <= 0 after their weight; task terms >= 0)")
+    results["every_term_has_the_sign_it_should"] = sign_ok
 
     # ── F. the observations are what they claim ──────────────────────────
     # Recomputed from world positions here, so the check does not simply

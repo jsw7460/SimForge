@@ -65,11 +65,12 @@ class LiftingCommandCfg(CommandTermCfg):
     object_yaw: tuple[float, float] = (-3.14159265, 3.14159265)
     place_object: bool = True
 
-    resampling_time_range: tuple[float, float] = (1e9, 1e9)
-    """Never resample mid-episode by default. Moving the goal AND the
-    object under a policy that is halfway through a reach is a different
-    task from the one it is being scored on; mjlab's own lift config
-    likewise resamples only on reset."""
+    resampling_time_range: tuple[float, float] = (8.0, 12.0)
+    """mjlab's own range: the goal and the object are re-drawn twice or
+    so within an episode. That is a deliberate part of the task rather
+    than an accident — it gives several attempts per episode, so a policy
+    that fumbles the first one still sees what a fresh layout looks
+    like."""
 
     def build(self, env: World) -> LiftingCommand:
         return LiftingCommand(env, self)
