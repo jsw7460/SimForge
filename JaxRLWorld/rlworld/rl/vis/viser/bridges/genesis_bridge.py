@@ -36,6 +36,7 @@ class GenesisBridge(SimulatorBridge):
         # ``entity.get_links_pos()`` / ``get_links_quat()`` per entity (not per link).
         self._entity_ranges: list[tuple] = []  # [(entity, start_body_id, n_links), ...]
         self._tracked_body_id: int | None = None
+        self._body_names: dict[int, str] = {}
 
         self._build_link_map()
 
@@ -83,18 +84,41 @@ class GenesisBridge(SimulatorBridge):
 
         return False
 
+    def _scene_name_of(self, entity) -> str | None:
+        """The name this entity is registered under in the scene config."""
+        for registry in (self._scene_manager.entities, self._scene_manager.rigid_objects):
+            for name, ent in registry.items():
+                if ent is entity:
+                    return name
+        return None
+
     def _build_link_map(self) -> None:
-        """Build a flat list of (entity, link, body_id) for all entities."""
+        """Build a flat list of (entity, link, body_id) for all entities.
+
+        Body names are qualified with the entity they belong to once the
+        scene holds more than one, because Genesis link names are bare:
+        two copies of a robot both call a link ``link_1``, and anything
+        keyed on the name — a picker, a log line — then cannot tell the
+        two machines apart. Newton namespaces its labels the same way,
+        and for the same reason. A single-entity scene keeps bare names.
+        """
         body_id = 0
+        entities = [
+            e for e in self._scene_manager.scene.entities if hasattr(e, "links") and not self._is_ground_entity(e)
+        ]
+        qualify = len(entities) > 1
         for entity in self._scene_manager.scene.entities:
             if not hasattr(entity, "links"):
                 continue
             # Skip ground plane — ViserScene adds its own checkerboard.
             if self._is_ground_entity(entity):
                 continue
+            scene_name = self._scene_name_of(entity)
+            prefix = f"{scene_name}/" if (qualify and scene_name) else ""
             start = body_id
             for link in entity.links:
                 self._link_map.append((entity, link, body_id))
+                self._body_names[body_id] = f"{prefix}{getattr(link, 'name', f'link_{body_id}')}"
                 # Track robot base.
                 name = getattr(link, "name", "")
                 if self._tracked_body_id is None and ("base" in name.lower() or "pelvis" in name.lower()):
@@ -146,13 +170,20 @@ class GenesisBridge(SimulatorBridge):
                 meshes.append(mesh)
 
             if meshes:
-                is_fixed = getattr(link, "is_fixed", False)
-                link_name = getattr(link, "name", f"link_{body_id}")
+                # NOT ``link.is_fixed``. ``is_fixed`` tells the viewer the
+                # group's vertices are already in world coordinates and need
+                # no pose — which is true of a terrain mesh and of nothing
+                # else. A welded link's vertices are in its own frame and it
+                # has a pose like any other body; marking it fixed parks it
+                # at the origin, so a bench-mounted arm and the bench itself
+                # sink into the ground while everything bolted to them
+                # appears to float. Only the terrain group below is fixed.
+                link_name = self._body_names[body_id]
                 mesh_groups.append(
                     BodyMeshGroup(
                         body_id=body_id,
                         body_name=link_name,
-                        is_fixed=is_fixed,
+                        is_fixed=False,
                         meshes=meshes,
                         # local_positions / local_quaternions intentionally
                         # omitted — baked into mesh.vertices above so
