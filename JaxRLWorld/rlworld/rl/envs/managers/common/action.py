@@ -177,17 +177,19 @@ class ActionManagerBase(BaseManager):
                     raise ValueError(f"ActionTermCfg for {term_name!r} has no class_type set — cannot instantiate.")
                 self._terms[term_name] = term_class(term_cfg, env=self.env, manager=self)
             self._has_action_terms = len(self._terms) > 0
-            # Sanity: total joint ids covered by all terms must equal
-            # the action dim (single-term case trivially passes; multi
-            # term requires the preset to cover every actuated joint
-            # with disjoint slices).
+            self._reject_explicit_actuators_off_the_driven_entity()
+            # Sanity: the buffers were allocated from a pre-instantiation
+            # estimate of each term's width, so the built terms have to
+            # add up to the same total. A mismatch means an estimate and
+            # its term disagree about which joints they cover — the
+            # policy output would then be sliced along the wrong
+            # boundaries and every term after the first would read
+            # someone else's actions.
             covered = sum(term.action_dim for term in self._terms.values())
             if covered != self._total_action_dim:
                 raise ValueError(
-                    f"ActionTerm joint coverage mismatch: terms cover "
-                    f"{covered} joints but action_dim is "
-                    f"{self._total_action_dim}. All actuated joints "
-                    f"must be covered exactly once by the term set."
+                    f"ActionTerm width mismatch: the built terms cover {covered} joints "
+                    f"but the action space was allocated for {self._total_action_dim}."
                 )
 
     # ------------------------------------------------------------------
@@ -222,9 +224,11 @@ class ActionManagerBase(BaseManager):
         1. Explicit ``num_actions`` field on the cfg (used by
            non-joint terms like ``PropellerThrustActionCfg`` where
            the action dim isn't derivable from joint names).
-        2. Joint-name regex match against the actuated-joint name
-           list (matches the JointAction-style flow at
-           :meth:`JointAction.__init__`). This must produce the same
+        2. Joint-name regex match against the joint list of the entity
+           the term names (matches the JointAction-style flow at
+           :meth:`JointAction.__init__`). Resolved against that entity,
+           not the manager's own, so a term driving a second robot is
+           sized by that robot's joints. This must produce the same
            count as ``len(term._joint_ids)`` post-instantiation,
            otherwise the buffer sizes will mismatch and the
            coverage sanity check below will trip.
@@ -234,8 +238,9 @@ class ActionManagerBase(BaseManager):
             return int(explicit)
         joint_names = getattr(term_cfg, "joint_names", None)
         if joint_names is not None:
+            entity_name = getattr(term_cfg, "asset_name", self.env.robot_entity_name)
             matched, _ = string_utils.resolve_matching_names(
-                joint_names, self._actuated_joint_names, preserve_order=True
+                joint_names, list(self.env.entity_indexing(entity_name).joint_names), preserve_order=True
             )
             return len(matched)
         raise ValueError(
@@ -253,20 +258,23 @@ class ActionManagerBase(BaseManager):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _apply_position(self, targets: torch.Tensor) -> None:
-        """Apply position targets to the simulator (uses simulator PD).
+    def _apply_position(self, targets: torch.Tensor, entity_name: str) -> None:
+        """Apply position targets to one entity (uses simulator PD).
 
         Args:
-            targets: Joint position targets, shape (num_envs, num_actuated).
+            targets: Joint position targets, shape ``(num_envs, n)`` where
+                ``n`` is that entity's joint count.
+            entity_name: Scene entity to write to.
         """
         ...
 
     @abstractmethod
-    def _apply_force(self, torques: torch.Tensor) -> None:
-        """Apply torques directly to simulator joints (bypasses simulator PD).
+    def _apply_force(self, torques: torch.Tensor, entity_name: str) -> None:
+        """Apply torques directly to one entity's joints (bypasses sim PD).
 
         Args:
-            torques: Joint torques, shape (num_envs, num_actuated).
+            torques: Joint torques, shape ``(num_envs, n)``.
+            entity_name: Scene entity to write to.
         """
         ...
 
@@ -505,6 +513,38 @@ class ActionManagerBase(BaseManager):
         """True if any non-implicit actuator is configured."""
         return self._has_explicit_actuators
 
+    def _reject_explicit_actuators_off_the_driven_entity(self) -> None:
+        """Refuse a term that drives another entity's explicit actuators.
+
+        The actuator models (``self._actuators``) are built for the
+        driven entity alone, and a flat list of them is public API that
+        DR terms, observations and several diags index directly. A term
+        pointing at a second robot that declares non-implicit actuators
+        would therefore be driven with the FIRST robot's actuator models
+        — plausible torques computed from the wrong motor. Say so rather
+        than produce them.
+
+        Entities driven through the simulator's own PD
+        (``ImplicitActuatorCfg``) are unaffected, which covers every
+        multi-robot scene built so far.
+        """
+        driven = self.env.robot_entity_name
+        entities = getattr(self.env.scene_manager.config, "entities", None) or {}
+        for term_name, term in self._terms.items():
+            name = term.entity_name
+            if name == driven:
+                continue
+            cfg = entities.get(name)
+            actuators = getattr(getattr(cfg, "articulation", None), "actuators", ())
+            explicit = [a for a in actuators if not isinstance(a, ImplicitActuatorCfg)]
+            if explicit:
+                raise NotImplementedError(
+                    f"Action term {term_name!r} drives entity {name!r}, which declares "
+                    f"{len(explicit)} explicit actuator group(s). Explicit actuator models are "
+                    f"currently built only for the driven entity ({driven!r}); "
+                    f"use ImplicitActuatorCfg on {name!r}, or drive it from the driven entity."
+                )
+
     def _build_actuators_from_entity(self) -> None:
         """Build per-group actuator models from the entity's ArticulationCfg.
 
@@ -597,13 +637,13 @@ class ActionManagerBase(BaseManager):
                 )
         raise ValueError(f"Unknown actuator config type: {type(cfg)}")
 
-    def _get_joint_pos(self) -> torch.Tensor:
-        """Get current joint positions via the RobotData protocol."""
-        return self.env.get_robot_data().joint_pos
+    def _get_joint_pos(self, entity_name: str | None = None) -> torch.Tensor:
+        """Current joint positions of one entity, via the RobotData protocol."""
+        return self.env.get_robot_data(entity_name or self.env.robot_entity_name).joint_pos
 
-    def _get_joint_vel(self) -> torch.Tensor:
-        """Get current joint velocities via the RobotData protocol."""
-        return self.env.get_robot_data().joint_vel
+    def _get_joint_vel(self, entity_name: str | None = None) -> torch.Tensor:
+        """Current joint velocities of one entity, via the RobotData protocol."""
+        return self.env.get_robot_data(entity_name or self.env.robot_entity_name).joint_vel
 
     # ------------------------------------------------------------------
     # Core methods
@@ -643,47 +683,56 @@ class ActionManagerBase(BaseManager):
 
         # Legacy non-term path: processed_actions is the full target.
         target = processed_actions
+        name = self.env.robot_entity_name
         if not self._has_explicit_actuators:
-            self._apply_position(target)
+            self._apply_position(target, name)
             return
-        self._apply_joint_target_full(target)
+        self._apply_joint_target_full(target, name)
 
     def _apply_joint_target_via_actuators(
         self,
         term_target: torch.Tensor,
         joint_ids: torch.Tensor,
+        entity_name: str | None = None,
     ) -> None:
         """Helper for :meth:`JointAction.apply_actions`.
 
-        Scatter the term's joint-position target into the full
-        action space and route through the actuator-compute path
-        (or the direct position path if no explicit actuators are
-        configured).
+        Scatter the term's joint-position target into ITS ENTITY's joint
+        space and route through the actuator-compute path (or the direct
+        position path if no explicit actuators are configured).
+
+        The buffer is sized by the entity's joint count, not by the
+        manager's ``total_action_dim``: with several terms the action
+        dim is the sum over terms, which is neither the width of any one
+        robot's joint space nor indexable by that robot's joint ids.
 
         Args:
             term_target: shape ``(num_envs, len(joint_ids))`` — target
                 position for the term's joint subset.
-            joint_ids: shape ``(len(joint_ids),)`` — indices into the
-                full actuated joint space.
+            joint_ids: shape ``(len(joint_ids),)`` — indices into
+                ``entity_name``'s joint space.
+            entity_name: entity being driven; defaults to the manager's own.
         """
+        name = entity_name or self.env.robot_entity_name
         full_target = torch.zeros(
-            (term_target.shape[0], self._total_action_dim),
+            (term_target.shape[0], len(self.env.entity_indexing(name).joint_names)),
             dtype=term_target.dtype,
             device=term_target.device,
         )
         full_target[:, joint_ids] = term_target
         if not self._has_explicit_actuators:
-            self._apply_position(full_target)
+            self._apply_position(full_target, name)
             return
-        self._apply_joint_target_full(full_target)
+        self._apply_joint_target_full(full_target, name)
 
-    def _apply_joint_target_full(self, target: torch.Tensor) -> None:
-        """Run actuator compute + sim force apply on a
-        full-action-dim joint position target. Internal helper used
-        by the legacy path and by :meth:`_apply_joint_target_via_actuators`.
+    def _apply_joint_target_full(self, target: torch.Tensor, entity_name: str | None = None) -> None:
+        """Run actuator compute + sim force apply on one entity's
+        joint position target. Internal helper used by the legacy path
+        and by :meth:`_apply_joint_target_via_actuators`.
         """
-        joint_pos = self._get_joint_pos()
-        joint_vel = self._get_joint_vel()
+        name = entity_name or self.env.robot_entity_name
+        joint_pos = self._get_joint_pos(name)
+        joint_vel = self._get_joint_vel(name)
         full_torques = torch.zeros_like(target)
         for actuator, joint_idx in self._actuators:
             target_subset = target[:, joint_idx]
@@ -692,12 +741,13 @@ class ActionManagerBase(BaseManager):
             torques = actuator.compute(target_subset, pos_subset, vel_subset)
             full_torques[:, joint_idx] = torques
         self._applied_torque = full_torques
-        self._apply_force(full_torques)
+        self._apply_force(full_torques, name)
 
     def _apply_joint_effort_via_indices(
         self,
         term_torques: torch.Tensor,
         joint_ids: torch.Tensor,
+        entity_name: str | None = None,
     ) -> None:
         """Apply a term's joint torques directly to the simulator.
 
@@ -719,14 +769,15 @@ class ActionManagerBase(BaseManager):
             joint_ids: shape ``(len(joint_ids),)`` — indices into the
                 full actuated joint space.
         """
+        name = entity_name or self.env.robot_entity_name
         full_torques = torch.zeros(
-            (term_torques.shape[0], self._total_action_dim),
+            (term_torques.shape[0], len(self.env.entity_indexing(name).joint_names)),
             dtype=term_torques.dtype,
             device=term_torques.device,
         )
         full_torques[:, joint_ids] = term_torques
         self._applied_torque = full_torques
-        self._apply_force(full_torques)
+        self._apply_force(full_torques, name)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
         """Process raw actions: dispatch to term system or legacy path.

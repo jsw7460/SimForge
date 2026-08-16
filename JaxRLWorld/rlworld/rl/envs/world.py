@@ -350,9 +350,19 @@ class World(ABC):
         rather than an equal copy, because ``RobotData`` column order has
         to *be* the action manager's order, not merely match it.
         """
-        act_manager = getattr(self, "act_manager", None)
-        if act_manager is not None and entity_name == self.robot_entity_name:
-            return act_manager.indexing
+        if entity_name == self.robot_entity_name:
+            act_manager = getattr(self, "act_manager", None)
+            if act_manager is not None:
+                return act_manager.indexing
+            # Called from inside the action manager's own constructor —
+            # its terms ask for this before ``env.act_manager`` is bound.
+            # Build fresh and do NOT cache: a cached copy would outlive
+            # construction and be handed out in place of the manager's,
+            # breaking the identity that RobotData column order relies on.
+            return self.scene_manager.build_articulation_indexing(
+                actuated_dof_names=self._actuated_dof_names_for(entity_name),
+                entity_name=entity_name,
+            )
 
         cached = self._entity_indexing_cache.get(entity_name)
         if cached is None:

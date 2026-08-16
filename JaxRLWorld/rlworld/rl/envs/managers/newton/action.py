@@ -38,7 +38,7 @@ class NewtonActionManager(ActionManagerBase):
     def __init__(self, env: World, config: NewtonActionManagerConfig):
         super().__init__(env, config)
 
-    def _apply_position(self, targets: torch.Tensor) -> None:
+    def _apply_position(self, targets: torch.Tensor, entity_name: str) -> None:
         """Apply position targets via Newton/Warp.
 
         Written **in place**, into a view of ``control.joint_target_q``
@@ -66,9 +66,8 @@ class NewtonActionManager(ActionManagerBase):
         # FREE joint) and is indexed by ``newton_q_indices``; under the
         # legacy DOF layout it follows ``joint_qd`` (6 slots for a FREE
         # joint) and is indexed by ``newton_qd_indices``.
-        write_indices = (
-            self._indexing.newton_q_indices if newton.use_coord_layout_targets else self._indexing.newton_qd_indices
-        )
+        indexing = self.env.entity_indexing(entity_name)
+        write_indices = indexing.newton_q_indices if newton.use_coord_layout_targets else indexing.newton_qd_indices
 
         dest = wp.to_torch(control.joint_target_q)
         if dest.numel() % num_worlds != 0:
@@ -78,7 +77,7 @@ class NewtonActionManager(ActionManagerBase):
             )
         dest.view(num_worlds, -1)[:, write_indices] = targets
 
-    def _apply_force(self, torques: torch.Tensor) -> None:
+    def _apply_force(self, torques: torch.Tensor, entity_name: str) -> None:
         """Apply torques directly via Newton/Warp.
 
         In place, for the same reason as :meth:`_apply_position`: the
@@ -96,10 +95,12 @@ class NewtonActionManager(ActionManagerBase):
                 f"world_count={num_worlds}; the per-world layout cannot be derived."
             )
         rows = dest.view(num_worlds, -1)
-        # A torque left over from the previous step would keep being applied,
-        # so this buffer does have to be cleared before the scatter.
-        rows.zero_()
-        rows[:, self._indexing.newton_qd_indices] = torques
+        # Write only this entity's slots. Zeroing the whole buffer first
+        # would erase the torque another entity's term wrote earlier in
+        # the same step. Nothing goes stale: the caller hands over a
+        # full-width buffer covering every one of this entity's actuated
+        # joints, zeros included, so each of them is rewritten every step.
+        rows[:, self.env.entity_indexing(entity_name).newton_qd_indices] = torques
 
     # -- Backward compat properties ------------------------------------------
 

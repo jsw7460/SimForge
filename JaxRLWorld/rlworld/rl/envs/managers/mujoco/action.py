@@ -32,13 +32,18 @@ class MujocoActionManager(ActionManagerBase):
         self._entity: Entity = env.scene_manager.robot
         super().__init__(env, config)
 
-    def _apply_position(self, targets):
-        encoder_bias = self._entity.data.encoder_bias[:, self._indexing.sim_indices]
-        target = targets - encoder_bias
-        self._entity.set_joint_position_target(target, joint_ids=self._indexing.sim_indices)
+    def _sim_indices(self, entity_name: str):
+        return self.env.entity_indexing(entity_name).sim_indices
 
-    def _apply_force(self, torques):
-        self._entity.set_joint_effort_target(torques, joint_ids=self._indexing.sim_indices)
+    def _apply_position(self, targets, entity_name):
+        entity = self.env.scene_manager.entities[entity_name]
+        sim_indices = self._sim_indices(entity_name)
+        encoder_bias = entity.data.encoder_bias[:, sim_indices]
+        entity.set_joint_position_target(targets - encoder_bias, joint_ids=sim_indices)
+
+    def _apply_force(self, torques, entity_name):
+        entity = self.env.scene_manager.entities[entity_name]
+        entity.set_joint_effort_target(torques, joint_ids=self._sim_indices(entity_name))
 
     # -- Backward compat --
     @property

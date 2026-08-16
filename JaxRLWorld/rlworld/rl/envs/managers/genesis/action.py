@@ -30,11 +30,13 @@ class ActionManager(ActionManagerBase):
         self._genesis_env = env
         super().__init__(env, config)
 
-    def _apply_position(self, targets):
-        self._genesis_env.robot.control_dofs_position(targets, self._indexing.sim_indices)
+    def _apply_position(self, targets, entity_name):
+        entity = self._genesis_env.scene_manager.entities[entity_name]
+        entity.control_dofs_position(targets, self.env.entity_indexing(entity_name).sim_indices)
 
-    def _apply_force(self, torques):
-        self._genesis_env.robot.control_dofs_force(torques, self._indexing.sim_indices)
+    def _apply_force(self, torques, entity_name):
+        entity = self._genesis_env.scene_manager.entities[entity_name]
+        entity.control_dofs_force(torques, self.env.entity_indexing(entity_name).sim_indices)
 
     @property
     def actuated_dof_ids(self):

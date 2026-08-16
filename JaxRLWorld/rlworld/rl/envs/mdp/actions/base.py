@@ -49,16 +49,19 @@ class ActionTermCfg:
 
     Attributes:
         class_type: Concrete ActionTerm subclass to instantiate.
-        joint_names: Regex patterns resolved against the robot's
-            actuated joint name list. The matched joints form this
-            term's joint subset. Default ``[".*"]`` = every actuated
-            joint.
+        asset_name: Scene entity this term drives. Each term names its
+            own, so one action space can span several robots — the
+            pattern IsaacLab's ``ActionTermCfg.asset_name`` sets.
+        joint_names: Regex patterns resolved against ``asset_name``'s
+            joint list. The matched joints form this term's subset.
+            Default ``[".*"]`` = every one of that entity's joints.
         clip: Optional ``(low, high)`` clip applied to the raw
             policy output before ``process_actions`` uses it.
             ``None`` = no clipping (policy output is passed through).
     """
 
     class_type: type[ActionTerm] | None = None
+    asset_name: str = "robot"
     joint_names: list[str] = field(default_factory=lambda: [".*"])
     clip: tuple[float, float] | None = None
 
@@ -96,6 +99,13 @@ class ActionTerm(ABC):
         self._env = env
         self._manager = manager
 
+        # The entity this term drives, and its joint indexing. Held per
+        # term rather than taken from the manager so several terms can
+        # drive different robots through one action space — IsaacLab's
+        # ``ActionTerm`` binds ``self._asset`` the same way.
+        self._entity_name: str = cfg.asset_name
+        self._indexing = env.entity_indexing(cfg.asset_name)
+
         # Subclasses must populate these in their own __init__ after
         # calling super().__init__.
         self._joint_ids: torch.Tensor = torch.empty(0, dtype=torch.long)
@@ -117,8 +127,18 @@ class ActionTerm(ABC):
         return self._manager
 
     @property
+    def entity_name(self) -> str:
+        """Scene entity this term drives."""
+        return self._entity_name
+
+    @property
+    def indexing(self):
+        """Joint indexing of the entity this term drives."""
+        return self._indexing
+
+    @property
     def joint_ids(self) -> torch.Tensor:
-        """Indices (into the manager's action_dim space) of this term's joints."""
+        """Indices of this term's joints within ITS OWN entity's joint space."""
         return self._joint_ids
 
     @property

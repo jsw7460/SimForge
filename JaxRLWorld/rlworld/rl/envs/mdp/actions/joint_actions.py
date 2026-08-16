@@ -83,13 +83,16 @@ class JointAction(ActionTerm):
     ) -> None:
         super().__init__(cfg, env, manager)
 
-        # Resolve joint_names → indices into manager.actuated_joint_names.
-        all_names = manager.actuated_joint_names
+        # Resolve joint_names against THIS TERM'S entity, not the
+        # manager's single joint list: with two robots in the scene the
+        # manager's list belongs to one of them, and a term driving the
+        # other would silently land on the first robot's joints.
+        all_names = list(self.indexing.joint_names)
         matched_indices, _ = string_utils.resolve_matching_names(cfg.joint_names, all_names, preserve_order=True)
         if not matched_indices:
             raise ValueError(
                 f"ActionTerm {type(self).__name__} got joint_names={cfg.joint_names!r} "
-                f"but no actuated joints matched. Available: {all_names}"
+                f"but no joints of entity {cfg.asset_name!r} matched. Available: {all_names}"
             )
         self._joint_ids = torch.tensor(matched_indices, device=env.device, dtype=torch.long)
         self._joint_names_local = [all_names[i] for i in matched_indices]
@@ -155,7 +158,7 @@ class JointAction(ActionTerm):
         dispatch logic lives here once.
         """
         target = self.compute_target_positions()
-        self._manager._apply_joint_target_via_actuators(target, self._joint_ids)
+        self._manager._apply_joint_target_via_actuators(target, self._joint_ids, self._entity_name)
 
 
 # ── Absolute ────────────────────────────────────────────────────────
@@ -194,13 +197,13 @@ class JointPositionAction(JointAction):
     ) -> None:
         super().__init__(cfg, env, manager)
         if cfg.use_default_offset:
-            # Override the per-joint offset tensor with the robot's
-            # default joint angles. Manager exposes a pre-built
-            # ``offset`` tensor of shape ``(num_envs, total_action_dim)``
-            # on its legacy path; we slice out this term's joints
-            # from env 0 (all envs share the same default pose).
-            legacy_offset = manager.offset[0]
-            self._offset = legacy_offset[self._joint_ids].clone()
+            # Override the per-joint offset with THIS ENTITY's declared
+            # home pose, in that entity's own joint order. Slicing the
+            # manager's ``offset`` instead would index the driven
+            # robot's action space, which is neither this entity's joint
+            # order nor, on the term path, even the same length.
+            home = env._resolve_default_joint_pos(self._entity_name)
+            self._offset = home[self._joint_ids].clone()
 
     def compute_target_positions(self) -> torch.Tensor:
         # processed_actions is already the absolute target (scale+offset).
@@ -247,7 +250,7 @@ class RelativeJointPositionAction(JointAction):
             self._offset = torch.zeros_like(self._offset)
 
     def compute_target_positions(self) -> torch.Tensor:
-        current_pos = self._manager._get_joint_pos()[:, self._joint_ids]
+        current_pos = self._manager._get_joint_pos(self._entity_name)[:, self._joint_ids]
         return current_pos + self._processed_actions
 
 
@@ -292,7 +295,7 @@ class SettleRelativeJointPositionAction(RelativeJointPositionAction):
     __name__ = "SettleRelativeJointPositionAction"
 
     def compute_target_positions(self) -> torch.Tensor:
-        current_pos = self._manager._get_joint_pos()[:, self._joint_ids]
+        current_pos = self._manager._get_joint_pos(self._entity_name)[:, self._joint_ids]
         target = current_pos + self._processed_actions
 
         settle_steps = self._cfg.settle_steps
@@ -469,4 +472,4 @@ class JointEffortAction(JointAction):
         torques = self._processed_actions
         if self._effort_limit is not None:
             torques = torch.clamp(torques, min=-self._effort_limit, max=self._effort_limit)
-        self._manager._apply_joint_effort_via_indices(torques, self._joint_ids)
+        self._manager._apply_joint_effort_via_indices(torques, self._joint_ids, self._entity_name)
