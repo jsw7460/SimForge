@@ -168,7 +168,20 @@ class ActionManagerBase(BaseManager):
         # them. Otherwise the legacy monolithic path is used (same as
         # before). See ``rlworld/rl/envs/mdp/actions/`` for the term
         # definitions.
+        # Persistent per-entity joint command buffers, keyed by entity
+        # name. IsaacLab's equivalent is ``ArticulationData.joint_pos_target``
+        # / ``joint_effort_target``: a term writes only the columns it owns
+        # and the buffer is flushed to the simulator once per step. A fresh
+        # zero buffer per term would instead command every joint the term
+        # does NOT own to zero, so an arm term and a gripper term on the
+        # same robot would each erase the other.
+        self._entity_joint_target: dict[str, torch.Tensor] = {}
+        self._entity_joint_effort: dict[str, torch.Tensor] = {}
+        self._pending_target_entities: list[str] = []
+        self._pending_effort_entities: list[str] = []
+
         self._terms: dict[str, Any] = {}
+        self._term_action_slices: dict[str, slice] = {}
         self._has_action_terms: bool = False
         if config.action_terms:
             for term_name, term_cfg in config.action_terms.items():
@@ -185,6 +198,16 @@ class ActionManagerBase(BaseManager):
             # policy output would then be sliced along the wrong
             # boundaries and every term after the first would read
             # someone else's actions.
+            # Each term owns a contiguous slice of the policy output, laid
+            # out in declaration order. Indexing by the term's JOINT ids
+            # instead — which coincides with the slice only while a single
+            # term covers joints 0..n-1 from index 0 — makes a second term
+            # read the first term's actions.
+            offset = 0
+            for term_name, term in self._terms.items():
+                self._term_action_slices[term_name] = slice(offset, offset + term.action_dim)
+                offset += term.action_dim
+
             covered = sum(term.action_dim for term in self._terms.values())
             if covered != self._total_action_dim:
                 raise ValueError(
@@ -295,7 +318,7 @@ class ActionManagerBase(BaseManager):
         auto modes. Only valid on the legacy (non-term) action path where
         every action dimension is an actuated joint.
         """
-        joint_lower, joint_upper = self._get_joint_limits()
+        joint_lower, _ = self._get_joint_limits()
         if joint_lower.shape[0] != self._total_action_dim:
             raise ValueError(
                 f"joint_limit auto mode requires every action dim to be an "
@@ -303,15 +326,25 @@ class ActionManagerBase(BaseManager):
                 f"total_action_dim={self._total_action_dim} (term-based "
                 f"action configs are not supported)."
             )
+        return self.soft_joint_limits_of(self.env.robot_entity_name)
+
+    def soft_joint_limits_of(self, entity_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """The same, for any articulation in the scene.
+
+        Split out from :meth:`_soft_joint_limits` because a reset acting
+        on a second robot needs that robot's limits, in its own joint
+        width — while the auto-scale modes above additionally require
+        the width to be the action dim, which is a statement about the
+        driven robot only.
+        """
+        indexing = self.env.entity_indexing(entity_name)
+        joint_lower, joint_upper = indexing.joint_limits_lower, indexing.joint_limits_upper
         mid = (joint_upper + joint_lower) / 2.0
         soft_half = (joint_upper - joint_lower) / 2.0 * self.config.joint_limit_soft_factor
         if (soft_half <= 0).any():
-            bad = [
-                f"{self._actuated_joint_names[i]} (half={soft_half[i].item():.4f})"
-                for i in range(len(soft_half))
-                if soft_half[i] <= 0
-            ]
-            raise ValueError(f"joint_limit auto mode: non-positive soft half-range for joints: {bad}")
+            names = list(indexing.joint_names)
+            bad = [f"{names[i]} (half={soft_half[i].item():.4f})" for i in range(len(soft_half)) if soft_half[i] <= 0]
+            raise ValueError(f"{entity_name!r}: non-positive soft half-range for joints: {bad}")
         return mid, soft_half
 
     def _initialize_scale(self) -> torch.Tensor:
@@ -419,6 +452,20 @@ class ActionManagerBase(BaseManager):
     def num_actions(self) -> int:
         """Alias for total_action_dim."""
         return self._total_action_dim
+
+    @property
+    def terms(self) -> dict[str, Any]:
+        """The action terms, in declaration order."""
+        return self._terms
+
+    @property
+    def term_action_slices(self) -> dict[str, slice]:
+        """Which columns of the policy output each term owns.
+
+        Declaration order, contiguous. This is the map a caller needs to
+        hand one robot's slice to one policy and another's to another.
+        """
+        return self._term_action_slices
 
     @property
     def offset(self) -> torch.Tensor:
@@ -679,6 +726,7 @@ class ActionManagerBase(BaseManager):
         if self._has_action_terms:
             for term in self._terms.values():
                 term.apply_actions()
+            self._flush_entity_commands()
             return
 
         # Legacy non-term path: processed_actions is the full target.
@@ -714,16 +762,9 @@ class ActionManagerBase(BaseManager):
             entity_name: entity being driven; defaults to the manager's own.
         """
         name = entity_name or self.env.robot_entity_name
-        full_target = torch.zeros(
-            (term_target.shape[0], len(self.env.entity_indexing(name).joint_names)),
-            dtype=term_target.dtype,
-            device=term_target.device,
-        )
-        full_target[:, joint_ids] = term_target
-        if not self._has_explicit_actuators:
-            self._apply_position(full_target, name)
-            return
-        self._apply_joint_target_full(full_target, name)
+        self._entity_target_buffer(name)[:, joint_ids] = term_target
+        if name not in self._pending_target_entities:
+            self._pending_target_entities.append(name)
 
     def _apply_joint_target_full(self, target: torch.Tensor, entity_name: str | None = None) -> None:
         """Run actuator compute + sim force apply on one entity's
@@ -740,8 +781,66 @@ class ActionManagerBase(BaseManager):
             vel_subset = joint_vel[:, joint_idx]
             torques = actuator.compute(target_subset, pos_subset, vel_subset)
             full_torques[:, joint_idx] = torques
-        self._applied_torque = full_torques
+        # ``applied_torque`` is the policy-facing torque of the driven
+        # robot, shaped to its action dim; a second entity's torque must
+        # not overwrite it.
+        if name == self.env.robot_entity_name:
+            self._applied_torque = full_torques
         self._apply_force(full_torques, name)
+
+    def _entity_target_buffer(self, entity_name: str) -> torch.Tensor:
+        """One entity's persistent joint-position-target buffer.
+
+        Created on first use and held at the entity's default joint
+        positions, so a joint that no term drives holds its home pose
+        rather than being commanded to zero.
+        """
+        buf = self._entity_joint_target.get(entity_name)
+        if buf is None:
+            default = self.env._resolve_default_joint_pos(entity_name)
+            buf = default.to(self.device).unsqueeze(0).repeat(self.env.num_envs, 1)
+            self._entity_joint_target[entity_name] = buf
+        return buf
+
+    def _entity_effort_buffer(self, entity_name: str) -> torch.Tensor:
+        """One entity's persistent joint-effort buffer.
+
+        Zero-filled, and zeroed again after every flush: a torque is a
+        per-step quantity, so a term that stops writing a joint must
+        stop applying torque to it — unlike a position target, which is
+        a hold.
+        """
+        buf = self._entity_joint_effort.get(entity_name)
+        if buf is None:
+            buf = torch.zeros(
+                (self.env.num_envs, len(self.env.entity_indexing(entity_name).joint_names)),
+                device=self.device,
+            )
+            self._entity_joint_effort[entity_name] = buf
+        return buf
+
+    def _flush_entity_commands(self) -> None:
+        """Write each entity's accumulated joint command to the simulator.
+
+        Once per entity per step, after every term has contributed. The
+        per-term alternative would make the last term to run decide the
+        whole entity's command.
+        """
+        for name in self._pending_target_entities:
+            target = self._entity_joint_target[name]
+            if self._has_explicit_actuators:
+                self._apply_joint_target_full(target, name)
+            else:
+                self._apply_position(target, name)
+        self._pending_target_entities.clear()
+
+        for name in self._pending_effort_entities:
+            effort = self._entity_joint_effort[name]
+            if name == self.env.robot_entity_name:
+                self._applied_torque = effort.clone()
+            self._apply_force(effort, name)
+            effort.zero_()
+        self._pending_effort_entities.clear()
 
     def _apply_joint_effort_via_indices(
         self,
@@ -770,14 +869,9 @@ class ActionManagerBase(BaseManager):
                 full actuated joint space.
         """
         name = entity_name or self.env.robot_entity_name
-        full_torques = torch.zeros(
-            (term_torques.shape[0], len(self.env.entity_indexing(name).joint_names)),
-            dtype=term_torques.dtype,
-            device=term_torques.device,
-        )
-        full_torques[:, joint_ids] = term_torques
-        self._applied_torque = full_torques
-        self._apply_force(full_torques, name)
+        self._entity_effort_buffer(name)[:, joint_ids] = term_torques
+        if name not in self._pending_effort_entities:
+            self._pending_effort_entities.append(name)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
         """Process raw actions: dispatch to term system or legacy path.
@@ -785,7 +879,7 @@ class ActionManagerBase(BaseManager):
         Two code paths:
 
         1. **Term-based path** (``config.action_terms`` non-empty):
-           the raw action is sliced by each term's ``joint_ids`` and
+           the raw action is sliced by each term's action slice and
            each term's ``process_actions`` is called. The per-term
            processed outputs are scattered back into a full-action-dim
            tensor and stored in ``_processed_action_history[0]``.
@@ -809,10 +903,10 @@ class ActionManagerBase(BaseManager):
 
         if self._has_action_terms:
             full_processed = torch.zeros_like(actions)
-            for term in self._terms.values():
-                slice_actions = actions[:, term.joint_ids]
-                term.process_actions(slice_actions)
-                full_processed[:, term.joint_ids] = term.processed_actions
+            for term_name, term in self._terms.items():
+                term_slice = self._term_action_slices[term_name]
+                term.process_actions(actions[:, term_slice])
+                full_processed[:, term_slice] = term.processed_actions
             self._processed_action_history[0] = full_processed
             return full_processed
 

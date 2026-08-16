@@ -106,6 +106,11 @@ class JointAction(ActionTerm):
         # Resolve offset dict → per-joint tensor (n,).
         self._offset = self._resolve_float_field(cfg.offset, default=0.0)
 
+    @property
+    def joint_names(self) -> list[str]:
+        """Names of this term's joints, in the order it drives them."""
+        return list(self._joint_names_local)
+
     def _resolve_float_field(
         self,
         value: float | dict[str, float],
