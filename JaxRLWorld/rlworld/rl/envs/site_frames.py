@@ -39,7 +39,7 @@ from pathlib import Path
 import torch
 from torch import Tensor
 
-from rlworld.rl.utils.quat_utils import quat_rotate_wxyz
+from rlworld.rl.utils.quat_utils import quat_mul_wxyz, quat_rotate_wxyz
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,23 @@ def site_pos_w(body_pos_w: Tensor, body_quat_w: Tensor, local_pos: Tensor) -> Te
     """
     offset_w = quat_rotate_wxyz(body_quat_w, local_pos.expand_as(body_pos_w))
     return body_pos_w + offset_w
+
+
+def site_quat_w(body_quat_w: Tensor, local_quat: Tensor) -> Tensor:
+    """World orientations of sites riding on the given bodies.
+
+    A site is a frame, not a point: the tool axis a task aims along, and
+    the frame an end-effector velocity is expressed in, both live in this
+    rotation.
+
+    Args:
+        body_quat_w: ``(num_envs, n, 4)`` parent orientations, wxyz.
+        local_quat: ``(n, 4)`` site rotations in each parent's frame, wxyz.
+
+    Returns:
+        ``(num_envs, n, 4)`` wxyz.
+    """
+    return quat_mul_wxyz(body_quat_w, local_quat.expand_as(body_quat_w))
 
 
 def site_lin_vel_w(
@@ -258,6 +275,15 @@ class SiteReaderMixin:
         )
         return body_rows, local
 
+    def _site_local_quats(self, site_ids: Tensor | list[int]) -> Tensor:
+        """Site rotations relative to their parents, for the given ids."""
+        ids = site_ids.tolist() if isinstance(site_ids, Tensor) else list(site_ids)
+        return torch.tensor(
+            [self._site_frames[int(i)].local_quat_wxyz for i in ids],
+            device=self.body_quat_w_all.device,
+            dtype=self.body_quat_w_all.dtype,
+        )
+
     # ── Reads ────────────────────────────────────────────────────────
 
     def site_pos_w_by_ids(self, site_ids: Tensor) -> Tensor:
@@ -278,6 +304,15 @@ class SiteReaderMixin:
             self.body_quat_w_all[:, body_rows],
             local,
         )
+
+    def site_quat_w_by_ids(self, site_ids: Tensor) -> Tensor:
+        """World orientations of the sites at ``site_ids``. ``(num_envs, n, 4)`` wxyz."""
+        body_rows, _ = self._site_body_rows(site_ids)
+        return site_quat_w(self.body_quat_w_all[:, body_rows], self._site_local_quats(site_ids))
+
+    def site_quat_w(self, names: list[str]) -> Tensor:
+        """World orientations of the named sites, ordered by ``names``."""
+        return self.site_quat_w_by_ids([self.find_site_index(n) for n in names])
 
     def site_pos_w(self, names: list[str]) -> Tensor:
         """World positions of the named sites, ordered by ``names``."""
