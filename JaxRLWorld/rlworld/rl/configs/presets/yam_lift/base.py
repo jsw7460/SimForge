@@ -22,6 +22,7 @@ from rlworld.rl.configs.common_config_classes import (
     RewardConfig,
     TerminationsConfig,
 )
+from rlworld.rl.configs.curriculums import CurriculumManagerConfig, CurriculumTermConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets.yam_arm.base import CUBE_HALF, TABLE_TOP_Z, YamArmConfig
@@ -30,6 +31,7 @@ from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from rlworld.rl.configs.terminations import TerminationResult
 from rlworld.rl.configs.terminations.termination_term_config import TerminationTermConfig
 from rlworld.rl.envs.mdp.commands.lifting import LiftingCommandCfg
+from rlworld.rl.envs.mdp.curriculums import reward_curriculum
 from rlworld.rl.envs.mdp.observations.common import manipulation as manip_obs
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     dof_pos,
@@ -39,6 +41,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
 from rlworld.rl.envs.mdp.rewards.common import manipulation as manip_rew
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import raw_action_rate_l2
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed
+from rlworld.rl.envs.mdp.terminations.common.terminations import illegal_contact
 
 CUBE = "cube"
 GRASP_SITE = "grasp_site"
@@ -51,6 +54,17 @@ DROPPED_Z = TABLE_TOP_Z - 0.05
 on its way to the floor. Not the floor itself: waiting for it to land
 spends the rest of the episode rewarding an arm that hovers over
 nothing."""
+
+ARM_TABLE_CONTACT = "arm_table_contact"
+"""Contact group name for the arm against its own work surface."""
+
+TABLE_SLAM_N = 20.0
+"""N — above this the arm is driving into the table rather than working
+on it. Chosen against two measured numbers: the arm at rest registers
+0 N, and pressing it down registers 158 N on Newton and far more on
+mjlab, while the cube it manipulates weighs 0.5 N. This is the threshold
+most likely to need adjusting once a policy is actually working near the
+surface."""
 
 _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
     "newton": "YamLift_Newton",
@@ -97,8 +111,38 @@ class YamLiftConfig(YamArmConfig):
     w_joint_vel: float = -0.001
     w_dropped: float = -5.0
 
+    joint_vel_curriculum: tuple[tuple[int, float], ...] = (
+        (0, -0.01),
+        (500 * 24, -0.1),
+        (1000 * 24, -1.0),
+    )
+    """Steps and weights for the joint-speed penalty, from mjlab's own
+    lift config. It grows a hundredfold across training on purpose: at
+    the final weight from the start the arm barely moves and learns
+    nothing, and at the starting weight forever it stays violent."""
+
     def _sim_builders(self):
         return _get_sim_builders(self.sim_type)
+
+    def _build_curriculum_config(self) -> CurriculumManagerConfig:
+        """Ramp the joint-speed penalty, as mjlab does.
+
+        Ported rather than dropped: mjlab put a hundredfold ramp on this
+        one term, which is a statement that a fixed weight does not work
+        for this task at either end.
+        """
+        stages = [{"step": step, "weight": weight} for step, weight in self.joint_vel_curriculum]
+
+        @dataclass
+        class _CurriculumCfg(CurriculumManagerConfig):
+            joint_vel_weight: CurriculumTermConfig = field(
+                default_factory=lambda: CurriculumTermConfig(
+                    func=reward_curriculum,
+                    params={"reward_name": "joint_vel", "stages": stages},
+                )
+            )
+
+        return _CurriculumCfg()
 
     # ── Task ─────────────────────────────────────────────────────────
 
@@ -229,6 +273,14 @@ class YamLiftConfig(YamArmConfig):
             cube_dropped = TerminationTermConfig(
                 func=_cube_below,
                 params={"object_name": CUBE, "min_height": DROPPED_Z},
+            )
+            # mjlab ends an episode when the end effector drives into the
+            # ground. The table is this scene's ground: without this, a
+            # policy can learn to reach the cube THROUGH the surface it
+            # is standing on, which no real arm survives.
+            table_slam = TerminationTermConfig(
+                func=illegal_contact,
+                params={"contact_group": ARM_TABLE_CONTACT, "force_threshold": TABLE_SLAM_N},
             )
 
         del cfg

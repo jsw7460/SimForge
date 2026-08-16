@@ -50,6 +50,7 @@ from rlworld.rl.configs.common_config_classes import (
     RunnerConfig,
     StdType,
 )
+from rlworld.rl.configs.curriculums import CurriculumManagerConfig
 from rlworld.rl.configs.events import EventTermConfig
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
@@ -184,6 +185,7 @@ class YamArmConfig:
             action=builders.build_action(self),
             reward=builders.build_reward(self),
             command=self._build_command_config(),
+            curriculum=self._build_curriculum_config(),
             event=self._build_event_config(),
             algorithm=self._build_algorithm_config(),
             nn=self._build_nn_config(),
@@ -251,6 +253,11 @@ class YamArmConfig:
     def _build_command_config(self) -> CommandConfig:
         """No command: the arm has no task-level target yet."""
         return CommandConfig(terms={})
+
+    def _build_curriculum_config(self) -> CurriculumManagerConfig:
+        """No curriculum: nothing here is being learned. A task built on
+        this preset overrides it."""
+        return CurriculumManagerConfig()
 
     def _build_event_config(self) -> EventConfig:
         """Place the arm, then randomise its joints slightly.
