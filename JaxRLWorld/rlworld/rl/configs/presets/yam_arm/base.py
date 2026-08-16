@@ -163,8 +163,17 @@ class YamArmConfig:
 
     # ── Build entry point ─────────────────────────────────────────────
 
+    def _sim_builders(self):
+        """The builder module this config's simulator uses.
+
+        A method rather than a direct call so a preset that extends this
+        one can point at its own builders while inheriting every
+        sim-agnostic method below.
+        """
+        return _get_sim_builders(self.sim_type)
+
     def build(self) -> ConfigsForRun:
-        builders = _get_sim_builders(self.sim_type)
+        builders = self._sim_builders()
         timing = _SIM_TIMINGS[self.sim_type]
 
         kwargs: Dict[str, Any] = dict(
@@ -219,7 +228,7 @@ class YamArmConfig:
         ``projected_gravity`` / ``base_height`` constant, so including
         them would widen the observation without adding information.
         """
-        builders = _get_sim_builders(self.sim_type)
+        builders = self._sim_builders()
         ObsCfgClass = builders.OBSERVATION_CFG_CLS
 
         @dataclass
@@ -258,7 +267,7 @@ class YamArmConfig:
         ``reset_joints_by_offset`` starts from the action manager's
         offset (the home pose) and clamps to the joint limits.
         """
-        builders = _get_sim_builders(self.sim_type)
+        builders = self._sim_builders()
 
         def _place(name: str, pos: tuple[float, float, float]) -> EventTermConfig:
             return EventTermConfig(
