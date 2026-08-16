@@ -18,8 +18,8 @@ Newton's native xyzw before writing.
 
 **Actuated-only values.** ``set_dof_positions`` / ``set_dof_velocities``
 accept tensors of shape ``(N, num_actuated)`` and write them to the
-correct generalized-coordinate indices via ``actuated_q_indices`` /
-``actuated_qd_indices``.
+correct generalized-coordinate indices, taken from the indexing of the
+entity this writer belongs to.
 
 **eval_fk.** Must be called after joint/root writes to recompute
 body transforms (``body_q``) from the updated ``joint_q``.
@@ -93,13 +93,19 @@ class NewtonRobotStateWriter:
     ``state.joint_qd`` for maximum write performance.
     """
 
-    def __init__(self, env: NewtonEnv, view: ArticulationView) -> None:
+    def __init__(self, env: NewtonEnv, view: ArticulationView, entity_name: str) -> None:
         self._env = env
         self._view = view
+        self._entity_name = entity_name
 
-        # Actuated joint index mappings
-        self._q_indices = env.act_manager.actuated_q_indices
-        self._qd_indices = env.act_manager.actuated_qd_indices
+        # Joint index mappings of THIS entity. Reading them off the action
+        # manager — which owns the driven robot's — sends every other
+        # entity's joint write into the driven robot's coordinates: the
+        # values land on a real articulation, so nothing raises, and the
+        # entity the write was meant for simply never changes.
+        indexing = env.entity_indexing(entity_name)
+        self._q_indices = indexing.newton_q_indices
+        self._qd_indices = indexing.newton_qd_indices
 
         # Zero-copy torch views of the warp state arrays.
         # These share GPU memory — torch writes update warp directly.
