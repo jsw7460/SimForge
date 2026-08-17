@@ -136,6 +136,24 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
         robot_cfg=r,
         solver_cfg=SolverMuJoCoCfg(
             cone="pyramidal",
+            # Paired with the cone, not left at the default. SolverMuJoCoCfg
+            # defaults to 100 because that is Newton's canonical humanoid
+            # recipe — and that recipe uses an ELLIPTIC cone. Taking the
+            # pyramidal half of the fast recipe while leaving impratio on the
+            # stiff one gives a combination nobody chose: friction constraints
+            # a hundred times stiffer than normal ones, solved with fewer
+            # iterations than either recipe asks for.
+            #
+            # It is also the only place the three backends disagree on this
+            # knob. MuJoCo's default is 1, mjlab holds it at 1 (it overrides
+            # the value go2's own XML declares), Genesis leaves it unset, and
+            # K1's Newton preset moved to 1 deliberately. Only g1 ran at 100,
+            # and only Newton NaN'd — mid-training, one environment in 8192,
+            # after a single substep took a joint from 6 to 64 rad/s and the
+            # whole 29-DOF state went non-finite two substeps later while the
+            # velocities were already coming back down. That is a constraint
+            # solve failing to condition, not a joint diverging.
+            impratio=1.0,
             iterations=50,
             ls_iterations=50,
             ccd_iterations=50,
