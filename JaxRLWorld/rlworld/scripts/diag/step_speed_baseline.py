@@ -19,6 +19,12 @@ or with a solver budget the presets do not carry, to find out whether the
 budget is what a cross-backend gap is made of:
 
     python -m rlworld.scripts.diag.step_speed_baseline --preset yam_lift --iterations 10 --ls-iterations 20
+
+Episode ends are spread out by default, so the timed loop pays for the
+terminations and resets a training loop pays for. Without that the numbers
+flatter any preset whose episodes outlast the measurement: go2's are 1000
+steps and this runs 200, which read 13.0 ms against the 17.7 the trainer
+sees. ``--no-stagger`` restores the old behaviour.
 """
 
 from __future__ import annotations
@@ -158,6 +164,7 @@ def run_single(
     iterations: int | None = None,
     ls_iterations: int | None = None,
     rigid_options: list[str] | None = None,
+    stagger: bool = True,
 ) -> dict:
     config = _PRESETS[preset](sim_type=sim, num_envs=num_envs)
     cfgs = config.build()
@@ -177,6 +184,18 @@ def run_single(
         )
 
     env.reset()
+
+    # Spread the episode ends out, as ``learn(init_at_random_ep_len=)`` does.
+    # Without it this measures only the cheap case: straight after a reset
+    # every environment is the same age, so nothing terminates for a whole
+    # episode and the step never pays for a terminal observation, a reset or
+    # a post-reset forward. A preset with 20 s episodes at 50 Hz needs 1000
+    # steps before its first timeout, and this loop runs 200 — so go2 read
+    # 13.0 ms here against 17.7 in the loop training actually runs.
+    if stagger:
+        env.termination_manager.episode_length_buf = torch.randint_like(
+            env.episode_length_buf, high=int(env.max_episode_length)
+        )
 
     n_act = env.act_manager.num_actions
     torch.manual_seed(0)
@@ -222,7 +241,11 @@ def run_single(
     # The LIVE budget, so the header cannot claim a setting the solver
     # is not running.
     budget = f"{live_iterations}/{live_ls_iterations}"
-    print(f"STEP SPEED  [preset={preset}  sim={sim}  num_envs={num_envs}  actions={n_act}  solver={budget}]")
+    episodes = "staggered" if stagger else "all fresh"
+    print(
+        f"STEP SPEED  [preset={preset}  sim={sim}  num_envs={num_envs}  actions={n_act}  "
+        f"solver={budget}  episodes={episodes}]"
+    )
     if applied_rigid:
         print(f"  rigid_options overridden: {applied_rigid}")
     print("=" * 78)
@@ -242,6 +265,7 @@ def run_all(
     iterations: int | None,
     ls_iterations: int | None,
     rigid_options: list[str],
+    stagger: bool,
 ) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="step_speed_"))
     out: dict[str, dict] = {}
@@ -272,6 +296,8 @@ def run_all(
             cmd += ["--iterations", str(iterations), "--ls-iterations", str(ls_iterations)]
         for override in rigid_options:
             cmd += ["--rigid-option", override]
+        if not stagger:
+            cmd += ["--no-stagger"]
         print()
         print("#" * 78)
         print(f"# $ {' '.join(cmd)}")
@@ -318,6 +344,11 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=50)
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--resets", type=int, default=20)
+    ap.add_argument(
+        "--no-stagger",
+        action="store_true",
+        help="Start every episode together, so the timed loop never resets.",
+    )
     ap.add_argument("--iterations", type=int, default=None, help="Override the solver iteration budget.")
     ap.add_argument("--ls-iterations", type=int, default=None, help="Override the line-search budget.")
     ap.add_argument(
@@ -339,6 +370,7 @@ def main() -> int:
             args.iterations,
             args.ls_iterations,
             args.rigid_option,
+            not args.no_stagger,
         )
 
     result = run_single(
@@ -351,6 +383,7 @@ def main() -> int:
         args.iterations,
         args.ls_iterations,
         args.rigid_option,
+        not args.no_stagger,
     )
     if args.result_json:
         Path(args.result_json).write_text(json.dumps(result))
