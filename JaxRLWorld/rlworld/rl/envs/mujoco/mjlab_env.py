@@ -20,7 +20,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
 )
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.managers.registry import ManagerRegistry
-from rlworld.rl.envs.site_frames import resolve_site_ids
+from rlworld.rl.envs.site_frames import resolve_sites
 from rlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import set_seed
@@ -175,6 +175,12 @@ class MujocoEnv(World):
                 return None
             return list(attr_value)
 
+        # One resolution, both halves. See ``resolve_sites``: taking the
+        # names from the backend's resolver instead orders them by its own
+        # table, and the consumers that pair ids with names then read the
+        # wrong column.
+        site_ids, site_names = resolve_sites(self, selector.name, selector.site_names)
+
         return ResolvedEntity(
             source_selector=selector,
             name=selector.name,
@@ -182,12 +188,12 @@ class MujocoEnv(World):
             joint_ids_native=_to_tensor(mjlab_cfg.joint_ids, selector.joint_names),
             body_ids=_to_tensor(mjlab_cfg.body_ids, selector.body_names),
             geom_ids=_to_tensor(mjlab_cfg.geom_ids, selector.geom_names),
-            site_ids=resolve_site_ids(self, selector.name, selector.site_names),
+            site_ids=site_ids,
             actuator_ids=_to_tensor(mjlab_cfg.actuator_ids, selector.actuator_names),
             joint_names=joint_names_resolved if selector.joint_names is not None else None,
             body_names=_names(mjlab_cfg.body_names, selector.body_names),
             geom_names=_names(mjlab_cfg.geom_names, selector.geom_names),
-            site_names=_names(mjlab_cfg.site_names, selector.site_names),
+            site_names=site_names,
             actuator_names=_names(mjlab_cfg.actuator_names, selector.actuator_names),
         )
 

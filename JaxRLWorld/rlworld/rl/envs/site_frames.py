@@ -159,16 +159,27 @@ def site_lin_vel_w(
     return body_lin_vel_w + torch.cross(body_ang_vel_w, offset_w, dim=-1)
 
 
-def resolve_site_ids(env, entity_name: str, site_names) -> Tensor | None:
-    """Site ids for a selector, against the one shared table.
+def resolve_sites(env, entity_name: str, site_names) -> tuple[Tensor | None, list[str] | None]:
+    """Site ids AND their names for a selector, against the one shared table.
 
-    Returns ``None`` when the selector names no sites, matching how the
-    other id fields report "not restricted". Resolved here rather than
-    per backend so an id means the same site everywhere — the whole point
-    of taking the table from the asset instead of from each simulator.
+    Returns both, always together, because every consumer pairs them: a
+    reward reads ``site_pos_w[:, site_ids]`` and then reindexes those
+    columns by looking a foot up in ``site_names``. Two columns and two
+    labels only line up if one resolution produced both.
+
+    They did not, once. ``site_ids`` came from here — this table, in the
+    order the selector lists — while ``site_names`` came from the
+    backend's own resolver, ordered by ITS table. For go2 that is
+    (FR, FL, RR, RL) against (FL, FR, RL, RR): left and right swap, every
+    reward that pairs them lands on the wrong leg, and nothing raises.
+    Returning one pair is what makes that unrepresentable; a comment
+    telling the caller to keep two calls in step is not.
+
+    ``(None, None)`` when the selector names no sites, matching how the
+    other id fields report "not restricted".
     """
     if not site_names:
-        return None
+        return None, None
     config = env.scene_manager.config
     cfg = config.entities.get(entity_name) or config.rigid_objects.get(entity_name)
     if cfg is None or cfg.mjcf_path is None:
@@ -189,7 +200,7 @@ def resolve_site_ids(env, entity_name: str, site_names) -> Tensor | None:
     # to look a frame up. On the device that readback is a synchronization:
     # it waits for every kernel queued so far, on every observation and
     # reward term that touches a site, on every step.
-    return torch.tensor(ids, dtype=torch.long)
+    return torch.tensor(ids, dtype=torch.long), list(site_names)
 
 
 class SiteReaderMixin:

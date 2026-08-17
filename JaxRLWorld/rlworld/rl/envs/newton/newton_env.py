@@ -17,7 +17,7 @@ from rlworld.rl.envs.managers.newton import (
     NewtonVisualizationManagerConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
-from rlworld.rl.envs.site_frames import resolve_site_ids
+from rlworld.rl.envs.site_frames import resolve_sites
 from rlworld.rl.envs.utils.newton.dr_baselines import snapshot_newton_dr_baselines
 from rlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from rlworld.rl.envs.world import World
@@ -161,6 +161,9 @@ class NewtonEnv(World):
                 entity_name=selector.name,
             )
 
+        # One resolution for both halves — see ``resolve_sites``.
+        site_ids, site_names = resolve_sites(self, selector.name, selector.site_names)
+
         return ResolvedEntity(
             source_selector=selector,
             name=selector.name,
@@ -168,7 +171,8 @@ class NewtonEnv(World):
             joint_ids_native=None,
             body_ids=body_ids,
             geom_ids=geom_ids,
-            site_ids=resolve_site_ids(self, selector.name, selector.site_names),
+            site_ids=site_ids,
+            site_names=site_names,
             actuator_ids=actuator_ids,
             joint_names=joint_names_resolved if selector.joint_names is not None else None,
             body_names=body_names_resolved,

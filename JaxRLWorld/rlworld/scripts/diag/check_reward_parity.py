@@ -19,6 +19,7 @@ guard doesn't reject multi-sim runs.
 Usage:
     python -m rlworld.scripts.diag.check_reward_parity                    # g1_29dof, all 3 sims
     python -m rlworld.scripts.diag.check_reward_parity --preset go2
+    python -m rlworld.scripts.diag.check_reward_parity --preset go2_gait
     python -m rlworld.scripts.diag.check_reward_parity --sim newton       # one sim
     python -m rlworld.scripts.diag.check_reward_parity --steps 50 --terms feet_slip,angular_momentum_penalty
 """
@@ -40,6 +41,18 @@ _PRESETS: dict[str, tuple[str, str]] = {
     "g1_tracking": ("rlworld.rl.configs.presets.g1_tracking.base", "G1TrackingConfig"),
     "t1_tracking": ("rlworld.rl.configs.presets.t1_tracking.base", "T1TrackingConfig"),
 }
+
+# Presets whose config class differs per backend rather than taking
+# ``sim_type``. The gait-conditioned rewards live only here, and they are
+# the ones that read foot SITES on mjlab and foot LINKS on the other two —
+# the asymmetric path, and so the one worth comparing across backends.
+_PER_SIM_PRESETS: dict[str, dict[str, tuple[str, str]]] = {
+    "go2_gait": {
+        "genesis": ("rlworld.rl.configs.presets.go2.genesis.gait_conditioned", "Go2GaitConditionedGenesisConfig"),
+        "newton": ("rlworld.rl.configs.presets.go2.newton.gait_conditioned", "Go2GaitConditionedNewtonConfig"),
+        "mujoco": ("rlworld.rl.configs.presets.go2.mujoco.gait_conditioned", "Go2GaitConditionedMujocoConfig"),
+    },
+}
 _SIMS = ("genesis", "newton", "mujoco")
 
 
@@ -48,7 +61,10 @@ def _build_env(preset: str, sim: str, num_envs: int):
 
     from rlworld.rl.runners import BaseRunner
 
-    mod_path, cls_name = _PRESETS[preset]
+    if preset in _PER_SIM_PRESETS:
+        mod_path, cls_name = _PER_SIM_PRESETS[preset][sim]
+    else:
+        mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
@@ -97,7 +113,7 @@ def main() -> int:
     import torch
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--preset", choices=sorted(_PRESETS), default="g1_29dof")
+    ap.add_argument("--preset", choices=sorted({**_PRESETS, **_PER_SIM_PRESETS}), default="g1_29dof")
     ap.add_argument("--sim", choices=[*_SIMS, "all"], default="all")
     ap.add_argument("--num-envs", type=int, default=8)
     ap.add_argument("--steps", type=int, default=10)

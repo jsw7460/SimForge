@@ -19,7 +19,7 @@ from rlworld.rl.envs.managers import (
     VisualizationManagerConfig,
 )
 from rlworld.rl.envs.managers.registry import ManagerRegistry
-from rlworld.rl.envs.site_frames import resolve_site_ids
+from rlworld.rl.envs.site_frames import resolve_sites
 from rlworld.rl.envs.world import World
 from rlworld.rl.utils import entity_utils as _eu, set_seed
 
@@ -150,6 +150,9 @@ class GenesisEnv(World):
                 "Genesis geoms have no names; use SceneEntitySelector.body_names "
                 "and let the backend expand to the link's collision geoms."
             )
+        # One resolution for both halves — see ``resolve_sites``.
+        site_ids, site_names = resolve_sites(self, selector.name, selector.site_names)
+
         return ResolvedEntity(
             source_selector=selector,
             name=selector.name,
@@ -157,7 +160,8 @@ class GenesisEnv(World):
             joint_ids_native=None,
             body_ids=body_ids,
             geom_ids=None,
-            site_ids=resolve_site_ids(self, selector.name, selector.site_names),
+            site_ids=site_ids,
+            site_names=site_names,
             actuator_ids=actuator_ids,
             joint_names=joint_names_resolved if selector.joint_names is not None else None,
             body_names=body_names_resolved,
