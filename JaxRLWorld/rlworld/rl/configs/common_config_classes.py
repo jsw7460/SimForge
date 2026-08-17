@@ -375,11 +375,64 @@ class SpaceTimeTransformerActorCfg(BaseConfig):
         return obj
 
 
-ActorCfg = Union[MLPActorCfg, SpaceTimeTransformerActorCfg]
+@dataclass
+class CNNEncoderCfg(BaseConfig):
+    """Config for ``CNNEncoder`` (rlworld/rl/modules/architectures/cnn/encoder.py).
+
+    Defaults are mjlab's vision recipe for the YAM wrist camera
+    (``tasks/manipulation/config/yam/rl_cfg.py``): two strided
+    convolutions, then a spatial softmax that reports WHERE each of the
+    32 channels fired rather than how strongly, giving a 64-number
+    latent regardless of image size.
+    """
+
+    output_channels: tuple[int, ...] = (16, 32)
+    kernel_size: tuple[int, ...] | int = (5, 3)
+    stride: tuple[int, ...] | int = (2, 2)
+    dilation: tuple[int, ...] | int = 1
+    # "zeros" keeps the output at ceil(input / stride); "none" does not pad.
+    padding: str = "zeros"
+    activation: Activation = Activation.ELU
+    spatial_softmax: bool = True
+    spatial_softmax_temperature: float = 1.0
+
+    def __post_init__(self):
+        if isinstance(self.activation, str):
+            self.activation = Activation(self.activation)
+
+
+@dataclass
+class VisionActorCfg(BaseConfig):
+    """Config for ``VisionActor``: image groups encoded, then an MLP.
+
+    ``image_groups`` names the observation groups that arrive as
+    ``(C, H, W)``; each gets its own encoder. Everything else the model
+    reads is the ordinary state vector, and it alone is normalised.
+    """
+
+    trunk: MLPActorCfg = field(default_factory=lambda: MLPActorCfg(hidden_dims=[256, 256, 128]))
+    cnn: CNNEncoderCfg = field(default_factory=CNNEncoderCfg)
+    image_groups: tuple[str, ...] = ("camera",)
+
+    def __post_init__(self):
+        if isinstance(self.trunk, dict):
+            self.trunk = MLPActorCfg.from_dict(self.trunk)
+        if isinstance(self.cnn, dict):
+            self.cnn = CNNEncoderCfg.from_dict(self.cnn)
+        self.image_groups = tuple(self.image_groups)
+
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        result["_type"] = type(self).__name__
+        return result
+
+
+ActorCfg = Union[MLPActorCfg, SpaceTimeTransformerActorCfg, VisionActorCfg]
 
 _ACTOR_CFG_CLASSES: Dict[str, type] = {
     "MLPActorCfg": MLPActorCfg,
     "SpaceTimeTransformerActorCfg": SpaceTimeTransformerActorCfg,
+    "VisionActorCfg": VisionActorCfg,
 }
 
 
@@ -458,11 +511,33 @@ class SpaceTimeTransformerCriticCfg(BaseConfig):
         return result
 
 
-CriticCfg = Union[MLPCriticCfg, SpaceTimeTransformerCriticCfg]
+@dataclass
+class VisionCriticCfg(BaseConfig):
+    """Config for ``VisionCritic``. See ``VisionActorCfg``."""
+
+    trunk: MLPCriticCfg = field(default_factory=lambda: MLPCriticCfg(hidden_dims=[256, 256, 128]))
+    cnn: CNNEncoderCfg = field(default_factory=CNNEncoderCfg)
+    image_groups: tuple[str, ...] = ("camera",)
+
+    def __post_init__(self):
+        if isinstance(self.trunk, dict):
+            self.trunk = MLPCriticCfg.from_dict(self.trunk)
+        if isinstance(self.cnn, dict):
+            self.cnn = CNNEncoderCfg.from_dict(self.cnn)
+        self.image_groups = tuple(self.image_groups)
+
+    def recursive_to_dict(self) -> Dict:
+        result = super().recursive_to_dict()
+        result["_type"] = type(self).__name__
+        return result
+
+
+CriticCfg = Union[MLPCriticCfg, SpaceTimeTransformerCriticCfg, VisionCriticCfg]
 
 _CRITIC_CFG_CLASSES: Dict[str, type] = {
     "MLPCriticCfg": MLPCriticCfg,
     "SpaceTimeTransformerCriticCfg": SpaceTimeTransformerCriticCfg,
+    "VisionCriticCfg": VisionCriticCfg,
 }
 
 

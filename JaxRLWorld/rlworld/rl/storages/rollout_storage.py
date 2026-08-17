@@ -31,7 +31,26 @@ def _write_step(buffers: tuple[jax.Array, ...], index: jax.Array, values: tuple[
     are dead once this returns, and using one raises rather than reading
     stale data. The only caller reassigns all ten immediately.
     """
-    return tuple(buffer.at[index].set(value) for buffer, value in zip(buffers, values))
+    return tuple(jax.tree.map(lambda b, v: b.at[index].set(v), buffer, value) for buffer, value in zip(buffers, values))
+
+
+ObsShape = tuple[int, ...] | dict[str, tuple[int, ...]]
+"""One group's per-env shape, or a dict of them when the policy reads
+several observation groups (a state vector plus one or more images)."""
+
+
+def _obs_zeros(shape: ObsShape, prefix: tuple[int, ...]) -> jax.Array | dict[str, jax.Array]:
+    """Allocate a buffer per group, each with ``prefix`` in front."""
+    if isinstance(shape, dict):
+        return {group: jnp.zeros(prefix + group_shape) for group, group_shape in shape.items()}
+    return jnp.zeros(prefix + shape)
+
+
+def _obs_reshape(obs: jax.Array | dict, shape: ObsShape, prefix: tuple[int, ...]):
+    """Reshape every group to ``prefix + its own shape``."""
+    if isinstance(shape, dict):
+        return {group: obs[group].reshape(prefix + shape[group]) for group in shape}
+    return obs.reshape(prefix + shape)
 
 
 class RolloutBatch(NamedTuple):
@@ -88,8 +107,8 @@ class RolloutStorage:
         self,
         num_envs: int,
         num_steps: int,
-        actor_obs_shape: tuple[int, ...],
-        critic_obs_shape: tuple[int, ...],
+        actor_obs_shape: ObsShape,
+        critic_obs_shape: ObsShape,
         action_shape: tuple[int, ...],
     ):
         self.num_envs = num_envs
@@ -105,8 +124,8 @@ class RolloutStorage:
 
     def _allocate_buffers(self) -> None:
         T, N = self.num_steps, self.num_envs
-        self.actor_obs = jnp.zeros((T, N) + self.actor_obs_shape)
-        self.critic_obs = jnp.zeros((T, N) + self.critic_obs_shape)
+        self.actor_obs = _obs_zeros(self.actor_obs_shape, (T, N))
+        self.critic_obs = _obs_zeros(self.critic_obs_shape, (T, N))
         self.actions = jnp.zeros((T, N) + self.action_shape)
         self.rewards = jnp.zeros((T, N))
         self.dones = jnp.zeros((T, N), dtype=jnp.bool_)
@@ -220,8 +239,8 @@ class RolloutStorage:
     def get_flat_observations(self) -> tuple[jax.Array, jax.Array]:
         """Return ``(flat_actor_obs, flat_critic_obs)`` flattened to
         ``[num_steps * num_envs, *obs_shape]`` for normalizer updates."""
-        flat_actor = self.actor_obs.reshape((-1,) + self.actor_obs_shape)
-        flat_critic = self.critic_obs.reshape((-1,) + self.critic_obs_shape)
+        flat_actor = _obs_reshape(self.actor_obs, self.actor_obs_shape, (-1,))
+        flat_critic = _obs_reshape(self.critic_obs, self.critic_obs_shape, (-1,))
         return flat_actor, flat_critic
 
     def get_flat_actions(self) -> jax.Array:
@@ -249,8 +268,8 @@ class RolloutStorage:
         num_total_batches = num_epochs * num_minibatches
 
         # Flatten [T, N, ...] → [T*N, ...]
-        flat_actor_obs = self.actor_obs.reshape((batch_size,) + self.actor_obs_shape)
-        flat_critic_obs = self.critic_obs.reshape((batch_size,) + self.critic_obs_shape)
+        flat_actor_obs = _obs_reshape(self.actor_obs, self.actor_obs_shape, (batch_size,))
+        flat_critic_obs = _obs_reshape(self.critic_obs, self.critic_obs_shape, (batch_size,))
         flat_actions = self.actions.reshape((batch_size,) + self.action_shape)
         flat_values = self.values.reshape(batch_size)
         flat_advantages = self.advantages.reshape(batch_size)
@@ -263,8 +282,8 @@ class RolloutStorage:
         keys = jax.random.split(key, num_epochs)
         perms = jax.vmap(lambda k: jax.random.permutation(k, batch_size))(keys)
 
-        shuf_actor_obs = jax.vmap(lambda p: flat_actor_obs[p])(perms)
-        shuf_critic_obs = jax.vmap(lambda p: flat_critic_obs[p])(perms)
+        shuf_actor_obs = jax.vmap(lambda p: jax.tree.map(lambda o: o[p], flat_actor_obs))(perms)
+        shuf_critic_obs = jax.vmap(lambda p: jax.tree.map(lambda o: o[p], flat_critic_obs))(perms)
         shuf_actions = jax.vmap(lambda p: flat_actions[p])(perms)
         shuf_values = jax.vmap(lambda p: flat_values[p])(perms)
         shuf_advantages = jax.vmap(lambda p: flat_advantages[p])(perms)
@@ -282,8 +301,8 @@ class RolloutStorage:
             return arr.reshape((num_total_batches, minibatch_size) + arr.shape[3:])
 
         return RolloutBatch(
-            actor_observations=merge_epochs(reshape_batches(shuf_actor_obs)),
-            critic_observations=merge_epochs(reshape_batches(shuf_critic_obs)),
+            actor_observations=jax.tree.map(lambda o: merge_epochs(reshape_batches(o)), shuf_actor_obs),
+            critic_observations=jax.tree.map(lambda o: merge_epochs(reshape_batches(o)), shuf_critic_obs),
             actions=merge_epochs(reshape_batches(shuf_actions)),
             values=merge_epochs(reshape_batches(shuf_values)),
             advantages=merge_epochs(reshape_batches(shuf_advantages)),

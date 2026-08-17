@@ -32,6 +32,13 @@ from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.storages.rollout_storage import RolloutStorage
 
 
+def _as_obs_shape(shape):
+    """Storage shape spec: one tuple, or one per observation group."""
+    if isinstance(shape, dict):
+        return {group: tuple(group_shape) for group, group_shape in shape.items()}
+    return tuple(shape)
+
+
 @eqx.filter_jit
 def _evaluate_bootstrap_values(model: PPOActorCritic, critic_obs: jax.Array) -> jax.Array:
     """Critic forward for the timeout bootstrap.
@@ -53,9 +60,13 @@ def _update_normalizers(
     actor_obs: jax.Array,
     critic_obs: jax.Array,
 ) -> PPOActorCritic:
-    """JIT-compiled normalizer update."""
-    new_actor_normalizer = model.actor_obs_normalizer.update(actor_obs)
-    new_critic_normalizer = model.critic_obs_normalizer.update(critic_obs)
+    """JIT-compiled normalizer update.
+
+    Only the state vector feeds the running statistics — images are not
+    normalized, matching rsl_rl's CNNModel.
+    """
+    new_actor_normalizer = model.actor_obs_normalizer.update(model._actor_vector(actor_obs))
+    new_critic_normalizer = model.critic_obs_normalizer.update(model._critic_vector(critic_obs))
     return eqx.tree_at(
         lambda m: (m.actor_obs_normalizer, m.critic_obs_normalizer),
         model,
@@ -274,8 +285,8 @@ class PPO(OnPolicyAlgorithm):
         self.storage = RolloutStorage(
             num_envs=cfg["num_envs"],
             num_steps=cfg["num_transitions_per_env"],
-            actor_obs_shape=tuple(cfg["actor_obs_shape"]),
-            critic_obs_shape=tuple(cfg["critic_obs_shape"]),
+            actor_obs_shape=_as_obs_shape(cfg["actor_obs_shape"]),
+            critic_obs_shape=_as_obs_shape(cfg["critic_obs_shape"]),
             action_shape=tuple(cfg["actions_shape"]),
         )
         self.transition = PPO.TransitionBuffer()
@@ -550,9 +561,12 @@ class PPO(OnPolicyAlgorithm):
             mean_clip_fraction = float(outputs.clip_fraction.mean())
             mean_mirror_loss = float(outputs.aux["mirror_loss"].mean())
 
-        # Get current std
-        sample_obs = stacked_batches.actor_observations[0]
-        current_std = float(self.train_state.model.std_module(sample_obs).mean())
+        # Get current std. Every std module reads the state vector (a
+        # vision policy's images are not part of it), so take the first
+        # minibatch of that.
+        model = self.train_state.model
+        sample_obs = model._actor_vector(stacked_batches.actor_observations)[0]
+        current_std = float(model.std_module(sample_obs).mean())
 
         # Early stop ratio
         early_stop_ratio = 1.0 - (num_actual_updates / num_expected_updates)

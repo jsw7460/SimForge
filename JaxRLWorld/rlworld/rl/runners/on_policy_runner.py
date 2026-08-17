@@ -10,6 +10,7 @@ from rlworld.rl.algorithms.ppo import PPO
 from rlworld.rl.algorithms.ppo.symmetry import build_mirror_spec
 from rlworld.rl.configs import ConfigsForRun
 from rlworld.rl.configs.algorithms import PPOConfig
+from rlworld.rl.configs.common_config_classes import VisionActorCfg, VisionCriticCfg
 from rlworld.rl.envs import World
 from rlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from rlworld.rl.modules.utils import count_parameters, print_model_summary
@@ -52,6 +53,16 @@ class OnPolicyRunner(BaseRunner):
 
         policy_cfg = self.cfgs.nn.policy
 
+        # A vision policy reads image groups next to the state vector, so
+        # observations travel as a dict of groups instead of one array.
+        self.obs_shapes = self.env.obs_manager.calculate_obs_shapes()
+        self.actor_image_groups = (
+            tuple(policy_cfg.actor.image_groups) if isinstance(policy_cfg.actor, VisionActorCfg) else ()
+        )
+        self.critic_image_groups = (
+            tuple(policy_cfg.critic.image_groups) if isinstance(policy_cfg.critic, VisionCriticCfg) else ()
+        )
+
         self.key, subkey = jax.random.split(self.key)
 
         self._init_ppo_actor_critic(policy_cfg, subkey)
@@ -82,6 +93,12 @@ class OnPolicyRunner(BaseRunner):
         symmetry_coef = 0.0
         sc = alg_cfg.symmetry_cfg
         if sc is not None and sc.use_mirror_loss:
+            if self.actor_image_groups:
+                raise ValueError(
+                    "The mirror loss permutes observation entries, which has no meaning for an image: "
+                    "mirroring a camera view means flipping pixels and re-deriving what the flipped "
+                    "scene should look like. Turn off symmetry_cfg for a vision policy."
+                )
             symmetry_spec = build_mirror_spec(self.env.obs_manager, list(self.env.act_manager.actuated_joint_names))
             symmetry_coef = sc.mirror_loss_coeff
         return PPO(
@@ -132,6 +149,7 @@ class OnPolicyRunner(BaseRunner):
             actuated_joint_names=actuated_joint_names,
             key=key,
             obs_normalization=self.cfgs.algorithm.obs_normalization,
+            obs_shapes=self.obs_shapes,
         )
 
     def _log_model_parameters(self) -> None:
@@ -153,20 +171,43 @@ class OnPolicyRunner(BaseRunner):
         cfg = {
             "num_envs": self.env.num_envs,
             "num_transitions_per_env": self.cfgs.algorithm.num_steps_per_env,
-            "actor_obs_shape": [obs_dim["actor"]],
-            "critic_obs_shape": [obs_dim["critic"]],
+            "actor_obs_shape": self._obs_shape_spec("actor", self.actor_image_groups),
+            "critic_obs_shape": self._obs_shape_spec("critic", self.critic_image_groups),
             "actions_shape": [self.env.num_actions],
             "robot_state_shape": [obs_dim.get("robot_state", 0)],
             "estimator_obs_shape": [obs_dim.get("estimator", 0)],
         }
         self.alg.init_storage(cfg)
 
+    def _obs_shape_spec(self, role: str, image_groups: tuple[str, ...]):
+        """Storage shape for one model: a plain tuple, or one per group."""
+        if not image_groups:
+            return [self.obs_shapes[role][0]]
+        spec = {role: tuple(self.obs_shapes[role])}
+        spec.update({group: tuple(self.obs_shapes[group]) for group in image_groups})
+        return spec
+
+    def _pack_obs(self, obs_dict, role: str, image_groups: tuple[str, ...]):
+        """One model's observation, converted to JAX.
+
+        Without image groups this is the state vector alone, exactly as
+        before. With them it is a dict keyed by group name — the same
+        keys the model was built against.
+        """
+        vector = torch_to_jax(obs_dict[role])
+        if not image_groups:
+            return vector
+        packed = {role: vector}
+        packed.update({group: torch_to_jax(obs_dict[group]) for group in image_groups})
+        return packed
+
     def _get_initial_obs(self) -> PPO.ActInput:
         """Get initial observation as JAX arrays."""
         obs = self.env.get_observation()
-        actor_obs = torch_to_jax(obs["actor"])
-        critic_obs = torch_to_jax(obs["critic"])
-        return PPO.ActInput(actor_obs, critic_obs)
+        return PPO.ActInput(
+            self._pack_obs(obs, "actor", self.actor_image_groups),
+            self._pack_obs(obs, "critic", self.critic_image_groups),
+        )
 
     def _postprocess_step_reward(self, rewards, actions, obs_dict, step_i):
         """Per-step reward-shaping hook; identity by default.
@@ -213,8 +254,8 @@ class OnPolicyRunner(BaseRunner):
             )
 
             # Convert to JAX
-            actor_obs = torch_to_jax(obs_dict["actor"])
-            critic_obs = torch_to_jax(obs_dict["critic"])
+            actor_obs = self._pack_obs(obs_dict, "actor", self.actor_image_groups)
+            critic_obs = self._pack_obs(obs_dict, "critic", self.critic_image_groups)
             rewards_jax = torch_to_jax(rewards)
             # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
             terminated_jax = jnp.asarray(terminated.cpu().numpy())
@@ -224,8 +265,8 @@ class OnPolicyRunner(BaseRunner):
             infos_jax = {}
             if infos.get("final_observation") is not None:
                 infos_jax["final_observation"] = {
-                    "actor": torch_to_jax(infos["final_observation"]["actor"]),
-                    "critic": torch_to_jax(infos["final_observation"]["critic"]),
+                    "actor": self._pack_obs(infos["final_observation"], "actor", self.actor_image_groups),
+                    "critic": self._pack_obs(infos["final_observation"], "critic", self.critic_image_groups),
                 }
                 # Bootstrap mask (truncations + non-absorbing terminations).
                 # Only meaningful on done steps (final_observation present);

@@ -16,6 +16,7 @@ new ``(cfg_type, network_class)`` pair.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import jax
@@ -29,8 +30,11 @@ from rlworld.rl.configs.common_config_classes import (
     OrthoInit,
     SpaceTimeTransformerActorCfg,
     SpaceTimeTransformerCriticCfg,
+    VisionActorCfg,
+    VisionCriticCfg,
 )
 from rlworld.rl.modules.architectures.base import BaseActor, BaseCritic
+from rlworld.rl.modules.architectures.cnn.actor import VisionActor, VisionCritic, build_encoders
 from rlworld.rl.modules.architectures.mlp.actor import MLPActor, MLPCritic
 from rlworld.rl.modules.architectures.space_time_transformer.actor import (
     SpaceTimeTransformerActor,
@@ -49,12 +53,14 @@ if TYPE_CHECKING:
 ACTOR_CLASS_BY_CFG: dict[type, type] = {
     MLPActorCfg: MLPActor,
     SpaceTimeTransformerActorCfg: SpaceTimeTransformerActor,
+    VisionActorCfg: VisionActor,
 }
 
 
 CRITIC_CLASS_BY_CFG: dict[type, type] = {
     MLPCriticCfg: MLPCritic,
     SpaceTimeTransformerCriticCfg: SpaceTimeTransformerCritic,
+    VisionCriticCfg: VisionCritic,
 }
 
 
@@ -83,9 +89,37 @@ def build_actor(
     key: jax.Array,
     kinematic_tree: KinematicTree | None = None,
     actuated_joint_names: list[str] | None = None,
+    obs_shapes: Mapping[str, tuple[int, ...]] | None = None,
+    vector_group: str | None = None,
 ) -> BaseActor:
-    """Instantiate the right actor class for ``actor_cfg``."""
+    """Instantiate the right actor class for ``actor_cfg``.
+
+    ``num_obs`` is the width of the state vector. A vision actor also
+    needs ``obs_shapes`` (every group's per-env shape) and
+    ``vector_group`` (which group that state vector is), and grows its
+    trunk by the encoders' latent width.
+    """
     ActorClass = ACTOR_CLASS_BY_CFG[type(actor_cfg)]
+
+    if isinstance(actor_cfg, VisionActorCfg):
+        if obs_shapes is None or vector_group is None:
+            raise ValueError("VisionActorCfg needs obs_shapes and vector_group.")
+        key_encoders, key_trunk = jax.random.split(key)
+        encoders, latent_dim = build_encoders(obs_shapes, actor_cfg.image_groups, actor_cfg.cnn, key=key_encoders)
+        trunk = build_actor(
+            actor_cfg.trunk,
+            num_obs=num_obs + latent_dim,
+            num_actions=num_actions,
+            key=key_trunk,
+            kinematic_tree=kinematic_tree,
+            actuated_joint_names=actuated_joint_names,
+        )
+        return ActorClass(
+            encoders=encoders,
+            trunk=trunk,
+            vector_group=vector_group,
+            image_groups=actor_cfg.image_groups,
+        )
 
     if isinstance(actor_cfg, MLPActorCfg):
         init_kwargs = _ortho_init_args(actor_cfg.init)
@@ -141,9 +175,29 @@ def build_critic(
     num_obs: int,
     key: jax.Array,
     kinematic_tree: KinematicTree | None = None,
+    obs_shapes: Mapping[str, tuple[int, ...]] | None = None,
+    vector_group: str | None = None,
 ) -> BaseCritic:
-    """Instantiate the right critic class for ``critic_cfg``."""
+    """Instantiate the right critic class for ``critic_cfg``. See ``build_actor``."""
     CriticClass = CRITIC_CLASS_BY_CFG[type(critic_cfg)]
+
+    if isinstance(critic_cfg, VisionCriticCfg):
+        if obs_shapes is None or vector_group is None:
+            raise ValueError("VisionCriticCfg needs obs_shapes and vector_group.")
+        key_encoders, key_trunk = jax.random.split(key)
+        encoders, latent_dim = build_encoders(obs_shapes, critic_cfg.image_groups, critic_cfg.cnn, key=key_encoders)
+        trunk = build_critic(
+            critic_cfg.trunk,
+            num_obs=num_obs + latent_dim,
+            key=key_trunk,
+            kinematic_tree=kinematic_tree,
+        )
+        return CriticClass(
+            encoders=encoders,
+            trunk=trunk,
+            vector_group=vector_group,
+            image_groups=critic_cfg.image_groups,
+        )
 
     if isinstance(critic_cfg, MLPCriticCfg):
         # Critic-side OrthoInit always uses output_gain=1.0 inside

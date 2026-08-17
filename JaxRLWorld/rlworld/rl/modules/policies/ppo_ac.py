@@ -9,6 +9,8 @@ from rlworld.rl.configs.common_config_classes import (
     CriticCfg,
     DistributionType,
     StdType,
+    VisionActorCfg,
+    VisionCriticCfg,
 )
 from rlworld.rl.modules.architectures.actor_registry import build_actor, build_critic
 from rlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
@@ -146,6 +148,9 @@ class PPOActorCritic(BaseActorCritic):
         kinematic_tree: Union["KinematicTree", None] = None,
         actuated_joint_names: "list[str] | None" = None,
         obs_normalization: bool = False,
+        obs_shapes: "dict[str, tuple[int, ...]] | None" = None,
+        actor_vector_group: str = "actor",
+        critic_vector_group: str = "critic",
         *,
         key: jax.Array,
     ):
@@ -161,6 +166,11 @@ class PPOActorCritic(BaseActorCritic):
             distribution_type: DistributionType enum
             kinematic_tree: Optional kinematic tree for dynamics-aware actors
             obs_normalization: If true, normalize observations
+            obs_shapes: Per-env shape of every observation group. Required
+                by vision cfgs, which read image groups the flat
+                ``num_actor_obs`` cannot describe.
+            actor_vector_group: Group holding the actor's state vector.
+            critic_vector_group: Group holding the critic's state vector.
             key: JAX random key
         """
         self.actor_obs_dim = num_actor_obs
@@ -174,6 +184,27 @@ class PPOActorCritic(BaseActorCritic):
 
         key_actor, key_critic, key_std = jax.random.split(key, 3)
 
+        # A vision cfg reads a dict of observation groups; every other
+        # cfg reads one array, and must not learn to.
+        actor_is_vision = isinstance(actor_cfg, VisionActorCfg)
+        critic_is_vision = isinstance(critic_cfg, VisionCriticCfg)
+        if actor_is_vision != critic_is_vision:
+            raise ValueError(
+                "Actor and critic must agree on whether observations are a dict of groups: "
+                f"got {type(actor_cfg).__name__} with {type(critic_cfg).__name__}."
+            )
+        if actor_is_vision:
+            if obs_shapes is None:
+                raise ValueError("A vision cfg needs obs_shapes.")
+            if std_type == StdType.STATE_DEPENDENT:
+                raise ValueError(
+                    "state_dependent std is not defined for a vision policy: the std network would have to "
+                    "read either the image or the state vector alone, and both are silent choices. "
+                    "Use std_type='scalar', as mjlab's vision task does."
+                )
+        self.actor_vector_group = actor_vector_group if actor_is_vision else None
+        self.critic_vector_group = critic_vector_group if critic_is_vision else None
+
         # Build actor + critic via the cfg-type-keyed builders.
         self.actor = build_actor(
             actor_cfg,
@@ -182,12 +213,16 @@ class PPOActorCritic(BaseActorCritic):
             key=key_actor,
             kinematic_tree=kinematic_tree,
             actuated_joint_names=actuated_joint_names,
+            obs_shapes=obs_shapes,
+            vector_group=self.actor_vector_group,
         )
         self.critic = build_critic(
             critic_cfg,
             num_obs=num_critic_obs,
             key=key_critic,
             kinematic_tree=kinematic_tree,
+            obs_shapes=obs_shapes,
+            vector_group=self.critic_vector_group,
         )
 
         # Initialize std
@@ -268,14 +303,15 @@ class PPOActorCritic(BaseActorCritic):
     ) -> tuple[GaussianDistribution | SquashedGaussianDistribution, dict]:
         """Create action distribution from observations."""
         normalized_obs = self._normalize_actor_obs(actor_obs)
+        vector = self._actor_vector(normalized_obs)
 
-        if normalized_obs.ndim == 2:
-            keys = jax.random.split(key, normalized_obs.shape[0])
+        if vector.ndim == 2:
+            keys = jax.random.split(key, vector.shape[0])
             mean, aux = jax.vmap(self.actor)(normalized_obs, key=keys)
         else:
             mean, aux = self.actor(normalized_obs, key=key)
 
-        std = self.get_current_std(normalized_obs)
+        std = self.get_current_std(vector)
         # std = jnp.clip(std, 1e-3, 5.0)
 
         if self.distribution_type == "gaussian":
