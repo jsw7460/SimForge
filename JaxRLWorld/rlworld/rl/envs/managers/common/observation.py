@@ -71,6 +71,8 @@ class ObservationManager(BaseManager):
         # Term index mapping for extraction
         self._group_term_indices: dict[str, dict[str, tuple[int, int]]] = {}
         self._is_term_indices_built = False
+        self._group_obs_shapes: dict[str, tuple[int, ...] | list[tuple[int, ...]]] = {}
+        self._flat_groups: set[str] | None = None
 
     @property
     def num_envs(self) -> int:
@@ -117,8 +119,23 @@ class ObservationManager(BaseManager):
                     generator=generator,
                 )
 
+    def _concatenate_dim(self, group_name: str) -> int:
+        """The group's concatenate axis shifted past the batch axis.
+
+        ``concatenate_dim`` is written per-env, so a non-negative value
+        counts from the first feature axis and needs the batch offset.
+        Mirrors mjlab ``observation_manager.py:442`` and IsaacLab
+        ``observation_manager.py:516``.
+        """
+        concatenate_dim = self._groups[group_name].concatenate_dim
+        return concatenate_dim + 1 if concatenate_dim >= 0 else concatenate_dim
+
     def _build_term_indices(self) -> None:
+        if self._flat_groups is None:
+            self._resolve_group_shapes()
         for group_name, terms in self._group_terms.items():
+            if group_name not in self._flat_groups:
+                continue
             self._group_term_indices[group_name] = {}
             current_idx = 0
             for term_name, obs_term in terms.items():
@@ -138,13 +155,47 @@ class ObservationManager(BaseManager):
                 current_idx += term_dim
         self._is_term_indices_built = True
 
+    def _resolve_group_shapes(self) -> None:
+        """Record every group's per-env shape and note which ones are flat.
+
+        A group is flat when it reduces to a single vector per env — the
+        only case where a term can be addressed by a slice or the group
+        summarised by one integer. An image group is not flat, so it is
+        served by shape alone.
+        """
+        self.process_observations(update_history=False)
+
+        self._group_obs_shapes = {}
+        self._flat_groups = set()
+        for group_name, group_obs in self.obs_dict.items():
+            if isinstance(group_obs, dict):
+                self._group_obs_shapes[group_name] = [tuple(term.shape[1:]) for term in group_obs.values()]
+                continue
+
+            shape = tuple(group_obs.shape[1:])
+            self._group_obs_shapes[group_name] = shape
+            if len(shape) == 1:
+                self._flat_groups.add(group_name)
+
     # ========== Public API ==========
 
+    def calculate_obs_shapes(self) -> dict[str, tuple[int, ...] | list[tuple[int, ...]]]:
+        """Per-env shape of every group, batch axis stripped.
+
+        A concatenated group reports one tuple; a group with
+        ``concatenate_terms=False`` reports one tuple per term, in term
+        order. Mirrors ``ObservationManager.group_obs_dim`` in mjlab and
+        IsaacLab.
+        """
+        self._resolve_group_shapes()
+        return dict(self._group_obs_shapes)
+
     def calculate_obs_dim(self) -> dict[str, int]:
+        """Flat groups' widths. Groups that are not a single vector per env are absent."""
         if not self._is_term_indices_built:
             self._build_term_indices()
-        self.process_observations(update_history=False)
-        return defaultdict(int, {group: tensor.shape[-1] for group, tensor in self.obs_dict.items()})
+        self._resolve_group_shapes()
+        return defaultdict(int, {group: self._group_obs_shapes[group][0] for group in self._flat_groups})
 
     def get_observation(self) -> dict[str, torch.Tensor]:
         return self.obs_dict
@@ -197,6 +248,12 @@ class ObservationManager(BaseManager):
         if not self._is_term_indices_built:
             self._build_term_indices()
         if group_name not in self._group_term_indices:
+            if group_name in self._group_terms:
+                raise ValueError(
+                    f"Group {group_name!r} is not a flat vector per env (shape "
+                    f"{self._group_obs_shapes[group_name]}), so its terms have no slice to address. "
+                    "Read the term from the group tensor directly."
+                )
             raise KeyError(f"No observation group {group_name!r}. Groups: {sorted(self._group_term_indices)}.")
         group_indices = self._group_term_indices[group_name]
         if term_name not in group_indices:
@@ -270,7 +327,10 @@ class ObservationManager(BaseManager):
                 else:
                     obs_list.append(obs_value)
 
-            self.obs_dict[group_name] = torch.concat(obs_list, dim=-1)
+            if self._groups[group_name].concatenate_terms:
+                self.obs_dict[group_name] = torch.concat(obs_list, dim=self._concatenate_dim(group_name))
+            else:
+                self.obs_dict[group_name] = dict(zip(terms.keys(), obs_list, strict=True))
 
     def advance(self) -> None:
         self.process_observations(update_history=True)
@@ -291,7 +351,11 @@ class ObservationManager(BaseManager):
 
                 try:
                     dummy = resolved_fn(self.env, **obs_term.params)
-                    base_dim = dummy.shape[-1]
+                    # A term with more than one feature axis (an image) has
+                    # no single width; show the whole per-env shape rather
+                    # than its last axis, which would read as a dimension
+                    # count it does not have.
+                    base_dim = dummy.shape[-1] if dummy.dim() == 2 else tuple(dummy.shape[1:])
                 except Exception:
                     base_dim = "?"
 

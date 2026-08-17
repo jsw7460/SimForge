@@ -142,12 +142,32 @@ class ObservationGroupConfig(BaseConfig):
 
         @dataclass
         class CriticObsCfg(ObservationGroupConfig):
-            enable_corruption = False  # privileged: critic sees raw signals
+            enable_corruption: bool = False  # privileged: critic sees raw signals
             base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=0.25)
             ...
     """
 
     enable_corruption: bool = True
+
+    concatenate_terms: bool = True
+    """Whether to concatenate this group's terms into one tensor. Defaults to True.
+
+    False keeps them separate and the group is served as a dict of named
+    tensors. A group whose terms differ in shape MUST set this to False —
+    an image and a joint vector have no axis along which to be joined.
+    Mirrors ``ObservationGroupCfg.concatenate_terms`` in both mjlab and
+    IsaacLab.
+    """
+
+    concatenate_dim: int = -1
+    """Axis to concatenate along, ignoring the batch axis. Defaults to -1.
+
+    The default joins vectors end to end. Image terms are stacked on the
+    CHANNEL axis instead — for a ``(C, H, W)`` term that is 0, which is
+    what mjlab's own YAM vision task passes to put a depth map and a
+    target mask into one two-channel tensor. Mirrors
+    ``ObservationGroupCfg.concatenate_dim``.
+    """
 
 
 def disable_corruption(observation_cfg) -> None:

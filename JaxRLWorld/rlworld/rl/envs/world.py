@@ -519,14 +519,19 @@ class World(ABC):
         Returns:
             Dict[str, spaces.Box]: Dictionary of observation spaces for each group
         """
-        obs_dims = self.obs_manager.calculate_obs_dim()
+        obs_shapes = self.obs_manager.calculate_obs_shapes()
         obs_spaces = {}
 
-        for group_name, dim in obs_dims.items():
+        for group_name, shape in obs_shapes.items():
+            if isinstance(shape, list):
+                raise ValueError(
+                    f"Group {group_name!r} keeps its terms separate (concatenate_terms=False), "
+                    f"so it has no single Box shape. Term shapes: {shape}."
+                )
             obs_spaces[group_name] = spaces.Box(
                 low=-np.inf,
                 high=np.inf,
-                shape=(dim,),
+                shape=shape,
                 dtype=np.float32,
             )
 

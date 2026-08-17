@@ -34,11 +34,15 @@ import argparse
 import math
 import statistics
 import time
+from dataclasses import dataclass
 
 import mujoco
 import torch
 
+from rlworld.rl.configs.common_config_classes import ObservationGroupConfig
+from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
+from rlworld.rl.envs.mdp.observations.common import perception
 from rlworld.rl.runners import BaseRunner
 
 _CAMERA_GROUP = "wrist"
@@ -99,44 +103,53 @@ def main() -> int:
 
     # Rebuild with the camera attached. Wrapping by name keeps the real
     # D405's mounting transform from the MJCF instead of re-deriving it.
-    cfgs = YamLiftConfig(sim_type="mujoco", num_envs=args.num_envs).build()
-    cfgs.scene.sensors = tuple(cfgs.scene.sensors) + (
-        MjCameraSensorCfg(
-            name=_CAMERA_GROUP,
-            camera_name=camera_name,
-            width=args.width,
-            height=args.height,
-            fovy=args.fovy,
-            data_types=("depth",),
-        ),
-        # Two reference cameras, in the worldbody, on bare floor away from
-        # the table. The wrist camera cannot settle either question below:
-        # it sees the gripper and the table at angles, so no two of its
-        # pixels are on one plane, and nothing it looks at is far enough
-        # away to miss. A MuJoCo camera looks along its own -Z with
-        # identity orientation, so this one points straight down.
-        MjCameraSensorCfg(
-            name=_FLOOR_GROUP,
-            pos=(_REF_X, 0.0, _REF_H),
-            quat=(1.0, 0.0, 0.0, 0.0),
-            width=args.width,
-            height=args.height,
-            fovy=args.fovy,
-            data_types=("depth",),
-        ),
-        # Rotated a half turn about X, so -Z points at the sky and every
-        # ray misses.
-        MjCameraSensorCfg(
-            name=_SKY_GROUP,
-            pos=(_REF_X, 0.0, _REF_H),
-            quat=(0.0, 1.0, 0.0, 0.0),
-            width=args.width,
-            height=args.height,
-            fovy=args.fovy,
-            data_types=("depth",),
-        ),
-    )
-    env = BaseRunner._create_env_from_config(cfgs)
+    # Fresh cfgs per env: term params carry SceneEntitySelectors that the
+    # managers resolve IN PLACE, so a cfgs object that has already built
+    # an env holds that env's device tensors.
+    def _build_cfgs(camera_group=None):
+        cfgs = YamLiftConfig(sim_type="mujoco", num_envs=args.num_envs).build()
+        cfgs.scene.sensors = tuple(cfgs.scene.sensors) + (
+            MjCameraSensorCfg(
+                name=_CAMERA_GROUP,
+                camera_name=camera_name,
+                width=args.width,
+                height=args.height,
+                fovy=args.fovy,
+                data_types=("depth",),
+            ),
+            # Two reference cameras, in the worldbody, on bare floor away
+            # from the table. The wrist camera cannot settle either
+            # question below: it sees the gripper and the table at
+            # angles, so no two of its pixels are on one plane, and
+            # nothing it looks at is far enough away to miss. A MuJoCo
+            # camera looks along its own -Z with identity orientation, so
+            # this one points straight down.
+            MjCameraSensorCfg(
+                name=_FLOOR_GROUP,
+                pos=(_REF_X, 0.0, _REF_H),
+                quat=(1.0, 0.0, 0.0, 0.0),
+                width=args.width,
+                height=args.height,
+                fovy=args.fovy,
+                data_types=("depth",),
+            ),
+            # Rotated a half turn about X, so -Z points at the sky and
+            # every ray misses.
+            MjCameraSensorCfg(
+                name=_SKY_GROUP,
+                pos=(_REF_X, 0.0, _REF_H),
+                quat=(0.0, 1.0, 0.0, 0.0),
+                width=args.width,
+                height=args.height,
+                fovy=args.fovy,
+                data_types=("depth",),
+            ),
+        )
+        if camera_group is not None:
+            cfgs.observation.camera = camera_group
+        return cfgs
+
+    env = BaseRunner._create_env_from_config(_build_cfgs())
     env.reset()
 
     # ── 1. shape, dtype, range ───────────────────────────────────────
@@ -250,6 +263,74 @@ def main() -> int:
         samples.append((time.perf_counter() - t0) * 1e3)
     print(f"  sim.sense(): {statistics.mean(samples):.3f} ms mean, {statistics.median(samples):.3f} median")
     print(f"  {args.num_envs} envs x {args.width}x{args.height} = {args.num_envs * args.width * args.height:,} pixels")
+
+    # ── 6. the observation pipeline ──────────────────────────────────
+    # Everything above says the RENDER is right. This says the number a
+    # policy actually receives is that render, normalised the way mjlab
+    # normalises it, in a group that does not disturb the vector groups.
+    print("\n-- 6. what the policy receives --")
+    cutoff = 0.5
+
+    @dataclass
+    class _CameraObsCfg(ObservationGroupConfig):
+        enable_corruption: bool = False
+        concatenate_dim: int = 0  # channel axis: several images stack, not laid side by side
+        depth = ObservationTermConfig(
+            func=perception.camera_depth,
+            scale=1.0,
+            params={"sensor_name": _CAMERA_GROUP, "cutoff_distance": cutoff},
+        )
+
+    cam_env = BaseRunner._create_env_from_config(_build_cfgs(_CameraObsCfg()))
+    cam_env.reset()
+
+    shapes = cam_env.obs_manager.calculate_obs_shapes()
+    dims = cam_env.calculate_obs_dim()
+    print(f"  group shapes: { {k: v for k, v in shapes.items()} }")
+    print(f"  flat dims:    {dict(dims)}")
+    results["camera_group_keeps_its_image_shape"] = shapes["camera"] == (1, args.height, args.width)
+    results["camera_group_is_not_given_a_flat_width"] = "camera" not in dims
+    results["vector_groups_are_untouched"] = dims["actor"] == env.calculate_obs_dim()["actor"]
+
+    obs = cam_env.obs_manager.get_observation()["camera"]
+    print(f"  camera obs {tuple(obs.shape)}  min {float(obs.min()):.4f}  max {float(obs.max()):.4f}")
+    results["camera_obs_is_bchw"] = tuple(obs.shape) == (args.num_envs, 1, args.height, args.width)
+    results["camera_obs_is_normalised"] = bool(torch.isfinite(obs).all() and obs.min() >= 0.0 and obs.max() <= 1.0)
+
+    # The normalisation, recomputed by hand from the same raw buffer.
+    raw = cam_env.scene_manager.sensors[_CAMERA_GROUP].data.depth.permute(0, 3, 1, 2)
+    expected = torch.clamp(torch.clamp(raw, min=0.01, max=cutoff) / cutoff, 0.0, 1.0)
+    gap = float((obs - expected).abs().max())
+    print(f"  vs clamp(clamp(raw, 0.01, {cutoff}) / {cutoff}, 0, 1): max gap {gap:.3e}")
+    results["camera_obs_is_mjlabs_normalisation"] = gap == 0.0
+
+    # Check 4 established that the raw buffer is a view. The term must
+    # hand back something the next render cannot rewrite.
+    kept = cam_env.obs_manager.get_observation()["camera"]
+    kept_snapshot = kept.clone()
+    for _ in range(5):
+        cam_env.step(action)
+    results["camera_obs_survives_the_next_render"] = float((kept - kept_snapshot).abs().max()) == 0.0
+
+    space = cam_env.observation_space["camera"]
+    print(f"  observation_space['camera'] = {space.shape}")
+    results["camera_observation_space_is_the_image"] = space.shape == (1, args.height, args.width)
+
+    # Two image terms in one group stack on the channel axis rather than
+    # being laid end to end — the mechanism a depth+mask policy needs.
+    @dataclass
+    class _TwoCameraObsCfg(_CameraObsCfg):
+        depth_far = ObservationTermConfig(
+            func=perception.camera_depth,
+            scale=1.0,
+            params={"sensor_name": _FLOOR_GROUP, "cutoff_distance": 2.0},
+        )
+
+    two_env = BaseRunner._create_env_from_config(_build_cfgs(_TwoCameraObsCfg()))
+    two_env.reset()
+    two_shape = two_env.obs_manager.calculate_obs_shapes()["camera"]
+    print(f"  two image terms in one group -> {two_shape}")
+    results["two_images_stack_on_the_channel_axis"] = two_shape == (2, args.height, args.width)
 
     print("\n" + "=" * 78)
     ok = True
