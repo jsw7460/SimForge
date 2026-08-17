@@ -90,6 +90,15 @@ class G1TrackingConfig:
     episode_length_s: float = 10.0
     seed: int = 42
 
+    # Domain-randomization cadence, as on g1_29dof and k1_joystick. When
+    # set, the sim builders' per-reset reset_dr terms instead re-sample
+    # together on ONE global timer every this many seconds — all envs at
+    # once, a single recompute per period — rather than once per reset.
+    # This preset randomizes body COM, which makes mjwarp's set_const
+    # stale, and that recompute is model-global: it runs in full for
+    # however few environments happened to end. None keeps per-reset DR.
+    dr_interval_period_s: float | None = 10.0
+
     # Motion source: tuple of NPZ paths (length-1 for single-clip, length
     # >= 2 for multi-motion). Each episode reset samples one clip per env
     # (uniform by default) and keeps it for the rest of the episode.
@@ -283,8 +292,17 @@ class G1TrackingConfig:
 
     def _build_event_config(self, builders) -> EventConfig:
         """DR-only — motion command owns the initial state."""
+        dr_terms = builders.build_dr_terms(self)
+
+        # Same conversion g1_29dof performs. See dr_interval_period_s.
+        if self.dr_interval_period_s is not None:
+            for term in dr_terms.values():
+                if term.mode == "reset_dr":
+                    term.mode = "interval_dr"
+                    term.interval_dr_period_s = self.dr_interval_period_s
+
         cfg = EventConfig()
-        for name, term in builders.build_dr_terms(self).items():
+        for name, term in dr_terms.items():
             setattr(cfg, name, term)
         return cfg
 

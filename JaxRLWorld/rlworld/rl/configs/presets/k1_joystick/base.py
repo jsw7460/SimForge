@@ -115,7 +115,14 @@ class K1JoystickConfig:
     # together on ONE global timer every this many seconds (all envs at once,
     # a single recompute per period) — see _build_dr_terms. None keeps per-reset
     # DR. Validated by k1_interval_dr_prototype_diag.
-    dr_interval_period_s: float | None = None
+    #
+    # On by default, as on G1. Per-reset was costing 8.0 ms of an 11.5 ms
+    # reset: mass and COM writes make mjwarp's set_const stale, and that
+    # recompute is model-global, so it ran in full for the handful of
+    # environments that ended. Nothing else in the DR set needs a
+    # recompute at all — friction, damping, gains and encoder bias are all
+    # RecomputeLevel.none.
+    dr_interval_period_s: float | None = 10.0
 
     # Left/right mirror-symmetry auxiliary loss coefficient (0 = off). When > 0,
     # PPO adds mirror_loss_coeff * MSE(pi(mirror(o)), mirror(pi(o))) to enforce
