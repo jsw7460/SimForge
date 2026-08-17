@@ -146,7 +146,7 @@ class LabCellConfig(YamArmConfig):
 
         @dataclass
         class _CriticObsCfg(_ActorObsCfg):
-            enable_corruption = False
+            enable_corruption: bool = False
 
         @dataclass
         class _ObsCfg(ObsCfgClass):

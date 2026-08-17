@@ -266,6 +266,33 @@ def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
 
 @dataclass
 class BaseConfig:
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Reject a field overridden without its type annotation.
+
+        Config settings are dataclass fields, so a subclass that writes
+        ``enable_corruption = False`` without the annotation overrides
+        nothing: the generated ``__init__`` assigns the INHERITED default
+        over it. The config reads as correct and runs as the opposite,
+        which is the worst way for one to be wrong — and there is no
+        error, no warning, and no wrong-looking number to notice. So
+        refuse the class outright rather than trust a convention to hold
+        across every preset.
+
+        Terms are unaffected: a term is a plain class attribute, not a
+        field, and stays the way every preset writes it.
+        """
+        super().__init_subclass__(**kwargs)
+        overridable = {f.name for f in dataclasses.fields(cls)}
+        annotated = cls.__dict__.get("__annotations__", {})
+        for name, value in cls.__dict__.items():
+            if name in overridable and name not in annotated:
+                field_type = cls.__dataclass_fields__[name].type
+                type_name = field_type if isinstance(field_type, str) else field_type.__name__
+                raise TypeError(
+                    f"{cls.__name__} sets {name} = {value!r} without a type annotation, "
+                    f"which a dataclass ignores. Write '{name}: {type_name} = {value!r}'."
+                )
+
     def get(self, key: str, default: Any = None) -> Any:
         """Dict-like get method for attribute access with default."""
         return getattr(self, key, default)

@@ -201,7 +201,7 @@ def build_observation(cfg: G1FlatConfig) -> ObservationConfig:
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):
-        enable_corruption = False
+        enable_corruption: bool = False
         base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
         projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         command = ObservationTermConfig(func=command_obs, scale=1.0)

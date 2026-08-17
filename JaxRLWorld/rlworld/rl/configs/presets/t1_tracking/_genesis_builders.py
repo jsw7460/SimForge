@@ -210,7 +210,7 @@ class _ActorObsCfg(ObservationGroupConfig):
 
 @dataclass
 class _CriticObsCfg(ObservationGroupConfig):
-    enable_corruption = False
+    enable_corruption: bool = False
     base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0)
     base_lin_vel_obs = ObservationTermConfig(func=base_lin_vel, scale=1.0)
     projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0)
