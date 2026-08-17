@@ -383,7 +383,7 @@ class NewtonEnv(World):
         path still swaps and would need a per-substep re-write if it ever grows
         an external-wrench consumer.
         """
-        for _ in range(self.decimation):
+        for substep in range(self.decimation):
             self.scene_manager.state_0.clear_forces()
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             # After clear_forces / actuator body_f writes, before the solver
@@ -393,8 +393,13 @@ class NewtonEnv(World):
             self.scene_manager.step()
             self.contact_manager.advance(dt=self.physics_dt)
 
-        if _NAN_TRIPWIRE:
-            self._nan_tripwire_check()
+            # Per SUBSTEP, not per control step: four solver steps separate
+            # a clean state from a poisoned one, and knowing which of them
+            # broke is the difference between reading a growth curve and
+            # reading its endpoint. Costs a host sync each, which is why it
+            # is behind the tripwire flag.
+            if _NAN_TRIPWIRE:
+                self._nan_tripwire_check(substep=substep)
 
     def _write_external_wrench(self) -> None:
         """Add the viewer force into ``state_0.body_f`` for one body/env.
@@ -424,16 +429,46 @@ class NewtonEnv(World):
         if self.vis_manager is not None:
             self.vis_manager.advance()
 
-    def _nan_tripwire_check(self) -> None:
+    _NAN_HISTORY_SUBSTEPS = 24
+    """How many substeps of pre-blowup history the tripwire keeps.
+
+    Six control steps at decimation 4. Enough to tell a joint that ramped
+    over tens of milliseconds from one that jumped to inf between two
+    solver steps: the first is an instability to damp, the second is a
+    degenerate operation — a zero-norm quaternion, a division by a
+    vanishing mass — and they are not fixed the same way.
+    """
+
+    def _nan_tripwire_check(self, substep: int = -1) -> None:
         """Dump forensics and crash on the FIRST non-finite physics state.
 
         Reports, for every poisoned env: episode step (recent reset?),
         its mjwarp contact and constraint-row counts (buffer-overflow
-        attribution), root kinematics and the blown-up joint. Raises so
-        the run stops at the first poisoned transition instead of
-        feeding NaNs to the learner for days.
+        attribution), root kinematics, the blown-up joint, the action and
+        joint target that drove it, and the substep-by-substep history
+        leading in. Raises so the run stops at the first poisoned
+        transition instead of feeding NaNs to the learner for days.
         """
         rd = self.get_robot_data()
+
+        # Ring of (max|joint_vel|, root_z) per env, newest last. Recorded
+        # BEFORE the finiteness test so the breaking substep is in it too.
+        depth = self._NAN_HISTORY_SUBSTEPS
+        if getattr(self, "_nan_ring", None) is None:
+            self._nan_ring = torch.zeros(depth, self.num_envs, 3, device=self.device)
+            self._nan_ring_n = 0
+        row = self._nan_ring_n % depth
+        # Non-finite entries are pushed BELOW every real speed rather than
+        # above it, so ``argmax`` names the joint that was actually fastest
+        # instead of the lowest-numbered one that happened to be nan. That
+        # distinction matters: reading the joint out of an all-nan row
+        # reports joint 0 every time and invents a pattern.
+        jv = rd.joint_vel.abs()
+        jv_ranked = torch.where(torch.isfinite(jv), jv, torch.full_like(jv, -1.0))
+        self._nan_ring[row, :, 0] = jv_ranked.amax(dim=1)
+        self._nan_ring[row, :, 1] = rd.root_link_pos_w[:, 2]
+        self._nan_ring[row, :, 2] = jv_ranked.argmax(dim=1).float()
+        self._nan_ring_n += 1
         checks = (
             ("joint_pos", rd.joint_pos),
             ("joint_vel", rd.joint_vel),
@@ -472,15 +507,48 @@ class NewtonEnv(World):
             f"[NAN-TRIPWIRE] contact pools: nacon={nacon}/naconmax={naconmax} (overflow={nacon > naconmax})  "
             f"newton rigid={rigid_count}/{rigid_cap} (sat={rigid_count >= rigid_cap})  njmax={int(mjw_data.njmax)}",
         ]
+        lines.append(f"[NAN-TRIPWIRE] broke during substep {substep} of {self.decimation}")
+        processed = self.act_manager.processed_actions
         for e in ids[:8].tolist():
-            jv_f = torch.nan_to_num(rd.joint_vel[e].abs(), nan=float("inf"))
-            j = int(jv_f.argmax())
+            jv_e = rd.joint_vel[e].abs()
+            n_bad_joints = int((~torch.isfinite(jv_e)).sum())
             lines.append(
                 f"[NAN-TRIPWIRE] env {e}: ep_len={int(self.episode_length_buf[e])}  "
                 f"ncon={int(ncon_world[e])}  nefc={int(nefc[e])}  "
                 f"root_z={float(rd.root_link_pos_w[e, 2]):.4f}  "
-                f"max|joint_vel|={float(jv_f[j]):.3e} @ {joint_names[j]}  "
+                f"non-finite joints={n_bad_joints}/{jv_e.numel()}  "
                 f"root_lin_vel={[round(float(v), 3) for v in rd.root_link_lin_vel_w[e].tolist()]}"
+            )
+            # The joint that led on the last substep whose velocities were
+            # still finite — the runaway's origin, not the wreckage.
+            order = [(self._nan_ring_n - depth + k) % depth for k in range(depth)]
+            available = [r for r in order if self._nan_ring_n > depth or r < self._nan_ring_n]
+            last_finite = next((r for r in reversed(available) if float(self._nan_ring[r, e, 0]) >= 0.0), None)
+            if last_finite is not None:
+                lead = int(self._nan_ring[last_finite, e, 2])
+                lines.append(
+                    f"[NAN-TRIPWIRE] env {e}: last finite substep led by {joint_names[lead]} "
+                    f"at {float(self._nan_ring[last_finite, e, 0]):.3e} rad/s  "
+                    f"joint_pos={float(rd.joint_pos[e, lead]):.4f}  "
+                    f"processed_action[{lead}]={float(processed[e, lead]):.4f}  "
+                    f"|action|max={float(processed[e].abs().max()):.4f}"
+                )
+            # Oldest first, so the shape of the approach reads left to right.
+            hist = [
+                (float(self._nan_ring[r, e, 0]), float(self._nan_ring[r, e, 1]), int(self._nan_ring[r, e, 2]))
+                for r in available
+            ]
+            lines.append(
+                f"[NAN-TRIPWIRE] env {e}: max|jv| by substep (oldest->newest): "
+                + " ".join("nan" if v < 0 else f"{v:.3e}" for v, _z, _j in hist)
+            )
+            lines.append(
+                f"[NAN-TRIPWIRE] env {e}: fastest joint by substep: "
+                + " ".join("-" if v < 0 else joint_names[j] for v, _z, j in hist[-8:])
+            )
+            lines.append(
+                f"[NAN-TRIPWIRE] env {e}: root_z by substep (oldest->newest):  "
+                + " ".join(f"{z:.4f}" for _v, z, _j in hist)
             )
         print("\n".join(lines), flush=True)
         raise RuntimeError("JAXRLWORLD_NAN_TRIPWIRE: first non-finite physics state (details above)")

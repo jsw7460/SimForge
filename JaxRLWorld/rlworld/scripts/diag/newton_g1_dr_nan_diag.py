@@ -79,7 +79,86 @@ def _finite(t) -> bool:
     return bool(torch.isfinite(t).all().item())
 
 
-def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int, njmax: int, rough: bool) -> dict:
+def _check_ccd_scratch(num_envs: int, nconmax: int, ccd_iterations: int) -> None:
+    """Refuse an nconmax whose GJK/EPA scratch will not fit.
+
+    mjwarp sizes its EPA workspace off the contact pool rather than off the
+    contacts that occur: ``naccdmax`` defaults to ``num_envs * nconmax`` and
+    ``convex_narrowphase`` allocates ``naccdmax x (10 + 2 * ccd_iterations)``
+    vec3s from it. At 50 CCD iterations that is 1320 bytes per contact slot
+    per environment, so raising nconmax to buy measurement headroom costs
+    gigabytes: 4096 envs at nconmax 2000 asks for 10.8 GB and dies inside
+    the collision driver, several frames deep, as a bare allocation failure.
+
+    Predicted here instead, before the scene is built, with the arithmetic
+    shown — so the fix (fewer envs, or a smaller ceiling) is obvious rather
+    than something to bisect.
+    """
+    import torch
+
+    row_vec3 = 10 + 2 * ccd_iterations
+    scratch = num_envs * nconmax * row_vec3 * 12
+    free, total = torch.cuda.mem_get_info()
+    print(
+        f"[INFO] EPA scratch: num_envs {num_envs} x nconmax {nconmax} x {row_vec3} vec3 x 12 B "
+        f"= {scratch / 2**30:.2f} GiB (device free {free / 2**30:.2f} / {total / 2**30:.2f} GiB)",
+        flush=True,
+    )
+    # Two thirds, not all of it: the model, the policy and every other
+    # solver buffer still have to fit alongside this one allocation.
+    if scratch > 0.66 * free:
+        raise RuntimeError(
+            f"nconmax={nconmax} at num_envs={num_envs} needs {scratch / 2**30:.2f} GiB of EPA "
+            f"scratch, against {free / 2**30:.2f} GiB free. Lower --num-envs or --nconmax: the "
+            f"cost is linear in both. num_envs={num_envs} tops out near "
+            f"nconmax={int(0.66 * free / (num_envs * row_vec3 * 12))}."
+        )
+
+
+def _load_policy(checkpoint: str, cfgs, env):
+    """Deterministic action from a trained checkpoint, as torch.
+
+    Deterministic on purpose: the question is what demand the learned
+    gait places on the contact buffers, and exploration noise would blur
+    the peak this is trying to find.
+    """
+    from rlworld.rl.algorithms import get_runner_class
+    from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+    from rlworld.rl.utils.wandb_checkpoint import resolve_checkpoint_path
+
+    # Through the concrete runner class, as ``BaseRunner.create_with_env``
+    # does. ``BaseRunner.load_checkpoint`` is the abstract declaration and
+    # its body is ``pass``, so calling it on the base returns None and the
+    # first attribute access on the result is what fails.
+    runner_cls = get_runner_class(cfgs.algorithm.algorithm_name)
+    runner = runner_cls.load_checkpoint(
+        checkpoint_path=resolve_checkpoint_path(checkpoint),
+        cfgs=cfgs,
+        env=env,
+        use_wandb=False,
+    )
+    alg = runner.alg
+
+    def act(obs_dict):
+        action = alg.act(
+            alg.ActInput(torch_to_jax(obs_dict["actor"]), torch_to_jax(obs_dict["critic"])),
+            deterministic=True,
+        )
+        return jax_to_torch(runner._process_action_for_env(action), runner.device)
+
+    return act
+
+
+def run_cell(
+    cell: str,
+    num_envs: int,
+    num_steps: int,
+    seed: int,
+    nconmax: int,
+    njmax: int,
+    rough: bool,
+    checkpoint: str | None = None,
+) -> dict:
     import torch
     import warp as wp
 
@@ -103,6 +182,7 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int, 
         cfgs.scene.solver_cfg.nconmax = nconmax
     if njmax > 0:
         cfgs.scene.solver_cfg.njmax = njmax
+    _check_ccd_scratch(num_envs, cfgs.scene.solver_cfg.nconmax, cfgs.scene.solver_cfg.ccd_iterations)
 
     disabled_names: list[str] = []
     for name, term in list(iter_terms(cfgs.event, EventTermConfig).items()):
@@ -115,6 +195,15 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int, 
 
     env = NewtonInitializer().init_environment(cfgs)
     _stage("env built")
+
+    # A trained policy, when one is given. The budgets in the preset were
+    # sized from RANDOM-action rollouts, and random flailing is not an upper
+    # bound on the contact demand of a gait: a policy that has learned to
+    # walk rough terrain lands its feet hard and puts both of them, plus
+    # knees and hands, on the heightfield at once. That is the state a
+    # late-training NaN comes from, and no random rollout visits it.
+    policy = _load_policy(checkpoint, cfgs, env) if checkpoint else None
+    _stage(f"policy: {'checkpoint ' + checkpoint if policy else 'random actions'}")
 
     env.reset()
     torch.cuda.synchronize()
@@ -155,7 +244,10 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int, 
     peak_ncon_world = 0
     trace: list[tuple[int, float, str]] = []  # (step, max|joint_vel|, argmax joint)
     for k in range(num_steps):
-        a = torch.empty((num_envs, env.num_actions), device=env.device).uniform_(-1.0, 1.0) * action_scale
+        if policy is None:
+            a = torch.empty((num_envs, env.num_actions), device=env.device).uniform_(-1.0, 1.0) * action_scale
+        else:
+            a = policy(env.get_observation())
         obs, rew, _term, _trunc, _infos = env.step(a)
         # Contact-slot demand: nacon records the TRUE demand even when the
         # pool overflows (writes beyond naconmax are skipped, the counter
@@ -221,6 +313,12 @@ def run_cell(cell: str, num_envs: int, num_steps: int, seed: int, nconmax: int, 
         "cell": cell,
         "num_envs": num_envs,
         "action_scale": action_scale,
+        # What drove the rollout belongs in the result, not only in the log.
+        # A contact-demand number means something different depending on it:
+        # random flailing and a trained gait visit different states, and the
+        # whole point of the checkpoint path is that the preset's budgets
+        # were sized from the former.
+        "driver": "checkpoint" if policy is not None else "random",
         "peak_joint_vel": peak_v,
         "nconmax_used": nconmax,
         "naconmax": naconmax,
@@ -283,6 +381,7 @@ def run_parent(args) -> int:
                     "--njmax",
                     str(args.njmax),
                     *(["--rough"] if args.rough else []),
+                    *(["--checkpoint", args.checkpoint] if args.checkpoint else []),
                 ],
                 stdout=lf,
                 stderr=subprocess.STDOUT,
@@ -312,7 +411,8 @@ def run_parent(args) -> int:
         lines.append(
             f"{d['cell']:<20}{verdict:<12}{str(d.get('first_bad_step', '?')):<16}"
             f"{d.get('bad_quantity', '') or '-':<14}{dev:<18}"
-            f"scale={d.get('action_scale', '?')} peak|jv|={d.get('peak_joint_vel', float('nan')):.2e} "
+            f"driver={d.get('driver', '?')} scale={d.get('action_scale', '?')} "
+            f"peak|jv|={d.get('peak_joint_vel', float('nan')):.2e} "
             f"peak_nacon={d.get('peak_nacon', '?')} peak_ncon/world={d.get('peak_ncon_world', '?')} "
             f"overflow={d.get('overflowed', '?')} "
             f"rigid={d.get('peak_rigid_count', '?')}/{d.get('rigid_contact_cap', '?')} "
@@ -364,11 +464,25 @@ def main() -> int:
     )
     ap.add_argument("--njmax", type=int, default=0, help="solver_cfg njmax override (0 = preset value)")
     ap.add_argument("--rough", action="store_true", help="build with use_rough_terrain=True")
+    ap.add_argument(
+        "--checkpoint",
+        default=None,
+        help="Drive with this trained policy instead of random actions (local dir or wandb run path).",
+    )
     ap.add_argument("--out", default="newton_g1_dr_nan_diag.txt")
     args = ap.parse_args()
 
     if args.cell is not None:
-        result = run_cell(args.cell, args.num_envs, args.num_steps, args.seed, args.nconmax, args.njmax, args.rough)
+        result = run_cell(
+            args.cell,
+            args.num_envs,
+            args.num_steps,
+            args.seed,
+            args.nconmax,
+            args.njmax,
+            args.rough,
+            args.checkpoint,
+        )
         Path(args.result_json).write_text(json.dumps(result, indent=2))
         print(json.dumps(result, indent=2))
         return 0
