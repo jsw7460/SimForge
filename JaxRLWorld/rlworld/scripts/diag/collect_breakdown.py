@@ -374,6 +374,76 @@ def _probe_reset_events(env, timer: _Timer, env_ids: torch.Tensor, repeats: int)
         for name, term in reset_terms
     }
     _time_probes(timer, probes, repeats)
+    _probe_reset_dr(env, timer, env_ids, repeats)
+
+
+def _probe_reset_dr(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> None:
+    """Split domain randomization into its terms and its model flush.
+
+    On k1_joystick this is 9.7 ms of an 11.6 ms reset — a third of the
+    whole collect step, and it runs on every step because a locomotion
+    policy early in training ends episodes constantly. Every locomotion
+    preset shares the path.
+
+    The manager already batches the terms so the model is recomputed once
+    rather than per term, which makes the flush and the terms two
+    different problems: a slow flush is one model-global call that has to
+    happen, and slow terms are a dozen small writes that need not be.
+    They are timed apart here — terms with the deferral in place but the
+    flush suppressed, then the flush on its own.
+    """
+    dr_terms = env.event_manager._terms_by_mode.get("reset_dr", [])
+    if not dr_terms:
+        return
+
+    print()
+    print("=" * 78)
+    print(f'event.apply("reset_dr"), TERM BY TERM  ({len(env_ids)} environments)')
+    print("=" * 78)
+
+    is_newton = env.sim_type == "newton"
+    is_mujoco = env.sim_type == "mujoco"
+
+    def call_without_flush(name, term):
+        # The prologue _run_dr_batch performs: the backends write their
+        # pending recompute level or notify flags into these, and raise
+        # without them.
+        if is_newton:
+            env._dr_pending_notify_flags = 0
+        if is_mujoco:
+            env._dr_pending_recompute_level = None
+        env.event_manager._call_event_fn(name, term, env_ids=env_ids)
+        level = env._dr_pending_recompute_level if is_mujoco else None
+        flags = env._dr_pending_notify_flags if is_newton else None
+        if is_newton:
+            del env._dr_pending_notify_flags
+        if is_mujoco:
+            del env._dr_pending_recompute_level
+        return level, flags
+
+    probes = {name: (lambda name=name, term=term: call_without_flush(name, term)) for name, term in dr_terms}
+    _time_probes(timer, probes, repeats)
+
+    # What the terms between them ask the model to redo, then the cost of
+    # doing it once.
+    level = None
+    flags = 0
+    for name, term in dr_terms:
+        term_level, term_flags = call_without_flush(name, term)
+        if term_level is not None and (level is None or term_level > level):
+            level = term_level
+        if term_flags:
+            flags |= term_flags
+
+    flush_probes = {}
+    if is_mujoco and level:
+        flush_probes[f"sim.recompute_constants({level})"] = lambda: env.scene_manager.sim.recompute_constants(level)
+    if is_newton and flags:
+        flush_probes[f"solver.notify_model_changed({flags})"] = lambda: env.scene_manager.solver.notify_model_changed(
+            flags
+        )
+    if flush_probes:
+        _time_probes(timer, flush_probes, repeats)
 
 
 def _time_probes(timer: _Timer, probes: dict, repeats: int) -> None:

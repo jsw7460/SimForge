@@ -64,8 +64,17 @@ class TerminationManager(BaseManager):
         # ``Episode_Termination/<name>`` by the runner once per training
         # iteration. Cleared on each consume so each call covers a fresh
         # window.
-        self._iter_reset_count: int = 0
-        self._iter_fire_counts: dict[str, int] = {name: 0 for name in self._all_terms}
+        # Accumulated ON THE DEVICE. Both counters are read once per
+        # training iteration by :meth:`consume_episode_stats`, but they are
+        # written on every step that anything resets — which, with episodes
+        # ending at staggered times, is essentially every step. Keeping
+        # them as Python ints meant an ``item()`` per term per step: a
+        # device-to-host copy that waits for every kernel queued so far,
+        # paid so a ratio could be logged once an iteration.
+        self._iter_reset_count: torch.Tensor = torch.zeros((), dtype=torch.long, device=self.device)
+        self._iter_fire_counts: dict[str, torch.Tensor] = {
+            name: torch.zeros((), dtype=torch.long, device=self.device) for name in self._all_terms
+        }
 
         # Last-step union of non-timeout termination fires; consumed by
         # MotionCommand's adaptive sampling to weight motion bins by
@@ -103,13 +112,15 @@ class TerminationManager(BaseManager):
         Keys follow the convention ``"Episode_Termination/<term_name>"``
         so wandb auto-groups them in a single UI folder.
         """
-        if self._iter_reset_count == 0:
+        # The one place these are read back to the host, once per training
+        # iteration rather than once per term per step.
+        n = int(self._iter_reset_count)
+        if n == 0:
             return {}
-        n = self._iter_reset_count
-        out = {f"Episode_Termination/{name}": count / n for name, count in self._iter_fire_counts.items()}
-        self._iter_reset_count = 0
-        for name in self._iter_fire_counts:
-            self._iter_fire_counts[name] = 0
+        out = {f"Episode_Termination/{name}": int(count) / n for name, count in self._iter_fire_counts.items()}
+        self._iter_reset_count.zero_()
+        for count in self._iter_fire_counts.values():
+            count.zero_()
         return out
 
     @property
@@ -210,9 +221,9 @@ class TerminationManager(BaseManager):
         # episode starts with a fresh counter for this env.
         n_reset = env_ids.numel() if hasattr(env_ids, "numel") else len(env_ids)
         if n_reset > 0:
-            self._iter_reset_count += int(n_reset)
+            self._iter_reset_count += n_reset
             for name, fires in self._episode_fires.items():
-                self._iter_fire_counts[name] += int((fires[env_ids] > 0).long().sum().item())
+                self._iter_fire_counts[name] += (fires[env_ids] > 0).long().sum()
                 fires[env_ids] = 0
 
         self.episode_count[env_ids] += 1
