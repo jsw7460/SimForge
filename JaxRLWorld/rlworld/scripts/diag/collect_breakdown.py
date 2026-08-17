@@ -286,7 +286,41 @@ def _probe_step_phases(env, timer: _Timer, actions: torch.Tensor) -> None:
         "act_manager.advance": lambda: env.act_manager.advance(),
     }
     _time_probes(timer, probes, repeats)
+    _probe_physics_substep(env, timer, repeats)
     _probe_observation_terms(env, timer, repeats)
+
+
+def _probe_physics_substep(env, timer: _Timer, repeats: int) -> None:
+    """Split the decimation loop into the simulator and everything else.
+
+    ``_step_physics`` is not the simulator. Every backend's loop also
+    applies actions and advances the contact sensors on each of its
+    ``decimation`` substeps, so a backend with an expensive contact
+    pipeline pays four times per control step for work that has nothing
+    to do with integrating the dynamics — and a comparison of raw
+    ``scene.step()`` between two engines would not show it.
+
+    Worth splitting because it changes what a cross-backend gap means: a
+    slow ``scene_manager.step`` is the engine, and a slow
+    ``contact_manager.advance`` is ours.
+
+    Timed one substep at a time, so multiply by ``decimation`` to compare
+    against the loop above.
+    """
+    print()
+    print("=" * 78)
+    print(f"ONE PHYSICS SUBSTEP  (the loop runs {env.decimation} of these)")
+    print("=" * 78)
+
+    probes = {
+        "act_manager.apply_actions": lambda: env.act_manager.apply_actions(env.act_manager.processed_actions),
+        "scene_manager.step (the engine)": lambda: env.scene_manager.step(),
+        "contact_manager.advance": lambda: env.contact_manager.advance(dt=env.physics_dt),
+    }
+    _time_probes(timer, probes, repeats)
+    total = sum(statistics.median(timer.samples[name]) for name in probes)
+    print(f"  {'x decimation':<38}{total * env.decimation:8.3f} ms")
+    print("=" * 78)
 
 
 def _probe_observation_terms(env, timer: _Timer, repeats: int) -> None:
