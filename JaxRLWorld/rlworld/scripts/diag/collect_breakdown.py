@@ -277,6 +277,36 @@ def _probe_done_branch(env, timer: _Timer) -> None:
         "_post_reset_forward (whole batch)": lambda: env._post_reset_forward(),
     }
 
+    _time_probes(timer, probes, repeats)
+
+    _probe_reset_managers(env, timer, env_ids, repeats)
+    _probe_reset_events(env, timer, env_ids, repeats)
+
+
+def _probe_reset_events(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> None:
+    """Split ``event.apply("reset")`` across its terms.
+
+    It is 2.0 ms of ``_reset_idx``'s 2.9 ms — more than the other twelve
+    managers together — and it is a plain Python loop over the reset
+    terms, so its cost is however many there are and what each writes.
+    """
+    reset_terms = env.event_manager._terms_by_mode.get("reset", [])
+    if not reset_terms:
+        return
+
+    print()
+    print("=" * 78)
+    print(f'event.apply("reset"), TERM BY TERM  ({len(env_ids)} environments)')
+    print("=" * 78)
+    probes = {
+        name: (lambda name=name, term=term: env.event_manager._call_event_fn(name, term, env_ids=env_ids))
+        for name, term in reset_terms
+    }
+    _time_probes(timer, probes, repeats)
+
+
+def _time_probes(timer: _Timer, probes: dict, repeats: int) -> None:
+    """Run each probe warm, then time it, then print mean and median."""
     for name, call in probes.items():
         for _ in range(3):
             call()
@@ -288,6 +318,51 @@ def _probe_done_branch(env, timer: _Timer) -> None:
         vals = timer.samples[name]
         print(f"  {name:<38}{statistics.mean(vals):8.3f} ms   median {statistics.median(vals):8.3f}")
     print("=" * 78)
+
+
+def _probe_reset_managers(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> None:
+    """Split ``_reset_idx`` across the managers it fans out to.
+
+    Resetting 8 environments costs 2.99 ms; resetting all 8192 costs
+    2.95 ms. A cost that ignores how much work it is given is not
+    arithmetic — it is a fixed number of kernel launches and Python
+    calls, and the only way to shrink it is to find which of the dozen
+    managers issues the most of them.
+
+    The list mirrors ``World._reset_idx`` in order. Anything it does
+    conditionally is guarded the same way here, so an absent mode shows
+    up as a missing row rather than a zero.
+    """
+    print()
+    print("=" * 78)
+    print(f"_reset_idx, MANAGER BY MANAGER  ({len(env_ids)} environments)")
+    print("=" * 78)
+
+    probes = {
+        "curriculum.compute": lambda: env.curriculum_manager.compute(env_ids=env_ids),
+        "_reset_scene (backend)": lambda: env._reset_scene(env_ids),
+        "event.reset": lambda: env.event_manager.reset(env_ids),
+    }
+    for mode in ("reset", "reset_dr"):
+        if mode in env.event_manager.available_modes:
+            probes[f"event.apply({mode})"] = lambda mode=mode: env.event_manager.apply(mode=mode, env_ids=env_ids)
+    probes.update(
+        {
+            "termination.reset": lambda: env.termination_manager.reset(env_ids),
+            "command.reset": lambda: env.command_manager.reset(env_ids),
+            "action.reset": lambda: env.act_manager.reset(env_ids),
+            "observation.reset": lambda: env.obs_manager.reset(env_ids),
+            "contact.reset": lambda: env.contact_manager.reset(env_ids),
+            "contact.refresh_after_reset": lambda: env.contact_manager.refresh_after_reset(env_ids),
+            "reward.reset": lambda: env.reward_manager.reset(env_ids),
+            "curriculum.reset": lambda: env.curriculum_manager.reset(env_ids),
+            "episode_sums index_fill": lambda: [
+                env.episode_sums[key].index_fill_(0, env_ids, 0.0) for key in list(env.episode_sums.keys())
+            ],
+        }
+    )
+
+    _time_probes(timer, probes, repeats)
 
 
 if __name__ == "__main__":
