@@ -43,6 +43,7 @@ import torch
 from rlworld.rl.algorithms.base import ActInput
 from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from rlworld.rl.configs.presets.k1_joystick.base import K1JoystickConfig
+from rlworld.rl.configs.presets.k1_joystick.g1_recipe import K1G1RecipeConfig
 from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from rlworld.rl.runners import BaseRunner
 from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
@@ -50,6 +51,10 @@ from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 _PRESETS = {
     "go2": Go2FlatConfig,
     "k1_joystick": K1JoystickConfig,
+    # The config the K1 training scripts actually run. Its scene and
+    # timing are inherited unchanged, so physics numbers match
+    # k1_joystick; the policy, reward and DR cadence differ.
+    "k1_g1_recipe": K1G1RecipeConfig,
     "yam_lift": YamLiftConfig,
 }
 

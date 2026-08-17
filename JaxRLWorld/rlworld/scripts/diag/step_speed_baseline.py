@@ -24,6 +24,7 @@ budget is what a cross-backend gap is made of:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import statistics
@@ -37,6 +38,7 @@ import torch
 
 from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from rlworld.rl.configs.presets.k1_joystick.base import K1JoystickConfig
+from rlworld.rl.configs.presets.k1_joystick.g1_recipe import K1G1RecipeConfig
 from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from rlworld.rl.runners import BaseRunner
 
@@ -54,6 +56,10 @@ _SIMS = ("genesis", "newton", "mujoco")
 _PRESETS = {
     "go2": Go2FlatConfig,
     "k1_joystick": K1JoystickConfig,
+    # The config the K1 training scripts actually run. Its scene and
+    # timing are inherited unchanged, so physics numbers match
+    # k1_joystick; the policy, reward and DR cadence differ.
+    "k1_g1_recipe": K1G1RecipeConfig,
     "yam_lift": YamLiftConfig,
 }
 
@@ -111,6 +117,37 @@ def _effective_solver_iterations(sim: str, env) -> tuple[int, int]:
     raise ValueError(f"Unknown sim {sim!r}")
 
 
+def _apply_rigid_overrides(sim: str, scene, overrides: list[str]) -> dict:
+    """Set Genesis ``RigidOptions`` fields named on the command line.
+
+    The collision and solver knobs a preset leaves unset default to
+    Genesis's own values, and finding which of them a slow scene is
+    paying for means changing one at a time. Doing that here keeps the
+    preset — which several other runs depend on — untouched between
+    measurements.
+
+    Values are parsed as Python literals, so ``None``, ``True``, ``150``
+    and ``0.02`` all arrive as the right type, and the field must already
+    exist: a typo raises rather than being silently ignored.
+    """
+    if not overrides:
+        return {}
+    if sim != "genesis":
+        raise ValueError(f"--rigid-option applies to genesis rigid_options, not {sim!r}.")
+    applied = {}
+    for override in overrides:
+        if "=" not in override:
+            raise ValueError(f"Expected FIELD=VALUE, got {override!r}.")
+        field, _, raw = override.partition("=")
+        field = field.strip()
+        if not hasattr(scene.rigid_options, field):
+            raise ValueError(f"RigidOptions has no field {field!r}.")
+        value = ast.literal_eval(raw.strip())
+        setattr(scene.rigid_options, field, value)
+        applied[field] = value
+    return applied
+
+
 def run_single(
     preset: str,
     sim: str,
@@ -120,6 +157,7 @@ def run_single(
     resets: int,
     iterations: int | None = None,
     ls_iterations: int | None = None,
+    rigid_options: list[str] | None = None,
 ) -> dict:
     config = _PRESETS[preset](sim_type=sim, num_envs=num_envs)
     cfgs = config.build()
@@ -127,6 +165,7 @@ def run_single(
         raise ValueError("Pass --iterations and --ls-iterations together; one alone is half an experiment.")
     if iterations is not None:
         _override_solver_iterations(sim, cfgs.scene, iterations, ls_iterations)
+    applied_rigid = _apply_rigid_overrides(sim, cfgs.scene, rigid_options or [])
     env = BaseRunner._create_env_from_config(cfgs)
 
     live_iterations, live_ls_iterations = _effective_solver_iterations(sim, env)
@@ -184,6 +223,8 @@ def run_single(
     # is not running.
     budget = f"{live_iterations}/{live_ls_iterations}"
     print(f"STEP SPEED  [preset={preset}  sim={sim}  num_envs={num_envs}  actions={n_act}  solver={budget}]")
+    if applied_rigid:
+        print(f"  rigid_options overridden: {applied_rigid}")
     print("=" * 78)
     print(f"  step   mean {result['step_mean_ms']:8.3f} ms   median {result['step_median_ms']:8.3f} ms")
     print(f"         p95  {result['step_p95_ms']:8.3f} ms   max    {result['step_max_ms']:8.3f} ms")
@@ -200,6 +241,7 @@ def run_all(
     resets: int,
     iterations: int | None,
     ls_iterations: int | None,
+    rigid_options: list[str],
 ) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="step_speed_"))
     out: dict[str, dict] = {}
@@ -228,6 +270,8 @@ def run_all(
         ]
         if iterations is not None:
             cmd += ["--iterations", str(iterations), "--ls-iterations", str(ls_iterations)]
+        for override in rigid_options:
+            cmd += ["--rigid-option", override]
         print()
         print("#" * 78)
         print(f"# $ {' '.join(cmd)}")
@@ -276,15 +320,37 @@ def main() -> int:
     ap.add_argument("--resets", type=int, default=20)
     ap.add_argument("--iterations", type=int, default=None, help="Override the solver iteration budget.")
     ap.add_argument("--ls-iterations", type=int, default=None, help="Override the line-search budget.")
+    ap.add_argument(
+        "--rigid-option",
+        action="append",
+        default=[],
+        metavar="FIELD=VALUE",
+        help="Genesis RigidOptions field to override, repeatable (e.g. box_box_detection=False).",
+    )
     args = ap.parse_args()
 
     if args.sim is None:
         return run_all(
-            args.preset, args.num_envs, args.warmup, args.steps, args.resets, args.iterations, args.ls_iterations
+            args.preset,
+            args.num_envs,
+            args.warmup,
+            args.steps,
+            args.resets,
+            args.iterations,
+            args.ls_iterations,
+            args.rigid_option,
         )
 
     result = run_single(
-        args.preset, args.sim, args.num_envs, args.warmup, args.steps, args.resets, args.iterations, args.ls_iterations
+        args.preset,
+        args.sim,
+        args.num_envs,
+        args.warmup,
+        args.steps,
+        args.resets,
+        args.iterations,
+        args.ls_iterations,
+        args.rigid_option,
     )
     if args.result_json:
         Path(args.result_json).write_text(json.dumps(result))
