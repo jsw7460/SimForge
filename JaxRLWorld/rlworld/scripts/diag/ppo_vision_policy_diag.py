@@ -21,11 +21,14 @@ Run::
 from __future__ import annotations
 
 import argparse
+import dataclasses
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from rlworld.rl.configs.base_config import iter_terms
+from rlworld.rl.configs.curriculums import CurriculumTermConfig
 from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from rlworld.rl.configs.presets.yam_lift.vision import CAMERA_GROUP, YamLiftVisionConfig
 from rlworld.rl.modules.architectures.cnn.encoder import CNNEncoder, SpatialSoftmax, compute_output_dim, compute_padding
@@ -205,6 +208,52 @@ def main() -> int:
     # same jitted forwards.
     print("\n-- 7. a policy with no camera --")
     plain_cfgs = YamLiftConfig(sim_type="mujoco", num_envs=args.num_envs).build()
+
+    # The vision preset must change what the policy SEES and nothing
+    # else. If it also moved a reward weight or a termination, the two
+    # runs would not be comparable and the vision curve sitting lower
+    # would say nothing about vision.
+    #
+    # Both sides are built fresh: a cfgs object that has already built
+    # an env holds selectors the managers resolved in place, so
+    # comparing a used one against a new one reports differences that
+    # are not in the preset.
+    fresh_vision = YamLiftVisionConfig(
+        sim_type="mujoco",
+        num_envs=args.num_envs,
+        camera_width=args.resolution,
+        camera_height=args.resolution,
+    ).build()
+    fresh_plain = YamLiftConfig(sim_type="mujoco", num_envs=args.num_envs).build()
+
+    def _section(cfgs_obj, name):
+        # Terminations hang off the env config, and the curriculum config
+        # is a plain dataclass rather than a BaseConfig, so it has no
+        # recursive_to_dict. Its terms hold module-level functions, which
+        # compare equal by identity across the two builds.
+        if name == "terminations":
+            return cfgs_obj.env.terminations.recursive_to_dict()
+        if name == "curriculum":
+            return {
+                term_name: dataclasses.asdict(term)
+                for term_name, term in iter_terms(cfgs_obj.curriculum, CurriculumTermConfig).items()
+            }
+        return getattr(cfgs_obj, name).recursive_to_dict()
+
+    for name in ("reward", "terminations", "command", "curriculum", "action"):
+        mine, theirs = _section(fresh_vision, name), _section(fresh_plain, name)
+        same = mine == theirs
+        print(f"  {name:<13} identical to the vector preset: {same}")
+        if not same:
+            for term in sorted(set(mine) | set(theirs)):
+                if mine.get(term) != theirs.get(term):
+                    print(f"      {term}: vision={mine.get(term)!r} vector={theirs.get(term)!r}")
+        results[f"the_{name}_config_is_unchanged"] = same
+
+    observation_same = fresh_vision.observation.recursive_to_dict() == fresh_plain.observation.recursive_to_dict()
+    print(f"  observation   identical: {observation_same} (expected False — that is the whole change)")
+    results["only_the_observation_config_changed"] = not observation_same
+
     plain_cfgs.runner.max_iterations = 1
     plain_cfgs.algorithm.num_steps_per_env = 8
     plain_runner = BaseRunner.create_with_env(plain_cfgs, use_wandb=False)

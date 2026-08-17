@@ -19,6 +19,7 @@ import trimesh.visual
 import viser
 
 from ._ghost import MotionGhost
+from .camera_panel import ViserCameraPanel
 from .command_panel import ViserCommandPanel
 from .force_drag import ForceDragController
 from .overlays import ViserDebugOverlays, ViserTermOverlays
@@ -86,6 +87,7 @@ class ViserPlayViewer(PlayViewerBase):
         # Translucent reference-pose overlay (motion-tracking presets
         # only; ``MotionGhost.is_active`` is False otherwise).
         self._motion_ghost: MotionGhost | None = None
+        self._camera_panel: ViserCameraPanel | None = None
 
     # ── Setup ──────────────────────────────────────────────────────
 
@@ -113,6 +115,14 @@ class ViserPlayViewer(PlayViewerBase):
         self._play_scene.set_on_env_switch(self._on_env_switch)
         self._setup_overlays(tabs)
         self._setup_command_panels(tabs)
+        # What the policy sees, when it sees anything: one panel per
+        # channel of every image observation group. Absent on a
+        # state-only preset.
+        self._camera_panel = ViserCameraPanel(self._server, self.env)
+        if self._camera_panel.is_supported:
+            self._camera_panel.build_ui(tabs)
+        else:
+            self._camera_panel = None
         # Interactive external-force drag tool (Newton / Genesis bridge
         # scenes only; see ForceDragController.is_supported).
         self._force_drag = None
@@ -723,3 +733,5 @@ class ViserPlayViewer(PlayViewerBase):
             "</div>"
         )
         self._update_inspect_display()
+        if self._camera_panel is not None:
+            self._camera_panel.update(int(self._play_scene.env_idx))

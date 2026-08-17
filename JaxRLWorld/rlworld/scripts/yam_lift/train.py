@@ -10,9 +10,10 @@ a flat curve on one goal is a task or reward problem, whereas a flat
 curve on a distribution could be either that or the spread being too
 wide.
 
-Anything else is a config path, e.g.::
+Anything else is a config path, written as ``path=value`` with no
+leading dashes — the config's own override parser reads them::
 
-    --env.num_envs 8192 --runner.max_iterations 3000
+    env.num_envs=8192 runner.max_iterations=3000
 """
 
 from __future__ import annotations

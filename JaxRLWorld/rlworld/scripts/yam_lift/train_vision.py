@@ -10,9 +10,10 @@ cube's position are gone. The critic keeps them.
 mjlab only for now: Newton and Genesis have camera sensors, but nothing
 in this repo renders them yet.
 
-Anything else is a config path, e.g.::
+Anything else is a config path, written as ``path=value`` with no
+leading dashes — the config's own override parser reads them::
 
-    --env.num_envs 4096 --runner.max_iterations 3000
+    env.num_envs=2048 algorithm.actor_lr=5e-4
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ def main() -> int:
     ap.add_argument("--difficulty", default="fixed", choices=("fixed", "dynamic"))
     ap.add_argument("--num-envs", type=int, default=4096)
     ap.add_argument("--resolution", type=int, default=32, help="Square camera resolution, pixels.")
+    ap.add_argument("--iterations", type=int, default=3000)
     args, rest = ap.parse_known_args()
     # Hand the remainder to the config's own override parser.
     sys.argv = [sys.argv[0], *rest]
@@ -39,6 +41,7 @@ def main() -> int:
         difficulty=args.difficulty,
         camera_width=args.resolution,
         camera_height=args.resolution,
+        max_iterations=args.iterations,
         run_name=f"YamLiftVision_Mujoco_{args.difficulty}",
     )
     cfgs_for_run = cfg.build().with_cli_overrides()

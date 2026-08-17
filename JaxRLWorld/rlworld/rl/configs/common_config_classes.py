@@ -400,6 +400,15 @@ class CNNEncoderCfg(BaseConfig):
         if isinstance(self.activation, str):
             self.activation = Activation(self.activation)
 
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        # Re-run __post_init__: from_dict builds a default instance and
+        # then writes the raw values over it, so the enum coercion above
+        # never sees the string yaml.safe_load produced.
+        obj = super().from_dict(config_dict)
+        obj.__post_init__()
+        return obj
+
 
 @dataclass
 class VisionActorCfg(BaseConfig):
@@ -419,7 +428,18 @@ class VisionActorCfg(BaseConfig):
             self.trunk = MLPActorCfg.from_dict(self.trunk)
         if isinstance(self.cnn, dict):
             self.cnn = CNNEncoderCfg.from_dict(self.cnn)
+        # The nested cfgs may have been written over field by field
+        # rather than constructed, which skips their own coercion and
+        # leaves an activation as the string yaml produced.
+        self.trunk.__post_init__()
+        self.cnn.__post_init__()
         self.image_groups = tuple(self.image_groups)
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        obj = super().from_dict(config_dict)
+        obj.__post_init__()
+        return obj
 
     def recursive_to_dict(self) -> Dict:
         result = super().recursive_to_dict()
@@ -524,7 +544,18 @@ class VisionCriticCfg(BaseConfig):
             self.trunk = MLPCriticCfg.from_dict(self.trunk)
         if isinstance(self.cnn, dict):
             self.cnn = CNNEncoderCfg.from_dict(self.cnn)
+        # The nested cfgs may have been written over field by field
+        # rather than constructed, which skips their own coercion and
+        # leaves an activation as the string yaml produced.
+        self.trunk.__post_init__()
+        self.cnn.__post_init__()
         self.image_groups = tuple(self.image_groups)
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict):
+        obj = super().from_dict(config_dict)
+        obj.__post_init__()
+        return obj
 
     def recursive_to_dict(self) -> Dict:
         result = super().recursive_to_dict()
