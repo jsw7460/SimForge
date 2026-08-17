@@ -276,9 +276,21 @@ class GenesisContactSensor:
             self._counterpart_links = torch.tensor(counterpart, dtype=torch.long, device=self.device)
 
         # ---- per-substep capture rings (newest-first, native layout) --
+        # ``fields`` is a declaration of what anything reads, and mjlab's
+        # sensor already extracts only what it lists. Honouring it here
+        # too is worth more than it looks: the force is a signed
+        # accumulation over the contact list followed by a rotation into
+        # each link's frame, and on a locomotion preset whose rewards,
+        # observations and terminations all read only ``is_contact`` that
+        # was two thirds of this sensor's per-substep cost — computed,
+        # stored, and never looked at.
+        self._name = cfg.name
+        self._track_force = "force" in cfg.fields
         h = cfg.history_length
         self._found_hist = torch.zeros(self.num_envs, h, self._num_primary, dtype=torch.bool, device=self.device)
-        self._force_hist = torch.zeros(self.num_envs, h, self._num_primary, 3, device=self.device)
+        self._force_hist = (
+            torch.zeros(self.num_envs, h, self._num_primary, 3, device=self.device) if self._track_force else None
+        )
 
     # ------------------------------------------------------------------
     # properties
@@ -316,16 +328,20 @@ class GenesisContactSensor:
         pmask_b = on_p_b & a_ok.unsqueeze(-1)
 
         found = (pmask_a | pmask_b).any(1)  # (B, P)
-        # World-frame signed sum: the collider force applies to side b;
-        # side a receives the opposite sign.
-        f_world = torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force)
-        quats = self._reader.links_quat(self._entity)[:, self._primary_local]
-        f_local = inv_transform_by_quat(f_world, quats)
 
         # torch.roll allocates a fresh tensor, so frames handed out by the
         # read paths below stay valid snapshots after later captures.
         self._found_hist = torch.roll(self._found_hist, 1, dims=1)
         self._found_hist[:, 0] = found
+
+        if not self._track_force:
+            return
+
+        # World-frame signed sum: the collider force applies to side b;
+        # side a receives the opposite sign.
+        f_world = torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force)
+        quats = self._reader.links_quat(self._entity)[:, self._primary_local]
+        f_local = inv_transform_by_quat(f_world, quats)
         self._force_hist = torch.roll(self._force_hist, 1, dims=1)
         self._force_hist[:, 0] = f_local
 
@@ -339,7 +355,17 @@ class GenesisContactSensor:
 
     def read_force(self) -> torch.Tensor:
         """(num_envs, N, 3) — newest captured link-local net contact force."""
+        self._require_force()
         return self._force_hist[:, 0]
+
+    def _require_force(self) -> None:
+        """Refuse a read of a force this sensor was told not to track."""
+        if not self._track_force:
+            raise RuntimeError(
+                f"Genesis contact sensor {self._name!r} was configured with fields that omit "
+                '"force", so no force was computed. Add "force" to the ContactSensorCfg\'s '
+                "fields to read it."
+            )
 
     def compute(self) -> ContactSensorData:
         return ContactSensorData(
@@ -350,4 +376,5 @@ class GenesisContactSensor:
 
     def compute_history(self) -> torch.Tensor:
         """(num_envs, N, H, 3) captured contact-force history, newest-first."""
+        self._require_force()
         return self._force_hist.permute(0, 2, 1, 3)

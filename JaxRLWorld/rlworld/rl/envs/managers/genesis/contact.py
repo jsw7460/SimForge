@@ -34,7 +34,7 @@ class ContactManager(BaseContactManager):
         """Register a contact sensor config as a named group."""
         sensor = GenesisContactSensor(self.env, cfg, reader=self._list_reader)
         self._sensors[cfg.name] = sensor
-        self._register_group(cfg.name, sensor.tracked_names)
+        self._register_group(cfg.name, sensor.tracked_names, cfg.fields)
 
     # -- per-substep capture + timing accumulation --
 

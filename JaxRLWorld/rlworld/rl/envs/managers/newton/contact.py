@@ -43,7 +43,7 @@ class NewtonContactManager(BaseContactManager):
             # ContactSensorCfg path — tracking names already resolved
             # (world-0 leaf names) by the wrapper.
             self._group_sensors[sensor_name] = sensor
-            self._register_group(sensor_name, list(sensor.tracked_names))
+            self._register_group(sensor_name, list(sensor.tracked_names), tuple(sensor.cfg.fields))
 
     # -- abstract impl --
 

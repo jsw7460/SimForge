@@ -151,6 +151,11 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> NewtonSceneCon
                 name="feet_pair_contact",
                 primary=ContactMatch(mode="body", pattern=(r.foot_names[0],), entity="robot"),
                 secondary=ContactMatch(mode="body", pattern=(r.foot_names[1],), entity="robot"),
+                # Matches mjlab's declaration for this group: the collision
+                # penalty reads the boolean only. Newton still derives
+                # is_contact from the force internally, so this changes
+                # what may be READ, not what it computes.
+                fields=("found",),
                 history_length=timing["decimation"],
             ),
         ],

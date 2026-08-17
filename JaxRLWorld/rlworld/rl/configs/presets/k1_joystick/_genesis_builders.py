@@ -115,6 +115,14 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
                 name="feet_pair_contact",
                 primary=ContactMatch(mode="body", pattern=(r.foot_names[0],), entity="robot"),
                 secondary=ContactMatch(mode="body", pattern=(r.foot_names[1],), entity="robot"),
+                # Only the boolean is read — the collision penalty asks
+                # whether the feet touched, never how hard. mjlab's K1
+                # already declared this; Genesis and Newton were left on
+                # the default and so disagreed about what the same group
+                # produces. On Genesis the force is a signed accumulation
+                # over the contact list plus a rotation into the link
+                # frame, per substep, for nobody.
+                fields=("found",),
                 history_length=timing["decimation"],
             ),
         ],

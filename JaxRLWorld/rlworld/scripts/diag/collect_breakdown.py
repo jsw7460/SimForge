@@ -321,6 +321,116 @@ def _probe_physics_substep(env, timer: _Timer, repeats: int) -> None:
     total = sum(statistics.median(timer.samples[name]) for name in probes)
     print(f"  {'x decimation':<38}{total * env.decimation:8.3f} ms")
     print("=" * 78)
+    _probe_contact_sensors(env, timer, repeats)
+
+
+def _probe_contact_sensors(env, timer: _Timer, repeats: int) -> None:
+    """Split the contact advance into the shared read and each sensor.
+
+    Genesis pays 0.649 ms here against mjlab's 0.113, four times per
+    control step. The advance is two different things: one read of the
+    solver's contact list, shared by every group and cached for the
+    substep, and then per-sensor arithmetic that masks that list down to
+    the links each group tracks.
+
+    Which one dominates decides the fix. The read is a fixed cost of
+    asking Genesis what touched what. The arithmetic builds
+    ``(envs, contact-list width, tracked links)`` intermediates, so it is
+    paid on the WIDTH OF THE LIST rather than on the number of contacts
+    that actually happened — worth knowing how far apart those two are.
+    """
+    sensors = getattr(env.contact_manager, "_sensors", None)
+    reader = getattr(next(iter(sensors.values())), "_reader", None) if sensors else None
+    if not sensors or reader is None:
+        return  # Backends whose sensors are native have nothing to split.
+
+    print()
+    print("=" * 78)
+    print("GENESIS CONTACT SENSORS, one substep")
+    print("=" * 78)
+
+    link_a, _, _, row_valid = reader.raw()
+    width = int(link_a.shape[1])
+    live = float(row_valid.sum(dim=1).float().mean())
+    print(f"  contact-list width {width}, live contacts per env {live:.1f} on average")
+    if live:
+        print(f"  the masks are {width / max(live, 1e-9):.0f}x wider than the contacts in them")
+
+    def shared_read():
+        # The read is memoized on the cache generation, which the physics
+        # loop bumps once per substep — so it has to be invalidated to be
+        # measured at all.
+        env._invalidate_cache()
+        reader.raw()
+
+    probes = {"reader.raw (shared list read)": shared_read}
+    for name, sensor in sensors.items():
+        probes[f"capture_substep: {name}"] = lambda sensor=sensor: sensor.capture_substep()
+    _time_probes(timer, probes, repeats)
+
+    _probe_capture_stages(env, next(iter(sensors.values())), timer, repeats)
+
+
+def _probe_capture_stages(env, sensor, timer: _Timer, repeats: int) -> None:
+    """Time capture_substep one stage at a time.
+
+    It costs 0.23 ms on intermediates of 8192x14x2 — a quarter of a
+    million elements, which no GPU takes that long to touch. So the cost
+    is the number of operations, not their size, and rewriting the wrong
+    half of a parity-verified sensor buys nothing.
+
+    The stages mirror ``GenesisContactSensor.capture_substep`` in order.
+    Each is timed on its own inputs, so they are comparable to each other
+    but their sum will exceed the method: draining between stages removes
+    the overlap the real call gets.
+    """
+    import torch as _torch
+    from genesis.utils.geom import inv_transform_by_quat
+
+    print()
+    print("=" * 78)
+    print("capture_substep, STAGE BY STAGE")
+    print("=" * 78)
+
+    reader = sensor._reader
+    link_a, link_b, force, row_valid = reader.raw()
+    primary = sensor._primary_links
+    counterpart = sensor._counterpart_links if not sensor._counterpart_is_all else None
+
+    def masks():
+        on_p_a = link_a.unsqueeze(-1) == primary
+        on_p_b = link_b.unsqueeze(-1) == primary
+        return on_p_a, on_p_b
+
+    def counterpart_test():
+        if counterpart is None:
+            return row_valid, row_valid
+        a_ok = row_valid & (link_a.unsqueeze(-1) == counterpart).any(-1)
+        b_ok = row_valid & (link_b.unsqueeze(-1) == counterpart).any(-1)
+        return a_ok, b_ok
+
+    on_p_a, on_p_b = masks()
+    a_ok, b_ok = counterpart_test()
+    pmask_a = on_p_a & b_ok.unsqueeze(-1)
+    pmask_b = on_p_b & a_ok.unsqueeze(-1)
+
+    probes = {
+        "primary-link masks": masks,
+        "counterpart test": counterpart_test,
+        "combine into pmask_a/b": lambda: (on_p_a & b_ok.unsqueeze(-1), on_p_b & a_ok.unsqueeze(-1)),
+        "found = (a|b).any(1)": lambda: (pmask_a | pmask_b).any(1),
+        "einsum -> world force": lambda: _torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force),
+        "links_quat (cached read)": lambda: reader.links_quat(sensor._entity),
+        "inv_transform_by_quat": lambda: inv_transform_by_quat(
+            _torch.zeros(env.num_envs, primary.shape[0], 3, device=env.device),
+            reader.links_quat(sensor._entity)[:, sensor._primary_local],
+        ),
+        "roll the two history rings": lambda: (
+            _torch.roll(sensor._found_hist, 1, dims=1),
+            _torch.roll(sensor._force_hist, 1, dims=1),
+        ),
+    }
+    _time_probes(timer, probes, repeats)
 
 
 def _probe_observation_terms(env, timer: _Timer, repeats: int) -> None:

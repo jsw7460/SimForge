@@ -45,6 +45,15 @@ class ContactGroup:
     name: str
     tracked_names: list[str]
     num_tracked: int
+    fields: tuple[str, ...]
+    """Quantities the sensor was declared to extract (``ContactSensorCfg.fields``).
+
+    A group that does not list ``"force"`` is telling the backend nobody
+    reads it, which is worth honouring: on Genesis the force is a
+    world-frame accumulation plus a rotation into the link frame, and it
+    was two thirds of the per-substep sensor cost on a preset whose
+    rewards, observations and terminations all read only ``is_contact``.
+    """
 
     # Timing buffers — shape (num_envs, num_tracked)
     current_air_time: torch.Tensor = field(repr=False)
@@ -76,7 +85,7 @@ class BaseContactManager(BaseManager, ABC):
     # Group registration (called by subclasses)
     # ------------------------------------------------------------------
 
-    def _register_group(self, name: str, tracked_names: list[str]) -> None:
+    def _register_group(self, name: str, tracked_names: list[str], fields: tuple[str, ...]) -> None:
         """Create a named contact group with allocated buffers."""
         n = len(tracked_names)
         shape = (self.num_envs, n)
@@ -84,6 +93,7 @@ class BaseContactManager(BaseManager, ABC):
             name=name,
             tracked_names=tracked_names,
             num_tracked=n,
+            fields=tuple(fields),
             current_air_time=torch.zeros(shape, device=self.device),
             current_contact_time=torch.zeros(shape, device=self.device),
             last_air_time=torch.zeros(shape, device=self.device),
@@ -131,6 +141,25 @@ class BaseContactManager(BaseManager, ABC):
     # ------------------------------------------------------------------
     # Public API — named group access
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _require_force(group: ContactGroup) -> None:
+        """Refuse a force read the group was not declared to produce.
+
+        Raising rather than returning zeros: a silent zero force reads as
+        "nothing is touching", which is a plausible-looking answer that
+        would quietly disable a collision penalty or a contact-force
+        termination. Enforced here, in the shared manager, so the three
+        backends agree on which reads are legal — a backend that happens
+        to compute the force anyway must not make a preset work on one
+        simulator and fail on another.
+        """
+        if "force" not in group.fields:
+            raise RuntimeError(
+                f"Contact group {group.name!r} was declared with fields={group.fields}, so its "
+                'contact force is not tracked. Add "force" to the ContactSensorCfg\'s fields to '
+                "read it."
+            )
 
     def _get_group(self, name: str) -> ContactGroup:
         return self._groups[name]
@@ -189,6 +218,7 @@ class BaseContactManager(BaseManager, ABC):
     def contact_force(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         """Contact force vectors. Shape: ``(num_envs, N, 3)``."""
         group = self._get_group(group_name)
+        self._require_force(group)
         force = self._compute_group_contact_force(group)
         if force is None:
             force = torch.zeros(self.num_envs, group.num_tracked, 3, device=self.device)
@@ -202,6 +232,7 @@ class BaseContactManager(BaseManager, ABC):
         in the ContactSensorCfg.
         """
         group = self._get_group(group_name)
+        self._require_force(group)
         history = self._compute_group_contact_force_history(group)
         if history is None:
             return None

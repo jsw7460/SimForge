@@ -31,7 +31,7 @@ class MujocoContactManager(BaseContactManager):
             if isinstance(sensor, ContactSensor):
                 self._group_sensors[sensor_name] = sensor
                 primary_names = list(dict.fromkeys(slot.primary_name for slot in sensor._slots))
-                self._register_group(sensor_name, primary_names)
+                self._register_group(sensor_name, primary_names, tuple(sensor.cfg.fields))
 
     # -- abstract impl --
 
