@@ -474,4 +474,18 @@ class MujocoEnv(World):
         inside the decimation loop's ``scene.update(dt)`` call.
         """
         self.scene_manager.forward()
+
+    def _render_sensors(self) -> None:
+        """mjlab's sense pipeline: BVH refit, camera rendering, raycasting.
+
+        Its own docstring says once per step, immediately before the
+        observation, and ``ManagerBasedRlEnv`` calls it as the last step
+        of both ``step`` and ``reset``. It used to ride along inside the
+        FK hook above, which runs before the commands and before the
+        interval events — so a camera would have been rendered from a
+        state the returned observation no longer described.
+
+        Returns immediately when no sensor needs it, so presets without
+        cameras or raycasts pay nothing.
+        """
         self.scene_manager.sim.sense()

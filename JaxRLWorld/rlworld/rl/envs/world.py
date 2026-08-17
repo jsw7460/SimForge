@@ -741,6 +741,12 @@ class World(ABC):
         final_observation = None
         final_info = None
         if len(reset_env_ids) > 0:
+            # The terminal observation describes the state that ENDED the
+            # episode, so its rendered sensors have to be of that state —
+            # taken here, before the reset writes the next episode's pose
+            # over it. Only on steps that actually terminate something,
+            # since this is a second render.
+            self._render_sensors()
             self.obs_manager.process_observations(update_history=True)
             final_observation = {key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()}
             self.obs_manager.rollback_last_history_append()
@@ -779,6 +785,11 @@ class World(ABC):
             if "interval_dr" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="interval_dr", dt=self.control_dt)
                 self._invalidate_cache()
+
+        # Rendered sensors last, after the interval events above: mjlab's
+        # own step ends forward -> command -> sense -> observation, and an
+        # image taken before a push describes a robot that has since moved.
+        self._render_sensors()
 
         # Advance managers
         self._advance_managers()
@@ -839,6 +850,27 @@ class World(ABC):
         state internally and has nothing to clear here.
         """
         return None
+
+    def _render_sensors(self) -> None:
+        """Run the backend's sensor rendering, just before an observation.
+
+        Separate from :meth:`_post_reset_forward` on purpose. That hook
+        refreshes derived kinematics; this one produces sensor readings
+        that are themselves rendered — cameras, raycasts — and the two
+        belong at different points in the step. mjlab runs its whole
+        sense pipeline (BVH refit, camera rendering, raycasting) as the
+        LAST thing before the observation, after the interval events
+        that may have moved the robot; folding it into the FK hook put
+        it before both, so a rendered image would describe a state the
+        observation no longer reports.
+
+        Each backend renders differently — mjlab's ``sim.sense()``,
+        Newton's tiled-camera sensor after a BVH refit, Genesis's batch
+        renderer — so the shared step only says WHEN, never how.
+
+        A no-op by default: a backend with no rendered sensors has
+        nothing to do here.
+        """
 
     def _post_reset_forward(self) -> None:
         """Refresh derived quantities after resets, before observations.
@@ -926,6 +958,7 @@ class World(ABC):
         self._post_reset_forward()
         self.command_manager.compute(dt=0.0)
         self._invalidate_cache()
+        self._render_sensors()
         self.obs_manager.advance()
 
         self.extras = {
