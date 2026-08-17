@@ -437,6 +437,15 @@ class MujocoSceneManager(BaseManager):
             data=self._sim.data,
         )
 
+        # Hand the scene's sensor context to the simulation, as mjlab's own
+        # ManagerBasedRlEnv does right after initialize(). ``Scene.initialize``
+        # builds one only when some sensor declares it needs rendering, and
+        # ``Simulation.sense`` returns immediately without it — so a camera
+        # registered but never wired renders nothing and reports a depth
+        # buffer of zeros, with the right shape and dtype, on every step.
+        if self._scene.sensor_context is not None:
+            self._sim.set_sensor_context(self._scene.sensor_context)
+
         # Build kinematic trees for each entity
         self._set_kinematic_tree()
 
