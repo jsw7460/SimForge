@@ -7,7 +7,7 @@ import jax
 import numpy as np
 import torch
 
-from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+from rlworld.rl.utils.jax_utils import jax_to_torch
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.multi_sim_world import _JointPermutation
@@ -33,6 +33,7 @@ class PolicyWrapper(ABC):
     ):
         self.device = device
         self._runner_process_action = runner._process_action_for_env
+        self._runner_pack_obs = runner._pack_obs
         self._joint_perm = joint_perm
 
     @classmethod
@@ -107,7 +108,7 @@ class ModelPolicyWrapper(PolicyWrapper):
 
     def get_action(self, env_obs, robot_states, deterministic=True):
         env_obs = self._permute_obs_to_canonical(env_obs)
-        actor_obs = torch_to_jax(env_obs["actor"])
+        actor_obs = self._runner_pack_obs(env_obs, "actor")
         action_jax = self._inference_fn(actor_obs, self._key)
         actions = jax_to_torch(self._process_action(action_jax), self.device)
         return self._permute_actions_to_sim(actions)
@@ -128,7 +129,7 @@ class MPCPolicyWrapper(PolicyWrapper):
 
     def get_action(self, env_obs, robot_states, deterministic=True):
         env_obs = self._permute_obs_to_canonical(env_obs)
-        actor_obs = torch_to_jax(env_obs["actor"])
+        actor_obs = self._runner_pack_obs(env_obs, "actor")
         action_jax = self._runner.alg.act_with_t0(
             obs=actor_obs,
             t0_mask=self._t0_mask,

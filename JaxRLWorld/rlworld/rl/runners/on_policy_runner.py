@@ -62,6 +62,7 @@ class OnPolicyRunner(BaseRunner):
         self.critic_image_groups = (
             tuple(policy_cfg.critic.image_groups) if isinstance(policy_cfg.critic, VisionCriticCfg) else ()
         )
+        self.image_groups_by_role = {"actor": self.actor_image_groups, "critic": self.critic_image_groups}
 
         self.key, subkey = jax.random.split(self.key)
 
@@ -171,23 +172,24 @@ class OnPolicyRunner(BaseRunner):
         cfg = {
             "num_envs": self.env.num_envs,
             "num_transitions_per_env": self.cfgs.algorithm.num_steps_per_env,
-            "actor_obs_shape": self._obs_shape_spec("actor", self.actor_image_groups),
-            "critic_obs_shape": self._obs_shape_spec("critic", self.critic_image_groups),
+            "actor_obs_shape": self._obs_shape_spec("actor"),
+            "critic_obs_shape": self._obs_shape_spec("critic"),
             "actions_shape": [self.env.num_actions],
             "robot_state_shape": [obs_dim.get("robot_state", 0)],
             "estimator_obs_shape": [obs_dim.get("estimator", 0)],
         }
         self.alg.init_storage(cfg)
 
-    def _obs_shape_spec(self, role: str, image_groups: tuple[str, ...]):
+    def _obs_shape_spec(self, role: str):
         """Storage shape for one model: a plain tuple, or one per group."""
+        image_groups = self.image_groups_by_role[role]
         if not image_groups:
             return [self.obs_shapes[role][0]]
         spec = {role: tuple(self.obs_shapes[role])}
         spec.update({group: tuple(self.obs_shapes[group]) for group in image_groups})
         return spec
 
-    def _pack_obs(self, obs_dict, role: str, image_groups: tuple[str, ...]):
+    def _pack_obs(self, obs_dict, role: str):
         """One model's observation, converted to JAX.
 
         Without image groups this is the state vector alone, exactly as
@@ -195,6 +197,7 @@ class OnPolicyRunner(BaseRunner):
         keys the model was built against.
         """
         vector = torch_to_jax(obs_dict[role])
+        image_groups = self.image_groups_by_role[role]
         if not image_groups:
             return vector
         packed = {role: vector}
@@ -205,8 +208,8 @@ class OnPolicyRunner(BaseRunner):
         """Get initial observation as JAX arrays."""
         obs = self.env.get_observation()
         return PPO.ActInput(
-            self._pack_obs(obs, "actor", self.actor_image_groups),
-            self._pack_obs(obs, "critic", self.critic_image_groups),
+            self._pack_obs(obs, "actor"),
+            self._pack_obs(obs, "critic"),
         )
 
     def _postprocess_step_reward(self, rewards, actions, obs_dict, step_i):
@@ -254,8 +257,8 @@ class OnPolicyRunner(BaseRunner):
             )
 
             # Convert to JAX
-            actor_obs = self._pack_obs(obs_dict, "actor", self.actor_image_groups)
-            critic_obs = self._pack_obs(obs_dict, "critic", self.critic_image_groups)
+            actor_obs = self._pack_obs(obs_dict, "actor")
+            critic_obs = self._pack_obs(obs_dict, "critic")
             rewards_jax = torch_to_jax(rewards)
             # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
             terminated_jax = jnp.asarray(terminated.cpu().numpy())
@@ -265,8 +268,8 @@ class OnPolicyRunner(BaseRunner):
             infos_jax = {}
             if infos.get("final_observation") is not None:
                 infos_jax["final_observation"] = {
-                    "actor": self._pack_obs(infos["final_observation"], "actor", self.actor_image_groups),
-                    "critic": self._pack_obs(infos["final_observation"], "critic", self.critic_image_groups),
+                    "actor": self._pack_obs(infos["final_observation"], "actor"),
+                    "critic": self._pack_obs(infos["final_observation"], "critic"),
                 }
                 # Bootstrap mask (truncations + non-absorbing terminations).
                 # Only meaningful on done steps (final_observation present);

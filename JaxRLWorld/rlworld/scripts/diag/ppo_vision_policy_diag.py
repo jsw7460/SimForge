@@ -144,7 +144,7 @@ def main() -> int:
     # ── 4. the image changes the action ──────────────────────────────
     print("\n-- 4. does the image reach the action --")
     obs = runner.env.get_observation()
-    packed = runner._pack_obs(obs, "actor", runner.actor_image_groups)
+    packed = runner._pack_obs(obs, "actor")
     key = jax.random.PRNGKey(0)
     action_real, _ = model.act(packed, key=key, deterministic=True)
     blank = {**packed, CAMERA_GROUP: jnp.zeros_like(packed[CAMERA_GROUP])}
@@ -153,8 +153,8 @@ def main() -> int:
     print(f"  blanking the depth image moves the action by {delta:.6f}")
     results["the_image_changes_the_action"] = delta > 1e-6
 
-    value_real, _ = model.evaluate_value(runner._pack_obs(obs, "critic", runner.critic_image_groups))
-    critic_blank = runner._pack_obs(obs, "critic", runner.critic_image_groups)
+    value_real, _ = model.evaluate_value(runner._pack_obs(obs, "critic"))
+    critic_blank = runner._pack_obs(obs, "critic")
     critic_blank = {**critic_blank, CAMERA_GROUP: jnp.zeros_like(critic_blank[CAMERA_GROUP])}
     value_blank, _ = model.evaluate_value(critic_blank)
     value_delta = float(jnp.abs(value_real - value_blank).max())
@@ -212,7 +212,7 @@ def main() -> int:
     results["a_vector_policy_declares_no_image_groups"] = plain_runner.actor_image_groups == ()
     results["a_vector_policy_has_no_group_dict"] = plain_runner.alg.actor_critic.actor_vector_group is None
 
-    plain_obs = plain_runner._pack_obs(plain_runner.env.get_observation(), "actor", ())
+    plain_obs = plain_runner._pack_obs(plain_runner.env.get_observation(), "actor")
     results["a_vector_policy_still_takes_one_array"] = isinstance(plain_obs, jax.Array)
 
     plain_runner.learn(num_learning_iterations=1, init_at_random_ep_len=False)

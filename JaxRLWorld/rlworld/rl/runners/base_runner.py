@@ -505,6 +505,17 @@ class BaseRunner(ABC):
             )
         return self._eval_env
 
+    def _pack_obs(self, obs_dict: Dict[str, torch.Tensor], role: str):
+        """One model's observation, converted to JAX.
+
+        A model that reads a single observation group gets that group's
+        array, which is every algorithm here except a vision policy —
+        ``OnPolicyRunner`` overrides this to hand back a dict of groups.
+        Every inference path must go through it, training and evaluation
+        alike, or the two disagree about what the model is fed.
+        """
+        return torch_to_jax(obs_dict[role])
+
     def _run_evaluation(self) -> Dict[str, Any]:
         """Deterministic eval on the default (training-motion) eval env."""
         return self._evaluate_env(self._get_or_create_eval_env())
@@ -543,8 +554,8 @@ class BaseRunner(ABC):
 
         while len(completed_returns) < target_episodes and step < max_steps:
             # Policy inference
-            actor_obs = torch_to_jax(obs_dict["actor"])
-            critic_obs = torch_to_jax(obs_dict["critic"])
+            actor_obs = self._pack_obs(obs_dict, "actor")
+            critic_obs = self._pack_obs(obs_dict, "critic")
             actions = self.alg.act(
                 ActInput(actor_obs, critic_obs),
                 deterministic=deterministic,
