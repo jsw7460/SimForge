@@ -21,6 +21,7 @@ All writer calls use subset-shaped tensors + ``env_ids``, matching the
 
 from __future__ import annotations
 
+from functools import cache
 from typing import TYPE_CHECKING
 
 import torch
@@ -44,6 +45,36 @@ def _sample_uniform(
     device: torch.device,
 ) -> torch.Tensor:
     return (upper - lower) * torch.rand(shape, device=device) + lower
+
+
+@cache
+def _constant(values: tuple, device_str: str) -> torch.Tensor:
+    """A tensor built once from a literal that never changes.
+
+    Reset events run on every step that anything terminates, and each
+    ``torch.tensor([...], device="cuda")`` inside one is a separate
+    host-to-device copy. The values come from term configuration — a
+    pose range, a default position, a rotation axis — and are the same
+    on every call, so building them per call is a copy per call for
+    nothing. At eight environments out of 8192 the reset path is already
+    dominated by launch count rather than arithmetic.
+
+    Returned tensors are shared between callers and must be treated as
+    read-only.
+    """
+    return torch.tensor(values, device=torch.device(device_str), dtype=torch.float32)
+
+
+def _is_zero_range(ranges: dict[str, tuple[float, float]], keys: tuple[str, ...]) -> bool:
+    """Are all the named ranges exactly ``(0, 0)``?
+
+    ``U(0, 0)`` is exactly ``0``, and composing a rotation of exactly
+    zero is exactly the identity, so a term configured this way can skip
+    the perturbation and get bit-identical results. Worth checking
+    because placing a fixture at a fixed pose — the common case — spends
+    a dozen kernels turning zeros into an identity quaternion.
+    """
+    return all(tuple(ranges.get(key, (0.0, 0.0))) == (0.0, 0.0) for key in keys)
 
 
 # ── Push ─────────────────────────────────────────────────────────────
@@ -174,37 +205,49 @@ def reset_root_state_uniform(
 
     # ── Sample pose perturbation ──────────────────────────────────
     keys = ["x", "y", "z", "roll", "pitch", "yaw"]
-    range_list = [pose_range.get(key, (0.0, 0.0)) for key in keys]
-    ranges = torch.tensor(range_list, device=device)
+    device_str = str(device)
+    ranges = _constant(tuple(tuple(pose_range.get(key, (0.0, 0.0))) for key in keys), device_str)
+    # Drawn even where the range is degenerate. The samples are then
+    # exactly zero and the arithmetic below can be skipped, but the draw
+    # itself must stay: removing it would shift the global RNG stream and
+    # silently change every trajectory that follows.
     pose_samples = _sample_uniform(ranges[:, 0], ranges[:, 1], (n, 6), device)
 
     # ── Position: default + perturbation ──────────────────────────
-    default_pos_t = torch.tensor(default_pos, device=device, dtype=torch.float32)
-    pos = default_pos_t.unsqueeze(0).expand(n, -1) + pose_samples[:, 0:3]
+    default_pos_t = _constant(tuple(default_pos), device_str)
+    pos = default_pos_t.unsqueeze(0).expand(n, -1)
+    if not _is_zero_range(pose_range, ("x", "y", "z")):
+        pos = pos + pose_samples[:, 0:3]
 
     pos = pos + env.scene_manager.env_origins[env_ids]
 
     # ── Orientation: default quat * delta quat (all wxyz) ─────────
-    default_quat_t = torch.tensor(default_quat_wxyz, device=device, dtype=torch.float32).unsqueeze(0).expand(n, -1)
+    default_quat_t = _constant(tuple(default_quat_wxyz), device_str).unsqueeze(0).expand(n, -1)
 
-    # Euler perturbation → quaternion delta
-    roll, pitch, yaw = pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
-    axis_x = torch.tensor([1.0, 0.0, 0.0], device=device)
-    axis_y = torch.tensor([0.0, 1.0, 0.0], device=device)
-    axis_z = torch.tensor([0.0, 0.0, 1.0], device=device)
-    q_roll = quat_from_angle_axis_wxyz(roll, axis_x)
-    q_pitch = quat_from_angle_axis_wxyz(pitch, axis_y)
-    q_yaw = quat_from_angle_axis_wxyz(yaw, axis_z)
-    delta_quat = quat_mul_wxyz(quat_mul_wxyz(q_yaw, q_pitch), q_roll)
-
-    quat_wxyz = quat_mul_wxyz(default_quat_t, delta_quat)
+    if _is_zero_range(pose_range, ("roll", "pitch", "yaw")):
+        # Rotating by exactly zero is exactly the identity, and composing
+        # with it returns the default unchanged — bit-identical, minus a
+        # dozen kernel launches per reset.
+        #
+        # Materialized rather than handed over as the broadcast view: the
+        # multiply this replaces always produced a real tensor, and the
+        # writers are entitled to assume one — Genesis passes it straight
+        # into ``set_quat``, and a stride-zero view is not what a
+        # simulator's buffer copy expects.
+        quat_wxyz = default_quat_t.contiguous()
+    else:
+        roll, pitch, yaw = pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
+        q_roll = quat_from_angle_axis_wxyz(roll, _constant((1.0, 0.0, 0.0), device_str))
+        q_pitch = quat_from_angle_axis_wxyz(pitch, _constant((0.0, 1.0, 0.0), device_str))
+        q_yaw = quat_from_angle_axis_wxyz(yaw, _constant((0.0, 0.0, 1.0), device_str))
+        delta_quat = quat_mul_wxyz(quat_mul_wxyz(q_yaw, q_pitch), q_roll)
+        quat_wxyz = quat_mul_wxyz(default_quat_t, delta_quat)
 
     # ── Velocity ──────────────────────────────────────────────────
     lin_vel = torch.zeros((n, 3), device=device)
     ang_vel = torch.zeros((n, 3), device=device)
     if velocity_range:
-        vel_range_list = [velocity_range.get(key, (0.0, 0.0)) for key in keys]
-        vel_ranges = torch.tensor(vel_range_list, device=device)
+        vel_ranges = _constant(tuple(tuple(velocity_range.get(key, (0.0, 0.0))) for key in keys), device_str)
         vel_samples = _sample_uniform(vel_ranges[:, 0], vel_ranges[:, 1], (n, 6), device)
         lin_vel = vel_samples[:, 0:3]
         ang_vel = vel_samples[:, 3:6]
