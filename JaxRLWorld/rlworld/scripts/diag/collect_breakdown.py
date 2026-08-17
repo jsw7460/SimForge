@@ -241,8 +241,79 @@ def main() -> int:
     print("  section's own work, not the previous section's queue.")
     print("  spikes = steps costing more than 10x that section's median.")
 
+    _probe_step_phases(env, timer, actions_torch)
     _probe_done_branch(env, timer)
     return 0
+
+
+def _probe_step_phases(env, timer: _Timer, actions: torch.Tensor) -> None:
+    """Split ``env.step`` into the phases it runs on EVERY step.
+
+    ``env.step`` is 82% of a collect step, and the terminate/reset branch
+    accounts for only about eight of its twenty-one milliseconds. The
+    rest is physics, observations, rewards, terminations and commands,
+    and which of those dominates decides whether the next thing worth
+    optimising is the simulator or the manager layer above it.
+
+    Ordered as ``World.step`` runs them. Physics is the decimation loop,
+    so it already covers several solver steps.
+    """
+    repeats = 20
+    print()
+    print("=" * 78)
+    print("env.step, PHASE BY PHASE  (the work every step does)")
+    print("=" * 78)
+
+    probes = {
+        "act_manager.process_actions": lambda: env.act_manager.process_actions(actions),
+        "_step_physics (decimation loop)": lambda: (env._step_physics(), env._invalidate_cache()),
+        "termination.advance": lambda: env.termination_manager.advance(),
+        "termination.check_termination": lambda: env.termination_manager.check_termination(),
+        "reset_buf.nonzero": lambda: env.termination_manager.reset_buf.nonzero(as_tuple=False).flatten(),
+        "reward_manager.set_rewards": lambda: env.reward_manager.set_rewards(
+            reward_buffer=env.rew_buf,
+            episode_sums=env.episode_sums,
+            reward_buffer_per_type=env.rew_buf_per_type,
+        ),
+        "command_manager.compute": lambda: env.command_manager.compute(env.control_dt),
+        "obs_manager.advance (the returned obs)": lambda: env.obs_manager.advance(),
+        "reward_manager.advance": lambda: env.reward_manager.advance(),
+        "act_manager.advance": lambda: env.act_manager.advance(),
+    }
+    _time_probes(timer, probes, repeats)
+    _probe_observation_terms(env, timer, repeats)
+
+
+def _probe_observation_terms(env, timer: _Timer, repeats: int) -> None:
+    """Time each observation term's own function.
+
+    Building the observations costs 4.37 ms and happens twice per step
+    once anything terminates — 8.7 ms against physics' 8.3 ms. For an
+    arm reporting seven joints, a cube pose and a command, that cannot be
+    arithmetic, so the question is whether one term is expensive or every
+    term costs a fixed amount and there are simply many of them.
+
+    Only the term function is timed here, not the noise, scaling, delay,
+    history and concat the manager wraps around it. The gap between the
+    sum of these and the manager's own 4.37 ms is that wrapper.
+    """
+    print()
+    print("=" * 78)
+    print("OBSERVATION TERMS, one build")
+    print("=" * 78)
+
+    probes = {}
+    for group_name, terms in env.obs_manager._group_terms.items():
+        for term_name, obs_term in terms.items():
+            func = env.obs_manager._resolved_fns[group_name][term_name]
+            probes[f"{group_name}/{term_name}"] = lambda func=func, obs_term=obs_term: func(
+                env.obs_manager.env, **obs_term.params
+            )
+
+    _time_probes(timer, probes, repeats)
+    total = sum(statistics.median(timer.samples[name]) for name in probes)
+    print(f"  {'sum of term functions':<38}{total:8.3f} ms")
+    print("=" * 78)
 
 
 def _probe_done_branch(env, timer: _Timer) -> None:

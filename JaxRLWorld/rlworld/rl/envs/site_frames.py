@@ -183,7 +183,13 @@ def resolve_site_ids(env, entity_name: str, site_names) -> Tensor | None:
             declared = [f.name for f in frames if not f.name.startswith("__unnamed")]
             raise KeyError(f"Entity {entity_name!r} has no site {name!r}. Declared: {declared or 'none'}.")
         ids.append(by_name[name])
-    return torch.tensor(ids, device=env.device, dtype=torch.long)
+    # Deliberately on the HOST. These are indices into a Python table, and
+    # every consumer either indexes with them — PyTorch accepts a CPU index
+    # tensor against a device tensor — or reads them back with ``tolist()``
+    # to look a frame up. On the device that readback is a synchronization:
+    # it waits for every kernel queued so far, on every observation and
+    # reward term that touches a site, on every step.
+    return torch.tensor(ids, dtype=torch.long)
 
 
 class SiteReaderMixin:
@@ -259,9 +265,22 @@ class SiteReaderMixin:
             "Sites come from the MJCF; an entity built from a URDF has none."
         )
 
+    # Per-instance, created on first use. The parent rows and local offsets
+    # for a set of site ids are fixed by the asset: the same two small
+    # tensors were being rebuilt — and copied to the device — on every read,
+    # which is once per observation term, per group, per build, per step.
+    _site_row_cache: dict | None = None
+    _site_quat_cache: dict | None = None
+
     def _site_body_rows(self, site_ids: Tensor | list[int]) -> tuple[Tensor, Tensor]:
         """Parent-body rows and local offsets for the given site ids."""
-        ids = site_ids.tolist() if isinstance(site_ids, Tensor) else list(site_ids)
+        if self._site_row_cache is None:
+            self._site_row_cache = {}
+        ids = tuple(site_ids.tolist()) if isinstance(site_ids, Tensor) else tuple(site_ids)
+        cached = self._site_row_cache.get(ids)
+        if cached is not None:
+            return cached
+
         frames = [self._site_frames[int(i)] for i in ids]
         body_rows = torch.tensor(
             [self.find_body_index(f.body_name) for f in frames],
@@ -273,16 +292,25 @@ class SiteReaderMixin:
             device=self.body_pos_w_all.device,
             dtype=self.body_pos_w_all.dtype,
         )
+        self._site_row_cache[ids] = (body_rows, local)
         return body_rows, local
 
     def _site_local_quats(self, site_ids: Tensor | list[int]) -> Tensor:
         """Site rotations relative to their parents, for the given ids."""
-        ids = site_ids.tolist() if isinstance(site_ids, Tensor) else list(site_ids)
-        return torch.tensor(
+        if self._site_quat_cache is None:
+            self._site_quat_cache = {}
+        ids = tuple(site_ids.tolist()) if isinstance(site_ids, Tensor) else tuple(site_ids)
+        cached = self._site_quat_cache.get(ids)
+        if cached is not None:
+            return cached
+
+        local_quats = torch.tensor(
             [self._site_frames[int(i)].local_quat_wxyz for i in ids],
             device=self.body_quat_w_all.device,
             dtype=self.body_quat_w_all.dtype,
         )
+        self._site_quat_cache[ids] = local_quats
+        return local_quats
 
     # ── Reads ────────────────────────────────────────────────────────
 
