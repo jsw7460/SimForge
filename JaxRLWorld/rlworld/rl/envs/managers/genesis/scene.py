@@ -235,6 +235,20 @@ class SceneManager(BaseManager):
                 "convexify": convexify,
                 "batch_fixed_verts": True,
                 "requires_jac_and_IK": False,
+                # Genesis defaults this to 0.1 kg*m^2 and injects it into
+                # every joint whose armature the file does not state
+                # (``genesis/utils/mjcf.py:182``). MuJoCo and Newton use the
+                # MJCF default of zero, so leaving it on makes Genesis alone
+                # simulate a different robot — silently, since the file is
+                # unchanged and the number never appears anywhere. On a light
+                # joint it is not a correction but a takeover: a spring-loaded
+                # tong hinge carries 1.44e-4, so 0.1 is roughly seven hundred
+                # times its real inertia. None means "believe the file", which
+                # is what the other two backends do. Joints that genuinely
+                # need armature get it from the robot config's ``armature``
+                # dict in ``_configure_robot_dynamics`` below, which runs
+                # after this and is the single place it is stated.
+                "default_armature": None,
             }
             # Keep morph offset at origin so the new relative=True default of
             # get_pos/set_pos/get_quat/set_quat (Genesis #2934) collapses to the
@@ -254,6 +268,8 @@ class SceneManager(BaseManager):
                 # event does to a table or tank, and the MJCF branch above
                 # already sets it.
                 "batch_fixed_verts": True,
+                # Same silent-armature injection as the MJCF branch above.
+                "default_armature": None,
             }
             if cfg.links_to_keep:
                 urdf_kwargs["links_to_keep"] = cfg.links_to_keep
