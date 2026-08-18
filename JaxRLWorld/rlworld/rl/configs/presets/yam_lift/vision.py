@@ -20,8 +20,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mjlab.sensor import CameraSensorCfg
-
 from rlworld.rl.configs.common_config_classes import (
     Activation,
     CNNEncoderCfg,
@@ -38,6 +36,7 @@ from rlworld.rl.configs.common_config_classes import (
 )
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
+from rlworld.rl.configs.sensors.camera_sensor_config import CameraSensorCfg
 from rlworld.rl.envs.mdp.observations.common import perception
 
 CAMERA_GROUP = "camera"
@@ -61,8 +60,14 @@ class YamLiftVisionConfig(YamLiftConfig):
 
     camera_width: int = 32
     camera_height: int = 32
-    camera_fovy: float = 58.0
-    """The D405's vertical field of view, degrees."""
+
+    visible_geometry: str = "collision"
+    """Which of the arm's two descriptions the camera sees: the coarse
+    colliders or the detailed visual meshes. mjlab's own vision task
+    shows the colliders. Both backends are made to honour this, which
+    they otherwise would not — mjlab draws geom groups, Newton draws
+    whatever carries a visibility flag, and after an MJCF import that is
+    both descriptions at once."""
 
     cutoff_distance: float = 0.5
     """Far plane, metres. Everything past it saturates at 1.0, so this is
@@ -72,21 +77,25 @@ class YamLiftVisionConfig(YamLiftConfig):
     cnn: CNNEncoderCfg = field(default_factory=CNNEncoderCfg)
 
     def build(self):
-        if self.sim_type != "mujoco":
+        if self.sim_type == "genesis":
             raise NotImplementedError(
-                f"The wrist camera is wired for mjlab only; {self.sim_type!r} has no camera sensor yet."
+                "Genesis renders through Madrona's BatchRenderer, which is not wired into "
+                "_render_sensors yet, so a camera declared here would never be drawn."
             )
         cfgs = super().build()
-        cfgs.scene.sensors = tuple(cfgs.scene.sensors) + (
+        # One config, both backends. The placement and the field of view
+        # come from the arm's own MJCF camera, so mjlab and Newton read
+        # the same numbers out of the same file instead of keeping two
+        # hand-copied sets in step.
+        cfgs.scene.cameras = tuple(cfgs.scene.cameras) + (
             CameraSensorCfg(
                 name=CAMERA_SENSOR,
-                camera_name=f"robot/{CAMERA_SENSOR}",
+                entity_name="robot",
+                camera_name=CAMERA_SENSOR,
                 width=self.camera_width,
                 height=self.camera_height,
-                fovy=self.camera_fovy,
                 data_types=("depth",),
-                enabled_geom_groups=(0, 3),
-                use_shadows=False,
+                visible_geometry=self.visible_geometry,
             ),
         )
         return cfgs

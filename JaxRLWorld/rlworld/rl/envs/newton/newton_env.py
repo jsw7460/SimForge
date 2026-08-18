@@ -193,6 +193,7 @@ class NewtonEnv(World):
                 rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=self.scene_cfg.sensors,
                 contact_sensors=getattr(self.scene_cfg, "contact_sensors", None),
+                cameras=getattr(self.scene_cfg, "cameras", ()),
                 terrain_cfg=self.scene_cfg.terrain_cfg,
                 dt=self.scene_cfg.dt,
                 substeps=self.scene_cfg.substeps,
@@ -400,6 +401,10 @@ class NewtonEnv(World):
             # is behind the tripwire flag.
             if _NAN_TRIPWIRE:
                 self._nan_tripwire_check(substep=substep)
+
+    def _render_sensors(self) -> None:
+        """Raytrace the cameras against the state the observation reports."""
+        self.scene_manager.render_cameras()
 
     def _write_external_wrench(self) -> None:
         """Add the viewer force into ``state_0.body_f`` for one body/env.

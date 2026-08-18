@@ -158,7 +158,7 @@ class YamArmConfig:
 
     reset_joint_position_noise: tuple[float, float] = (-0.05, 0.05)
 
-    max_iterations: int = 1000
+    max_iterations: int = 30000
     run_name: str = ""
     algorithm_name: str = "PPO"
 

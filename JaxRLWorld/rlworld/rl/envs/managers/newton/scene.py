@@ -23,6 +23,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     NewtonEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactSensorCfg
+from rlworld.rl.configs.sensors.camera_sensor_config import CameraSensorCfg
 from rlworld.rl.configs.sensors.newton_sensor_config import (
     NewtonFrameTransformSensorConfig,
     NewtonIMUSensorConfig,
@@ -33,6 +34,7 @@ from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from rlworld.rl.envs.managers.common.visual_mesh import extract_visual_meshes_from_mj_model
+from rlworld.rl.envs.managers.newton.camera_sensor import NewtonCameraSensor
 from rlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
 from rlworld.rl.envs.managers.newton.label_indexing import NewtonLabelIndexing
 from rlworld.rl.envs.managers.registry import ManagerRegistry
@@ -367,6 +369,10 @@ class NewtonSceneManagerConfig:
     # native ``SensorContact``, with optional substep history.
     contact_sensors: list[ContactSensorCfg] | None = None
 
+    # Simulator-agnostic cameras (CameraSensorCfg); each becomes a
+    # ``NewtonCameraSensor`` driving a native ``SensorTiledCamera``.
+    cameras: tuple[CameraSensorCfg, ...] = ()
+
     # Terrain (flat plane by default; generator → heightfield) — fed to a
     # NewtonTerrainImporter constructed via ManagerRegistry.
     terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
@@ -452,6 +458,9 @@ class NewtonSceneManager(BaseManager):
 
         # Sensor tracking
         self.sensors: dict[str, Any] = {}  # sensor_name -> sensor object
+        # CameraSensorCfg-backed cameras (also in ``self.sensors``); kept
+        # apart because they are the ones ``render_cameras`` drives.
+        self._cameras: dict[str, NewtonCameraSensor] = {}
         # ContactSensorCfg-backed wrappers (subset of ``self.sensors`` —
         # the wrapper objects are also stored under their ``cfg.name`` in
         # ``self.sensors`` so generic sensor iteration sees them).
@@ -1186,6 +1195,24 @@ class NewtonSceneManager(BaseManager):
                 self.sensors[cs_cfg.name] = wrapper
                 self._contact_sensor_wrappers[cs_cfg.name] = wrapper
 
+        # Cameras. Deferred to the end of the build: placing one needs
+        # the body-name index, which only exists once the model is
+        # finalized.
+        for camera_cfg in self.config.cameras:
+            if camera_cfg.name in self.sensors:
+                raise ValueError(f"Sensor '{camera_cfg.name}' already exists")
+            entity_cfg = self.config.entities[camera_cfg.entity_name]
+            link_name, offset, optics = camera_cfg.resolve(entity_cfg.mjcf_path)
+            camera = NewtonCameraSensor(
+                env=self.env,
+                cfg=camera_cfg,
+                link_name=link_name,
+                offset=offset,
+                optics=optics,
+            )
+            self.sensors[camera_cfg.name] = camera
+            self._cameras[camera_cfg.name] = camera
+
         # Create sensor-specific contacts with extended attributes
         has_contact_sensor = bool(self._contact_sensor_wrappers)
         if has_contact_sensor:
@@ -1710,6 +1737,11 @@ class NewtonSceneManager(BaseManager):
     def get_sensor(self, sensor_name: str) -> Any:
         """Get a sensor by name."""
         return self.sensors.get(sensor_name)
+
+    def render_cameras(self) -> None:
+        """Raytrace every camera against the current state."""
+        for camera in self._cameras.values():
+            camera.render()
 
     def get_body_positions(self) -> wp.array:
         """Get body positions [num_bodies, 7] (pos + quat)."""

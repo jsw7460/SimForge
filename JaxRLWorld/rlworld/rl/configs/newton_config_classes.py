@@ -113,6 +113,8 @@ class NewtonSceneConfig(BaseConfig):
     sensors: list["NewtonSensorConfig"] | None = None
     # Simulator-agnostic contact sensors (shared with Genesis / mjlab).
     contact_sensors: "list[ContactSensorCfg] | None" = None
+    # Simulator-agnostic cameras (shared with mjlab).
+    cameras: tuple = ()
     env_spacing: tuple[float, float, float] = (2.0, 2.0, 0.0)
     robot_cfg: Union["RobotConfig", None] = None
     # Terrain (flat plane by default; generator → heightfield) — owned by

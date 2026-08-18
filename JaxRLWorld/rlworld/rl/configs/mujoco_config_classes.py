@@ -66,6 +66,10 @@ class MujocoSceneConfig(BaseConfig):
     # MujocoSceneManager.build_scene.
     sensors: tuple = ()
 
+    # Cameras — sim-agnostic rlworld.rl.configs.sensors.CameraSensorCfg
+    # objects. Same field name on every backend's scene config.
+    cameras: tuple = ()
+
     # Terrain (flat plane by default; generator → heightfield).
     terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 

@@ -216,6 +216,7 @@ class MujocoEnv(World):
                 entities=getattr(self.scene_cfg, "entities", None),
                 rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=getattr(self.scene_cfg, "sensors", ()),
+                cameras=getattr(self.scene_cfg, "cameras", ()),
                 terrain_cfg=self.scene_cfg.terrain_cfg,
                 solver_iterations=getattr(self.scene_cfg, "solver_iterations", 10),
                 solver_ls_iterations=getattr(self.scene_cfg, "solver_ls_iterations", 20),

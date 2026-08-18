@@ -12,6 +12,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg,
 )
 from rlworld.rl.configs.sensors import ContactSensorCfg
+from rlworld.rl.configs.sensors.camera_sensor_config import CameraSensorCfg, resolve_mjcf_geom_groups
 from rlworld.rl.envs.managers.base import BaseManager
 from rlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from rlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
@@ -197,6 +198,11 @@ class MujocoSceneManagerConfig:
     # MujocoSceneManager.build_scene.
     sensors: tuple[ContactSensorCfg, ...] = ()
 
+    # Cameras — sim-agnostic rlworld.rl.configs.sensors.CameraSensorCfg
+    # objects, kept apart from ``sensors`` so the same field name means
+    # the same thing on every backend.
+    cameras: tuple[CameraSensorCfg, ...] = ()
+
     # Terrain (flat plane by default; generator → injected heightfield).
     terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
@@ -330,6 +336,49 @@ class MujocoSceneManager(BaseManager):
         """Passive rigid objects (no actuated joints)."""
         return {n: self._scene.entities[n] for n in self._rigid_object_names}
 
+    def _to_mjlab_camera_cfg(self, cfg: CameraSensorCfg) -> Any:
+        """Convert a sim-agnostic CameraSensorCfg to mjlab's.
+
+        mjlab is the one backend that can ride an MJCF ``<camera>``
+        element directly, so ``camera_name`` is passed through and the
+        asset keeps defining the placement and the intrinsics. The
+        by-hand path is expressed as a parented camera instead.
+        """
+        from mjlab.sensor import CameraSensorCfg as MjCameraSensorCfg
+
+        entity = cfg.entity_name
+        entity_cfg = self.config.entities[entity]
+        if cfg.enabled_geom_groups is not None:
+            geom_groups = tuple(cfg.enabled_geom_groups)
+        else:
+            # Group 0 is MuJoCo's default, and it is where every geom that
+            # came from somewhere other than this entity's MJCF ends up —
+            # the table and the cubes are URDFs. Dropping it would leave
+            # the camera staring at a robot in an empty world.
+            geom_groups = (0,) + resolve_mjcf_geom_groups(entity_cfg.mjcf_path, cfg.visible_geometry)
+        shared = dict(
+            name=cfg.name,
+            width=cfg.width,
+            height=cfg.height,
+            data_types=tuple(cfg.data_types),
+            enabled_geom_groups=geom_groups,
+        )
+        if cfg.camera_name is not None:
+            return MjCameraSensorCfg(
+                camera_name=f"{entity}/{cfg.camera_name}",
+                # None keeps whatever the asset declares — on the YAM arm
+                # that is a sensor size and focal length, not an fovy.
+                fovy=cfg.fovy,
+                **shared,
+            )
+        return MjCameraSensorCfg(
+            parent_body=f"{entity}/{cfg.link_name}",
+            pos=tuple(cfg.offset.pos),
+            quat=tuple(cfg.offset.quat),
+            fovy=cfg.fovy,
+            **shared,
+        )
+
     @property
     def sensors(self) -> dict[str, Any]:
         """Get all sensors."""
@@ -391,7 +440,7 @@ class MujocoSceneManager(BaseManager):
         if self.config.mjlab_scene_cfg is scene_cfg:
             scene_cfg.sensors = tuple(
                 _to_mjlab_sensor_cfg(s, self._mjlab_entity_root_body) for s in self.config.sensors
-            )
+            ) + tuple(self._to_mjlab_camera_cfg(c) for c in self.config.cameras)
 
         # Create scene
         self._scene = Scene(scene_cfg, device=self.config.device)

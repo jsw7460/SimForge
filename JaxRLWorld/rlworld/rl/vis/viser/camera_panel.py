@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 
 __all__ = ["ViserCameraPanel"]
 
+_TARGET_PIXELS = 256
+"""Roughly how wide a panel should be on screen. A policy image is
+tiny — 32x32 is mjlab's own size — and drawn at its true size it is a
+postage stamp, so it is enlarged by whole-pixel repetition. Nearest
+neighbour, never interpolation: a smoothed image is no longer the one
+the policy was given, and the blur would hide single-pixel artefacts."""
+
 
 class ViserCameraPanel:
     """A tab holding one image per channel of every image observation group."""
@@ -43,14 +50,23 @@ class ViserCameraPanel:
         shapes = self._env.obs_manager.calculate_obs_shapes()
         return {group: shape for group, shape in shapes.items() if isinstance(shape, tuple) and len(shape) == 3}
 
+    @staticmethod
+    def _scale_for(height: int, width: int) -> int:
+        return max(1, _TARGET_PIXELS // max(height, width))
+
+    @staticmethod
+    def _enlarge(image: np.ndarray, scale: int) -> np.ndarray:
+        return np.repeat(np.repeat(image, scale, axis=0), scale, axis=1)
+
     def build_ui(self, tabs: Any) -> None:
         with tabs.add_tab("Camera", icon=viser.Icon.CAMERA):
             for group, (channels, height, width) in self._groups.items():
                 with self._server.gui.add_folder(f"{group}  ({channels}x{height}x{width})"):
+                    scale = self._scale_for(height, width)
                     for channel in range(channels):
                         label = group if channels == 1 else f"{group} [{channel}]"
                         self._handles[(group, channel)] = self._server.gui.add_image(
-                            np.zeros((height, width, 3), dtype=np.uint8),
+                            np.zeros((height * scale, width * scale, 3), dtype=np.uint8),
                             label=label,
                             format="png",
                         )
@@ -64,4 +80,5 @@ class ViserCameraPanel:
         for (group, channel), handle in self._handles.items():
             plane = observations[group][env_idx, channel]
             grey = (plane.clamp(0.0, 1.0) * 255.0).to(dtype=torch.uint8).cpu().numpy()
-            handle.image = np.repeat(grey[:, :, None], 3, axis=2)
+            rgb = np.repeat(grey[:, :, None], 3, axis=2)
+            handle.image = self._enlarge(rgb, self._scale_for(*grey.shape))
