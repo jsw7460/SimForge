@@ -35,9 +35,8 @@ from rlworld.rl.configs.common_config_classes import (
     VisionCriticCfg,
 )
 from rlworld.rl.configs.observations import ObservationTermConfig
-from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig, _object_at_goal
+from rlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from rlworld.rl.configs.sensors.camera_sensor_config import CameraSensorCfg
-from rlworld.rl.configs.terminations.termination_term_config import TerminationTermConfig
 from rlworld.rl.envs.mdp.observations.common import perception
 
 CAMERA_GROUP = "camera"
@@ -121,18 +120,6 @@ class YamLiftVisionConfig(YamLiftConfig):
         # empty. Measured on a trained policy: it recovered from a reset
         # 3 times out of 3, and from a resample 0 times out of 8.
         cfg.terms["lift"].place_object_on_resample = False
-        return cfg
-
-    def build_terminations(self):
-        cfg = super().build_terminations()
-        # One attempt per episode. Reaching the goal ends it, and the
-        # next thing the policy meets is a reset — arm home, object
-        # placed — rather than a teleport it cannot perceive.
-        cfg.lifted_to_goal = TerminationTermConfig(
-            func=_object_at_goal,
-            params={"command_name": "lift"},
-            bootstrap_value=True,
-        )
         return cfg
 
     def _build_observation_config(self):

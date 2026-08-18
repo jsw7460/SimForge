@@ -305,6 +305,16 @@ class YamLiftConfig(YamArmConfig):
         @dataclass
         class _TerminationsCfg(TerminationsConfig):
             time_out = TerminationTermConfig(max_episode_exceed)
+            # One attempt per episode. Without this the arm solves the
+            # task in about three seconds and then stands holding the
+            # cube for the remaining seventeen, which teaches it almost
+            # nothing; ending here spends that time on a fresh attempt
+            # instead.
+            lifted_to_goal = TerminationTermConfig(
+                func=_object_at_goal,
+                params={"command_name": "lift"},
+                bootstrap_value=True,
+            )
             cube_dropped = TerminationTermConfig(
                 func=_cube_below,
                 params={"object_name": CUBE, "min_height": DROPPED_Z},
