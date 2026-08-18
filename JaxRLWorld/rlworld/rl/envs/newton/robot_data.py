@@ -253,11 +253,19 @@ class NewtonRigidObjectData(SiteReaderMixin):
     # ------------------------------------------------------------------
 
     def find_body_index(self, body_name: str) -> int:
-        """Resolve a body name to its per-env body index in Newton.
+        """Resolve a body name to its per-env body index, ON THIS ENTITY.
 
-        Uses the singleton ``NewtonBodyCache`` which builds a name→index
-        map at first access. For Newton, body names typically include the
-        entity prefix (e.g. ``"g1_29dof/torso_link"``).
+        The body cache is model-wide and stores bare leaf names, so with
+        two robots built from one asset every name appears twice. Taking
+        the first match then hands the second robot the FIRST robot's
+        body — silently, and only for the second robot, which is the
+        hardest kind of wrong to see: one arm behaves and the other
+        reports the other arm's hand as its own.
+
+        So the search is scoped by the entity's label prefix, which the
+        scene manager assigns whenever a scene holds more than one robot
+        (``scene.py``: ``add_builder(label_prefix=entity_name)``). With a
+        single robot there is no prefix and no ambiguity to resolve.
         """
         from rlworld.rl.envs.utils.newton.body_cache import get_cache
 
@@ -265,7 +273,31 @@ class NewtonRigidObjectData(SiteReaderMixin):
         indices = cache.get_body_indices(body_name)
         if not indices:
             raise ValueError(f"Body name {body_name!r} not found in Newton model. Available bodies: {cache.body_names}")
-        return indices[0]
+        if len(indices) == 1:
+            return indices[0]
+
+        labels = self._env.scene_manager.model.body_label
+        prefix = self._body_label_prefix()
+        if prefix is None:
+            raise ValueError(
+                f"Body name {body_name!r} matches {len(indices)} bodies in the Newton model and entity "
+                f"{self._entity_name!r} has no label prefix to tell them apart. Two entities built from one "
+                "asset need distinct label prefixes."
+            )
+        scoped = [i for i in indices if labels[i].startswith(f"{prefix}/")]
+        if len(scoped) != 1:
+            raise ValueError(
+                f"Body name {body_name!r} matches {len(scoped)} bodies under prefix {prefix!r} "
+                f"(entity {self._entity_name!r}); it must name exactly one."
+            )
+        return scoped[0]
+
+    def _body_label_prefix(self) -> str | None:
+        """This entity's Newton label prefix, or None when it has none."""
+        entity = self._env.scene_manager.entities.get(self._entity_name)
+        if entity is None:
+            return None
+        return getattr(entity["config"], "body_label_prefix", None)
 
     def body_ang_vel_w(self, body_index: int) -> Tensor:
         """World-frame angular velocity of a single body.
