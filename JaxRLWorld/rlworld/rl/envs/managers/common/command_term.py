@@ -144,6 +144,18 @@ class CommandTerm(ABC):
         pattern.
         """
 
+    def get_marker_positions_w(self) -> torch.Tensor | None:
+        """World-frame points a viewer should draw, ``(num_envs, 3)``.
+
+        ``None`` (the default) means the term has nothing to show.
+        Override it whenever the command IS a place — a goal position, a
+        target pose. Without it such a task is invisible: the viewer can
+        render the robot and nothing else, so an arm tracking a target it
+        has already reached is indistinguishable from an arm doing
+        nothing at all.
+        """
+        return None
+
     def get_ui_spec(self) -> CommandTermUISpec | None:
         """Declarative UI for an interactive viewer.
 

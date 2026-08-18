@@ -508,7 +508,7 @@ class ViserPlayViewer(PlayViewerBase):
                         # Queue debug visuals BEFORE update() so the same
                         # frame's _sync_debug_visuals (called inside update)
                         # picks them up — otherwise they lag by one frame.
-                        self._update_target_position_marker()
+                        self._update_command_markers()
                         self._play_scene.update()
                         if self._force_drag is not None:
                             # After scene.update so the frozen (offset-0)
@@ -581,35 +581,33 @@ class ViserPlayViewer(PlayViewerBase):
                 self._ang_vel_handle,
             )
 
-    # ── Target position marker ──────────────────────────────────────
+    # ── Command markers ─────────────────────────────────────────────
     #
-    # Generic hook: if the command manager exposes any 3D-position term
-    # (e.g. drone hover ``target_position``), render it as a small
-    # pinkish sphere at the world-frame target. Uses the existing
-    # debug-sphere infra (ViserScene.add_sphere) which auto-applies the
-    # camera-tracking scene offset so the marker stays consistent with
-    # the rendered robot frame.
-    _TARGET_TERM_NAMES = ("target_position",)
-    _TARGET_MARKER_RADIUS = 0.05
-    _TARGET_MARKER_COLOR = (255, 80, 80)
+    # Any command term that names a place in the world says so through
+    # ``CommandTerm.get_marker_positions_w``, and it is drawn as a small
+    # sphere. Asking the term rather than matching on its name is what
+    # makes this work for a term the viewer has never heard of — the
+    # previous version looked for one hard-coded name that no term in
+    # this repository uses, so it drew nothing, ever.
+    #
+    # Uses the existing debug-sphere infra (ViserScene.add_sphere), which
+    # applies the camera-tracking scene offset, so a marker stays put
+    # relative to the rendered robot.
+    _MARKER_RADIUS = 0.03
+    _MARKER_COLORS = ((255, 80, 80), (80, 160, 255), (120, 220, 120), (240, 200, 80))
 
-    def _update_target_position_marker(self) -> None:
-        cmd_manager = getattr(self.env, "command_manager", None)
-        if cmd_manager is None:
-            return
-        for name in self._TARGET_TERM_NAMES:
-            try:
-                cmd = cmd_manager.get_command(name)
-            except KeyError:
+    def _update_command_markers(self) -> None:
+        env_idx = self._play_scene.env_idx
+        for order, (_, term) in enumerate(self.env.command_manager.iter_terms()):
+            positions = term.get_marker_positions_w()
+            if positions is None:
                 continue
-            if cmd is None or cmd.ndim != 2 or cmd.shape[1] != 3:
-                continue
-            env_idx = self._play_scene.env_idx
-            target_xyz = cmd[env_idx].detach().cpu().numpy()
             self._play_scene.add_sphere(
-                position=target_xyz,
-                radius=self._TARGET_MARKER_RADIUS,
-                color=self._TARGET_MARKER_COLOR,
+                position=positions[env_idx].detach().cpu().numpy(),
+                radius=self._MARKER_RADIUS,
+                # One colour per term, so two arms reaching for two
+                # targets do not both get a red dot.
+                color=self._MARKER_COLORS[order % len(self._MARKER_COLORS)],
             )
 
     def _draw_velocity_arrow(
