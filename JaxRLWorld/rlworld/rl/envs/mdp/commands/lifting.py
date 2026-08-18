@@ -64,6 +64,19 @@ class LiftingCommandCfg(CommandTermCfg):
     object_z: tuple[float, float] = (0.42, 0.45)
     object_yaw: tuple[float, float] = (-3.14159265, 3.14159265)
     place_object: bool = True
+    place_object_on_resample: bool = True
+    """Whether the timer's resample also moves the object, or only the
+    episode reset does.
+
+    True is the original behaviour: a resample poses the task afresh,
+    which doubles the attempts an episode is worth. That works when the
+    policy is TOLD where the object is — the observation changes and it
+    goes after it. A policy that has to see the object cannot detect the
+    move at all when its camera is pointed elsewhere, and one that was
+    holding the object cannot tell that its gripper is now empty, so the
+    teleport reads as "nothing happened" and the rest of the episode is
+    spent holding nothing. Set False there.
+    """
 
     resampling_time_range: tuple[float, float] = (8.0, 12.0)
     """mjlab's own range: the goal and the object are re-drawn twice or
@@ -91,6 +104,10 @@ class LiftingCommand(CommandTerm):
         # object was ever brought to the goal, so a policy that reaches it
         # and then drifts is still credited with having got there.
         self.episode_success = torch.zeros(self.num_envs, device=self.device)
+        # Set only while an episode reset is resampling, so the object
+        # placement can be told apart from the timer's resample without
+        # changing _resample_command's signature for every command term.
+        self._placing_on_reset = False
 
     @property
     def command(self) -> torch.Tensor:
@@ -116,6 +133,13 @@ class LiftingCommand(CommandTerm):
 
     # ── Resampling ───────────────────────────────────────────────────
 
+    def reset(self, env_ids: torch.Tensor) -> None:
+        self._placing_on_reset = True
+        try:
+            super().reset(env_ids)
+        finally:
+            self._placing_on_reset = False
+
     def _resample_command(self, env_ids: torch.Tensor) -> None:
         n = len(env_ids)
         if n == 0:
@@ -134,6 +158,8 @@ class LiftingCommand(CommandTerm):
         self.target_pos[env_ids] = target + origins
 
         if not self.cfg.place_object:
+            return
+        if not self._placing_on_reset and not self.cfg.place_object_on_resample:
             return
 
         lower = torch.tensor([self.cfg.object_x[0], self.cfg.object_y[0], self.cfg.object_z[0]], device=self.device)

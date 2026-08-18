@@ -328,6 +328,24 @@ class YamLiftConfig(YamArmConfig):
         return runner
 
 
+def _object_at_goal(env, command_name: str) -> TerminationResult:
+    """End the episode once the object has been brought to its goal.
+
+    Bootstrapped, not absorbing. The reward here is dense and keeps
+    paying while the object is held at the goal, so cutting the episode
+    with a terminal value of zero would tell the policy that succeeding
+    costs it everything it would have earned by standing still — and the
+    surest way to avoid that is never to succeed. The value at the cut
+    is the value of carrying on, which is what bootstrapping supplies.
+
+    Ending here rather than running out the clock is what makes the
+    episode one attempt: the next state the policy meets is a fresh
+    reset, arm home and object placed, instead of seventeen seconds of
+    holding followed by a teleport it cannot perceive.
+    """
+    return TerminationResult(env.command_manager.get_term(command_name).at_goal, is_timeout=False)
+
+
 def _cube_below(env, object_name: str, min_height: float) -> TerminationResult:
     """Terminate where the object has fallen below ``min_height``.
 
