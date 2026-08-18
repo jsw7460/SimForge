@@ -27,6 +27,7 @@ def camera_depth(
     sensor_name: str,
     cutoff_distance: float,
     min_depth: float = 0.01,
+    near_clip: float = 0.0,
 ) -> torch.Tensor:
     """Depth in CNN-compatible format, normalised to [0, 1].
 
@@ -38,6 +39,14 @@ def camera_depth(
     ``cutoff_distance`` is the far plane: everything beyond it saturates
     at 1.0. Set it to roughly the depth of the workspace, not to the
     room — the resolution a policy gets is spread across this range.
+
+    ``near_clip`` discards surfaces nearer than the real sensor can
+    measure — a D405 cannot report anything closer than about 7 cm, so
+    below that both simulators are inventing, and they invent
+    differently: one renders the camera's own housing where the other
+    clips it away. Applied here rather than in a backend so BOTH see the
+    same rule, which is what makes their images comparable and what a
+    policy would meet on hardware.
 
     A pixel that hits nothing comes back as 0.0 and is lifted to
     ``min_depth``, i.e. it reads as "something right at the lens" rather
@@ -55,6 +64,8 @@ def camera_depth(
     if depth_data is None:
         raise ValueError(f"Camera {sensor_name!r} has no depth data. Add 'depth' to its data_types.")
     depth_data = depth_data.permute(0, 3, 1, 2)  # (B, 1, H, W)
+    if near_clip > 0.0:
+        depth_data = torch.where(depth_data < near_clip, torch.zeros_like(depth_data), depth_data)
     depth_data_clipped = torch.clamp(depth_data, min=min_depth, max=cutoff_distance)
     return torch.clamp(depth_data_clipped / cutoff_distance, 0.0, 1.0)
 

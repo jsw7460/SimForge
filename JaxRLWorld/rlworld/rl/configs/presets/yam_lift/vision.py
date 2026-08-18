@@ -61,6 +61,22 @@ class YamLiftVisionConfig(YamLiftConfig):
     camera_width: int = 32
     camera_height: int = 32
 
+    near_clip: float = 0.07
+    """Closest distance the camera reports, metres; nearer surfaces read
+    as "hit nothing". A real D405 cannot measure closer than about this.
+
+    It is also the only thing the two backends genuinely disagree about.
+    Below a few centimetres the camera is not looking at a surface, it is
+    BURIED in one — the cross-sim diag traced every remaining mismatch to
+    poses where the wrist had been driven inside the table — and what a
+    camera inside a solid sees is undefined. mjwarp culls the backface
+    and reports nothing; Newton reports the inner wall. Neither is wrong,
+    and neither is a state the physics would ever produce.
+
+    Applied to the observation rather than to a backend, so mjlab, Newton
+    and the robot all obey one rule.
+    """
+
     visible_geometry: str = "collision"
     """Which of the arm's two descriptions the camera sees: the coarse
     colliders or the detailed visual meshes. mjlab's own vision task
@@ -107,6 +123,7 @@ class YamLiftVisionConfig(YamLiftConfig):
             setattr(cfg.actor, term, None)
 
         cutoff = self.cutoff_distance
+        near_clip = self.near_clip
 
         @dataclass
         class _CameraObsCfg(ObservationGroupConfig):
@@ -117,7 +134,7 @@ class YamLiftVisionConfig(YamLiftConfig):
             wrist_depth = ObservationTermConfig(
                 func=perception.camera_depth,
                 scale=1.0,
-                params={"sensor_name": CAMERA_SENSOR, "cutoff_distance": cutoff},
+                params={"sensor_name": CAMERA_SENSOR, "cutoff_distance": cutoff, "near_clip": near_clip},
             )
 
         setattr(cfg, CAMERA_GROUP, _CameraObsCfg())

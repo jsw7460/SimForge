@@ -89,6 +89,9 @@ class NewtonCameraData:
     def __init__(self):
         self.depth: torch.Tensor | None = None
         self.rgb: torch.Tensor | None = None
+        self.shape_index: torch.Tensor | None = None
+        """Which shape each pixel hit, ``(num_envs, H, W)``. Newton's own
+        shape indexing, so ``model.shape_label`` names them."""
 
 
 class NewtonCameraSensor:
@@ -133,6 +136,9 @@ class NewtonCameraSensor:
         utils = self._sensor.utils
         self._rays = utils.compute_camera_rays_pinhole(cfg.width, cfg.height, **_ray_optics(cfg, optics))
         self._forward_depth = utils.create_forward_depth_image_output(cfg.width, cfg.height, camera_count=1)
+        # Which shape each pixel hit. Costs one more buffer and answers
+        # the only question a depth image cannot: WHAT is that surface.
+        self._shape_index = utils.create_shape_index_image_output(cfg.width, cfg.height, camera_count=1)
 
         # (camera_count, world_count), the order SensorTiledCamera.update
         # documents for transforms — note the outputs are the other way
@@ -145,6 +151,7 @@ class NewtonCameraSensor:
         # (worlds, cameras, H, W) -> (num_envs, H, W, 1), mjlab's layout.
         depth_torch = wp.to_torch(self._forward_depth)
         self.data.depth = depth_torch[:, 0].unsqueeze(-1)
+        self.data.shape_index = wp.to_torch(self._shape_index)[:, 0]
 
     def _apply_visibility(self, visible_geometry: str) -> None:
         """Show the camera the same shapes mjlab is told to draw.
@@ -217,4 +224,5 @@ class NewtonCameraSensor:
             self._transforms,
             self._rays,
             forward_depth_image=self._forward_depth,
+            shape_index_image=self._shape_index,
         )
