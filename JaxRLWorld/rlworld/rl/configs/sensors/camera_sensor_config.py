@@ -29,15 +29,15 @@ Backend support matrix
 ========================  ======  ========  =========
 field / value             mjlab   Newton    Genesis
 ========================  ======  ========  =========
-camera_name (from MJCF)    yes     yes       no
-link_name + offset         yes     yes       no
-data_types={"depth"}       yes     yes       no
+camera_name (from MJCF)    yes     yes       yes
+link_name + offset         yes     yes       yes
+data_types={"depth"}       yes     yes       yes
 data_types={"rgb"}         yes     no        no
 enabled_geom_groups        yes     no        no
 ========================  ======  ========  =========
 
-Genesis needs its ``BatchRenderer`` (Madrona) wired into
-``_render_sensors`` before any of this reaches it.
+Genesis draws through Madrona's batch renderer, which has to be asked
+for when the scene is constructed and requires ``gs_madrona``.
 
 Depth contract
 --------------
@@ -46,7 +46,9 @@ Every backend adapter must return depth as **forward-projected metres**
 camera reports — with **0.0 meaning the ray hit nothing**. mjlab is
 already both. Newton is both provided the adapter reads
 ``forward_depth`` (not ``depth``, which is ray distance) and leaves
-``ClearData.clear_depth`` at its 0.0 default.
+``ClearData.clear_depth`` at its 0.0 default. Genesis reports a miss as
++inf and its adapter converts it — measured, not assumed: the value was
+read off the cross-sim diag.
 """
 
 from __future__ import annotations

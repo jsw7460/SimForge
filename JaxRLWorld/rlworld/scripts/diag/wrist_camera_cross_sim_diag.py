@@ -118,18 +118,22 @@ def _sample_state(env, clutter_names: list[str], generator: torch.Generator, dev
     middle = 0.5 * (lower + upper)
     half = 0.475 * (upper - lower)
     lower, upper = (middle - half).cpu(), (middle + half).cpu()
+    # device="cpu" on every draw, spelled out: Genesis sets torch's
+    # default device to the GPU, and the point of sampling here is that
+    # both backends are handed the SAME numbers from one seeded CPU
+    # generator rather than each drawing its own.
     shape = (env.num_envs, lower.shape[-1])
-    unit = torch.rand(shape, generator=generator)
+    unit = torch.rand(shape, generator=generator, device="cpu")
     joint_pos = lower + unit * (upper - lower)
     joint_by_name = {name: joint_pos[:, index] for index, name in enumerate(joint_names)}
 
     objects = {}
     for name in ["cube", *clutter_names]:
-        pos = torch.empty((env.num_envs, 3))
+        pos = torch.empty((env.num_envs, 3), device="cpu")
         for axis, (low, high) in enumerate((_CLUTTER_X, _CLUTTER_Y, _CLUTTER_Z)):
-            pos[:, axis] = low + torch.rand((env.num_envs,), generator=generator) * (high - low)
-        yaw = torch.rand((env.num_envs,), generator=generator) * 6.2831853
-        quat = torch.zeros((env.num_envs, 4))
+            pos[:, axis] = low + torch.rand((env.num_envs,), generator=generator, device="cpu") * (high - low)
+        yaw = torch.rand((env.num_envs,), generator=generator, device="cpu") * 6.2831853
+        quat = torch.zeros((env.num_envs, 4), device="cpu")
         quat[:, 0] = torch.cos(0.5 * yaw)
         quat[:, 3] = torch.sin(0.5 * yaw)
         objects[name] = (pos, quat)
@@ -176,7 +180,7 @@ def _impose(env, joint_by_name: dict[str, torch.Tensor], objects: dict, device) 
 
 def _depth(env) -> torch.Tensor:
     """Raw sensor depth, ``(num_envs, H, W)``, metres."""
-    return env.scene_manager.sensors[CAMERA_SENSOR].data.depth[..., 0].float()
+    return env.scene_manager.camera_sensors[CAMERA_SENSOR].data.depth[..., 0].float()
 
 
 def _wrist_pose(env, body_name: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -231,37 +235,39 @@ def _depth_profile(depth: torch.Tensor) -> str:
     )
 
 
-def _geometry_report(mj_env, nt_env) -> None:
-    """Count what each backend actually has to draw.
+def _geometry_report(env, sim_type: str, label: str) -> None:
+    """Count what one backend actually has to draw.
 
-    The two disagreeing about a scene is meaningless until it is known
-    which shapes each one is even holding. mjlab filters by geom group;
-    Newton by a per-shape visibility flag. Both are counted from the
-    built model rather than from what the config asked for.
+    Two backends disagreeing about a scene is meaningless until it is
+    known which shapes each is even holding. Each states it its own way —
+    mjlab by geom group, Newton by a per-shape visibility flag, Genesis
+    through its own renderer — so each is counted the way it can be, from
+    the BUILT model rather than from what the config asked for.
     """
-    import warp as wp
-    from newton import ShapeFlags
+    if sim_type == "mujoco":
+        mj_model = env.scene_manager.sim.mj_model
+        groups: dict[int, int] = {}
+        for index in range(mj_model.ngeom):
+            group = int(mj_model.geom_group[index])
+            groups[group] = groups.get(group, 0) + 1
+        print(f"  {label:<8} {mj_model.ngeom} geoms by group: {dict(sorted(groups.items()))}")
+    elif sim_type == "newton":
+        import warp as wp
+        from newton import ShapeFlags
 
-    print("\n-- 0. what geometry each backend holds --")
-
-    mj_model = mj_env.scene_manager.sim.mj_model
-    groups: dict[int, int] = {}
-    for index in range(mj_model.ngeom):
-        groups[int(mj_model.geom_group[index])] = groups.get(int(mj_model.geom_group[index]), 0) + 1
-    print(f"  mjlab  {mj_model.ngeom} geoms by group: {dict(sorted(groups.items()))}")
-
-    flags = wp.to_torch(nt_env.scene_manager.model.shape_flags)
-    visible = (flags & int(ShapeFlags.VISIBLE)) != 0
-    collides = (flags & int(ShapeFlags.COLLIDE_SHAPES)) != 0
-    print(
-        f"  Newton {flags.numel()} shapes: visible {int(visible.sum())}, "
-        f"colliding {int(collides.sum())}, visible-but-not-colliding {int((visible & ~collides).sum())}, "
-        f"colliding-but-not-visible {int((collides & ~visible).sum())}"
-    )
-    print("  (a backend drawing shapes the other does not hold cannot match it)")
+        flags = wp.to_torch(env.scene_manager.model.shape_flags)
+        visible = (flags & int(ShapeFlags.VISIBLE)) != 0
+        collides = (flags & int(ShapeFlags.COLLIDE_SHAPES)) != 0
+        print(
+            f"  {label:<8} {flags.numel()} shapes: visible {int(visible.sum())}, "
+            f"colliding {int(collides.sum())}, visible-but-not-colliding {int((visible & ~collides).sum())}, "
+            f"colliding-but-not-visible {int((collides & ~visible).sum())}"
+        )
+    else:
+        print(f"  {label:<8} {sim_type}: no shape inventory wired up here")
 
 
-def _chain_report(mj_env, nt_env) -> None:
+def _chain_report(a_env, b_env) -> None:
     """Where along the arm do the two backends stop agreeing?
 
     A wrist that is in the wrong place with the joints identical is
@@ -269,43 +275,45 @@ def _chain_report(mj_env, nt_env) -> None:
     differently, and those have nothing to do with each other. Walking
     the chain names which.
     """
-    mj_bodies = mj_env.get_robot_data("robot")
-    nt_bodies = nt_env.get_robot_data("robot")
-    mj_origins = mj_env.scene_manager.env_origins
-    nt_origins = nt_env.scene_manager.env_origins
+    a_bodies = a_env.get_robot_data("robot")
+    b_bodies = b_env.get_robot_data("robot")
+    a_origins = a_env.scene_manager.env_origins
+    b_origins = b_env.scene_manager.env_origins
 
     print("\n-- 1a. where the two arms stop agreeing --")
     print(f"  {'body':<18} {'Δpos (m)':>12} {'Δrot (1-|dot|)':>16}")
     for name in ("arm", "link_1", "link_2", "link_3", "link_4", "link_5", "link_6"):
         try:
-            mj_index = mj_bodies.find_body_index(name)
-            nt_index = nt_bodies.find_body_index(name)
+            a_index = a_bodies.find_body_index(name)
+            b_index = b_bodies.find_body_index(name)
         except (ValueError, KeyError) as error:
             print(f"  {name:<18} not resolvable: {error}")
             continue
-        mj_pos = mj_bodies.body_pos_w_all[:, mj_index] - mj_origins
-        nt_pos = (nt_bodies.body_pos_w_all[:, nt_index] - nt_origins).to(mj_pos.device)
-        mj_quat = mj_bodies.body_quat_w_all[:, mj_index]
-        nt_quat = nt_bodies.body_quat_w_all[:, nt_index].to(mj_quat.device)
-        pos_gap = float((mj_pos - nt_pos).abs().max())
-        rot_gap = float((1.0 - (mj_quat * nt_quat).sum(-1).abs()).max())
+        a_pos = a_bodies.body_pos_w_all[:, a_index] - a_origins
+        b_pos = (b_bodies.body_pos_w_all[:, b_index] - b_origins).to(a_pos.device)
+        a_quat = a_bodies.body_quat_w_all[:, a_index]
+        b_quat = b_bodies.body_quat_w_all[:, b_index].to(a_quat.device)
+        pos_gap = float((a_pos - b_pos).abs().max())
+        rot_gap = float((1.0 - (a_quat * b_quat).sum(-1).abs()).max())
         print(f"  {name:<18} {pos_gap:12.6f} {rot_gap:16.6f}")
 
-    mj_index = mj_bodies.find_body_index("arm")
-    nt_index = nt_bodies.find_body_index("arm")
+    a_index = a_bodies.find_body_index("arm")
+    b_index = b_bodies.find_body_index("arm")
     print("  env 0 base pose, env-local:")
     print(
-        f"    mjlab  pos {[round(float(v), 5) for v in mj_bodies.body_pos_w_all[0, mj_index] - mj_origins[0]]}"
-        f"  quat {[round(float(v), 5) for v in mj_bodies.body_quat_w_all[0, mj_index]]}"
+        f"    mjlab  pos {[round(float(v), 5) for v in a_bodies.body_pos_w_all[0, a_index] - a_origins[0]]}"
+        f"  quat {[round(float(v), 5) for v in a_bodies.body_quat_w_all[0, a_index]]}"
     )
     print(
-        f"    Newton pos {[round(float(v), 5) for v in nt_bodies.body_pos_w_all[0, nt_index] - nt_origins[0]]}"
-        f"  quat {[round(float(v), 5) for v in nt_bodies.body_quat_w_all[0, nt_index]]}"
+        f"    Newton pos {[round(float(v), 5) for v in b_bodies.body_pos_w_all[0, b_index] - b_origins[0]]}"
+        f"  quat {[round(float(v), 5) for v in b_bodies.body_quat_w_all[0, b_index]]}"
     )
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--sim-a", default="mujoco", choices=("mujoco", "newton", "genesis"))
+    ap.add_argument("--sim-b", default="newton", choices=("mujoco", "newton", "genesis"))
     ap.add_argument("--num-envs", type=int, default=8)
     ap.add_argument("--samples", type=int, default=64, help="Random arm poses to compare.")
     ap.add_argument("--clutter", type=int, default=12, help="Extra cubes strewn over the table.")
@@ -336,7 +344,7 @@ def main() -> int:
 
     print("=" * 78)
     print(
-        f"WRIST DEPTH: mjlab vs Newton  [{args.num_envs} envs x {args.samples} poses, "
+        f"WRIST DEPTH: {args.sim_a} (A) vs {args.sim_b} (B)  [{args.num_envs} envs x {args.samples} poses, "
         f"{args.resolution}px, {args.clutter} extra cubes, {args.geometry} geometry]"
     )
     print("=" * 78)
@@ -344,35 +352,41 @@ def main() -> int:
     results: dict[str, bool] = {}
 
     print("\n-- building both backends --")
-    mj_env, cfg = _build_env("mujoco", args, clutter_names)
-    nt_env, _ = _build_env("newton", args, clutter_names)
-    device = mj_env.device
-    print(f"  mjlab  device {mj_env.device}   Newton device {nt_env.device}")
+    a_env, cfg = _build_env(args.sim_a, args, clutter_names)
+    b_env, _ = _build_env(args.sim_b, args, clutter_names)
+    device = a_env.device
+    print(f"  A = {args.sim_a} on {a_env.device}   B = {args.sim_b} on {b_env.device}")
 
-    mj_camera = mj_env.scene_manager.sensors[CAMERA_SENSOR]
-    nt_camera = nt_env.scene_manager.sensors[CAMERA_SENSOR]
-    print(f"  mjlab  camera {type(mj_camera).__name__}  geom groups {mj_camera.cfg.enabled_geom_groups}")
-    print(f"  Newton camera {type(nt_camera).__name__}")
-    print(f"  Newton reads the arm's MJCF camera as: link {nt_camera._link_name!r}")
-    print(f"    offset pos  {[round(float(v), 6) for v in nt_camera._offset_pos]}")
-    print(f"    offset quat {[round(float(v), 6) for v in nt_camera._offset_quat]}")
+    a_camera = a_env.scene_manager.camera_sensors[CAMERA_SENSOR]
+    b_camera = b_env.scene_manager.camera_sensors[CAMERA_SENSOR]
+    print(f"  A camera {type(a_camera).__name__}   B camera {type(b_camera).__name__}")
+    # Our own cfg, not the backend's translation of it: mjlab converts
+    # it into an mjlab CameraSensorCfg, which knows nothing about MJCF
+    # resolution.
+    our_cfg = next(c for c in a_env.scene_manager.config.cameras if c.name == CAMERA_SENSOR)
+    mjcf_path = a_env.scene_manager.config.entities["robot"].mjcf_path
+    link_name, offset, optics = our_cfg.resolve(mjcf_path)
+    print(f"  both read the arm's MJCF camera as: link {link_name!r}")
+    print(f"    offset pos  {[round(v, 6) for v in offset.pos]}")
+    print(f"    offset quat {[round(v, 6) for v in offset.quat]}")
+    print(f"    fovy {optics.fovy:.4f} deg   sensor {optics.sensorsize}   focal {optics.focal}")
 
-    wrist_body = nt_camera._link_name
+    wrist_body = link_name
     print(f"  wrist body on both backends: {wrist_body!r}")
 
-    mj_joint_names = list(mj_env.act_manager.actuated_joint_names)
-    nt_joint_names = list(nt_env.act_manager.actuated_joint_names)
-    print(f"  mjlab  actuated order {mj_joint_names}")
-    print(f"  Newton actuated order {nt_joint_names}")
-    if mj_joint_names != nt_joint_names:
+    a_joint_names = list(a_env.act_manager.actuated_joint_names)
+    b_joint_names = list(b_env.act_manager.actuated_joint_names)
+    print(f"  A actuated order {a_joint_names}")
+    print(f"  B actuated order {b_joint_names}")
+    if a_joint_names != b_joint_names:
         print("  -> the two orders DIFFER; joints are written by name, not by position")
-    if sorted(mj_joint_names) != sorted(nt_joint_names):
+    if sorted(a_joint_names) != sorted(b_joint_names):
         raise ValueError("The two backends do not even have the same actuated joints; nothing below is comparable.")
 
     near_clip = cfg.near_clip
     print(f"  near clip applied to both, in the observation: {near_clip} m")
 
-    joint_limits = nt_env.get_robot_data("robot").joint_pos_limits
+    joint_limits = b_env.get_robot_data("robot").joint_pos_limits
     generator = torch.Generator().manual_seed(args.seed)
 
     worst = {
@@ -387,8 +401,8 @@ def main() -> int:
         "joint_gap": 0.0,
         "wrist_pos_gap": 0.0,
         "wrist_quat_gap": 0.0,
-        "nohit_mj": 0,
-        "nohit_nt": 0,
+        "nohit_a": 0,
+        "nohit_b": 0,
         "nohit_both": 0,
         "nohit_either": 0,
         "policy_pixels": 0,
@@ -408,33 +422,33 @@ def main() -> int:
 
     print(f"\n-- {args.samples} random poses --")
     for sample in range(args.samples):
-        joint_by_name, objects = _sample_state(mj_env, clutter_names, generator, device, joint_limits, nt_joint_names)
-        _impose(mj_env, joint_by_name, objects, mj_env.device)
-        _impose(nt_env, joint_by_name, objects, nt_env.device)
+        joint_by_name, objects = _sample_state(a_env, clutter_names, generator, device, joint_limits, b_joint_names)
+        _impose(a_env, joint_by_name, objects, a_env.device)
+        _impose(b_env, joint_by_name, objects, b_env.device)
 
         # 1. the two scenes really do hold the same state
         # Compared by name, so a differing order shows up as a mismatch
         # rather than hiding behind two consistent readbacks.
-        mj_joints = mj_env.get_robot_data("robot").joint_pos
-        nt_joints = nt_env.get_robot_data("robot").joint_pos.to(mj_joints.device)
-        nt_order = [nt_joint_names.index(name) for name in mj_joint_names]
-        gap = (mj_joints - nt_joints[:, nt_order]).abs().max()
+        a_joints = a_env.get_robot_data("robot").joint_pos
+        b_joints = b_env.get_robot_data("robot").joint_pos.to(a_joints.device)
+        nt_order = [b_joint_names.index(name) for name in a_joint_names]
+        gap = (a_joints - b_joints[:, nt_order]).abs().max()
         totals["joint_gap"] = max(totals["joint_gap"], float(gap))
 
         # 2. so the wrist is in the same place
-        mj_pos, mj_quat = _wrist_pose(mj_env, wrist_body)
-        nt_pos, nt_quat = _wrist_pose(nt_env, wrist_body)
-        nt_pos = nt_pos.to(mj_pos.device)
-        nt_quat = nt_quat.to(mj_quat.device)
-        totals["wrist_pos_gap"] = max(totals["wrist_pos_gap"], float((mj_pos - nt_pos).abs().max()))
+        a_pos, a_quat = _wrist_pose(a_env, wrist_body)
+        b_pos, b_quat = _wrist_pose(b_env, wrist_body)
+        b_pos = b_pos.to(a_pos.device)
+        b_quat = b_quat.to(a_quat.device)
+        totals["wrist_pos_gap"] = max(totals["wrist_pos_gap"], float((a_pos - b_pos).abs().max()))
         # Quaternions double-cover, so compare the rotation, not the sign.
-        quat_gap = 1.0 - (mj_quat * nt_quat).sum(-1).abs()
+        quat_gap = 1.0 - (a_quat * b_quat).sum(-1).abs()
         totals["wrist_quat_gap"] = max(totals["wrist_quat_gap"], float(quat_gap.max()))
 
         # 3. and the images should agree
-        mj_depth = _depth(mj_env)
-        nt_depth = _depth(nt_env).to(mj_depth.device)
-        diff = (mj_depth - nt_depth).abs()
+        a_depth = _depth(a_env)
+        b_depth = _depth(b_env).to(a_depth.device)
+        diff = (a_depth - b_depth).abs()
 
         agreeing = int((diff <= args.tolerance).sum())
         pixels = diff.numel()
@@ -449,9 +463,9 @@ def main() -> int:
         # metres and not at all in what the network reads.
         cutoff = args.cutoff
 
-        mj_policy = _as_policy_sees(mj_depth, cutoff, near_clip)
-        nt_policy = _as_policy_sees(nt_depth, cutoff, near_clip)
-        policy_diff = (mj_policy - nt_policy).abs()
+        a_policy = _as_policy_sees(a_depth, cutoff, near_clip)
+        b_policy = _as_policy_sees(b_depth, cutoff, near_clip)
+        policy_diff = (a_policy - b_policy).abs()
         totals["policy_pixels"] += policy_diff.numel()
         totals["policy_agreeing"] += int((policy_diff <= args.tolerance / cutoff).sum())
         totals["policy_abs_sum"] += float(policy_diff.sum())
@@ -460,16 +474,16 @@ def main() -> int:
         # counts as disputed when one backend sees something inside the
         # working range and the other does not — that is real geometry
         # missing from one of them, not a grazing-ray artefact.
-        mj_near = (mj_depth > 0.0) & (mj_depth <= cutoff)
-        nt_near = (nt_depth > 0.0) & (nt_depth <= cutoff)
-        both_near = mj_near & nt_near
+        a_near = (a_depth > 0.0) & (a_depth <= cutoff)
+        b_near = (b_depth > 0.0) & (b_depth <= cutoff)
+        both_near = a_near & b_near
         totals["near_pixels"] += int(both_near.sum())
         totals["near_agreeing"] += int(((diff <= args.tolerance) & both_near).sum())
-        totals["near_disputed"] += int((mj_near ^ nt_near).sum())
+        totals["near_disputed"] += int((a_near ^ b_near).sum())
 
         # Away from silhouettes the question has one right answer, so
         # this is where a rendering port is either correct or not.
-        edge = _edge_mask(mj_depth, args.tolerance) | _edge_mask(nt_depth, args.tolerance)
+        edge = _edge_mask(a_depth, args.tolerance) | _edge_mask(b_depth, args.tolerance)
         interior = ~edge
         totals["edge_pixels"] += int(edge.sum())
         totals["interior_pixels"] += int(interior.sum())
@@ -480,23 +494,26 @@ def main() -> int:
         # Keep the sample with the most interior disagreement, not the
         # last one: the last is whatever the loop happened to end on, and
         # inspecting it says nothing about the aggregate above.
+        b_shape_index = getattr(b_camera.data, "shape_index", None)
         interior_bad = int(((diff > args.tolerance) & interior).sum())
         if interior_bad > worst_interior["count"]:
             worst_interior.update(
                 sample=sample,
                 count=interior_bad,
-                mj=mj_depth.clone(),
-                nt=nt_depth.clone(),
+                mj=a_depth.clone(),
+                nt=b_depth.clone(),
                 interior=interior.clone(),
-                shape=nt_camera.data.shape_index.clone(),
+                # Newton alone can say WHICH shape a pixel hit, and that
+                # is what turned the last mystery into an answer.
+                shape=None if b_shape_index is None else b_shape_index.clone(),
             )
 
-        mj_nohit = mj_depth <= 0.0
-        nt_nohit = nt_depth <= 0.0
-        totals["nohit_mj"] += int(mj_nohit.sum())
-        totals["nohit_nt"] += int(nt_nohit.sum())
-        totals["nohit_both"] += int((mj_nohit & nt_nohit).sum())
-        totals["nohit_either"] += int((mj_nohit | nt_nohit).sum())
+        a_nohit = a_depth <= 0.0
+        b_nohit = b_depth <= 0.0
+        totals["nohit_a"] += int(a_nohit.sum())
+        totals["nohit_b"] += int(b_nohit.sum())
+        totals["nohit_both"] += int((a_nohit & b_nohit).sum())
+        totals["nohit_either"] += int((a_nohit | b_nohit).sum())
 
         max_diff = float(diff.max())
         fraction = agreeing / pixels
@@ -507,22 +524,25 @@ def main() -> int:
             print(
                 f"  sample {sample:4d}: max |Δ| {max_diff:.5f} m   "
                 f"within {args.tolerance * 1000:.0f} mm: {100.0 * fraction:.2f}%   "
-                f"mjlab depth [{float(mj_depth.min()):.3f}, {float(mj_depth.max()):.3f}]   "
-                f"Newton [{float(nt_depth.min()):.3f}, {float(nt_depth.max()):.3f}]"
+                f"A depth [{float(a_depth.min()):.3f}, {float(a_depth.max()):.3f}]   "
+                f"B [{float(b_depth.min()):.3f}, {float(b_depth.max()):.3f}]"
             )
 
     diffs = torch.cat(all_diffs)
 
-    _geometry_report(mj_env, nt_env)
-    _chain_report(mj_env, nt_env)
+    print("\n-- 0. what geometry each backend holds --")
+    _geometry_report(a_env, args.sim_a, "A")
+    _geometry_report(b_env, args.sim_b, "B")
+    print("  (a backend drawing shapes the other does not hold cannot match it)")
+    _chain_report(a_env, b_env)
 
     print("\n-- 1. are the two scenes in the same state --")
     print(f"  worst joint-angle gap      {totals['joint_gap']:.3e} rad")
     print(f"  worst wrist position gap   {totals['wrist_pos_gap']:.3e} m   (env-local)")
     print(f"  worst wrist rotation gap   {totals['wrist_quat_gap']:.3e} (1 - |dot|)")
     print("\n-- 1b. what each backend's camera actually sees --")
-    print(f"  mjlab   {_depth_profile(mj_depth)}")
-    print(f"  Newton  {_depth_profile(nt_depth)}")
+    print(f"  A  {_depth_profile(a_depth)}")
+    print(f"  B  {_depth_profile(b_depth)}")
     print("  (last sample only; a large 'beyond 2 m' share means the camera is")
     print("   seeing a ground plane that stretches to the horizon)")
     results["the_same_joint_angles_land_in_both"] = totals["joint_gap"] < 1e-5
@@ -531,7 +551,7 @@ def main() -> int:
 
     print("\n-- 2. do the depth images agree --")
     fraction = totals["agreeing"] / totals["pixels"]
-    quantiles = torch.tensor([0.5, 0.9, 0.99, 0.999])
+    quantiles = torch.tensor([0.5, 0.9, 0.99, 0.999], device=diffs.device)
     q = torch.quantile(diffs.float(), quantiles)
     print(f"  pixels compared            {totals['pixels']:,}")
     print(f"  within {args.tolerance * 1000:.0f} mm             {100.0 * fraction:.3f}%")
@@ -600,8 +620,8 @@ def main() -> int:
         local_min = -torch.nn.functional.max_pool2d(-pad, 3, stride=1)
         return ((local_max - local_min) > args.tolerance).squeeze(1)
 
-    disagree = (mj_depth - nt_depth).abs() > args.tolerance
-    edge = _edges(mj_depth) | _edges(nt_depth)
+    disagree = (a_depth - b_depth).abs() > args.tolerance
+    edge = _edges(a_depth) | _edges(b_depth)
     disagreeing = int(disagree.sum())
     on_edge = int((disagree & edge).sum())
     share = on_edge / max(disagreeing, 1)
@@ -617,43 +637,46 @@ def main() -> int:
     # any depth discontinuity, with the neighbourhood each backend saw.
     if worst_interior["mj"] is None:
         print("  none: every interior pixel of every sample agrees")
-        mj_depth = nt_depth = None
+        a_depth = b_depth = None
     else:
-        mj_depth = worst_interior["mj"]
-        nt_depth = worst_interior["nt"]
+        a_depth = worst_interior["mj"]
+        b_depth = worst_interior["nt"]
         print(f"  from sample {worst_interior['sample']}, which had {worst_interior['count']:,} of them")
     masked = (
         None
-        if mj_depth is None
-        else torch.where(worst_interior["interior"], (mj_depth - nt_depth).abs(), torch.zeros_like(mj_depth))
+        if a_depth is None
+        else torch.where(worst_interior["interior"], (a_depth - b_depth).abs(), torch.zeros_like(a_depth))
     )
     flat = None if masked is None else masked.flatten()
     count = 0 if flat is None else min(5, int((flat > args.tolerance).sum()))
     if count:
         for rank, index in enumerate(torch.topk(flat, count).indices.tolist()):
             env_index, row, column = (
-                index // (mj_depth.shape[1] * mj_depth.shape[2]),
-                (index // mj_depth.shape[2]) % mj_depth.shape[1],
-                index % mj_depth.shape[2],
+                index // (a_depth.shape[1] * a_depth.shape[2]),
+                (index // a_depth.shape[2]) % a_depth.shape[1],
+                index % a_depth.shape[2],
             )
-            mj_value = float(mj_depth[env_index, row, column])
-            nt_value = float(nt_depth[env_index, row, column])
+            a_value = float(a_depth[env_index, row, column])
+            b_value = float(b_depth[env_index, row, column])
             rows = slice(max(row - 1, 0), row + 2)
             columns = slice(max(column - 1, 0), column + 2)
             print(
                 f"  #{rank}: env {env_index} pixel ({row},{column})  "
-                f"mjlab {mj_value:.4f} m   Newton {nt_value:.4f} m   Δ {abs(mj_value - nt_value):.4f} m"
+                f"A {a_value:.4f} m   B {b_value:.4f} m   Δ {abs(a_value - b_value):.4f} m"
             )
-            print(f"      mjlab  3x3 {[round(float(v), 3) for v in mj_depth[env_index, rows, columns].flatten()]}")
-            print(f"      Newton 3x3 {[round(float(v), 3) for v in nt_depth[env_index, rows, columns].flatten()]}")
-            shape_id = int(worst_interior["shape"][env_index, row, column])
-            keys = nt_env.scene_manager.model.shape_label
-            name = keys[shape_id] if 0 <= shape_id < len(keys) else "(nothing)"
-            print(f"      Newton hit shape {shape_id}: {name}")
+            print(f"      A 3x3 {[round(float(v), 3) for v in a_depth[env_index, rows, columns].flatten()]}")
+            print(f"      B 3x3 {[round(float(v), 3) for v in b_depth[env_index, rows, columns].flatten()]}")
+            if worst_interior["shape"] is not None:
+                # Newton alone reports which shape a pixel hit, and that
+                # is what turned the last mystery into an answer.
+                shape_id = int(worst_interior["shape"][env_index, row, column])
+                keys = b_env.scene_manager.model.shape_label
+                name = keys[shape_id] if 0 <= shape_id < len(keys) else "(nothing)"
+                print(f"      B hit shape {shape_id}: {name}")
     print("  (two similar neighbourhoods offset by a pixel = a silhouette the edge mask")
     print("   was too narrow to catch; a flat patch differing = real geometry)")
 
-    print("\n-- 2f. what mjlab discards that Newton keeps --")
+    print("\n-- 2f. what A discards that B keeps --")
     # mjwarp builds its rays from a near plane (render_util.compute_ray
     # takes znear); a surface closer than that is not rendered and the
     # pixel comes back as a miss. Newton raytraces from the camera
@@ -661,19 +684,23 @@ def main() -> int:
     # than one distance, that distance IS the near plane, and the
     # difference is a documented property of the two renderers rather
     # than a fault in either.
-    mj_model = mj_env.scene_manager.sim.mj_model
-    znear = float(mj_model.vis.map.znear) * float(mj_model.stat.extent)
-    print(f"  mjlab near plane: znear {mj_model.vis.map.znear} x extent {mj_model.stat.extent:.4f} = {znear:.5f} m")
+    if args.sim_a == "mujoco":
+        mj_model = a_env.scene_manager.sim.mj_model
+        znear = float(mj_model.vis.map.znear) * float(mj_model.stat.extent)
+        print(f"  A's near plane: znear {mj_model.vis.map.znear} x extent {mj_model.stat.extent:.4f} = {znear:.5f} m")
+    else:
+        znear = 0.0
+        print("  A is not mjlab; no near plane to read")
 
     if worst_interior["mj"] is not None:
-        mj_worst, nt_worst = worst_interior["mj"], worst_interior["nt"]
+        a_worst, b_worst = worst_interior["mj"], worst_interior["nt"]
         # Interior only. At a silhouette mjlab legitimately reports a
         # miss where Newton reports the object, and counting those here
         # would drown the question in the answer already known.
-        dropped = (mj_worst <= 0.0) & (nt_worst > 0.0) & worst_interior["interior"]
-        kept = (mj_worst > 0.0) & (nt_worst > 0.0)
+        dropped = (a_worst <= 0.0) & (b_worst > 0.0) & worst_interior["interior"]
+        kept = (a_worst > 0.0) & (b_worst > 0.0)
         if int(dropped.sum()):
-            values = nt_worst[dropped]
+            values = b_worst[dropped]
             quantiles = torch.quantile(values.float(), torch.tensor([0.5, 0.9, 1.0], device=values.device))
             print(
                 f"  interior pixels mjlab missed and Newton hit: {int(dropped.sum()):,}\n"
@@ -681,7 +708,7 @@ def main() -> int:
                 f"p90 {float(quantiles[1]):.4f}  max {float(quantiles[2]):.4f} m"
             )
             print(f"    beyond the near plane: {100.0 * float((values > znear).float().mean()):.1f}% of them")
-            print(f"  for comparison, where both hit, mjlab's nearest hit is {float(mj_worst[kept].min()):.4f} m")
+            print(f"  for comparison, where both hit, A's nearest hit is {float(a_worst[kept].min()):.4f} m")
             print("    (reported, not judged: the near plane explains most of these but not all,")
             print("     and section 2g measures what actually removes them)")
         else:
@@ -695,16 +722,16 @@ def main() -> int:
     # so the honest fix is to discard the band on both sides rather than
     # to make one imitate the other.
     if worst_interior["mj"] is not None:
-        mj_worst, nt_worst = worst_interior["mj"], worst_interior["nt"]
+        a_worst, b_worst = worst_interior["mj"], worst_interior["nt"]
         interior_worst = worst_interior["interior"]
         for clip in (0.0, znear, 0.025, 0.04, 0.07):
             # Applied to BOTH. Clipping one backend only trades the
             # pixels it saw and the other did not for the pixels the
             # other saw and it did not, which is how the first attempt at
             # this made the agreement worse.
-            mj_clipped = torch.where(mj_worst < clip, torch.zeros_like(mj_worst), mj_worst)
-            nt_clipped = torch.where(nt_worst < clip, torch.zeros_like(nt_worst), nt_worst)
-            agree = ((mj_clipped - nt_clipped).abs() <= args.tolerance) & interior_worst
+            a_clipped = torch.where(a_worst < clip, torch.zeros_like(a_worst), a_worst)
+            b_clipped = torch.where(b_worst < clip, torch.zeros_like(b_worst), b_worst)
+            agree = ((a_clipped - b_clipped).abs() <= args.tolerance) & interior_worst
             fraction = int(agree.sum()) / max(int(interior_worst.sum()), 1)
             label = " (mjlab's near plane)" if clip == znear else ""
             label = " (the real D405's minimum range)" if clip == 0.07 else label
@@ -714,8 +741,8 @@ def main() -> int:
     print("\n-- 3. do they agree about what they did NOT hit --")
     union = max(totals["nohit_either"], 1)
     iou = totals["nohit_both"] / union
-    print(f"  mjlab no-hit pixels        {totals['nohit_mj']:,}")
-    print(f"  Newton no-hit pixels       {totals['nohit_nt']:,}")
+    print(f"  A no-hit pixels            {totals['nohit_a']:,}")
+    print(f"  B no-hit pixels            {totals['nohit_b']:,}")
     print(f"  agreement (IoU)            {iou:.4f}")
     print("  (a ray grazing the ground plane hits it hundreds of metres away in one backend")
     print("   and misses in the other; the policy saturates both to its far plane)")
@@ -723,9 +750,9 @@ def main() -> int:
     print("\n-- 4. is the comparison worth anything --")
     # A pair of images that are constant, or a scene the camera never
     # sees into, would pass every check above by being empty.
-    spread = float(diffs.numel() and mj_depth.std())
-    print(f"  depth spread within one frame (mjlab): {spread:.5f} m")
-    print(f"  distinct depths in the last frame:     {int(torch.unique(mj_depth).numel()):,}")
+    spread = float(diffs.numel() and a_depth.std())
+    print(f"  depth spread within one frame (A): {spread:.5f} m")
+    print(f"  distinct depths in the last frame:     {int(torch.unique(a_depth).numel()):,}")
     results["the_image_has_structure_to_compare"] = spread > 1e-3
 
     print("\n" + "=" * 78)

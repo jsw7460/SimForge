@@ -187,6 +187,7 @@ class GenesisEnv(World):
                 entities=self.scene_cfg.entities,
                 rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=self.scene_cfg.sensors,
+                cameras=getattr(self.scene_cfg, "cameras", ()),
                 env_spacing=self.scene_cfg.env_spacing,
                 show_viewer=self.visualization_cfg.show_viewer,
                 num_envs=self.num_envs,
@@ -319,6 +320,23 @@ class GenesisEnv(World):
                 entity=entity,
                 actuated_dof_ids=[],
             )
+
+    def _post_reset_forward(self) -> None:
+        """Make a state written without stepping visible to the readers.
+
+        Genesis's setters update the solver immediately, so unlike mjlab
+        there is no forward pass to run. What goes stale is this repo's
+        own per-step read cache: ``RobotData``'s getters memoize on
+        ``_cache_generation``, which normally advances once per physics
+        substep, so a joint angle written between steps reads back as
+        the value from before the write — the write looks lost when it
+        was only unseen.
+        """
+        self._invalidate_cache()
+
+    def _render_sensors(self) -> None:
+        """Draw the cameras against the state the observation reports."""
+        self.scene_manager.render_cameras()
 
     def _step_physics(self) -> None:
         """Genesis physics step with decimation.

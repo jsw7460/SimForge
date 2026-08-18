@@ -62,6 +62,8 @@ class SceneConfig(BaseConfig):
     sensors: list[SensorConfig] | None = field(default_factory=list)
     # Simulator-agnostic contact sensor configs (``ContactSensorCfg``).
     contact_sensors: "list[ContactSensorCfg] | None" = None
+    # Simulator-agnostic cameras (shared with mjlab and Newton).
+    cameras: tuple = ()
     robot_cfg: Union["RobotConfig", None] = None
     # Terrain (flat plane by default; generator → heightfield) — owned by
     # the per-sim TerrainImporter the scene manager constructs.

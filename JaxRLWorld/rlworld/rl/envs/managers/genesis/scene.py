@@ -91,6 +91,9 @@ class SceneManagerConfig:
     show_viewer: bool
     num_envs: int = 1
     device: str = "cpu"
+    # Simulator-agnostic cameras (CameraSensorCfg); each becomes a
+    # ``GenesisCameraSensor`` drawn by Madrona's batch renderer.
+    cameras: tuple = ()
     # Passive rigid objects (no actuated joints) — graspable objects, props,
     # static fixtures. Loaded into the separate ``self.rigid_objects`` registry.
     rigid_objects: dict = field(default_factory=dict)
@@ -108,6 +111,9 @@ class SceneManager(BaseManager):
         self.scene = None
         self.entities: dict[str, RigidEntity] = defaultdict()
         self.sensors: dict[str, dict[str, dict[str, Sensor]]] = defaultdict(lambda: defaultdict(dict))
+        # CameraSensorCfg-backed cameras, flat by name. Kept apart from
+        # ``sensors`` above, which Genesis nests by entity and link.
+        self._cameras: dict[str, object] = {}
 
         self.trees: dict = {}
 
@@ -178,6 +184,7 @@ class SceneManager(BaseManager):
         self._add_entities()
         self._add_sensors()
         self._set_kinematic_tree()
+        self._add_cameras()
         self.env.vis_manager._setup_visualization_cameras()
 
     def _add_entities(self):
@@ -277,6 +284,33 @@ class SceneManager(BaseManager):
             sensor_class_name = sensor.__class__.__name__
             self.sensors[entity_name][link_name][sensor_class_name] = sensor
 
+    def _add_cameras(self) -> None:
+        """Attach the sim-agnostic cameras, before the scene is built."""
+        from rlworld.rl.envs.managers.genesis.camera_sensor import GenesisCameraSensor
+
+        for camera_cfg in self.config.cameras:
+            if camera_cfg.name in self._cameras:
+                raise ValueError(f"Camera '{camera_cfg.name}' already exists")
+            entity_cfg = self.config.entities[camera_cfg.entity_name]
+            link_name, offset, optics = camera_cfg.resolve(entity_cfg.mjcf_path)
+            self._cameras[camera_cfg.name] = GenesisCameraSensor(
+                env=self.env,
+                cfg=camera_cfg,
+                link_name=link_name,
+                offset=offset,
+                optics=optics,
+            )
+
+    def render_cameras(self) -> None:
+        """Draw every camera against the current state."""
+        for camera in self._cameras.values():
+            camera.render()
+
+    @property
+    def camera_sensors(self) -> dict:
+        """The sim-agnostic cameras, by name."""
+        return self._cameras
+
     def build_scene(self):
         self.scene.build(n_envs=self.env.num_envs, env_spacing=self.config.env_spacing, center_envs_at_origin=False)
         self._place_fixed_entities()
@@ -331,12 +365,17 @@ class SceneManager(BaseManager):
 
     def _create_scene(self) -> None:
         """Initialize scene with basic settings"""
+        # A camera needs the batch renderer, and Genesis only accepts one
+        # when the scene is constructed — adding a camera to a scene
+        # without it draws one environment at a time.
+        renderer = gs.renderers.BatchRenderer() if self.config.cameras else None
         self.scene = gs.Scene(
             sim_options=self.config.sim_options,
             viewer_options=self.config.viewer_options,
             vis_options=self.config.vis_options,
             rigid_options=self.config.rigid_options,
             show_viewer=self.config.show_viewer,
+            renderer=renderer,
         )
 
     def _configure_robot_dynamics(self) -> None:

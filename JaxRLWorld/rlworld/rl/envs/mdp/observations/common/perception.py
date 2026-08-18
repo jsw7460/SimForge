@@ -59,7 +59,7 @@ def camera_depth(
         the result never aliases the renderer's buffer, which is
         overwritten on the next render.
     """
-    sensor = env.scene_manager.sensors[sensor_name]
+    sensor = env.scene_manager.camera_sensors[sensor_name]
     depth_data = sensor.data.depth  # (B, H, W, 1)
     if depth_data is None:
         raise ValueError(f"Camera {sensor_name!r} has no depth data. Add 'depth' to its data_types.")
@@ -76,7 +76,7 @@ def camera_rgb(env: World, sensor_name: str) -> torch.Tensor:
     Returns:
         ``(B, 3, H, W)``, freshly allocated by the divide.
     """
-    sensor = env.scene_manager.sensors[sensor_name]
+    sensor = env.scene_manager.camera_sensors[sensor_name]
     rgb_data = sensor.data.rgb  # (B, H, W, 3)
     if rgb_data is None:
         raise ValueError(f"Camera {sensor_name!r} has no RGB data. Add 'rgb' to its data_types.")

@@ -380,6 +380,16 @@ class MujocoSceneManager(BaseManager):
         )
 
     @property
+    def camera_sensors(self) -> dict[str, Any]:
+        """The sim-agnostic cameras, by name.
+
+        mjlab keeps cameras in the same registry as every other sensor;
+        this picks out the ones a CameraSensorCfg asked for, so an
+        observation term reaches them the same way on every backend.
+        """
+        return {cfg.name: self.sensors[cfg.name] for cfg in self.config.cameras}
+
+    @property
     def sensors(self) -> dict[str, Any]:
         """Get all sensors."""
         return self._scene.sensors

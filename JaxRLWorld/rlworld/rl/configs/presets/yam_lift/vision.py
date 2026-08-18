@@ -93,11 +93,6 @@ class YamLiftVisionConfig(YamLiftConfig):
     cnn: CNNEncoderCfg = field(default_factory=CNNEncoderCfg)
 
     def build(self):
-        if self.sim_type == "genesis":
-            raise NotImplementedError(
-                "Genesis renders through Madrona's BatchRenderer, which is not wired into "
-                "_render_sensors yet, so a camera declared here would never be drawn."
-            )
         cfgs = super().build()
         # One config, both backends. The placement and the field of view
         # come from the arm's own MJCF camera, so mjlab and Newton read

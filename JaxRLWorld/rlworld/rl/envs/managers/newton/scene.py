@@ -1738,6 +1738,11 @@ class NewtonSceneManager(BaseManager):
         """Get a sensor by name."""
         return self.sensors.get(sensor_name)
 
+    @property
+    def camera_sensors(self) -> dict:
+        """The sim-agnostic cameras, by name."""
+        return self._cameras
+
     def render_cameras(self) -> None:
         """Raytrace every camera against the current state."""
         for camera in self._cameras.values():
