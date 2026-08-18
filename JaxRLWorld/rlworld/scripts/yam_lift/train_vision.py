@@ -31,7 +31,7 @@ def main() -> int:
     ap.add_argument("--difficulty", default="fixed", choices=("fixed", "dynamic"))
     ap.add_argument("--num-envs", type=int, default=4096)
     ap.add_argument("--resolution", type=int, default=32, help="Square camera resolution, pixels.")
-    ap.add_argument("--iterations", type=int, default=3000)
+    ap.add_argument("--iterations", type=int, default=30000)
     args, rest = ap.parse_known_args()
     # Hand the remainder to the config's own override parser.
     sys.argv = [sys.argv[0], *rest]

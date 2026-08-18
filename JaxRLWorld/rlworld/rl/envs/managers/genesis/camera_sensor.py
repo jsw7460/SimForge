@@ -120,6 +120,14 @@ class GenesisCameraSensor:
         )
         self._camera.attach(link, _offset_matrix(offset))
 
+        # Allocated now, not on the first render: the runner asks for the
+        # observation's shape while it is building its networks, which is
+        # before anything has been rendered or even reset. mjlab and
+        # Newton both hand out a zeroed buffer from construction, so a
+        # camera that has None there is the odd one out and fails only on
+        # the training path, never in a diag that resets first.
+        self.data.depth = torch.zeros((env.num_envs, cfg.height, cfg.width, 1), dtype=torch.float32, device=env.device)
+
     def render(self) -> None:
         """Follow the link, then draw.
 
