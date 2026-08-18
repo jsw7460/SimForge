@@ -1,0 +1,57 @@
+<mujoco model="tong">
+  <!-- A spring-loaded tong: two arms on one hinge, held open by a torsion
+       spring, closing only while something pushes them shut.
+
+       THE HINGE ZERO IS THE OPEN POSITION, and that is a portability
+       requirement rather than a style choice. MuJoCo and Newton let a
+       joint spring rest at a stated angle (`springref`), but Genesis has
+       no such concept — its passive joint force is `-stiffness * q`
+       (`genesis/engine/solvers/rigid/abd/forward_dynamics.py:985`), so
+       its spring always rests at zero. Defining "fully open" as q = 0
+       makes all three agree exactly, with no springref anywhere. Author
+       this the other way round and Genesis alone would quietly hold the
+       tong at a different opening.
+
+       q = 0.000 rad  fully open, 35 mm between the pads
+       q = 0.094 rad  closed onto a 25 mm cube
+       q = 0.321 rad  pads meet
+
+       Both arms carry an explicit <inertial>: left to a solver's own
+       geom-derived estimate, the three would not necessarily agree, and
+       an inertia mismatch shows up as a different swing rate rather than
+       as an error. The mass is stated once here and every backend reads
+       it. -->
+  <compiler angle="radian" autolimits="true"/>
+
+  <default>
+    <default class="tong">
+      <geom type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001"
+            contype="1" conaffinity="1" condim="3"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <!-- Lower arm, and the body the tong is carried by. Runs along +x
+         from the pivot at the origin; its top face is the z = 0 plane. -->
+    <body name="tong_base" pos="0 0 0" childclass="tong">
+      <freejoint name="tong_free"/>
+      <inertial pos="0.06 0 0" mass="0.03" diaginertia="5.4e-7 3.6e-5 3.6e-5"/>
+      <geom name="tong_base_arm" size="0.06 0.008 0.003" pos="0.06 0 -0.003"/>
+      <geom name="tong_base_pad" size="0.008 0.010 0.003" pos="0.112 0 0.003"/>
+
+      <!-- Upper arm. The body frame is pre-rotated by the open angle
+           (0.428 rad about -y) so that inside it the arm runs along +x
+           exactly like the lower one: the inertia is then diagonal in
+           the body frame and identical to the lower arm's, which is one
+           less thing that can differ between backends. Turning the joint
+           positive rotates the arm back down, i.e. CLOSES it. -->
+      <body name="tong_jaw" pos="0 0 0" quat="0.977194 0 -0.212371 0">
+        <joint name="tong_hinge" type="hinge" axis="0 1 0" range="0 0.321"
+               stiffness="0.5" damping="0.008"/>
+        <inertial pos="0.06 0 0" mass="0.03" diaginertia="5.4e-7 3.6e-5 3.6e-5"/>
+        <geom name="tong_jaw_arm" size="0.06 0.008 0.003" pos="0.06 0 0.003"/>
+        <geom name="tong_jaw_pad" size="0.008 0.010 0.003" pos="0.112 0 -0.003"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
