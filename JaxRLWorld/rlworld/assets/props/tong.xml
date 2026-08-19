@@ -54,4 +54,20 @@
       </body>
     </body>
   </worldbody>
+
+  <!-- The two arms overlap at their shared pivot, as the links of any
+       hinge do. MuJoCo filters that pair for being parent and child, so
+       a standalone tong behaves; loaded as one entity among several in a
+       scene it does not, and the pair starts colliding. The contact then
+       pushes the arms APART, which drives the hinge past its own open
+       stop and holds it there: measured at -0.12 rad on mjlab and
+       Newton against +0.033 on Genesis, whose scene disables
+       self-collision and so never saw it.
+
+       Excluded explicitly, so the answer depends neither on a backend's
+       reimplementation of the parent rule nor on whether whoever builds
+       the scene remembered to turn self-collision off. -->
+  <contact>
+    <exclude body1="tong_base" body2="tong_jaw"/>
+  </contact>
 </mujoco>
