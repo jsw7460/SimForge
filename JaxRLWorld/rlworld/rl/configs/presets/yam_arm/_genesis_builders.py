@@ -121,7 +121,15 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> SceneConfig:
             batch_dofs_info=True,
             contact_pruning_tolerance=None,
             friction_cone=gs.friction_cone.pyramidal,
-            impratio=1.0,
+            # 10, matching this preset's MuJoCo and Newton builders. It
+            # sets how stiff the friction cone is relative to the normal
+            # direction, and at 1 a held object creeps: the same 25 mm
+            # cube squeezed by the same force slides 9.8 mm in two
+            # seconds at 1 and 1.6 mm at 10. On an arm whose entire
+            # purpose is picking things up, that is the difference
+            # between a grasp and a slow drop, and it appears as a task
+            # that trains on two backends and not the third.
+            impratio=10.0,
             integrator=gs.integrator.implicitfast,
             tolerance=1e-5,
         ),
