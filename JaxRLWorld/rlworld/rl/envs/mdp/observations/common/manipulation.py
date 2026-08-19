@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from rlworld.rl.envs.mdp.entity_points import entity_point_w
 from rlworld.rl.utils.quat_utils import quat_inv_wxyz, quat_rotate_wxyz
 
 if TYPE_CHECKING:
@@ -42,25 +43,25 @@ def _site(env: World, asset_cfg: ResolvedEntity) -> tuple[torch.Tensor, torch.Te
 
 def ee_to_object_distance(
     env: World,
-    object_name: str,
+    object_cfg: ResolvedEntity,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Vector from the grasp point to the object, in the robot's base frame."""
     ee_pos_w, _ = _site(env, asset_cfg)
-    obj_pos_w = env.get_entity_data(object_name).root_link_pos_w
+    obj_pos_w = entity_point_w(env, object_cfg)
     base_quat_w = env.get_entity_data(asset_cfg.name).root_link_quat_w
     return quat_rotate_wxyz(quat_inv_wxyz(base_quat_w), obj_pos_w - ee_pos_w)
 
 
 def object_to_goal_distance(
     env: World,
-    object_name: str,
+    object_cfg: ResolvedEntity,
     command_name: str,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """Vector from the object to its goal, in the robot's base frame."""
     command = env.command_manager.get_term(command_name)
-    obj_pos_w = env.get_entity_data(object_name).root_link_pos_w
+    obj_pos_w = entity_point_w(env, object_cfg)
     base_quat_w = env.get_entity_data(asset_cfg.name).root_link_quat_w
     return quat_rotate_wxyz(quat_inv_wxyz(base_quat_w), command.target_pos - obj_pos_w)
 
@@ -94,7 +95,7 @@ def target_position(
 
 def object_height(
     env: World,
-    object_name: str,
+    object_cfg: ResolvedEntity,
     reference_height: float,
 ) -> torch.Tensor:
     """How far the object is above a reference height, e.g. the table top.
@@ -103,5 +104,4 @@ def object_height(
     world z answers this. Here the table's height would otherwise appear
     as a constant offset the policy has to learn to subtract.
     """
-    z = env.get_entity_data(object_name).root_link_pos_w[:, 2:3]
-    return z - reference_height
+    return entity_point_w(env, object_cfg)[:, 2:3] - reference_height

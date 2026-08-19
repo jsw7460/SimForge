@@ -201,12 +201,15 @@ def run_single(sim: str, num_envs: int) -> dict:
     drop_penalty_on_table = float(_reward(env, "dropped").mean())
     from rlworld.rl.configs.presets.yam_lift.base import _cube_below
 
-    term_on_table = bool(_cube_below(env, object_name=CUBE, min_height=DROPPED_Z).reset.any())
+    # The termination's own selector, for the same reason as in section F:
+    # this must exercise what the task is configured with.
+    drop_cfg = env.termination_manager._all_terms["cube_dropped"].params["object_cfg"]
+    term_on_table = bool(_cube_below(env, object_cfg=drop_cfg, min_height=DROPPED_Z).reset.any())
     below = on_table.clone()
     below[:, 2] = DROPPED_Z - 0.05
     _place_cube(env, below)
     drop_penalty_off = float(_reward(env, "dropped").mean())
-    term_off = bool(_cube_below(env, object_name=CUBE, min_height=DROPPED_Z).reset.all())
+    term_off = bool(_cube_below(env, object_cfg=drop_cfg, min_height=DROPPED_Z).reset.all())
     print(f"  on the table : penalty {drop_penalty_on_table:.3f}  terminates {term_on_table}")
     print(f"  below it     : penalty {drop_penalty_off:.3f}  terminates {term_off}")
     results["no_drop_penalty_while_on_the_table"] = drop_penalty_on_table < 1e-6 and not term_on_table
@@ -265,17 +268,20 @@ def run_single(sim: str, num_envs: int) -> dict:
     env._invalidate_cache()
     from rlworld.rl.envs.mdp.observations.common import manipulation as manip
 
+    # The selector the preset itself hands the terms, so this checks what
+    # the task runs with rather than a cube-shaped guess at it.
+    obj_cfg = env.reward_manager.reward_terms["bring"].params["object_cfg"]
     obj_w = env.get_entity_data(CUBE).root_link_pos_w
     base_q = data.root_link_quat_w
     expect_ee_to_cube = quat_rotate_wxyz(quat_inv_wxyz(base_q), obj_w - ee_pos())
-    got_ee_to_cube = manip.ee_to_object_distance(env, object_name=CUBE, asset_cfg=grasp)
+    got_ee_to_cube = manip.ee_to_object_distance(env, object_cfg=obj_cfg, asset_cfg=grasp)
     err_ee = float((expect_ee_to_cube - got_ee_to_cube).abs().max())
 
     expect_to_goal = quat_rotate_wxyz(quat_inv_wxyz(base_q), command.target_pos - obj_w)
-    got_to_goal = manip.object_to_goal_distance(env, object_name=CUBE, command_name="lift", asset_cfg=grasp)
+    got_to_goal = manip.object_to_goal_distance(env, object_cfg=obj_cfg, command_name="lift", asset_cfg=grasp)
     err_goal = float((expect_to_goal - got_to_goal).abs().max())
 
-    height = manip.object_height(env, object_name=CUBE, reference_height=preset.table_pos[2] * 2)
+    height = manip.object_height(env, object_cfg=obj_cfg, reference_height=preset.table_pos[2] * 2)
     print(f"  ee_to_cube      : {_fmt(got_ee_to_cube[0])}   err vs hand-computed {err_ee:.2e}")
     print(f"  cube_to_goal    : {_fmt(got_to_goal[0])}   err vs hand-computed {err_goal:.2e}")
     print(f"  cube height over the table = {float(height.mean()):.4f} m")

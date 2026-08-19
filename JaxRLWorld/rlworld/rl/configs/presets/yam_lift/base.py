@@ -27,11 +27,12 @@ from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from rlworld.rl.configs.presets.yam_arm.base import CUBE_HALF, TABLE_TOP_Z, YamArmConfig
 from rlworld.rl.configs.rewards.reward_term_config import RewardTermConfig
-from rlworld.rl.configs.scene.entity_selector import SceneEntitySelector
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.configs.terminations import TerminationResult
 from rlworld.rl.configs.terminations.termination_term_config import TerminationTermConfig
 from rlworld.rl.envs.mdp.commands.lifting import LiftingCommandCfg
 from rlworld.rl.envs.mdp.curriculums import reward_curriculum
+from rlworld.rl.envs.mdp.entity_points import entity_point_w
 from rlworld.rl.envs.mdp.observations.common import manipulation as manip_obs
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     dof_pos,
@@ -170,6 +171,19 @@ class YamLiftConfig(YamArmConfig):
     exist, and the command's ``object_*`` ranges have to describe where
     THAT object rests."""
 
+    object_site: str | None = None
+    """Which point on that object the task aims at, or None for its root.
+
+    None suits a cube: its origin is its middle, which is where a gripper
+    closes and what "bring it here" means. A shaped object needs saying.
+    A pair of tongs has its origin at the pivot — one END of the tool,
+    where its arms already touch, and millimetres off the bench it lies
+    on — so a reward pointed there sends the gripper through the bench.
+
+    Naming a site moves every term that asks "where is the object" at
+    once: reaching, bringing, the height observation and the has-it-been
+    -dropped test. They should agree, and this is what makes them."""
+
     w_staged: float = 1.0
     w_bring: float = 1.0
     w_action_rate: float = 0.01
@@ -210,6 +224,17 @@ class YamLiftConfig(YamArmConfig):
         return _CurriculumCfg()
 
     # ── Task ─────────────────────────────────────────────────────────
+
+    def _object_selector(self) -> SceneEntitySelector:
+        """The object, and the point on it the task aims at.
+
+        Built here rather than at each use so ``object_name`` and
+        ``object_site`` are read together in one place — a term given the
+        entity but not its site would silently fall back to the root,
+        which is exactly the mistake the site exists to prevent.
+        """
+        sites = () if self.object_site is None else (self.object_site,)
+        return SceneEntitySelector(name=self.object_name, site_names=sites or None)
 
     def _build_command_config(self) -> CommandConfig:
         """The goal, and where the cube starts.
@@ -253,7 +278,7 @@ class YamLiftConfig(YamArmConfig):
         grasp = SceneEntitySelector(name="robot", site_names=(GRASP_SITE,))
         # Bound out here because the observation groups below are nested
         # classes, whose bodies cannot see ``self``.
-        object_name = self.object_name
+        obj = self._object_selector()
 
         @dataclass
         class _ActorObsCfg(ObservationGroupConfig):
@@ -262,12 +287,12 @@ class YamLiftConfig(YamArmConfig):
             ee_to_cube = ObservationTermConfig(
                 func=manip_obs.ee_to_object_distance,
                 scale=1.0,
-                params={"object_name": object_name, "asset_cfg": grasp},
+                params={"object_cfg": obj, "asset_cfg": grasp},
             )
             cube_to_goal = ObservationTermConfig(
                 func=manip_obs.object_to_goal_distance,
                 scale=1.0,
-                params={"object_name": object_name, "command_name": "lift"},
+                params={"object_cfg": obj, "command_name": "lift"},
             )
             goal_from_ee = ObservationTermConfig(
                 func=manip_obs.target_position,
@@ -278,7 +303,7 @@ class YamLiftConfig(YamArmConfig):
             cube_height = ObservationTermConfig(
                 func=manip_obs.object_height,
                 scale=1.0,
-                params={"object_name": object_name, "reference_height": TABLE_TOP_Z},
+                params={"object_cfg": obj, "reference_height": TABLE_TOP_Z},
             )
             prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
@@ -308,7 +333,7 @@ class YamLiftConfig(YamArmConfig):
                 weight=cfg.w_staged,
                 params={
                     "command_name": "lift",
-                    "object_name": cfg.object_name,
+                    "object_cfg": cfg._object_selector(),
                     "reaching_std": cfg.reaching_std,
                     "bringing_std": cfg.bringing_std,
                     "asset_cfg": grasp,
@@ -317,7 +342,7 @@ class YamLiftConfig(YamArmConfig):
             bring = RewardTermConfig(
                 func=manip_rew.bring_object_reward,
                 weight=cfg.w_bring,
-                params={"command_name": "lift", "object_name": cfg.object_name, "std": cfg.precise_std},
+                params={"command_name": "lift", "object_cfg": cfg._object_selector(), "std": cfg.precise_std},
             )
             action_rate = RewardTermConfig(func=raw_action_rate_l2, weight=cfg.w_action_rate)
             # Large, and in mjlab's set from the start. An arm learning to
@@ -337,7 +362,7 @@ class YamLiftConfig(YamArmConfig):
             dropped = RewardTermConfig(
                 func=manip_rew.object_dropped,
                 weight=cfg.w_dropped,
-                params={"object_name": cfg.object_name, "min_height": DROPPED_Z},
+                params={"object_cfg": cfg._object_selector(), "min_height": DROPPED_Z},
             )
 
         return _RewardsCfg()
@@ -364,7 +389,7 @@ class YamLiftConfig(YamArmConfig):
             )
             cube_dropped = TerminationTermConfig(
                 func=_cube_below,
-                params={"object_name": cfg.object_name, "min_height": DROPPED_Z},
+                params={"object_cfg": cfg._object_selector(), "min_height": DROPPED_Z},
             )
             # mjlab ends an episode when the end effector drives into the
             # ground. The table is this scene's ground: without this, a
@@ -403,7 +428,7 @@ def _object_at_goal(env, command_name: str) -> TerminationResult:
     return TerminationResult(env.command_manager.get_term(command_name).at_goal, is_timeout=False)
 
 
-def _cube_below(env, object_name: str, min_height: float) -> TerminationResult:
+def _cube_below(env, object_cfg: ResolvedEntity, min_height: float) -> TerminationResult:
     """Terminate where the object has fallen below ``min_height``.
 
     A termination rather than a reward shape: once the cube is off the
@@ -413,5 +438,5 @@ def _cube_below(env, object_name: str, min_height: float) -> TerminationResult:
     Not a timeout — the episode ended badly, so its terminal value is
     zero rather than bootstrapped.
     """
-    fallen = env.get_entity_data(object_name).root_link_pos_w[:, 2] < min_height
+    fallen = entity_point_w(env, object_cfg)[:, 2] < min_height
     return TerminationResult(fallen, is_timeout=False)

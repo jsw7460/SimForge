@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from rlworld.rl.envs.mdp.entity_points import entity_point_w
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
@@ -32,7 +33,7 @@ def _ee_pos_w(env: World, asset_cfg: ResolvedEntity) -> torch.Tensor:
 def staged_position_reward(
     env: World,
     command_name: str,
-    object_name: str,
+    object_cfg: ResolvedEntity,
     reaching_std: float,
     bringing_std: float,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
@@ -51,7 +52,7 @@ def staged_position_reward(
     """
     command = env.command_manager.get_term(command_name)
     ee_pos_w = _ee_pos_w(env, asset_cfg)
-    obj_pos_w = env.get_entity_data(object_name).root_link_pos_w
+    obj_pos_w = entity_point_w(env, object_cfg)
 
     reach_error = torch.sum(torch.square(ee_pos_w - obj_pos_w), dim=-1)
     reaching = torch.exp(-reach_error / reaching_std**2)
@@ -65,12 +66,12 @@ def staged_position_reward(
 def bring_object_reward(
     env: World,
     command_name: str,
-    object_name: str,
+    object_cfg: ResolvedEntity,
     std: float,
 ) -> torch.Tensor:
     """How near the object is to its goal, as a Gaussian kernel."""
     command = env.command_manager.get_term(command_name)
-    obj_pos_w = env.get_entity_data(object_name).root_link_pos_w
+    obj_pos_w = entity_point_w(env, object_cfg)
     position_error = torch.sum(torch.square(command.target_pos - obj_pos_w), dim=-1)
     return torch.exp(-position_error / std**2)
 
@@ -102,7 +103,7 @@ def joint_velocity_hinge_penalty(
 
 def object_dropped(
     env: World,
-    object_name: str,
+    object_cfg: ResolvedEntity,
     min_height: float,
 ) -> torch.Tensor:
     """-1.0 where the object has fallen below ``min_height``, else 0.
@@ -114,4 +115,4 @@ def object_dropped(
     that notices, the episode runs to its time-out collecting a reaching
     reward for hovering over an empty table.
     """
-    return -(env.get_entity_data(object_name).root_link_pos_w[:, 2] < min_height).float()
+    return -(entity_point_w(env, object_cfg)[:, 2] < min_height).float()
