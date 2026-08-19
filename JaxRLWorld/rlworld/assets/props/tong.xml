@@ -35,9 +35,22 @@
          from the pivot at the origin; its top face is the z = 0 plane. -->
     <body name="tong_base" pos="0 0 0" childclass="tong">
       <freejoint name="tong_free"/>
-      <inertial pos="0.06 0 0" mass="0.03" diaginertia="5.4e-7 3.6e-5 3.6e-5"/>
-      <geom name="tong_base_arm" size="0.06 0.008 0.003" pos="0.06 0 -0.003"/>
-      <geom name="tong_base_pad" size="0.008 0.010 0.003" pos="0.112 0 0.003"/>
+      <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.609e-5 3.825e-5"/>
+      <geom name="tong_base_arm" size="0.06 0.015 0.003" pos="0.06 0 -0.003"/>
+      <geom name="tong_base_pad" size="0.008 0.015 0.003" pos="0.112 0 0.003"/>
+      <!-- Where the robot is meant to hold the tool: midway between the
+           two arms, 60 mm out from the pivot. A task aiming a gripper
+           at the tong needs a point to aim AT, and its frame origin is
+           the wrong one twice over - the origin is the pivot, where the
+           arms already touch so closing on it does nothing, and lying on
+           a bench the pivot is half an arm's width off the surface, so a
+           gripper sent there goes through the bench.
+
+           Out at 60 mm the arms are 25 mm apart, well inside the 76 mm
+           the YAM gripper opens to, and closing across them is the same
+           motion that works the tool - which is what the later stages
+           need and what a grasp at the pivot could never become. -->
+      <site name="grip_site" pos="0.06 0 0.0125" size="0.004" rgba="1 0.5 0 1"/>
 
       <!-- Upper arm. The body frame is pre-rotated by the open angle
            (0.428 rad about -y) so that inside it the arm runs along +x
@@ -48,9 +61,9 @@
       <body name="tong_jaw" pos="0 0 0" quat="0.977194 0 -0.212371 0">
         <joint name="tong_hinge" type="hinge" axis="0 1 0" range="0 0.321"
                stiffness="0.5" damping="0.008"/>
-        <inertial pos="0.06 0 0" mass="0.03" diaginertia="5.4e-7 3.6e-5 3.6e-5"/>
-        <geom name="tong_jaw_arm" size="0.06 0.008 0.003" pos="0.06 0 0.003"/>
-        <geom name="tong_jaw_pad" size="0.008 0.010 0.003" pos="0.112 0 -0.003"/>
+        <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.609e-5 3.825e-5"/>
+        <geom name="tong_jaw_arm" size="0.06 0.015 0.003" pos="0.06 0 0.003"/>
+        <geom name="tong_jaw_pad" size="0.008 0.015 0.003" pos="0.112 0 -0.003"/>
       </body>
     </body>
   </worldbody>
