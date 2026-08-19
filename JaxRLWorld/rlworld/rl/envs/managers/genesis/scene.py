@@ -69,7 +69,18 @@ def _canonical_joint_order_genesis(entity: RigidEntity) -> list[str]:
         # Sort by name for determinism when a body has multiple inbound joints
         # (rare — typically zero or one).
         for joint in sorted(link.joints, key=lambda j: j.name):
-            if joint.n_dofs > 0:
+            # A free base is NOT one of an articulation's joints: its state
+            # is the root pose, read through ``root_link_pos_w`` /
+            # ``root_link_quat_w``. mjlab already leaves it out of an
+            # entity's joint list, and leaving it in here makes the same
+            # floating entity report a different joint count and a
+            # different ``joint_pos`` width on this backend than on that
+            # one. It stayed hidden while every floating robot named its
+            # actuated joints explicitly, which filtered the base out
+            # downstream; it appears the moment an entity is indexed
+            # whole, which is what a passive mechanism with no actuators
+            # is.
+            if joint.n_dofs > 0 and joint.type != gs.JOINT_TYPE.FREE:
                 out.append(joint.name)
         kids = children.get(link.idx, [])
         for kid in reversed(kids):

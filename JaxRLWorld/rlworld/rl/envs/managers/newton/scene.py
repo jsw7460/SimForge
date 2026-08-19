@@ -113,6 +113,21 @@ def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | Non
     )
     joint_parent_w0 = joint_parent_arr[:joints_per_world]
     joint_child_w0 = joint_child_arr[:joints_per_world]
+    # A free base is NOT one of an articulation's joints: its state is the
+    # root pose, read through ``root_link_pos_w`` / ``root_link_quat_w``.
+    # mjlab already leaves it out of an entity's joint list; leaving it in
+    # here makes the same floating entity report a different joint count
+    # and a different ``joint_pos`` width on this backend than on that one.
+    # It never showed while every floating robot named its actuated joints
+    # explicitly, which filtered the base out downstream — it appears the
+    # moment an entity is indexed whole, which is what a passive mechanism
+    # with no actuators is.
+    joint_type_arr = (
+        wp.to_torch(model.joint_type).cpu().numpy()
+        if hasattr(model.joint_type, "numpy")
+        else np.asarray(model.joint_type)
+    )
+    joint_type_w0 = joint_type_arr[:joints_per_world]
 
     parent_of: dict[int, int] = {}
     body_to_joint: dict[int, int] = {}
@@ -142,7 +157,7 @@ def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | Non
     while stack:
         i = stack.pop()
         j = body_to_joint.get(i)
-        if j is not None:
+        if j is not None and int(joint_type_w0[j]) != int(newton.JointType.FREE):
             out.append(leaf_name(joint_labels_w0[j]))
         kids = children.get(i, [])
         for kid in reversed(kids):
