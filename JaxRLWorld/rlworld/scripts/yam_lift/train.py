@@ -29,7 +29,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--sim", default="mujoco", choices=("genesis", "newton", "mujoco"))
     ap.add_argument("--difficulty", default="fixed", choices=("fixed", "dynamic"))
-    ap.add_argument("--num-envs", type=int, default=8192)
+    ap.add_argument("--num-envs", type=int, default=16_384)
+    ap.add_argument(
+        "--run-past-success",
+        action="store_true",
+        help="Keep the episode going after the cube reaches the goal, instead of ending "
+        "there. Ending is the default and makes an episode one attempt. Comparing the two "
+        "settings, use Success Rate and Mean Episode Length: the per-term reward means are "
+        "per STEP, so running past success inflates them by adding held-at-the-goal steps.",
+    )
     args, rest = ap.parse_known_args()
     # Hand the remainder to the config's own override parser.
     sys.argv = [sys.argv[0], *rest]
@@ -39,7 +47,8 @@ def main() -> int:
         sim_type=args.sim,
         num_envs=args.num_envs,
         difficulty=args.difficulty,
-        run_name=f"YamLift_{suffix}_{args.difficulty}",
+        end_on_success=not args.run_past_success,
+        run_name=f"YamLift_{suffix}_{args.difficulty}" + ("_runpast" if args.run_past_success else ""),
     )
     cfgs_for_run = cfg.build().with_cli_overrides()
 

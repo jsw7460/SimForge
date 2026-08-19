@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from rlworld.rl.envs.managers.common.command_term import CommandTerm, CommandTermCfg
-from rlworld.rl.utils.quat_utils import quat_from_euler_xyz_wxyz
+from rlworld.rl.utils.quat_utils import quat_from_euler_xyz_wxyz, quat_mul_wxyz
 
 if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
@@ -63,6 +63,18 @@ class LiftingCommandCfg(CommandTermCfg):
     object_y: tuple[float, float] = (-0.10, 0.10)
     object_z: tuple[float, float] = (0.42, 0.45)
     object_yaw: tuple[float, float] = (-3.14159265, 3.14159265)
+    object_base_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+    """The orientation the object rests in, before the yaw above is
+    applied on top of it (w, x, y, z).
+
+    Identity suits a cube, which looks the same whichever face is down.
+    An object with only one resting pose does not: a spring tong lies on
+    its side, and placing it with a yaw alone would stand it back up
+    every episode, in a pose it does not stay in and cannot be picked up
+    from. Stated here rather than left to a separate event term, so the
+    one place that decides where an episode's object goes also decides
+    which way up it goes."""
+
     place_object: bool = True
     place_object_on_resample: bool = True
     """Whether the timer's resample also moves the object, or only the
@@ -175,6 +187,11 @@ class LiftingCommand(CommandTerm):
         )
         zero = torch.zeros(n, device=self.device)
         quat = quat_from_euler_xyz_wxyz(zero, zero, yaw)
+        base = torch.tensor(self.cfg.object_base_quat, device=self.device, dtype=quat.dtype)
+        # Yaw about the world's vertical, applied to the resting pose —
+        # not the other way round, which would turn the object about an
+        # axis that moved with it and tip a tong onto its side twice.
+        quat = quat_mul_wxyz(quat, base.expand_as(quat))
 
         # Polymorphic: the same call places a passive prop or an
         # articulation, so the object need not be one or the other.

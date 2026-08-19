@@ -129,6 +129,47 @@ class YamLiftConfig(YamArmConfig):
     # for the very thing the term exists to discourage. mjlab's terms
     # return the positive quantity and take a negative weight; carrying
     # its numbers across unchanged is what flipped these.
+    end_on_success: bool = True
+    """Whether reaching the goal ends the episode.
+
+    On, so an episode is one attempt: the next state the policy meets is
+    a fresh reset, arm home and object placed, rather than the rest of
+    twenty seconds spent holding what it already delivered.
+
+    It does change what the per-term reward numbers MEAN, and the change
+    is easy to read as a regression. Those numbers are per-step means
+    (``stats_collector.py:119``), not episode totals. With this off, a
+    policy that succeeds in three seconds then holds at the goal for
+    seventeen, and every one of those held steps pays full ``bring`` — so
+    the mean is dominated by the holding. With it on, the episode is
+    almost entirely the approach, where ``bring`` is near zero. The same
+    behaviour therefore reports a much lower ``bring`` here, having
+    changed only the denominator.
+
+    Compare these two settings on ``Success Rate``, whose denominator is
+    episodes either way, and on ``Mean Episode Length``, which with this
+    on IS the time taken to succeed. Not on the reward breakdown.
+
+    There is a real cost as well, separate from that: holding at the goal
+    pays dense reward, while ending swaps it for the critic's estimate of
+    that reward, which is near zero until the critic has learned. Until
+    then the arithmetic says succeeding is the expensive option, which is
+    what bootstrapping eventually — not immediately — corrects."""
+
+    object_name: str = CUBE
+    """Which scene entity this task lifts.
+
+    A field rather than the module constant it defaults to, so the same
+    reward, observation and termination set can be pointed at something
+    else. The terms read it through ``get_entity_data``, which resolves
+    an articulation and a passive body alike, so the thing being lifted
+    is not required to be one or the other — a tool with a joint in it
+    works here as well as a cube does.
+
+    A subclass that changes this owns the scene too: the entity has to
+    exist, and the command's ``object_*`` ranges have to describe where
+    THAT object rests."""
+
     w_staged: float = 1.0
     w_bring: float = 1.0
     w_action_rate: float = 0.01
@@ -180,7 +221,7 @@ class YamLiftConfig(YamArmConfig):
         return CommandConfig(
             terms={
                 "lift": LiftingCommandCfg(
-                    entity_name=CUBE,
+                    entity_name=self.object_name,
                     difficulty=self.difficulty,
                     success_threshold=self.success_threshold,
                     fixed_target=(0.40, 0.0, 0.70),
@@ -210,6 +251,9 @@ class YamLiftConfig(YamArmConfig):
         builders = self._sim_builders()
         ObsCfgClass = builders.OBSERVATION_CFG_CLS
         grasp = SceneEntitySelector(name="robot", site_names=(GRASP_SITE,))
+        # Bound out here because the observation groups below are nested
+        # classes, whose bodies cannot see ``self``.
+        object_name = self.object_name
 
         @dataclass
         class _ActorObsCfg(ObservationGroupConfig):
@@ -218,12 +262,12 @@ class YamLiftConfig(YamArmConfig):
             ee_to_cube = ObservationTermConfig(
                 func=manip_obs.ee_to_object_distance,
                 scale=1.0,
-                params={"object_name": CUBE, "asset_cfg": grasp},
+                params={"object_name": object_name, "asset_cfg": grasp},
             )
             cube_to_goal = ObservationTermConfig(
                 func=manip_obs.object_to_goal_distance,
                 scale=1.0,
-                params={"object_name": CUBE, "command_name": "lift"},
+                params={"object_name": object_name, "command_name": "lift"},
             )
             goal_from_ee = ObservationTermConfig(
                 func=manip_obs.target_position,
@@ -234,7 +278,7 @@ class YamLiftConfig(YamArmConfig):
             cube_height = ObservationTermConfig(
                 func=manip_obs.object_height,
                 scale=1.0,
-                params={"object_name": CUBE, "reference_height": TABLE_TOP_Z},
+                params={"object_name": object_name, "reference_height": TABLE_TOP_Z},
             )
             prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
@@ -264,7 +308,7 @@ class YamLiftConfig(YamArmConfig):
                 weight=cfg.w_staged,
                 params={
                     "command_name": "lift",
-                    "object_name": CUBE,
+                    "object_name": cfg.object_name,
                     "reaching_std": cfg.reaching_std,
                     "bringing_std": cfg.bringing_std,
                     "asset_cfg": grasp,
@@ -273,7 +317,7 @@ class YamLiftConfig(YamArmConfig):
             bring = RewardTermConfig(
                 func=manip_rew.bring_object_reward,
                 weight=cfg.w_bring,
-                params={"command_name": "lift", "object_name": CUBE, "std": cfg.precise_std},
+                params={"command_name": "lift", "object_name": cfg.object_name, "std": cfg.precise_std},
             )
             action_rate = RewardTermConfig(func=raw_action_rate_l2, weight=cfg.w_action_rate)
             # Large, and in mjlab's set from the start. An arm learning to
@@ -293,31 +337,34 @@ class YamLiftConfig(YamArmConfig):
             dropped = RewardTermConfig(
                 func=manip_rew.object_dropped,
                 weight=cfg.w_dropped,
-                params={"object_name": CUBE, "min_height": DROPPED_Z},
+                params={"object_name": cfg.object_name, "min_height": DROPPED_Z},
             )
 
         return _RewardsCfg()
 
     def build_terminations(self) -> TerminationsConfig:
-        """Time out, or lose the cube off the table."""
+        """Time out, lose the cube off the table, or drive into it."""
         cfg = self
 
         @dataclass
         class _TerminationsCfg(TerminationsConfig):
             time_out = TerminationTermConfig(max_episode_exceed)
-            # One attempt per episode. Without this the arm solves the
-            # task in about three seconds and then stands holding the
-            # cube for the remaining seventeen, which teaches it almost
-            # nothing; ending here spends that time on a fresh attempt
-            # instead.
-            lifted_to_goal = TerminationTermConfig(
-                func=_object_at_goal,
-                params={"command_name": "lift"},
-                bootstrap_value=True,
+            # One attempt per episode, when the variant wants that — see
+            # ``end_on_success``. None disables the term rather than
+            # leaving it out, because the terms are discovered off the
+            # class and a subclass has to be able to switch it either way.
+            lifted_to_goal = (
+                TerminationTermConfig(
+                    func=_object_at_goal,
+                    params={"command_name": "lift"},
+                    bootstrap_value=True,
+                )
+                if cfg.end_on_success
+                else None
             )
             cube_dropped = TerminationTermConfig(
                 func=_cube_below,
-                params={"object_name": CUBE, "min_height": DROPPED_Z},
+                params={"object_name": cfg.object_name, "min_height": DROPPED_Z},
             )
             # mjlab ends an episode when the end effector drives into the
             # ground. The table is this scene's ground: without this, a
