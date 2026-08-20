@@ -515,8 +515,14 @@ class GenesisTong:
         limits = np.concatenate([_numpy(v).reshape(-1) for v in entity.get_dofs_limit(self._dofs)])
         return {
             "dof_count": int(entity.n_dofs),
-            "arm_mass": [float(link.inertial_mass) for link in entity.links],
-            "arm_inertia_com_yy": [float(np.asarray(link.inertial_i)[1][1]) for link in entity.links],
+            # By name, not by index. Genesis gives the entity a base link
+            # of its own on top of the two the asset declares, with a mass
+            # of one float32 epsilon and no inertia -- harmless to the
+            # physics, and every dynamic pass here agrees with the other
+            # two backends to the digit, but enough to make a list
+            # comparison read as a mass mismatch.
+            "arm_mass": [float(link.inertial_mass) for link in self._jaw_links()],
+            "arm_inertia_com_yy": [float(np.asarray(link.inertial_i)[1][1]) for link in self._jaw_links()],
             "stiffness": _scalar(entity.get_dofs_stiffness(self._dofs)),
             "damping": _scalar(entity.get_dofs_damping(self._dofs)),
             "range": [float(limits[0]), float(limits[1])],
@@ -527,6 +533,18 @@ class GenesisTong:
             "spring_rest": 0.0,
             "armature": _scalar(entity.get_dofs_armature(self._dofs)),
         }
+
+    def _jaw_links(self) -> list:
+        """The two links the asset declares, in the order it declares them."""
+        wanted = ("tong_base", "tong_jaw")
+        found = {}
+        for link in self.entity.links:
+            for name in wanted:
+                if str(link.name).endswith(name) and name not in found:
+                    found[name] = link
+        if len(found) != len(wanted):
+            raise ValueError(f"Genesis links {[str(l.name) for l in self.entity.links]} do not cover {wanted}.")
+        return [found[name] for name in wanted]
 
     def _device(self):
         return self.entity.get_dofs_position(self._dofs).device
