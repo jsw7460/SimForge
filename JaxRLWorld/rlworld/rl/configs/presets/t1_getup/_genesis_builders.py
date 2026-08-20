@@ -163,7 +163,13 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
             batch_dofs_info=True,
             contact_pruning_tolerance=None,
             friction_cone=gs.friction_cone.elliptic,
-            impratio=1.0,
+            # Genesis 4786cd87 made 'signorini' the default resolution for
+            # elliptic+Newton; pin 'convex' for parity with the MuJoCo /
+            # Newton backends (signorini diverged to NaN on this
+            # impact-heavy task).  impratio 10 matches the getup recipe
+            # used by the other two backends.
+            contact_resolution=gs.contact_resolution.convex,
+            impratio=10.0,
             integrator=gs.integrator.implicitfast,
             tolerance=1e-5,
         ),
