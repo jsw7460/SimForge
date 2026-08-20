@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<!-- Graspable workpiece for the tong, 25 mm at 12 g. Sized to the tong's
+     jaws rather than to the YAM gripper's: the tong opens to 35 mm and
+     closes on this at a hinge angle of 0.094 rad, comfortably inside its
+     travel, where the 40 mm cube of cube.urdf would need the jaws at
+     their limit. Same density as that cube (781 kg/m^3), so the two are
+     the same object at two sizes. -->
+<robot name="cube_25mm">
+  <link name="cube">
+    <inertial>
+      <origin xyz="0 0 0"/>
+      <mass value="0.012"/>
+      <inertia ixx="1.25e-6" ixy="0" ixz="0" iyy="1.25e-6" iyz="0" izz="1.25e-6"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry><box size="0.025 0.025 0.025"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry><box size="0.025 0.025 0.025"/></geometry>
+    </collision>
+  </link>
+</robot>
