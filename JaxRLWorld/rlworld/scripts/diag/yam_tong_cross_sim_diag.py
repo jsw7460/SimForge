@@ -71,10 +71,38 @@ gripped cube creeps 9.8 mm in two seconds, at 10 it settles in 1.6 mm and
 stops. A grip pass run on defaults would be measuring the solver's
 tolerance for sliding rather than whether the tong holds."""
 
+
 # ── What the asset says about the tong ────────────────────────────
-STIFFNESS = 0.5  # N*m/rad
-DAMPING = 0.008  # N*m*s/rad
-ARM_PIECE_MASS = 0.03  # kg, each tong arm
+def _tong_facts(path: Path) -> dict:
+    """The spring and the jaws, read out of the arm asset itself.
+
+    Parsed rather than copied. The tool's mass and spring were restated
+    here once and went stale the day the jaws were made thicker: all
+    three backends then reported the asset's own values and were marked
+    wrong for it. ElementTree is none of the three engines, so it is
+    still an independent reference — just one that cannot fall behind.
+    """
+    root = ET.parse(path).getroot()
+
+    def find(tag: str, name: str):
+        for element in root.iter(tag):
+            if element.get("name") == name:
+                return element
+        raise ValueError(f"{path}: no <{tag}> named {name!r}")
+
+    hinge = find("joint", HINGE_JOINT)
+    return {
+        "stiffness": float(hinge.get("stiffness")),
+        "damping": float(hinge.get("damping")),
+        "arm_mass": float(find("body", "tong_base").find("inertial").get("mass")),
+    }
+
+
+_TONG = _tong_facts(ARM_XML)
+
+STIFFNESS = _TONG["stiffness"]  # N*m/rad
+DAMPING = _TONG["damping"]  # N*m*s/rad
+ARM_PIECE_MASS = _TONG["arm_mass"]  # kg, each tong jaw
 OPEN_ANGLE = 0.0  # rad, spring rest and the open stop
 CLOSED_ANGLE = 0.3244  # rad, pads touching
 CUBE_ANGLE = 0.0695  # rad, closed on a 25 mm cube
@@ -87,13 +115,13 @@ CUBE_AT = (0.29519, 0.01852, 0.164)
 and the hinge at CUBE_ANGLE, measured off the asset rather than guessed.
 The faces are 25.4 mm apart there, so the cube starts just touching."""
 
-GRIP_TORQUE = 0.10
+GRIP_TORQUE = round(0.32 * STIFFNESS * CLOSED_ANGLE, 6)
 """N*m. The spring alone needs 0.047 at this angle, so this leaves about
 0.05 to squeeze with — roughly 0.5 N at the pads against the 0.12 N the
 cube weighs. Comfortable rather than marginal, on purpose: this pass asks
 whether the three backends agree, not how close to slipping it can get."""
 
-TORQUE_STAIRCASE = (0.02, 0.06, 0.12)
+TORQUE_STAIRCASE = tuple(round(fraction * STIFFNESS * CLOSED_ANGLE, 6) for fraction in (0.1, 0.3, 0.6))
 SETTLE_STEPS = 600
 GRIP_STEPS = 1000
 """2 s. Long enough for a cube that is going to slip to have fallen far

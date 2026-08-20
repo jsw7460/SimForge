@@ -59,6 +59,7 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from xml.etree import ElementTree
 
 import numpy as np
 
@@ -73,29 +74,81 @@ nothing is allowed to average over their differences."""
 
 # ── What the asset says ───────────────────────────────────────────
 #
-# Restated here so a backend that lost one of them is caught against the
-# asset, not against another backend that might have lost the same one.
-STIFFNESS = 0.5  # N*m/rad
-DAMPING = 0.008  # N*m*s/rad
-ARM_MASS = 0.03  # kg, each arm
-ARM_COM = 0.06  # m, pivot to an arm's centre of mass
-ARM_INERTIA_COM = 3.6e-5  # kg*m^2, about the arm's own centre of mass
+# READ OUT OF THE XML, not copied from it. A backend that lost one of
+# these is still caught against the asset rather than against another
+# backend that might have lost the same one — which is the whole point of
+# an independent reference — but the reference now cannot drift out of
+# date, and an earlier copy of it did: the tool was made thicker and
+# heavier and every number below stayed at the old tool's, so all three
+# backends were reported as wrong for agreeing with the asset they had
+# been given.
+#
+# Parsed with ElementTree, which is neither of the three physics engines
+# and so is not an opinion any of them can share.
+
+
+def _asset_facts(path: Path) -> dict:
+    """The spring, the jaws and the pads, from the XML itself."""
+    root = ElementTree.parse(path).getroot()
+
+    def find(tag: str, name: str):
+        for element in root.iter(tag):
+            if element.get("name") == name:
+                return element
+        raise ValueError(f"{path}: no <{tag}> named {name!r}")
+
+    hinge = find("joint", HINGE_JOINT)
+    lo, hi = (float(v) for v in hinge.get("range").split())
+    inertial = find("body", "tong_base").find("inertial")
+    diag = [float(v) for v in inertial.get("diaginertia").split()]
+    pad = find("geom", "tong_base_pad")
+    jaw_quat = [float(v) for v in find("body", "tong_jaw").get("quat").split()]
+    return {
+        "stiffness": float(hinge.get("stiffness")),
+        "damping": float(hinge.get("damping")),
+        "open": lo,
+        "closed": hi,
+        "arm_mass": float(inertial.get("mass")),
+        "arm_com": float(inertial.get("pos").split()[0]),
+        # About the hinge's own axis, which is z. The other two turn the
+        # jaw about axes the joint does not move it on.
+        "arm_inertia_com": diag[2],
+        "pad_reach": float(pad.get("pos").split()[0]),
+        "pad_half": float(pad.get("size").split()[1]),
+        # A rotation about -z, so the angle is what the w component says.
+        "jaw_mount": 2.0 * math.acos(jaw_quat[0]),
+    }
+
+
+_ASSET = _asset_facts(TONG_XML)
+
+STIFFNESS = _ASSET["stiffness"]  # N*m/rad
+DAMPING = _ASSET["damping"]  # N*m*s/rad
+ARM_MASS = _ASSET["arm_mass"]  # kg, each jaw
+ARM_COM = _ASSET["arm_com"]  # m, pivot to a jaw's centre of mass
+ARM_INERTIA_COM = _ASSET["arm_inertia_com"]  # kg*m^2, about the jaw's own centre of mass
 OPEN_ANGLE = 0.0  # rad — the spring's rest position AND the open stop
-CLOSED_ANGLE = 0.3244  # rad, pads touching
-JAW_MOUNT_ANGLE = 0.428  # rad, the jaw body's built-in rotation
-PAD_REACH = 0.112  # m, pivot to pad centre
-PAD_HALF = 0.003  # m, pad half-thickness
+CLOSED_ANGLE = _ASSET["closed"]  # rad, pads touching
+JAW_MOUNT_ANGLE = _ASSET["jaw_mount"]  # rad, the jaw body's built-in rotation
+PAD_REACH = _ASSET["pad_reach"]  # m, pivot to pad centre
+PAD_HALF = _ASSET["pad_half"]  # m, pad half-thickness
 
 RELEASE_FROM = 0.20
-RINGDOWN_TORQUE = 0.06
-RINGDOWN_FROM = 0.24
-"""Rings about 0.12 rad with an amplitude of 0.12, so it stays clear of
-the open stop at 0 and the closed stop at 0.3244. Touching either would
-turn a measurement of the spring into a measurement of the stop."""
+RINGDOWN_TORQUE = 0.25 * STIFFNESS * CLOSED_ANGLE
+RINGDOWN_FROM = 0.50 * CLOSED_ANGLE
+"""Rings about a quarter of the travel with an amplitude of a quarter, so
+it stays clear of the open stop at 0 and the closed stop at the other
+end. Touching either would turn a measurement of the spring into a
+measurement of the stop. Scaled off the spring rather than stated, so a
+stiffer tool still rings in the middle of its own range instead of
+sitting on a stop."""
 
-TORQUE_STAIRCASE = (0.02, 0.04, 0.06, 0.08, 0.10, 0.12)
-"""N*m. Over the stiffness these are 0.04 .. 0.24 rad: from barely moving
-to closed onto a 25 mm cube and past it."""
+TORQUE_STAIRCASE = tuple(
+    round(fraction * STIFFNESS * CLOSED_ANGLE, 6) for fraction in (0.125, 0.25, 0.375, 0.5, 0.625, 0.75)
+)
+"""N*m. Over the stiffness these are an eighth to three quarters of the
+travel: from barely moving to nearly shut. Derived from the spring, so
+the staircase still spans the tool's own range when the tool changes."""
 
 SETTLE_STEPS = 600
 """1.2 s, about eleven undamped periods of this spring on this inertia,
