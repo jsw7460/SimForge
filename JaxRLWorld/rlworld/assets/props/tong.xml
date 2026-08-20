@@ -12,6 +12,17 @@
        this the other way round and Genesis alone would quietly hold the
        tong at a different opening.
 
+       The travel runs from -0.15 rad to 0.321, and the open END of that
+       is NOT where the tong sits. A spring tong's open position is set by
+       its spring; the only place the arms physically stop each other is
+       closed, where the pads meet. Giving the spring's rest position a
+       hard limit in the same place puts two constraints in permanent
+       disagreement over one point — the spring pushing into the stop and
+       the stop pushing back, every step, forever. MuJoCo and Genesis
+       absorb that; mujoco_warp turns a 0.24 m/s landing into an 11.7 m/s
+       launch and NaN within a dozen steps, measured. The extra travel is
+       headroom the spring never uses.
+
        q = 0.000 rad  fully open, 35 mm between the pads
        q = 0.094 rad  closed onto a 25 mm cube
        q = 0.321 rad  pads meet
@@ -35,9 +46,9 @@
          from the pivot at the origin; its top face is the z = 0 plane. -->
     <body name="tong_base" pos="0 0 0" childclass="tong">
       <freejoint name="tong_free"/>
-      <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.609e-5 3.825e-5"/>
-      <geom name="tong_base_arm" size="0.06 0.015 0.003" pos="0.06 0 -0.003"/>
-      <geom name="tong_base_pad" size="0.008 0.015 0.003" pos="0.112 0 0.003"/>
+      <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.825e-5 3.609e-5"/>
+      <geom name="tong_base_arm" size="0.06 0.003 0.015" pos="0.06 0.003 0"/>
+      <geom name="tong_base_pad" size="0.008 0.003 0.015" pos="0.112 -0.003 0"/>
       <!-- Where the robot is meant to hold the tool: midway between the
            two arms, 60 mm out from the pivot. A task aiming a gripper
            at the tong needs a point to aim AT, and its frame origin is
@@ -50,7 +61,7 @@
            the YAM gripper opens to, and closing across them is the same
            motion that works the tool - which is what the later stages
            need and what a grasp at the pivot could never become. -->
-      <site name="grip_site" pos="0.06 0 0.0125" size="0.004" rgba="1 0.5 0 1"/>
+      <site name="grip_site" pos="0.06 -0.0125 0" size="0.004" rgba="1 0.5 0 1"/>
 
       <!-- Upper arm. The body frame is pre-rotated by the open angle
            (0.428 rad about -y) so that inside it the arm runs along +x
@@ -58,12 +69,12 @@
            the body frame and identical to the lower arm's, which is one
            less thing that can differ between backends. Turning the joint
            positive rotates the arm back down, i.e. CLOSES it. -->
-      <body name="tong_jaw" pos="0 0 0" quat="0.977194 0 -0.212371 0">
-        <joint name="tong_hinge" type="hinge" axis="0 1 0" range="0 0.321"
+      <body name="tong_jaw" pos="0 0 0" quat="0.977194 0 0 -0.212371">
+        <joint name="tong_hinge" type="hinge" axis="0 0 1" range="-0.15 0.321"
                stiffness="0.5" damping="0.008"/>
-        <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.609e-5 3.825e-5"/>
-        <geom name="tong_jaw_arm" size="0.06 0.015 0.003" pos="0.06 0 0.003"/>
-        <geom name="tong_jaw_pad" size="0.008 0.015 0.003" pos="0.112 0 -0.003"/>
+        <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.825e-5 3.609e-5"/>
+        <geom name="tong_jaw_arm" size="0.06 0.003 0.015" pos="0.06 -0.003 0"/>
+        <geom name="tong_jaw_pad" size="0.008 0.003 0.015" pos="0.112 0.003 0"/>
       </body>
     </body>
   </worldbody>

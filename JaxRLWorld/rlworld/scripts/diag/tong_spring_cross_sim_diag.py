@@ -187,6 +187,21 @@ def fixed_base_asset() -> str:
     stripped = re.sub(r"[ \t]*<freejoint[^>]*/>\n?", "", text)
     if stripped == text:
         raise ValueError(f"{TONG_XML} has no <freejoint/> to remove; the asset changed shape under this diag.")
+    # Stood on edge, by a quarter turn about x, so the hinge axis is
+    # HORIZONTAL. The tong is authored lying flat, where its hinge axis
+    # is vertical and gravity has no moment about it — pass 4 would then
+    # be measuring that a zero equals a zero. Every pass below assumes
+    # this orientation, and it is the one the analytic references are
+    # written for.
+    stood, count = re.subn(
+        r'(<body name="tong_base" pos="0 0 0")',
+        r'\1 quat="0.7071068 -0.7071068 0 0"',
+        stripped,
+        count=1,
+    )
+    if count != 1:
+        raise ValueError(f"{TONG_XML} no longer opens tong_base at the origin; this diag cannot stand it on edge.")
+    stripped = stood
     out = Path(tempfile.mkdtemp(prefix="tong_diag_")) / "tong_fixed.xml"
     out.write_text(stripped)
     return str(out)

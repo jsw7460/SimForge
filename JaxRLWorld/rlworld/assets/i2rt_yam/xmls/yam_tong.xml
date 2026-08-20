@@ -117,16 +117,16 @@
                       <camera name="camera_d405" pos="0 0 0" quat="0 1 0 0" resolution="1280 720" sensorsize="0.003896 0.00214" focal="0.00193 0.00193" />
                     </body>
                   </body>
-                  <body name="tong_base" pos="0 0 0.075" quat="0 0.7071068 0 0.7071068">
-                    <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.609e-5 3.825e-5" />
-                    <geom name="tong_base_arm" size="0.06 0.015 0.003" pos="0.06 0 -0.003" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
-                    <geom name="tong_base_pad" size="0.008 0.015 0.003" pos="0.112 0 0.003" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
+                  <body name="tong_base" pos="0 0 0.075" quat="0.5 0.5 -0.5 0.5">
+                    <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.825e-5 3.609e-5" />
+                    <geom name="tong_base_arm" size="0.06 0.003 0.015" pos="0.06 0.003 0" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
+                    <geom name="tong_base_pad" size="0.008 0.003 0.015" pos="0.112 -0.003 0" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
                     <site name="grasp_site" pos="0.112 0 0.0185" />
-                    <body name="tong_jaw" pos="0 0 0" quat="0.977194 0 -0.212371 0">
-                      <joint name="tong_hinge" type="hinge" axis="0 1 0" range="0 0.321" stiffness="0.5" damping="0.008" />
-                      <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.609e-5 3.825e-5" />
-                      <geom name="tong_jaw_arm" size="0.06 0.015 0.003" pos="0.06 0 0.003" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
-                      <geom name="tong_jaw_pad" size="0.008 0.015 0.003" pos="0.112 0 -0.003" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
+                    <body name="tong_jaw" pos="0 0 0" quat="0.977194 0 0 -0.212371">
+                      <joint name="tong_hinge" type="hinge" axis="0 0 1" range="-0.15 0.321" stiffness="0.5" damping="0.008" />
+                      <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.825e-5 3.609e-5" />
+                      <geom name="tong_jaw_arm" size="0.06 0.003 0.015" pos="0.06 -0.003 0" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
+                      <geom name="tong_jaw_pad" size="0.008 0.003 0.015" pos="0.112 0.003 0" type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001" contype="1" conaffinity="1" condim="3" group="3" />
                     </body>
                   </body>
                 </body>
