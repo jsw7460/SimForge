@@ -81,7 +81,7 @@ ARM_MASS = 0.03  # kg, each arm
 ARM_COM = 0.06  # m, pivot to an arm's centre of mass
 ARM_INERTIA_COM = 3.6e-5  # kg*m^2, about the arm's own centre of mass
 OPEN_ANGLE = 0.0  # rad — the spring's rest position AND the open stop
-CLOSED_ANGLE = 0.321  # rad, pads touching
+CLOSED_ANGLE = 0.3244  # rad, pads touching
 JAW_MOUNT_ANGLE = 0.428  # rad, the jaw body's built-in rotation
 PAD_REACH = 0.112  # m, pivot to pad centre
 PAD_HALF = 0.003  # m, pad half-thickness
@@ -90,7 +90,7 @@ RELEASE_FROM = 0.20
 RINGDOWN_TORQUE = 0.06
 RINGDOWN_FROM = 0.24
 """Rings about 0.12 rad with an amplitude of 0.12, so it stays clear of
-the open stop at 0 and the closed stop at 0.321. Touching either would
+the open stop at 0 and the closed stop at 0.3244. Touching either would
 turn a measurement of the spring into a measurement of the stop."""
 
 TORQUE_STAIRCASE = (0.02, 0.04, 0.06, 0.08, 0.10, 0.12)

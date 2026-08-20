@@ -76,8 +76,8 @@ STIFFNESS = 0.5  # N*m/rad
 DAMPING = 0.008  # N*m*s/rad
 ARM_PIECE_MASS = 0.03  # kg, each tong arm
 OPEN_ANGLE = 0.0  # rad, spring rest and the open stop
-CLOSED_ANGLE = 0.321  # rad, pads touching
-CUBE_ANGLE = 0.094  # rad, closed on a 25 mm cube
+CLOSED_ANGLE = 0.3244  # rad, pads touching
+CUBE_ANGLE = 0.0695  # rad, closed on a 25 mm cube
 
 # ── The cube, and where it goes ───────────────────────────────────
 CUBE_SIZE = 0.025  # m

@@ -1,6 +1,29 @@
 <mujoco model="tong">
-  <!-- A spring-loaded tong: two arms on one hinge, held open by a torsion
+  <!-- A spring-loaded tong: two jaws on one hinge, held open by a torsion
        spring, closing only while something pushes them shut.
+
+       AN ALUMINIUM TOOL, and the thickness is a simulation requirement as
+       much as a design choice. The jaws began 6 mm thick at 30 g. The YAM
+       gripper saturates at 38 N, which on a 30 g jaw is 1268 m/s^2: in one
+       5 ms step that is 15.9 mm of unopposed travel, against a jaw 6 mm
+       thick. The contact cannot hold it — MuJoCo's soft-constraint time
+       constant is floored at 2*dt, which for 30 g is about 300 N/m and puts
+       the equilibrium penetration at 127 mm — so the finger went THROUGH
+       the jaw, the contacts vanished, and the energy stored in the
+       penetration came out as 400 rad/s of spin and a NaN two steps later.
+       Measured, on one environment in 8192, about once every 20 million
+       steps.
+
+       Not fixable by tuning contacts: holding the penetration under a
+       millimetre needs 38 kN/m, which is a time constant of 0.9 ms against
+       a floor of 10. The dials are force, mass and thickness, and the
+       honest one is the tool. 120 x 12 x 30 mm of aluminium at 2700 kg/m^3
+       is 116.6 g — the mass follows from the material and the size rather
+       than being chosen — which puts the penetration near 3 mm inside a
+       jaw whose half-thickness is 6.
+
+       The lift task never met this with the same gripper and a 50 g cube:
+       9.5 mm of travel per step cannot cross a 40 mm cube.
 
        THE HINGE ZERO IS THE OPEN POSITION, and that is a portability
        requirement rather than a style choice. MuJoCo and Newton let a
@@ -8,30 +31,42 @@
        no such concept — its passive joint force is `-stiffness * q`
        (`genesis/engine/solvers/rigid/abd/forward_dynamics.py:985`), so
        its spring always rests at zero. Defining "fully open" as q = 0
-       makes all three agree exactly, with no springref anywhere. Author
-       this the other way round and Genesis alone would quietly hold the
-       tong at a different opening.
+       makes all three agree exactly, with no springref anywhere.
 
-       The travel runs from -0.15 rad to 0.321, and the open END of that
+       The travel runs from -0.15 rad to 0.3244, and the open END of that
        is NOT where the tong sits. A spring tong's open position is set by
-       its spring; the only place the arms physically stop each other is
+       its spring; the only place the jaws physically stop each other is
        closed, where the pads meet. Giving the spring's rest position a
        hard limit in the same place puts two constraints in permanent
-       disagreement over one point — the spring pushing into the stop and
-       the stop pushing back, every step, forever. MuJoCo and Genesis
-       absorb that; mujoco_warp turns a 0.24 m/s landing into an 11.7 m/s
-       launch and NaN within a dozen steps, measured. The extra travel is
-       headroom the spring never uses.
+       disagreement over one point. The extra travel is headroom the
+       spring never uses.
 
-       q = 0.000 rad  fully open, 35 mm between the pads
-       q = 0.094 rad  closed onto a 25 mm cube
-       q = 0.321 rad  pads meet
+       Measured on this asset, not estimated:
 
-       Both arms carry an explicit <inertial>: left to a solver's own
+         q = 0.0000 rad  fully open, 31.71 mm between the pads
+         q = 0.0695 rad  closed onto a 25 mm object
+         q = 0.3244 rad  pads meet (0.89 mm past touching, the joint stop)
+         q = 0.5456 rad  the jaw frames align; unreachable, past the stop
+
+       The jaw's body frame is pre-rotated by that last angle about -z, so
+       that inside it the jaw runs along +x exactly like the base one: the
+       inertia is then diagonal in the body frame and identical for both,
+       which is one less thing that can differ between backends. Turning
+       the joint positive rotates the jaw back down, i.e. CLOSES it.
+
+       The spring is scaled with the tool. Making the jaws aluminium
+       multiplies the hinge's inertia about the pivot by 3.895, so
+       stiffness and damping are multiplied by the same factor: the
+       natural frequency stays at 58.907 rad/s and the damping ratio at
+       0.4713, both unchanged from the 6 mm tong. The tool is heavier and
+       thicker and behaves identically.
+
+       Both jaws carry an explicit <inertial>: left to a solver's own
        geom-derived estimate, the three would not necessarily agree, and
        an inertia mismatch shows up as a different swing rate rather than
-       as an error. The mass is stated once here and every backend reads
-       it. -->
+       as an error. It describes the 120 x 12 x 30 mm bar; the 16 mm pad
+       at its tip is not counted, as it was not before. The mass is stated
+       once here and every backend reads it. -->
   <compiler angle="radian" autolimits="true"/>
 
   <default>
@@ -42,48 +77,46 @@
   </default>
 
   <worldbody>
-    <!-- Lower arm, and the body the tong is carried by. Runs along +x
+    <!-- Lower jaw, and the body the tong is carried by. Runs along +x
          from the pivot at the origin; its top face is the z = 0 plane. -->
     <body name="tong_base" pos="0 0 0" childclass="tong">
       <freejoint name="tong_free"/>
-      <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.825e-5 3.609e-5"/>
-      <geom name="tong_base_arm" size="0.06 0.003 0.015" pos="0.06 0.003 0"/>
-      <geom name="tong_base_pad" size="0.008 0.003 0.015" pos="0.112 -0.003 0"/>
+      <inertial pos="0.06 0 0" mass="0.11664"
+                diaginertia="1.01477e-05 1.48716e-04 1.41368e-04"/>
+      <geom name="tong_base_arm" size="0.06 0.006 0.015" pos="0.06 0.006 0"/>
+      <geom name="tong_base_pad" size="0.008 0.006 0.015" pos="0.112 -0.006 0"/>
       <!-- Where the robot is meant to hold the tool: midway between the
-           two arms, 60 mm out from the pivot. A task aiming a gripper
-           at the tong needs a point to aim AT, and its frame origin is
-           the wrong one twice over - the origin is the pivot, where the
-           arms already touch so closing on it does nothing, and lying on
-           a bench the pivot is half an arm's width off the surface, so a
+           two jaws, 50 mm out from the pivot. A task aiming a gripper at
+           the tong needs a point to aim AT, and its frame origin is the
+           wrong one twice over — the origin is the pivot, where the jaws
+           already touch so closing on it does nothing, and lying on a
+           bench the pivot is half a jaw's width off the surface, so a
            gripper sent there goes through the bench.
 
-           Out at 60 mm the arms are 25 mm apart, well inside the 76 mm
-           the YAM gripper opens to, and closing across them is the same
-           motion that works the tool - which is what the later stages
-           need and what a grasp at the pivot could never become. -->
-      <site name="grip_site" pos="0.06 -0.0125 0" size="0.004" rgba="1 0.5 0 1"/>
+           50 mm rather than the 60 the 6 mm tong used. Across both jaws
+           the tool is 56.39 mm wide there and 62.46 mm at 60, against a
+           gripper that opens to 74.65: the nearer point leaves 18.26 mm
+           of approach clearance where the further one leaves 12.19, and
+           still holds the tool 70 mm from its tip, which is the leverage
+           that works it. -->
+      <site name="grip_site" pos="0.05 -0.016196 0" size="0.004" rgba="1 0.5 0 1"/>
 
-      <!-- Upper arm. The body frame is pre-rotated by the open angle
-           (0.428 rad about -y) so that inside it the arm runs along +x
-           exactly like the lower one: the inertia is then diagonal in
-           the body frame and identical to the lower arm's, which is one
-           less thing that can differ between backends. Turning the joint
-           positive rotates the arm back down, i.e. CLOSES it. -->
-      <body name="tong_jaw" pos="0 0 0" quat="0.977194 0 0 -0.212371">
-        <joint name="tong_hinge" type="hinge" axis="0 0 1" range="-0.15 0.321"
-               stiffness="0.5" damping="0.008"/>
-        <inertial pos="0.06 0 0" mass="0.03" diaginertia="2.34e-6 3.825e-5 3.609e-5"/>
-        <geom name="tong_jaw_arm" size="0.06 0.003 0.015" pos="0.06 -0.003 0"/>
-        <geom name="tong_jaw_pad" size="0.008 0.003 0.015" pos="0.112 0.003 0"/>
+      <body name="tong_jaw" pos="0 0 0" quat="0.963019 0 0 -0.269434">
+        <joint name="tong_hinge" type="hinge" axis="0 0 1" range="-0.15 0.3244"
+               stiffness="1.9476" damping="0.03116"/>
+        <inertial pos="0.06 0 0" mass="0.11664"
+                  diaginertia="1.01477e-05 1.48716e-04 1.41368e-04"/>
+        <geom name="tong_jaw_arm" size="0.06 0.006 0.015" pos="0.06 -0.006 0"/>
+        <geom name="tong_jaw_pad" size="0.008 0.006 0.015" pos="0.112 0.006 0"/>
       </body>
     </body>
   </worldbody>
 
-  <!-- The two arms overlap at their shared pivot, as the links of any
+  <!-- The two jaws overlap at their shared pivot, as the links of any
        hinge do. MuJoCo filters that pair for being parent and child, so
        a standalone tong behaves; loaded as one entity among several in a
        scene it does not, and the pair starts colliding. The contact then
-       pushes the arms APART, which drives the hinge past its own open
+       pushes the jaws APART, which drives the hinge past its own open
        stop and holds it there: measured at -0.12 rad on mjlab and
        Newton against +0.033 on Genesis, whose scene disables
        self-collision and so never saw it.
