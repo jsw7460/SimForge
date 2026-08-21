@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.managers.common.command_term import CommandTerm, CommandTermCfg
+from rlworld.rl.envs.mdp.entity_points import entity_point_w
 from rlworld.rl.utils.quat_utils import quat_from_euler_xyz_wxyz, quat_mul_wxyz
 
 if TYPE_CHECKING:
@@ -50,6 +52,17 @@ class LiftingCommandCfg(CommandTermCfg):
     """
 
     entity_name: str = "cube"
+    entity_site: str | None = None
+    """Site on the object that IS the object, for the purpose of arriving.
+
+    None means its frame origin, which is right for a cube and wrong for
+    anything shaped. The reward terms already aim at a site when one is
+    named -- and if this command keeps measuring the origin while they
+    aim at the site, the two disagree by however far apart the points
+    are. On the spring tong that is 52.6 mm against a success threshold
+    of 50, so bringing the grip point exactly onto the goal left the
+    origin outside it and the episode could never be solved.
+    """
     success_threshold: float = 0.05
     difficulty: str = "dynamic"
 
@@ -120,6 +133,10 @@ class LiftingCommand(CommandTerm):
         # placement can be told apart from the timer's resample without
         # changing _resample_command's signature for every command term.
         self._placing_on_reset = False
+        # Resolved once. Deferred rather than done here because a
+        # selector naming a site needs the scene's index tables, and a
+        # command is built while those are still being assembled.
+        self._object: ResolvedEntity | None = None
 
     @property
     def command(self) -> torch.Tensor:
@@ -128,8 +145,16 @@ class LiftingCommand(CommandTerm):
     # ── Task state ───────────────────────────────────────────────────
 
     @property
+    def object_point(self) -> ResolvedEntity:
+        """The object, and the point on it this command measures."""
+        if self._object is None:
+            sites = (self.cfg.entity_site,) if self.cfg.entity_site else None
+            self._object = self._env.resolve_selector(SceneEntitySelector(name=self.cfg.entity_name, site_names=sites))
+        return self._object
+
+    @property
     def object_pos_w(self) -> torch.Tensor:
-        return self._env.get_entity_data(self.cfg.entity_name).root_link_pos_w
+        return entity_point_w(self._env, self.object_point)
 
     @property
     def position_error(self) -> torch.Tensor:
