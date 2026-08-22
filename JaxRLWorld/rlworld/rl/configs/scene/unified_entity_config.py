@@ -129,7 +129,23 @@ class GenesisEntityCfg(EntityCfg):
     """Genesis-specific entity configuration."""
 
     convexify: bool = False
-    """Convex-decompose collision meshes."""
+    """Convex-decompose collision meshes -- and, when False, MERGE them.
+
+    Not a switch between "do the convex pass" and "skip it". With it off,
+    Genesis checks whether a link's geoms can each be convexified on their
+    own and, failing that, merges them into ONE geometry
+    (``rigid_entity.py:1258``), then wraps the result in a watertight mesh
+    (``morphs.py:551``). A link carrying more than one collision geom is
+    therefore not safe to leave at this default.
+
+    Measured on a two-box jaw of the spring tong: off, Genesis loaded the
+    pair as a single non-convex mesh of 502 vertices, which produced FORTY
+    contacts per environment against the bench where a box produces five,
+    and cost 114 ms a step against 27 with it on -- four times, on nothing
+    but how the same two boxes were loaded.
+
+    The default stays False because a single-geom link has nothing to
+    merge, which is most props. Anything with two or more wants True."""
 
     visualize_contact: bool = False
     """Show contact forces in the viewer."""
