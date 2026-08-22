@@ -229,13 +229,19 @@ class SceneManager(BaseManager):
         if name in self.entities or name in self.rigid_objects:
             raise ValueError(f"Entity '{name}' is already registered")
 
-        # GenesisEntityCfg-specific fields
+        # ``convexify`` comes from the shared base, because it decides
+        # whether a link's collision geoms stay separate or get merged into
+        # one -- a question a prop has as much as a robot. Forcing it False
+        # for anything that was not a GenesisEntityCfg meant a two-geom prop
+        # would have been merged with no way to say otherwise.
+        convexify = cfg.convexify
+
+        # These two are Genesis's alone: a render surface and a contact
+        # overlay have no meaning to the other backends.
         if isinstance(cfg, GenesisEntityCfg):
-            convexify = cfg.convexify
             surface = cfg.surface
             visualize = cfg.visualize_contact
         else:
-            convexify = False
             surface = None
             visualize = False
 

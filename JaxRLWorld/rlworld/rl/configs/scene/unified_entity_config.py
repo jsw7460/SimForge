@@ -118,16 +118,6 @@ class EntityCfg:
     collapse_fixed_joints: bool = False
     """Merge bodies connected by fixed joints."""
 
-
-# ---------------------------------------------------------------------------
-# Per-simulator entity configurations
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class GenesisEntityCfg(EntityCfg):
-    """Genesis-specific entity configuration."""
-
     convexify: bool = False
     """Convex-decompose collision meshes -- and, when False, MERGE them.
 
@@ -145,7 +135,25 @@ class GenesisEntityCfg(EntityCfg):
     but how the same two boxes were loaded.
 
     The default stays False because a single-geom link has nothing to
-    merge, which is most props. Anything with two or more wants True."""
+    merge, which is most props. Anything with two or more wants True.
+
+    On the shared base rather than on GenesisEntityCfg: props enter a
+    scene as RigidObjectCfg, which is not that class, and the Genesis
+    scene manager used to force this to False for anything that was not
+    -- so a prop with two collision geoms would have been merged with no
+    way to say otherwise. Every prop in this repo happens to carry one,
+    which is the only reason it never showed. The other backends ignore
+    the field, as they ignore collapse_fixed_joints above it."""
+
+
+# ---------------------------------------------------------------------------
+# Per-simulator entity configurations
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class GenesisEntityCfg(EntityCfg):
+    """Genesis-specific entity configuration."""
 
     visualize_contact: bool = False
     """Show contact forces in the viewer."""
