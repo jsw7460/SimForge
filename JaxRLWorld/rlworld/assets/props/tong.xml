@@ -69,6 +69,15 @@
        once here and every backend reads it. -->
   <compiler angle="radian" autolimits="true"/>
 
+  <!-- Every geom states type="box" itself, rather than inheriting it from
+       the class below. MuJoCo resolves childclass through nested bodies
+       and Genesis does not: it loaded the two boxes on tong_base as
+       boxes, and the two on tong_jaw -- one body deeper -- as a single
+       non-convex MESH of 502 vertices. Against the bench that mesh
+       produced forty contacts an environment where each box produced
+       five, and the step cost four times what the same scene carrying a
+       cube costs. Stating the type is one word per geom and removes the
+       question. -->
   <default>
     <default class="tong">
       <geom type="box" rgba="0.72 0.74 0.78 1" friction="0.9 0.005 0.0001"
@@ -83,8 +92,8 @@
       <freejoint name="tong_free"/>
       <inertial pos="0.06 0 0" mass="0.11664"
                 diaginertia="1.01477e-05 1.48716e-04 1.41368e-04"/>
-      <geom name="tong_base_arm" size="0.06 0.006 0.015" pos="0.06 0.006 0"/>
-      <geom name="tong_base_pad" size="0.008 0.006 0.015" pos="0.112 -0.006 0"/>
+      <geom name="tong_base_arm" type="box" size="0.06 0.006 0.015" pos="0.06 0.006 0"/>
+      <geom name="tong_base_pad" type="box" size="0.008 0.006 0.015" pos="0.112 -0.006 0"/>
       <!-- Where the robot is meant to hold the tool: midway between the
            two jaws, 50 mm out from the pivot. A task aiming a gripper at
            the tong needs a point to aim AT, and its frame origin is the
@@ -106,8 +115,8 @@
                stiffness="1.9476" damping="0.03116"/>
         <inertial pos="0.06 0 0" mass="0.11664"
                   diaginertia="1.01477e-05 1.48716e-04 1.41368e-04"/>
-        <geom name="tong_jaw_arm" size="0.06 0.006 0.015" pos="0.06 -0.006 0"/>
-        <geom name="tong_jaw_pad" size="0.008 0.006 0.015" pos="0.112 0.006 0"/>
+        <geom name="tong_jaw_arm" type="box" size="0.06 0.006 0.015" pos="0.06 -0.006 0"/>
+        <geom name="tong_jaw_pad" type="box" size="0.008 0.006 0.015" pos="0.112 0.006 0"/>
       </body>
     </body>
   </worldbody>
