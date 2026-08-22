@@ -72,7 +72,7 @@
   <!-- Every geom states type="box" itself, rather than inheriting it from
        the class below. MuJoCo resolves childclass through nested bodies
        and Genesis does not: it loaded the two boxes on tong_base as
-       boxes, and the two on tong_jaw -- one body deeper -- as a single
+       boxes, and the two on tong_jaw — one body deeper — as a single
        non-convex MESH of 502 vertices. Against the bench that mesh
        produced forty contacts an environment where each box produced
        five, and the step cost four times what the same scene carrying a
