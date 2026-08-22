@@ -21,6 +21,15 @@ class TerminationManager(BaseManager):
     """Manages termination conditions for the environment.
 
     Terms are discovered via :func:`iter_terms` on the config instance.
+
+    A term's ``func`` may be a plain function, called as
+    ``func(env, **params)``, or a class, instantiated once at setup with
+    ``func(env=env, **params)`` and called as ``instance(env)`` thereafter.
+    The class form is how a condition gets to depend on history rather than
+    on the current step alone -- "this has been true for N steps in a row"
+    is not readable off a single state. Such a term may define ``reset``,
+    which :meth:`reset` calls with the environments that just ended, and
+    the same convention the reward manager uses for stateful reward terms.
     """
 
     def __init__(self, env: World, config: TerminationsConfig, episode_length_s: float):
@@ -34,6 +43,17 @@ class TerminationManager(BaseManager):
         # Replace SceneEntitySelector params with their resolved ResolvedEntity.
         for term in self._all_terms.values():
             self._resolve_term_selectors(term.resolved_func, term.params)
+
+        # Stateful terms. A term whose ``func`` is a class is instantiated
+        # once here and called as ``instance(env)`` thereafter, mirroring the
+        # reward manager. This is what lets a condition depend on history —
+        # "the tool has been gripped for N consecutive steps" cannot be read
+        # off a single step's state. Per-env state is cleared in :meth:`reset`.
+        self._instances: dict[str, object] = {
+            name: fn(env=self.env, **self._all_terms[name].params)
+            for name, fn in self._resolved_fns.items()
+            if isinstance(fn, type)
+        }
 
         self.reset_buf = torch.ones(env.num_envs, device=self.device, dtype=torch.bool)
         self.episode_count = torch.zeros(env.num_envs, device=self.device, dtype=torch.long)
@@ -163,7 +183,11 @@ class TerminationManager(BaseManager):
         absorb_term = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
 
         for name, term_config in self._all_terms.items():
-            result: TerminationResult = self._resolved_fns[name](self.env, **term_config.params)
+            result: TerminationResult
+            if name in self._instances:
+                result = self._instances[name](self.env)
+            else:
+                result = self._resolved_fns[name](self.env, **term_config.params)
 
             self._term_dones[name] = result.reset
             self._episode_fires[name] += result.reset.long()
@@ -212,6 +236,13 @@ class TerminationManager(BaseManager):
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
             return
+
+        # Clear per-env state held by stateful terms, so a condition that
+        # counts steps starts the new episode from zero rather than
+        # inheriting the run the previous one ended on.
+        for instance in self._instances.values():
+            if hasattr(instance, "reset"):
+                instance.reset(env_ids)
 
         # Fold the just-reset envs into the iteration-window accumulator.
         # Raw counts — not fractions — so
