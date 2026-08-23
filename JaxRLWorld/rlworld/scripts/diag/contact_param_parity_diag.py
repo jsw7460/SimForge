@@ -20,6 +20,12 @@ Both were invisible to every existing check. A parameter divergence has
 no symptom a pair table can show: the same geoms touch, in the same
 poses, and merely grip differently.
 
+``contype`` and ``conaffinity`` are compared too. They decide whether a
+pair is considered AT ALL, so a difference there does not shade a
+contact, it deletes one, and Genesis is the backend whose mask handling
+this repo has had to change. Read off the live model on all three, not
+off the MJCF, since the whole question is what survived the import.
+
 Read from each backend's own live model, never from the asset -- the
 point is what the solver will use, after any spec edit and after the
 parser's own conversions:
@@ -92,7 +98,16 @@ from rlworld.scripts.diag.contact_pair_parity_diag import (  # noqa: E402
 
 SIMS = ("mujoco", "newton", "genesis")
 
-SHARED = ("friction_slide", "friction_spin", "friction_roll", "solref_t", "solref_d", "solimp")
+SHARED = (
+    "contype",
+    "conaffinity",
+    "friction_slide",
+    "friction_spin",
+    "friction_roll",
+    "solref_t",
+    "solref_d",
+    "solimp",
+)
 MUJOCO_ONLY = ("condim", "priority")
 
 
@@ -122,6 +137,8 @@ def read_mujoco(env, sim: str, vocab: set[str]) -> tuple[dict[tuple[str, str], l
         condim = int(mj_model.geom_condim[g])
         out.setdefault(key_for(body, geom_type, vocab), []).append(
             {
+                "contype": int(mj_model.geom_contype[g]),
+                "conaffinity": int(mj_model.geom_conaffinity[g]),
                 "friction_slide": round(float(friction[0]), 6),
                 # Effective, matching how Genesis parses them -- see the module docstring.
                 "friction_spin": round(float(friction[1]), 6) if condim >= 4 else 0.0,
@@ -141,6 +158,8 @@ def read_genesis(env, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]
 
     solver = env.scene_manager.scene.sim.rigid_solver
     geoms = solver.dyn_info.geoms
+    contype = qd_to_torch(geoms.contype, copy=True).cpu().numpy().reshape(-1)
+    conaffinity = qd_to_torch(geoms.conaffinity, copy=True).cpu().numpy().reshape(-1)
     slide = qd_to_torch(geoms.friction, copy=True).cpu().numpy().reshape(-1)
     spin = qd_to_torch(geoms.friction_torsional, copy=True).cpu().numpy().reshape(-1)
     roll = qd_to_torch(geoms.friction_rolling, copy=True).cpu().numpy().reshape(-1)
@@ -156,6 +175,8 @@ def read_genesis(env, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]
                 key = key_for(link.name, GENESIS_TYPE.get(int(geom.type), "?"), vocab)
                 out.setdefault(key, []).append(
                     {
+                        "contype": int(contype[i]),
+                        "conaffinity": int(conaffinity[i]),
                         "friction_slide": round(float(slide[i]), 6),
                         "friction_spin": round(float(spin[i]), 6),
                         "friction_roll": round(float(roll[i]), 6),

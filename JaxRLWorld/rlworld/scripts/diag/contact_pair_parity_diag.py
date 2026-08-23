@@ -190,7 +190,19 @@ def genesis_pairs(env, vocab: set[str]) -> tuple[Counter, set[str]]:
     for entity in solver.entities:
         for link in entity.links:
             for i, geom in enumerate(link.geoms):
-                keys[link.geom_start + i] = key(link.name, GENESIS_TYPE.get(int(geom.type), "?"), vocab)
+                # geom.idx, NOT link.geom_start + i. They are two claims
+                # about the same number and they do not always agree:
+                # KinematicLink.geom_start returns 0 unconditionally, so a
+                # link of that kind sends its contacts to whatever occupies
+                # the low indices and reads back as the wrong body. Contacts
+                # attributed to a neighbour do not go missing, they appear
+                # somewhere else, which is worse than an obvious zero.
+                if link.geom_start + i != int(geom.idx):
+                    raise RuntimeError(
+                        f"genesis geom indexing disagrees on {link.name}: "
+                        f"geom_start {link.geom_start} + {i} != geom.idx {int(geom.idx)}"
+                    )
+                keys[int(geom.idx)] = key(link.name, GENESIS_TYPE.get(int(geom.type), "?"), vocab)
     seen = {leaf(link.name, vocab) for entity in solver.entities for link in entity.links}
 
     state = solver.collider._collider_state
