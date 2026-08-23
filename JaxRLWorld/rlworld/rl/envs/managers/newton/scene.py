@@ -331,6 +331,18 @@ and treating it as anything else would invent a rule no asset states.
 """
 
 
+def _never_collides(builder, shape: int) -> bool:
+    """Is this shape masked 0/0 -- collides with nothing, in MuJoCo's terms?"""
+    from newton._src.solvers.mujoco.collision_masks import MUJOCO_COLLISION_MASK_UNSET
+
+    attrs = builder.custom_attributes
+    contype = (attrs["mujoco:contype"].values or {}).get(shape, MUJOCO_COLLISION_MASK_UNSET)
+    conaffinity = (attrs["mujoco:conaffinity"].values or {}).get(shape, MUJOCO_COLLISION_MASK_UNSET)
+    if MUJOCO_COLLISION_MASK_UNSET in (contype, conaffinity):
+        return False
+    return (int(contype) & 0xFFFFFFFF) == 0 and (int(conaffinity) & 0xFFFFFFFF) == 0
+
+
 def _forbidden_pairs(builder, shapes) -> list[tuple[int, int]]:
     """Pairs among ``shapes`` that the MJCF's masks say must never touch.
 
@@ -1072,6 +1084,25 @@ class NewtonSceneManager(BaseManager):
 
         flags = builder.shape_flags
         colliding = [i for i in range(len(flags)) if int(flags[i]) & int(ShapeFlags.COLLIDE_SHAPES)]
+
+        # A geom masked 0/0 collides with NOTHING -- that is what the two
+        # zeroes mean in MuJoCo, and Genesis drops such geoms at import for
+        # the same reason. Saying so by clearing the collide flag is both
+        # the faithful statement and a far smaller one: K1 carries 17 such
+        # shapes per world against 10 that do collide, and expressing
+        # "never" as a filter pair against every other shape turned 44
+        # pairs into 350 -- which replication then multiplies by the
+        # environment count.
+        if not ground_only:
+            silent = {i for i in colliding if _never_collides(builder, i)}
+            for i in silent:
+                flags[i] = int(flags[i]) & ~int(ShapeFlags.COLLIDE_SHAPES)
+            if silent and build_summary_enabled():
+                print(
+                    f"[newton] collision masks: {len(silent)} shapes masked 0/0 " f"withdrawn from collision ({what})"
+                )
+            colliding = [i for i in colliding if i not in silent]
+
         if len(colliding) < 2:
             return
 
