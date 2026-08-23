@@ -73,10 +73,6 @@ class YamSpecFn:
         return mujoco.MjSpec.from_file(str(Path(self.mjcf_path).resolve()))
 
 
-# The six spheres per finger are the surfaces that actually hold a
-# workpiece, so they get grippy, torsion-aware contact; every other geom
-# only needs to stop a link passing through something.
-_FINGER_PADS = "[lr]f_down(6|7|8|9|10|11)_collision"
 _ALL_COLLISION = ".*_collision"
 
 FULL_COLLISION = CollisionCfg(
@@ -88,10 +84,24 @@ FULL_COLLISION = CollisionCfg(
     # for the third is worse than the saved contact pairs.
     contype=1,
     conaffinity=1,
-    condim={_FINGER_PADS: 6, _ALL_COLLISION: 3},
-    friction={_FINGER_PADS: (1.0, 5e-3, 5e-4), _ALL_COLLISION: (0.6,)},
-    solref={_FINGER_PADS: (0.01, 1.0)},
-    priority={_FINGER_PADS: 1, ".*": 0},
+    # Uniform, and matching what the model compiles to, because this config
+    # is the only place any of it was ever set. The six spheres per finger
+    # used to be singled out here as the surfaces that actually hold a
+    # workpiece -- condim 6, friction 1.0, priority 1, a stiffer solref --
+    # with every other collision geom dropped to 0.6. Nothing carried that
+    # to Genesis or Newton, so the three did not hold a tool the same way,
+    # and only this backend was the odd one out.
+    #
+    # Measured on the spring tong: the pad's flat faces are the surfaces a
+    # gripper actually presses with, and they were among the geoms set to
+    # 0.6, so a pad-against-tool contact resolved to mu 0.9 here against
+    # 1.0 on the other two. The 1.0 went to the six spheres, which are
+    # 0.6 mm across. A grip is held by the faces.
+    #
+    # Levelled up rather than down: the backends WITHOUT this config are
+    # the ones that pick the tool up.
+    condim=3,
+    priority=0,
 )
 
 
