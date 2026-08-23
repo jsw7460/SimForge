@@ -344,7 +344,76 @@ class SceneManager(BaseManager):
         """The sim-agnostic cameras, by name."""
         return self._cameras
 
+    LOCAL_COLLISION_MASK_FLAG = "_is_local_collision_mask"
+    """The private field on a Genesis entity that gates cross-entity masks.
+
+    Private, so it is checked before it is written: assigning an attribute
+    Python does not already know simply creates a new one, and a rename
+    upstream would leave this silently doing nothing at all -- which is the
+    failure mode this repo keeps paying for.
+    """
+
+    def _share_one_collision_mask_namespace(self) -> None:
+        """Let contype / conaffinity mean the same thing across entities.
+
+        Genesis marks an entity loaded from MJCF or USD as carrying LOCAL
+        collision masks (``rigid_entity.py``) and then declines to compare
+        those bits against another entity's::
+
+            con_skip = (same_entity | ~has_local_mask) & (con_match == 0)
+
+        That is right in general -- bit 4 in one file need not mean bit 4 in
+        another -- and wrong for how these scenes are built. mjlab attaches
+        the robot's spec INTO the scene's and compiles ONE model, so one
+        vocabulary covers robot, props and ground alike, and every mask an
+        asset authors is honoured across all of them. Genesis loads each as
+        its own entity, so the same masks stop at the entity boundary.
+
+        Measured on K1: its foot carries a shell box masked 4/4 against a
+        1/1 ground -- forbidden, and mjlab forbids it -- while Genesis let
+        the box carry the robot for 30 of the foot's contacts. The foot is
+        four spheres on one backend and a flat sole on the other.
+
+        Cleared on every entity, not just the robot, because that is what
+        matching mjlab means: one namespace for the scene. Clearing only the
+        robot would fix robot-against-ground and leave robot-against-prop
+        still diverging -- and a gripper closing on a tool is exactly that
+        pair.
+
+        THE INVARIANT THIS ASSUMES, for whoever adds the next asset: within
+        one scene, a non-default contype / conaffinity BIT means the same
+        thing in every asset. K1 spends bit 4 on "foot shell"; a second
+        asset spending bit 4 on something else would make the two interact
+        by accident.
+
+        That exposure is not new and not ours to avoid: mjlab compiles the
+        whole scene into one model, so it already reads every asset's bits
+        in one vocabulary and would mis-collide the same pair. Setting this
+        False makes Genesis exactly as exposed as the backend we are
+        matching, no more. What guards it is
+        ``scripts/diag/contact_pair_parity_diag.py`` -- a bit clash makes
+        the three backends disagree about which geoms touch, and that is
+        the one thing it checks.
+
+        The universal alternative -- renumbering each entity's bits into
+        globally unique positions on import -- would make namespaces truly
+        composable, and would also spend a 32-bit budget a few entities at
+        a time and put us somewhere mjlab is not. The reference is mjlab.
+        """
+        for name, entity in self.entities.items():
+            if not hasattr(entity, self.LOCAL_COLLISION_MASK_FLAG):
+                raise AttributeError(
+                    f"Genesis entity {name!r} has no {self.LOCAL_COLLISION_MASK_FLAG!r}. "
+                    "Genesis renamed or removed the flag that gates cross-entity "
+                    "collision masks; find its replacement rather than letting the "
+                    "assignment below quietly create a field nothing reads."
+                )
+            setattr(entity, self.LOCAL_COLLISION_MASK_FLAG, False)
+
     def build_scene(self):
+        # Before build: the collider reads the flag when it assembles its
+        # pair list, which happens inside scene.build().
+        self._share_one_collision_mask_namespace()
         self.scene.build(n_envs=self.env.num_envs, env_spacing=self.config.env_spacing, center_envs_at_origin=False)
         self._place_fixed_entities()
         self._configure_robot_dynamics()
