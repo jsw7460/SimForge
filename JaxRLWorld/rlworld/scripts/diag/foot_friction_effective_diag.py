@@ -41,6 +41,7 @@ ROBOTS: dict[str, tuple[str, str]] = {
     "g1": ("rlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
     "go2": ("rlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
     "k1": ("rlworld.rl.configs.presets.k1_joystick.base", "K1JoystickConfig"),
+    "t1": ("rlworld.rl.configs.presets.t1_getup.base", "T1GetupConfig"),
 }
 SIMS = ("mujoco", "newton", "genesis")
 
@@ -146,6 +147,34 @@ def genesis_rows(env) -> np.ndarray:
     return np.asarray(keep)
 
 
+def priority_census(env, sim: str) -> str:
+    """How many collidable geoms carry a non-zero priority, and out of how many.
+
+    The scene manager used to paint priority 1 onto every collision shape.
+    It no longer does, so this now reads what the MJCF authors -- and for a
+    robot whose MJCF authors 1 on ALL of them, the forced value and the
+    authored value were the same and removing the workaround provably
+    changed nothing. That is the whole check for T1, whose ``<default>``
+    class carries ``priority="1"``.
+    """
+    import mujoco
+
+    manager = env.scene_manager
+    if sim == "newton":
+        mj_model, wp_model = manager.solver.mj_model, manager.solver.mjw_model
+    else:
+        mj_model, wp_model = manager.mj_model, manager.model
+    priority = _np(wp_model.geom_priority)
+    if priority.ndim > 1:
+        priority = priority[0]
+    collidable = [
+        gid for gid in range(mj_model.ngeom) if int(mj_model.geom_contype[gid]) or int(mj_model.geom_conaffinity[gid])
+    ]
+    nonzero = sum(1 for gid in collidable if int(priority[gid]) != 0)
+    del mujoco
+    return f"{nonzero}/{len(collidable)} collidable geoms at priority != 0"
+
+
 def measure(robot: str, sim: str) -> np.ndarray:
     env = build(robot, sim)
     zero = torch.zeros(NUM_ENVS, env.act_manager.num_actions, device=env.device)
@@ -153,6 +182,8 @@ def measure(robot: str, sim: str) -> np.ndarray:
         env.step(zero)
     env._invalidate_cache()
     rows = genesis_rows(env) if sim == "genesis" else mjwarp_rows(env, sim)
+    if sim != "genesis":
+        print(f"    {'':<12}{'':>8}   {priority_census(env, sim)}")
     del env
     return rows
 
