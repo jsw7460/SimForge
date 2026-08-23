@@ -139,11 +139,12 @@ class T1Config(RobotConfig):
     # joints fixed and only exposes the 12 leg DOFs — unusable for the
     # full-body getup task.
     urdf_path: str | None = "./JaxRLWorld/rlworld/assets/T1/T1_23dof.urdf"
-    mjcf_path: str | None = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
+    mjcf_path: str | None = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1_mjlab.xml"
 
-    # Menagerie T1 MJCF for Genesis (no inline ground plane, clean
-    # class defaults). Newton can't use this due to parser limitations.
-    mjcf_path_genesis: str | None = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
+    # Genesis reads the same file. The field stays separate because other
+    # robots do need a Genesis-specific MJCF; for T1 the whole point is
+    # that every backend, mjlab included, compiles this one asset.
+    mjcf_path_genesis: str | None = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1_mjlab.xml"
 
     # From HOME_KEYFRAME in mjlab t1_constants.py.
     base_init_height: float = 0.665

@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict
 
+import mujoco
 from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
     FULL_COLLISION as T1_FULL_COLLISION,
-    get_spec as t1_get_spec,
 )
 
 from rlworld.rl.actuators import IdealPDActuatorCfg
@@ -148,7 +148,9 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
                 ),
             ),
         ),
-        spec_fn=t1_get_spec,
+        # Same asset as Newton and Genesis -- see the note in
+        # ``t1_getup/_mujoco_builders.py``.
+        spec_fn=lambda: mujoco.MjSpec.from_file(r.mjcf_path),
         collisions=(T1_FULL_COLLISION,),
     )
 

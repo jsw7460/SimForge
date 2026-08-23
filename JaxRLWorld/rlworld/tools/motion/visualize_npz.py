@@ -46,7 +46,7 @@ import mujoco
 import numpy as np
 import tyro
 
-_DEFAULT_MJCF = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
+_DEFAULT_MJCF = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1_mjlab.xml"
 
 
 def _load_npz(path: str) -> dict[str, np.ndarray]:

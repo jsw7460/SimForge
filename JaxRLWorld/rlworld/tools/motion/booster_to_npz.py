@@ -57,7 +57,7 @@ from rlworld.tools.motion.mujoco_replayer import replay_motion
 # match mjlab's ``booster_t1/xmls/t1.xml`` exactly in body and joint layout,
 # so the NPZ produced with this MJCF works across all three simulator
 # backends of the t1_tracking preset.
-_DEFAULT_MJCF = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1.xml"
+_DEFAULT_MJCF = "./JaxRLWorld/rlworld/assets/menagerie_T1/t1_mjlab.xml"
 
 
 def _resample_pose_trajectory(

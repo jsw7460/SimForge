@@ -1,11 +1,17 @@
 """MuJoCo (mjlab) builders for T1 fall-recovery (getup) task.
 
 Dispatched from :meth:`T1GetupConfig.build` when ``sim_type == "mujoco"``.
-Unlike the Newton/Genesis builders which load T1 from a URDF, this
-builder uses the mjlab asset-zoo entry at
-``Mjlab/src/mjlab/asset_zoo/robots/booster_t1/`` — the MJCF + T1_FULL
-collision config + HOME_KEYFRAME are taken directly from
-``booster_t1.t1_constants``.
+The MJCF is ``robot.mjcf_path``, the same file Newton and Genesis parse.
+It began as mjlab's asset-zoo entry and is now vendored in ``assets/``;
+reading it from ``Mjlab/`` instead is what let this backend end up on a
+different T1 than the other two (13 collision geoms against 26) without
+anything reporting it.
+
+``T1_FULL_COLLISION`` still comes from ``booster_t1.t1_constants`` and is
+still applied HERE only, so this backend's contact parameters differ from
+the other two even though the geometry now matches -- friction 0.6
+against 1.0, solref 0.01 against 0.02
+(``rlworld/scripts/diag/contact_param_parity_diag.py``).
 
 MuJoCo-specific reward functions (``rf.joint_pos_limits``,
 ``rf.raw_action_rate_l2``, ``rf.self_collision_cost``) are used in
@@ -19,9 +25,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict
 
+import mujoco
 from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
     FULL_COLLISION as T1_FULL_COLLISION,
-    get_spec as t1_get_spec,
 )
 
 from rlworld.rl.actuators import ImplicitActuatorCfg
@@ -147,7 +153,13 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
                 ),
             ),
         ),
-        spec_fn=t1_get_spec,
+        # The asset comes from the repo, not from mjlab's asset zoo, so that
+        # this backend compiles the very file Newton and Genesis parse.
+        # ``t1_constants.get_spec`` reads mjlab's own copy; pointing at it
+        # left mjlab free to drift away from the other two on an upstream
+        # bump, which is how the two T1 collision models diverged in the
+        # first place.
+        spec_fn=lambda: mujoco.MjSpec.from_file(r.mjcf_path),
         collisions=(T1_FULL_COLLISION,),
     )
 
