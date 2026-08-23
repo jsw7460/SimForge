@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 from typing import TYPE_CHECKING
 
+import genesis as gs
 import torch
 from genesis.utils.misc import qd_to_torch
 from torch import Tensor
@@ -84,7 +85,7 @@ class GenesisRigidObjectData(SiteReaderMixin):
         # Global solver link indices for this entity, in local order — the
         # exact list ``RigidEntity.get_links_pos(None)`` uses internally
         # (``_get_global_idx(None, n_links, link_start)``).  Needed to query
-        # the ``ref="link_com"`` variant via the solver (RigidEntity's own
+        # the ``ref=gs.link_ref_frame.link_COM`` variant via the solver (RigidEntity's own
         # get_links_* don't expose ``ref``).
         self._global_link_ids = list(range(entity._link_start, entity._link_start + entity.n_links))
 
@@ -133,19 +134,19 @@ class GenesisRigidObjectData(SiteReaderMixin):
     # Genesis' solver computes link quantities at a chosen reference point.
     # ``RigidEntity.get_pos`` / ``get_vel`` (used above) call the solver with
     # the default ``ref="link_origin"``.  For the CoM we go straight to the
-    # solver with ``ref="link_com"`` (RigidEntity's wrappers don't pass ``ref``).
-    #   get_links_pos(ref="link_com") = links_state.i_pos + links_state.root_COM   (link CoM, world)
-    #   get_links_vel(ref="link_com") = cd_vel + cd_ang x links_state.i_pos        (vel at link CoM, world)
+    # solver with ``ref=gs.link_ref_frame.link_COM`` (RigidEntity's wrappers don't pass ``ref``).
+    #   get_links_pos(ref=gs.link_ref_frame.link_COM) = links_state.i_pos + links_state.root_COM   (link CoM, world)
+    #   get_links_vel(ref=gs.link_ref_frame.link_COM) = cd_vel + cd_ang x links_state.i_pos        (vel at link CoM, world)
 
     @property
     @_per_step_read
     def root_com_pos_w(self) -> Tensor:
-        return self._entity._solver.get_links_pos(self._entity.base_link_idx, ref="link_com")[..., 0, :]
+        return self._entity._solver.get_links_pos(self._entity.base_link_idx, ref=gs.link_ref_frame.link_COM)[..., 0, :]
 
     @property
     @_per_step_read
     def root_com_lin_vel_w(self) -> Tensor:
-        return self._entity._solver.get_links_vel(self._entity.base_link_idx, ref="link_com")[..., 0, :]
+        return self._entity._solver.get_links_vel(self._entity.base_link_idx, ref=gs.link_ref_frame.link_COM)[..., 0, :]
 
     @property
     def root_com_lin_vel_b(self) -> Tensor:
@@ -228,13 +229,13 @@ class GenesisRigidObjectData(SiteReaderMixin):
         Same link order as ``body_pos_w_all`` (``_global_link_ids`` is the
         same index list ``RigidEntity.get_links_pos(None)`` uses).
         """
-        return self._entity._solver.get_links_pos(self._global_link_ids, ref="link_com")
+        return self._entity._solver.get_links_pos(self._global_link_ids, ref=gs.link_ref_frame.link_COM)
 
     @property
     @_per_step_read
     def body_com_lin_vel_w_all(self) -> Tensor:
         """World-frame linear velocities of all links at their centers of mass. Shape ``(num_envs, num_links, 3)``."""
-        return self._entity._solver.get_links_vel(self._global_link_ids, ref="link_com")
+        return self._entity._solver.get_links_vel(self._global_link_ids, ref=gs.link_ref_frame.link_COM)
 
     # ------------------------------------------------------------------
     # Per-name body/site reads

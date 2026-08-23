@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import genesis as gs
 import torch
 
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
@@ -51,7 +52,7 @@ def wtw_feet_slip(
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[asset_cfg.name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
-    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local, ref="link_com")
+    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local, ref=gs.link_ref_frame.link_COM)
 
     contact = env.contact_manager.is_contact(contact_group, order=feet_links)
     prev_contact = env.contact_manager.prev_is_contact(contact_group, order=feet_links)

@@ -368,7 +368,7 @@ class GenesisEnv(World):
             force=force_w.view(1, 3),
             links_idx=link_ids_global,
             envs_idx=[int(env_idx)],
-            ref="link_com",
+            ref=gs.link_ref_frame.link_COM,
             local=False,
         )
 

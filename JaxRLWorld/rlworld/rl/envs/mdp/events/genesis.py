@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import genesis as gs
 import torch
 
 from rlworld.rl.utils import entity_utils as eu
@@ -55,7 +56,7 @@ def apply_external_force_torque(
         force=forces,
         links_idx=link_ids_global,
         envs_idx=env_ids.tolist(),
-        ref="link_com",
+        ref=gs.link_ref_frame.link_COM,
         local=False,
     )
 
@@ -70,6 +71,6 @@ def apply_external_force_torque(
             torque=torques,
             links_idx=link_ids_global,
             envs_idx=env_ids.tolist(),
-            ref="link_com",
+            ref=gs.link_ref_frame.link_COM,
             local=False,
         )

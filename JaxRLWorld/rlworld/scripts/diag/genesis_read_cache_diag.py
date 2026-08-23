@@ -55,6 +55,7 @@ def main() -> int:
     ap.add_argument("--out", default="genesis_read_cache_diag.txt")
     args = ap.parse_args()
 
+    import genesis as gs
     import torch
 
     torch.manual_seed(args.seed)
@@ -117,19 +118,19 @@ def main() -> int:
         "body_ang_vel_w_all": (lambda: rd.body_ang_vel_w_all, fresh_links_ang),
         "root_com_pos_w": (
             lambda: rd.root_com_pos_w,
-            lambda: solver.get_links_pos(entity.base_link_idx, ref="link_com")[..., 0, :],
+            lambda: solver.get_links_pos(entity.base_link_idx, ref=gs.link_ref_frame.link_COM)[..., 0, :],
         ),
         "root_com_lin_vel_w": (
             lambda: rd.root_com_lin_vel_w,
-            lambda: solver.get_links_vel(entity.base_link_idx, ref="link_com")[..., 0, :],
+            lambda: solver.get_links_vel(entity.base_link_idx, ref=gs.link_ref_frame.link_COM)[..., 0, :],
         ),
         "body_com_pos_w_all": (
             lambda: rd.body_com_pos_w_all,
-            lambda: solver.get_links_pos(link_ids, ref="link_com"),
+            lambda: solver.get_links_pos(link_ids, ref=gs.link_ref_frame.link_COM),
         ),
         "body_com_lin_vel_w_all": (
             lambda: rd.body_com_lin_vel_w_all,
-            lambda: solver.get_links_vel(link_ids, ref="link_com"),
+            lambda: solver.get_links_vel(link_ids, ref=gs.link_ref_frame.link_COM),
         ),
     }
 
