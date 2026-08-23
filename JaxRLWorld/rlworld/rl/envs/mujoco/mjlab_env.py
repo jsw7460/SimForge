@@ -212,24 +212,32 @@ class MujocoEnv(World):
                 num_envs=self.scene_cfg.num_envs,
                 env_spacing=self.scene_cfg.env_spacing,
                 physics_dt=self.scene_cfg.physics_dt,
-                substeps=getattr(self.scene_cfg, "substeps", 1),
-                entities=getattr(self.scene_cfg, "entities", None),
+                # Read straight off the config. Every field below is
+                # declared on ``MujocoSceneConfig`` with its own default, so
+                # a getattr fallback here was a second copy of each default
+                # in a second file -- including the solver budget and the
+                # friction cone. Two copies of a physics default is one too
+                # many: change the dataclass and this file quietly keeps
+                # using the old number for any config that lacks the field,
+                # rather than failing where the mistake is.
+                substeps=self.scene_cfg.substeps,
+                entities=self.scene_cfg.entities,
                 rigid_objects=self.scene_cfg.rigid_objects,
-                sensors=getattr(self.scene_cfg, "sensors", ()),
-                cameras=getattr(self.scene_cfg, "cameras", ()),
+                sensors=self.scene_cfg.sensors,
+                cameras=self.scene_cfg.cameras,
                 terrain_cfg=self.scene_cfg.terrain_cfg,
-                solver_iterations=getattr(self.scene_cfg, "solver_iterations", 10),
-                solver_ls_iterations=getattr(self.scene_cfg, "solver_ls_iterations", 20),
-                ccd_iterations=getattr(self.scene_cfg, "ccd_iterations", 50),
-                nconmax=getattr(self.scene_cfg, "nconmax", 35),
-                njmax=getattr(self.scene_cfg, "njmax", 1500),
-                impratio=getattr(self.scene_cfg, "impratio", 1.0),
-                cone=getattr(self.scene_cfg, "cone", "pyramidal"),
-                contact_sensor_maxmatch=getattr(self.scene_cfg, "contact_sensor_maxmatch", 64),
-                # Legacy fallbacks
-                mjlab_scene_cfg=getattr(self.scene_cfg, "mjlab_scene_cfg", None),
-                mjlab_sim_cfg=getattr(self.scene_cfg, "mjlab_sim_cfg", None),
-                unified_entities=getattr(self.scene_cfg, "unified_entities", None),
+                solver_iterations=self.scene_cfg.solver_iterations,
+                solver_ls_iterations=self.scene_cfg.solver_ls_iterations,
+                ccd_iterations=self.scene_cfg.ccd_iterations,
+                nconmax=self.scene_cfg.nconmax,
+                njmax=self.scene_cfg.njmax,
+                impratio=self.scene_cfg.impratio,
+                cone=self.scene_cfg.cone,
+                contact_sensor_maxmatch=self.scene_cfg.contact_sensor_maxmatch,
+                # Legacy — declared on the dataclass like everything else.
+                mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
+                mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
+                unified_entities=self.scene_cfg.unified_entities,
             ),
         )
         self.scene_manager.build_scene()
@@ -316,8 +324,7 @@ class MujocoEnv(World):
         self.contact_manager = ContactCls(env=self)
         self.contact_manager.register_sensors()
 
-        viewer_type = getattr(self.visualization_cfg, "viewer_type", None)
-        if viewer_type == "viser":
+        if self.visualization_cfg.viewer_type == "viser":
             # Same unified ViserScene path as Genesis/Newton (so ViserSceneConfig
             # applies to MuJoCo too — configurable ground + robot material).
             from rlworld.rl.vis.viser import ViserVisualizationManager

@@ -11,7 +11,7 @@ import newton
 import numpy as np
 import torch
 import warp as wp
-from newton import JointTargetMode, ShapeFlags
+from newton import JointTargetMode
 from newton.selection import ArticulationView
 
 from rlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
@@ -318,27 +318,6 @@ def _state_assign_full(
             d = getattr(ns_dst, attr, None)
             if isinstance(s, wp.array) and isinstance(d, wp.array):
                 d.assign(s)
-
-
-def _force_collision_shape_priority(builder: newton.ModelBuilder, priority: int = 1) -> None:
-    """Set ``geom_priority`` on every COLLIDE_SHAPES shape in this builder.
-
-    Works around a Newton MJCF parser bug where XML ``priority`` attributes
-    on ``<geom>`` elements are lost for most shapes when visuals are also
-    parsed. We bypass the parser by mutating the custom_attribute values
-    dict directly; Newton exposes no public per-shape setter for
-    post-load custom attributes. Visual-only shapes
-    (``COLLIDE_SHAPES`` flag cleared) are skipped because they don't
-    participate in contact pairs.
-    """
-    attr = builder.custom_attributes.get("mujoco:geom_priority")
-    if attr is None:
-        return
-    if attr.values is None:
-        attr.values = {}
-    for shape_idx in range(len(builder.shape_flags)):
-        if builder.shape_flags[shape_idx] & ShapeFlags.COLLIDE_SHAPES:
-            attr.values[shape_idx] = priority
 
 
 @dataclass
@@ -890,18 +869,21 @@ class NewtonSceneManager(BaseManager):
                         f"actuator and the simulator's PD will be inert. "
                         f"Available joint leaf names (first 16): {sorted(joint_leaves)[:16]}"
                     )
-        # Workaround: force ``geom_priority=1`` on every collision shape of this
-        # entity. Newton's MJCF parser loses the XML-declared ``priority``
-        # attribute on most geoms when ``parse_visuals=True`` (only ~4/12
-        # collision geoms end up with the intended value). Since priority gates
-        # MuJoCo's friction combine rule (higher-priority geom's value wins;
-        # otherwise element-wise MAX with ground/terrain), losing it here makes
-        # per-robot friction DR silently ineffective — randomized foot μ gets
-        # max()ed with the fixed ground μ and the policy never sees the
-        # variation. We patch the builder's custom_attribute values dict
-        # directly because Newton exposes no per-shape setter for this. Remove
-        # once the upstream parser bug is fixed.
-        _force_collision_shape_priority(builder)
+        # Priority is whatever the MJCF says. This used to paint
+        # ``geom_priority = 1`` onto every collision shape, working around a
+        # Newton parser that dropped the XML attribute when visuals were
+        # parsed — and in doing so erased what the assets author. g1, go2,
+        # K1 and T1 all give their feet ``priority="1"`` with an explicit
+        # friction beside it, so the foot's parameters win against the
+        # priority-0 ground rather than being max()ed with it; painting
+        # every shape the same value makes every pair tie, which is max()
+        # again. The workaround defeated the thing it was written to
+        # protect.
+        #
+        # The parser bug is fixed as of newton 1.6.0.dev0, measured by
+        # ``scripts/diag/newton_geom_priority_parse_diag``: every authored
+        # priority survives, through a ``<default>`` class and a per-geom
+        # override alike, with visuals parsed and without.
         mesh_approx = getattr(cfg, "mesh_approximation", "bounding_box")
         builder.approximate_meshes(mesh_approx)
 
