@@ -183,6 +183,14 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,
+            # The feet are authored condim=6, which mjwarp honours and
+            # Genesis ignores unless these are on -- it parses the
+            # coefficients and warns on every build. Genesis zeroes them
+            # for geoms below condim 4 and 6 at parse time
+            # (`genesis/utils/mjcf.py`), so turning them on applies them
+            # to exactly the geoms MuJoCo would.
+            enable_torsional_friction=True,
+            enable_rolling_friction=True,
             batch_dofs_info=True,
         ),
         robot_cfg=r,

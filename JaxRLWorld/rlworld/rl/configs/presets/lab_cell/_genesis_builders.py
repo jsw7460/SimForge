@@ -84,6 +84,12 @@ def build_scene(cfg: LabCellConfig, timing: Dict[str, Any]) -> SceneConfig:
     )
     # Four feet on the ground on top of the arm's own pairs.
     scene.rigid_options.max_collision_pairs = 200
+    # The go2 feet are authored condim=6, which mjwarp honours and Genesis
+    # ignores unless these are on. Set here rather than in the arm builder
+    # it inherits: the arm's own presets top out at condim 3, and turning
+    # these on there would change their physics for nothing.
+    scene.rigid_options.enable_torsional_friction = True
+    scene.rigid_options.enable_rolling_friction = True
     return scene
 
 

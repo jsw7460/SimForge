@@ -47,6 +47,16 @@ combines a pair by ``max``, so the ground is anchored low (0.01) to let
 the robot's win there too (``fc201cb``). All three end up applying the
 robot's number; only the unused input differs.
 
+**A stored value can agree and still be unused.** Genesis parses a geom's
+torsional and rolling coefficients but applies them only when the SCENE
+turns them on (``RigidOptions.enable_torsional_friction`` /
+``enable_rolling_friction``, both False by default), so a robot whose
+feet are authored ``condim`` 6 reads identical spin and roll numbers on
+all three backends while spinning freely on one of them. The per-geom
+table cannot see that, because it is a solver option and not a geom
+parameter. So the flags are checked separately, against the highest
+condim any geom in the scene actually declares.
+
 ``condim`` and ``priority`` have no Genesis equivalent -- it has no
 per-geom condim, and it resolves a pair's friction by ``max`` rather
 than by priority -- so those two columns are left blank for it rather
@@ -157,14 +167,47 @@ def read_genesis(env, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]
     return out, seen
 
 
-def measure(robot: str, sim: str, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]], set[str]]:
+def measure(robot: str, sim: str, vocab: set[str]) -> tuple[dict, set[str], dict]:
     env = build(robot, sim)
     zero = torch.zeros(NUM_ENVS, env.act_manager.num_actions, device=env.device)
     for _ in range(SETTLE):
         env.step(zero)
     values, seen = read_genesis(env, vocab) if sim == "genesis" else read_mujoco(env, sim, vocab)
+    flags = {}
+    if sim == "genesis":
+        options = env.scene_manager.scene.sim.rigid_solver._options
+        flags = {
+            "torsional": bool(options.enable_torsional_friction),
+            "rolling": bool(options.enable_rolling_friction),
+        }
     del env
-    return values, seen
+    return values, seen, flags
+
+
+def is_ground_anchor(key: tuple[str, str], field: str, cells: dict[str, str]) -> bool:
+    """The one difference that is supposed to be there.
+
+    MuJoCo and Newton resolve a contact pair by ``priority``, so a robot
+    geom with priority 1 supplies the whole friction triple and the
+    ground's is never read. Genesis has no priority and takes the ``max``
+    of the pair, so the ground is anchored BELOW anything a robot could
+    carry to reach the same answer (`fc201cb`, and the terrain importer
+    says so beside the value). All three end up applying the robot's
+    number; only the unused input differs.
+
+    Recognised narrowly, so a real regression still fails: the ground
+    only, a friction component only, and only when Genesis is the LOW
+    one. A Genesis ground that crept above the others stops being an
+    anchor and is reported.
+    """
+    if key[0] != GROUND or not field.startswith("friction"):
+        return False
+    try:
+        values = {sim: float(text) for sim, text in cells.items() if text != "-"}
+    except ValueError:
+        return False
+    genesis = values.pop("genesis", None)
+    return genesis is not None and bool(values) and genesis < min(values.values())
 
 
 def cell(rows: list[dict] | None, field: str) -> str:
@@ -189,9 +232,11 @@ def run(robot: str, sims: list[str], dump: bool) -> list[str]:
     # key their own rows, every backend looks like it has geoms the others
     # lack, and not one value gets compared with its counterpart.
     read: dict[str, dict] = {}
+    flags: dict[str, bool] = {}
     vocab: set[str] = set()
     for sim in sims:
-        read[sim], seen = measure(robot, sim, vocab)
+        read[sim], seen, sim_flags = measure(robot, sim, vocab)
+        flags.update(sim_flags)
         if not vocab:
             vocab = seen
     keys = sorted({key for values in read.values() for key in values})
@@ -205,14 +250,29 @@ def run(robot: str, sims: list[str], dump: bool) -> list[str]:
             cells = [cell(read[sim].get(key), field) for sim in speaks]
             present = [c for c in cells if c != "-"]
             differs = len(set(present)) > 1
+            expected = differs and is_ground_anchor(key, field, dict(zip(speaks, cells)))
             label = f"{key[0]} {key[1]}"
-            print(
-                f"      {label[:44]:<46}"
-                + "".join(f"{c[:15]:>16}" for c in cells)
-                + ("   <-- DIFFERS" if differs else "")
-            )
-            if differs:
+            mark = "   <-- anchored on genesis, by design" if expected else ("   <-- DIFFERS" if differs else "")
+            print(f"      {label[:44]:<46}" + "".join(f"{c[:15]:>16}" for c in cells) + mark)
+            if differs and not expected:
                 failures.append(f"{robot}: {field} on {label} = {dict(zip(speaks, cells))}")
+
+    # condim is read off mjlab, which is where it is authoritative; genesis
+    # has no per-geom condim to compare against, only the scene switches.
+    if "genesis" in sims and "mujoco" in sims:
+        declared = max((row["condim"] for rows in read["mujoco"].values() for row in rows), default=3)
+        print("\n    genesis solver flags   (a parameter agreeing does not mean it is used)")
+        print(f"      {'highest condim declared in the scene':<44}{declared:>8}")
+        for name, needed_at in (("torsional", 4), ("rolling", 6)):
+            on = flags.get(name, False)
+            label = f"enable_{name}_friction   (used from condim {needed_at})"
+            missing = declared >= needed_at and not on
+            print(f"      {label:<44}{str(on):>8}" + ("   <-- DECLARED BUT IGNORED" if missing else ""))
+            if missing:
+                failures.append(
+                    f"{robot}: geoms declare condim {declared} but genesis "
+                    f"enable_{name}_friction is off, so it ignores them"
+                )
 
     if dump:
         print("\n    RAW")

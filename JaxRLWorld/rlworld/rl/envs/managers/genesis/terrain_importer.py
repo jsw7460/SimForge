@@ -39,7 +39,16 @@ class GenesisTerrainImporter(TerrainImporter):
         # minimum allowed friction makes max() always resolve to the
         # robot side, matching the priority semantics of the other
         # backends.
-        ground_material = gs.materials.Rigid(friction=0.01)
+        # Torsional and rolling are anchored for the same reason and by
+        # the same max() rule (`collider/contact.py:399`). They default to
+        # 0.005 and 0.0001 on a Genesis material, and MuJoCo's ground
+        # contributes NOTHING to a foot contact -- the foot's priority
+        # wins the whole friction triple -- so a non-zero ground would
+        # hand spin and roll resistance to geoms MuJoCo leaves free,
+        # including every condim=1 body geom. Inert until a scene turns
+        # the coefficients on via RigidOptions, so this changes nothing
+        # for a preset that does not.
+        ground_material = gs.materials.Rigid(friction=0.01, friction_torsional=0.0, friction_rolling=0.0)
 
         if self.cfg.terrain_type == "plane":
             # Genesis primitive morphs default to contype/conaffinity
