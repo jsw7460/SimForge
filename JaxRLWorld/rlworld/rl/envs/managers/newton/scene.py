@@ -343,8 +343,16 @@ def _never_collides(builder, shape: int) -> bool:
     return (int(contype) & 0xFFFFFFFF) == 0 and (int(conaffinity) & 0xFFFFFFFF) == 0
 
 
-def _forbidden_pairs(builder, shapes) -> list[tuple[int, int]]:
+def _forbidden_pairs(builder, shapes, against=None) -> list[tuple[int, int]]:
     """Pairs among ``shapes`` that the MJCF's masks say must never touch.
+
+    ``against`` narrows the comparison to pairs that include one of ITS
+    shapes, and the post-replication ground pass must use it. The shape
+    count there is ``num_worlds * shapes_per_world``, and the all-pairs
+    upper triangle of that is quadratic: go2 at 4096 worlds carries
+    188416 colliding shapes, whose triangle is 1.8e10 pairs -- numpy asks
+    for 132 GiB and the build dies before a single mask is read. Ground
+    against everything else is linear in the same count.
 
     MuJoCo's rule verbatim: a pair may touch when
     ``(contype_a & conaffinity_b) | (contype_b & conaffinity_a)`` is
@@ -390,15 +398,29 @@ def _forbidden_pairs(builder, shapes) -> list[tuple[int, int]]:
             return MUJOCO_DEFAULT_CONTYPE, MUJOCO_DEFAULT_CONAFFINITY
         return int(a) & 0xFFFFFFFF, int(b) & 0xFFFFFFFF
 
-    shapes = list(shapes)
-    contype = np.array([mask(s)[0] for s in shapes], dtype=np.int64)
-    conaffinity = np.array([mask(s)[1] for s in shapes], dtype=np.int64)
-    index = np.array(shapes, dtype=np.int64)
+    def columns(subset):
+        subset = list(subset)
+        return (
+            np.array([mask(s)[0] for s in subset], dtype=np.int64),
+            np.array([mask(s)[1] for s in subset], dtype=np.int64),
+            np.array(subset, dtype=np.int64),
+        )
 
-    row, col = np.triu_indices(len(shapes), k=1)
-    allowed = (contype[row] & conaffinity[col]) | (contype[col] & conaffinity[row])
-    blocked = allowed == 0
-    return list(zip(index[row][blocked].tolist(), index[col][blocked].tolist()))
+    contype, conaffinity, index = columns(shapes)
+    if against is None:
+        row, col = np.triu_indices(len(index), k=1)
+        a = (contype[row], conaffinity[row], index[row])
+        b = (contype[col], conaffinity[col], index[col])
+    else:
+        g_contype, g_conaffinity, g_index = columns(against)
+        row = np.repeat(np.arange(len(g_index)), len(index))
+        col = np.tile(np.arange(len(index)), len(g_index))
+        a = (g_contype[row], g_conaffinity[row], g_index[row])
+        b = (contype[col], conaffinity[col], index[col])
+
+    allowed = (a[0] & b[1]) | (b[0] & a[1])
+    blocked = (allowed == 0) & (a[2] != b[2])
+    return list(zip(a[2][blocked].tolist(), b[2][blocked].tolist()))
 
 
 @dataclass
@@ -1114,10 +1136,7 @@ class NewtonSceneManager(BaseManager):
             ]
             if not ground:
                 return
-            pairs = []
-            for g in ground:
-                pairs += _forbidden_pairs(builder, [g, *(s for s in colliding if s != g)])
-            pairs = [pair for pair in pairs if pair[0] in ground or pair[1] in ground]
+            pairs = _forbidden_pairs(builder, colliding, against=ground)
         else:
             pairs = _forbidden_pairs(builder, colliding)
 
