@@ -13,10 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict
 
 from mjlab.asset_zoo.robots import G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
-from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
-    FULL_COLLISION as G1_FULL_COLLISION,
-    get_spec as g1_get_spec,
-)
+from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as g1_get_spec
 
 from rlworld.rl.actuators import DelayedPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
@@ -167,7 +164,6 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         spec_fn=g1_get_spec,
         # The file the spec function loads — see the go2 builder.
         mjcf_path=r.mjcf_path,
-        collisions=(G1_FULL_COLLISION,),
     )
 
     return MujocoSceneConfig(
