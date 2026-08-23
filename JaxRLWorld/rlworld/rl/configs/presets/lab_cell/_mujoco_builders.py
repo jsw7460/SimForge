@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict
 
-from rlworld.assets.unitree_go2.go2_constants import (
-    FULL_COLLISION as GO2_FULL_COLLISION,
-    get_spec as go2_get_spec,
-)
+from rlworld.assets.unitree_go2.go2_constants import get_spec as go2_get_spec
 from rlworld.rl.actuators import ImplicitActuatorCfg
 from rlworld.rl.configs.mujoco_config_classes import (
     MujocoActionConfig,
@@ -81,7 +78,6 @@ def build_scene(cfg: LabCellConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
             soft_joint_pos_limit_factor=0.9,
         ),
         spec_fn=go2_get_spec,
-        collisions=(GO2_FULL_COLLISION,),
     )
     # Two robots' limits and contacts against one buffer; an overflow
     # prints nefc overflow and silently DROPS constraints.

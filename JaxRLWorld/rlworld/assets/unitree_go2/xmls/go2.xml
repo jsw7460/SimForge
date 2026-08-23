@@ -34,10 +34,19 @@
         <geom type="mesh" contype="0" conaffinity="0" group="2"/>
       </default>
       <default class="collision">
-        <geom group="3"/>
+        <!--
+          solref and the foot friction below state what go2_constants
+          FULL_COLLISION used to apply after compiling. Only mjlab can edit
+          a compiled spec, so Newton and Genesis got neither: they ran the
+          feet at 0.4 where mjlab ran 0.6, and every contact at solref 0.02
+          where mjlab ran 0.01. condim and priority had already been copied
+          in here; friction and solref had not
+          (rlworld/scripts/diag/contact_param_parity_diag.py).
+        -->
+        <geom group="3" solref="0.01 1"/>
         <default class="foot">
           <geom size="0.022" pos="-0.002 0 0" priority="1" condim="6"
-            friction="0.4 0.02 0.01"/>
+            friction="0.6 0.02 0.01"/>
         </default>
       </default>
       <default class="foot_site">
@@ -117,8 +126,7 @@
             <site name="FL" class="foot_site"/>
             <body name="FL_foot" pos="0 0 -0.213">
               <inertial pos="0 0 0" mass="0" diaginertia="0 0 0"/>
-              <geom name="FL_foot_collision" type="sphere" size="0.022" pos="-0.002 0 0" priority="1" condim="6"
-            friction="0.4 0.02 0.01"/>
+              <geom name="FL_foot_collision" type="sphere" class="foot"/>
             </body>
           </body>
         </body>
@@ -156,8 +164,7 @@
             <site name="FR" class="foot_site"/>
             <body name="FR_foot" pos="0 0 -0.213">
               <inertial pos="0 0 0" mass="0" diaginertia="0 0 0"/>
-              <geom name="FR_foot_collision" type="sphere" size="0.022" pos="-0.002 0 0" priority="1" condim="6"
-            friction="0.4 0.02 0.01"/>
+              <geom name="FR_foot_collision" type="sphere" class="foot"/>
             </body>
           </body>
         </body>
@@ -195,8 +202,7 @@
             <site name="RL" class="foot_site"/>
             <body name="RL_foot" pos="0 0 -0.213">
               <inertial pos="0 0 0" mass="0" diaginertia="0 0 0"/>
-              <geom name="RL_foot_collision" type="sphere" size="0.022" pos="-0.002 0 0" priority="1" condim="6"
-            friction="0.4 0.02 0.01"/>
+              <geom name="RL_foot_collision" type="sphere" class="foot"/>
             </body>
           </body>
         </body>
@@ -236,8 +242,7 @@
             <site name="RR" class="foot_site"/>
             <body name="RR_foot" pos="0 0 -0.213">
               <inertial pos="0 0 0" mass="0" diaginertia="0 0 0"/>
-              <geom name="RR_foot_collision" type="sphere" size="0.022" pos="-0.002 0 0" priority="1" condim="6"
-            friction="0.4 0.02 0.01"/>
+              <geom name="RR_foot_collision" type="sphere" class="foot"/>
             </body>
           </body>
         </body>

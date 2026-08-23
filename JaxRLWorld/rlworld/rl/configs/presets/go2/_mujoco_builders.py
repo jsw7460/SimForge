@@ -14,10 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from mjlab.asset_zoo.robots import GO2_ACTION_SCALE as MJLAB_GO2_ACTION_SCALE
 
-from rlworld.assets.unitree_go2.go2_constants import (
-    FULL_COLLISION,
-    get_spec as go2_get_spec,
-)
+from rlworld.assets.unitree_go2.go2_constants import get_spec as go2_get_spec
 from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import TerminationsConfig
@@ -186,7 +183,6 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         # The file the spec function loads. Sites are read from it, since
         # their ids must mean the same thing on every backend.
         mjcf_path=r.mjcf_path,
-        collisions=(FULL_COLLISION,),
     )
 
     return MujocoSceneConfig(

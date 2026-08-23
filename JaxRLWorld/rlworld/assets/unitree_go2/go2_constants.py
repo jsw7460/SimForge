@@ -116,17 +116,11 @@ FEET_ONLY_COLLISION = CollisionCfg(
     solimp=(0.9, 0.95, 0.023),
 )
 
-# This enables all collisions, excluding self collisions.
-# Foot collisions are given custom condim, friction and solimp.
-FULL_COLLISION = CollisionCfg(
-    geom_names_expr=(".*_collision",),
-    contype=1,
-    conaffinity=1,
-    solref=(0.01, 1),
-    condim={_foot_regex: 6, ".*_collision": 1},
-    priority={_foot_regex: 1, ".*": 0},
-    friction={_foot_regex: (0.6,)},
-)
+# FULL_COLLISION lived here and was applied over the compiled spec on the
+# mjlab path alone, so Newton and Genesis never saw it. Its contents are
+# stated in xmls/go2.xml now, where all three read them. Do not bring it
+# back: a contact parameter written in two places is how the feet came to
+# run at 0.6 on one backend and 0.4 on the other two.
 
 ##
 # Final config.
@@ -149,7 +143,6 @@ def get_go2_robot_cfg() -> EntityCfg:
     """
     return EntityCfg(
         init_state=INIT_STATE,
-        collisions=(FULL_COLLISION,),
         spec_fn=get_spec,
         articulation=GO2_ARTICULATION,
     )
