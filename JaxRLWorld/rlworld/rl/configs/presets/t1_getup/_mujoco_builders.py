@@ -7,10 +7,13 @@ reading it from ``Mjlab/`` instead is what let this backend end up on a
 different T1 than the other two (13 collision geoms against 26) without
 anything reporting it.
 
-``T1_FULL_COLLISION`` still comes from ``booster_t1.t1_constants`` and is
-still applied HERE only, so this backend's contact parameters differ from
-the other two even though the geometry now matches -- friction 0.6
-against 1.0, solref 0.01 against 0.02
+The contact parameters come from the asset too. They used to be applied
+here alone, as ``t1_constants.FULL_COLLISION`` over the compiled spec,
+which only mjlab can do, so Newton and Genesis ran the same robot at
+friction 1.0 and solref 0.02 where this backend ran 0.6 and 0.01 -- and
+at condim 1, which is frictionless. They are stated in the MJCF's
+collision class now, measured off the compiled model rather than copied
+from the source
 (``rlworld/scripts/diag/contact_param_parity_diag.py``).
 
 MuJoCo-specific reward functions (``rf.joint_pos_limits``,
@@ -26,9 +29,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict
 
 import mujoco
-from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
-    FULL_COLLISION as T1_FULL_COLLISION,
-)
 
 from rlworld.rl.actuators import ImplicitActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
@@ -160,7 +160,6 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         # bump, which is how the two T1 collision models diverged in the
         # first place.
         spec_fn=lambda: mujoco.MjSpec.from_file(r.mjcf_path),
-        collisions=(T1_FULL_COLLISION,),
     )
 
     # Solver / arena settings are pinned to mjlab_playground's getup

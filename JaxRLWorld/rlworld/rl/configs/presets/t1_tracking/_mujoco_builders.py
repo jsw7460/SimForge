@@ -10,9 +10,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict
 
 import mujoco
-from mjlab.asset_zoo.robots.booster_t1.t1_constants import (
-    FULL_COLLISION as T1_FULL_COLLISION,
-)
 
 from rlworld.rl.actuators import IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
@@ -151,7 +148,6 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         # Same asset as Newton and Genesis -- see the note in
         # ``t1_getup/_mujoco_builders.py``.
         spec_fn=lambda: mujoco.MjSpec.from_file(r.mjcf_path),
-        collisions=(T1_FULL_COLLISION,),
     )
 
     return MujocoSceneConfig(

@@ -39,6 +39,14 @@ is applied to the MuJoCo side here, so the columns mean the same thing.
 Comparing the raw triples would flag every low-condim geom of every
 robot and say nothing.
 
+**The ground's stored friction is SUPPOSED to differ on Genesis** and is
+not a finding. MuJoCo and Newton give the robot's collision geoms
+``priority`` 1, so at a robot-ground contact the robot's coefficient wins
+outright and the ground's value never enters. Genesis has no priority and
+combines a pair by ``max``, so the ground is anchored low (0.01) to let
+the robot's win there too (``fc201cb``). All three end up applying the
+robot's number; only the unused input differs.
+
 ``condim`` and ``priority`` have no Genesis equivalent -- it has no
 per-geom condim, and it resolves a pair's friction by ``max`` rather
 than by priority -- so those two columns are left blank for it rather
@@ -78,16 +86,19 @@ SHARED = ("friction_slide", "friction_spin", "friction_roll", "solref_t", "solre
 MUJOCO_ONLY = ("condim", "priority")
 
 
-def key_for(body: str, geom_type: str) -> tuple[str, str]:
-    name = leaf(body, set())
+def key_for(body: str, geom_type: str, vocab: set[str]) -> tuple[str, str]:
+    name = leaf(body, vocab)
     return (GROUND if geom_type == "plane" or is_ground(name) else name, geom_type)
 
 
-def read_mujoco(env, sim: str) -> dict[tuple[str, str], list[dict]]:
+def read_mujoco(env, sim: str, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]], set[str]]:
     import mujoco
 
     manager = env.scene_manager
     mj_model = manager.solver.mj_model if sim == "newton" else manager.mj_model
+
+    names = [mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, b) or f"<body {b}>" for b in range(mj_model.nbody)]
+    seen = {leaf(name, vocab) for name in names}
 
     out: dict[tuple[str, str], list[dict]] = {}
     for g in range(mj_model.ngeom):
@@ -99,7 +110,7 @@ def read_mujoco(env, sim: str) -> dict[tuple[str, str], list[dict]]:
         solref = np.asarray(mj_model.geom_solref[g], dtype=float)
         solimp = np.asarray(mj_model.geom_solimp[g], dtype=float)
         condim = int(mj_model.geom_condim[g])
-        out.setdefault(key_for(body, geom_type), []).append(
+        out.setdefault(key_for(body, geom_type, vocab), []).append(
             {
                 "friction_slide": round(float(friction[0]), 6),
                 # Effective, matching how Genesis parses them -- see the module docstring.
@@ -112,10 +123,10 @@ def read_mujoco(env, sim: str) -> dict[tuple[str, str], list[dict]]:
                 "priority": int(mj_model.geom_priority[g]),
             }
         )
-    return out
+    return out, seen
 
 
-def read_genesis(env) -> dict[tuple[str, str], list[dict]]:
+def read_genesis(env, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]], set[str]]:
     from genesis.utils.misc import qd_to_torch
 
     solver = env.scene_manager.scene.sim.rigid_solver
@@ -125,12 +136,15 @@ def read_genesis(env) -> dict[tuple[str, str], list[dict]]:
     roll = qd_to_torch(geoms.friction_rolling, copy=True).cpu().numpy().reshape(-1)
     sol = qd_to_torch(geoms.sol_params, copy=True).cpu().numpy().reshape(-1, 7)
 
+    seen = {leaf(link.name, vocab) for entity in solver.entities for link in entity.links}
+
     out: dict[tuple[str, str], list[dict]] = {}
     for entity in solver.entities:
         for link in entity.links:
             for geom in link.geoms:
                 i = int(geom.idx)
-                out.setdefault(key_for(link.name, GENESIS_TYPE.get(int(geom.type), "?")), []).append(
+                key = key_for(link.name, GENESIS_TYPE.get(int(geom.type), "?"), vocab)
+                out.setdefault(key, []).append(
                     {
                         "friction_slide": round(float(slide[i]), 6),
                         "friction_spin": round(float(spin[i]), 6),
@@ -140,17 +154,17 @@ def read_genesis(env) -> dict[tuple[str, str], list[dict]]:
                         "solimp": ",".join(f"{v:g}" for v in np.round(sol[i, 2:7], 6)),
                     }
                 )
-    return out
+    return out, seen
 
 
-def measure(robot: str, sim: str) -> dict[tuple[str, str], list[dict]]:
+def measure(robot: str, sim: str, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]], set[str]]:
     env = build(robot, sim)
     zero = torch.zeros(NUM_ENVS, env.act_manager.num_actions, device=env.device)
     for _ in range(SETTLE):
         env.step(zero)
-    values = read_genesis(env) if sim == "genesis" else read_mujoco(env, sim)
+    values, seen = read_genesis(env, vocab) if sim == "genesis" else read_mujoco(env, sim, vocab)
     del env
-    return values
+    return values, seen
 
 
 def cell(rows: list[dict] | None, field: str) -> str:
@@ -169,7 +183,17 @@ def run(robot: str, sims: list[str], dump: bool) -> list[str]:
     print(f"  {robot.upper()}")
     print("=" * 104)
 
-    read = {sim: measure(robot, sim) for sim in sims}
+    # The first backend measured supplies the body-name vocabulary and the
+    # rest match into it by longest suffix, exactly as the pair diag does.
+    # Without it Newton's flattened names (T1_worldbody_Trunk_Waist_...)
+    # key their own rows, every backend looks like it has geoms the others
+    # lack, and not one value gets compared with its counterpart.
+    read: dict[str, dict] = {}
+    vocab: set[str] = set()
+    for sim in sims:
+        read[sim], seen = measure(robot, sim, vocab)
+        if not vocab:
+            vocab = seen
     keys = sorted({key for values in read.values() for key in values})
 
     for field in SHARED + MUJOCO_ONLY:

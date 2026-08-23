@@ -62,7 +62,21 @@
         <geom type="mesh" group="2"/>
       </default>
       <default class="collision">
-        <geom group="3" rgba="0 1 0 0.5" type="capsule" contype="1" conaffinity="1"/>
+        <!--
+          condim, friction, solref and priority state here what mjlab used
+          to apply after compiling, through FULL_COLLISION in
+          t1_constants.py. Only mjlab can edit a compiled spec, so on that
+          route Newton and Genesis got none of it: they read the class
+          default condim="1" above, which is a FRICTIONLESS contact, while
+          mjlab ran condim 3 at friction 0.6. Values measured off mjlab's
+          compiled model, not copied from the source
+          (rlworld/scripts/diag/contact_param_parity_diag.py).
+
+          Spin and roll stay at MuJoCo's defaults because condim 3 ignores
+          them; the feet raise condim to 6 and set their own.
+        -->
+        <geom group="3" rgba="0 1 0 0.5" type="capsule" contype="1" conaffinity="1"
+          condim="3" friction="0.6 0.005 0.0001" solref="0.01 1" priority="1"/>
       </default>
     </default>
   </default>
@@ -191,13 +205,13 @@
                       diaginertia="0.00269786 0.002385 0.00218714"/>
                     <joint name="Left_Ankle_Roll" axis="1 0 0" range="-0.44 0.44"/>
                     <geom class="visual" mesh="left_foot_link"/>
-                    <geom name="left_foot1_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="left_foot1_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 -0.03 -0.01 0.09 -0.03 -0.01"/>
-                    <geom name="left_foot2_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="left_foot2_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 0.03 -0.01 0.09 0.03 -0.01"/>
-                    <geom name="left_foot3_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="left_foot3_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 -0.01 -0.01 0.105 -0.01 -0.01"/>
-                    <geom name="left_foot4_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="left_foot4_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 0.01 -0.01 0.105 0.01 -0.01"/>
                     <site name="left_foot"/>
                   </body>
@@ -239,13 +253,13 @@
                       diaginertia="0.00269786 0.002385 0.00218714"/>
                     <joint name="Right_Ankle_Roll" axis="1 0 0" range="-0.44 0.44"/>
                     <geom class="visual" mesh="right_foot_link"/>
-                    <geom name="right_foot1_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="right_foot1_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 -0.03 -0.01 0.09 -0.03 -0.01"/>
-                    <geom name="right_foot2_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="right_foot2_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 0.03 -0.01 0.09 0.03 -0.01"/>
-                    <geom name="right_foot3_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="right_foot3_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 -0.01 -0.01 0.105 -0.01 -0.01"/>
-                    <geom name="right_foot4_collision" type="capsule" size="0.02" class="collision"
+                    <geom name="right_foot4_collision" type="capsule" size="0.02" class="collision" condim="6" friction="1 0.005 0.0005"
                       fromto="-0.08 0.01 -0.01 0.105 0.01 -0.01"/>
                     <site name="right_foot"/>
                   </body>
