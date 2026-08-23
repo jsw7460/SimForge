@@ -410,11 +410,11 @@ class SceneManager(BaseManager):
                     "assignment below quietly create a field nothing reads."
                 )
             source = self._entity_mjcf_path(name)
-            if source is None or self._authored_masks_survive_import(source):
+            if source is None or self._authored_masks_survive_import(entity, source):
                 setattr(entity, self.LOCAL_COLLISION_MASK_FLAG, False)
 
     @staticmethod
-    def _authored_masks_survive_import(mjcf_path: str) -> bool:
+    def _authored_masks_survive_import(entity, mjcf_path: str) -> bool:
         """Are this asset's contype / conaffinity still the ones its author wrote?
 
         Only then may they be compared against another entity's.
@@ -441,6 +441,10 @@ class SceneManager(BaseManager):
         be read across entities; an asset with exclusions cannot, and
         keeps Genesis's own guard.
 
+        Unless Genesis has been taught to keep exclusions in a list of
+        their own, in which case it never rewrites and every asset
+        qualifies. That is what the attribute probe below asks.
+
         What that costs: an asset that uses BOTH exclusions AND masks
         meant to reach another entity gets the guard, and the second
         intent is silently dropped. No asset here does -- K1 is the only
@@ -451,6 +455,12 @@ class SceneManager(BaseManager):
         list of its own, as MuJoCo and Newton both have, and the masks
         never need to carry two meanings at once.
         """
+        # A Genesis that carries exclusions in their own list never rewrote
+        # the masks, whatever the file declares. Probed rather than assumed
+        # so this holds against a stock Genesis too: there the attribute is
+        # absent and the exclusion count decides, as it must.
+        if hasattr(entity, "_excluded_link_names"):
+            return True
         return not mujoco.MjSpec.from_file(mjcf_path).excludes
 
     def _entity_mjcf_path(self, name: str) -> str | None:
