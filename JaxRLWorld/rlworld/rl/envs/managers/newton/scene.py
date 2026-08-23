@@ -41,6 +41,7 @@ from rlworld.rl.envs.managers.registry import ManagerRegistry
 from rlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
 from rlworld.rl.utils import string as string_utils
 from rlworld.rl.utils.quat_utils import wxyz_to_xyzw_tuple
+from rlworld.rl.utils.verbosity import build_summary_enabled
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import World
@@ -318,6 +319,74 @@ def _state_assign_full(
             d = getattr(ns_dst, attr, None)
             if isinstance(s, wp.array) and isinstance(d, wp.array):
                 d.assign(s)
+
+
+MUJOCO_DEFAULT_CONTYPE = 1
+MUJOCO_DEFAULT_CONAFFINITY = 1
+"""What a geom with no authored mask collides with: everything, bit 1.
+
+MuJoCo's own default, and measured to be what mjlab's ground carries. A
+shape Newton built itself -- the terrain plane -- has no preserved mask,
+and treating it as anything else would invent a rule no asset states.
+"""
+
+
+def _forbidden_pairs(builder, shapes) -> list[tuple[int, int]]:
+    """Pairs among ``shapes`` that the MJCF's masks say must never touch.
+
+    MuJoCo's rule verbatim: a pair may touch when
+    ``(contype_a & conaffinity_b) | (contype_b & conaffinity_a)`` is
+    non-zero. Everything else is forbidden, and this returns those.
+
+    Newton preserves each shape's authored ``contype`` / ``conaffinity``
+    but does not always USE them: reusing an MJCF's masks requires every
+    colliding shape to have come from the same ``add_mjcf`` call, and
+    replication stamps a fresh ``collision_mask_domain`` per world while
+    the terrain has none at all, so the condition never holds for us.
+    Newton then compiles fresh masks from its own allowed-pair set, which
+    has no way to know what the MJCF meant -- and K1's foot shell, masked
+    4/4 against a 1/1 ground, lands on the ground.
+
+    So state the forbidden pairs in the one language Newton always
+    honours. ``shape_collision_filter_pairs`` is Newton's own mechanism
+    and is respected whichever branch the mask handling takes.
+
+    Reading the masks in ONE vocabulary, ignoring the domain, is the same
+    bet the Genesis manager makes and the same one mjlab has always made:
+    within a scene, a non-default bit means the same thing in every asset.
+    """
+    import numpy as np
+    from newton._src.solvers.mujoco.collision_masks import MUJOCO_COLLISION_MASK_UNSET
+
+    attrs = builder.custom_attributes
+    contype_attr = attrs.get("mujoco:contype")
+    conaffinity_attr = attrs.get("mujoco:conaffinity")
+    if contype_attr is None or conaffinity_attr is None:
+        raise RuntimeError(
+            "Newton kept no 'mujoco:contype' / 'mujoco:conaffinity' on this "
+            "builder, so the MJCF's collision masks cannot be honoured. Either "
+            "SolverMuJoCo.register_custom_attributes was not called before the "
+            "import, or Newton renamed the attributes."
+        )
+    contype_values = contype_attr.values or {}
+    conaffinity_values = conaffinity_attr.values or {}
+
+    def mask(shape: int) -> tuple[int, int]:
+        a = contype_values.get(shape, MUJOCO_COLLISION_MASK_UNSET)
+        b = conaffinity_values.get(shape, MUJOCO_COLLISION_MASK_UNSET)
+        if a == MUJOCO_COLLISION_MASK_UNSET or b == MUJOCO_COLLISION_MASK_UNSET:
+            return MUJOCO_DEFAULT_CONTYPE, MUJOCO_DEFAULT_CONAFFINITY
+        return int(a) & 0xFFFFFFFF, int(b) & 0xFFFFFFFF
+
+    shapes = list(shapes)
+    contype = np.array([mask(s)[0] for s in shapes], dtype=np.int64)
+    conaffinity = np.array([mask(s)[1] for s in shapes], dtype=np.int64)
+    index = np.array(shapes, dtype=np.int64)
+
+    row, col = np.triu_indices(len(shapes), k=1)
+    allowed = (contype[row] & conaffinity[col]) | (contype[col] & conaffinity[row])
+    blocked = allowed == 0
+    return list(zip(index[row][blocked].tolist(), index[col][blocked].tolist()))
 
 
 @dataclass
@@ -986,6 +1055,50 @@ class NewtonSceneManager(BaseManager):
                 return i
         return None
 
+    def _honour_mjcf_masks(self, builder, what: str, ground_only: bool = False) -> None:
+        """Register the pairs the assets' collision masks forbid.
+
+        Only shapes that collide at all are considered: a shape without the
+        ``COLLIDE_SHAPES`` flag takes no part in any pair, and including
+        them would register a filter for every combination of geoms that
+        were never going to touch.
+
+        ``ground_only`` restricts the pass to pairs involving a world-level
+        shape. The full pass is quadratic and belongs on the single-world
+        template, where the shape count is small; the ground pass runs
+        against every replicated shape and has to stay linear.
+        """
+        from newton import ShapeFlags
+
+        flags = builder.shape_flags
+        colliding = [i for i in range(len(flags)) if int(flags[i]) & int(ShapeFlags.COLLIDE_SHAPES)]
+        if len(colliding) < 2:
+            return
+
+        if ground_only:
+            ground = [
+                i
+                for i in colliding
+                if any(hint in builder.shape_label[i].lower() for hint in ("ground", "terrain", "plane"))
+            ]
+            if not ground:
+                return
+            pairs = []
+            for g in ground:
+                pairs += _forbidden_pairs(builder, [g, *(s for s in colliding if s != g)])
+            pairs = [pair for pair in pairs if pair[0] in ground or pair[1] in ground]
+        else:
+            pairs = _forbidden_pairs(builder, colliding)
+
+        if not pairs:
+            return
+        builder.shape_collision_filter_pairs.extend(pairs)
+        if build_summary_enabled():
+            print(
+                f"[newton] collision masks: {len(pairs)} forbidden pairs "
+                f"({what}, {len(colliding)} colliding shapes)"
+            )
+
     def build_scene(self) -> None:
         """Build the complete scene with all entities replicated."""
         if not self._entity_builders:
@@ -1032,7 +1145,18 @@ class NewtonSceneManager(BaseManager):
             world_template.add_builder(object_builder, label_prefix=object_name)
             self.rigid_objects[object_name]["config"].body_label_prefix = object_name
 
+        # Before replication: pairs registered on the template are copied
+        # with it, so one pass over a single world's shapes covers every
+        # world. Robot-against-prop lives here -- a gripper closing on a
+        # tool is that pair -- and the ground does not, because it is added
+        # once to the scene rather than per world.
+        self._honour_mjcf_masks(world_template, "one world")
+
         scene_builder.replicate(world_template, self.config.num_worlds)
+
+        # After replication: the ground exists only on the scene builder, so
+        # its pairs have to be stated against the replicated shape indices.
+        self._honour_mjcf_masks(scene_builder, "against the ground", ground_only=True)
 
         # Finalize model
         self.model = scene_builder.finalize()
