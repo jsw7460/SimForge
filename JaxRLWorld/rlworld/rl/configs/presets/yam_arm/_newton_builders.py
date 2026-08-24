@@ -74,6 +74,18 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
         robot_cfg=r,
+        # Detect contact where the other two backends do. Newton's builder
+        # defaults every shape to a 0.1 m gap, and the broad phase expands
+        # an AABB by margin + gap on BOTH sides, so anything within 0.2 m
+        # arrives as a contact row that carries no force and holds an
+        # nconmax slot. The MJCF declares no gap and mjlab reads 0 from the
+        # same file. Measured on this bench at rest: 16 rows against
+        # Newton's 260, every one of the extra between 79 and 199.99 mm.
+        #
+        # Set here rather than globally: every other preset's nconmax was
+        # measured against the 0.1, and re-sizing them is not this task's
+        # to do.
+        rigid_gap=0.0,
         solver_cfg=SolverMuJoCoCfg(
             impratio=10.0,
             cone="pyramidal",
@@ -82,8 +94,15 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             ccd_iterations=50,
             # The gripper's many small pad geoms against a workpiece
             # overflow a tight budget, and an overflow silently DROPS
-            # contacts rather than erroring.
-            nconmax=400,
+            # contacts rather than erroring, so this is sized off a
+            # measurement with room on top, never guessed downward.
+            #
+            # Measured with rigid_gap=0.0 on the bench scene
+            # (settling, a scripted reach, and random actions): worst 65
+            # rows per world on mjlab, 51 on Newton. 300 is 4.6x that.
+            # It was 400 against a peak of 315, which was mostly the
+            # phantom rows the 0.1 m gap produced.
+            nconmax=300,
         ),
         entities={
             "robot": NewtonEntityCfg(

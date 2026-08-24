@@ -125,6 +125,13 @@ class NewtonSceneConfig(BaseConfig):
     # heightfield contacts aren't silently dropped (see the Newton scene
     # manager and the go2 rough preset).
     collision_max_triangle_pairs: int | None = None
+    # Contact-detection gap, in metres, applied to every shape. ``None``
+    # keeps Newton's ``ModelBuilder.rigid_gap`` default of 0.1, which is
+    # what every preset has always run with. The MJCF files declare no
+    # gap and mjlab reads 0 from the same file, so a scene that wants the
+    # three backends to detect contact at the same distance sets 0.0 --
+    # see the note in the Newton scene manager for what the 0.1 costs.
+    rigid_gap: float | None = None
 
 
 @dataclass

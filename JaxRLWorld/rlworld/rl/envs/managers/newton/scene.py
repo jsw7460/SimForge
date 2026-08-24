@@ -494,6 +494,28 @@ class NewtonSceneManagerConfig:
     # terrain).
     collision_max_triangle_pairs: int | None = None
 
+    rigid_gap: float | None = None
+    """Contact-detection gap in metres, written onto every shape.
+
+    ``None`` leaves Newton's ``ModelBuilder.rigid_gap`` default of 0.1
+    alone, which is what every preset has run with and what their
+    ``nconmax`` budgets were measured against. Not changed globally for
+    that reason.
+
+    What the 0.1 does: the MJCF declares no gap, so the importer leaves
+    ``ShapeConfig.gap`` at ``None`` and the builder default wins
+    (``newton/_src/sim/builder.py``). The broad phase then expands each
+    AABB by ``margin + gap`` on BOTH sides of a pair, so anything within
+    0.2 m is enumerated and reaches the narrow phase as a contact row.
+    Those rows carry zero force and occupy an ``nconmax`` slot each.
+    Measured on the tong bench at rest: mjlab 16 rows against Newton's
+    260, and every one of the 244 extra sat between 79 and 199.99 mm.
+
+    mjlab reads 0 from the same file. A scene that wants the two to
+    detect contact at the same distance sets this to 0.0 and can then
+    size ``nconmax`` to the contacts that actually exist.
+    """
+
 
 class NewtonSceneManager(BaseManager):
     """Manages Newton scene creation and simulation.
@@ -729,6 +751,7 @@ class NewtonSceneManager(BaseManager):
             raise ValueError(f"Entity '{name}' already registered")
 
         builder = newton.ModelBuilder()
+        self._apply_rigid_gap(builder)
         newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
 
         if cfg.usd_path:
@@ -1088,6 +1111,17 @@ class NewtonSceneManager(BaseManager):
                 return i
         return None
 
+    def _apply_rigid_gap(self, builder) -> None:
+        """Set the contact-detection gap, if this scene asked for one.
+
+        Every builder that receives shapes needs it: the gap is read when
+        a shape is added (``shape_gap.append(cfg.gap if cfg.gap is not
+        None else self.rigid_gap)``), and ``add_builder`` only merges
+        lists that were already fixed.
+        """
+        if self.config.rigid_gap is not None:
+            builder.rigid_gap = self.config.rigid_gap
+
     def _honour_mjcf_masks(self, builder, what: str, ground_only: bool = False) -> None:
         """Register the pairs the assets' collision masks forbid.
 
@@ -1155,6 +1189,7 @@ class NewtonSceneManager(BaseManager):
 
         # Create scene builder and replicate entities
         scene_builder = newton.ModelBuilder()
+        self._apply_rigid_gap(scene_builder)
 
         # When the scene has more than one (non-ground) robot, namespace each
         # robot's labels with its entities={...} dict-key name so that
@@ -1169,6 +1204,7 @@ class NewtonSceneManager(BaseManager):
         # globally, via the TerrainImporter. Not an entity, so the merge
         # loop below sees only robots.
         terrain_builder = newton.ModelBuilder()
+        self._apply_rigid_gap(terrain_builder)
         newton.solvers.SolverMuJoCo.register_custom_attributes(terrain_builder)
         self.terrain.import_into_builder(terrain_builder)
         scene_builder.add_builder(terrain_builder)
@@ -1184,6 +1220,7 @@ class NewtonSceneManager(BaseManager):
         # by exact name); each rigid object is name-prefixed so its own
         # ArticulationView (pattern ``{name}*``) resolves to only its bodies.
         world_template = newton.ModelBuilder()
+        self._apply_rigid_gap(world_template)
         newton.solvers.SolverMuJoCo.register_custom_attributes(world_template)
         for entity_name, entity_builder in self._entity_builders.items():
             label_prefix = entity_name if n_robot_entities > 1 else None

@@ -40,6 +40,11 @@ _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("rlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
     "g1_tracking": ("rlworld.rl.configs.presets.g1_tracking.base", "G1TrackingConfig"),
     "t1_tracking": ("rlworld.rl.configs.presets.t1_tracking.base", "T1TrackingConfig"),
+    # The arm, because it is the preset that sets a non-default
+    # ``rigid_gap`` and so the one where a contact-detection distance
+    # could move a force. Everything the tong task inherits comes through
+    # here.
+    "yam_lift": ("rlworld.rl.configs.presets.yam_lift.base", "YamLiftConfig"),
 }
 
 # Presets whose config class differs per backend rather than taking
