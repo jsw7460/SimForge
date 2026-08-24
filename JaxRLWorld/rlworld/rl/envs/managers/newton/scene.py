@@ -987,8 +987,8 @@ class NewtonSceneManager(BaseManager):
         # ``scripts/diag/newton_geom_priority_parse_diag``: every authored
         # priority survives, through a ``<default>`` class and a per-geom
         # override alike, with visuals parsed and without.
-        mesh_approx = getattr(cfg, "mesh_approximation", "bounding_box")
-        builder.approximate_meshes(mesh_approx)
+        if cfg.mesh_approximation is not None:
+            builder.approximate_meshes(cfg.mesh_approximation)
 
         sites = getattr(cfg, "sites", None)
         if sites:
@@ -1010,9 +1010,8 @@ class NewtonSceneManager(BaseManager):
         )
 
         # Mesh approximation
-        mesh_approx = getattr(cfg, "mesh_approximation", "convex_hull")
-        if mesh_approx is not None:
-            builder.approximate_meshes(mesh_approx)
+        if cfg.mesh_approximation is not None:
+            builder.approximate_meshes(cfg.mesh_approximation)
 
         # Apply gains from articulation actuators. Bare patterns only —
         # ``apply_joint_params_by_pattern`` canonicalises candidate

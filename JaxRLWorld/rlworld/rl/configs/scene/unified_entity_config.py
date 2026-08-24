@@ -118,6 +118,20 @@ class EntityCfg:
     collapse_fixed_joints: bool = False
     """Merge bodies connected by fixed joints."""
 
+    mesh_approximation: str | None = "convex_hull"
+    """How Newton simplifies a mesh used as a collision geom.
+
+    On the shared base for the same reason ``convexify`` is: a prop is
+    asked this as much as a robot, and it was the Newton manager that
+    used to answer for anything that was not a ``NewtonEntityCfg`` --
+    with ``"bounding_box"`` on the MJCF and URDF paths and
+    ``"convex_hull"`` on the USD one, so the same prop's collision
+    shape depended on which file it arrived in. One default, declared
+    once, is the point.
+
+    ``None`` leaves the meshes exactly as authored.
+    """
+
     convexify: bool = False
     """Convex-decompose collision meshes -- and, when False, MERGE them.
 
@@ -177,9 +191,6 @@ class NewtonEntityCfg(EntityCfg):
 
     contact_shapes: dict[str, Any] | None = None
     """Contact shape overrides."""
-
-    mesh_approximation: str = "convex_hull"
-    """Mesh simplification method for collision geometry."""
 
     ignore_inertial_definitions: bool = False
     """Ignore inertial properties from URDF."""
