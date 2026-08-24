@@ -37,7 +37,7 @@ from rlworld.rl.configs.scene.unified_entity_config import (
     GenesisEntityCfg,
     InitialStateCfg,
 )
-from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg, SensorConfig
+from rlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from rlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from rlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -129,13 +129,18 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
                 visualize_contact=False,
             ),
         },
-        sensors=[
-            SensorConfig(
-                entity_name="robot",
-                link_name=r.base_link_name,
-                sensor_class=gs.sensors.IMU,
-            ),
-        ],
+        # No IMU. Nothing reads one: the observation functions exist
+        # (``mdp/observations/genesis/proprioception.py``, imu /
+        # imu_lin_acc / imu_ang_vel) but no preset names them as a term,
+        # and neither Newton nor mjlab has a counterpart, so an obs set
+        # built on it could not cross the three anyway. Every preset
+        # takes base linear and angular velocity off the link instead.
+        #
+        # It was not free: the engine updated the sensor every substep
+        # for 2.3 ms per control step at 4096 envs, ~7% of a G1 step
+        # (measured in scripts/diag/g1_step_benchmark.py). Nothing the
+        # policy sees changes by removing it.
+        sensors=[],
         contact_sensors=[
             ContactSensorCfg(
                 name="self_collision",
