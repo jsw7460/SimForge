@@ -47,6 +47,11 @@ ROBOTS: dict[str, tuple[str, str]] = {
     "go2": ("rlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
     "k1": ("rlworld.rl.configs.presets.k1_joystick.base", "K1JoystickConfig"),
     "t1": ("rlworld.rl.configs.presets.t1_getup.base", "T1GetupConfig"),
+    # The arm presets, because they are where a scene has PROPS in it. A
+    # robot-and-ground scene exercises one cross-entity pair; a bench, a
+    # cube and a tool exercise the ones a manipulation policy lives on.
+    "yam_lift": ("rlworld.rl.configs.presets.yam_lift.base", "YamLiftConfig"),
+    "yam_dual": ("rlworld.rl.configs.presets.yam_dual.base", "YamDualArmConfig"),
 }
 SIMS = ("mujoco", "newton", "genesis")
 

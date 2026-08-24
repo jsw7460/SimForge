@@ -110,6 +110,26 @@ SHARED = (
 )
 MUJOCO_ONLY = ("condim", "priority")
 
+# Which backends a field can be compared across. A backend left out does
+# hold a value, and it is simply not the same quantity.
+#
+#   condim / priority   Genesis has no per-geom equivalent at all: it
+#                       resolves a pair by max rather than by priority.
+#   contype/conaffinity Newton REMAPS on import and keeps the authored
+#                       pair in `mujoco:contype` custom attributes, so its
+#                       stored numbers are its own bookkeeping. What the
+#                       MJCF actually forbids reaches the solver through
+#                       `shape_collision_filter_pairs`, which the scene
+#                       manager fills from the preserved originals. The
+#                       remapped values are correct AND unreadable here;
+#                       comparing them reports the whole robot.
+SPEAKS = {
+    "contype": ("mujoco", "genesis"),
+    "conaffinity": ("mujoco", "genesis"),
+    "condim": ("mujoco", "newton"),
+    "priority": ("mujoco", "newton"),
+}
+
 
 def key_for(body: str, geom_type: str, vocab: set[str]) -> tuple[str, str]:
     name = leaf(body, vocab)
@@ -263,8 +283,9 @@ def run(robot: str, sims: list[str], dump: bool) -> list[str]:
     keys = sorted({key for values in read.values() for key in values})
 
     for field in SHARED + MUJOCO_ONLY:
-        speaks = [s for s in sims if s != "genesis" or field in SHARED]
-        note = "" if field in SHARED else "   (no genesis equivalent)"
+        allowed = SPEAKS.get(field)
+        speaks = [s for s in sims if allowed is None or s in allowed]
+        note = "" if allowed is None else f"   (comparable on {', '.join(allowed)} only)"
         print(f"\n    {field}{note}")
         print(f"      {'body / type':<46}" + "".join(f"{s:>16}" for s in speaks))
         for key in keys:
