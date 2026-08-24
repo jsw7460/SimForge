@@ -41,6 +41,7 @@ import jax.numpy as jnp
 import torch
 
 from rlworld.rl.algorithms.base import ActInput
+from rlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 from rlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from rlworld.rl.configs.presets.k1_joystick.base import K1JoystickConfig
 from rlworld.rl.configs.presets.k1_joystick.g1_recipe import K1G1RecipeConfig
@@ -56,6 +57,12 @@ _PRESETS = {
     # k1_joystick; the policy, reward and DR cadence differ.
     "k1_g1_recipe": K1G1RecipeConfig,
     "yam_lift": YamLiftConfig,
+    # The humanoid, because it is where the backends disagree most: at
+    # 4096 envs the Genesis ENGINE is 27% faster than mujoco's on the
+    # same scene (raw 15.5 ms against 21.3) and the full env is 1.7x
+    # SLOWER (32.3 against 19.0). All of that is above the simulator,
+    # and this is the script that says which operation holds it.
+    "g1_29dof": G1FlatConfig,
 }
 
 
@@ -351,10 +358,20 @@ def _probe_contact_sensors(env, timer: _Timer, repeats: int) -> None:
 
     link_a, _, _, row_valid = reader.raw()
     width = int(link_a.shape[1])
-    live = float(row_valid.sum(dim=1).float().mean())
+    per_env = row_valid.sum(dim=1)
+    live = float(per_env.float().mean())
+    hi = int(per_env.max())
+    p99 = int(torch.quantile(per_env.float(), 0.99).round())
     print(f"  contact-list width {width}, live contacts per env {live:.1f} on average")
+    # The MEAN is not what a compaction could shrink to. Every stage runs on
+    # one batched tensor, so its second dimension has to cover the WORST
+    # environment in the batch, not the typical one. A mean of 4 against a
+    # max of 30 leaves nothing to win; a mean of 4 against a max of 8 leaves
+    # most of the width.
+    print(f"  worst environment {hi}, 99th percentile {p99}")
     if live:
-        print(f"  the masks are {width / max(live, 1e-9):.0f}x wider than the contacts in them")
+        print(f"  the masks are {width / max(live, 1e-9):.0f}x wider than the MEAN contact count,")
+        print(f"  and {width / max(hi, 1):.1f}x wider than the worst environment needs")
 
     def shared_read():
         # The read is memoized on the cache generation, which the physics

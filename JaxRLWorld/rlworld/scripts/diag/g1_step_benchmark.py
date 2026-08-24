@@ -498,6 +498,22 @@ def raw_mujoco(num_envs: int, steps: int, warmup: int) -> dict:
 # ── jaxrlworld cells ────────────────────────────────────────────────
 
 
+def _rough() -> bool:
+    """Is this a rough-terrain run?
+
+    Read from the environment rather than passed down, because every cell
+    runs in its own subprocess and each mode builds its own config; a flag
+    threaded through would have to reach a dozen signatures to arrive at
+    the two places that construct one.
+
+    The flat decomposition is recorded and settled (61.3 -> 38.9 ms, the
+    physics itself the fastest of the three engines). Rough replaces the
+    ground plane with a heightfield, which is a different collision
+    workload entirely, and has never been taken apart the same way.
+    """
+    return os.environ.get("G1_BENCH_ROUGH") == "1"
+
+
 def wrapped(sim: str, num_envs: int, steps: int, warmup: int) -> dict:
     import torch
 
@@ -505,7 +521,7 @@ def wrapped(sim: str, num_envs: int, steps: int, warmup: int) -> dict:
     from rlworld.rl.evals.sim_initializers import get_initializer
 
     t_build0 = time.perf_counter()
-    cfgs = G1FlatConfig(sim_type=sim, num_envs=num_envs, seed=0).build()
+    cfgs = G1FlatConfig(sim_type=sim, num_envs=num_envs, seed=0, use_rough_terrain=_rough()).build()
     sim_key = {"genesis": "Genesis", "newton": "Newton", "mujoco": "MujocoEnv"}[sim]
     env = get_initializer(sim_key).init_environment(cfgs)
     env.reset()
@@ -669,7 +685,7 @@ def wrapped_bare_scene(num_envs: int, steps: int, warmup: int, strip_dr: bool = 
     from rlworld.rl.evals.sim_initializers import get_initializer
 
     t_build0 = time.perf_counter()
-    cfgs = G1FlatConfig(sim_type="genesis", num_envs=num_envs, seed=0).build()
+    cfgs = G1FlatConfig(sim_type="genesis", num_envs=num_envs, seed=0, use_rough_terrain=_rough()).build()
     if strip_dr:
         # Remove every DR event term (startup + reset + interval) while
         # keeping state-reset events intact, to isolate whether the
@@ -740,7 +756,7 @@ def wrapped_bisect(num_envs: int, steps: int, warmup: int) -> dict:
     from rlworld.rl.evals.sim_initializers import get_initializer
 
     t_build0 = time.perf_counter()
-    cfgs = G1FlatConfig(sim_type="genesis", num_envs=num_envs, seed=0).build()
+    cfgs = G1FlatConfig(sim_type="genesis", num_envs=num_envs, seed=0, use_rough_terrain=_rough()).build()
     env = get_initializer("Genesis").init_environment(cfgs)
     env.reset()
     actions = torch.zeros((num_envs, env.num_actions), device=env.device)
@@ -975,6 +991,7 @@ def run_parent(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--rough", action="store_true", help="heightfield terrain instead of a ground plane")
     ap.add_argument("--cell", default=None, help="internal: run one cell 'sim:mode:num_envs'")
     ap.add_argument("--result-json", default=None, help="internal: child result path")
     ap.add_argument("--cells", default=None, help="comma-separated subset, e.g. 'genesis:raw:4096'")
@@ -983,6 +1000,10 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--out", default="g1_step_benchmark.txt")
     args = ap.parse_args()
+    # Set before any cell subprocess is spawned; env.copy() below carries
+    # it, and a --cell child re-reads it the same way.
+    if args.rough:
+        os.environ["G1_BENCH_ROUGH"] = "1"
 
     if args.cell is not None:
         sim, mode, n = args.cell.split(":")
