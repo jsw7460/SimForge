@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict
 
 import mujoco
-from mjlab.utils.spec_config import CollisionCfg
 
 from rlworld.rl.actuators import ImplicitActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
@@ -73,36 +72,23 @@ class YamSpecFn:
         return mujoco.MjSpec.from_file(str(Path(self.mjcf_path).resolve()))
 
 
-_ALL_COLLISION = ".*_collision"
-
-FULL_COLLISION = CollisionCfg(
-    geom_names_expr=(_ALL_COLLISION,),
-    # Every link collides, which is what the other two backends do with the
-    # same model. A gripper-only policy is cheaper, but it makes this
-    # backend the only one where the arm can sweep through its own bench —
-    # and a workspace where the table is solid for two simulators and not
-    # for the third is worse than the saved contact pairs.
-    contype=1,
-    conaffinity=1,
-    # Uniform, and matching what the model compiles to, because this config
-    # is the only place any of it was ever set. The six spheres per finger
-    # used to be singled out here as the surfaces that actually hold a
-    # workpiece -- condim 6, friction 1.0, priority 1, a stiffer solref --
-    # with every other collision geom dropped to 0.6. Nothing carried that
-    # to Genesis or Newton, so the three did not hold a tool the same way,
-    # and only this backend was the odd one out.
-    #
-    # Measured on the spring tong: the pad's flat faces are the surfaces a
-    # gripper actually presses with, and they were among the geoms set to
-    # 0.6, so a pad-against-tool contact resolved to mu 0.9 here against
-    # 1.0 on the other two. The 1.0 went to the six spheres, which are
-    # 0.6 mm across. A grip is held by the faces.
-    #
-    # Levelled up rather than down: the backends WITHOUT this config are
-    # the ones that pick the tool up.
-    condim=3,
-    priority=0,
-)
+# The arm's contact parameters used to be set HERE, as a CollisionCfg over
+# the compiled spec, which only mjlab can do -- so Newton and Genesis never
+# received them. b803250 levelled the values up until this config only
+# restated what the model already compiles to, and the parameter sweep
+# confirms it: friction, solref, solimp, condim and priority now read the
+# same on all three for every geom
+# (rlworld/scripts/diag/contact_param_parity_diag.py).
+#
+# What was still left is why it is gone. CollisionCfg matches geoms by NAME
+# and zeroes contype / conaffinity on everything it does not match, and one
+# geom in the arm has no name at all: the wrist camera's collision box
+# (assets/i2rt_yam/xmls/yam.xml, the only unnamed one of 27). An expression
+# cannot match a nameless geom, so mjlab alone built the arm without its
+# camera housing -- 40 collidable geoms against 41 -- and the camera is a
+# real object that sticks out of the wrist, which the other two backends
+# collide. Do not reintroduce a name-keyed collision config here; state
+# what you mean in the asset, where every backend reads it.
 
 
 def build_visualization(cfg: YamArmConfig) -> VisualizationConfig:
@@ -152,7 +138,6 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         # mjlab builds articulations from a spec function, not a path.
         spec_fn=YamSpecFn(mjcf_path=r.mjcf_path),
         mjcf_path=r.mjcf_path,
-        collisions=(FULL_COLLISION,),
     )
 
     return MujocoSceneConfig(
