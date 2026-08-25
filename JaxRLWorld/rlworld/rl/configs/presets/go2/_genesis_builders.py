@@ -186,6 +186,12 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             dt=sim_dt,
             iterations=10,
             ls_iterations=20,
+            # implicitfast is the MuJoCo-consistent integrator. The
+            # Genesis default (approximate_implicitfast) folds joint
+            # damping into the mass matrix before the constraint solve;
+            # the extra effective damping showed up as a systematic
+            # dof_vel offset versus the mjlab/newton cells.
+            integrator=gs.integrator.implicitfast,
             constraint_solver=gs.constraint_solver.Newton,
             constraint_timeconst=0.02,
             max_collision_pairs=20,

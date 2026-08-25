@@ -169,6 +169,19 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         dt=timing["dt"],
         substeps=timing["substeps"],
         gravity=(0.0, 0.0, -9.81),
+        # Detect contact where the other two backends do. Newton's builder
+        # gives every shape a 0.1 m gap by default and the MJCF declares
+        # none, so the broad phase expanded each AABB by margin + gap on
+        # both sides and enumerated pairs up to 0.2 m apart as contact
+        # rows. mjlab reads 0 from the same file, and Genesis has no such
+        # parameter at all.
+        #
+        # It reached the reward here, not just the budget: feet_slip on
+        # Newton spiked to 2-5x the other two on some steps, with a
+        # standard deviation LARGER than its mean -- a handful of
+        # environments each time. A foot 0.2 m off the ground is moving
+        # fast, and counting it as contact prices that speed as slip.
+        rigid_gap=0.0,
         solver_type="mujoco",
         solver_cfg=SolverMuJoCoCfg(
             impratio=1.0,
@@ -192,6 +205,14 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
             # broadphase culls those for free.
             nconmax=300,
             use_mujoco_contacts=True,
+            # Same CCD pipeline as the mjlab cell: the mujoco scene
+            # manager disables nativeccd on every mjlab build (and
+            # mjwarp keeps multiccd on), while Newton's defaults are
+            # the mirror image — multiccd off, nativeccd on — so the
+            # convex-convex (self-collision) pairs were narrowphased
+            # by different algorithms on the two mjwarp backends.
+            enable_multiccd=True,
+            disableflags=("nativeccd",),
         ),
         terrain_cfg=cfg.make_terrain_cfg(),
         entities={
