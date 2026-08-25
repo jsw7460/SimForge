@@ -130,7 +130,6 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> SceneConfig:
             # between a grasp and a slow drop, and it appears as a task
             # that trains on two backends and not the third.
             impratio=10.0,
-            integrator=gs.integrator.implicitfast,
             tolerance=1e-5,
         ),
         rigid_objects=build_rigid_objects(cfg),
