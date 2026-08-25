@@ -144,9 +144,15 @@ def key(body: str, geom_type: str, vocab: set[str]) -> str:
 
 
 def build(robot: str, sim: str):
+    """Build a preset by roster name, or by ``module:Class`` written out.
+
+    The second form is what lets a preset this file cannot name be
+    measured all the same -- a task living in a private overlay, or one
+    written this afternoon. The roster stays a convenience, not a gate.
+    """
     from rlworld.rl.runners import BaseRunner
 
-    mod_path, cls_name = ROBOTS[robot]
+    mod_path, cls_name = ROBOTS[robot] if robot in ROBOTS else robot.rsplit(":", 1)
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
     cfgs = cfg_cls(sim_type=sim, num_envs=NUM_ENVS).build()
     return BaseRunner._create_env_from_config(cfgs)
@@ -385,7 +391,13 @@ def run(robot: str, sims: list[str], settle: int) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--robots", nargs="+", default=sorted(ROBOTS), choices=sorted(ROBOTS))
+    ap.add_argument(
+        "--robots",
+        nargs="+",
+        default=sorted(ROBOTS),
+        metavar="NAME|module:Class",
+        help=f"roster names {sorted(ROBOTS)}, or an explicit module:Class",
+    )
     ap.add_argument("--sims", nargs="+", default=list(SIMS), choices=list(SIMS))
     ap.add_argument("--settle", type=int, default=SETTLE, help="settling steps before reading")
     args = ap.parse_args()

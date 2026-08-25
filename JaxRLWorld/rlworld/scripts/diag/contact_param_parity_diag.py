@@ -327,7 +327,13 @@ def run(robot: str, sims: list[str], dump: bool) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--robots", nargs="+", default=sorted(ROBOTS), choices=sorted(ROBOTS))
+    ap.add_argument(
+        "--robots",
+        nargs="+",
+        default=sorted(ROBOTS),
+        metavar="NAME|module:Class",
+        help=f"roster names {sorted(ROBOTS)}, or an explicit module:Class",
+    )
     ap.add_argument("--sims", nargs="+", default=list(SIMS), choices=list(SIMS))
     ap.add_argument("--dump", action="store_true", help="print every raw parameter row")
     args = ap.parse_args()
