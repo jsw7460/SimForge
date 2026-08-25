@@ -66,7 +66,12 @@ def _build_env(preset: str, sim: str, num_envs: int):
 
     from rlworld.rl.runners import BaseRunner
 
-    if preset in _PER_SIM_PRESETS:
+    if ":" in preset:
+        # ``module.path:ClassName`` — any preset whose config class takes
+        # ``sim_type`` and ``num_envs``, including ones that live outside
+        # this package. The named table below stays for the shorthands.
+        mod_path, cls_name = preset.split(":", 1)
+    elif preset in _PER_SIM_PRESETS:
         mod_path, cls_name = _PER_SIM_PRESETS[preset][sim]
     else:
         mod_path, cls_name = _PRESETS[preset]
@@ -118,7 +123,13 @@ def main() -> int:
     import torch
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--preset", choices=sorted({**_PRESETS, **_PER_SIM_PRESETS}), default="g1_29dof")
+    ap.add_argument(
+        "--preset",
+        default="g1_29dof",
+        help="A shorthand from the table in this module, or "
+        "'module.path:ClassName' for any other preset config class. "
+        f"Shorthands: {', '.join(sorted({**_PRESETS, **_PER_SIM_PRESETS}))}",
+    )
     ap.add_argument("--sim", choices=[*_SIMS, "all"], default="all")
     ap.add_argument("--num-envs", type=int, default=8)
     ap.add_argument("--steps", type=int, default=10)
