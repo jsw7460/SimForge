@@ -785,14 +785,10 @@ class ActionManagerBase(BaseManager):
         if name not in self._pending_target_entities:
             self._pending_target_entities.append(name)
 
-    def _apply_joint_target_full(self, target: torch.Tensor, entity_name: str | None = None) -> None:
-        """Run actuator compute + sim force apply on one entity's
-        joint position target. Internal helper used by the legacy path
-        and by :meth:`_apply_joint_target_via_actuators`.
-        """
-        name = entity_name or self.env.robot_entity_name
-        joint_pos = self._get_joint_pos(name)
-        joint_vel = self._get_joint_vel(name)
+    def _compute_actuator_torques(self, target: torch.Tensor, entity_name: str) -> torch.Tensor:
+        """Actuator-model torques for one entity's joint position target."""
+        joint_pos = self._get_joint_pos(entity_name)
+        joint_vel = self._get_joint_vel(entity_name)
         full_torques = torch.zeros_like(target)
         for actuator, joint_idx in self._actuators:
             target_subset = target[:, joint_idx]
@@ -800,6 +796,15 @@ class ActionManagerBase(BaseManager):
             vel_subset = joint_vel[:, joint_idx]
             torques = actuator.compute(target_subset, pos_subset, vel_subset)
             full_torques[:, joint_idx] = torques
+        return full_torques
+
+    def _apply_joint_target_full(self, target: torch.Tensor, entity_name: str | None = None) -> None:
+        """Run actuator compute + sim force apply on one entity's
+        joint position target. Internal helper used by the legacy path
+        and by :meth:`_apply_joint_target_via_actuators`.
+        """
+        name = entity_name or self.env.robot_entity_name
+        full_torques = self._compute_actuator_torques(target, name)
         # ``applied_torque`` is the policy-facing torque of the driven
         # robot, shaped to its action dim; a second entity's torque must
         # not overwrite it.
@@ -847,10 +852,24 @@ class ActionManagerBase(BaseManager):
         """
         for name in self._pending_target_entities:
             target = self._entity_joint_target[name]
-            if self._has_explicit_actuators:
-                self._apply_joint_target_full(target, name)
-            else:
+            if not self._has_explicit_actuators:
                 self._apply_position(target, name)
+                continue
+            torques = self._compute_actuator_torques(target, name)
+            # An entity can carry position terms AND an effort term on
+            # disjoint joints (an arm on wheels: PD arms, velocity-servo
+            # wheels). Each backend's ``_apply_force`` ASSIGNS over the
+            # entity's whole actuated joint set, so applying the two
+            # halves as two calls makes the second silently zero the
+            # first; they have to leave in one summed write.
+            if name in self._pending_effort_entities:
+                effort = self._entity_joint_effort[name]
+                torques = torques + effort
+                effort.zero_()
+                self._pending_effort_entities.remove(name)
+            if name == self.env.robot_entity_name:
+                self._applied_torque = torques
+            self._apply_force(torques, name)
         self._pending_target_entities.clear()
 
         for name in self._pending_effort_entities:
