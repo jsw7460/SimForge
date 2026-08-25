@@ -61,6 +61,32 @@ def leaf(name: str) -> str:
     return name.split("/")[-1]
 
 
+def canonical_joint(raw: str, vocab: list[str]) -> str:
+    """Map a backend's joint label to the action-manager joint name.
+
+    Backends decorate the XML joint name differently (mjlab attaches
+    under an entity prefix, Newton keeps a body-path label, and either
+    may flatten separators), so cross-sim matching goes by suffix
+    against the canonical actuated-joint vocabulary instead of by a
+    separator convention.
+    """
+    hits = [n for n in vocab if raw == n or raw.endswith("_" + n) or raw.endswith("/" + n)]
+    if len(hits) == 1:
+        return hits[0]
+    return leaf(raw)
+
+
+def decode_disableflags(flags: int) -> str:
+    import mujoco
+
+    names = [
+        n.removeprefix("mjDSBL_").lower()
+        for n in dir(mujoco.mjtDisableBit)
+        if n.startswith("mjDSBL_") and flags & getattr(mujoco.mjtDisableBit, n).value
+    ]
+    return "+".join(sorted(names)) if names else "none"
+
+
 def read_solver(env, sim: str) -> dict[str, object]:
     """Comparable solver/timing facts, plus backend-only extras under ``x_``."""
     out: dict[str, object] = {
@@ -71,33 +97,45 @@ def read_solver(env, sim: str) -> dict[str, object]:
     if sim in ("mujoco", "newton"):
         m = env.scene_manager.mj_model if sim == "mujoco" else env.scene_manager.solver.mj_model
         out.update(
-            solver_dt=round(float(m.opt.timestep), 9),
             iterations=int(m.opt.iterations),
             ls_iterations=int(m.opt.ls_iterations),
             impratio=float(m.opt.impratio),
             cone=_MJ_CONE.get(int(m.opt.cone), str(m.opt.cone)),
             integrator=_MJ_INTEGRATOR.get(int(m.opt.integrator), str(m.opt.integrator)),
             gravity_z=round(float(m.opt.gravity[2]), 6),
-            x_disableflags=int(m.opt.disableflags),
+            disableflags=decode_disableflags(int(m.opt.disableflags)),
         )
+        if sim == "mujoco":
+            out["solver_dt"] = round(float(m.opt.timestep), 9)
+        else:
+            # Newton's SolverMuJoCo writes the per-call dt into the live
+            # warp model at every step (mjw_model.opt.timestep.fill_(dt));
+            # the CPU-side mj_model keeps a stale build-time value, so
+            # the integration dt IS the scene dt the manager passes.
+            out["solver_dt"] = out["physics_dt"]
+            out["x_mj_model_template_dt"] = round(float(m.opt.timestep), 9)
     else:
+        # Per-sim lazy import: genesis only loads in the process that
+        # actually builds a genesis env.
+        import genesis as gs
+
         options = env.scene_manager.scene.sim.rigid_solver._options
         out.update(
             solver_dt=round(float(options.dt), 9),
             iterations=int(options.iterations),
             ls_iterations=int(options.ls_iterations),
             impratio=float(options.impratio),
-            cone=str(options.friction_cone).split(".")[-1],
-            integrator=str(options.integrator).split(".")[-1],
+            cone=gs.friction_cone(int(options.friction_cone)).name,
+            integrator=gs.integrator(int(options.integrator)).name,
             gravity_z=round(float(env.scene_manager.scene.sim.gravity[2]), 6),
-            x_constraint_solver=str(options.constraint_solver).split(".")[-1],
+            x_constraint_solver=gs.constraint_solver(int(options.constraint_solver)).name,
             x_tolerance=float(options.tolerance),
         )
     return out
 
 
-def read_dofs(env, sim: str) -> dict[str, dict[str, float]]:
-    """Per-actuated-joint passive DOF parameters, keyed by joint leaf name."""
+def read_dofs(env, sim: str, vocab: list[str]) -> dict[str, dict[str, float]]:
+    """Per-actuated-joint passive DOF parameters, keyed by canonical joint name."""
     out: dict[str, dict[str, float]] = {}
     if sim in ("mujoco", "newton"):
         m = env.scene_manager.mj_model if sim == "mujoco" else env.scene_manager.solver.mj_model
@@ -105,7 +143,7 @@ def read_dofs(env, sim: str) -> dict[str, dict[str, float]]:
             if m.jnt_type[j] == 0:  # mjJNT_FREE
                 continue
             dof = int(m.jnt_dofadr[j])
-            out[leaf(m.joint(j).name)] = {
+            out[canonical_joint(m.joint(j).name, vocab)] = {
                 "damping": float(m.dof_damping[dof]),
                 "armature": float(m.dof_armature[dof]),
                 "frictionloss": float(m.dof_frictionloss[dof]),
@@ -122,7 +160,7 @@ def read_dofs(env, sim: str) -> dict[str, dict[str, float]]:
             if joint.n_dofs != 1:  # skip the free joint
                 continue
             dof = int(joint.dofs_idx_local[0])
-            out[leaf(joint.name)] = {
+            out[canonical_joint(joint.name, vocab)] = {
                 "damping": float(damping[dof]),
                 "armature": float(armature[dof]),
                 "frictionloss": float(frictionloss[dof]),
@@ -153,7 +191,8 @@ def read_pd(env) -> dict[str, dict[str, tuple[float, float]]]:
 
 def measure(robot: str, sim: str) -> tuple[dict, dict, dict]:
     env = build(robot, sim)
-    solver, dofs, pd = read_solver(env, sim), read_dofs(env, sim), read_pd(env)
+    vocab = list(env.act_manager._actuated_joint_names)
+    solver, dofs, pd = read_solver(env, sim), read_dofs(env, sim, vocab), read_pd(env)
     del env
     return solver, dofs, pd
 
