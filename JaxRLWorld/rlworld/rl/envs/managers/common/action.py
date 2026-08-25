@@ -341,6 +341,15 @@ class ActionManagerBase(BaseManager):
         joint_lower, joint_upper = indexing.joint_limits_lower, indexing.joint_limits_upper
         mid = (joint_upper + joint_lower) / 2.0
         soft_half = (joint_upper - joint_lower) / 2.0 * self.config.joint_limit_soft_factor
+        # A joint with no declared range (a wheel, a continuous hinge)
+        # has nothing to clamp to, and its limits arrive as either
+        # +-inf (midpoint inf - inf = NaN, which then poisons every
+        # position it clamps) or as a degenerate 0..0 depending on the
+        # backend's encoding. Both mean the same thing: an identity
+        # band, mid 0 and infinite half-width.
+        unlimited = ~(torch.isfinite(joint_lower) & torch.isfinite(joint_upper)) | (joint_upper <= joint_lower)
+        mid = torch.where(unlimited, torch.zeros_like(mid), mid)
+        soft_half = torch.where(unlimited, torch.full_like(soft_half, float("inf")), soft_half)
         if (soft_half <= 0).any():
             names = list(indexing.joint_names)
             bad = [f"{names[i]} (half={soft_half[i].item():.4f})" for i in range(len(soft_half)) if soft_half[i] <= 0]
