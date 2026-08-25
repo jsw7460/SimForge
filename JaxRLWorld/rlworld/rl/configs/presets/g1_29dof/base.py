@@ -106,7 +106,7 @@ class G1FlatConfig:
     robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
     # Environment / training settings (sim-agnostic)
-    num_envs: int = 8192
+    num_envs: int = 16_384
     episode_length_s: float = 20.0
     seed: int = 42
 
