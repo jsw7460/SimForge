@@ -50,6 +50,38 @@ def staged_position_reward(
     product gives a gradient that only leads somewhere by going through
     the object first.
     """
+    reaching, bringing = staged_position_parts(
+        env,
+        command_name=command_name,
+        object_cfg=object_cfg,
+        reaching_std=reaching_std,
+        bringing_std=bringing_std,
+        asset_cfg=asset_cfg,
+    )
+    return reaching * (1.0 + bringing)
+
+
+def staged_position_parts(
+    env: World,
+    command_name: str,
+    object_cfg: ResolvedEntity,
+    reaching_std: float,
+    bringing_std: float,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The two kernels :func:`staged_position_reward` combines.
+
+    Split out so a task can put its own condition on one half without
+    restating the other. A task whose object can be carried WRONGLY --
+    held by a part rather than grasped -- has to stop paying the bringing
+    half for that, and the reaching half must keep paying regardless: at
+    the moment the arm is still approaching, nothing is grasped yet, so a
+    condition applied to both halves would zero the only term that leads
+    the arm to the object at all.
+
+    Returns:
+        ``(reaching, bringing)``, each ``(num_envs,)`` in [0, 1].
+    """
     command = env.command_manager.get_term(command_name)
     ee_pos_w = _ee_pos_w(env, asset_cfg)
     obj_pos_w = entity_point_w(env, object_cfg)
@@ -60,7 +92,7 @@ def staged_position_reward(
     position_error = torch.sum(torch.square(command.target_pos - obj_pos_w), dim=-1)
     bringing = torch.exp(-position_error / bringing_std**2)
 
-    return reaching * (1.0 + bringing)
+    return reaching, bringing
 
 
 def bring_object_reward(
