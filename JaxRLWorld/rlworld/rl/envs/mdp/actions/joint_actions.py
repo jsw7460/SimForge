@@ -478,3 +478,79 @@ class JointEffortAction(JointAction):
         if self._effort_limit is not None:
             torques = torch.clamp(torques, min=-self._effort_limit, max=self._effort_limit)
         self._manager._apply_joint_effort_via_indices(torques, self._joint_ids, self._entity_name)
+
+
+# ── Velocity servo ──────────────────────────────────────────────────────
+
+
+@dataclass
+class JointVelocityActionCfg(JointActionCfg):
+    """Joint velocity action, closed as a servo inside the term.
+
+    The policy output for this term's joints is interpreted as a
+    **joint velocity target** (``processed = raw * scale + offset``,
+    so ``scale`` is the top speed a unit action commands [rad/s]), and
+    the term turns it into torque itself::
+
+        torque = kv * (target_velocity - joint_velocity)
+
+    applied through the same direct-torque path as
+    :class:`JointEffortAction`. Closing the loop here rather than in
+    each simulator is the point: every backend receives the identical
+    torque law, so a wheel servo cannot behave differently per backend
+    the way native velocity-actuator implementations do.
+
+    Built for wheels — the first actuation in this repo that tracks a
+    speed rather than a position — but generic to any velocity-servoed
+    joint.
+
+    .. important::
+        As with :class:`JointEffortActionCfg`, the driven joints must be
+        in the backend's direct-torque mode (no implicit PD on them), or
+        this torque lands on top of the simulator's own.
+
+    Attributes:
+        scale: Per-joint velocity scale [rad/s per unit action].
+        offset: Per-joint velocity offset [rad/s]. Defaults to 0.
+        kv: Per-joint servo gain [N·m·s/rad]. Required and positive —
+            a zero gain is a wheel nothing drives, which is a config
+            error rather than a choice.
+        effort_limit: Optional per-joint torque saturation [N·m], the
+            motor's stall torque. ``None`` leaves the servo unclamped.
+    """
+
+    kv: float | dict[str, float] = 0.0
+    effort_limit: float | dict[str, float] | None = None
+
+
+class JointVelocityAction(JointAction):
+    """Velocity-servo action term. See :class:`JointVelocityActionCfg`."""
+
+    __name__ = "JointVelocityAction"
+    _cfg: JointVelocityActionCfg
+
+    def __init__(
+        self,
+        cfg: JointVelocityActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        self._kv = self._resolve_float_field(cfg.kv, default=0.0)
+        if bool((self._kv <= 0.0).any()):
+            bad = [n for n, k in zip(self._joint_names_local, self._kv.tolist()) if k <= 0.0]
+            raise ValueError(
+                f"JointVelocityAction on {self._entity_name!r}: kv must be positive for every joint; "
+                f"got non-positive kv for {bad}."
+            )
+        if cfg.effort_limit is None:
+            self._effort_limit: torch.Tensor | None = None
+        else:
+            self._effort_limit = self._resolve_float_field(cfg.effort_limit, default=float("inf"))
+
+    def apply_actions(self) -> None:
+        joint_vel = self._manager._get_joint_vel(self._entity_name)[:, self._joint_ids]
+        torques = self._kv * (self._processed_actions - joint_vel)
+        if self._effort_limit is not None:
+            torques = torch.clamp(torques, min=-self._effort_limit, max=self._effort_limit)
+        self._manager._apply_joint_effort_via_indices(torques, self._joint_ids, self._entity_name)
