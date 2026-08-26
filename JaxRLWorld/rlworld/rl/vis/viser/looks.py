@@ -100,8 +100,13 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
         ground_texture="checker",
         ground_texture_tiles=25.0,
         ground_metalness=0.15,
-        ground_roughness=0.08,
+        ground_roughness=0.16,
+        # The studio HDRI feeds the floor reflections, but its softbox
+        # panels mirror as glaring white blobs on a near-mirror floor:
+        # dim the map and lift the floor roughness a touch so the
+        # panels spread into a soft sheen instead of hot spots.
         env_map="studio",
+        env_map_intensity=0.45,
         env_map_as_background=False,
         sky_background=True,
         sky_kind="gradient",
@@ -112,8 +117,8 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
         # ambient + hemisphere + the studio HDRI carry the lighting.
         sun_intensity=0.0,
         sky_sun_glow=False,
-        ambient_intensity=0.45,
-        hemisphere_intensity=0.45,
+        ambient_intensity=0.55,
+        hemisphere_intensity=0.5,
     ),
     # Keep the simulator's own per-link mesh colors / textures (the unitree
     # robots' black/grey parts, etc.) on the polished slate.
