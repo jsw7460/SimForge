@@ -131,10 +131,13 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
         robot_color=None,
         ground_texture="navy_grid",
         ground_texture_tiles=25.0,
-        ground_metalness=0.2,
+        # Dielectric gloss: metalness must stay 0 — a metallic material
+        # trades its diffuse color for reflections, and with the dark
+        # night HDRI feeding them the navy floor turned near-black.
+        ground_metalness=0.0,
         ground_roughness=0.14,
         env_map="night",
-        env_map_intensity=0.6,
+        env_map_intensity=0.8,
         env_map_as_background=False,
         sky_background=True,
         sky_kind="starfield",
