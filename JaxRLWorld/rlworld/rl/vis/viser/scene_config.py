@@ -48,8 +48,11 @@ class ViserSceneConfig:
     """When set, the ground is a tiled image (overrides ``ground_kind``).
     ``"default"`` → the bundled earthy ``ground_texture.png``; ``"marble"``
     (default) → the bundled dark veined ``marble_texture.png``; ``"concrete"``
-    → the bundled cool-gray ``concrete_texture.png``; a file path → use
-    that image; ``None`` → no texture, fall back to ``ground_kind`` + colors."""
+    → the bundled cool-gray ``concrete_texture.png``; ``"checker"`` → the
+    bundled light checkerboard (use this instead of
+    ``ground_kind="checkerboard"`` when the grid needs a glossy PBR
+    material); a file path → use that image; ``None`` → no texture, fall
+    back to ``ground_kind`` + colors."""
     ground_texture_tiles: float = 25.0
     """How many times the texture repeats across ``ground_size`` (50 m / 25 = 2 m tile)."""
 

@@ -27,6 +27,7 @@ from .scene_config import ViserSceneConfig
 _BUNDLED_GROUND_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "ground_texture.png")
 _BUNDLED_MARBLE_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "marble_texture.png")
 _BUNDLED_CONCRETE_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "concrete_texture.png")
+_BUNDLED_CHECKER_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "checker_texture.png")
 _BUNDLED_CONSTRUCTION_BACKDROP = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets", "construction_backdrop.png"
 )
@@ -34,6 +35,7 @@ _GROUND_TEXTURE_ALIASES = {
     "default": _BUNDLED_GROUND_TEXTURE,
     "marble": _BUNDLED_MARBLE_TEXTURE,
     "concrete": _BUNDLED_CONCRETE_TEXTURE,
+    "checker": _BUNDLED_CHECKER_TEXTURE,
 }
 _SKY_IMAGE_ALIASES = {"construction": _BUNDLED_CONSTRUCTION_BACKDROP}
 

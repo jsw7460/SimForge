@@ -86,20 +86,23 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
         hemisphere_ground_color=(150, 140, 120),
         sun_intensity=1.7,
     ),
-    # Glossy white ceramic on a light checkerboard ground + blue sky.  No
-    # HDRI so the colour palette stays clean.  The faint 0.5 m grid gives
-    # the eye a motion reference, and the saturated sky separates ground
-    # from background (a plain pale sky read as one white void).
+    # Glossy white ceramic on a glass-polished light checkerboard + blue
+    # sky.  The faint 1 m grid gives the eye a motion reference, the
+    # saturated sky separates ground from background, and the "checker"
+    # TEXTURE (not the face-colored checkerboard mesh) lets the ground
+    # carry a low-roughness PBR material so it reflects.  The studio
+    # HDRI feeds those reflections only — ``env_map_as_background=False``
+    # keeps the procedural sky as the visible backdrop.
     "ceramic_white": ViserSceneConfig(
         robot_color=(232, 234, 238),
         robot_metalness=0.0,
         robot_roughness=0.35,
-        ground_texture=None,
-        ground_kind="checkerboard",
-        ground_color=(238, 238, 240),
-        ground_color_alt=(214, 217, 222),
-        ground_roughness=0.4,
-        env_map=None,
+        ground_texture="checker",
+        ground_texture_tiles=25.0,
+        ground_metalness=0.15,
+        ground_roughness=0.08,
+        env_map="studio",
+        env_map_as_background=False,
         sky_background=True,
         sky_kind="gradient",
         sky_color=(120, 172, 230),

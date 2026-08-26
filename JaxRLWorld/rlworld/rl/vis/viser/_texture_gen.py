@@ -12,6 +12,10 @@ Currently bakes:
   (the default polished-glass ground — the veins read through the glass
   reflection so the floor doesn't look featureless).
 * ``assets/concrete_texture.png`` — tileable cool-gray concrete slab.
+* ``assets/checker_texture.png`` — tileable 2x2 light checkerboard; run
+  through the textured-ground path so the grid can carry a PBR
+  (glossy/reflective) material, which the face-colored checkerboard
+  mesh cannot.
 * ``assets/construction_backdrop.png`` — wide hazy construction-site
   panorama (sky + crane + buildings); used as a flat canvas backdrop.
 """
@@ -324,11 +328,27 @@ def generate_construction_backdrop(width: int = 1024, height: int = 512, seed: i
     return pil
 
 
+def generate_checker_texture(
+    size: int = 512,
+    color_a: tuple[int, int, int] = (238, 238, 240),
+    color_b: tuple[int, int, int] = (214, 217, 222),
+) -> Image.Image:
+    """Tileable 2x2 checkerboard (one tile = 2x2 cells, so tiling repeats
+    seamlessly).  Cell size in metres = ground_size / tiles / 2."""
+    img = Image.new("RGB", (size, size), color_a)
+    draw = ImageDraw.Draw(img)
+    half = size // 2
+    draw.rectangle((half, 0, size, half), fill=color_b)
+    draw.rectangle((0, half, half, size), fill=color_b)
+    return img
+
+
 _ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 _DEFAULT_PATH = os.path.join(_ASSETS_DIR, "ground_texture.png")
 _MARBLE_PATH = os.path.join(_ASSETS_DIR, "marble_texture.png")
 _CONCRETE_PATH = os.path.join(_ASSETS_DIR, "concrete_texture.png")
 _CONSTRUCTION_BACKDROP_PATH = os.path.join(_ASSETS_DIR, "construction_backdrop.png")
+_CHECKER_PATH = os.path.join(_ASSETS_DIR, "checker_texture.png")
 
 
 def default_texture_path() -> str:
@@ -351,6 +371,11 @@ def construction_backdrop_path() -> str:
     return _CONSTRUCTION_BACKDROP_PATH
 
 
+def checker_texture_path() -> str:
+    """Path to the bundled ``checker_texture.png`` (light 2x2 checkerboard)."""
+    return _CHECKER_PATH
+
+
 if __name__ == "__main__":
     os.makedirs(_ASSETS_DIR, exist_ok=True)
     generate_ground_texture().save(_DEFAULT_PATH)
@@ -361,3 +386,5 @@ if __name__ == "__main__":
     print(f"wrote {_CONCRETE_PATH}")
     generate_construction_backdrop().save(_CONSTRUCTION_BACKDROP_PATH)
     print(f"wrote {_CONSTRUCTION_BACKDROP_PATH}")
+    generate_checker_texture().save(_CHECKER_PATH)
+    print(f"wrote {_CHECKER_PATH}")
