@@ -15,15 +15,45 @@ from dataclasses import replace
 
 from .scene_config import ViserSceneConfig
 
+# Glossy dark robot on a glass-polished light checkerboard + blue sky.
+# Shared by the "ceramic_white" and "default" entries (``get_look`` hands
+# out fresh copies, so sharing the instance is safe).
+_CERAMIC_WHITE = ViserSceneConfig(
+    robot_color=(18, 18, 20),
+    robot_metalness=0.0,
+    robot_roughness=0.18,
+    ground_texture="checker",
+    ground_texture_tiles=25.0,
+    ground_metalness=0.15,
+    ground_roughness=0.16,
+    # The studio HDRI feeds the floor reflections, but its softbox
+    # panels mirror as glaring white blobs on a near-mirror floor:
+    # dim the map and lift the floor roughness a touch so the
+    # panels spread into a soft sheen instead of hot spots.
+    env_map="studio",
+    env_map_intensity=0.45,
+    env_map_as_background=False,
+    sky_background=True,
+    sky_kind="gradient",
+    sky_color=(120, 172, 230),
+    sky_horizon_color=(210, 226, 242),
+    # No sun: the directional light's specular glint on the glass
+    # floor (and the sky's sun-glow disc) read as a glaring hot spot;
+    # ambient + hemisphere + the studio HDRI carry the lighting.
+    sun_intensity=0.0,
+    sky_sun_glow=False,
+    ambient_intensity=0.55,
+    hemisphere_intensity=0.5,
+)
+
 # name -> ViserSceneConfig.  Keep these as plain instances; ``get_look``
 # hands out a fresh copy so callers can't mutate the shared template.
 VISER_LOOKS: dict[str, ViserSceneConfig] = {
-    # The package default: dark veined marble under glass-polished specular
-    # + carbon-finish robot, lit by the "studio" HDRI.  The marble texture
-    # shows through the gloss so the floor reads as a real surface rather
-    # than a featureless mirror.
-    "default": ViserSceneConfig(),
-    # Aliases of the default — kept for discoverability under intuitive names.
+    # The package default — ceramic_white (also the fallback when no
+    # ``viser_scene`` / ``--look`` is given; see ``ViserScene``).
+    "default": _CERAMIC_WHITE,
+    # Dark veined marble under glass-polished specular + carbon-finish
+    # robot, lit by the "studio" HDRI (the former package default).
     "polished": ViserSceneConfig(),
     "carbon": ViserSceneConfig(),
     # Dark metal finish on the same polished marble (no carbon tint).
@@ -86,40 +116,11 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
         hemisphere_ground_color=(150, 140, 120),
         sun_intensity=1.7,
     ),
-    # Glossy white ceramic on a glass-polished light checkerboard + blue
-    # sky.  The faint 1 m grid gives the eye a motion reference, the
-    # saturated sky separates ground from background, and the "checker"
-    # TEXTURE (not the face-colored checkerboard mesh) lets the ground
-    # carry a low-roughness PBR material so it reflects.  The studio
-    # HDRI feeds those reflections only — ``env_map_as_background=False``
-    # keeps the procedural sky as the visible backdrop.
-    "ceramic_white": ViserSceneConfig(
-        robot_color=(18, 18, 20),
-        robot_metalness=0.0,
-        robot_roughness=0.18,
-        ground_texture="checker",
-        ground_texture_tiles=25.0,
-        ground_metalness=0.15,
-        ground_roughness=0.16,
-        # The studio HDRI feeds the floor reflections, but its softbox
-        # panels mirror as glaring white blobs on a near-mirror floor:
-        # dim the map and lift the floor roughness a touch so the
-        # panels spread into a soft sheen instead of hot spots.
-        env_map="studio",
-        env_map_intensity=0.45,
-        env_map_as_background=False,
-        sky_background=True,
-        sky_kind="gradient",
-        sky_color=(120, 172, 230),
-        sky_horizon_color=(210, 226, 242),
-        # No sun: the directional light's specular glint on the glass
-        # floor (and the sky's sun-glow disc) read as a glaring hot spot;
-        # ambient + hemisphere + the studio HDRI carry the lighting.
-        sun_intensity=0.0,
-        sky_sun_glow=False,
-        ambient_intensity=0.55,
-        hemisphere_intensity=0.5,
-    ),
+    # The grid gives the eye a motion reference, the saturated sky
+    # separates ground from background, and the "checker" TEXTURE (not
+    # the face-colored checkerboard mesh) lets the ground carry a
+    # glossy PBR material so it reflects.  See ``_CERAMIC_WHITE`` above.
+    "ceramic_white": _CERAMIC_WHITE,
     # Keep the simulator's own per-link mesh colors / textures (the unitree
     # robots' black/grey parts, etc.) on the polished slate.
     "sim_native": ViserSceneConfig(robot_color=None),

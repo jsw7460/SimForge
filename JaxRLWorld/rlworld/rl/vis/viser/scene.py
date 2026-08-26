@@ -22,6 +22,7 @@ import viser
 from PIL import Image
 
 from .bridge import SimulatorBridge, SimulatorGeometry
+from .looks import get_look
 from .scene_config import ViserSceneConfig
 
 _BUNDLED_GROUND_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "ground_texture.png")
@@ -238,7 +239,10 @@ class ViserScene:
         self.server = server
         self.bridge = bridge
         self.geometry = geometry
-        self.scene_config = scene_config or ViserSceneConfig()
+        # Fallback goes through the named "default" look so the package
+        # default is declared once, in ``looks.py`` (bare
+        # ``ViserSceneConfig()`` is the "polished" marble template).
+        self.scene_config = scene_config if scene_config is not None else get_look("default")
 
         # State.
         self.env_idx: int = 0
