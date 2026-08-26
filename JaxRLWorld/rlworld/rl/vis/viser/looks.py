@@ -132,12 +132,16 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
         ground_texture="navy_grid",
         ground_texture_tiles=25.0,
         # Dielectric gloss: metalness must stay 0 — a metallic material
-        # trades its diffuse color for reflections, and with the dark
-        # night HDRI feeding them the navy floor turned near-black.
+        # trades its diffuse color for reflections.  And the gloss must
+        # stay moderate: a glossy floor SHOWS its environment, so over a
+        # near-black night sky a mirror finish renders black no matter
+        # the base color (Fresnel boosts reflection at the floor's
+        # grazing view angles).  Satin roughness over the "city" HDRI
+        # (night lights) keeps the navy readable with lit reflections.
         ground_metalness=0.0,
-        ground_roughness=0.14,
-        env_map="night",
-        env_map_intensity=0.8,
+        ground_roughness=0.3,
+        env_map="city",
+        env_map_intensity=0.55,
         env_map_as_background=False,
         sky_background=True,
         sky_kind="starfield",
