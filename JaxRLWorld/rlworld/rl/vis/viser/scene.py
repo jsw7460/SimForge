@@ -32,13 +32,21 @@ _BUNDLED_CHECKER_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__
 _BUNDLED_CONSTRUCTION_BACKDROP = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets", "construction_backdrop.png"
 )
+_BUNDLED_NAVY_GRID_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "navy_grid_texture.png")
+_BUNDLED_STARFIELD_BACKDROP = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "assets", "starfield_backdrop.png"
+)
 _GROUND_TEXTURE_ALIASES = {
     "default": _BUNDLED_GROUND_TEXTURE,
     "marble": _BUNDLED_MARBLE_TEXTURE,
     "concrete": _BUNDLED_CONCRETE_TEXTURE,
     "checker": _BUNDLED_CHECKER_TEXTURE,
+    "navy_grid": _BUNDLED_NAVY_GRID_TEXTURE,
 }
-_SKY_IMAGE_ALIASES = {"construction": _BUNDLED_CONSTRUCTION_BACKDROP}
+_SKY_IMAGE_ALIASES = {
+    "construction": _BUNDLED_CONSTRUCTION_BACKDROP,
+    "starfield": _BUNDLED_STARFIELD_BACKDROP,
+}
 
 
 def _quat_shortest_arc(a: np.ndarray, b: np.ndarray) -> np.ndarray:

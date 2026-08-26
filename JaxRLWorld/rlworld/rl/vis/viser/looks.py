@@ -121,6 +121,24 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
     # the face-colored checkerboard mesh) lets the ground carry a
     # glossy PBR material so it reflects.  See ``_CERAMIC_WHITE`` above.
     "ceramic_white": _CERAMIC_WHITE,
+    # The MuJoCo / dm_control house style (as seen in OGBench renders):
+    # matte dark-navy two-tone grid with light cross lines, a starfield
+    # night sky, sim-native robot colors, and NO specular anywhere
+    # (no HDRI, matte floor) so the frame stays uniformly calm.
+    "mujoco": ViserSceneConfig(
+        robot_color=None,
+        ground_texture="navy_grid",
+        ground_texture_tiles=25.0,
+        ground_metalness=0.0,
+        ground_roughness=0.85,
+        env_map=None,
+        sky_background=True,
+        sky_kind="starfield",
+        sky_sun_glow=False,
+        sun_intensity=0.9,
+        ambient_intensity=0.4,
+        hemisphere_intensity=0.35,
+    ),
     # Keep the simulator's own per-link mesh colors / textures (the unitree
     # robots' black/grey parts, etc.) on the polished slate.
     "sim_native": ViserSceneConfig(robot_color=None),

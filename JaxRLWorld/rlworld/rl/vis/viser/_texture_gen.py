@@ -328,6 +328,54 @@ def generate_construction_backdrop(width: int = 1024, height: int = 512, seed: i
     return pil
 
 
+def generate_navy_grid_texture(
+    size: int = 512,
+    color_a: tuple[int, int, int] = (20, 28, 41),
+    color_b: tuple[int, int, int] = (38, 46, 64),
+    mark_color: tuple[int, int, int] = (204, 204, 204),
+) -> Image.Image:
+    """The MuJoCo / dm_control house floor: dark navy 2x2 checker with a
+    light cross through the texture centre (the builtin checker's
+    ``mark="cross"``), which tiles into a regular bright line grid."""
+    img = Image.new("RGB", (size, size), color_a)
+    draw = ImageDraw.Draw(img)
+    half = size // 2
+    draw.rectangle((half, 0, size, half), fill=color_b)
+    draw.rectangle((0, half, half, size), fill=color_b)
+    w = max(2, size // 256)
+    draw.rectangle((0, half - w // 2, size, half + w // 2), fill=mark_color)
+    draw.rectangle((half - w // 2, 0, half + w // 2, size), fill=mark_color)
+    return img
+
+
+def generate_starfield_backdrop(
+    width: int = 2048,
+    height: int = 1024,
+    top: tuple[int, int, int] = (10, 12, 18),
+    horizon: tuple[int, int, int] = (38, 46, 64),
+    star_density: float = 0.0012,
+    seed: int = 23,
+) -> Image.Image:
+    """Night-sky backdrop: near-black zenith fading to navy at the
+    horizon, sprinkled with white stars (the MuJoCo skybox's
+    ``mark="random"``).  Used as a flat canvas image, like the
+    construction backdrop."""
+    rng = np.random.default_rng(seed)
+    t = np.linspace(0.0, 1.0, height)[:, None, None]
+    grad = (1.0 - t) * np.array(top, dtype=np.float64) + t * np.array(horizon, dtype=np.float64)
+    img = np.broadcast_to(grad, (height, width, 3)).copy()
+
+    n_stars = int(width * height * star_density)
+    xs = rng.integers(0, width, n_stars)
+    ys = rng.integers(0, height, n_stars)
+    brightness = rng.uniform(120.0, 255.0, n_stars)
+    img[ys, xs] = brightness[:, None]
+    # A handful of brighter 2x2 stars for depth.
+    for x, y in zip(xs[:: max(1, n_stars // 60)], ys[:: max(1, n_stars // 60)]):
+        img[max(0, y - 1) : y + 1, max(0, x - 1) : x + 1] = 255.0
+    return Image.fromarray(img.clip(0, 255).astype(np.uint8))
+
+
 def generate_checker_texture(
     size: int = 512,
     color_a: tuple[int, int, int] = (238, 238, 240),
@@ -349,6 +397,8 @@ _MARBLE_PATH = os.path.join(_ASSETS_DIR, "marble_texture.png")
 _CONCRETE_PATH = os.path.join(_ASSETS_DIR, "concrete_texture.png")
 _CONSTRUCTION_BACKDROP_PATH = os.path.join(_ASSETS_DIR, "construction_backdrop.png")
 _CHECKER_PATH = os.path.join(_ASSETS_DIR, "checker_texture.png")
+_NAVY_GRID_PATH = os.path.join(_ASSETS_DIR, "navy_grid_texture.png")
+_STARFIELD_BACKDROP_PATH = os.path.join(_ASSETS_DIR, "starfield_backdrop.png")
 
 
 def default_texture_path() -> str:
@@ -388,3 +438,7 @@ if __name__ == "__main__":
     print(f"wrote {_CONSTRUCTION_BACKDROP_PATH}")
     generate_checker_texture().save(_CHECKER_PATH)
     print(f"wrote {_CHECKER_PATH}")
+    generate_navy_grid_texture().save(_NAVY_GRID_PATH)
+    print(f"wrote {_NAVY_GRID_PATH}")
+    generate_starfield_backdrop().save(_STARFIELD_BACKDROP_PATH)
+    print(f"wrote {_STARFIELD_BACKDROP_PATH}")
