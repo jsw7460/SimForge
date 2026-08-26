@@ -86,20 +86,24 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
         hemisphere_ground_color=(150, 140, 120),
         sun_intensity=1.7,
     ),
-    # Glossy white ceramic on a light, plain ground + pale sky.  No HDRI
-    # so the colour palette stays clean.
+    # Glossy white ceramic on a light checkerboard ground + blue sky.  No
+    # HDRI so the colour palette stays clean.  The faint 0.5 m grid gives
+    # the eye a motion reference, and the saturated sky separates ground
+    # from background (a plain pale sky read as one white void).
     "ceramic_white": ViserSceneConfig(
         robot_color=(232, 234, 238),
         robot_metalness=0.0,
         robot_roughness=0.35,
         ground_texture=None,
-        ground_kind="plane",
+        ground_kind="checkerboard",
         ground_color=(238, 238, 240),
+        ground_color_alt=(214, 217, 222),
         ground_roughness=0.4,
         env_map=None,
         sky_background=True,
         sky_kind="gradient",
-        sky_color=(205, 216, 232),
+        sky_color=(120, 172, 230),
+        sky_horizon_color=(210, 226, 242),
     ),
     # Keep the simulator's own per-link mesh colors / textures (the unitree
     # robots' black/grey parts, etc.) on the polished slate.
