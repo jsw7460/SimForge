@@ -122,16 +122,20 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
     # glossy PBR material so it reflects.  See ``_CERAMIC_WHITE`` above.
     "ceramic_white": _CERAMIC_WHITE,
     # The MuJoCo / dm_control house style (as seen in OGBench renders):
-    # matte dark-navy two-tone grid with light cross lines, a starfield
-    # night sky, sim-native robot colors, and NO specular anywhere
-    # (no HDRI, matte floor) so the frame stays uniformly calm.
+    # dark-navy two-tone grid with light cross lines under a glassy
+    # polish, a starfield night sky, and sim-native robot colors.  The
+    # "night" HDRI feeds the floor reflections only (dark, so no glare
+    # blobs) — ``env_map_as_background=False`` keeps the starfield as
+    # the visible backdrop.
     "mujoco": ViserSceneConfig(
         robot_color=None,
         ground_texture="navy_grid",
         ground_texture_tiles=25.0,
-        ground_metalness=0.0,
-        ground_roughness=0.85,
-        env_map=None,
+        ground_metalness=0.2,
+        ground_roughness=0.14,
+        env_map="night",
+        env_map_intensity=0.6,
+        env_map_as_background=False,
         sky_background=True,
         sky_kind="starfield",
         sky_sun_glow=False,
