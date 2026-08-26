@@ -331,7 +331,7 @@ def generate_construction_backdrop(width: int = 1024, height: int = 512, seed: i
 def generate_checker_texture(
     size: int = 512,
     color_a: tuple[int, int, int] = (238, 238, 240),
-    color_b: tuple[int, int, int] = (214, 217, 222),
+    color_b: tuple[int, int, int] = (205, 209, 215),
 ) -> Image.Image:
     """Tileable 2x2 checkerboard (one tile = 2x2 cells, so tiling repeats
     seamlessly).  Cell size in metres = ground_size / tiles / 2."""
