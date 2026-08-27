@@ -496,6 +496,37 @@ def penalize_contact_force_count(
     return -(force_mag > force_threshold).float().sum(dim=-1)
 
 
+def penalize_any_contact_force(
+    env: World,
+    contact_group: str,
+    force_threshold: float = 10.0,
+) -> torch.Tensor:
+    """-1 when ANY tracked column crossed the threshold this step, else 0.
+
+    Binary variant of :func:`penalize_contact_force_count`. The point of
+    the binary reduction is cross-sim value parity at each backend's
+    cheapest sensor shape: Genesis/Newton track the group per link and
+    reduce here with ``any()``, while mjlab can register the group as a
+    single subtree-vs-subtree pair (two native sensors instead of two per
+    link) whose one column is the same "was there any contact" signal.
+    A per-link count cannot be expressed that way in MuJoCo without one
+    sensor per link, which is evaluated inside the mjwarp step graph
+    every substep.
+
+    History-aware like the count variant: with substep history a column
+    counts if any substep crossed the threshold.
+    """
+    history = env.contact_manager.contact_force_history(contact_group)
+    if history is not None:
+        # (B, N, H, 3) → any over substeps and columns.
+        force_mag = torch.norm(history, dim=-1)
+        return -(force_mag > force_threshold).any(dim=2).any(dim=-1).float()
+
+    forces = env.contact_manager.contact_force(contact_group)
+    force_mag = torch.norm(forces, dim=-1)  # (B, N)
+    return -(force_mag > force_threshold).any(dim=-1).float()
+
+
 def penalize_soft_landing(
     env: World,
     contact_group: str,

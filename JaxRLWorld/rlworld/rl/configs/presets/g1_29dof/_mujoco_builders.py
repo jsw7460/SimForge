@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from mjlab.asset_zoo.robots import G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as g1_get_spec
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -127,17 +127,20 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         num_slots=1,
     )
 
-    # Self-collision sensor — per-robot-body net self-collision force, to
-    # match the Genesis / Newton ``self_collision`` group (same sensor
-    # output, so ``self_collision_cost`` is equivalent across sims). mjlab
-    # can't express ``secondary.entity="self"``; the whole-robot subtree of
-    # the floating-base root body ("pelvis") is the equivalent single
-    # secondary.
+    # Self-collision sensor — ONE subtree-vs-subtree pair, the shape
+    # mjlab's own G1 task uses. The previous per-robot-body form expanded
+    # to two mj sensors per link (62 total), all evaluated inside the
+    # mjwarp step graph every substep — measured 5.5 ms/step at 16384
+    # envs. The reward reads the group as a binary any-self-collision
+    # signal (``penalize_any_contact_force``), which Genesis/Newton
+    # reproduce from their per-link groups with an ``any()`` — same value
+    # on all three backends.
     self_collision_cfg = ContactSensorCfg(
         name="self_collision",
-        primary=ContactMatch(mode="body", pattern=".*", entity="robot"),
+        primary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
         secondary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
-        reduce="netforce",
+        reduce="none",
+        num_slots=1,
         history_length=timing["decimation"],
     )
 
@@ -150,7 +153,20 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         floating=True,
         articulation=ArticulationCfg(
             actuators=(
-                DelayedPDActuatorCfg(
+                # Flat follows the Mjlab-Velocity-Flat-Unitree-G1 reference:
+                # builtin position actuators (PD inside mjwarp). The
+                # explicit torch PD with command delay ran per substep and
+                # cost ~0.4 ms/step at 16384 envs on top of the solver.
+                # Rough keeps the DelayedPD sim2real modeling.
+                ImplicitActuatorCfg(
+                    target_names_expr=(".*",),
+                    stiffness=r.p_gains,
+                    damping=r.d_gains,
+                    armature=r.armature,
+                    frictionloss=0.3,
+                )
+                if not cfg.use_rough_terrain
+                else DelayedPDActuatorCfg(
                     target_names_expr=(".*",),
                     stiffness=r.p_gains,
                     damping=r.d_gains,
@@ -175,11 +191,14 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         cone="pyramidal",
         entities={"robot": robot_entity},
         sensors=(feet_ground_cfg, self_collision_cfg),
-        solver_iterations=50,
-        solver_ls_iterations=50,
+        # Flat follows the Mjlab-Velocity-Flat-Unitree-G1 reference
+        # (iterations 10 / ls 20, njmax 300, nconmax auto); rough keeps
+        # the previously measured budgets.
+        solver_iterations=50 if cfg.use_rough_terrain else 10,
+        solver_ls_iterations=50 if cfg.use_rough_terrain else 20,
         ccd_iterations=50,
-        nconmax=100,
-        njmax=1500,
+        nconmax=100 if cfg.use_rough_terrain else None,
+        njmax=1500 if cfg.use_rough_terrain else 300,
         contact_sensor_maxmatch=64,
         preset_class_name=type(cfg).__name__,
         preset_module_path=type(cfg).__module__,
@@ -281,7 +300,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
         )
 
         self_collision_cost = RewardTermConfig(
-            func=rf.self_collision_cost,
+            func=rf_common.penalize_any_contact_force,
             weight=1.0,
             params={"contact_group": "self_collision", "force_threshold": 10.0},
         )

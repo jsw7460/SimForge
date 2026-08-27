@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import warp as wp
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, IdealPDActuatorCfg, ImplicitActuatorCfg
 from rlworld.rl.configs import RewardConfig, SolverMuJoCoCfg, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -55,7 +55,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab, reward_terms as rf_newton
+from rlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
 
 if TYPE_CHECKING:
@@ -120,11 +120,15 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
     # the robot config) replace the nominal p_gains / d_gains — the
     # actuator's stiffness / damping accept a {joint_regex: value} map
     # natively, so heterogeneous per-joint PD ships without rewiring.
-    ActuatorCls, _delay_kwargs = (
-        (IdealPDActuatorCfg, {})
-        if cfg.use_ideal_pd_actuator
-        else (DelayedPDActuatorCfg, {"min_delay": 0, "max_delay": 2})
-    )
+    # Flat follows the Mjlab-Velocity-Flat-Unitree-G1 reference: implicit
+    # (mjwarp builtin) position actuators. Rough keeps the DelayedPD
+    # sim2real modeling; explicit-PD collection keeps IdealPD.
+    if cfg.use_ideal_pd_actuator:
+        ActuatorCls, _delay_kwargs = IdealPDActuatorCfg, {}
+    elif cfg.use_rough_terrain:
+        ActuatorCls, _delay_kwargs = DelayedPDActuatorCfg, {"min_delay": 0, "max_delay": 2}
+    else:
+        ActuatorCls, _delay_kwargs = ImplicitActuatorCfg, {}
     stiffness = r.kp_per_dof_override if r.kp_per_dof_override is not None else r.p_gains
     damping = r.kd_per_dof_override if r.kd_per_dof_override is not None else r.d_gains
 
@@ -154,8 +158,8 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             # velocities were already coming back down. That is a constraint
             # solve failing to condition, not a joint diverging.
             impratio=1.0,
-            iterations=50,
-            ls_iterations=50,
+            iterations=50 if cfg.use_rough_terrain else 10,
+            ls_iterations=50 if cfg.use_rough_terrain else 20,
             ccd_iterations=50,
             # Rough terrain inflates the per-env contact count by an order
             # of magnitude vs flat ground (observed on G1 29-DOF +
@@ -184,8 +188,8 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             # (naccdmax defaults to naconmax; ~naconmax * 5 *
             # ccd_iterations vec3s — nconmax=4000 tried to allocate
             # 50 GB).
-            njmax=1500,
-            nconmax=300 if cfg.use_rough_terrain else 200,
+            njmax=1500 if cfg.use_rough_terrain else 300,
+            nconmax=300 if cfg.use_rough_terrain else None,
             # mjwarp-native collision on BOTH flat and rough. The old
             # rough-only opt-out (use_mujoco_contacts=False → Newton's
             # MPR collide()) dated from when the terrain was a triangle
@@ -408,7 +412,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
 
         # Self-collision
         self_collision_cost = RewardTermConfig(
-            func=rf_newton.wtw_collision,
+            func=rf_common.penalize_any_contact_force,
             weight=1.0,
             params={"contact_group": "self_collision", "force_threshold": 10.0},
         )

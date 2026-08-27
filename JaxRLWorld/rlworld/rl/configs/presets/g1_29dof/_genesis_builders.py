@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import genesis as gs
 
-from rlworld.rl.actuators import DelayedPDActuatorCfg
+from rlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg
 from rlworld.rl.configs import TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -57,7 +57,7 @@ from rlworld.rl.envs.mdp.observations.common.proprioception import (
     raw_actions,
 )
 from rlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab, reward_terms as rf_genesis
+from rlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_mjlab
 from rlworld.rl.envs.mdp.terminations.common import max_episode_exceed, terminations as common_tf
 
 if TYPE_CHECKING:
@@ -121,7 +121,19 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                 floating=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        DelayedPDActuatorCfg(
+                        # Flat follows the Mjlab-Velocity-Flat-Unitree-G1
+                        # reference: implicit (simulator-internal) PD, no
+                        # command delay. Rough keeps the DelayedPD
+                        # sim2real modeling.
+                        ImplicitActuatorCfg(
+                            target_names_expr=(".*",),
+                            stiffness=r.p_gains,
+                            damping=r.d_gains,
+                            armature=r.armature,
+                            frictionloss=0.3,
+                        )
+                        if not cfg.use_rough_terrain
+                        else DelayedPDActuatorCfg(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
@@ -307,7 +319,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
 
         # Self-collision
         self_collision_cost = RewardTermConfig(
-            func=rf_genesis.wtw_collision,
+            func=rf_common.penalize_any_contact_force,
             weight=1.0,
             params={"contact_group": "self_collision", "force_threshold": 10.0},
         )
