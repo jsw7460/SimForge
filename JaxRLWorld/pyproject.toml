@@ -26,12 +26,15 @@ dependencies = [
     "gymnasium>=0.29.0",
     "pytz",
     "pyyaml>=6.0",
+    # Live training dashboard (ConsoleWriter falls back to plain block
+    # logging when rich is missing or stdout is not a terminal).
+    "rich>=13.0",
 ]
 
 [project.optional-dependencies]
 # Genesis, Newton, and mjlab are installed from git submodules (see
 # README), not via PyPI extras. Only wandb is a real optional PyPI dep.
-wandb = ["wandb>=0.16.0"]
+wandb = ["wandb>=0.25.0"]
 dev = [
     "pytest",
     "ruff",

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import os
 import statistics
+import sys
+import traceback
+from collections import deque
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Union
 
@@ -36,6 +40,40 @@ class ConsoleWriter:
 
     def __init__(self):
         self.pad = 35
+        # Rich live dashboard: one in-place-updating panel instead of a
+        # ~40-line block scrolling by every iteration. Only when stdout
+        # is a real terminal — log files, tee pipes, and CHTC condor
+        # jobs keep the plain scrolling blocks (they need parseable,
+        # append-only text). JAXRLWORLD_PLAIN_LOG=1 forces plain.
+        self._live = None
+        self._live_disabled = os.environ.get("JAXRLWORLD_PLAIN_LOG", "0") == "1" or not sys.stdout.isatty()
+        # Rolling window for the dashboard's timing statistics.
+        self._roll: deque = deque(maxlen=50)
+        self._prev_rewards: Dict[str, float] = {}
+
+    def _ensure_live(self):
+        """Start the rich Live region on first use (TTY only)."""
+        if self._live is not None or self._live_disabled:
+            return self._live
+        try:
+            from rich.console import Console
+            from rich.live import Live
+        except ImportError:
+            print("[ConsoleWriter] rich not installed — falling back to plain block logging.")
+            self._live_disabled = True
+            return None
+        self._console = Console()
+        self._live = Live(console=self._console, refresh_per_second=4, transient=False)
+        self._live.start()
+        atexit.register(self._stop_live)
+        return self._live
+
+    def _stop_live(self):
+        if self._live is not None:
+            try:
+                self._live.stop()
+            finally:
+                self._live = None
 
     def write_metrics(
         self,
@@ -92,7 +130,15 @@ class ConsoleWriter:
         # Footer
         log_string.append(f"{Fore.CYAN}{'═' * width}{Style.RESET_ALL}")
 
-        print("\n".join(log_string))
+        text = "\n".join(log_string)
+        if self._live is not None:
+            # Print above the live dashboard (rich keeps the region at
+            # the bottom), so eval blocks leave a persistent record.
+            from rich.text import Text
+
+            self._live.console.print(Text.from_ansi(text))
+        else:
+            print(text)
 
     def write_iteration(
         self,
@@ -120,6 +166,18 @@ class ConsoleWriter:
         # Merge display context (wandb_url, simulator, etc.)
         compat.update(context)
 
+        live = self._ensure_live()
+        if live is not None:
+            try:
+                self._roll.append((data.fps, data.collection_time, data.learning_time))
+                live.update(self._build_dashboard(compat, data.metrics, last_eval_stats))
+                return
+            except Exception:
+                print("[ConsoleWriter] rich dashboard failed — falling back to plain block logging.")
+                traceback.print_exc()
+                self._live_disabled = True
+                self._stop_live()
+
         self.write_metrics(
             data=compat,
             metrics=data.metrics,
@@ -128,11 +186,147 @@ class ConsoleWriter:
             last_eval_stats=last_eval_stats,
         )
 
+    def _build_dashboard(self, data: Dict, metrics: BaseMetrics | None, last_eval_stats: Dict | None):
+        """One rich renderable holding the whole iteration view.
+
+        Replaces the scrolling per-iteration block in TTY sessions: the
+        panel updates in place, eval blocks print above it (persistent),
+        and the timing row carries rolling statistics over the last 50
+        iterations — information the scrollback used to provide.
+        """
+        from rich.console import Group
+        from rich.padding import Padding
+        from rich.panel import Panel
+        from rich.rule import Rule
+        from rich.table import Table
+        from rich.text import Text
+
+        rows = []
+
+        def section(title: str, style: str) -> None:
+            # A labelled horizontal rule separates each category.
+            rows.append(Text(""))
+            rows.append(Rule(f"[bold {style}]{title}[/]", style="dim", align="left"))
+
+        def indent(renderable) -> None:
+            rows.append(Padding(renderable, (0, 0, 0, 2)))
+
+        # ── run info ────────────────────────────────────────────────
+        info_bits = [f"[yellow]{data.get('simulator', 'N/A')}[/] · [yellow]{data.get('task_name', 'N/A')}[/]"]
+        if "wandb_url" in data:
+            info_bits.append(f"[dim]{data['wandb_url']}[/]")
+        rows.append(Text.from_markup("   ".join(info_bits)))
+        rows.append(Text(""))
+
+        # ── progress ────────────────────────────────────────────────
+        iteration = data.get("iteration", 0)
+        total = data.get("total_iterations", 0)
+        frac = (iteration / total) if isinstance(total, int | float) and total else 0.0
+        bar_w = 44
+        filled = int(round(frac * bar_w))
+        bar = Text.assemble(
+            (f"iter {iteration:,}/{total:,}  " if isinstance(total, int | float) else f"iter {iteration}  ", "bold"),
+            ("█" * filled, "cyan"),
+            ("░" * (bar_w - filled), "grey35"),
+            (f"  {frac * 100:5.1f}%", "cyan"),
+            (f"   elapsed {_format_time(data.get('total_time', 0))}", "white"),
+            (f"   ETA {self._calculate_eta(data, data.get('total_time', 0))}", "yellow"),
+        )
+        rows.append(bar)
+
+        # ── throughput / timing with rolling stats ──────────────────
+        fps = data.get("fps", 0)
+        col = data.get("collection_time", 0.0)
+        lrn = data.get("learning_time", 0.0)
+        if len(self._roll) >= 2:
+            med_fps = statistics.median(r[0] for r in self._roll)
+            med_col = statistics.median(r[1] for r in self._roll)
+            med_lrn = statistics.median(r[2] for r in self._roll)
+            roll_txt = f"   [dim]last {len(self._roll)} median: {med_fps:,.0f} st/s · {med_col:.3f}s/{med_lrn:.3f}s[/]"
+        else:
+            roll_txt = ""
+        section("Performance", "yellow")
+        indent(
+            Text.from_markup(
+                f"[bold green]{fps:,.0f}[/] steps/s   "
+                f"collect [cyan]{col:.3f}s[/] │ learn [cyan]{lrn:.3f}s[/]{roll_txt}"
+            )
+        )
+
+        # ── algorithm metrics ───────────────────────────────────────
+        if metrics is not None:
+            section("Algorithm", "red")
+            grid = Table.grid(padding=(0, 3))
+            items = []
+            for m in metrics.get_console_metrics():
+                value = f"{m.value:.4f}" if isinstance(m.value, float) else str(m.value)
+                items.append(f"[dim]{m.display_name}[/] [cyan]{value}[/]")
+            per_row = 4
+            for i in range(0, len(items), per_row):
+                grid.add_row(*items[i : i + per_row])
+            indent(grid)
+
+        # ── episode stats ───────────────────────────────────────────
+        mean_return = data.get("mean_return", 0.0)
+        ret_style = "green" if mean_return >= 0 else "red"
+        ep_line = (
+            f"return [{ret_style}]{mean_return:.2f}[/]   " f"ep len [cyan]{data.get('mean_episode_length', 0.0):.1f}[/]"
+        )
+        success = data.get("success_rate")
+        if success is not None:
+            ep_line += f"   success [yellow]{success * 100:.1f}%[/]"
+        ep_line += f"   steps [white]{data.get('total_timesteps', 0):,}[/]"
+        section("Episode", "green")
+        indent(Text.from_markup(ep_line))
+
+        # ── rewards, |value| descending, with change arrows ─────────
+        reward_stats = data.get("reward_stats") or {}
+        if reward_stats:
+            section("Rewards (|value| desc)", "blue")
+            items = sorted(
+                ((k, v["mean"]) for k, v in reward_stats.items()),
+                key=lambda kv: abs(kv[1]),
+                reverse=True,
+            )
+            table = Table.grid(padding=(0, 1))
+            per_row = 3
+            cells = []
+            for name, mean in items:
+                prev = self._prev_rewards.get(name)
+                if prev is None or abs(mean - prev) < 1e-6:
+                    arrow = " "
+                elif mean > prev:
+                    arrow = "[green]▲[/]"
+                else:
+                    arrow = "[red]▼[/]"
+                style = "green" if mean >= 0 else "red"
+                cells.append(f"[white]{name[:24]:<24}[/][{style}]{mean:>9.4f}[/]{arrow}")
+            for i in range(0, len(cells), per_row):
+                table.add_row(*cells[i : i + per_row])
+            indent(table)
+            self._prev_rewards = {k: v for k, v in items}
+
+        # ── pinned eval ─────────────────────────────────────────────
+        if last_eval_stats is not None:
+            section("Eval", "magenta")
+            indent(
+                Text.from_markup(
+                    f"[magenta]@iter {last_eval_stats.get('eval/iteration', '?')}:[/] "
+                    f"R [bold]{last_eval_stats.get('eval/mean_return', 0.0):.2f}[/]"
+                    f" ± {last_eval_stats.get('eval/std_return', 0.0):.2f}   "
+                    f"len {last_eval_stats.get('eval/mean_episode_length', 0.0):.1f}   "
+                    f"({last_eval_stats.get('eval/num_episodes', 0)} eps)"
+                )
+            )
+
+        title = data.get("wandb_run_name") or data.get("task_name", "training")
+        return Panel(Group(*rows), title=f"[bold]{title}[/]", border_style="cyan")
+
     def _create_section_header(self, width: int, title: str) -> List[str]:
         """Create a formatted section header."""
         return [
             f"{Fore.CYAN}{'═' * width}{Style.RESET_ALL}",
-            f"{Fore.CYAN}║{Style.RESET_ALL}" + title.center(width - 2, " ") + f"{Fore.CYAN}║{Style.RESET_ALL}",
+            title.center(width, " ").rstrip(),
             f"{Fore.CYAN}{'═' * width}{Style.RESET_ALL}",
             "",
         ]
@@ -442,15 +636,20 @@ class WandbLogger:
 
             run_name = ct_now.strftime("run_%Y%m%d_%H%M%S_CT")
 
+        # No Settings(start_method=...): wandb deprecated it as
+        # non-functional, and newer releases (CHTC images) reject the
+        # field outright with a pydantic extra_forbidden error.
         self.run = wandb.init(
             project=project_name,
             dir=log_dir,
             config=cfg,
             group=group_name,
             name=run_name,
-            settings=wandb.Settings(start_method="fork"),
         )
-        self.wandb_url = self.run.get_url()
+        # ``get_url`` is deprecated (removed after the warning stage);
+        # ``run.url`` is the long-standing property both old and new
+        # wandb releases serve.
+        self.wandb_url = self.run.url
         os.makedirs(log_dir, exist_ok=True)
         self.log_dir = log_dir
 
