@@ -260,23 +260,32 @@ class OnPolicyRunner(BaseRunner):
             actor_obs = self._pack_obs(obs_dict, "actor")
             critic_obs = self._pack_obs(obs_dict, "critic")
             rewards_jax = torch_to_jax(rewards)
-            # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
-            terminated_jax = jnp.asarray(terminated.cpu().numpy())
-            truncated_jax = jnp.asarray(truncated.cpu().numpy())
+            # Bool tensors must not go through DLPack as BOOL (its bool
+            # dtype exchange is what once produced rare random bit flips).
+            # Crossing as uint8 sidesteps that entirely: the device-side
+            # cast allocates a fresh 0/1 buffer, DLPack carries a
+            # first-class dtype, and JAX reconstructs bool with a defined
+            # nonzero->True cast — no host sync, no bool ambiguity.
+            # Adoption was gated on check_bool_dlpack_bridge (adversarial
+            # bit-equality under async queue pressure).
+            terminated_jax = torch_to_jax(terminated.to(torch.uint8)).astype(jnp.bool_)
+            truncated_jax = torch_to_jax(truncated.to(torch.uint8)).astype(jnp.bool_)
 
             # Process step
             infos_jax = {}
             if infos.get("final_observation") is not None:
+                # Only the critic's terminal observation is consumed
+                # (bootstrap value); nothing reads an "actor" entry.
                 infos_jax["final_observation"] = {
-                    "actor": self._pack_obs(infos["final_observation"], "actor"),
                     "critic": self._pack_obs(infos["final_observation"], "critic"),
                 }
                 # Bootstrap mask (truncations + non-absorbing terminations).
                 # Only meaningful on done steps (final_observation present);
                 # absent -> PPO falls back to ``truncated & ~terminated``.
                 if infos.get("bootstrap_mask") is not None:
-                    # NOTE: bool -> use asarray, not DLPack.
-                    infos_jax["bootstrap_mask"] = jnp.asarray(infos["bootstrap_mask"].cpu().numpy())
+                    infos_jax["bootstrap_mask"] = torch_to_jax(infos["bootstrap_mask"].to(torch.uint8)).astype(
+                        jnp.bool_
+                    )
             self.alg.process_env_step(
                 rewards_jax,
                 terminated_jax,
