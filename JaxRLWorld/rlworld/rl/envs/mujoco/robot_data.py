@@ -377,4 +377,11 @@ class MujocoRobotData(MujocoRigidObjectData):
         """
         limits = self._entity.data.soft_joint_pos_limits
         sliced = limits[0, self._joint_ids]
-        return sliced[:, 0], sliced[:, 1]
+        lo, hi = sliced[:, 0], sliced[:, 1]
+        # A rangeless joint reaches mjlab as a degenerate 0..0 band,
+        # which would turn a limit penalty into |q|. Same identity-band
+        # treatment as the other two backends.
+        unlimited = ~(torch.isfinite(lo) & torch.isfinite(hi)) | (hi <= lo)
+        neg_inf = torch.full_like(lo, -float("inf"))
+        pos_inf = torch.full_like(hi, float("inf"))
+        return torch.where(unlimited, neg_inf, lo), torch.where(unlimited, pos_inf, hi)

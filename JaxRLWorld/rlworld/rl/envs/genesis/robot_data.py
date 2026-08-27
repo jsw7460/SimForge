@@ -383,7 +383,18 @@ class GenesisRobotData(GenesisRigidObjectData):
         is exactly the hard limits. Returns ``(num_joints,)`` tensors.
         """
         lo, hi = self.joint_pos_limits
+        # A joint with no declared range arrives as +-inf (mid = NaN)
+        # or as a degenerate 0..0 band (penalty = |q|) depending on the
+        # backend's encoding. Both mean "nothing to violate": serve an
+        # identity band so limit penalties read 0 for such joints on
+        # every backend.
+        unlimited = ~(torch.isfinite(lo) & torch.isfinite(hi)) | (hi <= lo)
         mid = 0.5 * (lo + hi)
         half = 0.5 * (hi - lo)
         f = self._soft_joint_pos_limit_factor
-        return mid - half * f, mid + half * f
+        neg_inf = torch.full_like(lo, -float("inf"))
+        pos_inf = torch.full_like(hi, float("inf"))
+        return (
+            torch.where(unlimited, neg_inf, mid - half * f),
+            torch.where(unlimited, pos_inf, mid + half * f),
+        )
