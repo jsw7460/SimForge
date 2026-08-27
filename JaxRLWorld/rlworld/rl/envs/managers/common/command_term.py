@@ -261,7 +261,11 @@ class CommandTerm(ABC):
         episode reset.
         """
         self._externally_controlled[env_ids] = False
-        self._any_locked = bool(self._externally_controlled.any())
+        # Clearing rows can only turn the mirror off; when it is already
+        # False (the training-loop case — locking comes from eval/viewer
+        # only) skip the device round-trip entirely.
+        if self._any_locked:
+            self._any_locked = bool(self._externally_controlled.any())
         self.time_left[env_ids] = torch.empty(len(env_ids), device=self.device).uniform_(
             *self.cfg.resampling_time_range
         )

@@ -97,6 +97,9 @@ class NewtonRobotStateWriter:
         self._env = env
         self._view = view
         self._entity_name = entity_name
+        # Persistent mask buffers — see ``_persistent_mask``.
+        self._mask_torch: Tensor | None = None
+        self._mask_wp = None
 
         # Joint index mappings of THIS entity. Reading them off the action
         # manager — which owns the driven robot's — sends every other
@@ -152,6 +155,11 @@ class NewtonRobotStateWriter:
         else:
             self._joint_qd[:, self._qd_indices] = values
 
+    def set_dof_state(self, positions: Tensor, velocities: Tensor, env_ids: Tensor | None = None) -> None:
+        """Write joint positions and velocities (both zero-copy scatters)."""
+        self.set_dof_positions(positions, env_ids=env_ids)
+        self.set_dof_velocities(velocities, env_ids=env_ids)
+
     # ------------------------------------------------------------------
     # Root writes
     # ------------------------------------------------------------------
@@ -197,12 +205,28 @@ class NewtonRobotStateWriter:
     # ==================================================================
 
     def _mask(self, env_ids: Tensor | None):
-        if env_ids is None:
-            return None
-        num_worlds = self._env.scene_manager.model.world_count
-        mask = torch.zeros(num_worlds, dtype=torch.bool, device=self._env.device)
-        mask[env_ids] = True
-        return wp.from_torch(mask)
+        return _persistent_mask(self, env_ids)
+
+
+def _persistent_mask(writer, env_ids: Tensor | None):
+    """Reuse one ``(num_worlds,)`` bool mask + its warp alias per writer.
+
+    Allocated lazily on first masked write; refilled in place after that
+    (same pattern as ``NewtonEnv._reset_world_mask``). Saves one torch
+    allocation and one ``wp.from_torch`` per reset write.
+    """
+    if env_ids is None:
+        return None
+    mask = writer._mask_torch
+    if mask is None:
+        num_worlds = writer._env.scene_manager.model.world_count
+        mask = torch.zeros(num_worlds, dtype=torch.bool, device=writer._env.device)
+        writer._mask_torch = mask
+        writer._mask_wp = wp.from_torch(mask)
+    else:
+        mask.zero_()
+    mask[env_ids] = True
+    return writer._mask_wp
 
 
 class NewtonRigidObjectStateWriter:
@@ -230,15 +254,25 @@ class NewtonRigidObjectStateWriter:
         self._env = env
         self._view = view
         self._immovable = immovable
+        # Persistent mask buffers — see ``_persistent_mask``.
+        self._mask_torch: Tensor | None = None
+        self._mask_wp = None
+        # Persistent staging buffers per width — see ``_staged``.
+        self._staged_bufs: dict[int, Tensor] = {}
 
     def _staged(self, env_ids: Tensor | None, values: Tensor, width: int) -> Tensor:
         """Full ``(num_worlds, width)`` buffer with ``values`` at the reset rows.
 
-        Masked-out rows are never written by the view kernel, so their content
-        (zeros) is irrelevant.
+        Masked-out rows are never written by the view kernel, so their
+        content — zeros on first use, a previous reset's values after —
+        is irrelevant. The buffer is allocated once per width and
+        refilled in place.
         """
-        num_worlds = self._env.scene_manager.model.world_count
-        buf = torch.zeros((num_worlds, width), device=self._env.device, dtype=torch.float32)
+        buf = self._staged_bufs.get(width)
+        if buf is None:
+            num_worlds = self._env.scene_manager.model.world_count
+            buf = torch.zeros((num_worlds, width), device=self._env.device, dtype=torch.float32)
+            self._staged_bufs[width] = buf
         buf[env_ids if env_ids is not None else slice(None)] = values
         return buf
 
@@ -283,9 +317,4 @@ class NewtonRigidObjectStateWriter:
         self._view.eval_fk(self._env.scene_manager.state, mask=self._mask(env_ids))
 
     def _mask(self, env_ids: Tensor | None):
-        if env_ids is None:
-            return None
-        num_worlds = self._env.scene_manager.model.world_count
-        mask = torch.zeros(num_worlds, dtype=torch.bool, device=self._env.device)
-        mask[env_ids] = True
-        return wp.from_torch(mask)
+        return _persistent_mask(self, env_ids)

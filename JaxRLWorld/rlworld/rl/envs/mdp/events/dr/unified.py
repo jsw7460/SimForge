@@ -26,6 +26,7 @@ that have no cross-sim counterpart.
 
 from __future__ import annotations
 
+import weakref
 from typing import TYPE_CHECKING, Literal
 
 import torch
@@ -391,6 +392,9 @@ def _mujoco_friction_backend(
 # ──────────────────────────────────────────────────────────────────────
 
 
+_MJLAB_CFG_CACHE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
 def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scene):
     """Build a resolved mjlab ``SceneEntityCfg`` from our selector.
 
@@ -399,11 +403,23 @@ def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scen
     from ``asset_cfg.source_selector``).  Used by every MuJoCo backend;
     mjlab import is local because the module-level rule says simulator
     deps are optional extras.
+
+    Memoized per (selector, scene): DR terms call this on every reset,
+    and ``resolve`` re-runs the name regexes each time even though both
+    the selector and the compiled scene are static after build.
     """
     from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
 
     if isinstance(asset_cfg, ResolvedEntity):
         asset_cfg = asset_cfg.source_selector
+
+    per_scene = _MJLAB_CFG_CACHE.get(asset_cfg)
+    if per_scene is None:
+        per_scene = {}
+        _MJLAB_CFG_CACHE[asset_cfg] = per_scene
+    cached = per_scene.get(id(scene))
+    if cached is not None:
+        return cached
 
     cfg = _MjlabSceneEntityCfg(
         name=asset_cfg.name,
@@ -415,6 +431,7 @@ def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scen
         preserve_order=asset_cfg.preserve_order,
     )
     cfg.resolve(scene)
+    per_scene[id(scene)] = cfg
     return cfg
 
 
@@ -754,6 +771,27 @@ def _genesis_dr_baseline(env, entity_name: str, param: str, getter) -> torch.Ten
     return cache[key]
 
 
+_GENESIS_SEL_DOFS_CACHE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _genesis_sel_dofs(env, resolved):
+    """``(sel_dofs, sel_np)`` — the selector's Genesis dof subset, cached.
+
+    ``sel_dofs`` are the entity-local dof indices as a device tensor,
+    ``sel_np`` the same as numpy for Genesis's ``dofs_idx_local``
+    argument. Both are static per selector, but DR terms recompute them
+    every reset and the ``.cpu()`` crossing costs a sync each time.
+    """
+    hit = _GENESIS_SEL_DOFS_CACHE.get(resolved)
+    if hit is not None:
+        return hit
+    selected = _selected_joint_ids(env, resolved)
+    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
+    sel_np = None if sel_dofs is None else sel_dofs.cpu().numpy()
+    _GENESIS_SEL_DOFS_CACHE[resolved] = (sel_dofs, sel_np)
+    return sel_dofs, sel_np
+
+
 def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(
@@ -762,20 +800,21 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
         )
     entity = env.scene_manager[resolved.name]
     # Canonical joint subset -> Genesis local dof indices (None = all dofs).
-    selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
-    sel_np = None if sel_dofs is None else sel_dofs.cpu().numpy()
+    sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
     n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
+    # Values are passed as device tensors: Genesis's setters run them
+    # through ``torch.as_tensor(..., device=gs.device)``, so a numpy
+    # detour costs a D2H sync plus an H2D upload for nothing.
     if kp_range is not None:
         base_kp = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "kp", entity.get_dofs_kp), sel_dofs)
         ratios = sample((len(env_ids), n_sel), *kp_range, env.device, distribution)
         kp_new = (base_kp * ratios) if base_kp.dim() == 1 else (base_kp[env_ids] * ratios)
-        entity.set_dofs_kp(kp=kp_new.cpu().numpy(), dofs_idx_local=sel_np, envs_idx=env_ids)
+        entity.set_dofs_kp(kp=kp_new, dofs_idx_local=sel_np, envs_idx=env_ids)
     if kd_range is not None:
         base_kv = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "kv", entity.get_dofs_kv), sel_dofs)
         ratios = sample((len(env_ids), n_sel), *kd_range, env.device, distribution)
         kv_new = (base_kv * ratios) if base_kv.dim() == 1 else (base_kv[env_ids] * ratios)
-        entity.set_dofs_kv(kv=kv_new.cpu().numpy(), dofs_idx_local=sel_np, envs_idx=env_ids)
+        entity.set_dofs_kv(kv=kv_new, dofs_idx_local=sel_np, envs_idx=env_ids)
 
 
 def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
@@ -928,15 +967,14 @@ def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation,
     if operation != "scale":
         raise NotImplementedError(f"Genesis joint_armature DR only supports operation='scale' (got {operation!r}).")
     entity = env.scene_manager[resolved.name]
-    selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
+    sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
     n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
     base = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "armature", entity.get_dofs_armature), sel_dofs)
     ratios = sample((len(env_ids), n_sel), *armature_range, env.device, distribution)
     arm_new = (base * ratios) if base.dim() == 1 else (base[env_ids] * ratios)
     entity.set_dofs_armature(
-        armature=arm_new.cpu().numpy(),
-        dofs_idx_local=None if sel_dofs is None else sel_dofs.cpu().numpy(),
+        armature=arm_new,
+        dofs_idx_local=sel_np,
         envs_idx=env_ids,
     )
 
@@ -1027,13 +1065,12 @@ def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, oper
             f"(got {operation!r}); set_dofs_frictionloss takes absolute values."
         )
     entity = env.scene_manager[resolved.name]
-    selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
+    sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
     n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
     values = sample((len(env_ids), n_sel), *friction_range, env.device, distribution)
     entity.set_dofs_frictionloss(
-        frictionloss=values.cpu().numpy(),
-        dofs_idx_local=None if sel_dofs is None else sel_dofs.cpu().numpy(),
+        frictionloss=values,
+        dofs_idx_local=sel_np,
         envs_idx=env_ids,
     )
 
@@ -1130,13 +1167,12 @@ def _genesis_joint_damping_backend(env, env_ids, resolved, damping_range, operat
             f"(got {operation!r}); set_dofs_damping takes absolute values."
         )
     entity = env.scene_manager[resolved.name]
-    selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
+    sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
     n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
     values = sample((len(env_ids), n_sel), *damping_range, env.device, distribution)
     entity.set_dofs_damping(
-        damping=values.cpu().numpy(),
-        dofs_idx_local=None if sel_dofs is None else sel_dofs.cpu().numpy(),
+        damping=values,
+        dofs_idx_local=sel_np,
         envs_idx=env_ids,
     )
 

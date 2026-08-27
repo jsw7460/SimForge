@@ -76,6 +76,23 @@ class RobotStateWriterProtocol(Protocol):
         """Write joint velocities for the actuated DOFs."""
         ...
 
+    def set_dof_state(
+        self,
+        positions: torch.Tensor,
+        velocities: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Write joint positions AND velocities in one call.
+
+        Semantically identical to ``set_dof_positions`` followed by
+        ``set_dof_velocities``, but lets a backend do it cheaper: mjlab's
+        ``write_joint_state_to_sim`` wants the pair anyway (the split
+        calls each gather the missing half from sim state), and Genesis
+        can run a single forward pass instead of one per write. Reset
+        paths that have both halves should call this.
+        """
+        ...
+
     def set_root_pose(
         self,
         pos: torch.Tensor,

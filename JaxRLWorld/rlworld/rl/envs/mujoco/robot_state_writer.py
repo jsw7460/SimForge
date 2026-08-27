@@ -83,6 +83,21 @@ class MujocoRobotStateWriter:
             joint_ids=self._joint_ids,
         )
 
+    def set_dof_state(self, positions: Tensor, velocities: Tensor, env_ids: Tensor | None = None) -> None:
+        """Write joint positions and velocities in one native call.
+
+        ``write_joint_state_to_sim`` wants the pair anyway; passing both
+        halves skips the two current-state gathers and one of the two
+        full writes the split setters would perform.
+        """
+        env_ids = self._resolve_env_ids(env_ids)
+        self._entity.write_joint_state_to_sim(
+            positions,
+            velocities,
+            env_ids=env_ids,
+            joint_ids=self._joint_ids,
+        )
+
     # ------------------------------------------------------------------
     # Root writes
     # ------------------------------------------------------------------

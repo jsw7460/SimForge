@@ -80,6 +80,28 @@ class GenesisRobotStateWriter:
             envs_idx=env_ids,
         )
 
+    def set_dof_state(self, positions: Tensor, velocities: Tensor, env_ids: torch.Tensor | None = None) -> None:
+        """Write joint positions and velocities with a single forward pass.
+
+        Velocity first with ``skip_forward=True``, then the position
+        write, whose unconditional FK recomputes the link buffers from
+        BOTH the new qpos and the new dof velocities — one forward
+        instead of two. ``zero_velocity=False``: see
+        :meth:`set_dof_positions`.
+        """
+        self._entity.set_dofs_velocity(
+            velocity=velocities,
+            dofs_idx_local=self._actuated_dof_ids,
+            envs_idx=env_ids,
+            skip_forward=True,
+        )
+        self._entity.set_dofs_position(
+            position=positions,
+            dofs_idx_local=self._actuated_dof_ids,
+            envs_idx=env_ids,
+            zero_velocity=False,
+        )
+
     # ------------------------------------------------------------------
     # Root writes
     # ------------------------------------------------------------------
@@ -122,8 +144,16 @@ class GenesisRobotStateWriter:
         through its mocap base and Newton through its fixed-root mocap bodies.
 
         ``zero_velocity=False``: see :meth:`set_dof_positions`.
+
+        ``skip_forward=True`` on the position write only: the quat write
+        that immediately follows runs the forward pass, refreshing the
+        link state both writes touched in one FK instead of two. The
+        quat write must NOT skip — ``set_root_velocity`` reads
+        ``get_quat`` (FK-refreshed link state, not qpos) right after,
+        and standalone velocity writes (pushes) rely on fresh link
+        buffers for the very next observation.
         """
-        self._entity.set_pos(pos, envs_idx=env_ids, zero_velocity=False)
+        self._entity.set_pos(pos, envs_idx=env_ids, zero_velocity=False, skip_forward=True)
         self._entity.set_quat(quat_wxyz, envs_idx=env_ids, zero_velocity=False)
 
     def set_root_velocity(

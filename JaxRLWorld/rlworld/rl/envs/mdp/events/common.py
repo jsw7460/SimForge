@@ -331,8 +331,7 @@ def reset_joints_by_offset(
     mid, soft_half = env.act_manager.soft_joint_limits_of(asset_cfg.name)
     default_pos = default_pos.clamp(mid - soft_half, mid + soft_half)
 
-    writer.set_dof_positions(default_pos, env_ids=env_ids)
-    writer.set_dof_velocities(joint_vel, env_ids=env_ids)
+    writer.set_dof_state(default_pos, joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
 
 
@@ -373,8 +372,7 @@ def reset_joints_by_scale(
     else:
         joint_vel = torch.empty(n, num_joints, device=device).uniform_(*velocity_range)
 
-    writer.set_dof_positions(joint_pos, env_ids=env_ids)
-    writer.set_dof_velocities(joint_vel, env_ids=env_ids)
+    writer.set_dof_state(joint_pos, joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
 
 
@@ -586,6 +584,5 @@ def reset_fallen_or_standing(
     # ── Write ─────────────────────────────────────────────────────
     writer.set_root_pose(pos, quat_wxyz, env_ids=env_ids)
     writer.set_root_velocity(lin_vel, ang_vel, env_ids=env_ids)
-    writer.set_dof_positions(joint_pos, env_ids=env_ids)
-    writer.set_dof_velocities(joint_vel, env_ids=env_ids)
+    writer.set_dof_state(joint_pos, joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)

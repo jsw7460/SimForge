@@ -125,6 +125,10 @@ class World(ABC):
         # :meth:`get_root_state_writer`.
         self._rigid_object_state_writer_cache: dict = {}
 
+        # Memoized ``_resolve_default_joint_pos`` results per entity —
+        # static config, but the reset event path asks on every reset.
+        self._default_joint_pos_resolved: dict = {}
+
         # One ArticulationIndexing per articulation entity, built on first
         # use by :meth:`entity_indexing`. The driven entity is not stored
         # here — it defers to the action manager's own indexing.
@@ -449,11 +453,17 @@ class World(ABC):
         applied it to every robot, so a second robot inherited the
         first's home pose.
 
-        Called once per env init — not per reset.
+        Memoized per entity: the pose is static config, but the reset
+        event term calls this on every reset, and the uncached resolve
+        pays a regex match plus one scalar H2D kernel per joint each
+        time. Callers treat the returned tensor as read-only.
         """
         from rlworld.rl.utils import string as _su
 
         name = entity_name if entity_name is not None else self.robot_entity_name
+        cached = self._default_joint_pos_resolved.get(name)
+        if cached is not None:
+            return cached
         all_names = list(self.entity_indexing(name).joint_names)
         base = torch.zeros(len(all_names), device=self.device, dtype=torch.float32)
 
@@ -464,6 +474,7 @@ class World(ABC):
             for idx, val in zip(matched_idx, matched_vals):
                 base[idx] = val
 
+        self._default_joint_pos_resolved[name] = base
         return base
 
     @abstractmethod
