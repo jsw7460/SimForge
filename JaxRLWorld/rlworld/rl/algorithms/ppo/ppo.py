@@ -465,7 +465,10 @@ class PPO(OnPolicyAlgorithm):
         key = self.train_state.key
         key, subkey = jax.random.split(key)
 
-        stacked_batches = self.storage.get_stacked_batches(
+        # The rollout stays flat (views, no copy); the update's scan
+        # gathers one shuffled minibatch per step via these index rows.
+        flat_batch = self.storage.get_flat_batch()
+        batch_indices = self.storage.get_minibatch_indices(
             num_minibatches=self.num_mini_batches,
             num_epochs=self.num_learning_epochs,
             key=subkey,
@@ -494,7 +497,8 @@ class PPO(OnPolicyAlgorithm):
             desired_kl,
             self.symmetry_spec,
             self.symmetry_coef,
-            stacked_batches,
+            flat_batch,
+            batch_indices,
             subkey,
         )
 
@@ -507,7 +511,7 @@ class PPO(OnPolicyAlgorithm):
         )
 
         # Compute metrics
-        metrics = self._compute_metrics(outputs, stacked_batches)
+        metrics = self._compute_metrics(outputs, flat_batch, batch_indices)
 
         # Adaptive learning rate based on KL divergence.
         # Use the analytical KL averaged over actually-applied minibatches —
@@ -538,7 +542,7 @@ class PPO(OnPolicyAlgorithm):
 
         return metrics
 
-    def _compute_metrics(self, outputs: ScanOutput, stacked_batches) -> PPOMetrics:
+    def _compute_metrics(self, outputs: ScanOutput, flat_batch, batch_indices) -> PPOMetrics:
         """Compute metrics from update outputs."""
         did_update = outputs.did_update
         num_actual_updates = int(did_update.sum())
@@ -563,17 +567,21 @@ class PPO(OnPolicyAlgorithm):
 
         # Get current std. Every std module reads the state vector (a
         # vision policy's images are not part of it), so take the first
-        # minibatch of that.
+        # minibatch of that — gathered from the flat rollout by the same
+        # index row the update's first scan step used.
         model = self.train_state.model
-        sample_obs = model._actor_vector(stacked_batches.actor_observations)[0]
+        mb0_obs = jax.tree.map(lambda x: x[batch_indices[0]], flat_batch.actor_observations)
+        sample_obs = model._actor_vector(mb0_obs)
         current_std = float(model.std_module(sample_obs).mean())
 
         # Early stop ratio
         early_stop_ratio = 1.0 - (num_actual_updates / num_expected_updates)
 
-        # Batch statistics
-        actions = stacked_batches.actions
-        returns = stacked_batches.returns
+        # Batch statistics over the flat rollout.  (The old pre-gathered
+        # layout averaged over num_epochs permuted copies of the same
+        # samples — mathematically the same statistics.)
+        actions = flat_batch.actions
+        returns = flat_batch.returns
 
         return PPOMetrics(
             critic=PPOCriticMetrics(

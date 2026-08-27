@@ -99,7 +99,8 @@ class RolloutStorage:
         - normalize_advantages(): rsl_rl-style per-rollout normalization
         - get_flat_observations(): flatten obs for normalizer updates
         - get_flat_actions(): flatten actions for action-stat logging
-        - get_stacked_batches(...): shuffled minibatches for the update loop
+        - get_flat_batch() + get_minibatch_indices(...): the update loop's
+          data — one flat batch plus shuffled index rows into it
         - clear(): reset for the next rollout (no reallocation)
     """
 
@@ -249,68 +250,55 @@ class RolloutStorage:
 
     # ----------------------------------------------------------- minibatch
 
-    def get_stacked_batches(
+    def get_flat_batch(self) -> RolloutBatch:
+        """The whole rollout as ONE flat batch, ``[T*N, ...]`` per field.
+
+        Observation reshapes are views — nothing here copies the rollout.
+        Minibatching happens later, inside the update's scan, by indexing
+        this flat batch with ``get_minibatch_indices``: the shuffled
+        minibatches are never materialized all at once, which is what
+        used to blow device memory on image observations (the old
+        pre-gathered layout held ``num_epochs`` full copies of the
+        rollout).
+        """
+        if self.advantages is None or self.returns is None:
+            raise RuntimeError("get_flat_batch() called before compute_returns().")
+        batch_size = self.num_envs * self.num_steps
+        return RolloutBatch(
+            actor_observations=_obs_reshape(self.actor_obs, self.actor_obs_shape, (batch_size,)),
+            critic_observations=_obs_reshape(self.critic_obs, self.critic_obs_shape, (batch_size,)),
+            actions=self.actions.reshape((batch_size,) + self.action_shape),
+            values=self.values.reshape(batch_size),
+            advantages=self.advantages.reshape(batch_size),
+            returns=self.returns.reshape(batch_size),
+            old_log_probs=self.log_probs.reshape(batch_size),
+            old_mu=self.mu.reshape((batch_size,) + self.action_shape),
+            old_sigma=self.sigma.reshape((batch_size,) + self.action_shape),
+        )
+
+    def get_minibatch_indices(
         self,
         num_minibatches: int,
         num_epochs: int,
         key: jax.Array,
-    ) -> RolloutBatch:
-        """Get stacked, shuffled minibatches for the PPO update loop.
+    ) -> jax.Array:
+        """Shuffled minibatch indices into the flat batch.
 
-        Output shape per field: ``(num_epochs * num_minibatches, minibatch_size, ...)``.
-        The leading axis is the dimension that the scan-based update
-        iterates over.
+        Shape ``(num_epochs * num_minibatches, minibatch_size)`` — the
+        leading axis is what the scan-based update iterates over.  Key
+        handling and permutation order are kept exactly as the old
+        pre-gathered path (one independent permutation per epoch, split
+        sequentially into minibatches), so row ``i`` selects the very
+        same samples the old layout put in stacked batch ``i``.
         """
-        if self.advantages is None or self.returns is None:
-            raise RuntimeError("get_stacked_batches() called before compute_returns().")
         batch_size = self.num_envs * self.num_steps
         minibatch_size = batch_size // num_minibatches
-        num_total_batches = num_epochs * num_minibatches
-
-        # Flatten [T, N, ...] → [T*N, ...]
-        flat_actor_obs = _obs_reshape(self.actor_obs, self.actor_obs_shape, (batch_size,))
-        flat_critic_obs = _obs_reshape(self.critic_obs, self.critic_obs_shape, (batch_size,))
-        flat_actions = self.actions.reshape((batch_size,) + self.action_shape)
-        flat_values = self.values.reshape(batch_size)
-        flat_advantages = self.advantages.reshape(batch_size)
-        flat_returns = self.returns.reshape(batch_size)
-        flat_log_probs = self.log_probs.reshape(batch_size)
-        flat_mu = self.mu.reshape((batch_size,) + self.action_shape)
-        flat_sigma = self.sigma.reshape((batch_size,) + self.action_shape)
 
         # One independent permutation per epoch.
         keys = jax.random.split(key, num_epochs)
         perms = jax.vmap(lambda k: jax.random.permutation(k, batch_size))(keys)
 
-        shuf_actor_obs = jax.vmap(lambda p: jax.tree.map(lambda o: o[p], flat_actor_obs))(perms)
-        shuf_critic_obs = jax.vmap(lambda p: jax.tree.map(lambda o: o[p], flat_critic_obs))(perms)
-        shuf_actions = jax.vmap(lambda p: flat_actions[p])(perms)
-        shuf_values = jax.vmap(lambda p: flat_values[p])(perms)
-        shuf_advantages = jax.vmap(lambda p: flat_advantages[p])(perms)
-        shuf_returns = jax.vmap(lambda p: flat_returns[p])(perms)
-        shuf_log_probs = jax.vmap(lambda p: flat_log_probs[p])(perms)
-        shuf_mu = jax.vmap(lambda p: flat_mu[p])(perms)
-        shuf_sigma = jax.vmap(lambda p: flat_sigma[p])(perms)
-
-        # (num_epochs, num_minibatches, minibatch_size, ...)
-        def reshape_batches(arr):
-            return arr.reshape((num_epochs, num_minibatches, minibatch_size) + arr.shape[2:])
-
-        # (num_epochs * num_minibatches, minibatch_size, ...)
-        def merge_epochs(arr):
-            return arr.reshape((num_total_batches, minibatch_size) + arr.shape[3:])
-
-        return RolloutBatch(
-            actor_observations=jax.tree.map(lambda o: merge_epochs(reshape_batches(o)), shuf_actor_obs),
-            critic_observations=jax.tree.map(lambda o: merge_epochs(reshape_batches(o)), shuf_critic_obs),
-            actions=merge_epochs(reshape_batches(shuf_actions)),
-            values=merge_epochs(reshape_batches(shuf_values)),
-            advantages=merge_epochs(reshape_batches(shuf_advantages)),
-            returns=merge_epochs(reshape_batches(shuf_returns)),
-            old_log_probs=merge_epochs(reshape_batches(shuf_log_probs)),
-            old_mu=merge_epochs(reshape_batches(shuf_mu)),
-            old_sigma=merge_epochs(reshape_batches(shuf_sigma)),
-        )
+        return perms.reshape(num_epochs * num_minibatches, minibatch_size)
 
 
 # ==================== Functional GAE ====================

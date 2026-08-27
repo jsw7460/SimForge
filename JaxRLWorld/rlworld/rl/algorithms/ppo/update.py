@@ -219,7 +219,8 @@ def update_all_batches(
     desired_kl: float,
     symmetry_spec: Any,
     symmetry_coef: float,
-    batches: RolloutBatch,
+    flat_batch: RolloutBatch,
+    batch_indices: jax.Array,
     key: jax.Array,
 ) -> tuple[Any, optax.OptState, ScanOutput, jax.Array]:
     """
@@ -237,14 +238,19 @@ def update_all_batches(
         normalize_advantages: Whether to normalize advantages (static)
         use_early_stop: Whether to use KL-based early stopping (static)
         desired_kl: Target KL for early stopping (static, used as threshold)
-        batches: Stacked batches (num_batches, batch_size, ...)
+        flat_batch: The whole rollout, flat: ``[T*N, ...]`` per field
+        batch_indices: Shuffled minibatch rows into ``flat_batch``,
+            ``(num_batches, minibatch_size)`` — each scan step gathers
+            just its own minibatch, so the shuffled epochs are never
+            materialized together (the old pre-gathered layout held
+            ``num_epochs`` full rollout copies on device)
         key: JAX random key
 
     Returns:
         Updated params, opt_state, and aggregated outputs
     """
 
-    def scan_fn(carry: ScanCarry, batch: RolloutBatch) -> tuple[ScanCarry, ScanOutput]:
+    def scan_fn(carry: ScanCarry, idx: jax.Array) -> tuple[ScanCarry, ScanOutput]:
         params, opt_state, key, early_stopped = (
             carry.params,
             carry.opt_state,
@@ -252,6 +258,10 @@ def update_all_batches(
             carry.early_stopped,
         )
         key, subkey = jax.random.split(key)
+
+        # Gather this step's minibatch from the flat rollout (dict obs
+        # groups included via the tree map).
+        batch = jax.tree.map(lambda x: x[idx], flat_batch)
 
         def loss_fn(p):
             return compute_batch_loss(
@@ -321,6 +331,6 @@ def update_all_batches(
         key=key,
         early_stopped=jnp.array(False),
     )
-    final_carry, outputs = jax.lax.scan(scan_fn, init_carry, batches)
+    final_carry, outputs = jax.lax.scan(scan_fn, init_carry, batch_indices)
 
     return final_carry.params, final_carry.opt_state, outputs, final_carry.key
