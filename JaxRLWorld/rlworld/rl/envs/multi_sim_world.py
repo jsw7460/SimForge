@@ -315,9 +315,6 @@ class MultiSimWorld:
 
         # ── Buffers ──
         self.rew_buf = torch.zeros(self.num_envs, device=self.device)
-        self.episode_sums: defaultdict = defaultdict(
-            lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32)
-        )
         self.rew_buf_per_type: defaultdict = defaultdict(
             lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32)
         )

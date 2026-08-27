@@ -137,7 +137,6 @@ class World(ABC):
     def _init_buffers(self) -> None:
         """Initialize common buffers. Call after setting num_envs and device."""
         self.rew_buf = torch.zeros(self.num_envs, device=self.device)
-        self.episode_sums = defaultdict(lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32))
         self.rew_buf_per_type = defaultdict(lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32))
         self.extras = {}
 
@@ -744,9 +743,7 @@ class World(ABC):
 
         # Compute rewards
         self.rew_buf[:] = 0.0
-        self.reward_manager.set_rewards(
-            reward_buffer=self.rew_buf, episode_sums=self.episode_sums, reward_buffer_per_type=self.rew_buf_per_type
-        )
+        self.reward_manager.set_rewards(reward_buffer=self.rew_buf, reward_buffer_per_type=self.rew_buf_per_type)
 
         # Handle terminal observations.
         #
@@ -963,11 +960,6 @@ class World(ABC):
         # state under a ``Curriculum/`` namespace in
         # :meth:`BaseRunner.log_training_data`.
         self.curriculum_manager.reset(env_ids)
-
-        # Reset episode sums
-        keys = list(self.episode_sums.keys())
-        for key in keys:
-            self.episode_sums[key].index_fill_(0, env_ids, 0.0)
 
     def reset(self, *, seed=None, options=None) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         """Reset all environments."""

@@ -36,7 +36,6 @@ import importlib
 import statistics
 import time
 from collections import defaultdict
-from copy import deepcopy
 
 import jax.numpy as jnp
 import torch
@@ -309,7 +308,6 @@ def _probe_step_phases(env, timer: _Timer, actions: torch.Tensor) -> None:
         "reset_buf.nonzero": lambda: env.termination_manager.reset_buf.nonzero(as_tuple=False).flatten(),
         "reward_manager.set_rewards": lambda: env.reward_manager.set_rewards(
             reward_buffer=env.rew_buf,
-            episode_sums=env.episode_sums,
             reward_buffer_per_type=env.rew_buf_per_type,
         ),
         "command_manager.compute": lambda: env.command_manager.compute(env.control_dt),
@@ -534,7 +532,6 @@ def _probe_done_branch(env, timer: _Timer) -> None:
             env.obs_manager.rollback_last_history_append(),
         ),
         "clone the observations": lambda: {key: obs.clone() for key, obs in env.obs_manager.obs_dict.items()},
-        "deepcopy(episode_sums)": lambda: deepcopy(env.episode_sums),
         "_reset_idx(env_ids)": lambda: env._reset_idx(env_ids),
         "_post_reset_forward (whole batch)": lambda: env._post_reset_forward(),
     }
@@ -688,9 +685,6 @@ def _probe_reset_managers(env, timer: _Timer, env_ids: torch.Tensor, repeats: in
             "contact.refresh_after_reset": lambda: env.contact_manager.refresh_after_reset(env_ids),
             "reward.reset": lambda: env.reward_manager.reset(env_ids),
             "curriculum.reset": lambda: env.curriculum_manager.reset(env_ids),
-            "episode_sums index_fill": lambda: [
-                env.episode_sums[key].index_fill_(0, env_ids, 0.0) for key in list(env.episode_sums.keys())
-            ],
         }
     )
 
