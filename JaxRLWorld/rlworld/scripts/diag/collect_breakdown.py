@@ -97,7 +97,12 @@ class _Timer:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--preset", choices=[*_PRESETS, "go2_gait"], default="yam_lift")
+    ap.add_argument(
+        "--preset",
+        default="yam_lift",
+        help=f"A shorthand ({', '.join([*_PRESETS, 'go2_gait'])}) or 'module.path:ClassName' "
+        "for any preset config class taking (sim_type, num_envs).",
+    )
     ap.add_argument("--sim", default="mujoco", choices=("genesis", "newton", "mujoco"))
     ap.add_argument("--num-envs", type=int, default=8192)
     ap.add_argument("--warmup", type=int, default=24)
@@ -117,7 +122,11 @@ def main() -> int:
     if args.performance_mode and args.sim != "genesis":
         ap.error("--performance-mode only applies to --sim genesis")
 
-    if args.preset == "go2_gait":
+    if ":" in args.preset:
+        mod_path, cls_name = args.preset.split(":", 1)
+        cfg_cls = importlib.import_module(mod_path).__dict__[cls_name]
+        cfgs = cfg_cls(sim_type=args.sim, num_envs=args.num_envs).build()
+    elif args.preset == "go2_gait":
         # Per-sim gait config classes, imported lazily so only the
         # requested backend's simulator is loaded (each per-sim config
         # module imports its engine at module scope).
