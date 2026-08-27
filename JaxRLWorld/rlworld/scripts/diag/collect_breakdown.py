@@ -404,8 +404,11 @@ def _probe_contact_sensors(env, timer: _Timer, repeats: int) -> None:
         reader.raw()
 
     probes = {"reader.raw (shared list read)": shared_read}
+    # Production path: one fused capture for all groups (GenesisContactBatch).
+    probes[f"batched capture ({len(sensors)} groups)"] = lambda: env.contact_manager._capture_all()
+    # Reference: what the per-group path costs, for the batching delta.
     for name, sensor in sensors.items():
-        probes[f"capture_substep: {name}"] = lambda sensor=sensor: sensor.capture_substep()
+        probes[f"per-group capture_substep: {name}"] = lambda sensor=sensor: sensor.capture_substep()
     _time_probes(timer, probes, repeats)
 
     _probe_capture_stages(env, next(iter(sensors.values())), timer, repeats)

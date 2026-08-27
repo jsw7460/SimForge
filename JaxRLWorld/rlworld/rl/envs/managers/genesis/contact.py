@@ -7,7 +7,11 @@ from genesis.utils.misc import qd_to_torch
 
 from rlworld.rl.configs.sensors import ContactSensorCfg
 from rlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
-from rlworld.rl.envs.managers.genesis.contact_sensor import GenesisContactListReader, GenesisContactSensor
+from rlworld.rl.envs.managers.genesis.contact_sensor import (
+    GenesisContactBatch,
+    GenesisContactListReader,
+    GenesisContactSensor,
+)
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
@@ -29,25 +33,36 @@ class ContactManager(BaseContactManager):
         super().__init__(env=env)
         self._list_reader = GenesisContactListReader(env)
         self._sensors: dict[str, GenesisContactSensor] = {}
+        # Fused per-substep capture across all groups; (re)built lazily on
+        # the first advance after registration settles.
+        self._batch: GenesisContactBatch | None = None
 
     def register_sensor(self, cfg: ContactSensorCfg) -> None:
         """Register a contact sensor config as a named group."""
         sensor = GenesisContactSensor(self.env, cfg, reader=self._list_reader)
         self._sensors[cfg.name] = sensor
         self._register_group(cfg.name, sensor.tracked_names, cfg.fields)
+        self._batch = None
+
+    def _capture_all(self) -> None:
+        """One fused capture for every group (see GenesisContactBatch)."""
+        if not self._sensors:
+            return
+        if self._batch is None:
+            self._batch = GenesisContactBatch(self.env, self._list_reader, list(self._sensors.values()))
+        self._batch.capture_substep()
 
     # -- per-substep capture + timing accumulation --
 
     def advance(self, dt: float) -> None:
-        """Capture one contact frame per group from the shared list read,
-        then run the base per-substep timing arithmetic on it.
+        """Capture one contact frame for all groups from the shared list
+        read, then run the base per-substep timing arithmetic on it.
 
         ``GenesisEnv._step_physics`` bumps the cache generation after
-        every ``scene.step``, so the sensors' shared collider read is
-        fresh exactly once per substep no matter how many groups exist.
+        every ``scene.step``, so the shared collider read is fresh
+        exactly once per substep no matter how many groups exist.
         """
-        for sensor in self._sensors.values():
-            sensor.capture_substep()
+        self._capture_all()
         super().advance(dt=dt)
 
     # -- abstract impl --
@@ -101,8 +116,7 @@ class ContactManager(BaseContactManager):
         # (``read_found``/``read_force``), so push one frame from the
         # fresh detection — the Newton counterpart's ``_update_sensors``
         # call does the same on its side.
-        for sensor in self._sensors.values():
-            sensor.capture_substep()
+        self._capture_all()
 
     # -- pretty print --
 

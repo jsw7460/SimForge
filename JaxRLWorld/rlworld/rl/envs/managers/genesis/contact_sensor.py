@@ -329,21 +329,14 @@ class GenesisContactSensor:
 
         found = (pmask_a | pmask_b).any(1)  # (B, P)
 
-        # torch.roll allocates a fresh tensor, so frames handed out by the
-        # read paths below stay valid snapshots after later captures.
-        self._found_hist = torch.roll(self._found_hist, 1, dims=1)
-        self._found_hist[:, 0] = found
-
-        if not self._track_force:
-            return
-
-        # World-frame signed sum: the collider force applies to side b;
-        # side a receives the opposite sign.
-        f_world = torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force)
-        quats = self._reader.links_quat(self._entity)[:, self._primary_local]
-        f_local = inv_transform_by_quat(f_world, quats)
-        self._force_hist = torch.roll(self._force_hist, 1, dims=1)
-        self._force_hist[:, 0] = f_local
+        f_local = None
+        if self._track_force:
+            # World-frame signed sum: the collider force applies to side b;
+            # side a receives the opposite sign.
+            f_world = torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force)
+            quats = self._reader.links_quat(self._entity)[:, self._primary_local]
+            f_local = inv_transform_by_quat(f_world, quats)
+        self.push_frame(found, f_local)
 
     # ------------------------------------------------------------------
     # reads (captured frames only)
@@ -352,6 +345,20 @@ class GenesisContactSensor:
     def read_found(self) -> torch.Tensor:
         """(num_envs, N) bool — newest captured ``found`` frame."""
         return self._found_hist[:, 0]
+
+    def push_frame(self, found: torch.Tensor, f_local: torch.Tensor | None) -> None:
+        """Push one externally computed frame onto the rings.
+
+        Used by :class:`GenesisContactBatch`, which computes every
+        group's frame in one fused pass and hands each sensor its slice.
+        ``torch.roll`` allocates a fresh tensor, so frames handed out by
+        the read paths stay valid snapshots after later captures.
+        """
+        self._found_hist = torch.roll(self._found_hist, 1, dims=1)
+        self._found_hist[:, 0] = found
+        if self._track_force:
+            self._force_hist = torch.roll(self._force_hist, 1, dims=1)
+            self._force_hist[:, 0] = f_local
 
     def read_force(self) -> torch.Tensor:
         """(num_envs, N, 3) — newest captured link-local net contact force."""
@@ -378,3 +385,109 @@ class GenesisContactSensor:
         """(num_envs, N, H, 3) captured contact-force history, newest-first."""
         self._require_force()
         return self._force_hist.permute(0, 2, 1, 3)
+
+
+class GenesisContactBatch:
+    """One fused per-substep capture for every contact group.
+
+    Each group used to run its own primary-link masks, counterpart test,
+    ``einsum`` and frame rotation against the same shared contact-list
+    read — with G groups that is G of everything, all launch-bound small
+    kernels (measured ~0.24 ms per group per substep on go2_gait @4096).
+    The batch concatenates every group's primary links into one column
+    axis and runs each stage once, then hands each sensor its column
+    slice via :meth:`GenesisContactSensor.push_frame`.
+
+    Per-column math is identical to ``capture_substep``'s: ``found`` is
+    bit-identical, ``force`` can differ only by the reduction scheduling
+    inside the single larger einsum (float sum order).
+    """
+
+    def __init__(self, env: GenesisEnv, reader: GenesisContactListReader, sensors: list[GenesisContactSensor]):
+        self._reader = reader
+        self._sensors = sensors
+        device = env.device
+
+        self._all_primary = torch.cat([s._primary_links for s in sensors])
+        slices, start = [], 0
+        for s in sensors:
+            slices.append(slice(start, start + s._num_primary))
+            start += s._num_primary
+        self._slices = slices
+
+        # Distinct counterpart sets: most presets point every group at the
+        # same counterpart (the terrain), so the membership test collapses
+        # to one. ``None`` in the list means "every link counts".
+        keys: list[tuple] = []
+        self._distinct_counterparts: list[torch.Tensor | None] = []
+        col_set: list[int] = []
+        for s in sensors:
+            key = ("all",) if s._counterpart_is_all else tuple(s._counterpart_links.tolist())
+            if key not in keys:
+                keys.append(key)
+                self._distinct_counterparts.append(None if s._counterpart_is_all else s._counterpart_links)
+            col_set.extend([keys.index(key)] * s._num_primary)
+        self._uniform_counterpart = len(self._distinct_counterparts) == 1
+        self._col_set = torch.tensor(col_set, dtype=torch.long, device=device)
+
+        # Force is only computed for the columns whose sensor tracks it
+        # (the fields declaration — see the ring comment in the sensor).
+        self._force_sensors = [s for s in sensors if s._track_force]
+        fcols: list[int] = []
+        for s, sl in zip(sensors, slices):
+            if s._track_force:
+                fcols.extend(range(sl.start, sl.stop))
+        self._force_cols = torch.tensor(fcols, dtype=torch.long, device=device) if fcols else None
+        self._force_all_cols = self._force_cols is not None and len(fcols) == start
+
+    def capture_substep(self) -> None:
+        """Compute this substep's frames for every group and push them."""
+        link_a, link_b, force, row_valid = self._reader.raw()
+
+        on_a = link_a.unsqueeze(-1) == self._all_primary  # (B, C, P_total)
+        on_b = link_b.unsqueeze(-1) == self._all_primary
+
+        a_oks, b_oks = [], []
+        for cp in self._distinct_counterparts:
+            if cp is None:
+                a_oks.append(row_valid)
+                b_oks.append(row_valid)
+            else:
+                a_oks.append(row_valid & (link_a.unsqueeze(-1) == cp).any(-1))
+                b_oks.append(row_valid & (link_b.unsqueeze(-1) == cp).any(-1))
+        if self._uniform_counterpart:
+            a_ok_cols = a_oks[0].unsqueeze(-1)
+            b_ok_cols = b_oks[0].unsqueeze(-1)
+        else:
+            a_ok_cols = torch.stack(a_oks, dim=-1)[:, :, self._col_set]
+            b_ok_cols = torch.stack(b_oks, dim=-1)[:, :, self._col_set]
+
+        # A pair counts for a primary link on side a iff the OTHER side (b)
+        # is an allowed counterpart, and vice versa — same rule per column
+        # as the single-group capture.
+        pmask_a = on_a & b_ok_cols
+        pmask_b = on_b & a_ok_cols
+        found = (pmask_a | pmask_b).any(1)  # (B, P_total)
+
+        f_local = None
+        if self._force_cols is not None:
+            if self._force_all_cols:
+                sub_a, sub_b = pmask_a, pmask_b
+            else:
+                sub_a = pmask_a[:, :, self._force_cols]
+                sub_b = pmask_b[:, :, self._force_cols]
+            f_world = torch.einsum("ncp,nci->npi", sub_b.float() - sub_a.float(), force)
+            quats = torch.cat(
+                [self._reader.links_quat(s._entity)[:, s._primary_local] for s in self._force_sensors],
+                dim=1,
+            )
+            f_local = inv_transform_by_quat(f_world, quats)
+
+        fstart = 0
+        for s, sl in zip(self._sensors, self._slices):
+            if s._track_force:
+                n = s._num_primary
+                s.push_frame(found[:, sl], f_local[:, fstart : fstart + n])
+                fstart += n
+            else:
+                s.push_frame(found[:, sl], None)
