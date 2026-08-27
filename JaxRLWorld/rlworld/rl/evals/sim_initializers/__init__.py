@@ -173,7 +173,17 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
         if cls is not None and is_dataclass(cls):
             field_names = {f.name for f in fields(cls)}
             if "sim_type" in field_names:
-                kwargs = {k: v for k, v in config_dict.get("preset_kwargs", {}).items() if k in field_names}
+                preset_kwargs = config_dict["preset_kwargs"]
+                if preset_kwargs is None:
+                    raise ValueError(
+                        f"{preset_class_name}.build() left preset_kwargs unset in this "
+                        "checkpoint, so the eval env cannot be rebuilt faithfully -- "
+                        "reconstructing from class defaults would silently drop any "
+                        "non-default constructor kwargs the training run used. Fix the "
+                        "preset to capture its kwargs (see K1JoystickConfig."
+                        "_get_preset_kwargs) and retrain, or pass eval_cfgs manually."
+                    )
+                kwargs = {k: v for k, v in preset_kwargs.items() if k in field_names}
                 kwargs["sim_type"] = sim_key
                 return cls(**kwargs).build()
 

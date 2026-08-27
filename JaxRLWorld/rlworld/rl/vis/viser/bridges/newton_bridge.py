@@ -188,14 +188,25 @@ class NewtonBridge(SimulatorBridge):
         return "ground" in leaf or "plane" in leaf
 
     def _find_tracked_body(self) -> int | None:
-        """Find the robot base body index (first non-ground body)."""
+        """Find the floating base: the child body of a FREE joint.
+
+        Mirrors the MuJoCo bridge. A name heuristic ("base"/"pelvis")
+        picked the WRONG body on robots whose root is named otherwise
+        (Mobile ALOHA's "footprint" fell through to a fallback that
+        returned body 1 -- a wheel -- and the velocity arrow rotated
+        the correct world velocity into a spinning wheel's frame).
+        The ground plane is static geometry on body -1, so a fixed-base
+        robot's root is simply the first body.
+        """
         model = self._model
-        for i in range(min(self._bodies_per_world, len(model.body_label))):
-            label = model.body_label[i]
-            if "base" in label.lower() or "pelvis" in label.lower():
-                return i
-        # Default to body 1 (skip ground at 0).
-        return min(1, self._bodies_per_world - 1) if self._bodies_per_world > 1 else 0
+        joint_type = model.joint_type.numpy()
+        joint_child = model.joint_child.numpy()
+        for j in range(len(joint_type)):
+            if int(joint_type[j]) == int(newton.JointType.FREE):
+                child = int(joint_child[j])
+                if child < self._bodies_per_world:
+                    return child
+        return 0 if self._bodies_per_world > 0 else None
 
     @staticmethod
     def _heightfield_to_vertices_faces(hf: Heightfield) -> tuple[np.ndarray, np.ndarray]:

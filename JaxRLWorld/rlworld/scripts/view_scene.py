@@ -118,11 +118,12 @@ def _add_action_sliders(viewer, policy: FixedAction, env) -> None:
                 if gain == 0.0:
                     print(f"[view_scene] {joint!r} has action scale 0 — no slider (it cannot be commanded)")
                     continue
-                # A joint with no declared range reports an infinite limit,
-                # which is not a number a slider can span. Say so and give
+                # A joint with no declared range reports an infinite limit
+                # -- or, on Newton, a finite sentinel around 1e8 -- neither
+                # of which is a number a slider can span. Say so and give
                 # it a workable window around home rather than emitting a
                 # control whose ends are unreachable.
-                if not (np.isfinite(low) and np.isfinite(high) and high > low):
+                if not (np.isfinite(low) and np.isfinite(high) and high > low) or (high - low) > 1.0e3:
                     print(
                         f"[view_scene] {joint!r} has no usable joint range "
                         f"(low={low}, high={high}) — slider spans home +-pi instead"

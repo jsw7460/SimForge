@@ -31,6 +31,7 @@ from .viewer import (
     _ANG_VEL_POS_COLOR,
     _ANG_VEL_THRESHOLD,
     _ARROW_HEAD_RADIUS,
+    _ARROW_LENGTH_BUCKETS,
     _ARROW_LENGTH_SCALE,
     _ARROW_SHAFT_RADIUS,
     _ARROW_Z_OFFSET,
@@ -627,21 +628,34 @@ class ViserPlayViewer(PlayViewerBase):
 
         if magnitude < 1e-4:
             if old_handles is not None:
-                for h in old_handles:
-                    h.remove()
+                old_handles[0].remove()
+                old_handles[1].remove()
             return None
 
-        if old_handles is not None:
-            for h in old_handles:
-                h.remove()
-
-        arrow_length = min(_MAX_ARROW_LENGTH, magnitude * _ARROW_LENGTH_SCALE)
         direction = np.array([world_vx, world_vy, 0.0]) / magnitude
         z_axis = np.array([0.0, 0.0, 1.0])
         rot_quat = _rotation_quat_from_vectors(z_axis, direction)
         r, g, b = color
 
+        # A remove + add round-trip blinks in the browser, so the meshes
+        # are rebuilt only when the arrow LENGTH crosses a quantization
+        # bucket; position and orientation mutate in place every frame.
+        raw_length = min(_MAX_ARROW_LENGTH, magnitude * _ARROW_LENGTH_SCALE)
+        bucket = max(1, round(raw_length / _MAX_ARROW_LENGTH * _ARROW_LENGTH_BUCKETS))
+        arrow_length = bucket / _ARROW_LENGTH_BUCKETS * _MAX_ARROW_LENGTH
+
         shaft_length = _SHAFT_LENGTH_RATIO * arrow_length
+        if old_handles is not None and old_handles[2] == bucket:
+            shaft_h, head_h = old_handles[0], old_handles[1]
+            shaft_h.position = tuple(origin)
+            shaft_h.wxyz = tuple(rot_quat)
+            head_h.position = tuple(origin + direction * shaft_length)
+            head_h.wxyz = tuple(rot_quat)
+            return old_handles
+
+        if old_handles is not None:
+            old_handles[0].remove()
+            old_handles[1].remove()
         shaft = _get_unit_shaft_mesh().copy()
         shaft.visual = trimesh.visual.ColorVisuals(
             mesh=shaft,
@@ -669,7 +683,7 @@ class ViserPlayViewer(PlayViewerBase):
             wxyz=tuple(rot_quat),
             scale=(_ARROW_HEAD_RADIUS, _ARROW_HEAD_RADIUS, head_length),
         )
-        return (shaft_h, head_h)
+        return (shaft_h, head_h, bucket)
 
     def _draw_angular_indicator(
         self,
@@ -677,25 +691,33 @@ class ViserPlayViewer(PlayViewerBase):
         ang_vel: float,
         old_handle: Any,
     ) -> Any:
-        if old_handle is not None:
-            old_handle.remove()
         if abs(ang_vel) < _ANG_VEL_THRESHOLD:
+            if old_handle is not None:
+                old_handle[0].remove()
             return None
         color = _ANG_VEL_POS_COLOR if ang_vel > 0 else _ANG_VEL_NEG_COLOR
-        radius = 0.03 + 0.03 * min(1.0, abs(ang_vel))
+        # Same anti-blink treatment as the arrows: rebuild the mesh only
+        # when the quantized radius or the spin direction changes.
+        radius = 0.03 + 0.03 * round(min(1.0, abs(ang_vel)) * 8) / 8
         pos = origin.copy()
         pos[2] += 0.15
+        if old_handle is not None and old_handle[1] == (radius, color):
+            old_handle[0].position = tuple(pos)
+            return old_handle
+        if old_handle is not None:
+            old_handle[0].remove()
         mesh = trimesh.creation.icosphere(subdivisions=2, radius=radius)
         r, g, b = color
         mesh.visual = trimesh.visual.ColorVisuals(
             mesh=mesh,
             face_colors=np.tile([r, g, b, 255], (len(mesh.faces), 1)),
         )
-        return self._server.scene.add_mesh_trimesh(
+        handle = self._server.scene.add_mesh_trimesh(
             name="/overlay/ang_vel",
             mesh=mesh,
             position=tuple(pos),
         )
+        return (handle, (radius, color))
 
     # ── Lifecycle ──────────────────────────────────────────────────
 

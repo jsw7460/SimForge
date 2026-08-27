@@ -34,6 +34,7 @@ _ANG_VEL_NEG_COLOR = (50, 200, 200)  # Cyan for negative angular vel
 # Arrow settings.
 _ARROW_LENGTH_SCALE = 0.5
 _MAX_ARROW_LENGTH = 1.0
+_ARROW_LENGTH_BUCKETS = 12  # length quantization steps; in-place pose updates between rebuilds
 _ARROW_Z_OFFSET = 0.8  # Above the robot's head for humanoids.
 _ANG_VEL_THRESHOLD = 0.05
 
@@ -309,23 +310,34 @@ class ViserVisualizationManager:
         magnitude = np.sqrt(world_vx**2 + world_vy**2)
         if magnitude < 1e-4:
             if old_handles is not None:
-                for h in old_handles:
-                    h.remove()
+                old_handles[0].remove()
+                old_handles[1].remove()
             return None
 
-        arrow_length = min(_MAX_ARROW_LENGTH, magnitude * _ARROW_LENGTH_SCALE)
         direction = np.array([world_vx, world_vy, 0.0]) / magnitude
-
-        # Remove old handles.
-        if old_handles is not None:
-            for h in old_handles:
-                h.remove()
 
         z_axis = np.array([0.0, 0.0, 1.0])
         rotation_quat = _rotation_quat_from_vectors(z_axis, direction)
 
-        # Shaft: cylinder from origin along direction.
+        # A remove + add round-trip blinks in the browser, so the meshes
+        # are rebuilt only when the arrow LENGTH crosses a quantization
+        # bucket; position and orientation mutate in place every frame.
+        raw_length = min(_MAX_ARROW_LENGTH, magnitude * _ARROW_LENGTH_SCALE)
+        bucket = max(1, round(raw_length / _MAX_ARROW_LENGTH * _ARROW_LENGTH_BUCKETS))
+        arrow_length = bucket / _ARROW_LENGTH_BUCKETS * _MAX_ARROW_LENGTH
+
         shaft_length = _SHAFT_LENGTH_RATIO * arrow_length
+        if old_handles is not None and old_handles[2] == bucket:
+            shaft_handle, head_handle = old_handles[0], old_handles[1]
+            shaft_handle.position = tuple(origin)
+            shaft_handle.wxyz = tuple(rotation_quat)
+            head_handle.position = tuple(origin + direction * shaft_length)
+            head_handle.wxyz = tuple(rotation_quat)
+            return old_handles
+
+        if old_handles is not None:
+            old_handles[0].remove()
+            old_handles[1].remove()
         shaft_mesh = _get_unit_shaft_mesh()
         r, g, b = color
         shaft_colored = shaft_mesh.copy()
@@ -358,7 +370,7 @@ class ViserVisualizationManager:
             scale=(_ARROW_HEAD_RADIUS, _ARROW_HEAD_RADIUS, head_length),
         )
 
-        return (shaft_handle, head_handle)
+        return (shaft_handle, head_handle, bucket)
 
     def _draw_angular_indicator(
         self,
@@ -367,17 +379,24 @@ class ViserVisualizationManager:
         old_handle=None,
     ):
         """Draw angular velocity indicator sphere."""
-        if old_handle is not None:
-            old_handle.remove()
-
         if abs(ang_vel) < _ANG_VEL_THRESHOLD:
+            if old_handle is not None:
+                old_handle[0].remove()
             return None
 
         color = _ANG_VEL_POS_COLOR if ang_vel > 0 else _ANG_VEL_NEG_COLOR
-        radius = 0.03 + 0.03 * min(1.0, abs(ang_vel))
+        # Same anti-blink treatment as the arrows: rebuild the mesh only
+        # when the quantized radius or the spin direction changes.
+        radius = 0.03 + 0.03 * round(min(1.0, abs(ang_vel)) * 8) / 8
 
         pos = origin.copy()
         pos[2] += 0.15
+
+        if old_handle is not None and old_handle[1] == (radius, color):
+            old_handle[0].position = tuple(pos)
+            return old_handle
+        if old_handle is not None:
+            old_handle[0].remove()
 
         mesh = trimesh.creation.icosphere(subdivisions=2, radius=radius)
         r, g, b = color
@@ -390,7 +409,7 @@ class ViserVisualizationManager:
             mesh=mesh,
             position=tuple(pos),
         )
-        return handle
+        return (handle, (radius, color))
 
     def start_recording(self) -> None:
         """Start video recording (placeholder)."""
