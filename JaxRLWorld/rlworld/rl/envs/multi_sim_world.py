@@ -330,6 +330,17 @@ class MultiSimWorld:
 
         self._task_name = getattr(self._primary, "task_name", "multi_sim")
 
+    @property
+    def terminal_obs_groups(self) -> tuple[str, ...] | None:
+        return self._primary.terminal_obs_groups
+
+    @terminal_obs_groups.setter
+    def terminal_obs_groups(self, groups: tuple[str, ...] | None) -> None:
+        # Forward the runner's narrowing to every sub-env — the wrapper
+        # itself never builds a terminal observation, its sub-envs do.
+        for env in self.envs:
+            env.terminal_obs_groups = groups
+
     # ------------------------------------------------------------------
     # Joint permutation setup
     # ------------------------------------------------------------------
@@ -619,24 +630,8 @@ class MultiSimWorld:
                 merged_rpt[k] = torch.cat(parts, dim=0)
             merged["rewards_per_type"] = merged_rpt
 
-        # episode_reward_sums
-        if "episode_reward_sums" in all_infos[0]:
-            sum_keys = set()
-            for info in all_infos:
-                if info.get("episode_reward_sums") is not None:
-                    sum_keys.update(info["episode_reward_sums"].keys())
-            merged_sums: Dict[str, torch.Tensor] = {}
-            for k in sum_keys:
-                parts = []
-                for info, n in zip(all_infos, self.splits):
-                    sums = info.get("episode_reward_sums")
-                    parts.append(sums[k] if sums is not None and k in sums else torch.zeros(n, device=self.device))
-                merged_sums[k] = torch.cat(parts, dim=0)
-            merged["episode_reward_sums"] = merged_sums
-
         # final_observation (permuted to canonical order)
         merged["final_observation"] = self._merge_final_observations(all_infos)
-        merged["final_info"] = self._merge_final_info(all_infos)
         merged["terminal_env_ids"] = self._merge_terminal_env_ids(all_infos)
 
         return merged
@@ -669,32 +664,6 @@ class MultiSimWorld:
             merged[k] = torch.cat(parts, dim=0)
 
         return merged
-
-    def _merge_final_info(self, all_infos: List[Dict[str, Any]]) -> Dict[str, Any] | None:
-        has_any = any(info.get("final_info") is not None for info in all_infos)
-        if not has_any:
-            return None
-
-        sum_keys: set = set()
-        for info in all_infos:
-            fi = info.get("final_info")
-            if fi is not None and "episode_reward_sums" in fi:
-                sum_keys.update(fi["episode_reward_sums"].keys())
-        if not sum_keys:
-            return None
-
-        merged_sums: Dict[str, torch.Tensor] = {}
-        for k in sum_keys:
-            parts = []
-            for info, env in zip(all_infos, self.envs):
-                fi = info.get("final_info")
-                parts.append(
-                    fi["episode_reward_sums"][k]
-                    if fi is not None and k in fi.get("episode_reward_sums", {})
-                    else torch.zeros(env.num_envs, device=self.device)
-                )
-            merged_sums[k] = torch.cat(parts, dim=0)
-        return {"episode_reward_sums": merged_sums}
 
     def _merge_terminal_env_ids(self, all_infos: List[Dict[str, Any]]) -> torch.Tensor | None:
         parts = []

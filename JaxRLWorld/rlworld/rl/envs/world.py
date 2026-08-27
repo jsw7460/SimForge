@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import numpy as np
@@ -98,6 +97,13 @@ class World(ABC):
 
         self._env_step_counter = 0
         self.lifecycle = LifecycleManager()
+
+        # Which observation groups the terminal-observation pass computes.
+        # ``None`` means every group. A runner that consumes only part of
+        # ``final_observation`` narrows this (the on-policy runner sets
+        # ``("critic",)`` — PPO's truncation bootstrap reads nothing else),
+        # so terminal steps skip re-computing groups nobody reads.
+        self.terminal_obs_groups: tuple[str, ...] | None = None
 
         # Per-entity RobotData cache for articulations. Populated by each
         # backend's env at build time; read via :meth:`get_robot_data`.
@@ -744,20 +750,18 @@ class World(ABC):
         # downstream, so the rollback only matters for the non-terminated
         # ones.
         final_observation = None
-        final_info = None
         if len(reset_env_ids) > 0:
             # The terminal observation describes the state that ENDED the
             # episode, so its rendered sensors have to be of that state —
             # taken here, before the reset writes the next episode's pose
             # over it. Only on steps that actually terminate something,
             # since this is a second render.
+            groups = self.terminal_obs_groups
             self._render_sensors()
-            self.obs_manager.process_observations(update_history=True)
-            final_observation = {key: obs.clone() for key, obs in self.obs_manager.obs_dict.items()}
-            self.obs_manager.rollback_last_history_append()
-            final_info = {
-                "episode_reward_sums": deepcopy(self.episode_sums),
-            }
+            self.obs_manager.process_observations(update_history=True, groups=groups)
+            group_names = self.obs_manager.obs_dict.keys() if groups is None else groups
+            final_observation = {key: self.obs_manager.obs_dict[key].clone() for key in group_names}
+            self.obs_manager.rollback_last_history_append(groups=groups)
 
         # Reset terminated environments
         self._reset_idx(reset_env_ids)
@@ -804,7 +808,6 @@ class World(ABC):
         # Build extras
         self.extras = {
             "final_observation": final_observation,
-            "final_info": final_info,
             "terminal_env_ids": reset_env_ids if len(reset_env_ids) > 0 else None,
             "rewards_per_type": self.rew_buf_per_type,
             # Per-env mask of terminals whose value should be bootstrapped

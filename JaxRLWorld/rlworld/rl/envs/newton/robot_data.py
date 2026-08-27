@@ -11,6 +11,7 @@ Newton velocities are in **world frame**; body-frame properties rotate them.
 
 from __future__ import annotations
 
+import functools
 from typing import TYPE_CHECKING
 
 import newton
@@ -26,6 +27,38 @@ if TYPE_CHECKING:
     from newton.selection import ArticulationView
 
     from rlworld.rl.envs.newton.newton_env import NewtonEnv
+
+
+def _per_step_read(fn):
+    """Memoize a zero-argument state read for the current cache generation.
+
+    Newton reads cross warp→torch per CALL (``wp.to_torch`` rebuilds the
+    tensor view) and derived quantities re-run their rotation kernels for
+    every caller — obs / reward / termination terms re-read the same
+    quantity several times per control step. The cache key is
+    ``env._cache_generation``; ``NewtonEnv._step_physics`` bumps it after
+    EVERY physics substep (and ``World.step`` after the loop and after
+    resets), so a cached value can never outlive the sim state it was
+    read from — in particular the explicit-actuator PD path still gets a
+    fresh joint state each substep. Mirrors ``genesis/robot_data.py``.
+
+    Cached tensors are shared between callers within a step: treat every
+    RobotData read as read-only (the same convention mjlab's zero-copy
+    TorchArray views already impose).
+    """
+    name = fn.__name__
+
+    @functools.wraps(fn)
+    def wrapper(self):
+        gen = self._env._cache_generation
+        hit = self._read_cache.get(name)
+        if hit is not None and hit[0] == gen:
+            return hit[1]
+        value = fn(self)
+        self._read_cache[name] = (gen, value)
+        return value
+
+    return wrapper
 
 
 class NewtonRigidObjectData(SiteReaderMixin):
@@ -48,6 +81,8 @@ class NewtonRigidObjectData(SiteReaderMixin):
         self._env = env
         self._view = view
         self._entity_name = entity_name
+        # Per-step read memoization — see :func:`_per_step_read`.
+        self._read_cache: dict[str, tuple[int, Tensor]] = {}
         self._gravity_vec: Tensor | None = None
         self._default_joint_pos = default_joint_pos
         # Per-body CoM offset *in the body frame* (model.body_com), shape
@@ -163,15 +198,18 @@ class NewtonRigidObjectData(SiteReaderMixin):
     # ------------------------------------------------------------------
 
     @property
+    @_per_step_read
     def root_link_pos_w(self) -> Tensor:
         return self.root_pos_w(self._state)
 
     @property
+    @_per_step_read
     def root_link_quat_w(self) -> Tensor:
         """Quaternion in wxyz."""
         return self.root_quat_wxyz(self._state)
 
     @property
+    @_per_step_read
     def root_link_lin_vel_w(self) -> Tensor:
         # Newton's joint_qd[0:3] is the velocity AT the CoM. Transfer it to the
         # link frame origin O:  v_O = v_C - omega x (R @ c)
@@ -187,15 +225,18 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return v_com - torch.cross(omega, r_world, dim=-1)
 
     @property
+    @_per_step_read
     def root_link_ang_vel_w(self) -> Tensor:
         return self.root_ang_vel_w(self._state)
 
     @property
+    @_per_step_read
     def root_link_lin_vel_b(self) -> Tensor:
         quat_wxyz = self.root_quat_wxyz(self._state)
         return quat_rotate_inverse_wxyz(quat_wxyz, self.root_link_lin_vel_w)
 
     @property
+    @_per_step_read
     def root_link_ang_vel_b(self) -> Tensor:
         quat_wxyz = self.root_quat_wxyz(self._state)
         return quat_rotate_inverse_wxyz(quat_wxyz, self.root_link_ang_vel_w)
@@ -205,6 +246,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
     # the CoM position), so these are the "native" reads.
 
     @property
+    @_per_step_read
     def root_com_pos_w(self) -> Tensor:
         # r_C = r_O + R @ c
         quat_wxyz = self.root_quat_wxyz(self._state)
@@ -213,18 +255,22 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return link_pos + quat_rotate_wxyz(quat_wxyz, c.expand_as(link_pos))
 
     @property
+    @_per_step_read
     def root_com_lin_vel_w(self) -> Tensor:
         return self.root_lin_vel_w(self._state)  # raw joint_qd[0:3] = v at CoM
 
     @property
+    @_per_step_read
     def root_com_lin_vel_b(self) -> Tensor:
         return quat_rotate_inverse_wxyz(self.root_quat_wxyz(self._state), self.root_com_lin_vel_w)
 
     @property
+    @_per_step_read
     def projected_gravity_b(self) -> Tensor:
         return quat_rotate_inverse_wxyz(self.root_link_quat_w, self._get_gravity_vec())
 
     @property
+    @_per_step_read
     def heading_w(self) -> Tensor:
         return quat_to_euler_wxyz(self.root_link_quat_w)[:, 2]
 
@@ -312,6 +358,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
     # Batched per-body reads
     # ------------------------------------------------------------------
 
+    @_per_step_read
     def _body_q_view(self) -> Tensor:
         """Helper: state.body_q reshaped to (num_envs, bodies_per_env, 7).
 
@@ -327,6 +374,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         state = self._env.scene_manager.state
         return wp.to_torch(state.body_q).view(self._env.num_envs, cache.bodies_per_env, 7)
 
+    @_per_step_read
     def _body_qd_view(self) -> Tensor:
         """Helper: state.body_qd reshaped to (num_envs, bodies_per_env, 6).
 
@@ -362,6 +410,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return self._body_com_local
 
     @property
+    @_per_step_read
     def body_pos_w_all(self) -> Tensor:
         """World-frame positions of all bodies' link frame origins. Shape ``(num_envs, num_bodies, 3)``.
 
@@ -371,6 +420,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return self._body_q_view()[:, :, 0:3]
 
     @property
+    @_per_step_read
     def body_quat_w_all(self) -> Tensor:
         """World-frame orientations of all bodies, wxyz. Shape ``(num_envs, num_bodies, 4)``.
 
@@ -383,6 +433,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return quat_xyzw[..., [3, 0, 1, 2]]
 
     @property
+    @_per_step_read
     def body_lin_vel_w_all(self) -> Tensor:
         """World-frame linear velocities of all bodies, at their link frame origins. Shape ``(num_envs, num_bodies, 3)``.
 
@@ -397,11 +448,13 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return v_com - torch.cross(omega, r_world, dim=-1)
 
     @property
+    @_per_step_read
     def body_ang_vel_w_all(self) -> Tensor:
         """World-frame angular velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
         return self._body_qd_view()[:, :, 3:6]
 
     @property
+    @_per_step_read
     def body_com_pos_w_all(self) -> Tensor:
         """World-frame positions of all bodies' centers of mass. Shape ``(num_envs, num_bodies, 3)``.
 
@@ -412,6 +465,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return link_pos + quat_rotate_wxyz(self.body_quat_w_all, c.expand_as(link_pos))
 
     @property
+    @_per_step_read
     def body_com_lin_vel_w_all(self) -> Tensor:
         """World-frame linear velocities of all bodies at their centers of mass. Shape ``(num_envs, num_bodies, 3)``.
 
@@ -462,6 +516,12 @@ class NewtonRigidObjectData(SiteReaderMixin):
     # ------------------------------------------------------------------
 
     def angular_momentum_w(self, sensor_name: str | None = None) -> Tensor:
+        """Per-step-cached wrapper — ``sensor_name`` is ignored (documented
+        below), so all callers share one cached value per generation."""
+        return self._angular_momentum_w_cached()
+
+    @_per_step_read
+    def _angular_momentum_w_cached(self) -> Tensor:
         """Whole-body angular momentum (world frame) about the system CoM.
 
         Matches MuJoCo's ``subtreeangmom`` sensor (subtree rooted at the
@@ -547,6 +607,7 @@ class NewtonRobotData(NewtonRigidObjectData):
         """
         return self._env.entity_indexing(self._entity_name)
 
+    @_per_step_read
     def _joint_coords(self) -> Tensor:
         """One world's slice of the model-wide joint coordinate array.
 
@@ -561,6 +622,7 @@ class NewtonRobotData(NewtonRigidObjectData):
         worlds = model.world_count
         return wp.to_torch(self._state.joint_q).view(worlds, model.joint_coord_count // worlds)
 
+    @_per_step_read
     def _joint_dofs(self) -> Tensor:
         """One world's slice of the model-wide joint velocity array."""
         model = self._env.scene_manager.model
@@ -572,14 +634,17 @@ class NewtonRobotData(NewtonRigidObjectData):
         return self._default_joint_pos
 
     @property
+    @_per_step_read
     def joint_pos(self) -> Tensor:
         return self._joint_coords()[:, self._indexing.newton_q_indices]
 
     @property
+    @_per_step_read
     def joint_vel(self) -> Tensor:
         return self._joint_dofs()[:, self._indexing.newton_qd_indices]
 
     @property
+    @_per_step_read
     def applied_torque(self) -> Tensor:
         """Per-DOF actuator torque in actuated order.
 

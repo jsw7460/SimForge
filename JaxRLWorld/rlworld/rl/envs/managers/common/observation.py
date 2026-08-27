@@ -213,22 +213,32 @@ class ObservationManager(BaseManager):
             for buffer in delay_buffers.values():
                 buffer.reset(batch_ids=env_ids)
 
-    def rollback_last_history_append(self) -> None:
+    def rollback_last_history_append(self, groups: tuple[str, ...] | None = None) -> None:
         """Undo the most recent history append on every term's circular buffer.
 
         Used by ``World.step`` after capturing the terminal observation: the
         capture appends the terminal frame into history (so terminal
         observations include it), then this rollback rewinds the write head so
         the subsequent per-step ``advance()`` is the only append that counts.
+
+        ``groups`` must match the ``groups`` the capturing
+        ``process_observations`` call received: only those groups' buffers
+        advanced, so only they are rewound.
         """
-        for group_buffers in self._group_obs_term_history_buffer.values():
+        if groups is None:
+            history_groups = self._group_obs_term_history_buffer.values()
+            delay_groups = self._group_obs_term_delay_buffer.values()
+        else:
+            history_groups = [self._group_obs_term_history_buffer[name] for name in groups]
+            delay_groups = [self._group_obs_term_delay_buffer[name] for name in groups]
+        for group_buffers in history_groups:
             for buf in group_buffers.values():
                 buf.rollback_last()
         # Delay buffers advanced (append + lag sample) during the capture
         # pass too; rewind them the same way, including the sampler RNG,
         # so a step with a terminal capture consumes the same random
         # stream as one without.
-        for delay_buffers in self._group_obs_term_delay_buffer.values():
+        for delay_buffers in delay_groups:
             for buf in delay_buffers.values():
                 buf.rollback_last()
 
@@ -270,10 +280,24 @@ class ObservationManager(BaseManager):
 
     # ========== Core Processing ==========
 
-    def process_observations(self, update_history: bool = True) -> None:
-        self.obs_dict = {}
+    def process_observations(self, update_history: bool = True, groups: tuple[str, ...] | None = None) -> None:
+        """Compute observation groups into ``obs_dict``.
 
-        for group_name, terms in self._group_terms.items():
+        ``groups`` restricts the pass to those groups (used by the
+        terminal-observation capture in ``World.step``, which only needs
+        what the runner actually reads from ``final_observation``); their
+        history/delay buffers are the only ones that advance, so the
+        matching ``rollback_last_history_append(groups=...)`` must receive
+        the same tuple. ``None`` computes every group and rebuilds
+        ``obs_dict`` from scratch.
+        """
+        if groups is None:
+            self.obs_dict = {}
+            group_items = self._group_terms.items()
+        else:
+            group_items = [(name, self._group_terms[name]) for name in groups]
+
+        for group_name, terms in group_items:
             obs_list = []
             apply_group_noise = self._groups[group_name].enable_corruption
 
@@ -290,7 +314,12 @@ class ObservationManager(BaseManager):
                     clip = obs_term.clip
                     if isinstance(clip, list):
                         clip = tuple(clip)
-                    obs_value = obs_value.clip_(min=clip[0], max=clip[1])
+                    # Out-of-place on purpose: a term may hand back a shared
+                    # tensor — a per-step-memoized RobotData read, an
+                    # @EnvStepCache value, or an mjlab zero-copy view straight
+                    # into sim memory — and an in-place clip would corrupt it
+                    # for every other reader (or write into the simulator).
+                    obs_value = obs_value.clip(min=clip[0], max=clip[1])
 
                 obs_value = obs_value * scale
 

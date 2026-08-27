@@ -393,6 +393,12 @@ class NewtonEnv(World):
             if self._external_wrench is not None:
                 self._write_external_wrench()
             self.scene_manager.step()
+            # The physics state just advanced; bump the read-cache generation
+            # so per-step-memoized reads (RobotData) can never serve a
+            # pre-substep value inside the decimation loop — the
+            # explicit-actuator PD path re-reads joint state each substep.
+            # (Same per-substep bump Genesis does in its ``_step_physics``.)
+            self._invalidate_cache()
             self.contact_manager.advance(dt=self.physics_dt)
 
             # Per SUBSTEP, not per control step: four solver steps separate

@@ -43,6 +43,11 @@ class OnPolicyRunner(BaseRunner):
         """Initialize the runner with environment and configuration."""
         self.algorithm_name = cfgs.algorithm.algorithm_name
         super().__init__(env=env, cfgs=cfgs, use_wandb=use_wandb, seed=seed)
+        # The on-policy path reads only the critic's groups from
+        # ``final_observation`` (PPO truncation bootstrap; see
+        # ``_pack_obs``), so terminal steps skip computing the rest.
+        # Adapter envs without the attribute simply carry it inertly.
+        self.env.terminal_obs_groups = ("critic", *self.critic_image_groups)
 
     def _init_training_modules(self) -> None:
         """Initialize actor-critic model based on algorithm type."""

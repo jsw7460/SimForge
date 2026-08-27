@@ -28,6 +28,13 @@ class NewtonContactManager(BaseContactManager):
         super().__init__(env)
         # group name -> NewtonContactSensor
         self._group_sensors: dict[str, NewtonContactSensor] = {}
+        # Per-step force memoization, keyed by ``env._cache_generation``
+        # (bumped every physics substep and after resets/events, so a
+        # cached read can never outlive the sensor state it came from).
+        # ``is_contact`` / ``contact_force`` re-read the same group from
+        # several reward/termination terms per step; each uncached read
+        # costs a warp→torch crossing plus a reduction.
+        self._force_cache: dict[str, tuple[int, torch.Tensor | None]] = {}
         # Lazily captured CUDA graph for the post-reset forward (see
         # refresh_after_reset); None until first capture or when the
         # scene manager runs without graphs.
@@ -48,7 +55,13 @@ class NewtonContactManager(BaseContactManager):
     # -- abstract impl --
 
     def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
-        return self._group_sensors[group.name].compute_force()
+        gen = self.env._cache_generation
+        hit = self._force_cache.get(group.name)
+        if hit is not None and hit[0] == gen:
+            return hit[1]
+        value = self._group_sensors[group.name].compute_force()
+        self._force_cache[group.name] = (gen, value)
+        return value
 
     def _compute_group_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
         return self._group_sensors[group.name].compute_history()  # (num_envs, N, H, 3) or None

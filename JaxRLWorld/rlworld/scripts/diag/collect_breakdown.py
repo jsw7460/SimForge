@@ -195,8 +195,9 @@ def main() -> int:
         timer.start()
         infos_jax = {}
         if infos.get("final_observation") is not None:
+            # The runner narrows ``env.terminal_obs_groups`` to the critic's
+            # groups, so ``final_observation`` no longer carries "actor".
             infos_jax["final_observation"] = {
-                "actor": torch_to_jax(infos["final_observation"]["actor"]),
                 "critic": torch_to_jax(infos["final_observation"]["critic"]),
             }
             if infos.get("bootstrap_mask") is not None:
