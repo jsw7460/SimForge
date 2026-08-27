@@ -204,7 +204,13 @@ def compute_batch_loss(
 # ==================== Main Update Function ====================
 
 
-@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10, 12))
+# ``opt_state`` is donated: it is consumed and immediately replaced by the
+# caller, so XLA can write the new Adam moments into the old buffers
+# instead of allocating 2x parameter bytes fresh every iteration.
+# ``params`` is NOT donated — on the first update its leaves are the
+# initial model's arrays, which the runner's ``actor_critic`` reference
+# still shares; donating them would invalidate that object's buffers.
+@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10, 12), donate_argnums=(2,))
 def update_all_batches(
     params: Any,
     static: Any,

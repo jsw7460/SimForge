@@ -807,7 +807,6 @@ class World(ABC):
             "final_info": final_info,
             "terminal_env_ids": reset_env_ids if len(reset_env_ids) > 0 else None,
             "rewards_per_type": self.rew_buf_per_type,
-            "episode_reward_sums": deepcopy(self.episode_sums),
             # Per-env mask of terminals whose value should be bootstrapped
             # (truncations + non-absorbing terminations). Consumed by the
             # on-policy bootstrap; equals ``truncated & ~terminated`` unless

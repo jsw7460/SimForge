@@ -587,15 +587,27 @@ class BaseRunner(ABC):
             if success_t is not None:
                 success_available = True
 
-            # Collect completed episodes
-            for i in range(num_envs):
-                if dones[i] and len(completed_returns) < target_episodes:
-                    completed_returns.append(episode_returns[i].item())
-                    completed_lengths.append(episode_lengths[i].item())
+            # Collect completed episodes.  One nonzero + one batched
+            # transfer: the old per-env ``if dones[i]`` / ``.item()``
+            # loop was num_envs blocking syncs per eval step.
+            done_idx = dones.nonzero(as_tuple=False).flatten()
+            if len(done_idx) > 0 and len(completed_returns) < target_episodes:
+                rnames = list(reward_type_sums)
+                rows = [episode_returns[done_idx].float(), episode_lengths[done_idx].float()]
+                if success_t is not None:
+                    rows.append(success_t[done_idx].float())
+                rows.extend(reward_type_sums[r][done_idx].float() for r in rnames)
+                stacked = torch.stack(rows).cpu().numpy()
+                off = 3 if success_t is not None else 2
+                for j in range(stacked.shape[1]):
+                    if len(completed_returns) >= target_episodes:
+                        break
+                    completed_returns.append(float(stacked[0, j]))
+                    completed_lengths.append(int(stacked[1, j]))
                     if success_t is not None:
-                        completed_successes.append(float(success_t[i].item()))
-                    for rname in reward_type_sums:
-                        completed_reward_breakdowns[rname].append(reward_type_sums[rname][i].item())
+                        completed_successes.append(float(stacked[2, j]))
+                    for k, rname in enumerate(rnames):
+                        completed_reward_breakdowns[rname].append(float(stacked[off + k, j]))
 
             # Reset tracking for done envs
             episode_returns[dones] = 0
@@ -860,11 +872,23 @@ class BaseRunner(ABC):
         )
 
     def _save_latest_checkpoint(self, iteration: int) -> None:
-        """Save latest checkpoint (overwritten every iteration)."""
+        """Save the rolling ``checkpoint_latest``.
+
+        Written to a temp dir first and swapped in with renames, so a
+        valid latest checkpoint exists at every instant (the old
+        rmtree-then-write left a window with none).
+        """
         latest_dir = os.path.join(self.model_log_dir, "checkpoint_latest")
+        tmp_dir = latest_dir + ".tmp"
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        self._save_checkpoint_to(tmp_dir, iteration)
+        old_dir = latest_dir + ".old"
         if os.path.exists(latest_dir):
-            shutil.rmtree(latest_dir)
-        self._save_checkpoint_to(latest_dir, iteration)
+            os.rename(latest_dir, old_dir)
+        os.rename(tmp_dir, latest_dir)
+        if os.path.exists(old_dir):
+            shutil.rmtree(old_dir)
 
     def post_iteration(self, data: IterationData, total_iter: int, it: int = 0):
         """Post-iteration processing."""
@@ -887,8 +911,10 @@ class BaseRunner(ABC):
         if it % self.runner_cfg.save_interval == 0:
             self.checkpoint(it)
 
-        # Save latest every iteration
-        self._save_latest_checkpoint(it)
+        # The rolling latest checkpoint is a full-parameter D2H plus
+        # synchronous disk I/O — every iteration was pure overhead.
+        if it % self.runner_cfg.latest_checkpoint_interval == 0:
+            self._save_latest_checkpoint(it)
 
     def collect_dynamics_dataset(
         self,

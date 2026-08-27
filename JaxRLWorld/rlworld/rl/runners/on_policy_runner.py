@@ -377,7 +377,16 @@ class OnPolicyRunner(BaseRunner):
             self.post_iteration(data, total_iter, it)
 
     def _get_action_statistics(self) -> Dict[str, Any]:
-        """Extract action stats from rollout storage."""
+        """Extract action stats from rollout storage.
+
+        Gated BEFORE the device transfer: with both action-logging flags
+        off (the default) the old path still paid a blocking D2H of the
+        whole rollout's actions every iteration — and, sitting between
+        compute_returns and update(), charged it to learning_time.
+        """
+        logging_cfg = getattr(self.runner_cfg, "logging", None)
+        if not (getattr(logging_cfg, "action_dist", False) or getattr(logging_cfg, "action_histogram", False)):
+            return {}
         # Returns flattened [num_steps * num_envs, action_dim]; the helper
         # reshape internally if it needs the (T, N, D) layout.
         actions = np.array(self.alg.storage.get_flat_actions())

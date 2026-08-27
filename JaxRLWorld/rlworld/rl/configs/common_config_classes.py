@@ -775,6 +775,10 @@ class RunnerConfig(BaseConfig):
     logger: str = "wandb"
     wandb_project: str = "SimForge"
     save_interval: int = 1000
+    # Cadence of the rolling ``checkpoint_latest`` (full-parameter D2H +
+    # disk write). 1 restores the old save-every-iteration behavior; the
+    # crash-recovery cost of the default is at most this many iterations.
+    latest_checkpoint_interval: int = 10
     output_dir: str = "auto"
     upload_checkpoint: bool = False
     delete_local_after_upload: bool = False

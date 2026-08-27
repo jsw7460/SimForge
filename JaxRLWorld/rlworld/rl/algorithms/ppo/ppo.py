@@ -74,6 +74,47 @@ def _update_normalizers(
     )
 
 
+@eqx.filter_jit
+def _metric_values(model: PPOActorCritic, outputs, flat_actions, flat_returns, mb0_actor_obs) -> jax.Array:
+    """Every per-iteration metric scalar in ONE compiled program and ONE
+    output array. The loose ``float()`` / ``int()`` reads this replaces
+    were ~16 separate blocking host transfers per update; the caller now
+    pays a single ``np.asarray``.
+    """
+    n = outputs.did_update.sum()
+    n_f = n.astype(jnp.float32)
+    mask = outputs.did_update.astype(jnp.float32)
+
+    def masked_mean(x):
+        # Mean over actually-applied minibatches; plain mean when the
+        # whole update early-stopped (same branch the host code took).
+        return jnp.where(n > 0, (x * mask).sum() / jnp.maximum(n_f, 1.0), x.mean())
+
+    sample_obs = model._actor_vector(mb0_actor_obs)
+    current_std = model.std_module(sample_obs).mean()
+    return jnp.stack(
+        [
+            n_f,
+            masked_mean(outputs.value_loss),
+            masked_mean(outputs.policy_loss),
+            masked_mean(outputs.entropy),
+            masked_mean(outputs.approx_kl),
+            masked_mean(outputs.clip_fraction),
+            masked_mean(outputs.aux["mirror_loss"]),
+            # Also feeds the adaptive-LR schedule (identical formula to
+            # the duplicate the host code used to recompute).
+            masked_mean(outputs.analytical_kl),
+            flat_returns.mean(),
+            flat_returns.std(),
+            flat_returns.min(),
+            flat_returns.max(),
+            flat_actions.mean(),
+            flat_actions.std(),
+            current_std,
+        ]
+    )
+
+
 class PPOTrainState(NamedTuple):
     """Training state for PPO."""
 
@@ -202,6 +243,9 @@ class PPO(OnPolicyAlgorithm):
         # runner from the env's obs layout; coef 0 disables (no trace cost).
         self.symmetry_spec = symmetry_spec
         self.symmetry_coef = symmetry_coef
+        # Filled by _compute_metrics each update; consumed by the
+        # adaptive-LR schedule in the same update() call.
+        self._last_analytical_kl_mean = 0.0
         self.optimizer_class = optimizer_class or optax.adam
 
         # Check if model has normalizers enabled
@@ -516,15 +560,9 @@ class PPO(OnPolicyAlgorithm):
         # Adaptive learning rate based on KL divergence.
         # Use the analytical KL averaged over actually-applied minibatches —
         # lower-variance signal than approx_kl, matches rsl_rl behavior.
+        # The value comes out of the single metrics transfer above.
         if self.schedule == "adaptive" and self.desired_kl is not None:
-            did_update = outputs.did_update
-            num_actual_updates = int(did_update.sum())
-            if num_actual_updates > 0:
-                update_mask = did_update.astype(jnp.float32)
-                analytical_kl_mean = float((outputs.analytical_kl * update_mask).sum() / num_actual_updates)
-            else:
-                analytical_kl_mean = float(outputs.analytical_kl.mean())
-            self._adaptive_learning_rate(analytical_kl_mean)
+            self._adaptive_learning_rate(self._last_analytical_kl_mean)
 
         # Update observation normalizers with all collected observations.
         # Done AFTER gradient update so that rollout, returns, and loss
@@ -543,45 +581,38 @@ class PPO(OnPolicyAlgorithm):
         return metrics
 
     def _compute_metrics(self, outputs: ScanOutput, flat_batch, batch_indices) -> PPOMetrics:
-        """Compute metrics from update outputs."""
-        did_update = outputs.did_update
-        num_actual_updates = int(did_update.sum())
+        """Compute metrics from update outputs.
+
+        One jitted program + one host transfer; every scalar (masked
+        loss/KL means, batch statistics, current std) comes back in a
+        single array instead of ~16 separate blocking reads.
+        """
         num_expected_updates = self.num_learning_epochs * self.num_mini_batches
-
-        # Compute means only from updated batches
-        if num_actual_updates > 0:
-            update_mask = did_update.astype(jnp.float32)
-            mean_value_loss = float((outputs.value_loss * update_mask).sum() / num_actual_updates)
-            mean_policy_loss = float((outputs.policy_loss * update_mask).sum() / num_actual_updates)
-            mean_entropy = float((outputs.entropy * update_mask).sum() / num_actual_updates)
-            mean_approx_kl = float((outputs.approx_kl * update_mask).sum() / num_actual_updates)
-            mean_clip_fraction = float((outputs.clip_fraction * update_mask).sum() / num_actual_updates)
-            mean_mirror_loss = float((outputs.aux["mirror_loss"] * update_mask).sum() / num_actual_updates)
-        else:
-            mean_value_loss = float(outputs.value_loss.mean())
-            mean_policy_loss = float(outputs.policy_loss.mean())
-            mean_entropy = float(outputs.entropy.mean())
-            mean_approx_kl = float(outputs.approx_kl.mean())
-            mean_clip_fraction = float(outputs.clip_fraction.mean())
-            mean_mirror_loss = float(outputs.aux["mirror_loss"].mean())
-
-        # Get current std. Every std module reads the state vector (a
-        # vision policy's images are not part of it), so take the first
-        # minibatch of that — gathered from the flat rollout by the same
-        # index row the update's first scan step used.
-        model = self.train_state.model
         mb0_obs = jax.tree.map(lambda x: x[batch_indices[0]], flat_batch.actor_observations)
-        sample_obs = model._actor_vector(mb0_obs)
-        current_std = float(model.std_module(sample_obs).mean())
+        vals = np.asarray(
+            _metric_values(self.train_state.model, outputs, flat_batch.actions, flat_batch.returns, mb0_obs)
+        )
+        (
+            n_f,
+            mean_value_loss,
+            mean_policy_loss,
+            mean_entropy,
+            mean_approx_kl,
+            mean_clip_fraction,
+            mean_mirror_loss,
+            analytical_kl_mean,
+            return_mean,
+            return_std,
+            return_min,
+            return_max,
+            action_mean,
+            action_std,
+            current_std,
+        ) = (float(v) for v in vals)
+        num_actual_updates = int(n_f)
+        self._last_analytical_kl_mean = analytical_kl_mean
 
-        # Early stop ratio
         early_stop_ratio = 1.0 - (num_actual_updates / num_expected_updates)
-
-        # Batch statistics over the flat rollout.  (The old pre-gathered
-        # layout averaged over num_epochs permuted copies of the same
-        # samples — mathematically the same statistics.)
-        actions = flat_batch.actions
-        returns = flat_batch.returns
 
         return PPOMetrics(
             critic=PPOCriticMetrics(
@@ -601,12 +632,12 @@ class PPO(OnPolicyAlgorithm):
                 expected_updates=num_expected_updates,
             ),
             batch=BatchMetrics(
-                return_mean=float(returns.mean()),
-                return_std=float(returns.std()),
-                return_min=float(returns.min()),
-                return_max=float(returns.max()),
-                action_mean=float(actions.mean()),
-                action_std=float(actions.std()),
+                return_mean=return_mean,
+                return_std=return_std,
+                return_min=return_min,
+                return_max=return_max,
+                action_mean=action_mean,
+                action_std=action_std,
             ),
             learning_rate=self.actor_lr,
         )
