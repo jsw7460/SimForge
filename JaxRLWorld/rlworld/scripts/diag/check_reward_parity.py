@@ -61,7 +61,7 @@ _PER_SIM_PRESETS: dict[str, dict[str, tuple[str, str]]] = {
 _SIMS = ("genesis", "newton", "mujoco")
 
 
-def _build_env(preset: str, sim: str, num_envs: int):
+def _build_env(preset: str, sim: str, num_envs: int, genesis_performance_mode: bool = False):
     import importlib
 
     from rlworld.rl.runners import BaseRunner
@@ -77,6 +77,8 @@ def _build_env(preset: str, sim: str, num_envs: int):
         mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
+    if sim == "genesis" and genesis_performance_mode:
+        cfgs.env.performance_mode = True
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
 
@@ -141,6 +143,13 @@ def main() -> int:
         help="Comma-separated subset of reward term names to display "
         "(default: all). Useful for focusing: --terms feet_slip,feet_clearance",
     )
+    ap.add_argument(
+        "--genesis-performance-mode",
+        action="store_true",
+        help="Build the Genesis env with gs.init(performance_mode=True). "
+        "gs.init runs once per process, and the sims build genesis-first, "
+        "so the flag takes effect for the genesis columns.",
+    )
     args = ap.parse_args()
 
     term_filter = set(t.strip() for t in args.terms.split(",")) if args.terms else None
@@ -151,7 +160,7 @@ def main() -> int:
 
     for sim in sims:
         print(f"\n{'=' * 70}\nBuilding [{sim}] {args.preset!r} (num_envs={args.num_envs}) ...")
-        env = _build_env(args.preset, sim, args.num_envs)
+        env = _build_env(args.preset, sim, args.num_envs, args.genesis_performance_mode)
         torch.manual_seed(args.seed)
         env.reset()
         zero = torch.zeros(env.num_envs, env.num_actions, device=env.device)

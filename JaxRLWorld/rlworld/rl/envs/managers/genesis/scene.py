@@ -704,7 +704,12 @@ class SceneManager(BaseManager):
         )
 
     def step(self):
-        self.scene.step()
+        # Headless training with no cameras has nothing to draw: skip the
+        # visualizer/recorder bookkeeping Genesis otherwise runs on every
+        # substep. Any visual consumer (native viewer, camera sensors)
+        # keeps the exact historical behavior.
+        update_vis = bool(self.config.show_viewer or self.config.cameras)
+        self.scene.step(update_visualizer=update_vis, refresh_visualizer=update_vis)
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         # Genesis manages scene state internally; nothing to do here

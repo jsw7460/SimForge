@@ -516,6 +516,10 @@ class NewtonSceneManagerConfig:
     size ``nconmax`` to the contacts that actually exist.
     """
 
+    # Mirror of ``NewtonSceneConfig.request_qfrc_actuator`` — see that
+    # field's comment. True is the historical behavior.
+    request_qfrc_actuator: bool = True
+
 
 class NewtonSceneManager(BaseManager):
     """Manages Newton scene creation and simulation.
@@ -1619,14 +1623,15 @@ class NewtonSceneManager(BaseManager):
     def _request_sensor_state_attributes(self) -> None:
         """Request extended state attributes needed by sensors and data-API.
 
-        Always requests ``mujoco:qfrc_actuator`` when using the MuJoCo
-        solver so :attr:`NewtonRobotData.applied_torque` is readable
+        Requests ``mujoco:qfrc_actuator`` when using the MuJoCo solver
+        (gated by ``NewtonSceneConfig.request_qfrc_actuator``, default
+        True) so :attr:`NewtonRobotData.applied_torque` is readable
         uniformly (energy-based termination, actuator-torque rewards).
-        The allocation is a single ``wp.array`` the size of
-        ``joint_dof_count`` per state, so the cost is negligible even
-        when nothing reads it.
+        The allocation is small, but the request also makes the solver
+        run a MJ->Newton conversion kernel every substep, which a preset
+        that never reads ``applied_torque`` can opt out of.
         """
-        if self.config.solver_type == "mujoco":
+        if self.config.solver_type == "mujoco" and self.config.request_qfrc_actuator:
             self.model.request_state_attributes("mujoco:qfrc_actuator")
 
         if not self.config.sensors:
@@ -1695,6 +1700,14 @@ class NewtonSceneManager(BaseManager):
         # the layout its model snapshot chose, with the FREE joint's
         # quaternion slot valid; the writers index it in place through
         # ``joint_target_q_start``.
+        # Warm-up: run one step eagerly so lazy allocations (mjwarp
+        # scratch, contact buffers) happen OUTSIDE the capture — Newton's
+        # examples all step once before capturing, because a graph that
+        # contains allocation nodes re-allocates on every launch and can
+        # fail at launch time with a mempool OOM. The state this step
+        # advances is discarded: every entry point (runner, evaluator,
+        # diags, viewer) resets all envs before its first real step.
+        self._step()
         with wp.ScopedCapture() as capture:
             self._step()
         self.graph = capture.graph
@@ -1809,7 +1822,10 @@ class NewtonSceneManager(BaseManager):
         else:
             self._step()
 
-        # Update sensors
+        # Torch-side sensor bookkeeping (substep history push). The
+        # warp-kernel half of the sensor refresh runs inside ``_step``
+        # — and therefore inside the captured graph — see
+        # ``_update_sensors_native``.
         self._update_sensors()
 
     def _step(self):
@@ -1838,6 +1854,11 @@ class NewtonSceneManager(BaseManager):
                 self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
             )
         self._substep_loop(need_state_copy, last_idx)
+        # Sensor refresh, warp-kernel half. Lives inside ``_step`` so the
+        # captured CUDA graph replays it instead of the host relaunching
+        # every kernel each step (Newton's own sensor examples capture
+        # their sensor updates the same way, e.g. example_sensor_imu).
+        self._update_sensors_native()
 
     def _substep_loop(self, need_state_copy: bool, last_idx: int) -> None:
         if self._use_single_state:
@@ -1893,25 +1914,34 @@ class NewtonSceneManager(BaseManager):
                 # Swap states (reference rebind, no memory copy).
                 self.state_0, self.state_1 = self.state_1, self.state_0
 
-    def _update_sensors(self) -> None:
-        """Update all sensors after physics step.
+    def _update_sensors_native(self) -> None:
+        """Warp-kernel half of the sensor refresh — CUDA-graph safe.
 
-        Called once per ``scene.step()`` — i.e. once per physics step,
-        ``decimation`` times per control step (and never from inside the
-        captured CUDA graph, so dynamic torch ops in the ContactSensorCfg
-        wrappers are safe here). The wrappers also push one substep frame
-        into their ring buffer on every call (see ``NewtonContactSensor``).
+        Runs at the tail of ``_step`` (inside the captured graph): the
+        mjwarp contact export plus every native sensor's kernel launches
+        (SensorContact accumulation, IMU, frame transforms). Nothing
+        here may allocate or run torch ops — the warm-up step before
+        capture triggers any first-call allocations these make.
         """
-        has_contact_sensor = bool(self._contact_sensor_wrappers)
-        if has_contact_sensor:
+        if self._contact_sensor_wrappers:
             self.solver.update_contacts(self.sensor_contacts, self.state_0)
 
-        for sensor_name, sensor in self.sensors.items():
+        for sensor in self.sensors.values():
             if isinstance(sensor, NewtonContactSensor):
-                # Wrapper: refreshes its native SensorContact + pushes history.
-                sensor.update(self.state_0, self.sensor_contacts)
+                sensor.update_native(self.state_0, self.sensor_contacts)
             elif hasattr(sensor, "update"):
                 sensor.update(self.state_0)  # IMU takes State
+
+    def _update_sensors(self) -> None:
+        """Torch half of the sensor refresh — never inside the graph.
+
+        Called once per ``scene.step()`` after the graph launch. Pushes
+        one substep frame into each contact wrapper's ring buffer (a
+        torch scatter over warp-backed memory, which must stay outside
+        the capture).
+        """
+        for sensor in self._contact_sensor_wrappers.values():
+            sensor.push_history()
 
     def reset(self, env_ids=None) -> None:
         """Reset specified environments to model defaults (joint_q, joint_qd).

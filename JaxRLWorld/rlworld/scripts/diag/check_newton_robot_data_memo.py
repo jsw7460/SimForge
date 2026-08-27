@@ -46,8 +46,17 @@ _MEMO_PROPERTIES = (
     "joint_pos",
     "joint_vel",
     "applied_torque",
+    "joint_pos_limits",
+    "soft_joint_pos_limits",
 )
 _MEMO_METHODS = ("_body_q_view", "_body_qd_view", "_joint_coords", "_joint_dofs", "_angular_momentum_w_cached")
+
+
+def _values_equal(a, b) -> bool:
+    """Bitwise equality for a tensor or a tuple of tensors (the limits)."""
+    if isinstance(a, tuple):
+        return all(torch.equal(x, y) for x, y in zip(a, b, strict=True))
+    return torch.equal(a, b)
 
 
 def _build_env(preset: str, num_envs: int):
@@ -87,7 +96,7 @@ def main() -> int:
         for name in _MEMO_PROPERTIES:
             cached = getattr(rd, name)
             fresh = getattr(rd_cls, name).fget.__wrapped__(rd)
-            if not torch.equal(cached, fresh):
+            if not _values_equal(cached, fresh):
                 failures += 1
                 print(f"[step {step:3d}] STALE property {name}")
             if getattr(rd, name) is not cached:
@@ -97,7 +106,7 @@ def main() -> int:
         for name in _MEMO_METHODS:
             cached = getattr(rd, name)()
             fresh = getattr(rd_cls, name).__wrapped__(rd)
-            if not torch.equal(cached, fresh):
+            if not _values_equal(cached, fresh):
                 failures += 1
                 print(f"[step {step:3d}] STALE method {name}")
             if getattr(rd, name)() is not cached:

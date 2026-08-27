@@ -274,19 +274,32 @@ class NewtonContactSensor:
     # substep history (only when history_length > 0)
     # ------------------------------------------------------------------
 
-    def update(self, state, contacts) -> None:
-        """Refresh the native sensor and (if enabled) push one history frame.
+    def update_native(self, state, contacts) -> None:
+        """Refresh the native sensor — pure warp kernels, CUDA-graph safe.
 
-        Called by ``NewtonSceneManager._update_sensors`` once per physics
-        step. ``state`` / ``contacts`` are the scene manager's current
-        ``state_0`` / ``sensor_contacts``.
+        Called from ``NewtonSceneManager._update_sensors_native`` at the
+        tail of the captured physics step. ``state`` / ``contacts`` are
+        the scene manager's current ``state_0`` / ``sensor_contacts``.
         """
         self._native.update(state, contacts)
+
+    def push_history(self) -> None:
+        """Push one substep frame into the history ring (torch side).
+
+        Called by ``NewtonSceneManager._update_sensors`` once per physics
+        step, after the graph launch — the torch scatter must not be
+        captured.
+        """
         if self._history is None:
             return
         # Push the current per-primary net force into the ring at ``cursor``.
         self._history[:, :, self._cursor, :] = self.compute_force()
         self._cursor = (self._cursor + 1) % self._history_length
+
+    def update(self, state, contacts) -> None:
+        """Native refresh + history push in one call (eager paths only)."""
+        self.update_native(state, contacts)
+        self.push_history()
 
     def compute_history(self) -> torch.Tensor | None:
         """Substep contact-force history ``(num_envs, N, H, 3)``, or ``None`` if disabled.

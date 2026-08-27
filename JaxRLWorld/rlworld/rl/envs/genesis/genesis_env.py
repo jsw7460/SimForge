@@ -50,7 +50,7 @@ class GenesisEnv(World):
         # subsequent env construction (curriculum / re-init paths), so
         # call ``set_random_seed`` directly when Genesis is already up.
         if not gs._initialized:
-            gs.init(logging_level="warning", seed=env_cfg.seed)
+            gs.init(logging_level="warning", seed=env_cfg.seed, performance_mode=env_cfg.performance_mode)
         else:
             _gs_set_random_seed(env_cfg.seed)
 

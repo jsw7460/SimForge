@@ -42,6 +42,14 @@ class EnvConfig(BaseConfig):
     seed: int = 42
     terminations: Any = None  # TerminationsConfig instance, set by preset
     episode_length_s: float = 20.0
+    # Passed to ``gs.init(performance_mode=...)`` — compiles kernels
+    # against the static FIELD array backend (shape-fixed), which steps
+    # faster but forbids scene edits after build. Measured on go2_gait
+    # @4096 envs: engine substep 3.01 -> 1.84 ms with reward parity
+    # bit-consistent and zero-copy intact, so True is the default; a
+    # tool that edits the scene after build sets False. Only honored by
+    # the process's FIRST Genesis env (``gs.init`` runs once per process).
+    performance_mode: bool = True
 
 
 @dataclass

@@ -132,6 +132,14 @@ class NewtonSceneConfig(BaseConfig):
     # three backends to detect contact at the same distance sets 0.0 --
     # see the note in the Newton scene manager for what the 0.1 costs.
     rigid_gap: float | None = None
+    # Whether to request ``mujoco:qfrc_actuator`` from the solver. True
+    # (the historical behavior) keeps ``RobotData.applied_torque``
+    # readable in implicit-actuator mode, at the price of a Newton<-MJ
+    # conversion kernel every substep. A preset whose reward/termination
+    # terms never read ``applied_torque`` (and runs implicit actuators)
+    # can set False; explicit-actuator presets read the action manager
+    # instead and never touch it either way.
+    request_qfrc_actuator: bool = True
 
 
 @dataclass

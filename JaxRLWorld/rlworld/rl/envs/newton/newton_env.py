@@ -203,6 +203,7 @@ class NewtonEnv(World):
                 env_spacing=self.scene_cfg.env_spacing,
                 collision_max_triangle_pairs=self.scene_cfg.collision_max_triangle_pairs,
                 rigid_gap=self.scene_cfg.rigid_gap,
+                request_qfrc_actuator=self.scene_cfg.request_qfrc_actuator,
             ),
         )
         self.scene_manager.register_entities()

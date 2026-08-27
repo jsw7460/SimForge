@@ -108,7 +108,15 @@ def main() -> int:
         action="store_true",
         help="Start every episode together instead of spreading their ends out.",
     )
+    ap.add_argument(
+        "--performance-mode",
+        action="store_true",
+        help="Genesis only: gs.init(performance_mode=True) — static FIELD kernel backend.",
+    )
     args = ap.parse_args()
+
+    if args.performance_mode and args.sim != "genesis":
+        ap.error("--performance-mode only applies to --sim genesis")
 
     if args.preset == "go2_gait":
         # Per-sim gait config classes, imported lazily so only the
@@ -124,6 +132,8 @@ def main() -> int:
         cfgs = cfg_cls(sim_type=args.sim, num_envs=args.num_envs).build()
     else:
         cfgs = _PRESETS[args.preset](sim_type=args.sim, num_envs=args.num_envs).build()
+    if args.performance_mode:
+        cfgs.env.performance_mode = True
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env
 

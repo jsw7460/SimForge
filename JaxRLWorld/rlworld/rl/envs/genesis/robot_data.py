@@ -87,7 +87,10 @@ class GenesisRigidObjectData(SiteReaderMixin):
         # (``_get_global_idx(None, n_links, link_start)``).  Needed to query
         # the ``ref=gs.link_ref_frame.link_COM`` variant via the solver (RigidEntity's own
         # get_links_* don't expose ``ref``).
-        self._global_link_ids = list(range(entity._link_start, entity._link_start + entity.n_links))
+        # Kept as a ``range`` on purpose: ``qd_to_torch`` turns a range
+        # into a contiguous slice (zero-copy view), while a list takes
+        # the advanced-indexing path and re-uploads the indices per call.
+        self._global_link_ids = range(entity._link_start, entity._link_start + entity.n_links)
 
     def _get_gravity_vec(self) -> Tensor:
         if self._gravity_vec is None:
@@ -351,6 +354,7 @@ class GenesisRobotData(GenesisRigidObjectData):
         return self._entity.get_dofs_control_force(dofs_idx_local=self._actuated_dof_ids)
 
     @property
+    @_per_step_read
     def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Hard joint position limits in canonical actuated order.
 
@@ -372,6 +376,7 @@ class GenesisRobotData(GenesisRigidObjectData):
         return lower, upper
 
     @property
+    @_per_step_read
     def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Soft joint position limits in actuated order.
 

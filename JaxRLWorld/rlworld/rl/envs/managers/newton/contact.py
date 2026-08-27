@@ -107,6 +107,9 @@ class NewtonContactManager(BaseContactManager):
             else:
                 solver._update_mjc_data(solver.mjw_data, sm.model, sm.state_0)
                 mujoco_warp.forward(solver.mjw_model, solver.mjw_data)
+        # Eager path: run both sensor halves (kernels + history push) —
+        # this is a reset, not the captured step.
+        sm._update_sensors_native()
         sm._update_sensors()
 
     # -- pretty print --

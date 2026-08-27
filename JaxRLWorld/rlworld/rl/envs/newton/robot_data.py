@@ -679,6 +679,7 @@ class NewtonRobotData(NewtonRigidObjectData):
         return qfrc[:, self._indexing.newton_qd_indices]
 
     @property
+    @_per_step_read
     def joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Hard joint position limits in canonical actuated order.
 
@@ -698,6 +699,7 @@ class NewtonRobotData(NewtonRigidObjectData):
         return lower_all[qd_indices], upper_all[qd_indices]
 
     @property
+    @_per_step_read
     def soft_joint_pos_limits(self) -> tuple[Tensor, Tensor]:
         """Soft joint position limits in actuated order.
 
