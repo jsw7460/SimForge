@@ -32,6 +32,7 @@ and the profile points at the messenger.
 from __future__ import annotations
 
 import argparse
+import importlib
 import statistics
 import time
 from collections import defaultdict
@@ -97,7 +98,7 @@ class _Timer:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--preset", choices=list(_PRESETS), default="yam_lift")
+    ap.add_argument("--preset", choices=[*_PRESETS, "go2_gait"], default="yam_lift")
     ap.add_argument("--sim", default="mujoco", choices=("genesis", "newton", "mujoco"))
     ap.add_argument("--num-envs", type=int, default=8192)
     ap.add_argument("--warmup", type=int, default=24)
@@ -109,7 +110,20 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    cfgs = _PRESETS[args.preset](sim_type=args.sim, num_envs=args.num_envs).build()
+    if args.preset == "go2_gait":
+        # Per-sim gait config classes, imported lazily so only the
+        # requested backend's simulator is loaded (each per-sim config
+        # module imports its engine at module scope).
+        gait = {
+            "genesis": ("rlworld.rl.configs.presets.go2.genesis.gait_conditioned", "Go2GaitConditionedGenesisConfig"),
+            "newton": ("rlworld.rl.configs.presets.go2.newton.gait_conditioned", "Go2GaitConditionedNewtonConfig"),
+            "mujoco": ("rlworld.rl.configs.presets.go2.mujoco.gait_conditioned", "Go2GaitConditionedMujocoConfig"),
+        }
+        mod_path, cls_name = gait[args.sim]
+        cfg_cls = importlib.import_module(mod_path).__dict__[cls_name]
+        cfgs = cfg_cls(sim_type=args.sim, num_envs=args.num_envs).build()
+    else:
+        cfgs = _PRESETS[args.preset](sim_type=args.sim, num_envs=args.num_envs).build()
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env
 

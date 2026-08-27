@@ -99,6 +99,11 @@ class CommandTerm(ABC):
         """
         cmd_dim = self.command.shape[1]
         self._externally_controlled = torch.zeros(self.num_envs, cmd_dim, dtype=torch.bool, device=self.device)
+        # Host-side mirror of ``_externally_controlled.any()``.  The
+        # per-step fast-path checks read this bool instead of syncing
+        # the device (during training it is permanently False); it is
+        # maintained at the rare write sites below.
+        self._any_locked = False
 
     # ── Subclass helpers ───────────────────────────────────────────
 
@@ -185,7 +190,7 @@ class CommandTerm(ABC):
             )
             self._resample_command(resample_ids)
 
-        if self._externally_controlled.any():
+        if self._any_locked:
             # Capture the user-driven values; restore after the
             # subclass's post-processing so e.g. heading P-control
             # never overwrites a locked column.
@@ -225,6 +230,7 @@ class CommandTerm(ABC):
         # Index-assign: _command[env_ids[:, None], col_idx[None, :]] = values.
         self._command[env_ids[:, None], col_idx[None, :]] = values
         self._externally_controlled[env_ids[:, None], col_idx[None, :]] = True
+        self._any_locked = True
 
     def release_command(
         self,
@@ -245,6 +251,7 @@ class CommandTerm(ABC):
         """
         col_idx = self._resolve_columns(columns)
         self._externally_controlled[env_ids[:, None], col_idx[None, :]] = False
+        self._any_locked = bool(self._externally_controlled.any())
 
     def reset(self, env_ids: torch.Tensor) -> None:
         """Force resample for the given environments.
@@ -254,6 +261,7 @@ class CommandTerm(ABC):
         episode reset.
         """
         self._externally_controlled[env_ids] = False
+        self._any_locked = bool(self._externally_controlled.any())
         self.time_left[env_ids] = torch.empty(len(env_ids), device=self.device).uniform_(
             *self.cfg.resampling_time_range
         )
@@ -337,24 +345,23 @@ class VelocityCommandTerm(CommandTerm):
         # the pre-refactor code (and avoid a 3× write in standing
         # zeroing). The base ``compute()`` already short-circuits the
         # clone-and-restore in the same case.
-        any_locked = self._externally_controlled.any()
+        any_locked = self._any_locked
 
         # Heading P-control overwrites column 2 (ang_vel). Skip envs
-        # where the user has locked ang_vel via the viewer.
+        # where the user has locked ang_vel via the viewer.  Written as
+        # a masked column update: ``nonzero()`` here would drain the
+        # CUDA queue every step (the mask only changes on resample).
         if self.cfg.heading_command:
+            heading_error = _wrap_to_pi(self.heading_target - self._env.heading_w)
+            new_ang = torch.clamp(
+                self.cfg.heading_control_stiffness * heading_error,
+                self.cfg.ang_vel_range[0],
+                self.cfg.ang_vel_range[1],
+            )
+            mask = self.is_heading_env
             if any_locked:
-                ang_free = ~self._externally_controlled[:, 2]
-                heading_ids = (self.is_heading_env & ang_free).nonzero(as_tuple=False).flatten()
-            else:
-                heading_ids = self.is_heading_env.nonzero(as_tuple=False).flatten()
-            if len(heading_ids) > 0:
-                heading_w = self._env.heading_w
-                heading_error = _wrap_to_pi(self.heading_target - heading_w)
-                self._command[heading_ids, 2] = torch.clamp(
-                    self.cfg.heading_control_stiffness * heading_error[heading_ids],
-                    self.cfg.ang_vel_range[0],
-                    self.cfg.ang_vel_range[1],
-                )
+                mask = mask & ~self._externally_controlled[:, 2]
+            self._command[:, 2] = torch.where(mask, new_ang, self._command[:, 2])
 
         # Standing-env zeroing writes all three columns. In the
         # training fast path zero the whole row in one shot; only when
@@ -365,13 +372,13 @@ class VelocityCommandTerm(CommandTerm):
             if any_locked:
                 for col in (0, 1, 2):
                     col_free = ~self._externally_controlled[:, col]
-                    ids = (self.is_standing_env & col_free).nonzero(as_tuple=False).flatten()
-                    if len(ids) > 0:
-                        self._command[ids, col] = 0.0
+                    self._command[:, col] = torch.where(
+                        self.is_standing_env & col_free,
+                        torch.zeros((), device=self.device, dtype=self._command.dtype),
+                        self._command[:, col],
+                    )
             else:
-                standing_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
-                if len(standing_ids) > 0:
-                    self._command[standing_ids] = 0.0
+                self._command.masked_fill_(self.is_standing_env.unsqueeze(1), 0.0)
 
     def get_ui_spec(self) -> CommandTermUISpec:
         return CommandTermUISpec(

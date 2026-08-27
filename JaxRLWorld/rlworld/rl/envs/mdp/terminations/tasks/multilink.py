@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import weakref
 from typing import TYPE_CHECKING
 
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.configs.terminations import TerminationResult
+
+# Resolved body-id lists, cached per ResolvedEntity (immutable after setup).
+_BODY_IDS_CACHE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 if TYPE_CHECKING:
     from rlworld.rl.envs import GenesisEnv
@@ -33,7 +37,13 @@ def end_effector_below_ground(
     entity = env.scene_manager[asset_cfg.name]
 
     if asset_cfg.body_ids is not None:
-        z_coord = entity.get_links_pos(links_idx_local=asset_cfg.body_ids.tolist())[:, :, 2]
+        # ``body_ids`` is resolved once at setup; .tolist() on the device
+        # tensor here would be a host sync every step — cache the list.
+        ids = _BODY_IDS_CACHE.get(asset_cfg)
+        if ids is None:
+            ids = asset_cfg.body_ids.tolist()
+            _BODY_IDS_CACHE[asset_cfg] = ids
+        z_coord = entity.get_links_pos(links_idx_local=ids)[:, :, 2]
         return TerminationResult((z_coord < z_threshold).any(dim=1))
 
     z_coord = entity.get_links_pos()[:, -1, 2]  # last link's z

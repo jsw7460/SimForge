@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from typing import TYPE_CHECKING, Dict
 
 import torch
@@ -452,6 +453,21 @@ class posture:
 # ── Walk-These-Ways reward terms (MuJoCo) ────────────────────────────────
 
 
+# Gait-order permutations are pure functions of build-time config (site
+# names, contact tracked names, gait foot order), but were re-derived on
+# every call — for the site variant that included a per-step
+# ``site_ids.tolist()`` host sync. Cache per env; entries die with it.
+_GAIT_ORDER_CACHE: weakref.WeakKeyDictionary[MujocoLocomotionEnv, dict] = weakref.WeakKeyDictionary()
+
+
+def _gait_order_cache(env: MujocoLocomotionEnv) -> dict:
+    cache = _GAIT_ORDER_CACHE.get(env)
+    if cache is None:
+        cache = {}
+        _GAIT_ORDER_CACHE[env] = cache
+    return cache
+
+
 def _contact_order_matching_gait(env: MujocoLocomotionEnv, contact_group: str) -> list[str]:
     """Permute a contact group's tracked_names so column ``i`` is the
     same foot as column ``i`` of ``env.gait_manager.foot_names``.
@@ -461,6 +477,11 @@ def _contact_order_matching_gait(env: MujocoLocomotionEnv, contact_group: str) -
     ``"FR_foot_collision"``). Raises if the match is missing or
     ambiguous so any future naming drift surfaces immediately.
     """
+    cache = _gait_order_cache(env)
+    key = ("contact", contact_group)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     gait_order = list(env.gait_manager.foot_names)
     tracked = list(env.contact_manager.tracked_names(contact_group))
     out: list[str] = []
@@ -473,6 +494,7 @@ def _contact_order_matching_gait(env: MujocoLocomotionEnv, contact_group: str) -
                 f"tracked {tracked}."
             )
         out.append(candidates[0])
+    cache[key] = out
     return out
 
 
@@ -486,6 +508,11 @@ def _site_ids_matching_gait(env: MujocoLocomotionEnv, asset_cfg: ResolvedEntity)
     the resolver reordered ``site_ids`` away from the user-supplied
     tuple, this helper maps it back to gait order.
     """
+    cache = _gait_order_cache(env)
+    key = ("sites", id(asset_cfg))
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     gait_order = list(env.gait_manager.foot_names)
     site_ids_list = asset_cfg.site_ids.tolist() if asset_cfg.site_ids is not None else []
     site_pairs = list(zip(asset_cfg.site_names or [], site_ids_list))
@@ -495,6 +522,7 @@ def _site_ids_matching_gait(env: MujocoLocomotionEnv, asset_cfg: ResolvedEntity)
         if len(candidates) != 1:
             raise ValueError(f"Cannot map gait foot {g!r} to asset_cfg sites {site_pairs}: candidates {candidates}.")
         out.append(candidates[0])
+    cache[key] = out
     return out
 
 

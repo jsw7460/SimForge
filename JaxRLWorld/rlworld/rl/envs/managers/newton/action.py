@@ -58,6 +58,19 @@ class NewtonActionManager(ActionManagerBase):
 
     def __init__(self, env: World, config: NewtonActionManagerConfig):
         super().__init__(env, config)
+        # The out-of-range write check is real protection (a bad index
+        # surfaces as a device-side assert several kernels later), but
+        # indices and per-world widths are immutable after build — so it
+        # runs ONCE per (entity, array, width) instead of paying a
+        # .tolist() host sync every physics substep.
+        self._range_checked: set[tuple[str, str, int]] = set()
+
+    def _check_range_once(self, indices, width: int, entity_name: str, indexing, array_name: str) -> None:
+        key = (entity_name, array_name, width)
+        if key in self._range_checked:
+            return
+        _reject_out_of_range(indices, width, entity_name, indexing, array_name)
+        self._range_checked.add(key)
 
     def _apply_position(self, targets: torch.Tensor, entity_name: str) -> None:
         """Apply position targets via Newton/Warp.
@@ -104,7 +117,7 @@ class NewtonActionManager(ActionManagerBase):
                 f"world_count={num_worlds}; the per-world layout cannot be derived."
             )
         rows = dest.view(num_worlds, -1)
-        _reject_out_of_range(write_indices, rows.shape[1], entity_name, indexing, "joint_target_q")
+        self._check_range_once(write_indices, rows.shape[1], entity_name, indexing, "joint_target_q")
         rows[:, write_indices] = targets
 
     def _apply_force(self, torques: torch.Tensor, entity_name: str) -> None:
@@ -131,7 +144,7 @@ class NewtonActionManager(ActionManagerBase):
         # full-width buffer covering every one of this entity's actuated
         # joints, zeros included, so each of them is rewritten every step.
         write_indices = self.env.entity_indexing(entity_name).newton_qd_indices
-        _reject_out_of_range(
+        self._check_range_once(
             write_indices,
             rows.shape[1],
             entity_name,

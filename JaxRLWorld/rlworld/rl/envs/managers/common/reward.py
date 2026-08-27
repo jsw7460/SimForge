@@ -126,16 +126,21 @@ class RewardManager(BaseManager):
         """
         rew_pos = torch.zeros_like(reward_buffer)
         rew_neg = torch.zeros_like(reward_buffer)
+        zero = torch.zeros((), device=reward_buffer.device, dtype=reward_buffer.dtype)
 
         for name, reward_term in self.reward_terms.items():
             reward_value = self._compute_weighted_reward(name, reward_term)
             reward_buffer_per_type[name] = reward_value
             episode_sums[name] += reward_value
 
-            if torch.sum(reward_value) >= 0:
-                rew_pos += reward_value
-            else:
-                rew_neg += reward_value
+            # The sign classification stays a DEVICE decision: a Python
+            # ``if`` on the sum would drain the whole CUDA queue once per
+            # term per step (~20 pipeline stalls on the WTW presets).
+            # The masked adds preserve the original accumulation order
+            # exactly (the other accumulator just adds 0).
+            is_pos = torch.sum(reward_value) >= 0
+            rew_pos = rew_pos + torch.where(is_pos, reward_value, zero)
+            rew_neg = rew_neg + torch.where(is_pos, zero, reward_value)
 
         reward_buffer += rew_pos * torch.exp(rew_neg / self.config.shaping_sigma)
 
