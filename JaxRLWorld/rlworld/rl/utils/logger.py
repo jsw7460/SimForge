@@ -216,6 +216,8 @@ class ConsoleWriter:
         if "wandb_url" in data:
             info_bits.append(f"[dim]{data['wandb_url']}[/]")
         rows.append(Text.from_markup("   ".join(info_bits)))
+        if "log_dir" in data:
+            rows.append(Text.from_markup(f"[white]saved to[/] [cyan]{data['log_dir']}[/]"))
         rows.append(Text(""))
 
         # ── progress ────────────────────────────────────────────────
