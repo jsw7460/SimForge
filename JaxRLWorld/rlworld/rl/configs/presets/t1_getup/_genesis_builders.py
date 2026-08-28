@@ -174,6 +174,7 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
             enable_rolling_friction=True,
             max_collision_pairs=300,
             batch_dofs_info=True,
+            batch_links_info=True,
             contact_pruning_tolerance=None,
             friction_cone=gs.friction_cone.elliptic,
             # Genesis 4786cd87 made 'signorini' the default resolution for

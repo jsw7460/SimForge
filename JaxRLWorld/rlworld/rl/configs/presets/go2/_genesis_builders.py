@@ -207,6 +207,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             enable_torsional_friction=True,
             enable_rolling_friction=True,
             batch_dofs_info=True,
+            batch_links_info=True,
         ),
         robot_cfg=r,
     )

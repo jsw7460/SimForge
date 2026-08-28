@@ -150,6 +150,7 @@ def build_scene(cfg: K1JoystickConfig, timing: Dict[str, Any]) -> SceneConfig:
             # (n_envs, n_dofs) tensors; default False keeps dofs_info
             # shared across envs and rejects batched writes).
             batch_dofs_info=True,
+            batch_links_info=True,
             contact_pruning_tolerance=None,
         ),
     )

@@ -471,22 +471,30 @@ def randomize_body_mass(
 def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(
-            f"Genesis body mass DR only supports operation='scale' (got {operation!r}); set_mass_shift is a multiplier."
+            f"Genesis body mass DR only supports operation='scale' (got {operation!r}); "
+            f"it scales the URDF default link mass."
         )
     entity = env.scene_manager[resolved.name]
     if resolved.body_ids is None:
         raise ValueError("Genesis randomize_body_mass requires asset_cfg.body_names; got selector with no body subset.")
+    _genesis_require_batched_links_info(entity, "randomize_body_mass")
     links_idx = resolved.body_ids.tolist()
     n_envs, n_links = len(env_ids), len(links_idx)
     ratios = sample((n_envs, n_links), *mass_range, env.device, distribution)
-    # mass_shift = torch.zeros(n_envs, n_links, device=env.device)
-    # for i, idx in enumerate(links_idx):
-    #     original_mass = entity.links[idx].get_mass()
-    #     mass_shift[:, i] = original_mass * (ratios[:, i] - 1.0)
-
-    original_masses = entity.get_links_inertial_mass(links_idx_local=links_idx)
-    mass_shift = original_masses * (ratios - 1.0)
-    entity.set_mass_shift(mass_shift=mass_shift, links_idx_local=links_idx, envs_idx=env_ids)
+    # Baseline = URDF default link mass, snapshotted before any DR touches it.
+    # ``set_links_mass`` writes the absolute mass into ``dyn_info`` (it survives
+    # ``scene.reset()``), so scaling the CURRENT mass would compound ratios into
+    # a random walk across resets; scale the captured baseline instead. Genesis
+    # leaves the link inertia unchanged (``scale_inertia=False``), exactly as the
+    # former ``set_mass_shift`` did.
+    base = _genesis_dr_baseline(
+        env,
+        resolved.name,
+        "links_mass",
+        lambda: entity.get_links_mass(links_idx_local=links_idx),
+    )
+    new_mass = base[env_ids] * ratios
+    entity.set_links_mass(mass=new_mass, links_idx_local=links_idx, envs_idx=env_ids)
 
 
 def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, distribution):
@@ -579,22 +587,33 @@ def _genesis_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
     if operation != "add":
         raise NotImplementedError(
             f"Genesis body COM offset DR only supports operation='add' "
-            f"(got {operation!r}); set_COM_shift is purely additive."
+            f"(got {operation!r}); it offsets the URDF default COM additively."
         )
     entity = env.scene_manager[resolved.name]
     if resolved.body_ids is None:
         raise ValueError("Genesis randomize_body_com_offset requires asset_cfg.body_names.")
+    _genesis_require_batched_links_info(entity, "randomize_body_com_offset")
     links_idx = resolved.body_ids.tolist()
     n_envs, n_links = len(env_ids), len(links_idx)
-    # Read current i_pos_shift so non-target axes preserve prior EventTerm writes within the same
-    # reset.  Genesis's set_COM_shift kernel writes the full 3-vec; without this read-modify-write
-    # a follow-up EventTerm targeting another axis would clobber the prior one.  Entity has no
-    # get_COM_shift wrapper, so go through solver.get_links_COM_shift with global link indices.
-    links_global_idx = torch.as_tensor([entity._link_start + i for i in links_idx], device=env.device, dtype=torch.long)
-    com_shift = entity._solver.get_links_COM_shift(links_idx=links_global_idx, envs_idx=env_ids)
+    # Baseline = URDF default COM, snapshotted before any DR touches it.
+    # ``set_links_COM`` writes the absolute local-frame COM into ``dyn_info``
+    # (it survives ``scene.reset()``); the target axes become ``base + U(lo, hi)``
+    # while the untouched axes keep whatever a prior EventTerm wrote this reset
+    # (read-modify-write on the current COM). This reproduces the former
+    # get/set_COM_shift semantics exactly: with the shift stored as an offset from
+    # the base, target-axis shift = U(lo, hi) is identical to target-axis absolute
+    # = base + U(lo, hi), and untouched-axis absolutes carry the prior shift.
+    base = _genesis_dr_baseline(
+        env,
+        resolved.name,
+        "links_COM",
+        lambda: entity.get_links_COM(links_idx_local=links_idx),
+    )
+    com = entity.get_links_COM(links_idx_local=links_idx, envs_idx=env_ids)
     for axis, (lo, hi) in ranges.items():
-        com_shift[:, :, axis] = torch.empty(n_envs, n_links, device=env.device).uniform_(lo, hi)
-    entity.set_COM_shift(com_shift=com_shift, links_idx_local=links_idx, envs_idx=env_ids)
+        offset = torch.empty(n_envs, n_links, device=env.device).uniform_(lo, hi)
+        com[:, :, axis] = base[env_ids, :, axis] + offset
+    entity.set_links_COM(com=com, links_idx_local=links_idx, envs_idx=env_ids)
 
 
 def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
@@ -751,6 +770,26 @@ def _newton_dof_view(values: torch.Tensor) -> torch.Tensor:
     if values.dim() == 3 and values.shape[1] == 1:
         return values[:, 0]
     raise NotImplementedError(f"Unexpected Newton view attribute shape {tuple(values.shape)}")
+
+
+def _genesis_require_batched_links_info(entity, term_name: str) -> None:
+    """Guard: per-env link mass/COM DR needs ``RigidOptions(batch_links_info=True)``.
+
+    Genesis stores per-link mass / COM / inertia in ``dyn_info``, shared by the
+    whole batch unless ``batch_links_info=True``. The absolute setters
+    ``set_links_mass`` / ``set_links_COM`` write ``dyn_info`` directly, so a
+    per-environment value is only representable with the batched store; without
+    it a per-env write clobbers every environment. (The pre-migration
+    ``set_mass_shift`` / ``set_COM_shift`` wrote per-env ``dyn_state`` and did
+    not need this, which is why presets that fire these terms must now opt in.)
+    """
+    if not entity._solver.is_links_info_batched:
+        raise RuntimeError(
+            f"{term_name} on Genesis requires the scene's "
+            f"gs.options.RigidOptions(batch_links_info=True); the current build "
+            f"shares link inertial properties across environments, so per-env "
+            f"mass/COM randomization is impossible."
+        )
 
 
 def _genesis_dr_baseline(env, entity_name: str, param: str, getter) -> torch.Tensor:
