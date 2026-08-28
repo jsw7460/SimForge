@@ -14,8 +14,10 @@ import warp as wp
 from rlworld.rl.envs.mdp.observations.newton.body_utils import (
     get_bodies_height_with_contact,
     get_bodies_pos,
+    get_bodies_pos_with_contact,
 )
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    _fd_foot_velocity,
     get_leg_xy_signs,
     penalize_contact_force_count,
 )
@@ -27,16 +29,19 @@ from rlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_wxyz
 
 
 def wtw_feet_slip(env: "NewtonLocomotionEnv") -> torch.Tensor:
-    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
-    cache = get_cache(env)
-    _state = env.scene_manager.state
+    """WTW feet slip: penalize foot xy travel while in contact OR was in contact.
 
+    The foot velocity is the per-step finite difference of the foot body
+    positions, not the instantaneous ``body_qd`` — the instantaneous
+    read is taken at a different effective instant on each backend and
+    cannot be compared across simulators; see
+    ``common.reward_terms._fd_foot_velocity``.
+    """
     feet_bodies = env.gait_manager.foot_names
-    result = get_bodies_height_with_contact(env, feet_bodies)
+    result = get_bodies_pos_with_contact(env, feet_bodies)
 
-    body_qd = wp.to_torch(_state.body_qd).reshape(env.num_envs, cache.bodies_per_env, 6)
-    feet_vel_xy = body_qd[:, result.body_indices, :2]
-    vel_sq = torch.sum(torch.square(feet_vel_xy), dim=-1)
+    feet_vel = _fd_foot_velocity(env, "wtw_feet_slip", result.data)
+    vel_sq = torch.sum(torch.square(feet_vel[..., :2]), dim=-1)
 
     contact = env.contact_manager.is_contact("feet_ground_contact", order=result.body_names)
     prev_contact = env.contact_manager.prev_is_contact("feet_ground_contact", order=result.body_names)

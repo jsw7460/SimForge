@@ -10,6 +10,7 @@ from rlworld.rl.envs.mdp.observations.mujoco.proprioception import quat_apply_in
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     VariablePostureTracker,
+    _fd_foot_velocity,
     flat_orientation as flat_orientation_l2_common,
     get_leg_xy_signs,
     penalize_angular_momentum_l2,
@@ -531,11 +532,17 @@ def wtw_feet_slip(
     contact_group: str = "feet_ground_contact",
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact.
+    """WTW feet slip: penalize foot xy travel while in contact OR was in contact.
 
     Both contact and site arrays are read in ``gait_manager.foot_names``
     order so the elementwise multiply pairs each foot's contact state
     with its own velocity.
+
+    The foot velocity is the per-step finite difference of the foot site
+    positions, not the instantaneous ``site_lin_vel_w`` — the
+    instantaneous read is taken at a different effective instant on each
+    backend and cannot be compared across simulators; see
+    ``common.reward_terms._fd_foot_velocity``.
     """
     robot = env.scene_manager.get_entity(asset_cfg.name)
     contact_order = _contact_order_matching_gait(env, contact_group)
@@ -545,8 +552,9 @@ def wtw_feet_slip(
     prev_contact = env.contact_manager.prev_is_contact(contact_group, order=contact_order)
     contact_filt = (in_contact | prev_contact).float()
 
-    foot_vel_xy = robot.data.site_lin_vel_w[:, site_ids, :2]
-    vel_sq = torch.sum(torch.square(foot_vel_xy), dim=-1)
+    foot_pos = robot.data.site_pos_w[:, site_ids]
+    foot_vel = _fd_foot_velocity(env, "wtw_feet_slip", foot_pos)
+    vel_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
     return -torch.sum(contact_filt * vel_sq, dim=-1)
 
 

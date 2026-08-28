@@ -13,11 +13,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import genesis as gs
 import torch
 
 from rlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from rlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    _fd_foot_velocity,
     get_leg_xy_signs,
     penalize_contact_force_count,
 )
@@ -48,11 +48,19 @@ def wtw_feet_slip(
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
     contact_group: str = "feet_ground_contact",
 ) -> torch.Tensor:
-    """WTW feet slip: penalize foot xy velocity when in contact OR was in contact."""
+    """WTW feet slip: penalize foot xy travel while in contact OR was in contact.
+
+    The foot velocity is the per-step finite difference of the foot link
+    positions, not the instantaneous ``get_links_vel`` — the
+    instantaneous read is taken at a different effective instant on each
+    backend and cannot be compared across simulators; see
+    ``common.reward_terms._fd_foot_velocity``.
+    """
     feet_links = tuple(env.gait_manager.foot_names)
     entity = env.scene_manager[asset_cfg.name]
     links_idx_local, _ = eu.find_links(entity, list(feet_links), global_ids=False, preserve_order=True)
-    feet_vel = entity.get_links_vel(links_idx_local=links_idx_local, ref=gs.link_ref_frame.link_COM)
+    feet_pos = entity.get_links_pos(links_idx_local=links_idx_local)
+    feet_vel = _fd_foot_velocity(env, "wtw_feet_slip", feet_pos)
 
     contact = env.contact_manager.is_contact(contact_group, order=feet_links)
     prev_contact = env.contact_manager.prev_is_contact(contact_group, order=feet_links)

@@ -394,6 +394,51 @@ def _feet_contact_order(asset_cfg: ResolvedEntity, contact_order: list[str] | No
     return None
 
 
+# Previous-step foot positions for the finite-difference slip terms,
+# keyed (id(env), term_key). Same lifetime pattern as the newton body
+# cache: entries outlive dead envs, which is harmless — a fresh env
+# starts masked (episode_length_buf <= 1) so an id()-reuse collision
+# can never leak a stale difference into a reward.
+_fd_prev_foot_pos: dict[tuple[int, str], torch.Tensor] = {}
+
+
+def _fd_foot_velocity(env: World, key: str, foot_pos: torch.Tensor) -> torch.Tensor:
+    """Per-control-step finite-difference velocity of the given foot positions.
+
+    Feet-slip terms used to read each backend's INSTANTANEOUS foot
+    velocity, but "the velocity at reward time" is not the same instant
+    on every backend: mjlab derives velocities from ``cvel``, which
+    MuJoCo's ``step = forward(); integrate()`` fills BEFORE the final
+    substep's integration (one substep old by design — refreshing it
+    would cost an extra forward per step), while Newton and Genesis
+    report the post-integration end-of-step value. A touchdown kills
+    the tangential velocity on the contact solref timescale (~10 ms),
+    so a 5 ms read offset alone scales the read by ~e in speed — a
+    measured 2.8x cross-sim spread in the slip penalty on IDENTICAL
+    physics, while the per-step foot displacement agreed within ~10%
+    on all three backends (rlworld.scripts.diag.parity.
+    feet_slip_forensics, phases E/F).
+
+    The position difference is read-timing-free and measures exactly
+    what the penalty means — how far the foot actually travelled during
+    the control step — so it is the only slip velocity that can be
+    compared (and trained against) consistently across simulators.
+
+    Freshly reset envs are masked to zero: their stored position is the
+    pre-teleport pose, so the raw difference would be a spawn jump, not
+    slip. The first call after construction returns zeros for the same
+    reason.
+    """
+    cache_key = (id(env), key)
+    prev = _fd_prev_foot_pos.get(cache_key)
+    _fd_prev_foot_pos[cache_key] = foot_pos.clone()
+    if prev is None:
+        return torch.zeros_like(foot_pos)
+    vel = (foot_pos - prev) / env.control_dt
+    vel[env.episode_length_buf <= 1] = 0.0
+    return vel
+
+
 def penalize_feet_clearance(
     env: World,
     target_height: float,
@@ -444,6 +489,29 @@ def penalize_feet_slip(
             ``site_names``).
     """
     _, foot_vel = _foot_pos_vel(env, asset_cfg)
+    vel_xy_norm_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
+
+    is_contact = env.contact_manager.is_contact(contact_group, order=_feet_contact_order(asset_cfg, contact_order))
+
+    cost = torch.sum(vel_xy_norm_sq * is_contact.float(), dim=1)
+    return -cost * _command_active(env, command_threshold)
+
+
+def penalize_feet_slip_fd(
+    env: World,
+    contact_group: str,
+    command_threshold: float = 0.05,
+    contact_order: list[str] | None = None,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """``penalize_feet_slip`` with the finite-difference foot velocity.
+
+    Same contact filter and command gating; only the velocity source
+    changes — see :func:`_fd_foot_velocity` for why the instantaneous
+    read cannot be compared across backends.
+    """
+    foot_pos, _ = _foot_pos_vel(env, asset_cfg)
+    foot_vel = _fd_foot_velocity(env, f"feet_slip_fd:{contact_group}", foot_pos)
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
 
     is_contact = env.contact_manager.is_contact(contact_group, order=_feet_contact_order(asset_cfg, contact_order))
