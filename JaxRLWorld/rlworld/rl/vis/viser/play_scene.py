@@ -51,6 +51,9 @@ class PlayScene(Protocol):
     @needs_update.setter
     def needs_update(self, value: bool) -> None: ...
 
+    @property
+    def scene_offset(self) -> np.ndarray: ...
+
     def create(self, server: viser.ViserServer) -> None: ...
     def begin_frame(self) -> None: ...
     def update(self) -> None: ...
@@ -94,6 +97,10 @@ class BridgePlayScene:
     @needs_update.setter
     def needs_update(self, value: bool) -> None:
         self._scene.needs_update = value
+
+    @property
+    def scene_offset(self) -> np.ndarray:
+        return self._scene._scene_offset
 
     def begin_frame(self) -> None:
         self._bridge.begin_frame()
@@ -168,6 +175,12 @@ class MujocoPlayScene:
     @needs_update.setter
     def needs_update(self, value: bool) -> None:
         self._mj_scene.needs_update = value
+
+    @property
+    def scene_offset(self) -> np.ndarray:
+        # Same tolerance as get_tracked_body_data below: mjlab's scene
+        # only grew ``_scene_offset`` in newer versions.
+        return self._mj_scene._scene_offset if hasattr(self._mj_scene, "_scene_offset") else np.zeros(3)
 
     def begin_frame(self) -> None:
         # MjlabViserScene reads ``data.xpos`` / ``data.xquat`` / ``data.cvel``

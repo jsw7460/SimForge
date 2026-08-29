@@ -21,7 +21,10 @@ import viser
 from ._ghost import MotionGhost
 from .camera_panel import ViserCameraPanel
 from .command_panel import ViserCommandPanel
+from .contact_overlay import ContactForceOverlay
 from .force_drag import ForceDragController
+from .genesis_contact_overlay import GenesisContactOverlay
+from .mjv_contact_overlay import MjvContactOverlay
 from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .play_scene import PlayScene
 from .play_viewer_base import PlayViewerBase
@@ -130,6 +133,11 @@ class ViserPlayViewer(PlayViewerBase):
         if ForceDragController.is_supported(self._play_scene):
             self._force_drag = ForceDragController(self._server, self.env, self._play_scene)
             self._force_drag.build_ui(tabs)
+        # Contact-force arrows (GUI folder; off until toggled).
+        self._contact_overlay = ContactForceOverlay(self._server, self.env)
+        # Engine-level contact decor (each class gates on its own backend).
+        self._mjv_contacts = MjvContactOverlay(self._server, self.env)
+        self._gs_contacts = GenesisContactOverlay(self._server, self.env)
         # Motion picker (only renders when the env exposes a 'motion' command
         # term — i.e. tracking presets; no-op on locomotion / getup / ...).
         self._build_motion_controls(tabs)
@@ -190,7 +198,14 @@ class ViserPlayViewer(PlayViewerBase):
             with self._server.gui.add_folder("Height reference"):
                 self._ref_show = self._server.gui.add_checkbox("Show plane", initial_value=False)
                 self._ref_height = self._server.gui.add_slider(
-                    "Height (m)", min=0.0, max=0.30, step=0.005, initial_value=0.11
+                    # Up to 1.2 m: tall enough to lay the plane through a
+                    # tabletop (0.6) or a lift goal band (0.72-0.88), not
+                    # just foot-swing heights.
+                    "Height (m)",
+                    min=0.0,
+                    max=1.20,
+                    step=0.005,
+                    initial_value=0.11,
                 )
                 self._ref_show.on_update(lambda _: self._sync_ref_plane())
                 self._ref_height.on_update(lambda _: self._sync_ref_plane())
@@ -198,7 +213,7 @@ class ViserPlayViewer(PlayViewerBase):
         # A thin translucent plate at world z = slider; foot mesh renders above
         # it iff its world z clears the slider height (Z is unshifted by the
         # scene-follow offset, so render z == world z).
-        plate = trimesh.creation.box(extents=(1.5, 1.5, 0.004))
+        plate = trimesh.creation.box(extents=(3.0, 3.0, 0.004))
         plate.visual = trimesh.visual.ColorVisuals(plate, face_colors=[80, 180, 255, 110])
         self._ref_plane = self._server.scene.add_mesh_trimesh(name="/height_ref", mesh=plate)
         self._ref_plane.position = (0.0, 0.0, float(self._ref_height.value))
@@ -517,6 +532,9 @@ class ViserPlayViewer(PlayViewerBase):
                             # writes env.set_external_wrench under the lock.
                             self._force_drag.tick()
                         self._update_command_arrows()
+                        self._contact_overlay.update(self._play_scene.env_idx, self._play_scene.scene_offset)
+                        self._mjv_contacts.update(self._play_scene.env_idx, self._play_scene.scene_offset)
+                        self._gs_contacts.update(self._play_scene.env_idx, self._play_scene.scene_offset)
                         if self._motion_ghost is not None:
                             self._motion_ghost.update(self._play_scene.env_idx)
                         self._server.flush()

@@ -17,6 +17,9 @@ import trimesh.visual
 import viser
 
 from .bridge import SimulatorBridge
+from .contact_overlay import ContactForceOverlay
+from .genesis_contact_overlay import GenesisContactOverlay
+from .mjv_contact_overlay import MjvContactOverlay
 from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .scene import ViserScene
 from .scene_config import ViserSceneConfig
@@ -182,6 +185,12 @@ class ViserVisualizationManager:
                 scene=self.scene,
             )
 
+        # Contact-force arrows (GUI folder; off until toggled).
+        self._contact_overlay = ContactForceOverlay(self.server, self.env)
+        # Engine-level contact decor (each class gates on its own backend).
+        self._mjv_contacts = MjvContactOverlay(self.server, self.env)
+        self._gs_contacts = GenesisContactOverlay(self.server, self.env)
+
     def _on_env_switch(self) -> None:
         """Handle environment index change."""
         if self._term_overlays:
@@ -214,6 +223,11 @@ class ViserVisualizationManager:
             # Draw command/velocity arrows.
             if self.config.enable_command_arrows:
                 self._update_command_arrows()
+
+            # Contact-force arrows.
+            self._contact_overlay.update(self.scene.env_idx, self.scene._scene_offset)
+            self._mjv_contacts.update(self.scene.env_idx, self.scene._scene_offset)
+            self._gs_contacts.update(self.scene.env_idx, self.scene._scene_offset)
 
             # Update debug visualization.
             if self._debug_overlays:
