@@ -11,17 +11,14 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 import gymnasium as gym
 
-from rlworld.rl.configs import GenesisConfigsForRun
 from rlworld.rl.configs.presets.inverted_double_pendulum.mlp import get_config
 from rlworld.rl.runners import OnPolicyRunner
 
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config(sim="genesis")
+    cfgs_for_run = get_config(sim="genesis").with_cli_overrides()
 
-    # Create configs and runner
-    cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
     from gymnasium.vector import SyncVectorEnv
 
     from rlworld.rl.envs import GymnasiumEnv

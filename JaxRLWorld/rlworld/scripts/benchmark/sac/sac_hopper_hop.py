@@ -11,7 +11,7 @@ genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 import gymnasium as gym
 
-from rlworld.rl.configs import GenesisConfigsForRun, SACPolicyConfig
+from rlworld.rl.configs import SACPolicyConfig
 from rlworld.rl.configs.algorithms import SACConfig
 from rlworld.rl.configs.common_config_classes import (
     Activation,
@@ -24,10 +24,7 @@ from rlworld.rl.runners import OffPolicyRunner
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config(sim="genesis")
-
-    # Create configs and runner
-    cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
+    cfgs_for_run = get_config(sim="genesis").with_cli_overrides()
 
     cfgs_for_run.algorithm = SACConfig()
     cfgs_for_run.algorithm.obs_normalization = False

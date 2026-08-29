@@ -13,7 +13,7 @@ import genesis.utils.terrain
 genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
-from rlworld.rl.configs import FastTD3PolicyConfig, GenesisConfigsForRun
+from rlworld.rl.configs import FastTD3PolicyConfig
 from rlworld.rl.configs.algorithms import FastTD3Config
 from rlworld.rl.configs.common_config_classes import (
     Activation,
@@ -27,12 +27,9 @@ from rlworld.rl.runners import BaseRunner
 
 def main():
     # Get complete config from preset
-    configs_dict = get_config(sim="genesis")
+    cfgs_for_run = get_config(sim="genesis").with_cli_overrides()
 
-    configs_dict["runner"]["run_name"] = "HalfCheetah_TD3"
-
-    # Create configs and runner
-    cfgs_for_run = GenesisConfigsForRun.from_dict_with_overrides(configs_dict)
+    cfgs_for_run.runner.run_name = "HalfCheetah_TD3"
 
     cfgs_for_run.env.num_envs = 1
     cfgs_for_run.env.env_name = "GymnasiumEnv"
