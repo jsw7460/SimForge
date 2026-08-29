@@ -33,6 +33,8 @@ class PPOConfig(BaseConfig):
     num_learning_epochs: int = 5
     num_mini_batches: int = 4
     schedule: str = "adaptive"
+    # Adam epsilon. SB3's PPO pins 1e-5; optax's default is 1e-8.
+    optimizer_eps: float = 1e-8
     use_clipped_value_loss: bool = False
     # Value-target normalization (skrl-style). When True, the critic learns
     # in normalized return space and outputs are inverse-normalized for GAE

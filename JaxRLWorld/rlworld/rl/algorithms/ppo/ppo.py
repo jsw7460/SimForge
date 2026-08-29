@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Dict, NamedTuple
 
 import equinox as eqx
@@ -181,6 +182,7 @@ class PPO(OnPolicyAlgorithm):
         desired_kl: float = 0.01,
         use_value_normalization: bool = False,
         use_early_stop: bool = False,
+        optimizer_eps: float = 1e-8,
         normalize_advantage_per_minibatch: bool = True,
         symmetry_spec=None,
         symmetry_coef: float = 0.0,
@@ -246,7 +248,7 @@ class PPO(OnPolicyAlgorithm):
         # Filled by _compute_metrics each update; consumed by the
         # adaptive-LR schedule in the same update() call.
         self._last_analytical_kl_mean = 0.0
-        self.optimizer_class = optimizer_class or optax.adam
+        self.optimizer_class = optimizer_class or partial(optax.adam, eps=optimizer_eps)
 
         # Check if model has normalizers enabled
         self.obs_normalization = actor_critic.actor_obs_normalizer is not None

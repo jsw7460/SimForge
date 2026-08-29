@@ -249,13 +249,16 @@ class OrthoInit(BaseConfig):
     """Orthogonal initialization.
 
     Hidden-layer gain is auto-derived from the activation (sqrt(2) for
-    relu/elu, 1.0 for tanh/sigmoid/selu). Only ``output_gain`` is
-    user-controllable: actor heads typically use a small value
-    (e.g. 0.01) so the policy starts near zero; critic heads ignore
-    this and always use 1.0.
+    relu/elu, 1.0 for tanh/sigmoid/selu) unless ``hidden_gain`` pins it
+    explicitly — SB3/openai-baselines use sqrt(2) for every hidden
+    layer regardless of activation, so parity comparisons set
+    ``hidden_gain=sqrt(2)`` on tanh networks. ``output_gain`` scales the
+    head: actor heads typically use a small value (e.g. 0.01) so the
+    policy starts near zero; critic heads ignore it and always use 1.0.
     """
 
     output_gain: float = 1.0
+    hidden_gain: float | None = None
 
 
 @dataclass

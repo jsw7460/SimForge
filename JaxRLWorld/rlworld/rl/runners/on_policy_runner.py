@@ -124,6 +124,7 @@ class OnPolicyRunner(BaseRunner):
             desired_kl=alg_cfg.desired_kl,
             use_value_normalization=alg_cfg.use_value_normalization,
             use_early_stop=alg_cfg.use_early_stop,
+            optimizer_eps=alg_cfg.optimizer_eps,
             normalize_advantage_per_minibatch=alg_cfg.normalize_advantage_per_minibatch,
             symmetry_spec=symmetry_spec,
             symmetry_coef=symmetry_coef,

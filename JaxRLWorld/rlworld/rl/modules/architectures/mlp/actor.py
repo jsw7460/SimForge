@@ -31,6 +31,7 @@ class MLPActor(BaseActor):
         use_layer_norm: bool = False,
         ortho_init: bool = True,
         output_gain: float = 1.0,
+        hidden_gain: float | None = None,
         *,
         key: jax.Array,
     ):
@@ -43,6 +44,8 @@ class MLPActor(BaseActor):
             use_layer_norm: Whether to use layer normalization
             ortho_init: Whether to use orthogonal initialization
             output_gain: Gain for the MLP (ignored if ortho_init=False)
+            hidden_gain: Explicit hidden-layer gain; None derives it from
+                the activation (sqrt(2) for relu/elu, 1.0 for tanh)
             key: JAX random key
         """
         self.num_obs = num_obs
@@ -70,7 +73,8 @@ class MLPActor(BaseActor):
                 "sigmoid": 1.0,
                 "selu": 1.0,
             }
-            hidden_gain = gain_map.get(activation, math.sqrt(2))
+            if hidden_gain is None:
+                hidden_gain = gain_map.get(activation, math.sqrt(2))
 
             self.net = orthogonal_init_mlp(
                 self.net,
@@ -109,6 +113,7 @@ class MLPCritic(BaseCritic):
         activation: str = "relu",
         use_layer_norm: bool = False,
         ortho_init: bool = True,
+        hidden_gain: float | None = None,
         *,
         key: jax.Array,
     ):
@@ -141,7 +146,8 @@ class MLPCritic(BaseCritic):
                 "elu": math.sqrt(2),
                 "tanh": 1.0,
             }
-            hidden_gain = gain_map.get(activation, math.sqrt(2))
+            if hidden_gain is None:
+                hidden_gain = gain_map.get(activation, math.sqrt(2))
 
             self.net = orthogonal_init_mlp(
                 self.net,

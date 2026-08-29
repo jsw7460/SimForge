@@ -75,7 +75,7 @@ def _ortho_init_args(init) -> dict:
     DefaultInit()   → ortho_init=False, output_gain=1.0 (ignored).
     """
     if isinstance(init, OrthoInit):
-        return {"ortho_init": True, "output_gain": init.output_gain}
+        return {"ortho_init": True, "output_gain": init.output_gain, "hidden_gain": init.hidden_gain}
     if isinstance(init, DefaultInit):
         return {"ortho_init": False, "output_gain": 1.0}
     raise TypeError(f"Unknown InitScheme: {type(init).__name__}")
@@ -204,6 +204,8 @@ def build_critic(
         # MLPCritic (it ignores per-cfg output_gain), but we still
         # honor DefaultInit by toggling ``ortho_init``.
         init_kwargs = {"ortho_init": isinstance(critic_cfg.init, OrthoInit)}
+        if isinstance(critic_cfg.init, OrthoInit):
+            init_kwargs["hidden_gain"] = critic_cfg.init.hidden_gain
         return CriticClass(
             num_obs=num_obs,
             hidden_dims=list(critic_cfg.hidden_dims),
