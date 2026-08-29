@@ -525,6 +525,16 @@ class GymnasiumEnv(World):
                     "estimator": 0,  # Not used in gym envs
                 }
 
+            def calculate_obs_shapes(self) -> dict[str, tuple[int, ...]]:
+                """Per-env shape of every group, batch axis stripped.
+
+                Same contract as ``BaseObservationManager.calculate_obs_shapes``
+                (the on-policy runner reads it for vision-group routing); a
+                gym env only ever has the two flat vector groups.
+                """
+                obs_dim = self.wrapper._obs_dim
+                return {"actor": (obs_dim,), "critic": (obs_dim,)}
+
             def get_observation(self) -> dict[str, torch.Tensor]:
                 """Return current observation in required format"""
                 if self.wrapper._current_obs is None:
