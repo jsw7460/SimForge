@@ -73,20 +73,36 @@ def setup_log_dir(output_dir: str | None = None) -> tuple[str, str]:
     models_log_dir = base_path / "outputs" / "models" / date_str / time_str
     wandb_log_dir = base_path / "outputs" / "logs" / date_str / time_str
 
-    # Create directories if they don't exist. On CHTC, ``EXP_OUTPUT_DIR``
-    # is set to ``/staging`` (data-transfer dir, not writable) when
-    # running inside a job slot — fall back to the current scratch
-    # directory so policy load (which forces this path on every
-    # checkpoint) doesn't abort the run.
+    # The timestamp has one-second resolution, so two runners starting in
+    # the same second would SHARE the directory — their checkpoint
+    # tmp-dir/rename dance then races and one of them crashes mid-write.
+    # Claim the models dir atomically (exist_ok=False) and suffix -2, -3,
+    # … on collision; the wandb dir follows whatever name won.
+    def _claim(base_models: Path, base_wandb: Path) -> tuple[Path, Path]:
+        for attempt in range(100):
+            suffix = "" if attempt == 0 else f"-{attempt + 1}"
+            candidate = base_models.with_name(base_models.name + suffix)
+            try:
+                candidate.mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                continue
+            wandb_dir = base_wandb.with_name(base_wandb.name + suffix)
+            wandb_dir.mkdir(parents=True, exist_ok=True)
+            return candidate, wandb_dir
+        raise RuntimeError(f"Could not claim a unique log dir near {base_models}")
+
+    # On CHTC, ``EXP_OUTPUT_DIR`` is set to ``/staging`` (data-transfer
+    # dir, not writable) when running inside a job slot — fall back to the
+    # current scratch directory so policy load (which forces this path on
+    # every checkpoint) doesn't abort the run.
     try:
-        models_log_dir.mkdir(parents=True, exist_ok=True)
-        wandb_log_dir.mkdir(parents=True, exist_ok=True)
+        models_log_dir, wandb_log_dir = _claim(models_log_dir, wandb_log_dir)
     except PermissionError:
         fallback = Path(".")
-        models_log_dir = fallback / "outputs" / "models" / date_str / time_str
-        wandb_log_dir = fallback / "outputs" / "logs" / date_str / time_str
-        models_log_dir.mkdir(parents=True, exist_ok=True)
-        wandb_log_dir.mkdir(parents=True, exist_ok=True)
+        models_log_dir, wandb_log_dir = _claim(
+            fallback / "outputs" / "models" / date_str / time_str,
+            fallback / "outputs" / "logs" / date_str / time_str,
+        )
 
     return str(models_log_dir), str(wandb_log_dir)
 
