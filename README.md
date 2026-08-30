@@ -108,22 +108,10 @@ Return after the budget, averaged over seeds 0/1/2:
 | Humanoid-v5    |      111.8 |  174.9 |
 | Swimmer-v5     |       25.3 |   31.9 |
 
-**Read these as a parity check, not a ranking.** The hyperparameters are
-SB3's defaults throughout, so neither side is tuned per task, and the
-budgets are short enough that the seed spread is wide — SAC on
-HalfCheetah returned 2262 / 769 / 1938 across the three seeds for
-JaxRLWorld and 2230 / 622 / 2140 for SB3, the same seed going badly for
-both. At three seeds the differences above are not resolved; what the
-table supports is that the implementations land in the same place, which
-is what it was built to check.
-
-Everything that could differ and does not is pinned in
-[`_common.py`][bench]: environment version, number of parallel
-environments, network shape and activation, learning rates, batch and
-rollout sizes, discount, clipping, entropy target. The asymmetries that
-remain are deliberate and listed there — JaxRLWorld's learner is JAX
-against SB3's torch, and SB3's PPO has no value-loss clipping or
-adaptive-KL schedule, so those are turned off on our side to match.
+Hyperparameters are SB3's defaults on both sides, untuned per task, so
+this is a parity check rather than a ranking — at three seeds and these
+budgets the spread is wide. Everything held equal is pinned in
+[`_common.py`][bench].
 
 ```bash
 # one cell
