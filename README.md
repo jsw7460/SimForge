@@ -41,10 +41,11 @@ external users can clone a single, reproducible stack.
   covering Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and
   the Booster T1 and K1 humanoids.
 - **PPO is the default for all locomotion tasks** across the three
-  simulators. **SAC, TD3, FastTD3, and TDMPC2** are validated on a
-  small subset of a Gymnasium-based benchmark suite (see
-  `JaxRLWorld/rlworld/scripts/benchmark/`), with FastTD3 additionally
-  validated on [mujoco_playground][mjpg].
+  simulators. **PPO, SAC and TD3** are checked against
+  [Stable-Baselines3][sb3] on six Gymnasium MuJoCo tasks under identical
+  settings — see [Benchmarks](#benchmarks). **FastTD3 and TDMPC2** are
+  validated on the same Gymnasium suite, FastTD3 additionally on
+  [mujoco_playground][mjpg].
 - **Domain randomization, motion tracking, and viser-based 3-D
   visualization** are wired up across all simulators.
 
@@ -64,6 +65,72 @@ trained and evaluated end-to-end with PPO.
 | `t1_tracking`                | Booster T1   | ✓       | ✓      | ✓      |
 | `k1_joystick`                | Booster K1   | ✓       | ✓      | ✓      |
 | `k1_joystick` (g1 recipe)    | Booster K1   | ✓       | ✓      | ✓      |
+
+## Benchmarks
+
+The locomotion tasks above have no external reference to check against,
+so the algorithms are validated against [Stable-Baselines3][sb3] on
+Gymnasium MuJoCo instead: same environment, same network, same
+hyperparameters, same budget, three seeds each.
+
+Return after the budget, averaged over seeds 0/1/2:
+
+**PPO** — 1000 iterations x 16 envs x 128 steps = 2.05M environment steps
+
+| Task           | JaxRLWorld | SB3    |
+| -------------- | ---------: | -----: |
+| HalfCheetah-v5 |     1555.4 | 1550.0 |
+| Hopper-v5      |     2042.7 | 2113.3 |
+| Walker2d-v5    |     1714.4 | 1696.3 |
+| Ant-v5         |     2129.2 | 1225.3 |
+| Humanoid-v5    |      513.2 |  488.3 |
+| Swimmer-v5     |       68.6 |   69.9 |
+
+**SAC** — 100k environment steps, one gradient step each
+
+| Task           | JaxRLWorld | SB3    |
+| -------------- | ---------: | -----: |
+| HalfCheetah-v5 |     1912.6 | 1664.0 |
+| Hopper-v5      |      871.5 |  479.7 |
+| Walker2d-v5    |      727.2 |  564.7 |
+| Ant-v5         |      446.0 |  362.3 |
+| Humanoid-v5    |      769.7 |  661.7 |
+| Swimmer-v5     |       34.5 |   37.1 |
+
+**TD3** — 100k environment steps, one gradient step each
+
+| Task           | JaxRLWorld | SB3    |
+| -------------- | ---------: | -----: |
+| HalfCheetah-v5 |     1414.3 | 1054.7 |
+| Hopper-v5      |      437.0 |  312.7 |
+| Walker2d-v5    |     1082.4 |  540.3 |
+| Ant-v5         |      954.6 | 1086.3 |
+| Humanoid-v5    |      111.8 |  174.9 |
+| Swimmer-v5     |       25.3 |   31.9 |
+
+**Read these as a parity check, not a ranking.** The hyperparameters are
+SB3's defaults throughout, so neither side is tuned per task, and the
+budgets are short enough that the seed spread is wide — SAC on
+HalfCheetah returned 2262 / 769 / 1938 across the three seeds for
+JaxRLWorld and 2230 / 622 / 2140 for SB3, the same seed going badly for
+both. At three seeds the differences above are not resolved; what the
+table supports is that the implementations land in the same place, which
+is what it was built to check.
+
+Everything that could differ and does not is pinned in
+[`_common.py`][bench]: environment version, number of parallel
+environments, network shape and activation, learning rates, batch and
+rollout sizes, discount, clipping, entropy target. The asymmetries that
+remain are deliberate and listed there — JaxRLWorld's learner is JAX
+against SB3's torch, and SB3's PPO has no value-loss clipping or
+adaptive-KL schedule, so those are turned off on our side to match.
+
+```bash
+# one cell
+bash JaxRLWorld/rlworld/scripts/benchmark/sb3_compare/ppo_halfcheetah.bash
+# every algorithm x task, resumable
+bash JaxRLWorld/rlworld/scripts/benchmark/sb3_compare/sweep.bash
+```
 
 ## Installation
 
@@ -193,3 +260,5 @@ python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py \
 [tdmpc2]: https://github.com/nicklashansen/tdmpc2
 [mjpg]: https://github.com/google-deepmind/mujoco_playground
 [warp]: https://github.com/NVIDIA/warp
+[sb3]: https://github.com/DLR-RM/stable-baselines3
+[bench]: JaxRLWorld/rlworld/scripts/benchmark/sb3_compare/_common.py
