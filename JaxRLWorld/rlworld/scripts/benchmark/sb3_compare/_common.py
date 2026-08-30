@@ -353,6 +353,11 @@ def run_jrw(algo: str, task_key: str) -> None:
         raise ValueError(f"Unknown algo {algo!r}")
 
     cfgs.runner.log_interval = 500
+    # An off-policy iteration is one environment step, so the rolling
+    # checkpoint's default cadence (every 10 iterations) would write the
+    # full parameter set to disk 10,000 times over this run. SB3 writes
+    # none while learning; keep the comparison about learning.
+    cfgs.runner.latest_checkpoint_interval = OFFPOLICY_ITERS
     policy_cfg.actor = MLPActorCfg(hidden_dims=list(hp["net"]), activation=Activation.RELU, init=DefaultInit())
     policy_cfg.critic = MLPCriticCfg(hidden_dims=list(hp["net"]), activation=Activation.RELU, init=DefaultInit())
 
