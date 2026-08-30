@@ -3,11 +3,22 @@
 Sensor-free: instead of reading a ContactSensorCfg group, this copies
 the displayed env's ``qpos / qvel / ctrl`` into a private CPU
 ``MjData``, runs ``mj_forward`` there, and asks MuJoCo's own
-visualization pipeline (``mjv_updateScene`` with the CONTACTPOINT /
-CONTACTFORCE flags) to generate the contact discs and force arrows —
-the exact mechanism mjviser uses. Every contact in the scene shows up
-(robot-ground, robot-object, object-object), at the true contact
-points, with MuJoCo's force decomposition.
+visualization pipeline (``mjv_updateScene`` with CONTACTPOINT) to
+generate the contact discs — the mechanism mjviser uses. Every contact
+in the scene shows up (robot-ground, robot-object, object-object) at
+the true contact points.
+
+The force arrows are computed here via ``mj_contactForce`` instead of
+mjv's arrow decor, for two reasons measured on the real scenes: mjv's
+arrow length is normalized by per-model visual statistics
+(``vis.map.force`` / ``stat``), so the same ~350 N ground reaction
+rendered huge on the Newton template and nearly invisible on the mjlab
+scene; and mjv's arrow direction follows the contact's geom ordering,
+which differs between the two templates (force into the ground on one,
+out of it on the other). Drawing them ourselves gives every backend
+the same metres-per-newton slider and the same convention: the force
+acting on the NON-STATIC geom, so a ground reaction always points out
+of the ground.
 
 Works on both mjwarp cells: the mujoco backend's scene ``mj_model`` and
 Newton's ``SolverMuJoCo.mj_model`` are each the CPU template of the
@@ -38,6 +49,10 @@ if TYPE_CHECKING:
 
 _MAXGEOM = 2000
 _SHAFT_RATIO = 0.8  # mjviser / mjlab convention: 80% shaft, 20% head
+_SHAFT_RADIUS = 0.006
+_HEAD_RADIUS = 0.015
+_MAX_LENGTH_M = 1.0
+_FORCE_COLOR = (220, 55, 45)
 
 
 def _unit_meshes() -> dict[str, trimesh.Trimesh]:
@@ -101,11 +116,8 @@ class MjvContactOverlay:
         with server.gui.add_folder("Engine contacts", expand_by_default=False):
             self._show_points = server.gui.add_checkbox("Contact points", initial_value=False)
             self._show_forces = server.gui.add_checkbox("Contact forces", initial_value=False)
-            # ``vis.map.force`` only feeds the decor generator; the model's
-            # physics side was already consumed by put_model, so writing a
-            # visual-map field cannot reach the GPU simulation.
             self._force_scale = server.gui.add_slider(
-                "Force scale", min=0.001, max=0.1, step=0.001, initial_value=float(self._mj_model.vis.map.force)
+                "Force scale (m/N)", min=0.0005, max=0.02, step=0.0005, initial_value=0.002
             )
 
     # ── per-frame update ─────────────────────────────────────────────
@@ -126,27 +138,16 @@ class MjvContactOverlay:
         d.qvel[:] = wp.to_torch(self._wp_data.qvel)[env_idx].detach().cpu().numpy()
         if d.ctrl.size:
             d.ctrl[:] = wp.to_torch(self._wp_data.ctrl)[env_idx].detach().cpu().numpy()
-        m.vis.map.force = float(self._force_scale.value)
         mujoco.mj_forward(m, d)
 
         self._opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = self._show_points.value
-        self._opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = self._show_forces.value
         mujoco.mjv_updateScene(m, d, self._opt, None, self._cam, int(mujoco.mjtCatBit.mjCAT_DECOR), self._scn)
 
         cylinders: list = []
-        arrows: list = []
-        arrow_types = {
-            int(mujoco.mjtGeom.mjGEOM_ARROW),
-            int(mujoco.mjtGeom.mjGEOM_ARROW1),
-            int(mujoco.mjtGeom.mjGEOM_ARROW2),
-        }
         for i in range(self._scn.ngeom):
             g = self._scn.geoms[i]
-            gtype = int(g.type)
-            if gtype == int(mujoco.mjtGeom.mjGEOM_CYLINDER):
+            if int(g.type) == int(mujoco.mjtGeom.mjGEOM_CYLINDER):
                 cylinders.append(g)
-            elif gtype in arrow_types:
-                arrows.append(g)
 
         offset = scene_offset.astype(np.float32)
 
@@ -167,28 +168,52 @@ class MjvContactOverlay:
         else:
             self._hide("disc")
 
-        # Force arrows: shaft + head, split mjviser-style.
-        if arrows:
-            n = len(arrows)
-            s_pos = np.empty((n, 3), np.float32)
-            quat = np.empty((n, 4), np.float32)
-            s_scale = np.empty((n, 3), np.float32)
-            h_pos = np.empty((n, 3), np.float32)
-            h_scale = np.empty((n, 3), np.float32)
-            color = np.empty((n, 3), np.uint8)
-            for j, g in enumerate(arrows):
-                mat = np.asarray(g.mat).reshape(3, 3)
-                size = np.asarray(g.size)  # [shaft_radius, head_radius, total_length]
-                total = size[2]
-                shaft_len = total * _SHAFT_RATIO
-                s_pos[j] = np.asarray(g.pos) + offset
-                quat[j] = vtf.SO3.from_matrix(mat).wxyz
-                s_scale[j] = [size[0], size[0], max(shaft_len, 1e-4)]
-                h_pos[j] = s_pos[j] + mat @ np.array([0.0, 0.0, shaft_len])
-                h_scale[j] = [size[1], size[1], max(total - shaft_len, 1e-4)]
-                color[j] = (np.clip(np.asarray(g.rgba)[:3], 0, 1) * 255).astype(np.uint8)
-            self._draw("arrow_shaft", "shaft", s_pos, quat, s_scale, color)
-            self._draw("arrow_head", "head", h_pos, quat, h_scale, color)
+        # Force arrows from mj_contactForce, oriented onto the non-static
+        # geom (a ground reaction points out of the ground on every model,
+        # regardless of the contact's geom ordering).
+        if self._show_forces.value and d.ncon:
+            n = int(d.ncon)
+            pos = np.empty((n, 3), np.float32)
+            vec = np.empty((n, 3), np.float32)
+            f6 = np.zeros(6, dtype=np.float64)
+            geom_bodyid = m.geom_bodyid
+            for i in range(n):
+                c = d.contact[i]
+                mujoco.mj_contactForce(m, d, i, f6)
+                # Contact-frame rows are the world-frame axes; f6[:3] is the
+                # force on geom2 in that frame (normal component >= 0).
+                f_world = np.asarray(c.frame).reshape(3, 3).T @ f6[:3]
+                body1 = int(geom_bodyid[int(c.geom[0])])
+                body2 = int(geom_bodyid[int(c.geom[1])])
+                if body2 == 0 and body1 != 0:
+                    f_world = -f_world  # show the force on geom1 instead
+                pos[i] = np.asarray(c.pos) + offset
+                vec[i] = f_world.astype(np.float32)
+
+            mags = np.linalg.norm(vec, axis=1)
+            dirs = np.where(mags[:, None] > 1e-9, vec / np.clip(mags[:, None], 1e-9, None), [[0.0, 0.0, 1.0]])
+            quats = np.empty((n, 4), np.float32)
+            z = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+            dots = dirs @ z
+            crosses = np.cross(np.broadcast_to(z, dirs.shape), dirs)
+            quats[:, 0] = 1.0 + dots
+            quats[:, 1:] = crosses
+            flipped = quats[:, 0] < 1e-8
+            quats[flipped] = np.array([0.0, 1.0, 0.0, 0.0])
+            quats /= np.linalg.norm(quats, axis=1, keepdims=True)
+
+            lengths = np.clip(mags * float(self._force_scale.value), 0.0, _MAX_LENGTH_M)
+            shaft_len = lengths * _SHAFT_RATIO
+            s_scale = np.stack(
+                [np.full(n, _SHAFT_RADIUS, np.float32), np.full(n, _SHAFT_RADIUS, np.float32), shaft_len], axis=1
+            )
+            h_scale = np.stack(
+                [np.full(n, _HEAD_RADIUS, np.float32), np.full(n, _HEAD_RADIUS, np.float32), lengths - shaft_len],
+                axis=1,
+            )
+            color = np.tile(np.array(_FORCE_COLOR, dtype=np.uint8), (n, 1))
+            self._draw("arrow_shaft", "shaft", pos, quats, s_scale, color)
+            self._draw("arrow_head", "head", pos + dirs * shaft_len[:, None], quats, h_scale, color)
         else:
             self._hide("arrow_shaft")
             self._hide("arrow_head")

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from rlworld.rl.envs.world import World
 
 _POINT_COLOR = (255, 190, 60)
-_FORCE_COLOR = (235, 100, 40)
+_FORCE_COLOR = (220, 55, 45)
 _POINT_RADIUS = 0.012
 _SHAFT_RADIUS = 0.006
 _HEAD_RADIUS = 0.015
@@ -58,12 +58,14 @@ class GenesisContactOverlay:
             return
 
         self._collider = env.scene_manager.scene.rigid_solver.collider
+        robot = env.scene_manager[env.robot_entity_name]
+        self._robot_geom_range = (int(robot.geom_start), int(robot.geom_end))
 
         with server.gui.add_folder("Engine contacts", expand_by_default=False):
             self._show_points = server.gui.add_checkbox("Contact points", initial_value=False)
             self._show_forces = server.gui.add_checkbox("Contact forces", initial_value=False)
             self._force_scale = server.gui.add_slider(
-                "Force scale (m/N)", min=0.001, max=0.05, step=0.001, initial_value=0.005
+                "Force scale (m/N)", min=0.0005, max=0.02, step=0.0005, initial_value=0.002
             )
 
     def update(self, env_idx: int, scene_offset: np.ndarray) -> None:
@@ -81,12 +83,26 @@ class GenesisContactOverlay:
         if pos_t.ndim == 3:  # parallelized scene: (n_envs, capacity, 3)
             pos = pos_t[env_idx].detach().cpu().numpy().astype(np.float32)
             force = force_t[env_idx].detach().cpu().numpy().astype(np.float32)
+            geom_a = data["geom_a"][env_idx].detach().cpu().numpy()
+            geom_b = data["geom_b"][env_idx].detach().cpu().numpy()
             n_live = int(data["n_contacts"][env_idx].item())
         else:  # single non-parallel scene: (capacity, 3)
             pos = pos_t.detach().cpu().numpy().astype(np.float32)
             force = force_t.detach().cpu().numpy().astype(np.float32)
+            geom_a = data["geom_a"].detach().cpu().numpy()
+            geom_b = data["geom_b"].detach().cpu().numpy()
             n_live = int(np.asarray(data["n_contacts"]).reshape(-1)[0])
         valid = np.arange(pos.shape[0]) < n_live
+
+        # Direction convention shared with the mjwarp overlay: show the
+        # force acting on the ROBOT geom. The raw "force" is the force on
+        # geom B (the entity API derives force_a as its negation), so flip
+        # the rows where the robot is geom A — a ground reaction then
+        # points out of the ground on every backend.
+        lo, hi = self._robot_geom_range
+        robot_a = (geom_a >= lo) & (geom_a < hi)
+        robot_b = (geom_b >= lo) & (geom_b < hi)
+        force = np.where((robot_a & ~robot_b)[:, None], -force, force)
 
         n = pos.shape[0]
         if n == 0:

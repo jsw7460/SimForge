@@ -119,6 +119,33 @@ def _pbr_visual(
 _GROUND_QUAD_FACES = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
 
 
+def _terrain_face_shading(mesh: trimesh.Trimesh) -> None:
+    """Bake slope/height shading into per-face colors, in place.
+
+    A raw heightfield mesh under a uniform material renders as a flat
+    white sheet — smooth normals plus a single color leave no cue for
+    the bumps. Per-face colors from the face normal (a fixed oblique
+    light) and a subtle height tint give the terrain visible relief
+    without any texture, and face colors render faceted, which reads
+    far better for coarse height grids than smooth shading.
+    """
+    normals = mesh.face_normals
+    light = np.array([0.35, 0.25, 0.9])
+    light = light / np.linalg.norm(light)
+    shade = np.clip(normals @ light, 0.0, 1.0)  # (F,)
+
+    z = mesh.triangles_center[:, 2]
+    z_span = max(float(z.max() - z.min()), 1e-6)
+    height = (z - float(z.min())) / z_span  # 0 = valley, 1 = crest
+
+    base = np.array([158.0, 150.0, 136.0])
+    high = np.array([196.0, 190.0, 178.0])
+    color = base[None, :] + (high - base)[None, :] * height[:, None]
+    color = color * (0.55 + 0.45 * shade)[:, None]
+    rgba = np.concatenate([color, np.full((len(color), 1), 255.0)], axis=1)
+    mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, face_colors=rgba.astype(np.uint8))
+
+
 def _ground_quad_vertices(size: float) -> np.ndarray:
     half = size / 2.0
     return np.array(
@@ -318,7 +345,13 @@ class ViserScene:
                 mesh_path = f"/fixed_bodies/body_{group.body_id}/mesh"
 
             for mesh_idx, mesh in enumerate(group.meshes):
-                if cfg.robot_color is not None:
+                if group.is_fixed:
+                    # Terrain / static world geometry gets its own relief
+                    # shading — painting it with the robot material (or
+                    # leaving it colorless) renders a featureless sheet.
+                    mesh = mesh.copy()
+                    _terrain_face_shading(mesh)
+                elif cfg.robot_color is not None:
                     mesh = mesh.copy()
                     # Fresh material per mesh — sharing a TextureVisuals would
                     # fight over its back-reference to ``mesh``.

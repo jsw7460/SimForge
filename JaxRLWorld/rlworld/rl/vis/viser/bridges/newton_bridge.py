@@ -75,9 +75,16 @@ class NewtonBridge(SimulatorBridge):
 
         model = self._model
 
-        # Only extract shapes for world 0.
+        # World-0 shapes are the ones whose body lives in world 0
+        # (body < bodies_per_world) plus global static shapes (body < 0,
+        # e.g. the terrain). Slicing the first shape_count // num_envs
+        # entries instead silently dropped one robot shape whenever a
+        # global terrain shape shifted the block.
         shape_flags = model.shape_flags.numpy()
-        for shape_idx in range(self._shapes_per_world):
+        shape_bodies = model.shape_body.numpy()
+        for shape_idx in range(model.shape_count):
+            if int(shape_bodies[shape_idx]) >= self._bodies_per_world:
+                continue
             # Skip non-visible shapes (collision-only geometry).
             if not (shape_flags[shape_idx] & ShapeFlags.VISIBLE):
                 continue
@@ -232,8 +239,12 @@ class NewtonBridge(SimulatorBridge):
         v01 = (rr * ncol + cc + 1).ravel()
         v10 = ((rr + 1) * ncol + cc).ravel()
         v11 = ((rr + 1) * ncol + cc + 1).ravel()
-        tri1 = np.stack([v00, v10, v11], axis=1)
-        tri2 = np.stack([v00, v11, v01], axis=1)
+        # Winding: with X along columns and Y along rows, [v00, v10, v11]
+        # winds clockwise seen from above (normal -Z) and viser back-face
+        # culls the whole terrain when looked at from above — an invisible
+        # ground. Order the triangles counter-clockwise instead.
+        tri1 = np.stack([v00, v11, v10], axis=1)
+        tri2 = np.stack([v00, v01, v11], axis=1)
         indices = np.concatenate([tri1, tri2], axis=0).reshape(-1).astype(np.int32)
         return vertices, indices
 
