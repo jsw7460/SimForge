@@ -254,7 +254,13 @@ def _jrw_base_cfg(algo: str, task_key: str, num_envs: int):
     return cfgs
 
 
-def run_jrw(algo: str, task_key: str) -> None:
+def run_jrw(algo: str, task_key: str, buffer_device: str = "host") -> None:
+    """Run one JaxRLWorld cell.
+
+    ``buffer_device`` is exposed so the two storage locations can be
+    compared without editing this file. "host" is the default because it
+    is the faster of the two *here* — see the off-policy branch below.
+    """
     from rlworld.rl.configs.common_config_classes import (
         Activation,
         DefaultInit,
@@ -365,6 +371,16 @@ def run_jrw(algo: str, task_key: str) -> None:
         raise ValueError(f"Unknown algo {algo!r}")
 
     cfgs.runner.log_interval = 500
+    # Storage location is an implementation choice rather than a
+    # hyperparameter, so each side runs the way it is meant to — and here
+    # that means the host for both. A device buffer wins by 23x at
+    # go2/newton/sac's shapes (8192 envs, batches of 8192) and loses by
+    # 12% at these (one env, batches of 256): TD3/HalfCheetah takes 257 s
+    # on the host against 288 s on device. The transfers it removes are
+    # 0.2 MB here, and the jit dispatches it adds cost more than NumPy
+    # indexing did. Which way it goes is a question of scale, which is why
+    # the field exists at all.
+    cfgs.algorithm.replay_buffer_device = buffer_device
     # An off-policy iteration is one environment step, so the rolling
     # checkpoint's default cadence (every 10 iterations) would write the
     # full parameter set to disk 10,000 times over this run. SB3 writes
