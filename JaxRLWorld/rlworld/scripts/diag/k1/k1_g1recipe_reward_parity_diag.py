@@ -338,6 +338,18 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int, task: str) -
 
         cfgs.scene.rigid_options.integrator = gs.integrator.implicitfast
         cfgs.scene.rigid_options.friction_cone = gs.friction_cone.elliptic
+    elif variant == "genesis_nomasscom":
+        # Disable ONLY the body mass / COM domain-randomization terms (the
+        # ones migrated to Genesis's absolute set_links_mass / set_links_COM
+        # under the #3237 engine bump). Everything else — armature/friction/
+        # kp/kd DR, batch_links_info, the current engine — is untouched.
+        # Setting a term attribute to None is the documented disable in
+        # iter_terms. If this cell STANDS while plain genesis collapses, the
+        # mass/COM DR path is the trigger; if it still collapses, the #3237
+        # engine physics is, independent of DR.
+        for _t in ("dr_body_com", "dr_trunk_mass", "dr_link_mass"):
+            if hasattr(cfgs.event, _t):
+                setattr(cfgs.event, _t, None)
     elif variant is not None:
         raise ValueError(f"unknown genesis variant: {variant}")
 
@@ -391,8 +403,16 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int, task: str) -
         entity = env.get_robot_state_writer()._entity
         dof_ids = env.get_robot_state_writer()._actuated_dof_ids
         audit["n_links"] = len(entity.links)
-        audit["total_mass"] = round(float(entity.get_mass()), 6)
-        audit["link_masses"] = {l.name.rsplit("/", 1)[-1]: round(float(l.get_mass()), 6) for l in entity.links}
+
+        # batch_links_info=True makes get_mass() / link.get_mass() return a
+        # per-env (n_envs,) tensor (each env carries its own DR'd mass), so
+        # reduce to the cross-env mean for the scalar comparison table. A
+        # scalar (no per-env DR) reshapes to numel 1 and means to itself.
+        def _mass_mean(t) -> float:
+            return round(float(torch.as_tensor(t, device=env.device).float().reshape(-1).mean()), 6)
+
+        audit["total_mass"] = _mass_mean(entity.get_mass())
+        audit["link_masses"] = {l.name.rsplit("/", 1)[-1]: _mass_mean(l.get_mass()) for l in entity.links}
 
         def _dofstat(t):
             t = torch.as_tensor(t, device=env.device).float()
@@ -853,8 +873,13 @@ def run_parent(args) -> int:
     log_dir = out_path.parent / (out_path.stem + "_logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Default sweep is the three shipping sims; --sims lets an A/B include
+    # genesis integrator variants (genesis_implicitfast / genesis_ifast_ellip
+    # / genesis_noprune) in the SAME comparison table.
+    sim_list = [s.strip() for s in args.sims.split(",")] if args.sims else list(_SIMS)
+
     results: dict[str, dict] = {}
-    for sim in _SIMS:
+    for sim in sim_list:
         log_path = log_dir / f"{sim}.log"
         result_path = log_dir / f"{sim}.json"
         if result_path.exists():
@@ -889,7 +914,7 @@ def run_parent(args) -> int:
         if ok:
             results[sim] = json.loads(result_path.read_text())
 
-    sims = [s for s in _SIMS if s in results]
+    sims = [s for s in sim_list if s in results]
     L: list[str] = []
     L.append("=" * 118)
     L.append("K1 G1-recipe reward parity — first-step + settle dump")
@@ -1111,6 +1136,14 @@ def main() -> int:
     ap.add_argument("--settle-steps", type=int, default=50)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--task", default="g1recipe", choices=("g1recipe", "joystick"))
+    ap.add_argument(
+        "--sims",
+        default=None,
+        help="comma list of cells to sweep into one report "
+        "(default: genesis,newton,mujoco). Add genesis integrator "
+        "variants for an A/B, e.g. "
+        "--sims genesis,genesis_implicitfast,newton,mujoco",
+    )
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     if args.out is None:
