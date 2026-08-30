@@ -160,7 +160,16 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             impratio=1.0,
             iterations=50 if cfg.use_rough_terrain else 10,
             ls_iterations=50 if cfg.use_rough_terrain else 20,
-            ccd_iterations=50,
+            # Down from the canonical recipe's 50: under the new mjwarp
+            # the EPA scratch is 6 arrays totalling num_envs x nconmax x
+            # (280 + 132 x ccd_iterations) bytes -- 24.8 GB at 16384
+            # envs x nconmax 220 (OOM), 17.7 GB at MuJoCo's default 35
+            # (env built, then the CUDA graph exec OOMed), 12.4 GB at
+            # 24. EPA only serves CONVEX (mesh) pairs -- the feet are
+            # capsules on primitive paths -- and upstream itself runs
+            # epa_iterations=16 for box-box scenes, so 24 stays above
+            # upstream's own floor.
+            ccd_iterations=24,
             # Rough terrain inflates the per-env contact count by an order
             # of magnitude vs flat ground (observed on G1 29-DOF +
             # self-collision + heightfield). ``nconmax`` / ``njmax`` are
@@ -189,7 +198,29 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             # ccd_iterations vec3s — nconmax=4000 tried to allocate
             # 50 GB).
             njmax=1500 if cfg.use_rough_terrain else 300,
-            nconmax=300 if cfg.use_rough_terrain else None,
+            # Flat re-measured 2026-08-27 after the env rebuild (Warp
+            # 1.16.0 combo). Two different demands, do not confuse them:
+            # narrowphase peak per-world ncon = 79 (full_100 cell, 4096
+            # envs, random actions), but the buffer ALSO caps BROADPHASE
+            # candidate pairs, and a 16384-env training launch demanded
+            # 135-153 live for those. Undersizing does not fail -- the
+            # excess pairs are silently dropped, feet penetrate, the
+            # pair count then CREEPS upward every step (measured 151 ->
+            # 153; 150 fed that spiral). 220 = observed demand x ~1.4.
+            # The ceiling is the EPA scratch bill (num_envs x nconmax x
+            # 5 x ccd_iterations vec3s): ~10.8 GB at 16384 envs. nefc
+            # peak 151 < njmax 300, unchanged.
+            # Rough re-measured 2026-08-27 on the same combo: peak
+            # per-world ncon = 55, nefc = 196 (2048 envs, full_100) --
+            # but the LIVE broadphase demand at the training scale of
+            # 16384 envs is ~153/world on BOTH terrains (the max over
+            # that many worlds swamps the terrain difference), so both
+            # paths get the same 220. The old 300 dated from the
+            # Newton-MPR contact stream and, under the new mjwarp's
+            # fatter EPA scratch row (1024 vec3 per slot, was ~250),
+            # OOMed at env build; 220 keeps the scratch at ~11 GB for
+            # 16384 envs (naccdmax = naconmax / 4 in this version).
+            nconmax=220,
             # mjwarp-native collision on BOTH flat and rough. The old
             # rough-only opt-out (use_mujoco_contacts=False → Newton's
             # MPR collide()) dated from when the terrain was a triangle
