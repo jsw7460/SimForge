@@ -89,8 +89,9 @@ checkpoints/
 *.log
 *.mov
 .claude/
-CLAUDE.local.md
-TODO.local.md
+# Local working notes: the .local.md suffix marks a file as this
+# machine's scratch, not shared history.
+*.local.md
 MUJOCO_LOG.TXT
 
 # Raw retargeted-motion CSVs (intermediate; converted NPZs live in rlworld_private)
