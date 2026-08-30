@@ -209,6 +209,7 @@ def main():
             "size_per_env": BUFFER_SIZE_PER_ENV,
             "n_steps": N_STEPS,
             "seed": SEED,
+            "buffer_device": "host",
         }
     )
 

@@ -100,6 +100,14 @@ class Go2SACNewtonConfig(Go2FlatConfig):
             max_grad_norm=1.0,
             batch_size=8192,
             buffer_size=5_000_000,
+            # Newton produces the transitions on the GPU, so a host
+            # buffer would send every one of them down to be stored and
+            # back up to be sampled. At these shapes that is 65 ms of
+            # storing and 1080 ms of sampling per iteration, against 6
+            # and 44 on device (replay_buffer_throughput). The 3.85 GiB
+            # it costs is the physics' to spare here; a vision preset's
+            # would not be.
+            replay_buffer_device="device",
             # Transitions before updates start; one 24-step collection
             # pass at 8192 envs stores 196,608 transitions, so updates
             # begin from the second iteration.

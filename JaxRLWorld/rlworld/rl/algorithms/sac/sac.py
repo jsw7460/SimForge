@@ -27,6 +27,7 @@ from rlworld.rl.algorithms.sac.update import (
     update_all,
 )
 from rlworld.rl.modules.policies.sac_ac import SACActorCritic
+from rlworld.rl.storages import make_replay_buffer
 from rlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
 
 
@@ -268,7 +269,8 @@ class SAC(OffPolicyAlgorithm):
 
     def init_storage(self, cfg: Dict[str, Any]) -> None:
         """Initialize replay buffer."""
-        self.replay_buffer = ReplayBuffer(
+        self.replay_buffer = make_replay_buffer(
+            cfg["buffer_device"],
             num_envs=cfg["num_envs"],
             actor_obs_dim=cfg["actor_obs_shape"][0],
             critic_obs_dim=cfg["critic_obs_shape"][0],

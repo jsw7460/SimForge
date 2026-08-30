@@ -29,6 +29,7 @@ from rlworld.rl.algorithms.fast_td3.update import (
     update_targets,
 )
 from rlworld.rl.modules.policies.fast_td3_ac import FastTD3ActorCritic
+from rlworld.rl.storages import make_replay_buffer
 from rlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
 
 
@@ -253,7 +254,8 @@ class FastTD3(OffPolicyAlgorithm):
 
     def init_storage(self, cfg: Dict[str, Any]) -> None:
         """Initialize replay buffer."""
-        self.replay_buffer = ReplayBuffer(
+        self.replay_buffer = make_replay_buffer(
+            cfg["buffer_device"],
             num_envs=cfg["num_envs"],
             actor_obs_dim=cfg["actor_obs_shape"][0],
             critic_obs_dim=cfg["critic_obs_shape"][0],

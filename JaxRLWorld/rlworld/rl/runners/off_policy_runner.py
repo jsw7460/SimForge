@@ -247,8 +247,9 @@ class OffPolicyRunner(BaseRunner):
             "actions_shape": [self.env.num_actions],
             "size_per_env": size_per_env,
             "n_steps": self.cfgs.algorithm.n_steps,
-            # The buffer draws its own indices on the host; this seeds it.
+            # The buffer draws its own indices; this seeds it.
             "seed": self.jax_seed,
+            "buffer_device": self.cfgs.algorithm.replay_buffer_device,
         }
         self.alg.init_storage(cfg)
 
