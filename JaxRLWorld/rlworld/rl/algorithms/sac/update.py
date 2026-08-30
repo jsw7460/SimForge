@@ -2,8 +2,10 @@ from typing import Any, Dict
 
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 import optax
 
+from rlworld.rl.algorithms.base import polyak_update
 from rlworld.rl.algorithms.sac.losses import (
     compute_actor_loss,
     compute_alpha_loss,
@@ -177,3 +179,109 @@ def update_alpha(
     new_log_ent_coef = optax.apply_updates(log_ent_coef, updates)
 
     return new_log_ent_coef, new_alpha_opt_state, loss, alpha
+
+
+@eqx.filter_jit
+def update_all(
+    model: SACActorCritic,
+    target_critic1_params: Any,
+    target_critic2_params: Any,
+    critic_opt_state: optax.OptState,
+    actor_opt_state: optax.OptState,
+    alpha_opt_state: optax.OptState,
+    log_ent_coef: jax.Array,
+    batch: ReplayBatch,
+    key: jax.Array,
+    critic_optimizer: optax.GradientTransformation,
+    actor_optimizer: optax.GradientTransformation,
+    alpha_optimizer: optax.GradientTransformation,
+    gamma: float,
+    tau: float,
+    target_entropy: float,
+    fixed_ent_coef: float,
+    update_actor_now: bool,
+    auto_entropy: bool,
+) -> tuple[Any, ...]:
+    """One SAC step — critics, actor, alpha, targets — in one program.
+
+    Run as four separate compiled functions with Python between them,
+    a step costs four launches plus a target-network tree walk, and an
+    off-policy algorithm pays that per environment step. At this batch
+    size the launches, not the arithmetic, are what the step costs.
+
+    ``update_actor_now`` and ``auto_entropy`` are static, so the delayed
+    and undelayed variants compile separately rather than carrying a
+    branch; with the default ``policy_delay`` of 1 only one of them is
+    ever traced.
+
+    Returns the new state plus the metric scalars, left on device — see
+    ``host_scalars`` for why they are not converted here.
+    """
+    key, critic_key, actor_key = jax.random.split(key, 3)
+
+    ent_coef = jnp.exp(log_ent_coef) if auto_entropy else jnp.asarray(fixed_ent_coef)
+
+    model, critic_opt_state, critic_info = update_critics(
+        model,
+        target_critic1_params,
+        target_critic2_params,
+        critic_opt_state,
+        batch,
+        critic_optimizer,
+        gamma,
+        ent_coef,
+        critic_key,
+    )
+
+    if update_actor_now:
+        model, actor_opt_state, log_prob, actor_info = update_actor(
+            model,
+            actor_opt_state,
+            actor_optimizer,
+            batch,
+            ent_coef,
+            actor_key,
+        )
+        actor_loss = actor_info["actor_loss"]
+        entropy = actor_info["entropy"]
+
+        if auto_entropy:
+            log_ent_coef, alpha_opt_state, alpha_loss, alpha_value = update_alpha(
+                log_ent_coef,
+                alpha_opt_state,
+                alpha_optimizer,
+                log_prob,
+                target_entropy,
+            )
+        else:
+            alpha_loss = jnp.zeros(())
+            alpha_value = ent_coef
+
+        critic1_params, _ = eqx.partition(model.critic1, eqx.is_inexact_array)
+        critic2_params, _ = eqx.partition(model.critic2, eqx.is_inexact_array)
+        target_critic1_params, target_critic2_params = polyak_update(
+            (critic1_params, critic2_params),
+            (target_critic1_params, target_critic2_params),
+            tau,
+        )
+    else:
+        actor_loss = jnp.zeros(())
+        entropy = jnp.zeros(())
+        alpha_loss = jnp.zeros(())
+        alpha_value = ent_coef
+
+    return (
+        model,
+        target_critic1_params,
+        target_critic2_params,
+        critic_opt_state,
+        actor_opt_state,
+        alpha_opt_state,
+        log_ent_coef,
+        key,
+        critic_info,
+        actor_loss,
+        entropy,
+        alpha_loss,
+        alpha_value,
+    )

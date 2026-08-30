@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple
+from typing import Any, Dict, NamedTuple, Union
 
 import equinox as eqx
 import jax
@@ -261,6 +261,7 @@ class FastTD3(OffPolicyAlgorithm):
             size_per_env=cfg["size_per_env"],
             n_steps=cfg["n_steps"],
             gamma=self.gamma,
+            seed=cfg["seed"],
         )
         self.transition = FastTD3TransitionBuffer()
 
@@ -355,13 +356,21 @@ class FastTD3(OffPolicyAlgorithm):
             truncated=truncated,
         )
 
-    def sample_batch(self, batch_size: int, key: jax.Array) -> ReplayBatch:
-        """Sample batch from replay buffer."""
-        return self.replay_buffer.sample_batch(batch_size, key)
+    def sample_batch(self, batch_size: int) -> ReplayBatch:
+        """Sample batch from replay buffer.
 
-    def update(self, batch: ReplayBatch) -> FastTD3Metrics:
+        The buffer draws its own indices on the host; no key is threaded
+        through (see ``ReplayBuffer.sample_batch``).
+        """
+        return self.replay_buffer.sample_batch(batch_size)
+
+    def update(self, batch: ReplayBatch, build_metrics: bool = True) -> Union[FastTD3Metrics, None]:
         """
         Update all networks using provided batch.
+
+        ``build_metrics=False`` returns ``None`` instead of moving the
+        metric set to the host — see the off-policy runner, which updates
+        once per environment step and logs every few hundred.
 
         NOTE: Observation normalization is now handled inside model methods
         (_normalize_actor_obs, _normalize_critic_obs), so we no longer need
@@ -446,9 +455,9 @@ class FastTD3(OffPolicyAlgorithm):
         jax.block_until_ready(self.train_state.model)
 
         # Build metrics
-        metrics = self._build_metrics(critic_info, actor_loss, action_mean, action_std, actor_q_value, batch)
-
-        return metrics
+        if not build_metrics:
+            return None
+        return self._build_metrics(critic_info, actor_loss, action_mean, action_std, actor_q_value, batch)
 
     def _build_metrics(
         self,

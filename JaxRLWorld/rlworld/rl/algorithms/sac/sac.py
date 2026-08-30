@@ -12,9 +12,8 @@ from rlworld.rl.algorithms.base import (
     ActInput,
     OffPolicyAlgorithm,
     copy_params,
-    polyak_update,
 )
-from rlworld.rl.algorithms.metrics import ActorMetrics
+from rlworld.rl.algorithms.metrics import ActorMetrics, host_scalars
 from rlworld.rl.algorithms.sac.metrics import (
     SACAlphaMetrics,
     SACBatchMetrics,
@@ -25,9 +24,7 @@ from rlworld.rl.algorithms.sac.update import (
     act_deterministic,
     act_stochastic,
     get_value,
-    update_actor,
-    update_alpha,
-    update_critics,
+    update_all,
 )
 from rlworld.rl.modules.policies.sac_ac import SACActorCritic
 from rlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
@@ -269,13 +266,6 @@ class SAC(OffPolicyAlgorithm):
         """Get current model."""
         return self.train_state.model
 
-    def _get_ent_coef(self) -> jax.Array:
-        """Get current entropy coefficient."""
-        if self.auto_entropy:
-            return jnp.exp(self.train_state.log_ent_coef)
-        else:
-            return jnp.array(self.fixed_ent_coef)
-
     def init_storage(self, cfg: Dict[str, Any]) -> None:
         """Initialize replay buffer."""
         self.replay_buffer = ReplayBuffer(
@@ -286,6 +276,7 @@ class SAC(OffPolicyAlgorithm):
             size_per_env=cfg["size_per_env"],
             n_steps=cfg["n_steps"],
             gamma=self.gamma,
+            seed=cfg["seed"],
         )
         self.transition = SACTransitionBuffer()
 
@@ -352,9 +343,13 @@ class SAC(OffPolicyAlgorithm):
             truncated=truncated,
         )
 
-    def sample_batch(self, batch_size: int, key: jax.Array) -> ReplayBatch:
-        """Sample batch from replay buffer."""
-        return self.replay_buffer.sample_batch(batch_size, key)
+    def sample_batch(self, batch_size: int) -> ReplayBatch:
+        """Sample batch from replay buffer.
+
+        The buffer draws its own indices on the host; no key is threaded
+        through (see ``ReplayBuffer.sample_batch``).
+        """
+        return self.replay_buffer.sample_batch(batch_size)
 
     def update_normalizers(self, actor_obs: jax.Array, critic_obs: jax.Array) -> None:
         """Update obs normalizers with collected env-time observations.
@@ -370,151 +365,140 @@ class SAC(OffPolicyAlgorithm):
         new_model = _update_normalizers(self.train_state.model, actor_obs, critic_obs)
         self.train_state = self.train_state._replace(model=new_model)
 
-    def update(self, batch: ReplayBatch) -> SACMetrics:
-        """Update all networks using provided batch."""
+    def update(self, batch: ReplayBatch, build_metrics: bool = True) -> Union[SACMetrics, None]:
+        """Update all networks using provided batch.
+
+        ``build_metrics=False`` skips the device-to-host transfer that
+        reporting needs and returns ``None``. An off-policy runner
+        updates once per environment step but logs every few hundred, so
+        on the steps in between the whole metric set was being brought
+        across and discarded.
+        """
         self.total_it += 1
 
-        key = self.train_state.key
-        key, critic_key, actor_key = jax.random.split(key, 3)
-
-        ent_coef = self._get_ent_coef()
-
-        # Update critics
-        new_model, new_critic_opt_state, critic_info = update_critics(
+        (
+            model,
+            target_critic1_params,
+            target_critic2_params,
+            critic_opt_state,
+            actor_opt_state,
+            alpha_opt_state,
+            log_ent_coef,
+            key,
+            critic_info,
+            actor_loss,
+            entropy,
+            alpha_loss,
+            alpha_value,
+        ) = update_all(
             self.train_state.model,
             self.train_state.target_critic1_params,
             self.train_state.target_critic2_params,
             self.train_state.critic_opt_state,
+            self.train_state.actor_opt_state,
+            self.train_state.alpha_opt_state,
+            self.train_state.log_ent_coef,
             batch,
+            self.train_state.key,
             self.critic_optimizer,
+            self.actor_optimizer,
+            self.alpha_optimizer,
             self.gamma,
-            ent_coef,
-            critic_key,
+            self.tau,
+            self.target_entropy,
+            0.0 if self.auto_entropy else self.fixed_ent_coef,
+            self.total_it % self.policy_delay == 0,
+            self.auto_entropy,
         )
 
         self.train_state = self.train_state._replace(
-            model=new_model,
-            critic_opt_state=new_critic_opt_state,
+            model=model,
+            target_critic1_params=target_critic1_params,
+            target_critic2_params=target_critic2_params,
+            critic_opt_state=critic_opt_state,
+            actor_opt_state=actor_opt_state,
+            alpha_opt_state=alpha_opt_state,
+            log_ent_coef=log_ent_coef,
             key=key,
         )
 
-        # Update actor (with policy delay)
-        if self.total_it % self.policy_delay == 0:
-            new_model, new_actor_opt_state, log_prob, actor_info = update_actor(
-                self.train_state.model,
-                self.train_state.actor_opt_state,
-                self.actor_optimizer,
-                batch,
-                ent_coef,
-                actor_key,
-            )
-
-            actor_loss = float(actor_info["actor_loss"])
-            entropy = float(actor_info["entropy"])
-
-            self.train_state = self.train_state._replace(
-                model=new_model,
-                actor_opt_state=new_actor_opt_state,
-            )
-
-            # Update alpha (if auto-tuning)
-            if self.auto_entropy:
-                new_log_ent_coef, new_alpha_opt_state, alpha_loss, alpha_value = update_alpha(
-                    self.train_state.log_ent_coef,
-                    self.train_state.alpha_opt_state,
-                    self.alpha_optimizer,
-                    log_prob,
-                    self.target_entropy,
-                )
-
-                alpha_loss = float(alpha_loss)
-                alpha_value = float(alpha_value)
-
-                self.train_state = self.train_state._replace(
-                    log_ent_coef=new_log_ent_coef,
-                    alpha_opt_state=new_alpha_opt_state,
-                )
-            else:
-                alpha_loss = 0.0
-                alpha_value = float(ent_coef)
-
-            # Update target networks
-            self._update_target_networks()
-        else:
-            actor_loss = 0.0
-            entropy = 0.0
-            alpha_loss = 0.0
-            alpha_value = float(ent_coef)
-
-        # Note: no explicit block_until_ready — _build_metrics calls float()
-        # on the device-side losses, which forces the same sync naturally.
-        # Build metrics
-        metrics = self._build_metrics(critic_info, actor_loss, entropy, alpha_loss, alpha_value, batch)
-
-        return metrics
+        # update_all leaves every metric on device, so with build_metrics
+        # off the whole step stays queued and nothing waits for it.
+        if not build_metrics:
+            return None
+        return self._build_metrics(critic_info, actor_loss, entropy, alpha_loss, alpha_value, batch)
 
     def _build_metrics(
         self,
         critic_info: Dict[str, jax.Array],
-        actor_loss: float,
-        entropy: float,
-        alpha_loss: float,
-        alpha_value: float,
+        actor_loss: Union[jax.Array, float],
+        entropy: Union[jax.Array, float],
+        alpha_loss: Union[jax.Array, float],
+        alpha_value: Union[jax.Array, float],
         batch: ReplayBatch,
     ) -> SACMetrics:
-        """Build metrics from update results."""
+        """Build metrics from update results.
+
+        Every device scalar crosses to the host together (see
+        ``host_scalars``). SAC updates once per environment step, so
+        materialising them one at a time cost one pipeline stall per
+        value per step.
+        """
+        host = host_scalars(
+            {
+                "critic_loss": critic_info["critic_loss"],
+                "critic1_loss": critic_info["critic1_loss"],
+                "critic2_loss": critic_info["critic2_loss"],
+                "q1_value": critic_info["q1_value"],
+                "q2_value": critic_info["q2_value"],
+                "current_q1_std": critic_info["current_q1_std"],
+                "current_q2_std": critic_info["current_q2_std"],
+                "target_q_value": critic_info["target_q_value"],
+                "actor_loss": actor_loss,
+                "entropy": entropy,
+                "alpha_loss": alpha_loss,
+                "alpha_value": alpha_value,
+                "reward_mean": batch.rewards.mean(),
+                "reward_std": batch.rewards.std(),
+                "reward_min": batch.rewards.min(),
+                "reward_max": batch.rewards.max(),
+                "action_mean": batch.actions.mean(),
+                "action_std": batch.actions.std(),
+                "terminated_ratio": batch.terminated.mean(),
+            }
+        )
+        target_entropy = float(self.target_entropy)
         return SACMetrics(
             critic=SACCriticMetrics(
-                loss=float(critic_info["critic_loss"]),
-                critic1_loss=float(critic_info["critic1_loss"]),
-                critic2_loss=float(critic_info["critic2_loss"]),
-                q1_mean=float(critic_info["q1_value"]),
-                q2_mean=float(critic_info["q2_value"]),
-                q1_std=float(critic_info["current_q1_std"]),
-                q2_std=float(critic_info["current_q2_std"]),
-                q_target_mean=float(critic_info["target_q_value"]),
+                loss=host["critic_loss"],
+                critic1_loss=host["critic1_loss"],
+                critic2_loss=host["critic2_loss"],
+                q1_mean=host["q1_value"],
+                q2_mean=host["q2_value"],
+                q1_std=host["current_q1_std"],
+                q2_std=host["current_q2_std"],
+                q_target_mean=host["target_q_value"],
             ),
             actor=ActorMetrics(
-                loss=actor_loss,
-                entropy=entropy,
+                loss=host["actor_loss"],
+                entropy=host["entropy"],
             ),
             alpha=SACAlphaMetrics(
-                value=alpha_value,
-                loss=alpha_loss,
-                target_entropy=float(self.target_entropy),
-                entropy_gap=entropy - float(self.target_entropy),
+                value=host["alpha_value"],
+                loss=host["alpha_loss"],
+                target_entropy=target_entropy,
+                entropy_gap=host["entropy"] - target_entropy,
             ),
             batch=SACBatchMetrics(
-                reward_mean=float(batch.rewards.mean()),
-                reward_std=float(batch.rewards.std()),
-                reward_min=float(batch.rewards.min()),
-                reward_max=float(batch.rewards.max()),
-                action_mean=float(batch.actions.mean()),
-                action_std=float(batch.actions.std()),
-                terminated_ratio=float(batch.terminated.mean()),
+                reward_mean=host["reward_mean"],
+                reward_std=host["reward_std"],
+                reward_min=host["reward_min"],
+                reward_max=host["reward_max"],
+                action_mean=host["action_mean"],
+                action_std=host["action_std"],
+                terminated_ratio=host["terminated_ratio"],
             ),
             total_updates=self.total_it,
-        )
-
-    def _update_target_networks(self) -> None:
-        """Update target critics with Polyak averaging."""
-        critic1_params, _ = eqx.partition(self.train_state.model.critic1, eqx.is_inexact_array)
-        critic2_params, _ = eqx.partition(self.train_state.model.critic2, eqx.is_inexact_array)
-
-        new_target_critic1_params = polyak_update(
-            critic1_params,
-            self.train_state.target_critic1_params,
-            self.tau,
-        )
-        new_target_critic2_params = polyak_update(
-            critic2_params,
-            self.train_state.target_critic2_params,
-            self.tau,
-        )
-
-        self.train_state = self.train_state._replace(
-            target_critic1_params=new_target_critic1_params,
-            target_critic2_params=new_target_critic2_params,
         )
 
     def get_value(self, critic_obs: jax.Array) -> jax.Array:

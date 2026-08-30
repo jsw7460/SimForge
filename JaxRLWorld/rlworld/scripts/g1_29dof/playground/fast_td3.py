@@ -208,6 +208,7 @@ def main():
             "actions_shape": [n_act],
             "size_per_env": BUFFER_SIZE_PER_ENV,
             "n_steps": N_STEPS,
+            "seed": SEED,
         }
     )
 
@@ -357,8 +358,7 @@ def main():
                 measure_step = global_step
 
             for _ in range(NUM_UPDATES):
-                key, subkey = jax.random.split(key)
-                batch = alg.sample_batch(BATCH_SIZE, subkey)
+                batch = alg.sample_batch(BATCH_SIZE)
                 metrics = alg.update(batch)
 
             # Logging

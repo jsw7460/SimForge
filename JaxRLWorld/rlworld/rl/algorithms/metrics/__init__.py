@@ -4,6 +4,7 @@ from rlworld.rl.algorithms.metrics.base import (
     BatchMetrics,
     ConsoleMetric,
     MetricType,
+    host_scalars,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "BatchMetrics",
     "MetricType",
     "ConsoleMetric",
+    "host_scalars",
 ]

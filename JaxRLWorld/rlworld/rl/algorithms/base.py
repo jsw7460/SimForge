@@ -90,6 +90,7 @@ def create_simple_optimizer(
 # ==================== Target Network Utilities ====================
 
 
+@jax.jit
 def polyak_update(
     params: Any,
     target_params: Any,
@@ -99,6 +100,12 @@ def polyak_update(
     Polyak averaging for target network update.
 
     target = tau * params + (1 - tau) * target
+
+    Compiled, because the tree it walks is the whole target network. Run
+    eagerly, each leaf costs its own handful of dispatches — a pair of
+    [256, 256] critics is a couple of dozen arrays, so a few dozen
+    launches — and an off-policy algorithm runs this once per
+    environment step. Under ``jit`` the whole tree is one program.
 
     Args:
         params: Current network parameters
@@ -357,13 +364,21 @@ class OffPolicyAlgorithm(RLAlgorithm):
         return self._target_params
 
     @abstractmethod
-    def sample_batch(self, batch_size: int, key: jax.Array) -> Any:
+    def sample_batch(self, batch_size: int, *args: Any) -> Any:
         """
         Sample batch from replay buffer.
 
+        A buffer that keeps its storage in host memory owns its index
+        sampler and takes only ``batch_size`` — drawing indices on the
+        accelerator would add a blocking transfer per batch, which for an
+        off-policy algorithm means one per environment step. Sequence
+        buffers that build their batches on device still take a JAX key
+        as the second argument.
+
         Args:
             batch_size: Number of transitions to sample
-            key: JAX random key
+            *args: Implementation-specific; a JAX key for device-sampled
+                buffers, nothing for host-sampled ones
 
         Returns:
             Batch of transitions

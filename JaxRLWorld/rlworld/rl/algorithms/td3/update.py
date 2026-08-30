@@ -188,3 +188,95 @@ def update_targets(
     new_target_critic2 = polyak_update(critic2_params, target_critic2_params, tau)
 
     return new_target_actor, new_target_critic1, new_target_critic2
+
+
+@eqx.filter_jit
+def update_all(
+    model: TD3ActorCritic,
+    target_actor_params: Any,
+    target_actor_static: Any,
+    target_critic1_params: Any,
+    target_critic1_static: Any,
+    target_critic2_params: Any,
+    target_critic2_static: Any,
+    critic_opt_state: optax.OptState,
+    actor_opt_state: optax.OptState,
+    batch: ReplayBatch,
+    key: jax.Array,
+    critic_optimizer: optax.GradientTransformation,
+    actor_optimizer: optax.GradientTransformation,
+    gamma: float,
+    tau: float,
+    target_policy_noise: float,
+    target_noise_clip: float,
+    update_actor_now: bool,
+) -> tuple[Any, ...]:
+    """One TD3 step — critics, actor, targets — in one program.
+
+    Same reasoning as SAC's ``update_all``: run as three compiled
+    functions with Python state swaps between them, a step costs three
+    launches, and an off-policy algorithm pays that per environment
+    step. At this batch size the launches, not the arithmetic, are the
+    cost.
+
+    ``update_actor_now`` is static, so the delayed and undelayed steps
+    compile separately instead of carrying a branch.
+
+    Metric scalars come back on device; see ``host_scalars``.
+    """
+    key, critic_key, actor_key = jax.random.split(key, 3)
+
+    model, critic_opt_state, critic_info = update_critics(
+        model,
+        target_actor_params,
+        target_actor_static,
+        target_critic1_params,
+        target_critic1_static,
+        target_critic2_params,
+        target_critic2_static,
+        critic_opt_state,
+        batch,
+        critic_optimizer,
+        gamma,
+        target_policy_noise,
+        target_noise_clip,
+        critic_key,
+    )
+
+    if update_actor_now:
+        model, actor_opt_state, actor_info = update_actor(
+            model,
+            actor_opt_state,
+            actor_optimizer,
+            batch,
+            actor_key,
+        )
+        actor_loss = actor_info["actor_loss"]
+        action_mean = actor_info["action_mean"]
+        action_std = actor_info["action_std"]
+
+        target_actor_params, target_critic1_params, target_critic2_params = update_targets(
+            model,
+            target_actor_params,
+            target_critic1_params,
+            target_critic2_params,
+            tau,
+        )
+    else:
+        actor_loss = jnp.zeros(())
+        action_mean = jnp.zeros(())
+        action_std = jnp.zeros(())
+
+    return (
+        model,
+        target_actor_params,
+        target_critic1_params,
+        target_critic2_params,
+        critic_opt_state,
+        actor_opt_state,
+        key,
+        critic_info,
+        actor_loss,
+        action_mean,
+        action_std,
+    )

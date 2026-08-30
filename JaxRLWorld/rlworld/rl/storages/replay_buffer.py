@@ -1,8 +1,36 @@
+from functools import partial
 from typing import Any, Dict, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+
+@partial(jax.jit, static_argnums=(1, 2, 3))
+def _split_batch(flat: jax.Array, a: int, c: int, k: int) -> Tuple[jax.Array, ...]:
+    """Cut the uploaded batch back into its fields, in one program.
+
+    Slicing outside ``jit`` is a launch per slice, and there are nine of
+    them per gradient step — which for an off-policy algorithm is nine
+    per environment step. Compiled, the nine cuts cost one.
+    """
+    o = [0, a, a + c, a + c + k, a + c + k + 1]
+    o += [o[-1] + a, o[-1] + a + c, o[-1] + a + c + 1, o[-1] + a + c + 2, o[-1] + a + c + 3]
+    return tuple(flat[:, o[i] : o[i + 1]] for i in range(9))
+
+
+@jax.jit
+def _pack_transition(*fields: jax.Array) -> jax.Array:
+    """Lay one step's fields out side by side, ready for a single copy.
+
+    Every field of a transition has to reach host storage, and a separate
+    copy per field means a separate transfer per field. Under ``jit`` the
+    whole concatenation is one program, so the step costs one copy
+    instead of eight. Scalars-per-env arrive as ``[num_envs]`` and are
+    widened to ``[num_envs, 1]`` so they line up with the vectors.
+    """
+    columns = [f.reshape(f.shape[0], -1).astype(jnp.float32) for f in fields]
+    return jnp.concatenate(columns, axis=1)
 
 
 class ReplayBatch(NamedTuple):
@@ -38,6 +66,7 @@ class ReplayBuffer:
         size_per_env: int,
         n_steps: int = 1,
         gamma: float = 0.99,
+        seed: int = 0,
     ):
         """
         Initialize the parallel replay buffer.
@@ -50,6 +79,12 @@ class ReplayBuffer:
             size_per_env: Maximum size of buffer per environment
             n_steps: Number of steps for n-step returns (default: 1)
             gamma: Discount factor for n-step returns (default: 0.99)
+            seed: Seed for this buffer's own index sampler. The storage
+                lives in host memory and is indexed with NumPy, so the
+                indices are drawn on the host too — drawing them on the
+                accelerator instead would mean a blocking transfer per
+                sampled batch, which for an off-policy algorithm is one
+                per environment step.
         """
         self.num_envs = num_envs
         self.actor_obs_dim = actor_obs_dim
@@ -59,6 +94,7 @@ class ReplayBuffer:
         self.total_size = num_envs * size_per_env
         self.n_steps = n_steps
         self.gamma = gamma
+        self.rng = np.random.default_rng(seed)
 
         # NumPy buffers for fast in-place writes: [num_envs, size_per_env, dim]
         self.actor_obs_buf = np.zeros((num_envs, size_per_env, actor_obs_dim), dtype=np.float32)
@@ -110,23 +146,28 @@ class ReplayBuffer:
             terminated: [num_envs] or [num_envs, 1]
             truncated: [num_envs] or [num_envs, 1]
         """
-        # Convert JAX arrays to NumPy
-        actor_obs_np = np.asarray(actor_obs)
-        critic_obs_np = np.asarray(critic_obs)
-        act_np = np.asarray(act)
-        rew_np = np.asarray(rew)
-        next_actor_obs_np = np.asarray(next_actor_obs)
-        next_critic_obs_np = np.asarray(next_critic_obs)
-        terminated_np = np.asarray(terminated, dtype=np.float32)
-        truncated_np = np.asarray(truncated, dtype=np.float32)
+        # The storage is host memory, so every field has to come down
+        # from the accelerator. Coming down one field at a time is eight
+        # transfers per environment step — for an off-policy algorithm,
+        # eight per step of training. Concatenating first makes it one;
+        # the split below costs nothing, being views into that array.
+        packed = _pack_transition(
+            actor_obs, critic_obs, act, rew, next_actor_obs, next_critic_obs, terminated, truncated
+        )
+        flat = np.asarray(packed)
 
-        # Ensure correct shapes [num_envs, 1]
-        if rew_np.ndim == 1:
-            rew_np = rew_np[:, None]
-        if terminated_np.ndim == 1:
-            terminated_np = terminated_np[:, None]
-        if truncated_np.ndim == 1:
-            truncated_np = truncated_np[:, None]
+        a, c, k = self.actor_obs_dim, self.critic_obs_dim, self.act_dim
+        cuts = np.cumsum([a, c, k, 1, a, c, 1])
+        (
+            actor_obs_np,
+            critic_obs_np,
+            act_np,
+            rew_np,
+            next_actor_obs_np,
+            next_critic_obs_np,
+            terminated_np,
+            truncated_np,
+        ) = np.split(flat, cuts, axis=1)
 
         # In-place update (fast)
         self.actor_obs_buf[:, self.ptr] = actor_obs_np
@@ -250,14 +291,18 @@ class ReplayBuffer:
             gamma_power,
         )
 
-    def sample_batch(self, batch_size: int, key: jax.Array) -> ReplayBatch:
+    def sample_batch(self, batch_size: int) -> ReplayBatch:
         """
         Sample a batch of transitions from the buffer.
         Computes n-step returns if n_steps > 1.
 
+        Indices come from this buffer's own NumPy generator (see
+        ``seed``), not from a JAX key: the storage is host memory indexed
+        with NumPy, so drawing indices on the accelerator would only add
+        a blocking transfer to bring them back.
+
         Args:
             batch_size: Size of the batch to sample
-            key: JAX random key
 
         Returns:
             ReplayBatch object with n-step data (JAX arrays)
@@ -273,19 +318,16 @@ class ReplayBuffer:
                 f"learning_starts so collection covers at least n_steps."
             )
 
-        key1, key2 = jax.random.split(key)
-
-        # Sample indices using JAX, convert to NumPy for indexing
-        env_indices = np.asarray(jax.random.randint(key1, (batch_size,), 0, self.num_envs))
+        env_indices = self.rng.integers(0, self.num_envs, size=batch_size)
 
         # Sample position indices
         if self.filled_size >= self.size_per_env:
             max_logical = self.size_per_env - (self.n_steps - 1)
-            logical_start = np.asarray(jax.random.randint(key2, (batch_size,), 0, max_logical))
+            logical_start = self.rng.integers(0, max_logical, size=batch_size)
             pos_indices = (self.ptr + logical_start) % self.size_per_env
         else:
             max_start_idx = max(1, self.filled_size - self.n_steps + 1)
-            pos_indices = np.asarray(jax.random.randint(key2, (batch_size,), 0, max_start_idx))
+            pos_indices = self.rng.integers(0, max_start_idx, size=batch_size)
 
         # Get starting observations and actions (NumPy indexing)
         actor_obs = self.actor_obs_buf[env_indices, pos_indices]
@@ -309,18 +351,28 @@ class ReplayBuffer:
             truncated = self.truncated_buf[env_indices, pos_indices]
             gamma_power = np.full((batch_size, 1), self.gamma, dtype=np.float32)
 
-        # Convert to JAX arrays for training
-        return ReplayBatch(
-            actor_observations=jnp.asarray(actor_obs),
-            critic_observations=jnp.asarray(critic_obs),
-            actions=jnp.asarray(actions),
-            rewards=jnp.asarray(nstep_rewards),
-            next_actor_observations=jnp.asarray(next_actor_obs),
-            next_critic_observations=jnp.asarray(next_critic_obs),
-            terminated=jnp.asarray(terminated),
-            truncated=jnp.asarray(truncated),
-            gamma_power=jnp.asarray(gamma_power),
+        # Up in one copy, for the same reason it comes down in one: nine
+        # separate uploads is nine per gradient step, and an off-policy
+        # algorithm takes a gradient step per environment step. The
+        # slices below are views into the uploaded array.
+        flat = jnp.asarray(
+            np.concatenate(
+                [
+                    actor_obs,
+                    critic_obs,
+                    actions,
+                    nstep_rewards,
+                    next_actor_obs,
+                    next_critic_obs,
+                    terminated,
+                    truncated,
+                    gamma_power,
+                ],
+                axis=1,
+                dtype=np.float32,
+            )
         )
+        return ReplayBatch(*_split_batch(flat, self.actor_obs_dim, self.critic_obs_dim, self.act_dim))
 
     def get_recent_actions(self, n: int) -> jax.Array:
         """Get the most recent n actions from the buffer."""

@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple
+from typing import Any, Dict, NamedTuple, Union
 
 import equinox as eqx
 import jax
@@ -13,6 +13,7 @@ from rlworld.rl.algorithms.base import (
     OffPolicyAlgorithm,
     copy_params,
 )
+from rlworld.rl.algorithms.metrics import host_scalars
 from rlworld.rl.algorithms.td3.metrics import (
     TD3ActorMetrics,
     TD3BatchMetrics,
@@ -23,9 +24,7 @@ from rlworld.rl.algorithms.td3.update import (
     act_deterministic,
     act_with_noise,
     get_value,
-    update_actor,
-    update_critics,
-    update_targets,
+    update_all,
 )
 from rlworld.rl.modules.policies.td3_ac import TD3ActorCritic
 from rlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
@@ -251,6 +250,7 @@ class TD3(OffPolicyAlgorithm):
             size_per_env=cfg["size_per_env"],
             n_steps=cfg["n_steps"],
             gamma=self.gamma,
+            seed=cfg["seed"],
         )
         self.transition = TD3TransitionBuffer()
 
@@ -317,9 +317,13 @@ class TD3(OffPolicyAlgorithm):
             truncated=truncated,
         )
 
-    def sample_batch(self, batch_size: int, key: jax.Array) -> ReplayBatch:
-        """Sample batch from replay buffer."""
-        return self.replay_buffer.sample_batch(batch_size, key)
+    def sample_batch(self, batch_size: int) -> ReplayBatch:
+        """Sample batch from replay buffer.
+
+        The buffer draws its own indices on the host; no key is threaded
+        through (see ``ReplayBuffer.sample_batch``).
+        """
+        return self.replay_buffer.sample_batch(batch_size)
 
     def update_normalizers(self, actor_obs: jax.Array, critic_obs: jax.Array) -> None:
         """Update obs normalizers with collected env-time observations.
@@ -335,15 +339,23 @@ class TD3(OffPolicyAlgorithm):
         new_model = _update_normalizers(self.train_state.model, actor_obs, critic_obs)
         self.train_state = self.train_state._replace(model=new_model)
 
-    def update(self, batch: ReplayBatch) -> TD3Metrics:
+    def update(self, batch: ReplayBatch, build_metrics: bool = True) -> Union[TD3Metrics, None]:
         """Update all networks using provided batch."""
         self.total_it += 1
 
-        key = self.train_state.key
-        key, critic_key, actor_key = jax.random.split(key, 3)
-
-        # Update critics
-        new_model, new_critic_opt_state, critic_info = update_critics(
+        (
+            model,
+            target_actor_params,
+            target_critic1_params,
+            target_critic2_params,
+            critic_opt_state,
+            actor_opt_state,
+            key,
+            critic_info,
+            actor_loss,
+            action_mean,
+            action_std,
+        ) = update_all(
             self.train_state.model,
             self.train_state.target_actor_params,
             self.train_state.target_actor_static,
@@ -352,100 +364,89 @@ class TD3(OffPolicyAlgorithm):
             self.train_state.target_critic2_params,
             self.train_state.target_critic2_static,
             self.train_state.critic_opt_state,
+            self.train_state.actor_opt_state,
             batch,
+            self.train_state.key,
             self.critic_optimizer,
+            self.actor_optimizer,
             self.gamma,
+            self.tau,
             self.target_policy_noise,
             self.target_noise_clip,
-            critic_key,
+            self.total_it % self.policy_delay == 0,
         )
 
         self.train_state = self.train_state._replace(
-            model=new_model,
-            critic_opt_state=new_critic_opt_state,
+            model=model,
+            target_actor_params=target_actor_params,
+            target_critic1_params=target_critic1_params,
+            target_critic2_params=target_critic2_params,
+            critic_opt_state=critic_opt_state,
+            actor_opt_state=actor_opt_state,
             key=key,
         )
 
-        # Update actor (with policy delay)
-        if self.total_it % self.policy_delay == 0:
-            new_model, new_actor_opt_state, actor_info = update_actor(
-                self.train_state.model,
-                self.train_state.actor_opt_state,
-                self.actor_optimizer,
-                batch,
-                actor_key,
-            )
-
-            actor_loss = float(actor_info["actor_loss"])
-            action_mean = float(actor_info["action_mean"])
-            action_std = float(actor_info["action_std"])
-
-            self.train_state = self.train_state._replace(
-                model=new_model,
-                actor_opt_state=new_actor_opt_state,
-            )
-
-            # Update target networks
-            self._update_target_networks()
-        else:
-            actor_loss = 0.0
-            action_mean = 0.0
-            action_std = 0.0
-
-        # Note: no explicit block_until_ready — _build_metrics calls float()
-        # on the device-side losses, which forces the same sync naturally.
-        # Build metrics
-        metrics = self._build_metrics(critic_info, actor_loss, action_mean, action_std, batch)
-
-        return metrics
+        # update_all leaves every metric on device, so with build_metrics
+        # off the whole step stays queued and nothing waits for it.
+        if not build_metrics:
+            return None
+        return self._build_metrics(critic_info, actor_loss, action_mean, action_std, batch)
 
     def _build_metrics(
         self,
         critic_info: Dict[str, jax.Array],
-        actor_loss: float,
-        action_mean: float,
-        action_std: float,
+        actor_loss: Union[jax.Array, float],
+        action_mean: Union[jax.Array, float],
+        action_std: Union[jax.Array, float],
         batch: ReplayBatch,
     ) -> TD3Metrics:
-        """Build metrics from update results."""
+        """Build metrics from update results.
+
+        Every device scalar crosses to the host together (see
+        ``host_scalars``). TD3 updates once per environment step, so
+        materialising them one at a time cost one pipeline stall per
+        value per step.
+        """
+        host = host_scalars(
+            {
+                "critic_loss": critic_info["critic_loss"],
+                "critic1_loss": critic_info["critic1_loss"],
+                "critic2_loss": critic_info["critic2_loss"],
+                "q1_value": critic_info["q1_value"],
+                "q2_value": critic_info["q2_value"],
+                "current_q1_std": critic_info["current_q1_std"],
+                "current_q2_std": critic_info["current_q2_std"],
+                "target_q_value": critic_info["target_q_value"],
+                "actor_loss": actor_loss,
+                "actor_action_mean": action_mean,
+                "actor_action_std": action_std,
+                "batch_reward_mean": batch.rewards.mean(),
+                "batch_action_mean": batch.actions.mean(),
+                "batch_action_std": batch.actions.std(),
+            }
+        )
         return TD3Metrics(
             critic=TD3CriticMetrics(
-                loss=float(critic_info["critic_loss"]),
-                critic1_loss=float(critic_info["critic1_loss"]),
-                critic2_loss=float(critic_info["critic2_loss"]),
-                q1_mean=float(critic_info["q1_value"]),
-                q2_mean=float(critic_info["q2_value"]),
-                q1_std=float(critic_info["current_q1_std"]),
-                q2_std=float(critic_info["current_q2_std"]),
-                q_target_mean=float(critic_info["target_q_value"]),
+                loss=host["critic_loss"],
+                critic1_loss=host["critic1_loss"],
+                critic2_loss=host["critic2_loss"],
+                q1_mean=host["q1_value"],
+                q2_mean=host["q2_value"],
+                q1_std=host["current_q1_std"],
+                q2_std=host["current_q2_std"],
+                q_target_mean=host["target_q_value"],
             ),
             actor=TD3ActorMetrics(
-                loss=actor_loss,
-                action_mean=action_mean,
-                action_std=action_std,
+                loss=host["actor_loss"],
+                action_mean=host["actor_action_mean"],
+                action_std=host["actor_action_std"],
             ),
             batch=TD3BatchMetrics(
-                reward_mean=float(batch.rewards.mean()),
-                action_mean=float(batch.actions.mean()),
-                action_std=float(batch.actions.std()),
+                reward_mean=host["batch_reward_mean"],
+                action_mean=host["batch_action_mean"],
+                action_std=host["batch_action_std"],
             ),
             total_updates=self.total_it,
-        )
-
-    def _update_target_networks(self) -> None:
-        """Update target networks with Polyak averaging."""
-        new_target_actor, new_target_critic1, new_target_critic2 = update_targets(
-            self.train_state.model,
-            self.train_state.target_actor_params,
-            self.train_state.target_critic1_params,
-            self.train_state.target_critic2_params,
-            self.tau,
-        )
-
-        self.train_state = self.train_state._replace(
-            target_actor_params=new_target_actor,
-            target_critic1_params=new_target_critic1,
-            target_critic2_params=new_target_critic2,
         )
 
     def get_value(self, actor_obs: jax.Array, critic_obs: jax.Array) -> jax.Array:

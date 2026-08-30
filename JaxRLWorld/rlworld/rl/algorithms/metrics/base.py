@@ -1,6 +1,48 @@
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Union
+from typing import Any, Dict, Union
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+
+
+@jax.jit
+def _stack_scalars(values: tuple) -> jnp.ndarray:
+    """Gather scalars into one array inside a single dispatch.
+
+    Doing the stack eagerly would trade one blocking transfer per value
+    for one op dispatch per value, which on a fast link is no better.
+    Under ``jit`` the whole gather is one program and one launch.
+    """
+    return jnp.stack([jnp.asarray(value, dtype=jnp.float32).reshape(()) for value in values])
+
+
+def host_scalars(values: Dict[str, Any]) -> Dict[str, float]:
+    """Materialise a whole metric set in ONE device-to-host transfer.
+
+    ``float()`` on a device scalar is a blocking transfer: it drains the
+    queue and stalls the pipeline. A metric set has a couple of dozen of
+    them, so building it one ``float()`` at a time costs a couple of
+    dozen stalls per update.
+
+    That is invisible in an on-policy run, where one update covers a
+    whole rollout, and dominant in an off-policy one, where an update
+    follows every single environment step. PPO removed its own copy of
+    this cost by fusing the metrics into one jitted program; stacking the
+    scalars first achieves the same thing without touching the update.
+
+    Cheaper still is not building the set at all on iterations that will
+    not log it — callers that update far more often than they log should
+    skip the call rather than optimise it.
+
+    Plain Python floats are accepted alongside device scalars — branches
+    that skip a network (a delayed policy update) pass literals, and both
+    cross in the same transfer.
+    """
+    names = list(values)
+    stacked = _stack_scalars(tuple(values[name] for name in names))
+    return {name: float(value) for name, value in zip(names, np.asarray(stacked))}
 
 
 class MetricType(Enum):

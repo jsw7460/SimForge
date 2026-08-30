@@ -15,8 +15,8 @@ from rlworld.rl.modules.policies.sac_ac import SACActorCritic
 from rlworld.rl.modules.policies.td3_ac import TD3ActorCritic
 from rlworld.rl.modules.utils import count_parameters, print_model_summary
 from rlworld.rl.runners.base_runner import BaseRunner
-from rlworld.rl.runners.iteration_data import IterationData
-from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+from rlworld.rl.runners.iteration_data import EpisodeStats, IterationData
+from rlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax, torch_to_jax_many
 
 
 class OffPolicyRunner(BaseRunner):
@@ -247,6 +247,8 @@ class OffPolicyRunner(BaseRunner):
             "actions_shape": [self.env.num_actions],
             "size_per_env": size_per_env,
             "n_steps": self.cfgs.algorithm.n_steps,
+            # The buffer draws its own indices on the host; this seeds it.
+            "seed": self.jax_seed,
         }
         self.alg.init_storage(cfg)
 
@@ -305,27 +307,41 @@ class OffPolicyRunner(BaseRunner):
             # Environment step
             obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
 
-            # Convert to JAX
-            next_actor_obs = torch_to_jax(obs_dict["actor"])
-            next_critic_obs = torch_to_jax(obs_dict["critic"])
+            # Convert to JAX. One batch, so the wait every conversion
+            # owes its source (see ``torch_to_jax_many``) is paid once
+            # per step instead of once per tensor — and an off-policy
+            # step is a whole iteration, so that difference is the
+            # difference between one stall per step and six. The uint8
+            # done casts belong in the mapping: it is what holds those
+            # temporaries alive across the wait.
+            final_obs = infos.get("final_observation")
+            sources = {
+                "actor": obs_dict["actor"],
+                "critic": obs_dict["critic"],
+                "reward": rewards,
+                "terminated": terminated.to(torch.uint8),
+                "truncated": truncated.to(torch.uint8),
+            }
+            if final_obs is not None:
+                sources["final_actor"] = final_obs["actor"]
+                sources["final_critic"] = final_obs["critic"]
+
+            converted = torch_to_jax_many(sources)
+
+            next_actor_obs = converted["actor"]
+            next_critic_obs = converted["critic"]
+            rewards_jax = converted["reward"]
+            # Bool must not cross as BOOL (DLPack's bool exchange once
+            # produced rare bit flips); uint8 in, bool out inside JAX.
+            terminated_jax = converted["terminated"].astype(jnp.bool_)
+            truncated_jax = converted["truncated"].astype(jnp.bool_)
 
             # Handle truncated episodes: use final_observation for bootstrap
-            final_obs = infos.get("final_observation")
             if final_obs is not None:
-                final_actor = torch_to_jax(final_obs["actor"])
-                final_critic = torch_to_jax(final_obs["critic"])
-
                 # Replace next_obs for truncated (not terminated) envs
-                truncated_jax_mask = jnp.asarray(truncated.cpu().numpy())
-                terminated_jax_mask = jnp.asarray(terminated.cpu().numpy())
-                truncated_only = (truncated_jax_mask & ~terminated_jax_mask)[:, None]
-                next_actor_obs = jnp.where(truncated_only, final_actor, next_actor_obs)
-                next_critic_obs = jnp.where(truncated_only, final_critic, next_critic_obs)
-
-            rewards_jax = torch_to_jax(rewards)
-            # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
-            terminated_jax = jnp.asarray(terminated.cpu().numpy())
-            truncated_jax = jnp.asarray(truncated.cpu().numpy())
+                truncated_only = (truncated_jax & ~terminated_jax)[:, None]
+                next_actor_obs = jnp.where(truncated_only, converted["final_actor"], next_actor_obs)
+                next_critic_obs = jnp.where(truncated_only, converted["final_critic"], next_critic_obs)
 
             # Store transition in replay buffer
             self.alg.store_transition(
@@ -391,15 +407,19 @@ class OffPolicyRunner(BaseRunner):
         fps = 0.0
         buffer_size = None
         batch_size = self.cfgs.algorithm.batch_size
+        logging_now = iteration % self.runner_cfg.log_interval == 0
 
         if self.alg.replay_buffer.size >= self.cfgs.algorithm.learning_starts:
             training_start_time = time.time()
 
             num_updates = max(1, self.cfgs.algorithm.get("num_gradient_steps", 1))
-            for _ in range(num_updates):
-                self.key, subkey = jax.random.split(self.key)
-                batch = self.alg.sample_batch(batch_size, subkey)
-                metrics = self.alg.update(batch)
+            for step in range(num_updates):
+                batch = self.alg.sample_batch(batch_size)
+                # Only the last update's metrics are ever read, and only
+                # on a logging iteration. Building them otherwise brings
+                # the whole set to the host to be thrown away — once per
+                # environment step, since an off-policy iteration is one.
+                metrics = self.alg.update(batch, build_metrics=logging_now and step == num_updates - 1)
                 del batch
 
             learning_time = time.time() - training_start_time
@@ -408,14 +428,20 @@ class OffPolicyRunner(BaseRunner):
 
         # Only compute action statistics on log intervals
         action_dist = {}
-        if iteration % self.runner_cfg.log_interval == 0:
+        if logging_now:
             action_dist = self._get_action_statistics()
+
+        # Snapshotting the episode statistics drains the collector's
+        # device-side ring buffers to the host. An off-policy iteration is
+        # a single environment step, so doing it unconditionally meant one
+        # transfer per step for numbers only the logger reads.
+        episode_stats = self._build_episode_stats() if logging_now else EpisodeStats([], [], {})
 
         return IterationData(
             collection_time=collection_time,
             learning_time=learning_time,
             fps=fps,
-            episode_stats=self._build_episode_stats(),
+            episode_stats=episode_stats,
             metrics=metrics,
             last_obs=collection_data["last_obs"],
             action_distribution=action_dist,
