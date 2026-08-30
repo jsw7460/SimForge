@@ -46,9 +46,21 @@ PROJECT = "SB3_vs_JRW"
 PPO_ITERS = 1000  # x 16 envs x 128 steps = ~2.0M env steps
 OFFPOLICY_ITERS = 100_000  # 1 env step + 1 gradient step each
 
+ALGOS = ("ppo", "sac", "td3")
+
+# The continuous-control set these algorithms are conventionally
+# reported on, spanning the range that matters for a framework
+# comparison: action dimension 2 to 17, observation dimension 8 to 348,
+# and both the "easy to move, hard to stay upright" tasks (hopper,
+# walker2d) and the ones where the reward is almost entirely forward
+# speed (halfcheetah, swimmer).
 TASKS = {
     "halfcheetah": "HalfCheetah-v5",
     "swimmer": "Swimmer-v5",
+    "hopper": "Hopper-v5",
+    "walker2d": "Walker2d-v5",
+    "ant": "Ant-v5",
+    "humanoid": "Humanoid-v5",
 }
 
 # ── shared hyperparameter tables (values = SB3 defaults) ─────────────

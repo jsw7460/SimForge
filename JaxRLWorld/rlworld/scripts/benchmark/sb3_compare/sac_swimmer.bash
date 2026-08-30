@@ -19,16 +19,18 @@ fi
 
 PIDS=()
 for SEED in 0 1 2; do
-    BENCH_SEED=$SEED \
+    ( START=$(date +%s); BENCH_SEED=$SEED \
         ${TASKSET[@]+"${TASKSET[@]}"} python "$SCRIPT_DIR/sb3_sac_swimmer.py" \
-        > "$LOG_DIR/sb3_sac_swimmer_s$SEED.log" 2>&1 &
+        > "$LOG_DIR/sb3_sac_swimmer_s$SEED.log" 2>&1; \
+        echo $(($(date +%s) - START)) > "$LOG_DIR/sb3_sac_swimmer_s$SEED.sec" ) &
     PIDS+=($!)
 
     # XLA_PYTHON_CLIENT_PREALLOCATE=false is what the jaxpy alias sets;
     # required here so three JAX processes can share the GPU.
-    BENCH_SEED=$SEED XLA_PYTHON_CLIENT_PREALLOCATE=false \
+    ( START=$(date +%s); BENCH_SEED=$SEED XLA_PYTHON_CLIENT_PREALLOCATE=false \
         ${TASKSET[@]+"${TASKSET[@]}"} python "$SCRIPT_DIR/jrw_sac_swimmer.py" \
-        > "$LOG_DIR/jrw_sac_swimmer_s$SEED.log" 2>&1 &
+        > "$LOG_DIR/jrw_sac_swimmer_s$SEED.log" 2>&1; \
+        echo $(($(date +%s) - START)) > "$LOG_DIR/jrw_sac_swimmer_s$SEED.sec" ) &
     PIDS+=($!)
 
     # JRW stamps its model/log directory with a per-second timestamp;
@@ -47,4 +49,16 @@ if [ "$FAIL" -ne 0 ]; then
     echo "$FAIL process(es) exited non-zero — check the logs above."
     exit 1
 fi
+echo "--- wall clock (s) and final return ---"
+for SEED in 0 1 2; do
+    for FW in sb3 jrw; do
+        SECS=$(cat "$LOG_DIR/${FW}_sac_swimmer_s$SEED.sec" 2>/dev/null || echo "?")
+        if [ "$FW" = jrw ]; then
+            RET=$(grep -a "Mean Return" "$LOG_DIR/jrw_sac_swimmer_s$SEED.log" | tail -1 | awk '{print $NF}')
+        else
+            RET=$(grep -a "ep_rew_mean" "$LOG_DIR/sb3_sac_swimmer_s$SEED.log" | tail -1 | awk '{print $(NF-1)}')
+        fi
+        printf '%-4s s%s  %6ss  %s\n' "$FW" "$SEED" "$SECS" "${RET:-n/a}"
+    done
+done
 echo "all six runs finished."
