@@ -55,6 +55,45 @@ def get_value(
     return model.evaluate(critic_obs, key=key)
 
 
+def metric_scalars(
+    critic_info: Dict[str, jax.Array],
+    actor_loss: jax.Array,
+    entropy: jax.Array,
+    alpha_loss: jax.Array,
+    alpha_value: jax.Array,
+    batch: ReplayBatch,
+) -> Dict[str, jax.Array]:
+    """Every number a metric set needs, still on device.
+
+    Shared by the single update and the scanned loop so the two report
+    the same things. The scan carries these nineteen scalars per step
+    rather than the batches they came from — stacking a batch per update
+    would cost ``num_gradient_steps`` copies of the whole thing for
+    numbers only the last step contributes.
+    """
+    return {
+        "critic_loss": critic_info["critic_loss"],
+        "critic1_loss": critic_info["critic1_loss"],
+        "critic2_loss": critic_info["critic2_loss"],
+        "q1_value": critic_info["q1_value"],
+        "q2_value": critic_info["q2_value"],
+        "current_q1_std": critic_info["current_q1_std"],
+        "current_q2_std": critic_info["current_q2_std"],
+        "target_q_value": critic_info["target_q_value"],
+        "actor_loss": actor_loss,
+        "entropy": entropy,
+        "alpha_loss": alpha_loss,
+        "alpha_value": alpha_value,
+        "reward_mean": batch.rewards.mean(),
+        "reward_std": batch.rewards.std(),
+        "reward_min": batch.rewards.min(),
+        "reward_max": batch.rewards.max(),
+        "action_mean": batch.actions.mean(),
+        "action_std": batch.actions.std(),
+        "terminated_ratio": batch.terminated.mean(),
+    }
+
+
 # ==================== Update Functions ====================
 
 
@@ -285,3 +324,78 @@ def update_all(
         alpha_loss,
         alpha_value,
     )
+
+
+@eqx.filter_jit
+def scan_updates(
+    state: tuple,
+    sampler: Any,
+    sample_state: Any,
+    num_updates: int,
+    critic_optimizer: optax.GradientTransformation,
+    actor_optimizer: optax.GradientTransformation,
+    alpha_optimizer: optax.GradientTransformation,
+    gamma: float,
+    tau: float,
+    target_entropy: float,
+    fixed_ent_coef: float,
+    auto_entropy: bool,
+) -> tuple:
+    """``num_updates`` gradient steps as one program, sampling included.
+
+    ``filter_jit`` keeps every non-array argument static, so
+    ``num_updates``, the optimizers, the scalars and the sampler are all
+    baked in and only ``state`` is traced.
+
+    ``sampler`` is the buffer's traceable sampler and ``sample_state``
+    the arrays it reads (see ``DeviceReplayBuffer.batch_sampler``). They
+    are separate because the sampler has to stay static and hashable for
+    the compilation cache to hit, while the rings must stay traced.
+
+    The per-step outputs are the metric scalars, stacked; the caller
+    takes the last row. Returning the batches instead would stack
+    ``num_updates`` copies of them for numbers only one step supplies.
+    """
+
+    def body(carry, _):
+        model, tc1, tc2, critic_opt, actor_opt, alpha_opt, log_ent_coef, key, sample_key = carry
+        sample_key, sub = jax.random.split(sample_key)
+        batch = sampler(sample_state, sub)
+        (
+            model,
+            tc1,
+            tc2,
+            critic_opt,
+            actor_opt,
+            alpha_opt,
+            log_ent_coef,
+            key,
+            critic_info,
+            actor_loss,
+            entropy,
+            alpha_loss,
+            alpha_value,
+        ) = update_all(
+            model,
+            tc1,
+            tc2,
+            critic_opt,
+            actor_opt,
+            alpha_opt,
+            log_ent_coef,
+            batch,
+            key,
+            critic_optimizer,
+            actor_optimizer,
+            alpha_optimizer,
+            gamma,
+            tau,
+            target_entropy,
+            fixed_ent_coef,
+            True,
+            auto_entropy,
+        )
+        carry = (model, tc1, tc2, critic_opt, actor_opt, alpha_opt, log_ent_coef, key, sample_key)
+        return carry, metric_scalars(critic_info, actor_loss, entropy, alpha_loss, alpha_value, batch)
+
+    return jax.lax.scan(body, state, None, length=num_updates)

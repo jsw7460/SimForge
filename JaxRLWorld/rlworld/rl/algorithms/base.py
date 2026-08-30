@@ -363,6 +363,24 @@ class OffPolicyAlgorithm(RLAlgorithm):
         self._target_params = polyak_update(params, self._target_params, self.tau)
         return self._target_params
 
+    def update_many(self, num_updates: int, batch_size: int, build_metrics: bool = True) -> Any:
+        """Run ``num_updates`` gradient steps, sampling a batch for each.
+
+        Driven from Python here: sample, update, sample, update. That is
+        three dispatches a pass and a gap between each while Python
+        decides what to do next, which is most of the cost when the
+        update is small. Subclasses whose buffer can be sampled inside a
+        trace override this with a single ``lax.scan`` — the shape PPO's
+        update has always had — and only the last metric set is built,
+        since only the last is ever read.
+        """
+        metrics = None
+        for step in range(num_updates):
+            metrics = self.update(
+                self.sample_batch(batch_size), build_metrics=build_metrics and step == num_updates - 1
+            )
+        return metrics
+
     @abstractmethod
     def sample_batch(self, batch_size: int, *args: Any) -> Any:
         """

@@ -413,15 +413,12 @@ class OffPolicyRunner(BaseRunner):
         if self.alg.replay_buffer.size >= self.cfgs.algorithm.learning_starts:
             training_start_time = time.time()
 
+            # The algorithm owns the loop: with a device-resident buffer it
+            # runs as one scanned program instead of num_updates x 3
+            # dispatches with Python in between. Only the last update's
+            # metrics are ever read, and only on a logging iteration.
             num_updates = max(1, self.cfgs.algorithm.get("num_gradient_steps", 1))
-            for step in range(num_updates):
-                batch = self.alg.sample_batch(batch_size)
-                # Only the last update's metrics are ever read, and only
-                # on a logging iteration. Building them otherwise brings
-                # the whole set to the host to be thrown away — once per
-                # environment step, since an off-policy iteration is one.
-                metrics = self.alg.update(batch, build_metrics=logging_now and step == num_updates - 1)
-                del batch
+            metrics = self.alg.update_many(num_updates, batch_size, build_metrics=logging_now)
 
             learning_time = time.time() - training_start_time
             fps = (self.num_steps_per_env * self.env.num_envs) / (collection_time + learning_time)

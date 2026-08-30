@@ -25,6 +25,7 @@ fills both with identical transitions and compares their batches for
 the same indices; run it after touching either.
 """
 
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, Dict, Tuple
 
@@ -148,12 +149,43 @@ def _gather_batch(
     )
 
 
+@dataclass(frozen=True)
+class TracedSampler:
+    """A sampler that ``jit`` can treat as a constant.
+
+    The obvious way to hand a scan its sampling step is a closure, but
+    equinox keeps every non-array argument static and compares them by
+    value: a fresh closure each call is a fresh static argument, so the
+    compilation cache misses every time and the scan recompiles instead
+    of running. Frozen and built only from the numbers that determine
+    the program, this compares equal across calls; the arrays it reads
+    travel separately, as ``state``, and stay traced.
+    """
+
+    num_envs: int
+    size_per_env: int
+    n_steps: int
+    batch_size: int
+    full: bool
+    gamma: float
+
+    def __call__(self, state: Tuple[Any, Any], key: jax.Array) -> ReplayBatch:
+        buffers, fill = state
+        indices = _sample_indices(key, fill, self.num_envs, self.size_per_env, self.n_steps, self.batch_size, self.full)
+        return _gather_batch(buffers, indices, self.size_per_env, self.n_steps, self.gamma)
+
+
 class DeviceReplayBuffer:
     """Device-resident counterpart of :class:`ReplayBuffer`.
 
     Same interface and same semantics; see the module docstring for when
     to prefer it and what it costs.
     """
+
+    #: Everything a sample touches lives on the device, so a whole
+    #: update-to-data loop can be one traced program (see
+    #: :meth:`batch_sampler`).
+    supports_traced_sampling = True
 
     def __init__(
         self,
@@ -253,6 +285,30 @@ class DeviceReplayBuffer:
             self.filled_size >= self.size_per_env,
         )
         return _gather_batch(self.buffers, indices, self.size_per_env, self.n_steps, self.gamma)
+
+    def batch_sampler(self, batch_size: int) -> Tuple["TracedSampler", Tuple[Any, Any]]:
+        """A sampler and its state, for sampling inside a traced program.
+
+        Driving ``num_gradient_steps`` updates from Python costs three
+        dispatches a pass and a gap between each; handing this to
+        ``lax.scan`` makes the whole loop one program.
+
+        Returns the sampler — hashable, so the compilation cache hits —
+        and the arrays it reads. Nothing is stored while updating, so
+        the rings and fill counters are snapshotted here rather than
+        carried through the scan. The caller owns the key and must
+        thread it, so consecutive updates see different batches.
+        """
+        sampler = TracedSampler(
+            num_envs=self.num_envs,
+            size_per_env=self.size_per_env,
+            n_steps=self.n_steps,
+            batch_size=batch_size,
+            full=self.filled_size >= self.size_per_env,
+            gamma=self.gamma,
+        )
+        state = (self.buffers, (jnp.asarray(self.ptr), jnp.asarray(self.filled_size)))
+        return sampler, state
 
     def get_recent_actions(self, n: int) -> jax.Array:
         """The most recent ``n`` actions, for action-distribution logging."""

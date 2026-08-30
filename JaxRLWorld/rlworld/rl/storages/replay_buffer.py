@@ -57,6 +57,11 @@ class ReplayBuffer:
     Supports n-step returns computation at sampling time.
     """
 
+    #: Its storage is host NumPy and its indices are drawn with NumPy, so
+    #: a sample cannot happen inside a traced program — the UTD loop that
+    #: uses this buffer has to be driven from Python.
+    supports_traced_sampling = False
+
     def __init__(
         self,
         num_envs: int,
