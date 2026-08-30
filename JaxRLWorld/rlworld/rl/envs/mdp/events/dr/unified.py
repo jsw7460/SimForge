@@ -487,12 +487,16 @@ def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, di
     # a random walk across resets; scale the captured baseline instead. Genesis
     # leaves the link inertia unchanged (``scale_inertia=False``), exactly as the
     # former ``set_mass_shift`` did.
-    base = _genesis_dr_baseline(
-        env,
-        resolved.name,
-        "links_mass",
-        lambda: entity.get_links_mass(links_idx_local=links_idx),
-    )
+    #
+    # Snapshot the FULL-entity baseline (every link) under the one cache key
+    # and slice this term's subset out of it, mirroring the kp/kv/armature
+    # path and Newton's whole-model ``_dr_baselines``. Caching only this
+    # term's ``links_idx`` columns is wrong: the key is ``(entity,
+    # "links_mass")``, so a SECOND body-mass term with a different subset
+    # (K1 randomizes both the trunk alone and every link) would read this
+    # cache and inherit the first term's columns as its baseline. The
+    # batched-links-info guard above makes the baseline ``(n_envs, n_links)``.
+    base = _genesis_dr_baseline(env, resolved.name, "links_mass", entity.get_links_mass)[:, links_idx]
     new_mass = base[env_ids] * ratios
     entity.set_links_mass(mass=new_mass, links_idx_local=links_idx, envs_idx=env_ids)
 
@@ -603,12 +607,10 @@ def _genesis_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
     # get/set_COM_shift semantics exactly: with the shift stored as an offset from
     # the base, target-axis shift = U(lo, hi) is identical to target-axis absolute
     # = base + U(lo, hi), and untouched-axis absolutes carry the prior shift.
-    base = _genesis_dr_baseline(
-        env,
-        resolved.name,
-        "links_COM",
-        lambda: entity.get_links_COM(links_idx_local=links_idx),
-    )
+    # Full-entity baseline captured once under the ``(entity, "links_COM")``
+    # cache key and sliced per-term — see the body-mass backend for why a
+    # per-subset snapshot corrupts a second term that shares the key.
+    base = _genesis_dr_baseline(env, resolved.name, "links_COM", entity.get_links_COM)[:, links_idx, :]
     com = entity.get_links_COM(links_idx_local=links_idx, envs_idx=env_ids)
     for axis, (lo, hi) in ranges.items():
         offset = torch.empty(n_envs, n_links, device=env.device).uniform_(lo, hi)
