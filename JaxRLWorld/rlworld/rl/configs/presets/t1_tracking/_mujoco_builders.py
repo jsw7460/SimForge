@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict
 
-import mujoco
-
 from rlworld.rl.actuators import IdealPDActuatorCfg
 from rlworld.rl.configs import RewardConfig, TerminationTermConfig
 from rlworld.rl.configs.common_config_classes import (
@@ -28,6 +26,7 @@ from rlworld.rl.configs.mujoco_config_classes import (
 )
 from rlworld.rl.configs.observations import ObservationTermConfig
 from rlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from rlworld.rl.configs.presets.t1_getup._mujoco_builders import T1SpecFn
 from rlworld.rl.configs.rewards import RewardTermConfig
 from rlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
@@ -147,7 +146,7 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         ),
         # Same asset as Newton and Genesis -- see the note in
         # ``t1_getup/_mujoco_builders.py``.
-        spec_fn=lambda: mujoco.MjSpec.from_file(r.mjcf_path),
+        spec_fn=T1SpecFn(mjcf_path=r.mjcf_path),
     )
 
     return MujocoSceneConfig(

@@ -79,6 +79,20 @@ CONFIGS_FOR_RUN_CLS = MujocoConfigsForRun
 OBSERVATION_CFG_CLS = MujocoObservationConfig
 
 
+@dataclass
+class T1SpecFn:
+    """Picklable ``spec_fn``: load the repo's own T1 MJCF.
+
+    A lambda here fails ``recursive_to_dict`` when the runner serializes
+    the config for logging (``callable_to_string`` refuses lambdas).
+    """
+
+    mjcf_path: str
+
+    def __call__(self):
+        return mujoco.MjSpec.from_file(self.mjcf_path)
+
+
 # ── Builders ─────────────────────────────────────────────────────────
 
 
@@ -159,7 +173,7 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         # left mjlab free to drift away from the other two on an upstream
         # bump, which is how the two T1 collision models diverged in the
         # first place.
-        spec_fn=lambda: mujoco.MjSpec.from_file(r.mjcf_path),
+        spec_fn=T1SpecFn(mjcf_path=r.mjcf_path),
     )
 
     # Solver / arena settings are pinned to mjlab_playground's getup
