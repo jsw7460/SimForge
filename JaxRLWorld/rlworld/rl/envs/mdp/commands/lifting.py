@@ -168,6 +168,15 @@ class LiftingCommand(CommandTerm):
     def _update_command(self) -> None:
         self.episode_success = torch.maximum(self.episode_success, self.at_goal.float())
 
+    def get_marker_positions_w(self) -> torch.Tensor:
+        """The goal, so a viewer can show where the object must end up.
+
+        Without this the task is invisible: an arm holding the object
+        a hand's width from an unseen goal looks exactly like an arm
+        holding it in the right place.
+        """
+        return self.target_pos
+
     # ── Resampling ───────────────────────────────────────────────────
 
     def reset(self, env_ids: torch.Tensor) -> None:
