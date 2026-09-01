@@ -267,6 +267,18 @@ class SceneManager(BaseManager):
                 # dict in ``_configure_robot_dynamics`` below, which runs
                 # after this and is the single place it is stated.
                 "default_armature": None,
+                # align=None resolves to True for a "basic rigid object"
+                # (a lone free root, exactly what a prop is), which REFRAMES
+                # the link so its origin sits at the CoM (morphs.py: the
+                # 'align' doc). Newton and mjlab keep the authored frame, so
+                # an aligned Genesis prop with an off-origin CoM would be
+                # PLACED and READ c apart from the other two backends — and
+                # its CoM/mass become unwritable at runtime, which the body
+                # DR needs. False keeps the authored frame; for every
+                # centered-CoM prop (cube, table) alignment was a no-op, so
+                # nothing existing changes. Caught by
+                # newton_root_velocity_roundtrip_diag's CoM cross-check.
+                "align": False,
             }
             # Keep morph offset at origin so the new relative=True default of
             # get_pos/set_pos/get_quat/set_quat (Genesis #2934) collapses to the
@@ -288,6 +300,8 @@ class SceneManager(BaseManager):
                 "batch_fixed_verts": True,
                 # Same silent-armature injection as the MJCF branch above.
                 "default_armature": None,
+                # Keep the authored link frame — see the MJCF branch above.
+                "align": False,
             }
             if cfg.links_to_keep:
                 urdf_kwargs["links_to_keep"] = cfg.links_to_keep
