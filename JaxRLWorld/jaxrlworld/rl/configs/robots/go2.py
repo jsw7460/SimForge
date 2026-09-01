@@ -1,0 +1,148 @@
+from dataclasses import dataclass, field
+from typing import Dict, List
+
+from jaxrlworld.rl.configs.robots.utils import reflected_inertia_simple
+
+from .base import RobotConfig
+
+# Go2 motor specs (from mjlab_sim2real)
+# Ref: https://github.com/unitreerobotics/unitree_ros/blob/master/robots/go2_description/urdf/go2_description.urdf#L90
+ROTOR_INERTIA = 0.000111842  # kg·m^2
+
+# Gear ratios
+# Ref: https://www.unitree.com/cn/go1/motor
+HIP_GEAR_RATIO = 6.33
+KNEE_GEAR_RATIO = HIP_GEAR_RATIO * 1.92  # ≈ 12.1536
+
+ARMATURE_HIP = reflected_inertia_simple(ROTOR_INERTIA, HIP_GEAR_RATIO)  # ≈ 0.004481  kg·m^2
+ARMATURE_KNEE = reflected_inertia_simple(ROTOR_INERTIA, KNEE_GEAR_RATIO)  # ≈ 0.016520  kg·m^2
+
+# PD gains derived from reflected inertia
+NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10Hz → ≈ 62.8319 rad/s
+DAMPING_RATIO = 2.0
+
+STIFFNESS_HIP = ARMATURE_HIP * NATURAL_FREQ**2  # ≈ 17.6918  N·m/rad
+DAMPING_HIP = 2 * DAMPING_RATIO * ARMATURE_HIP * NATURAL_FREQ  # ≈  1.1263  N·m·s/rad
+
+STIFFNESS_KNEE = ARMATURE_KNEE * NATURAL_FREQ**2  # ≈ 65.2191  N·m/rad
+DAMPING_KNEE = 2 * DAMPING_RATIO * ARMATURE_KNEE * NATURAL_FREQ  # ≈  4.1520  N·m·s/rad
+
+# Effort limits
+EFFORT_HIP = 23.7  # N·m
+EFFORT_KNEE = 45.43  # N·m
+
+# Action scale: 0.25 * effort / stiffness
+ACTION_SCALE_HIP = 0.25 * EFFORT_HIP / STIFFNESS_HIP  # ≈ 0.3349  rad
+ACTION_SCALE_KNEE = 0.25 * EFFORT_KNEE / STIFFNESS_KNEE  # ≈ 0.1741  rad
+
+GO2_ACTION_SCALE: Dict[str, float] = {
+    r".*_hip_joint": ACTION_SCALE_HIP,
+    r".*_thigh_joint": ACTION_SCALE_HIP,
+    r".*_calf_joint": ACTION_SCALE_KNEE,
+}
+
+
+@dataclass
+class Go2Config(RobotConfig):
+    """Configuration for Unitree Go2 quadruped robot."""
+
+    name: str = "go2"
+    urdf_path: str = "Genesis/genesis/assets/urdf/go2/urdf/go2.urdf"
+    mjcf_path: str = "JaxRLWorld/jaxrlworld/assets/unitree_go2/xmls/go2.xml"
+
+    # base_init_height: float = 0.278
+    base_init_height: float = 0.30
+    # base_link_name: str = "base"
+    base_link_name: str = "trunk"
+
+    default_joint_angles: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*thigh_joint": 0.9,
+            ".*calf_joint": -1.8,
+            ".*R_hip_joint": 0.1,
+            ".*L_hip_joint": -0.1,
+        }
+    )
+
+    actuated_dof_patterns: List[str] = field(
+        default_factory=lambda: [
+            r"FL_(hip|thigh|calf)_joint",
+            r"FR_(hip|thigh|calf)_joint",
+            r"RL_(hip|thigh|calf)_joint",
+            r"RR_(hip|thigh|calf)_joint",
+        ]
+    )
+
+    p_gains: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_joint": STIFFNESS_HIP,
+            ".*_thigh_joint": STIFFNESS_HIP,
+            ".*_calf_joint": STIFFNESS_KNEE,
+        }
+    )
+
+    d_gains: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_joint": DAMPING_HIP,
+            ".*_thigh_joint": DAMPING_HIP,
+            ".*_calf_joint": DAMPING_KNEE,
+        }
+    )
+
+    armature: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_joint": ARMATURE_HIP,
+            ".*_thigh_joint": ARMATURE_HIP,
+            ".*_calf_joint": ARMATURE_KNEE,
+        }
+    )
+
+    foot_names: List[str] = field(default_factory=lambda: ["FR_foot", "FL_foot", "RR_foot", "RL_foot"])
+
+    # ── Optional PD / friction overrides (default None = legacy) ──
+    # When set on a preset, downstream builders use these values
+    # instead of the module-level ``STIFFNESS_*`` / ``DAMPING_*``
+    # constants and install deterministic friction event terms in
+    # place of the default wide DR. Default ``None`` means "no
+    # override" — every existing training run is bit-identical to
+    # before these fields were added. See ``jaxrlworld/rl/configs/
+    # presets/go2/_newton_builders.py`` for the read sites.
+    kp_hip_override: float | None = None
+    kd_hip_override: float | None = None
+    kp_knee_override: float | None = None
+    kd_knee_override: float | None = None
+    joint_frictionloss_override: float | None = None
+    foot_friction_override: float | None = None
+
+    # ── Per-leg PD overrides (Newton only, default None = legacy) ──
+    # When set, builders broadcast a per-joint stiffness/damping dict to
+    # the actuator instead of a single scalar — the four quadrants then
+    # ship distinct PD gains. Format:
+    #
+    #   {"FL": {"hip": 12.0, "knee": 45.0},
+    #    "FR": {"hip": 15.0, "knee": 55.0},
+    #    "RL": {"hip": 18.0, "knee": 60.0},
+    #    "RR": {"hip": 22.0, "knee": 70.0}}
+    #
+    # ``hip`` covers both hip and thigh joints (matches the existing
+    # ``(.*_hip_joint, .*_thigh_joint)`` actuator grouping); ``knee``
+    # covers the calf joint. Takes precedence over the scalar
+    # ``kp_hip_override`` / ``kp_knee_override`` slots above when set.
+    kp_per_leg_override: dict[str, dict[str, float]] | None = None
+    kd_per_leg_override: dict[str, dict[str, float]] | None = None
+
+    # ── Per-DOF / per-foot friction overrides (Newton only, default
+    # None = legacy) ──
+    # When set, builders install a deterministic per-dim friction event
+    # (``set_joint_friction_per_dim`` / ``set_foot_friction_per_foot``)
+    # that rewrites the heterogeneous values every reset, in place of the
+    # scalar ``joint_frictionloss_override`` / ``foot_friction_override``
+    # terms. ``joint_friction_per_joint_override`` is a 12-vector in the
+    # actuated-DOF order matched by ``(.*_joint$,)`` against
+    # ``robot_view.joint_dof_names``; ``foot_friction_per_foot_override``
+    # is a 4-vector in the order the foot collision shapes are matched
+    # against ``model.shape_label`` (same order the per-foot apply
+    # uses, so collect and identification stay column-consistent). Take
+    # precedence over the scalar friction overrides when set.
+    joint_friction_per_joint_override: list[float] | None = None
+    foot_friction_per_foot_override: list[float] | None = None

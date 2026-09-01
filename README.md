@@ -4,7 +4,7 @@ A JAX-based reinforcement learning framework for legged-robot locomotion,
 with first-class support for training and evaluating **one policy across
 three simulators** — [Genesis][genesis], [Newton][newton], and MuJoCo
 (via [mjlab][mjlab]) — using a single sim-agnostic API. The framework
-itself is `rlworld/` inside [`JaxRLWorld/`](JaxRLWorld); `SimForge/` is the
+itself is `jaxrlworld/` inside [`JaxRLWorld/`](JaxRLWorld); `SimForge/` is the
 umbrella repo that pins specific simulator versions as git submodules so
 external users can clone a single, reproducible stack.
 
@@ -115,9 +115,9 @@ budgets the spread is wide. Everything held equal is pinned in
 
 ```bash
 # one cell
-bash JaxRLWorld/rlworld/scripts/benchmark/sb3_compare/ppo_halfcheetah.bash
+bash JaxRLWorld/jaxrlworld/scripts/benchmark/sb3_compare/ppo_halfcheetah.bash
 # every algorithm x task, resumable
-bash JaxRLWorld/rlworld/scripts/benchmark/sb3_compare/sweep.bash
+bash JaxRLWorld/jaxrlworld/scripts/benchmark/sb3_compare/sweep.bash
 ```
 
 ## Installation
@@ -172,14 +172,14 @@ pip install -U "jax[cuda12]"   # match your system CUDA
 Train PPO on Go2 gait-conditioned locomotion in Newton:
 
 ```bash
-python JaxRLWorld/rlworld/scripts/go2/newton/gait_conditioned.py
+python JaxRLWorld/jaxrlworld/scripts/go2/newton/gait_conditioned.py
 ```
 
 The same task in Genesis or MuJoCo:
 
 ```bash
-python JaxRLWorld/rlworld/scripts/go2/genesis/gait_conditioned.py
-python JaxRLWorld/rlworld/scripts/go2/mujoco/gait_conditioned.py
+python JaxRLWorld/jaxrlworld/scripts/go2/genesis/gait_conditioned.py
+python JaxRLWorld/jaxrlworld/scripts/go2/mujoco/gait_conditioned.py
 ```
 
 ## Cross-sim evaluation
@@ -196,7 +196,7 @@ Training writes checkpoints to
 that directory to `--policy_path`:
 
 ```bash
-python JaxRLWorld/rlworld/scripts/evaluation/eval_cross_sim.py \
+python JaxRLWorld/jaxrlworld/scripts/evaluation/eval_cross_sim.py \
     --policy_path outputs/models/<date>/<time>/checkpoint_latest/ \
     --eval_sim mujoco
 ```
@@ -205,7 +205,7 @@ To pull a checkpoint from W&B instead, set `--policy_path None` and
 provide `--wandb_run_path`:
 
 ```bash
-python JaxRLWorld/rlworld/scripts/evaluation/eval_cross_sim.py \
+python JaxRLWorld/jaxrlworld/scripts/evaluation/eval_cross_sim.py \
     --policy_path None \
     --wandb_run_path <entity>/<task>/<run-id> \
     --eval_sim mujoco \
@@ -217,7 +217,7 @@ checkpoint. Enable that either in your runner config or as a CLI
 override:
 
 ```bash
-python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py \
+python JaxRLWorld/jaxrlworld/scripts/g1_29dof/genesis/mlp.py \
     runner.upload_checkpoint=True
 ```
 
@@ -249,4 +249,4 @@ python JaxRLWorld/rlworld/scripts/g1_29dof/genesis/mlp.py \
 [mjpg]: https://github.com/google-deepmind/mujoco_playground
 [warp]: https://github.com/NVIDIA/warp
 [sb3]: https://github.com/DLR-RM/stable-baselines3
-[bench]: JaxRLWorld/rlworld/scripts/benchmark/sb3_compare/_common.py
+[bench]: JaxRLWorld/jaxrlworld/scripts/benchmark/sb3_compare/_common.py

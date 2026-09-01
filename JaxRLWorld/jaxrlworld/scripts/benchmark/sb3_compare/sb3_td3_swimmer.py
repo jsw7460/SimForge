@@ -1,0 +1,9 @@
+"""SB3 TD3 on Swimmer-v5 — parity contract in ``_common.py``.
+
+Run:  python jaxrlworld/scripts/benchmark/sb3_compare/sb3_td3_swimmer.py
+"""
+
+from jaxrlworld.scripts.benchmark.sb3_compare._common import run_sb3
+
+if __name__ == "__main__":
+    run_sb3("td3", "swimmer")

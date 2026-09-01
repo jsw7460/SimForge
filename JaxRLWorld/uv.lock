@@ -997,7 +997,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rlworld"
+name = "jaxrlworld"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -1030,7 +1030,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytz" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "rlworld", extras = ["wandb"], marker = "extra == 'all'" },
+    { name = "jaxrlworld", extras = ["wandb"], marker = "extra == 'all'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "wandb", marker = "extra == 'wandb'", specifier = ">=0.16.0" },
 ]

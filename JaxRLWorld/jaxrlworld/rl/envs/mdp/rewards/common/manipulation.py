@@ -1,0 +1,150 @@
+"""Reward terms for picking an object up and bringing it somewhere.
+
+Ported from mjlab's ``tasks/manipulation/mdp/rewards.py``. Simulator-
+agnostic: everything is read through ``RobotData`` / ``RigidObjectData``
+and the site frames, so the same terms run on Newton, Genesis and mjlab.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import torch
+
+from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.entity_points import entity_point_w
+
+if TYPE_CHECKING:
+    from jaxrlworld.rl.envs.world import World
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
+def _ee_pos_w(env: World, asset_cfg: ResolvedEntity) -> torch.Tensor:
+    """World position of the selector's single site — the grasp point."""
+    if asset_cfg.site_ids is None:
+        raise ValueError(
+            f"Reward term needs a site on entity {asset_cfg.name!r}: pass "
+            "SceneEntitySelector(name=..., site_names=('grasp_site',))."
+        )
+    return env.get_entity_data(asset_cfg.name).site_pos_w_by_ids(asset_cfg.site_ids)[:, 0]
+
+
+def staged_position_reward(
+    env: World,
+    command_name: str,
+    object_cfg: ResolvedEntity,
+    reaching_std: float,
+    bringing_std: float,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """Reaching, multiplied by one plus bringing.
+
+    Two Gaussian kernels: how near the grasp point is to the object, and
+    how near the object is to its goal. Multiplied rather than added, so
+    the bringing bonus is worth nothing until the arm is at the object.
+
+    That ordering is the point. Bringing an object to a goal is a reward
+    a policy cannot collect by accident, and a sum would let it collect
+    the reaching half forever without ever closing the gripper. The
+    product gives a gradient that only leads somewhere by going through
+    the object first.
+    """
+    reaching, bringing = staged_position_parts(
+        env,
+        command_name=command_name,
+        object_cfg=object_cfg,
+        reaching_std=reaching_std,
+        bringing_std=bringing_std,
+        asset_cfg=asset_cfg,
+    )
+    return reaching * (1.0 + bringing)
+
+
+def staged_position_parts(
+    env: World,
+    command_name: str,
+    object_cfg: ResolvedEntity,
+    reaching_std: float,
+    bringing_std: float,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The two kernels :func:`staged_position_reward` combines.
+
+    Split out so a task can put its own condition on one half without
+    restating the other. A task whose object can be carried WRONGLY --
+    held by a part rather than grasped -- has to stop paying the bringing
+    half for that, and the reaching half must keep paying regardless: at
+    the moment the arm is still approaching, nothing is grasped yet, so a
+    condition applied to both halves would zero the only term that leads
+    the arm to the object at all.
+
+    Returns:
+        ``(reaching, bringing)``, each ``(num_envs,)`` in [0, 1].
+    """
+    command = env.command_manager.get_term(command_name)
+    ee_pos_w = _ee_pos_w(env, asset_cfg)
+    obj_pos_w = entity_point_w(env, object_cfg)
+
+    reach_error = torch.sum(torch.square(ee_pos_w - obj_pos_w), dim=-1)
+    reaching = torch.exp(-reach_error / reaching_std**2)
+
+    position_error = torch.sum(torch.square(command.target_pos - obj_pos_w), dim=-1)
+    bringing = torch.exp(-position_error / bringing_std**2)
+
+    return reaching, bringing
+
+
+def bring_object_reward(
+    env: World,
+    command_name: str,
+    object_cfg: ResolvedEntity,
+    std: float,
+) -> torch.Tensor:
+    """How near the object is to its goal, as a Gaussian kernel."""
+    command = env.command_manager.get_term(command_name)
+    obj_pos_w = entity_point_w(env, object_cfg)
+    position_error = torch.sum(torch.square(command.target_pos - obj_pos_w), dim=-1)
+    return torch.exp(-position_error / std**2)
+
+
+def joint_velocity_hinge_penalty(
+    env: World,
+    max_vel: float,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """Squared penalty on joint speed ABOVE a limit, zero below it.
+
+    A plain velocity penalty taxes every motion, including the fast
+    approach the task wants. This one is silent until a joint exceeds
+    ``max_vel`` and then grows quadratically, which bounds the speed
+    without discouraging moving at all.
+
+    Returns a NEGATIVE value, the convention every ``penalize_*`` term in
+    this repo follows, so its weight is positive. mjlab's own version
+    returns the positive excess and is given a negative weight; carrying
+    that convention across along with the formula is how a penalty
+    silently becomes a bonus.
+    """
+    joint_vel = env.get_entity_data(asset_cfg.name).joint_vel
+    if asset_cfg.joint_ids is not None:
+        joint_vel = joint_vel[:, asset_cfg.joint_ids]
+    excess = (joint_vel.abs() - max_vel).clamp_min(0.0)
+    return -(excess**2).sum(dim=-1)
+
+
+def object_dropped(
+    env: World,
+    object_cfg: ResolvedEntity,
+    min_height: float,
+) -> torch.Tensor:
+    """-1.0 where the object has fallen below ``min_height``, else 0.
+
+    Negative, like every other penalty here, so its weight is positive.
+
+    Not in mjlab's set. Added because this scene has a table: an object
+    knocked off it lands on the floor and stays there, and without a term
+    that notices, the episode runs to its time-out collecting a reaching
+    reward for hovering over an empty table.
+    """
+    return -(entity_point_w(env, object_cfg)[:, 2] < min_height).float()

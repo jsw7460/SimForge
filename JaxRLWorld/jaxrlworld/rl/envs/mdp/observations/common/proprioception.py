@@ -1,0 +1,399 @@
+"""Unified proprioception observations using the RobotData interface.
+
+All functions accept any ``World`` subclass and read state exclusively
+through ``env.get_entity_data(asset_cfg.name)`` or ``env.contact_manager``,
+making them simulator-agnostic.  ``asset_cfg`` is a
+:class:`~jaxrlworld.rl.configs.scene.entity_selector.ResolvedEntity` —
+ObservationManager pre-resolves the :data:`_DEFAULT_SELECTOR` default at
+setup time, so presets only specify ``asset_cfg`` for a non-default
+entity.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import torch
+
+from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.utils import EnvStepCache
+from jaxrlworld.rl.utils.quat_utils import quat_to_euler_wxyz
+
+if TYPE_CHECKING:
+    from jaxrlworld.rl.envs.world import World
+
+
+_DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+
+@EnvStepCache()
+def base_lin_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Base linear velocity in body frame.
+
+    Returns:
+        Tensor of shape (num_envs, 3).
+    """
+    return env.get_entity_data(asset_cfg.name).root_link_lin_vel_b
+
+
+@EnvStepCache()
+def base_ang_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Base angular velocity in body frame.
+
+    Returns:
+        Tensor of shape (num_envs, 3).
+    """
+    return env.get_entity_data(asset_cfg.name).root_link_ang_vel_b
+
+
+@EnvStepCache()
+def projected_gravity(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Gravity vector projected into the body frame.
+
+    Returns:
+        Tensor of shape (num_envs, 3).
+    """
+    return env.get_entity_data(asset_cfg.name).projected_gravity_b
+
+
+@EnvStepCache()
+def base_quat(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Base quaternion in world frame, **wxyz** convention.
+
+    Returns:
+        Tensor of shape (num_envs, 4).
+
+    Note:
+        The legacy ``observations.newton.state.base_quat`` returned the
+        Newton-native **xyzw** order. Migrating to this common helper
+        normalizes Newton onto the wxyz convention shared by Genesis,
+        mjlab, and the ``RobotData`` protocol — old Newton checkpoints
+        whose critic obs included ``base_quat`` will need to retrain.
+    """
+    return env.get_entity_data(asset_cfg.name).root_link_quat_w
+
+
+@EnvStepCache()
+def base_euler(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, degrees: bool = False) -> torch.Tensor:
+    """Base orientation as Euler angles ``(roll, pitch, yaw)`` in radians.
+
+    Args:
+        env: Any environment with a ``RobotData``.
+        asset_cfg: Selector identifying the robot entity.
+        degrees: If True, return angles in degrees instead of radians.
+
+    Returns:
+        Tensor of shape (num_envs, 3) — ``[roll, pitch, yaw]``.
+    """
+    quat_wxyz = env.get_entity_data(asset_cfg.name).root_link_quat_w
+    euler = quat_to_euler_wxyz(quat_wxyz)
+    if degrees:
+        euler = euler * (180.0 / torch.pi)
+    return euler
+
+
+def _actuated_joint_ids(env: World) -> torch.Tensor | None:
+    """Return act_manager._joint_ids if it exists (MuJoCo needs reindexing)."""
+    ids = getattr(env.act_manager, "_joint_ids", None)
+    if ids is None:
+        return None
+    # Only return if it's actually a permutation (not identity).
+    n = len(ids)
+    if n > 0 and not torch.equal(ids, torch.arange(n, device=ids.device)):
+        return ids
+    return None
+
+
+@EnvStepCache()
+def dof_pos(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Actuated joint positions in act_manager order.
+
+    Returns:
+        Tensor of shape (num_envs, num_joints).
+    """
+    pos = env.get_entity_data(asset_cfg.name).joint_pos
+    return pos
+
+
+@EnvStepCache()
+def dof_pos_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Actuated joint positions plus per-env encoder bias.
+
+    Same as :func:`dof_pos` but adds ``act_manager.encoder_bias_of``
+    to simulate a static, per-episode joint encoder miscalibration
+    (mirrors mjlab's ``biased=True`` observation flag used by the
+    getup task). Register this in place of :func:`dof_pos` in the
+    actor observation group when ``randomize_encoder_bias`` is
+    active; the critic typically keeps the unbiased ``dof_pos``.
+    """
+    return dof_pos(env, asset_cfg) + env.act_manager.encoder_bias_of(asset_cfg.name)
+
+
+@EnvStepCache()
+def dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Actuated joint velocities in act_manager order.
+
+    Returns:
+        Tensor of shape (num_envs, num_joints).
+    """
+    vel = env.get_entity_data(asset_cfg.name).joint_vel
+    return vel
+
+
+@EnvStepCache()
+def applied_torque(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Per-joint actuator torque actually applied at the last physics substep.
+
+    Reads :attr:`RobotData.applied_torque` (MuJoCo ``qfrc_actuator``
+    semantics), which each backend implements for BOTH actuator modes:
+    the sim-native actuator force under ``ImplicitActuatorCfg`` and the
+    clipped Python-side PD output under explicit actuators. Typically a
+    privileged (critic-only) term — real hardware has no torque sensor
+    on most robots.
+
+    Returns:
+        Tensor of shape (num_envs, num_joints) in act_manager order.
+    """
+    return env.get_entity_data(asset_cfg.name).applied_torque
+
+
+@EnvStepCache()
+def dof_pos_nominal_difference(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Joint positions relative to nominal (default) positions, in act_manager order.
+
+    Mirrors mjlab's ``joint_pos_rel(biased=False)``:
+    ``current_joint_pos - default_joint_pos``. Uses
+    ``RobotData.default_joint_pos`` which is resolved once at env
+    init from ``init_state.joint_pos``, so it is correct for both
+    absolute-action presets (where ``act_manager.offset`` equals the
+    default) and relative-action presets (where ``act_manager.offset``
+    is zeroed by ``use_zero_offset=True``).
+
+    Returns:
+        Tensor of shape (num_envs, num_joints).
+    """
+    rd = env.get_entity_data(asset_cfg.name)
+    return rd.joint_pos - rd.default_joint_pos.unsqueeze(0)
+
+
+def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """:func:`dof_pos_nominal_difference` plus the per-env encoder bias.
+
+    ``(q + encoder_bias) - default_pos`` — the nominal-difference joint obs with
+    a static per-episode encoder miscalibration (``act_manager.encoder_bias_of``,
+    written by ``randomize_encoder_bias``). Mirrors mjlab's
+    ``joint_pos_rel(biased=True)``. Register in the ACTOR group in place of
+    :func:`dof_pos_nominal_difference` when ``randomize_encoder_bias`` is active;
+    the critic keeps the unbiased version. On the real robot the encoder already
+    reads ``q + bias`` physically, so ``(q + bias) - default`` matches deploy.
+    """
+    rd = env.get_entity_data(asset_cfg.name)
+    return rd.joint_pos + env.act_manager.encoder_bias_of(asset_cfg.name) - rd.default_joint_pos.unsqueeze(0)
+
+
+@EnvStepCache()
+def foot_height(
+    env: World,
+    body_names: tuple[str, ...] | None = None,
+    site_names: tuple[str, ...] | None = None,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """Z-coordinate of each foot above the world origin.
+
+    Accepts **either** ``body_names`` (Newton/Genesis) **or**
+    ``site_names`` (MuJoCo) — exactly one must be provided.
+    Pass as **tuples** (not lists) for ``EnvStepCache`` hashability.
+
+    Returns:
+        Tensor of shape ``(num_envs, num_feet)``.
+    """
+    rd = env.get_entity_data(asset_cfg.name)
+    if body_names is not None:
+        return rd.body_pos_w(list(body_names))[:, :, 2]
+    elif site_names is not None:
+        return rd.site_pos_w(list(site_names))[:, :, 2]
+    raise ValueError("foot_height requires body_names or site_names")
+
+
+@EnvStepCache()
+def base_height(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Base height (z-coordinate) above world origin.
+
+    Returns:
+        Tensor of shape (num_envs, 1).
+    """
+    return env.get_entity_data(asset_cfg.name).root_link_pos_w[:, 2:3]
+
+
+def _term_action_slice(env: World, term_name: str | None) -> slice:
+    """Columns of the action vector belonging to one action term.
+
+    ``None`` selects the whole vector, which is what a single-robot preset
+    wants. Naming a term selects the slice that term owns, so a robot's
+    observation can carry its own actions rather than every robot's — the
+    role IsaacLab's ``last_action(env, action_name)`` fills
+    (``isaaclab/envs/mdp/observations.py:762``).
+    """
+    if term_name is None:
+        return slice(None)
+    slices = env.act_manager.term_action_slices
+    if term_name not in slices:
+        raise KeyError(
+            f"No action term named {term_name!r}. The action config declares: {sorted(slices) or 'no terms'}."
+        )
+    return slices[term_name]
+
+
+@EnvStepCache()
+def prev_processed_actions(env: World, term_name: str | None = None) -> torch.Tensor:
+    """Current step's processed actions (used as observation input).
+
+    Note: Despite the name, this returns the *current* processed actions,
+    matching the existing Newton/Genesis observation behavior.
+
+    Args:
+        term_name: Restrict to one action term's columns. ``None`` (the
+            default) returns the whole action vector.
+
+    Returns:
+        Tensor of shape (num_envs, num_actions) or the term's width.
+    """
+    return env.act_manager.processed_actions[:, _term_action_slice(env, term_name)].clone()
+
+
+@EnvStepCache()
+def prev_raw_actions(env: World, term_name: str | None = None) -> torch.Tensor:
+    """Previous step's raw actions, optionally for one action term."""
+    return env.act_manager.prev_raw_actions[:, _term_action_slice(env, term_name)]
+
+
+@EnvStepCache()
+def raw_actions(env: World, term_name: str | None = None) -> torch.Tensor:
+    """Current step's raw (unprocessed) actions.
+
+    Args:
+        term_name: Restrict to one action term's columns. ``None`` (the
+            default) returns the whole action vector.
+
+    Returns:
+        Tensor of shape (num_envs, num_actions) or the term's width.
+    """
+    return env.act_manager.raw_actions[:, _term_action_slice(env, term_name)]
+
+
+@EnvStepCache()
+def last_processed_actions(env: World, term_name: str | None = None) -> torch.Tensor:
+    """Previous step's processed actions.
+
+    This is the action applied one step before the current one.
+    Matches Walk-These-Ways ``self.last_actions`` in observations.
+
+    Args:
+        term_name: Restrict to one action term's columns. ``None`` (the
+            default) returns the whole action vector.
+
+    Returns:
+        Tensor of shape (num_envs, num_actions) or the term's width.
+    """
+    return env.act_manager.prev_processed_actions[:, _term_action_slice(env, term_name)].clone()
+
+
+@EnvStepCache()
+def clock_inputs(env: World) -> torch.Tensor:
+    """Gait clock signals from GaitManager.
+
+    Returns sin(2*pi * warped_foot_phase) for each foot.
+    Requires the environment to have a ``gait_manager`` attribute.
+
+    Returns:
+        Tensor of shape (num_envs, num_feet).
+    """
+    return env.gait_manager.clock_inputs
+
+
+@EnvStepCache()
+def all_commands(env: World) -> torch.Tensor:
+    """All command terms concatenated.
+
+    Returns all registered command terms (e.g., velocity + gait)
+    as a single tensor via CommandManager.get_commands_tensor().
+
+    Returns:
+        Tensor of shape (num_envs, total_command_dim).
+    """
+    return env.command_manager.get_commands_tensor()
+
+
+# Short alias kept for the historical name used by every preset that
+# previously imported `command` from `genesis.exteroception` (which was
+# misplaced — it was sim-agnostic from day one).
+command = all_commands
+
+
+# ── Contact-based observations ───────────────────────────────────────
+
+
+@EnvStepCache()
+def foot_air_time(
+    env: World,
+    contact_group: str = "feet_ground_contact",
+    body_names: tuple[str, ...] | None = None,
+    use_last: bool = False,
+) -> torch.Tensor:
+    """Per-foot air-time observation.
+
+    Args:
+        env: Any environment with a contact_manager.
+        contact_group: Name of the registered contact group.
+        body_names: Optional ordered subset of body names to read; when
+            given, the helper passes ``order=body_names`` to the contact
+            manager so the result columns line up with the caller's
+            foot ordering. Pass as **tuple** for cache hashability.
+        use_last: If True, return the last completed air-time interval
+            (frozen at landing) instead of the live current air-time
+            counter. The legacy Newton presets used the "last" variant;
+            new code should prefer ``False`` (the current counter).
+
+    Returns:
+        Tensor of shape ``(num_envs, num_feet)``.
+    """
+    order = list(body_names) if body_names is not None else None
+    if use_last:
+        return env.contact_manager.last_air_time(contact_group, order=order)
+    return env.contact_manager.current_air_time(contact_group, order=order)
+
+
+@EnvStepCache()
+def foot_contact_indicator(
+    env: World,
+    contact_group: str = "feet_ground_contact",
+    body_names: tuple[str, ...] | None = None,
+) -> torch.Tensor:
+    """Binary per-foot contact indicator (1.0 = in contact).
+
+    Returns:
+        Tensor of shape ``(num_envs, num_feet)``.
+    """
+    order = list(body_names) if body_names is not None else None
+    return env.contact_manager.is_contact(contact_group, order=order).float()
+
+
+@EnvStepCache()
+def foot_contact_forces(
+    env: World,
+    contact_group: str = "feet_ground_contact",
+    body_names: tuple[str, ...] | None = None,
+) -> torch.Tensor:
+    """Per-foot 3-D contact force, log-scaled and flattened.
+
+    Applies ``sign(F) * log1p(|F|)`` to compress the dynamic range of
+    raw contact forces, then flattens the per-foot 3-vectors into a
+    single per-env feature vector.
+
+    Returns:
+        Tensor of shape ``(num_envs, num_feet * 3)``.
+    """
+    order = list(body_names) if body_names is not None else None
+    forces_3d = env.contact_manager.contact_force(contact_group, order=order)
+    flat = forces_3d.flatten(start_dim=1)
+    return torch.sign(flat) * torch.log1p(torch.abs(flat))

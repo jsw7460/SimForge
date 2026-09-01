@@ -1,0 +1,85 @@
+import os
+
+os.environ["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+os.environ["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
+
+custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets"))
+import genesis.utils.terrain
+
+genesis.utils.misc.get_assets_dir = lambda: custom_assets
+genesis.utils.terrain.get_assets_dir = lambda: custom_assets
+
+import gymnasium as gym
+
+from jaxrlworld.rl.configs import SACPolicyConfig
+from jaxrlworld.rl.configs.algorithms import SACConfig
+from jaxrlworld.rl.configs.common_config_classes import (
+    Activation,
+    MLPActorCfg,
+    MLPCriticCfg,
+)
+from jaxrlworld.rl.configs.presets.go2.mlp import get_config
+from jaxrlworld.rl.runners import OffPolicyRunner
+
+
+def main():
+    # Get complete config from preset
+    cfgs_for_run = get_config(sim="genesis").with_cli_overrides()
+
+    cfgs_for_run.algorithm = SACConfig()
+    cfgs_for_run.algorithm.obs_normalization = False
+    cfgs_for_run.algorithm.actor_lr = 3e-4
+    cfgs_for_run.algorithm.buffer_size = 1_000_000
+    cfgs_for_run.algorithm.batch_size = 256
+    cfgs_for_run.algorithm.tau = 0.005
+    cfgs_for_run.algorithm.num_steps_per_env = 1
+    cfgs_for_run.algorithm.num_gradient_steps = 1
+    cfgs_for_run.nn.policy = cfgs_for_run.nn.policy.to(SACPolicyConfig)
+    cfgs_for_run.nn.policy.actor = MLPActorCfg(
+        hidden_dims=[256, 256],
+        activation=Activation.RELU,
+    )
+    cfgs_for_run.nn.policy.critic = MLPCriticCfg(
+        hidden_dims=[64, 64, 64],
+        activation=Activation.RELU,
+    )
+    cfgs_for_run.runner.log_interval = 100
+    cfgs_for_run.runner.max_iterations = 1000000
+    cfgs_for_run.runner.save_interval = 100000
+    cfgs_for_run.runner.run_name = "SACBenchmarkHopper_Hop"
+    cfgs_for_run.runner.eval_interval = 0  # Do not change this
+
+    from gymnasium.vector import AutoresetMode, SyncVectorEnv
+
+    from jaxrlworld.rl.envs import GymnasiumEnv
+
+    def make_env(seed):
+        def _init():
+            return gym.make("Hopper-v5")
+
+        return _init
+
+    num_envs = 1
+    env_gym = SyncVectorEnv([make_env(i) for i in range(num_envs)], autoreset_mode=AutoresetMode.SAME_STEP)
+    env = GymnasiumEnv(
+        env_gym,
+        env_cfg=cfgs_for_run.env,
+        scene_cfg=cfgs_for_run.scene,
+        obs_cfg=cfgs_for_run.observation,
+        act_cfg=cfgs_for_run.action,
+        reward_cfg=cfgs_for_run.reward,
+        command_cfg=cfgs_for_run.command,
+        seed=42,
+    )
+
+    runner = OffPolicyRunner(env=env, cfgs=cfgs_for_run, use_wandb=True)
+
+    # Start training
+    runner.learn(
+        num_learning_iterations=cfgs_for_run.runner.max_iterations,
+        init_at_random_ep_len=cfgs_for_run.runner.init_at_random_ep_len,
+    )
+
+
+if __name__ == "__main__":
+    main()

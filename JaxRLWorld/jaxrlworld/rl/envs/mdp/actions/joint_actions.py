@@ -1,0 +1,556 @@
+"""Joint-space action terms: absolute / relative / settle-relative.
+
+Three concrete :class:`ActionTerm` subclasses covering the action
+interpretations every existing and planned JaxRLWorld task needs:
+
+* :class:`JointPositionAction` — **absolute** target. Policy outputs
+  are scaled and offset by a fixed reference (default joint pose
+  when ``use_default_offset=True``). Mirrors IsaacLab's /
+  mjlab's ``JointPositionAction``. Used by locomotion tasks
+  (Go2, G1 flat) where the policy commands displacements around
+  a known standing pose.
+
+* :class:`RelativeJointPositionAction` — **delta** target. Target is
+  ``current_joint_pos + raw * scale``. ``raw=0`` means "hold current".
+  Mirrors mjlab's ``RelativeJointPositionAction``. Used by
+  manipulation / reaching tasks where the policy commands
+  incremental moves from the current state.
+
+* :class:`SettleRelativeJointPositionAction` — **delta + settle**.
+  Same as Relative but during the first ``settle_steps`` control
+  steps after each reset the target is forcibly held at
+  ``current_joint_pos`` regardless of the policy output. Added by
+  mjlab_playground specifically for fall-recovery (getup) tasks
+  where the robot is dropped from height and must not receive any
+  policy command until it has physically settled on the ground.
+
+All three share :class:`JointAction`'s scale/offset processing;
+they differ only in :meth:`ActionTerm.compute_target_positions`.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import torch
+
+from jaxrlworld.rl.envs.mdp.actions.base import ActionTerm, ActionTermCfg
+from jaxrlworld.rl.utils import string as string_utils
+
+if TYPE_CHECKING:
+    from jaxrlworld.rl.envs.managers.common.action import ActionManagerBase
+    from jaxrlworld.rl.envs.world import World
+
+
+# ── Shared base ─────────────────────────────────────────────────────
+
+
+@dataclass
+class JointActionCfg(ActionTermCfg):
+    """Shared config for joint-space action terms.
+
+    Attributes:
+        scale: Per-joint scale. ``float`` applies to every joint in
+            this term; ``dict[regex → float]`` resolves per-joint.
+        offset: Per-joint offset added to ``raw * scale``. Used by
+            the absolute :class:`JointPositionAction` to reference a
+            default pose. Relative terms typically force this to 0.
+    """
+
+    scale: float | dict[str, float] = 1.0
+    offset: float | dict[str, float] = 0.0
+
+
+class JointAction(ActionTerm):
+    """Shared base implementing ``processed = raw * scale + offset``.
+
+    Position subclasses override :meth:`compute_target_positions` to
+    turn the intermediate ``processed_actions`` into an absolute joint
+    position target (dispatched through the actuator-compute path). The
+    effort subclass (:class:`JointEffortAction`) instead applies
+    ``processed_actions`` directly as joint torque and never calls
+    :meth:`compute_target_positions`.
+    """
+
+    __name__ = "JointAction"
+
+    def __init__(
+        self,
+        cfg: JointActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+
+        # Resolve joint_names against THIS TERM'S entity, not the
+        # manager's single joint list: with two robots in the scene the
+        # manager's list belongs to one of them, and a term driving the
+        # other would silently land on the first robot's joints.
+        all_names = list(self.indexing.joint_names)
+        matched_indices, _ = string_utils.resolve_matching_names(cfg.joint_names, all_names, preserve_order=True)
+        if not matched_indices:
+            raise ValueError(
+                f"ActionTerm {type(self).__name__} got joint_names={cfg.joint_names!r} "
+                f"but no joints of entity {cfg.asset_name!r} matched. Available: {all_names}"
+            )
+        self._joint_ids = torch.tensor(matched_indices, device=env.device, dtype=torch.long)
+        self._joint_names_local = [all_names[i] for i in matched_indices]
+
+        n = len(matched_indices)
+        self._raw_actions = torch.zeros((env.num_envs, n), device=env.device, dtype=torch.float32)
+        self._processed_actions = torch.zeros_like(self._raw_actions)
+
+        # Resolve scale dict → per-joint tensor (n,).
+        self._scale = self._resolve_float_field(cfg.scale, default=1.0)
+        # Resolve offset dict → per-joint tensor (n,).
+        self._offset = self._resolve_float_field(cfg.offset, default=0.0)
+
+    @property
+    def joint_names(self) -> list[str]:
+        """Names of this term's joints, in the order it drives them."""
+        return list(self._joint_names_local)
+
+    def _resolve_float_field(
+        self,
+        value: float | dict[str, float],
+        default: float,
+    ) -> torch.Tensor:
+        """Map a float or regex-dict onto the term's joint set."""
+        out = torch.full(
+            (self.action_dim,),
+            float(default),
+            device=self._env.device,
+            dtype=torch.float32,
+        )
+        if isinstance(value, int | float):
+            out[:] = float(value)
+        elif isinstance(value, dict):
+            indices, _, values = string_utils.resolve_matching_names_values(value, self._joint_names_local)
+            out[indices] = torch.tensor(values, device=self._env.device)
+        else:
+            raise TypeError(
+                f"{type(self).__name__}: expected float or dict for scale/offset, got {type(value).__name__}"
+            )
+        return out
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        """Clip (optional), scale, and offset the raw action slice."""
+        if self._cfg.clip is not None:
+            lo, hi = self._cfg.clip
+            actions = torch.clamp(actions, lo, hi)
+        self._raw_actions[:] = actions
+        self._processed_actions = actions * self._scale + self._offset
+
+    def compute_target_positions(self) -> torch.Tensor:
+        """Return absolute joint position targets for this term's joints.
+
+        Shape: ``(num_envs, action_dim)``. JointAction subclasses
+        implement this to translate ``processed_actions`` into the
+        actual sim-level joint target. :meth:`apply_actions` calls
+        this and routes the result through the manager's
+        actuator-compute path.
+        """
+        raise NotImplementedError(f"{type(self).__name__} must override compute_target_positions")
+
+    def apply_actions(self) -> None:
+        """Compute the joint target and dispatch through the
+        manager's actuator-compute path.
+
+        Common to every JointAction subclass; the only thing that
+        varies between Absolute / Relative / Settle / MotionResidual
+        is what :meth:`compute_target_positions` returns, so the
+        dispatch logic lives here once.
+        """
+        target = self.compute_target_positions()
+        self._manager._apply_joint_target_via_actuators(target, self._joint_ids, self._entity_name)
+
+
+# ── Absolute ────────────────────────────────────────────────────────
+
+
+@dataclass
+class JointPositionActionCfg(JointActionCfg):
+    """Absolute joint position action.
+
+    Target = ``raw * scale + offset``. If ``use_default_offset=True``,
+    the ``offset`` field is overridden at construction with the
+    robot's default joint angles (read from the scene's
+    ``act_manager.offset[0]`` first row). Legacy-compatible with the
+    monolithic ``ActionManagerBase`` code path when wrapped by the
+    manager's auto-shim.
+
+    Attributes:
+        use_default_offset: When True, override ``offset`` with the
+            robot's default joint angles. Matches IsaacLab's
+            ``JointPositionActionCfg.use_default_offset``.
+    """
+
+    use_default_offset: bool = False
+
+
+class JointPositionAction(JointAction):
+    """Absolute joint position action — target = processed."""
+
+    __name__ = "JointPositionAction"
+
+    def __init__(
+        self,
+        cfg: JointPositionActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        if cfg.use_default_offset:
+            # Override the per-joint offset with THIS ENTITY's declared
+            # home pose, in that entity's own joint order. Slicing the
+            # manager's ``offset`` instead would index the driven
+            # robot's action space, which is neither this entity's joint
+            # order nor, on the term path, even the same length.
+            home = env._resolve_default_joint_pos(self._entity_name)
+            self._offset = home[self._joint_ids].clone()
+
+    def compute_target_positions(self) -> torch.Tensor:
+        # processed_actions is already the absolute target (scale+offset).
+        return self._processed_actions
+
+
+# ── Relative ────────────────────────────────────────────────────────
+
+
+@dataclass
+class RelativeJointPositionActionCfg(JointActionCfg):
+    """Relative / delta joint position action.
+
+    Target = ``current_joint_pos + raw * scale``. Offset is forced
+    to 0 so that ``raw=0`` means "hold current". Mirrors mjlab's
+    ``RelativeJointPositionActionCfg``.
+
+    Attributes:
+        use_zero_offset: When True (default), the resolved per-joint
+            ``offset`` tensor is overwritten with zeros at
+            construction — matches mjlab's semantics.
+    """
+
+    use_zero_offset: bool = True
+
+
+class RelativeJointPositionAction(JointAction):
+    """Delta joint position action.
+
+    ``processed_actions = raw * scale`` (delta in joint-space).
+    ``compute_target_positions`` returns ``current_joint_pos + processed``.
+    """
+
+    __name__ = "RelativeJointPositionAction"
+
+    def __init__(
+        self,
+        cfg: RelativeJointPositionActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        if cfg.use_zero_offset:
+            self._offset = torch.zeros_like(self._offset)
+
+    def compute_target_positions(self) -> torch.Tensor:
+        current_pos = self._manager._get_joint_pos(self._entity_name)[:, self._joint_ids]
+        return current_pos + self._processed_actions
+
+
+# ── Settle relative (getup) ─────────────────────────────────────────
+
+
+@dataclass
+class SettleRelativeJointPositionActionCfg(RelativeJointPositionActionCfg):
+    """Delta joint position action with an initial settle-and-hold phase.
+
+    Extends :class:`RelativeJointPositionActionCfg` with a
+    ``settle_steps`` field. During the first ``settle_steps`` control
+    steps after each reset, the target is held at the current joint
+    position regardless of the policy output, giving the robot time
+    to settle physically after a drop/impact before the policy takes
+    over.
+
+    Mirrors mjlab_playground's
+    ``SettleRelativeJointPositionActionCfg`` used by the T1 getup
+    task at ``mjlab_playground/getup/mdp/actions.py``.
+
+    Attributes:
+        settle_steps: Number of control steps post-reset during
+            which the policy output is masked and the target equals
+            the current joint position. Set to 0 to disable (then
+            this term behaves identically to
+            :class:`RelativeJointPositionAction`).
+    """
+
+    settle_steps: int = 0
+
+
+class SettleRelativeJointPositionAction(RelativeJointPositionAction):
+    """Relative action with a first-N-steps hold.
+
+    ``compute_target_positions`` is identical to
+    :class:`RelativeJointPositionAction` except that envs whose
+    ``episode_length_buf < settle_steps`` have their target clamped
+    to ``current_joint_pos``.
+    """
+
+    __name__ = "SettleRelativeJointPositionAction"
+
+    def compute_target_positions(self) -> torch.Tensor:
+        current_pos = self._manager._get_joint_pos(self._entity_name)[:, self._joint_ids]
+        target = current_pos + self._processed_actions
+
+        settle_steps = self._cfg.settle_steps
+        if settle_steps > 0:
+            in_settle = (self._env.episode_length_buf < settle_steps).unsqueeze(-1)
+            target = torch.where(in_settle, current_pos, target)
+
+        return target
+
+
+# ── Motion-residual (Any2Track-style) ───────────────────────────────
+
+
+@dataclass
+class MotionResidualJointPositionActionCfg(JointActionCfg):
+    """Motion-anchored residual joint position action.
+
+    Used by motion tracking tasks. Target each step is the reference
+    motion's joint position plus a tanh-bounded, per-joint-scaled
+    correction the policy outputs:
+
+        target = motion_command.joint_pos + alpha * tanh(raw)
+
+    ``raw = 0`` (the PPO Gaussian's mean at init) reduces to perfect
+    motion playback, so the policy's bootstrapping baseline already
+    tracks the motion. The policy only needs to learn corrections
+    (balance, contact reaction, embodiment gap) on top, which is a
+    much smaller function than learning motion + corrections together.
+    Bounded ``tanh`` also prevents PD target spikes from outlier
+    action samples during early training.
+
+    Inspired by Any2Track [arXiv 2025] eq. (1):
+    ``q_d = q_tilde_{t+1} + alpha * tanh(pi(a_t | s_t))``.
+
+    The base ``scale`` and ``offset`` fields are unused — this term
+    overrides ``process_actions`` so motion + alpha * tanh(raw) is
+    the entire pipeline.
+
+    Attributes:
+        command_name: Name of the :class:`MotionCommand` term in the
+            env's :class:`CommandManager`. The term reads
+            ``env.command_manager.get_term(command_name).joint_pos``
+            as the residual anchor each step. Joint positions in the
+            command are assumed to be in the env's canonical
+            actuated-joint order (which :class:`MotionLoader` enforces).
+        alpha: Per-joint correction scale. ``float`` applies the same
+            value to every joint; ``dict[regex -> float]`` resolves
+            per-joint via the standard regex-on-name plumbing. Default
+            0.5 — i.e. each joint can deviate up to ±0.5 rad from the
+            motion reference per step.
+    """
+
+    command_name: str = "motion"
+    alpha: float | dict[str, float] = 0.5
+
+
+class MotionResidualJointPositionAction(JointAction):
+    """Motion-anchored residual joint position action.
+
+    target = motion_command.joint_pos[:, joint_ids] + alpha * tanh(raw)
+
+    ``compute_target_positions`` reads the motion command's joint
+    reference each control step and adds a per-joint, tanh-bounded
+    correction from the policy. The base ``scale`` and ``offset``
+    pipeline is bypassed; raw actions are stored unchanged in
+    ``processed_actions`` for logging compatibility but not used in
+    the target computation.
+    """
+
+    __name__ = "MotionResidualJointPositionAction"
+    _cfg: MotionResidualJointPositionActionCfg
+
+    def __init__(
+        self,
+        cfg: MotionResidualJointPositionActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+        tanh_squash: bool = False,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        # Per-joint tanh scale (alpha). Replaces self._scale/_offset's role.
+        self._alpha = self._resolve_float_field(cfg.alpha, default=0.5)
+        self._tanh_squash = tanh_squash
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        """Clip then store. ``processed_actions = raw`` (no scale/offset)."""
+        if self._cfg.clip is not None:
+            lo, hi = self._cfg.clip
+            actions = torch.clamp(actions, lo, hi)
+        self._raw_actions[:] = actions
+        # Kept identical to raw so logging / diagnostics that read
+        # processed_actions still see something sensible. Not used in
+        # target computation.
+        self._processed_actions[:] = actions
+
+    def compute_target_positions(self) -> torch.Tensor:
+        cmd = self._env.command_manager.get_term(self._cfg.command_name)
+        motion_target = cmd.joint_pos[:, self._joint_ids]
+        if self._tanh_squash:
+            residual = self._alpha * torch.tanh(self._raw_actions)
+        else:
+            residual = self._alpha * self._raw_actions
+        return motion_target + residual
+
+
+# ── Direct joint effort (torque) ────────────────────────────────────
+
+
+@dataclass
+class JointEffortActionCfg(JointActionCfg):
+    """Direct joint-torque action.
+
+    The policy output for this term's joints is interpreted as a
+    **joint torque** (``processed = raw * scale + offset``) and written
+    straight to the simulator, bypassing the position-target /
+    actuator-PD path. Mirrors IsaacLab's / mjlab's ``JointEffortAction``.
+
+    Used by tasks that command joint torques directly — e.g. NeRD-style
+    random-torque data collection, or torque-control RL.
+
+    .. important::
+        The joints driven by this term must be in the backend's
+        **direct-torque mode** (no internal PD): configure them with an
+        explicit actuator (``IdealPDActuatorCfg`` / ``DelayedPDActuatorCfg``
+        / ``DCMotorCfg`` with zero gains, or simply no implicit actuator)
+        so Newton leaves ``joint_target_mode = NONE`` and drives the joint
+        purely from ``control.joint_f``. If an ``ImplicitActuatorCfg``
+        (``joint_target_mode = POSITION``) covers the same joints, this
+        torque is applied *on top of* the simulator's internal PD output.
+
+    Attributes:
+        scale: Per-joint scale mapping raw policy output to torque
+            [N·m]. ``float`` or ``dict[regex → float]``. Set this to the
+            joint's effort limit to map a ``(-1, 1)`` action onto the
+            full torque range.
+        offset: Per-joint torque offset [N·m]. Defaults to 0.
+        effort_limit: Optional per-joint torque saturation [N·m] applied
+            after scale/offset. ``float`` (same for all joints),
+            ``dict[regex → float]`` (per-joint), or ``None`` (no clamp).
+    """
+
+    effort_limit: float | dict[str, float] | None = None
+
+
+class JointEffortAction(JointAction):
+    """Direct joint-torque action.
+
+    Reuses :class:`JointAction`'s ``process_actions`` (clip → scale →
+    offset) and applies the resulting ``processed_actions`` as joint
+    torque via the manager's :meth:`_apply_joint_effort_via_indices`
+    path. :meth:`compute_target_positions` is intentionally not
+    implemented — this term never produces a position target.
+    """
+
+    __name__ = "JointEffortAction"
+    _cfg: JointEffortActionCfg
+
+    def __init__(
+        self,
+        cfg: JointEffortActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        # Per-joint torque saturation. ``None`` → no clamp. When given
+        # as a regex dict, joints the dict does not match stay unlimited
+        # (default ``inf``) rather than being silently clamped to zero.
+        if cfg.effort_limit is None:
+            self._effort_limit: torch.Tensor | None = None
+        else:
+            self._effort_limit = self._resolve_float_field(cfg.effort_limit, default=float("inf"))
+
+    def apply_actions(self) -> None:
+        torques = self._processed_actions
+        if self._effort_limit is not None:
+            torques = torch.clamp(torques, min=-self._effort_limit, max=self._effort_limit)
+        self._manager._apply_joint_effort_via_indices(torques, self._joint_ids, self._entity_name)
+
+
+# ── Velocity servo ──────────────────────────────────────────────────────
+
+
+@dataclass
+class JointVelocityActionCfg(JointActionCfg):
+    """Joint velocity action, closed as a servo inside the term.
+
+    The policy output for this term's joints is interpreted as a
+    **joint velocity target** (``processed = raw * scale + offset``,
+    so ``scale`` is the top speed a unit action commands [rad/s]), and
+    the term turns it into torque itself::
+
+        torque = kv * (target_velocity - joint_velocity)
+
+    applied through the same direct-torque path as
+    :class:`JointEffortAction`. Closing the loop here rather than in
+    each simulator is the point: every backend receives the identical
+    torque law, so a wheel servo cannot behave differently per backend
+    the way native velocity-actuator implementations do.
+
+    Built for wheels — the first actuation in this repo that tracks a
+    speed rather than a position — but generic to any velocity-servoed
+    joint.
+
+    .. important::
+        As with :class:`JointEffortActionCfg`, the driven joints must be
+        in the backend's direct-torque mode (no implicit PD on them), or
+        this torque lands on top of the simulator's own.
+
+    Attributes:
+        scale: Per-joint velocity scale [rad/s per unit action].
+        offset: Per-joint velocity offset [rad/s]. Defaults to 0.
+        kv: Per-joint servo gain [N·m·s/rad]. Required and positive —
+            a zero gain is a wheel nothing drives, which is a config
+            error rather than a choice.
+        effort_limit: Optional per-joint torque saturation [N·m], the
+            motor's stall torque. ``None`` leaves the servo unclamped.
+    """
+
+    kv: float | dict[str, float] = 0.0
+    effort_limit: float | dict[str, float] | None = None
+
+
+class JointVelocityAction(JointAction):
+    """Velocity-servo action term. See :class:`JointVelocityActionCfg`."""
+
+    __name__ = "JointVelocityAction"
+    _cfg: JointVelocityActionCfg
+
+    def __init__(
+        self,
+        cfg: JointVelocityActionCfg,
+        env: World,
+        manager: ActionManagerBase,
+    ) -> None:
+        super().__init__(cfg, env, manager)
+        self._kv = self._resolve_float_field(cfg.kv, default=0.0)
+        if bool((self._kv <= 0.0).any()):
+            bad = [n for n, k in zip(self._joint_names_local, self._kv.tolist()) if k <= 0.0]
+            raise ValueError(
+                f"JointVelocityAction on {self._entity_name!r}: kv must be positive for every joint; "
+                f"got non-positive kv for {bad}."
+            )
+        if cfg.effort_limit is None:
+            self._effort_limit: torch.Tensor | None = None
+        else:
+            self._effort_limit = self._resolve_float_field(cfg.effort_limit, default=float("inf"))
+
+    def apply_actions(self) -> None:
+        joint_vel = self._manager._get_joint_vel(self._entity_name)[:, self._joint_ids]
+        torques = self._kv * (self._processed_actions - joint_vel)
+        if self._effort_limit is not None:
+            torques = torch.clamp(torques, min=-self._effort_limit, max=self._effort_limit)
+        self._manager._apply_joint_effort_via_indices(torques, self._joint_ids, self._entity_name)

@@ -1,0 +1,523 @@
+"""
+Model-Based Runner for model-based RL algorithms.
+
+Supports TD-MPC2 and other MBRL algorithms that use:
+- Sequence replay buffers
+- Planning-based action selection
+- World model + policy joint training
+
+Follows the same runner pattern as OnPolicyRunner and OffPolicyRunner.
+"""
+
+import time
+from typing import Any, Dict, List
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+import torch
+
+from jaxrlworld.rl.algorithms.tdmpc2 import TDMPC2
+from jaxrlworld.rl.configs import ConfigsForRun
+from jaxrlworld.rl.envs import World
+from jaxrlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
+from jaxrlworld.rl.modules.utils import count_parameters, print_model_summary
+from jaxrlworld.rl.runners.base_runner import BaseRunner
+from jaxrlworld.rl.runners.iteration_data import IterationData
+from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+
+
+class ModelBasedRunner(BaseRunner):
+    """
+    Runner for model-based RL algorithms (e.g., TD-MPC2).
+
+    Features:
+    - Sequence replay buffer for trajectory-chunk sampling
+    - Planning-based action selection (MPPI)
+    - Configurable UTD ratio
+    - Checkpoint save/load
+    """
+
+    alg: TDMPC2
+    is_distributed_runner: bool = False
+
+    def __init__(
+        self,
+        env: World,
+        cfgs: ConfigsForRun,
+        use_wandb: bool = True,
+        seed: int = 0,
+    ):
+        self.algorithm_name = cfgs.algorithm.algorithm_name
+        super().__init__(env=env, cfgs=cfgs, use_wandb=use_wandb, seed=seed)
+
+    # ==================== Initialization ====================
+
+    def _init_training_modules(self) -> None:
+        """Initialize world model."""
+        obs_dim = self.env.obs_manager.calculate_obs_dim()
+        self.obs_dim = obs_dim["actor"]  # TD-MPC2 uses single obs (no actor/critic split)
+        self.num_actions_dim = self.env.num_actions
+
+        alg_cfg = self.cfgs.algorithm
+        self.key, subkey = jax.random.split(self.key)
+
+        # Determine squash_action from config (default: True for backward compatibility)
+        squash_action = alg_cfg.squash_action
+
+        # Action bounds from environment (used when squash_action=False)
+        action_low = self.env.action_low.cpu().numpy()
+        action_high = self.env.action_high.cpu().numpy()
+
+        # Build world model
+        self.world_model = TDMPC2WorldModel(
+            obs_dim=self.obs_dim,
+            action_dim=self.num_actions_dim,
+            latent_dim=alg_cfg.latent_dim,
+            mlp_dim=alg_cfg.mlp_dim,
+            num_enc_layers=alg_cfg.num_enc_layers,
+            num_q=alg_cfg.num_q,
+            num_bins=alg_cfg.num_bins,
+            simnorm_dim=alg_cfg.simnorm_dim,
+            dropout=alg_cfg.dropout,
+            log_std_min=alg_cfg.log_std_min,
+            log_std_max=alg_cfg.log_std_max,
+            squash_action=squash_action,
+            action_low=tuple(action_low.tolist()),
+            action_high=tuple(action_high.tolist()),
+            obs_normalization=alg_cfg.obs_normalization,
+            episodic=alg_cfg.episodic,
+            dynamics_type=alg_cfg.dynamics_type,
+            dynamics_kwargs=alg_cfg.dynamics_kwargs,
+            simnorm_at_head=alg_cfg.simnorm_at_head,
+            key=subkey,
+        )
+
+        self.training_modules = {"world_model": self.world_model}
+
+        # Action scaling: driven by world model's squash_action setting
+        # squash_action=True  -> squash_output=True  -> _process_action_for_env scales [-1,1] to env range
+        # squash_action=False -> squash_output=False -> _process_action_for_env clips to env range
+        self.squash_output = self.world_model.squash_action
+        self._init_action_scaling()
+
+        # Print model info
+        print_model_summary(self.world_model, "TDMPC2WorldModel")
+        if self.use_wandb:
+            self._log_model_parameters()
+
+    def _init_algorithm(self) -> TDMPC2:
+        """Initialize TD-MPC2 algorithm."""
+        alg_cfg = self.cfgs.algorithm
+        self.key, subkey = jax.random.split(self.key)
+
+        self.alg = TDMPC2(
+            world_model=self.world_model,
+            num_envs=self.env.num_envs,
+            gamma=alg_cfg.gamma,
+            episode_length=alg_cfg.episode_length,
+            discount_min=alg_cfg.discount_min,
+            discount_max=alg_cfg.discount_max,
+            discount_denom=alg_cfg.discount_denom,
+            lr=alg_cfg.lr,
+            pi_lr=alg_cfg.pi_lr,
+            tau=alg_cfg.tau,
+            mpc=alg_cfg.mpc,
+            horizon=alg_cfg.horizon,
+            num_samples=alg_cfg.num_samples,
+            num_pi_trajs=alg_cfg.num_pi_trajs,
+            num_elites=alg_cfg.num_elites,
+            num_iterations=alg_cfg.num_iterations,
+            temperature=alg_cfg.temperature,
+            min_std=alg_cfg.min_std,
+            max_std=alg_cfg.max_std,
+            consistency_coef=alg_cfg.consistency_coef,
+            reward_coef=alg_cfg.reward_coef,
+            value_coef=alg_cfg.value_coef,
+            entropy_coef=alg_cfg.entropy_coef,
+            rho=alg_cfg.rho,
+            num_bins=alg_cfg.num_bins,
+            vmin=alg_cfg.vmin,
+            vmax=alg_cfg.vmax,
+            batch_size=alg_cfg.batch_size,
+            grad_clip_norm=alg_cfg.grad_clip_norm,
+            max_grad_norm=alg_cfg.max_grad_norm,
+            episodic=alg_cfg.episodic,
+            termination_coef=alg_cfg.termination_coef,
+            dynamics_reg_coef=alg_cfg.dynamics_reg_coef,
+            detach_task_heads=alg_cfg.detach_task_heads,
+            vicreg_coef=alg_cfg.vicreg_coef,
+            aux_loss_coef=alg_cfg.aux_loss_coef,
+            key=subkey,
+        )
+
+        return self.alg
+
+    def _init_storage(self) -> None:
+        """Initialize sequence replay buffer."""
+        obs_dim = self.env.obs_manager.calculate_obs_dim()
+        alg_cfg = self.cfgs.algorithm
+        size_per_env = alg_cfg.get("buffer_size", 1_000_000) // self.env.num_envs
+
+        cfg = {
+            "num_envs": self.env.num_envs,
+            "obs_dim": obs_dim["actor"],
+            "action_dim": self.env.num_actions,
+            "size_per_env": size_per_env,
+        }
+        self.alg.init_storage(cfg)
+
+    def _log_model_parameters(self) -> None:
+        """Log model parameters to wandb."""
+        import wandb
+
+        total = count_parameters(self.world_model)
+        wandb.summary["model/total_parameters"] = total
+
+    # ==================== Data Collection ====================
+
+    def _get_initial_obs(self) -> jax.Array:
+        """Get initial observation as JAX array."""
+        obs = self.env.obs_manager.get_observation()
+        return torch_to_jax(obs["actor"])
+
+    def _collect_experience(
+        self,
+        obs: jax.Array,
+        ep_infos: List[Dict],
+        iteration: int,
+    ) -> Dict[str, Any]:
+        """Collect experience from the environment."""
+        start_time = time.time()
+        infos = {}
+        actor_obs = obs
+
+        for step in range(self.num_steps_per_env):
+            # Warmup: random actions
+            if self.total_timesteps < self.cfgs.algorithm.get("learning_starts", 0):
+                self.key, subkey = jax.random.split(self.key)
+                if self.world_model.squash_action:
+                    # Original behavior: sample in [-1, 1] with scalar bounds
+                    actions = jax.random.uniform(
+                        subkey,
+                        shape=(self.env.num_envs, self.env.num_actions),
+                        minval=-1.0,
+                        maxval=1.0,
+                    )
+                else:
+                    # Raw action mode: sample in [action_low, action_high]
+                    action_low = jnp.array(self.world_model.action_low_tuple)
+                    action_high = jnp.array(self.world_model.action_high_tuple)
+                    actions = jax.random.uniform(
+                        subkey,
+                        shape=(self.env.num_envs, self.env.num_actions),
+                        minval=action_low,
+                        maxval=action_high,
+                    )
+            else:
+                # Plan/act with MPPI or policy
+                actions = self.alg.act_with_t0(
+                    actor_obs,
+                    t0_mask=self.env.reset_buf.cpu().numpy(),
+                    eval_mode=False,
+                )
+
+            # Process action for environment
+            actions_for_env = self._process_action_for_env(actions)
+            actions_torch = jax_to_torch(actions_for_env, self.device)
+
+            # Environment step
+            obs_dict, rewards, terminated, truncated, infos = self.env.step(actions_torch)
+
+            # Convert to JAX
+            next_actor_obs = torch_to_jax(obs_dict["actor"])  # reset obs (post-autoreset)
+            rewards_jax = torch_to_jax(rewards)
+            # NOTE: DO NOT USE DLPACK HERE. DLPACK DOESN'T SUPPORT BOOLEAN
+            terminated_jax = jnp.asarray(terminated.cpu().numpy())
+            truncated_jax = jnp.asarray(truncated.cpu().numpy())
+
+            # For buffer: use final_observation at truncation boundaries
+            next_obs_for_buffer = next_actor_obs
+            final_obs = infos.get("final_observation")
+            if final_obs is not None:
+                final_actor = torch_to_jax(final_obs["actor"])
+                truncated_mask = truncated.cpu().numpy()
+                terminated_mask = terminated.cpu().numpy()
+                for i in range(self.env.num_envs):
+                    if (truncated_mask[i] or terminated_mask[i]) and final_obs is not None:
+                        next_obs_for_buffer = next_obs_for_buffer.at[i].set(final_actor[i])
+
+            # Store transition (buffer gets terminal obs, loop continues with reset obs).
+            # Generic side channels: if the env surfaces info["extras"] ({name: [num_envs, dim]}),
+            # store them parallel to the transition for downstream consumers; else no-op.
+            self.alg.store_transition(
+                obs=actor_obs,
+                action=actions,
+                reward=rewards_jax,
+                next_obs=next_obs_for_buffer,  # Terminal observation
+                terminated=terminated_jax,
+                truncated=truncated_jax,
+                extras=infos.get("extras"),
+            )
+
+            # Update reward statistics
+            dones = terminated | truncated
+            self._update_reward_stats(
+                reward_info=infos["rewards_per_type"],
+                dones=dones,
+                success=infos.get("success", None),
+            )
+
+            # Continue with reset obs for next step
+            actor_obs = next_actor_obs
+
+        return {
+            "collection_time": time.time() - start_time,
+            "last_obs": actor_obs,
+        }
+
+    # ==================== Training ====================
+
+    def _run_training_iteration(
+        self,
+        obs: jax.Array,
+        iteration: int,
+        ep_infos: List[Dict] = None,
+    ) -> IterationData:
+        """Execute a single training iteration."""
+        collection_data = self._collect_experience(
+            obs=obs,
+            ep_infos=ep_infos,
+            iteration=iteration,
+        )
+
+        collection_time = collection_data["collection_time"]
+        metrics = None
+        learning_time = 0.0
+        fps = 0.0
+        buffer_size = None
+        batch_size = self.cfgs.algorithm.batch_size
+
+        min_buffer_size = max(
+            self.cfgs.algorithm.learning_starts,
+            batch_size,
+        )
+
+        if self.alg.replay_buffer.size >= min_buffer_size:
+            training_start = time.time()
+
+            if not getattr(self, "_pretrained", False):
+                num_updates = self.cfgs.algorithm.learning_starts // self.env.num_envs
+                print(f"Pretraining agent on seed data ({num_updates} updates)...")
+                self._pretrained = True
+            else:
+                num_updates = max(1, self.cfgs.algorithm.num_gradient_steps)
+
+            for i in range(num_updates):
+                self.key, subkey = jax.random.split(self.key)
+                batch = self.alg.sample_batch(batch_size, subkey)
+                is_last = i == num_updates - 1
+                metrics = self.alg.update(batch, build_metrics=is_last)
+
+            learning_time = time.time() - training_start
+            fps = (self.num_steps_per_env * self.env.num_envs) / (collection_time + learning_time)
+            buffer_size = self.alg.replay_buffer.size
+
+        return IterationData(
+            collection_time=collection_time,
+            learning_time=learning_time,
+            fps=fps,
+            episode_stats=self._build_episode_stats(),
+            metrics=metrics,
+            last_obs=collection_data["last_obs"],
+            action_distribution=self._get_action_statistics(),
+            buffer_size=buffer_size,
+            iteration=iteration,
+        )
+
+    def learn(
+        self,
+        num_learning_iterations: int,
+        init_at_random_ep_len: bool = False,
+    ):
+        """Main training loop."""
+        if init_at_random_ep_len:
+            if hasattr(self.env, "termination_manager"):
+                self.env.termination_manager.episode_length_buf = torch.randint_like(
+                    self.env.episode_length_buf, high=int(self.env.max_episode_length)
+                )
+
+        obs = self._get_initial_obs()
+        ep_infos: List[Dict] = []
+
+        total_iter = self.current_learning_iteration + num_learning_iterations
+        self.initial_learning_iteration = self.current_learning_iteration
+
+        for it in range(self.initial_learning_iteration, total_iter + 1):
+            self.it = it
+
+            data = self._run_training_iteration(
+                obs=obs,
+                iteration=it,
+                ep_infos=ep_infos,
+            )
+
+            obs = data.last_obs
+            self.post_iteration(data, total_iter, it)
+
+    def _get_action_statistics(self) -> Dict[str, Any]:
+        """Extract recent action statistics from replay buffer."""
+        n_recent = min(
+            self.num_steps_per_env * self.env.num_envs,
+            self.alg.replay_buffer.size,
+        )
+        if n_recent == 0:
+            return {}
+        actions = self.alg.replay_buffer.get_recent_actions(n_recent)
+        return self._compute_action_distribution_stats(np.array(actions))
+
+    # ==================== Evaluation ====================
+
+    def _run_evaluation(self) -> Dict[str, Any]:
+        """Run evaluation with MPPI planning instead of direct policy output."""
+        eval_env = self._get_or_create_eval_env()
+        eval_start = time.time()
+
+        num_envs = eval_env.num_envs
+
+        # Reset eval env
+        eval_env.reset()
+        obs_dict = eval_env.obs_manager.get_observation()
+
+        # Per-env tracking
+        episode_returns = torch.zeros(num_envs, device=self.device)
+        episode_lengths = torch.zeros(num_envs, device=self.device, dtype=torch.long)
+
+        completed_returns: list[float] = []
+        completed_lengths: list[float] = []
+
+        # Per-reward-type tracking
+        reward_type_sums: dict[str, torch.Tensor] = {}
+        completed_reward_breakdowns: dict[str, list[float]] = {}
+
+        target_episodes = self.runner_cfg.eval_num_episodes
+        max_steps = int(eval_env.max_episode_length) * 2
+        step = 0
+
+        # Resize MPPI prev_mean for eval num_envs (may differ from training)
+        _, horizon, action_dim = self.alg._prev_mean.shape
+        orig_prev_mean = self.alg._prev_mean
+        self.alg._prev_mean = np.zeros(
+            (num_envs, horizon, action_dim),
+            dtype=np.float32,
+        )
+
+        # MPPI warm-start: all envs start fresh
+        t0_mask = np.ones(num_envs, dtype=bool)
+
+        while len(completed_returns) < target_episodes and step < max_steps:
+            actor_obs = torch_to_jax(obs_dict["actor"])
+
+            # Use MPPI planning for action selection
+            actions = self.alg.act_with_t0(
+                actor_obs,
+                t0_mask=t0_mask,
+                eval_mode=True,
+            )
+
+            # Process actions
+            actions_for_env = self._process_action_for_env(actions)
+            actions_torch = jax_to_torch(actions_for_env, self.device)
+
+            # Step
+            obs_dict, rewards, terminated, truncated, infos = eval_env.step(actions_torch)
+            dones = terminated | truncated
+
+            # Reset MPPI warm-start for done envs
+            t0_mask = dones.cpu().numpy()
+
+            # Accumulate returns
+            episode_returns += rewards
+            episode_lengths += 1
+
+            # Per-reward-type accumulation
+            rewards_per_type = infos.get("rewards_per_type", {})
+            for rname, rval in rewards_per_type.items():
+                if rname not in reward_type_sums:
+                    reward_type_sums[rname] = torch.zeros(num_envs, device=self.device)
+                    completed_reward_breakdowns[rname] = []
+                reward_type_sums[rname] += rval
+
+            # Collect completed episodes
+            for i in range(num_envs):
+                if dones[i] and len(completed_returns) < target_episodes:
+                    completed_returns.append(episode_returns[i].item())
+                    completed_lengths.append(episode_lengths[i].item())
+                    for rname in reward_type_sums:
+                        completed_reward_breakdowns[rname].append(reward_type_sums[rname][i].item())
+
+            # Reset tracking for done envs
+            episode_returns[dones] = 0
+            episode_lengths[dones] = 0
+            for rname in reward_type_sums:
+                reward_type_sums[rname][dones] = 0
+
+            step += 1
+
+        eval_time = time.time() - eval_start
+
+        eval_stats = {
+            "eval/mean_return": np.mean(completed_returns) if completed_returns else 0.0,
+            "eval/std_return": np.std(completed_returns) if completed_returns else 0.0,
+            "eval/min_return": np.min(completed_returns) if completed_returns else 0.0,
+            "eval/max_return": np.max(completed_returns) if completed_returns else 0.0,
+            "eval/mean_episode_length": np.mean(completed_lengths) if completed_lengths else 0.0,
+            "eval/num_episodes": len(completed_returns),
+            "eval/time": eval_time,
+        }
+
+        for rname, vals in completed_reward_breakdowns.items():
+            if vals:
+                eval_stats[f"eval/reward/{rname}"] = np.mean(vals)
+
+        # Restore prev_mean to training size
+        self.alg._prev_mean = orig_prev_mean
+
+        return eval_stats
+
+    # ==================== Checkpoint ====================
+
+    @classmethod
+    def load_checkpoint(
+        cls,
+        checkpoint_path: str,
+        cfgs: ConfigsForRun = None,
+        env: World = None,
+        use_wandb: bool = True,
+    ) -> "ModelBasedRunner":
+        """Load runner from checkpoint."""
+        from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata
+
+        metadata = load_checkpoint_metadata(checkpoint_path)
+
+        if cfgs is None:
+            from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
+
+            cfgs = load_config_from_checkpoint(metadata)
+        if env is None:
+            env = cls._create_env_from_config(cfgs)
+
+        runner = cls(env=env, cfgs=cfgs, use_wandb=use_wandb)
+        runner.alg.load_train_state(checkpoint_path, metadata)
+
+        runner.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
+        runner.total_timesteps = metadata["total_timesteps"]
+        runner.total_time = metadata.get("total_time", 0)
+        runner.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)
+
+        print(f"Loaded checkpoint from {checkpoint_path}")
+        print(f"  Algorithm: {runner.algorithm_name}")
+        print(f"  Iteration: {runner.current_learning_iteration}")
+        print(f"  Timesteps: {runner.total_timesteps}")
+
+        return runner

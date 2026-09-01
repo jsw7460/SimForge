@@ -1,0 +1,2002 @@
+from __future__ import annotations
+
+import os
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, Dict, Literal
+
+import mujoco
+import newton
+import numpy as np
+import torch
+import warp as wp
+from newton import JointTargetMode
+from newton.selection import ArticulationView
+
+from jaxrlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+from jaxrlworld.rl.configs.newton_config_classes import SolverMuJoCoCfg
+from jaxrlworld.rl.configs.scene.newton_entity_config import NewtonEntityConfig
+from jaxrlworld.rl.configs.scene.terrain_config import TerrainCfg
+from jaxrlworld.rl.configs.scene.unified_entity_config import (
+    EntityCfg,
+    NewtonEntityCfg,
+)
+from jaxrlworld.rl.configs.sensors import ContactSensorCfg
+from jaxrlworld.rl.configs.sensors.camera_sensor_config import CameraSensorCfg
+from jaxrlworld.rl.configs.sensors.newton_sensor_config import (
+    NewtonFrameTransformSensorConfig,
+    NewtonIMUSensorConfig,
+    NewtonSensorConfig,
+)
+from jaxrlworld.rl.envs.indexing import ArticulationIndexing
+from jaxrlworld.rl.envs.managers.base import BaseManager
+from jaxrlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
+from jaxrlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
+from jaxrlworld.rl.envs.managers.common.visual_mesh import extract_visual_meshes_from_mj_model
+from jaxrlworld.rl.envs.managers.newton.camera_sensor import NewtonCameraSensor
+from jaxrlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
+from jaxrlworld.rl.envs.managers.newton.label_indexing import NewtonLabelIndexing
+from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.envs.utils.newton.label import as_leaf_globs, leaf_name
+from jaxrlworld.rl.utils import string as string_utils
+from jaxrlworld.rl.utils.quat_utils import wxyz_to_xyzw_tuple
+from jaxrlworld.rl.utils.verbosity import build_summary_enabled
+
+if TYPE_CHECKING:
+    from jaxrlworld.rl.envs import World
+
+
+def _reject_out_of_range(
+    indices: torch.Tensor,
+    limit: int,
+    entity_name: str,
+    joint_names: list[str],
+    kind: str,
+) -> None:
+    """Raise if any index falls outside one world's share of an array."""
+    bad = [i for i, v in enumerate(indices.tolist()) if not 0 <= v < limit]
+    if bad:
+        detail = ", ".join(f"{joint_names[i]}->{int(indices[i])}" for i in bad)
+        raise ValueError(
+            f"Newton {kind} indices for entity {entity_name!r} fall outside world 0's "
+            f"{limit} {kind}s: {detail}. The joint list and the model's per-world layout disagree."
+        )
+
+
+def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | None = None) -> list[str]:
+    """Canonical joint name list — DFS walk of Newton's world-0 body tree with
+    siblings sorted alphabetically by bare body name at each node, collecting
+    each body's inbound joint when visited.
+
+    Newton's ``Model`` does NOT carry a ``body_parent`` array, so we
+    reconstruct the body tree from the joint arrays: each joint records
+    ``joint_parent[j]`` (parent body) and ``joint_child[j]`` (child body),
+    which makes ``parent_of(child_body) = joint_parent[j]`` where ``j`` is
+    the inbound joint of ``child_body``. Bodies that never appear as a
+    joint child are roots.
+
+    Returns bare joint leaf names (entity / XPath prefixes stripped) in
+    canonical DFS order.
+
+    ``body_prefix`` restricts the walk to one entity's bodies, using the
+    same delimiter rule as :class:`NewtonLabelIndexing` (the label either
+    IS the prefix or lies under ``prefix/``). Names come back bare, so two
+    entities loaded from the same model otherwise contribute the same joint
+    names twice and a caller filtering by name cannot tell them apart.
+    """
+    body_labels = list(getattr(model, "body_label", []))
+    n_total = len(body_labels)
+    bodies_per_world = n_total // num_worlds if num_worlds > 0 else n_total
+    if bodies_per_world == 0:
+        return []
+
+    body_labels_w0 = body_labels[:bodies_per_world]
+    bare_body_names = [leaf_name(b) for b in body_labels_w0]
+    if body_prefix is None:
+        in_scope = [True] * bodies_per_world
+    else:
+        in_scope = [lbl == body_prefix or lbl.startswith(f"{body_prefix}/") for lbl in body_labels_w0]
+
+    # Reconstruct parent_of(body) from joint_parent + joint_child arrays.
+    joint_labels_all = list(getattr(model, "joint_label", None) or getattr(model, "joint_key", []))
+    joints_per_world = len(joint_labels_all) // num_worlds if num_worlds > 0 else len(joint_labels_all)
+    joint_labels_w0 = joint_labels_all[:joints_per_world]
+    joint_parent_arr = (
+        wp.to_torch(model.joint_parent).cpu().numpy()
+        if hasattr(model.joint_parent, "numpy")
+        else np.asarray(model.joint_parent)
+    )
+    joint_child_arr = (
+        wp.to_torch(model.joint_child).cpu().numpy()
+        if hasattr(model.joint_child, "numpy")
+        else np.asarray(model.joint_child)
+    )
+    joint_parent_w0 = joint_parent_arr[:joints_per_world]
+    joint_child_w0 = joint_child_arr[:joints_per_world]
+    # A free base is NOT one of an articulation's joints: its state is the
+    # root pose, read through ``root_link_pos_w`` / ``root_link_quat_w``.
+    # mjlab already leaves it out of an entity's joint list; leaving it in
+    # here makes the same floating entity report a different joint count
+    # and a different ``joint_pos`` width on this backend than on that one.
+    # It never showed while every floating robot named its actuated joints
+    # explicitly, which filtered the base out downstream — it appears the
+    # moment an entity is indexed whole, which is what a passive mechanism
+    # with no actuators is.
+    joint_type_arr = (
+        wp.to_torch(model.joint_type).cpu().numpy()
+        if hasattr(model.joint_type, "numpy")
+        else np.asarray(model.joint_type)
+    )
+    joint_type_w0 = joint_type_arr[:joints_per_world]
+
+    parent_of: dict[int, int] = {}
+    body_to_joint: dict[int, int] = {}
+    for j in range(joints_per_world):
+        c = int(joint_child_w0[j])
+        p = int(joint_parent_w0[j])
+        if 0 <= c < bodies_per_world:
+            parent_of[c] = p  # may be -1 for a free-base joint connecting to world.
+            body_to_joint[c] = j
+
+    children: dict[int, list[int]] = {}
+    roots: list[int] = []
+    for i in range(bodies_per_world):
+        if not in_scope[i]:
+            continue
+        p = parent_of.get(i, -1)
+        if p < 0 or p >= bodies_per_world or not in_scope[p]:
+            roots.append(i)
+        else:
+            children.setdefault(p, []).append(i)
+    roots.sort(key=lambda i: bare_body_names[i])
+    for k in children:
+        children[k].sort(key=lambda i: bare_body_names[i])
+
+    out: list[str] = []
+    stack = list(reversed(roots))
+    while stack:
+        i = stack.pop()
+        j = body_to_joint.get(i)
+        if j is not None and int(joint_type_w0[j]) != int(newton.JointType.FREE):
+            out.append(leaf_name(joint_labels_w0[j]))
+        kids = children.get(i, [])
+        for kid in reversed(kids):
+            stack.append(kid)
+    return out
+
+
+def apply_joint_params_by_pattern(
+    builder,
+    ke_map: Dict[str, float] | None = None,
+    kd_map: Dict[str, float] | None = None,
+    armature_map: Dict[str, float] | None = None,
+    effort_limit_map: Dict[str, float] | None = None,
+    friction_map: Dict[str, float] | None = None,
+    target_mode_map: Dict[str, int] | None = None,
+) -> None:
+    """Apply joint parameters (target gains, armature, effort limit) using
+    regex pattern matching.
+
+    Uses ``re.fullmatch`` rather than ``re.match`` so a pattern like
+    ``T1/.*Waist`` only fires on joint labels that *end* with
+    ``Waist``, not any label whose XPath *contains* a ``Waist`` body
+    segment. This matters for MJCF-loaded entities whose joint labels
+    are hierarchical (e.g. ``T1/worldbody/Trunk/Waist/Hip_Pitch_Left/
+    Left_Hip_Pitch``); with ``re.match`` a bare ``.*Waist`` pattern
+    would silently claim every leg joint under the Waist subtree.
+    Flat URDF labels behave identically under both functions because
+    existing patterns already end in a specific suffix.
+
+    ``effort_limit_map`` overrides ``builder.joint_effort_limit`` per DOF;
+    ``SolverMuJoCo`` later turns this into ``joint.actfrcrange`` on each
+    hinge (always ``actfrclimited=True``). Use this to relax the tight
+    XML-declared ``actuatorfrcrange`` when the scene-file values disagree
+    with the motor spec that training actually assumes (e.g. menagerie
+    T1's 15/20 Nm ankle vs booster_t1's 50 Nm).
+
+    ``target_mode_map`` writes ``builder.joint_target_mode`` per DOF —
+    typically ``int(JointTargetMode.POSITION)`` for joints driven by
+    an ``ImplicitActuatorCfg`` so ``SolverMuJoCo`` creates an internal
+    mjwarp actuator (it iterates per-DOF and calls ``spec.add_actuator``
+    for every DOF whose mode is not ``NONE``). Without this, an MJCF
+    that ships without an ``<actuator>`` block leaves every mode at
+    NONE, ``nu=0``, and the simulator never runs PD — the implicit
+    actuator silently does nothing.
+    """
+    if (
+        ke_map is None
+        and kd_map is None
+        and armature_map is None
+        and effort_limit_map is None
+        and friction_map is None
+        and target_mode_map is None
+    ):
+        return
+
+    ke_map = ke_map or {}
+    kd_map = kd_map or {}
+    armature_map = armature_map or {}
+    effort_limit_map = effort_limit_map or {}
+    friction_map = friction_map or {}
+    target_mode_map = target_mode_map or {}
+    num_joints = len(builder.joint_label)
+
+    for joint_idx, joint_label_raw in enumerate(builder.joint_label):
+        # Canonicalize to bare leaf so regex patterns in ke_map etc. can
+        # use bare joint names (``waist_yaw_joint``, ``.*_hip_pitch_joint``)
+        # regardless of URDF-flat vs MJCF-XPath layout.
+        joint_name = leaf_name(joint_label_raw)
+        if joint_idx < num_joints - 1:
+            dof_count = builder.joint_qd_start[joint_idx + 1] - builder.joint_qd_start[joint_idx]
+        else:
+            dof_count = builder.joint_dof_count - builder.joint_qd_start[joint_idx]
+
+        if dof_count == 0:
+            continue
+
+        dof_start = builder.joint_qd_start[joint_idx]
+
+        # Apply ke
+        for pattern, value in ke_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_target_ke[dof_start + d] = value
+                break
+
+        # Apply kd
+        for pattern, value in kd_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_target_kd[dof_start + d] = value
+                break
+
+        # Apply armature
+        for pattern, value in armature_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_armature[dof_start + d] = value
+
+        # Apply effort limit (overrides XML-declared actuatorfrcrange)
+        for pattern, value in effort_limit_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_effort_limit[dof_start + d] = value
+                break
+
+        # Apply joint frictionloss (MuJoCo dof_frictionloss equivalent)
+        for pattern, value in friction_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_friction[dof_start + d] = value
+                break
+
+        # Apply joint_target_mode — usually POSITION for ImplicitActuatorCfg
+        # so SolverMuJoCo creates an internal mjwarp position actuator.
+        for pattern, value in target_mode_map.items():
+            if re.fullmatch(pattern, joint_name):
+                for d in range(dof_count):
+                    builder.joint_target_mode[dof_start + d] = value
+                break
+
+
+def _state_assign_full(
+    dst: newton.State,
+    src: newton.State,
+    namespaces: tuple[str, ...] = ("mujoco",),
+) -> None:
+    r"""Assign ``src`` into ``dst`` including attribute-namespace arrays.
+
+    Newton's :meth:`State.assign` iterates ``self.__dict__`` and copies
+    top-level ``wp.array`` attributes, but descendants inside
+    ``AttributeNamespace`` objects (e.g. ``state.mujoco.qfrc_actuator``)
+    are skipped because the namespace itself is not a ``wp.array`` —
+    the outer loop treats it as a non-array and ``continue``\s. This
+    helper performs the standard ``dst.assign(src)`` then manually
+    descends into each listed namespace and copies its ``wp.array``
+    children.
+
+    Callers rely on this when the ``need_state_copy`` branch of a
+    substep loop fires (odd substeps under CUDA graph capture) so
+    consumers reading ``state.mujoco.qfrc_actuator`` via
+    :attr:`NewtonRobotData.applied_torque` don't see stale zeros.
+
+    Status: Newton's own ``State.assign`` now walks every
+    ``Model.AttributeNamespace`` container and copies its arrays, so this
+    helper is redundant with upstream and could be collapsed to a plain
+    ``dst.assign(src)``. It is kept because the only remaining caller is the
+    xpbd substep path, which carries no namespaced attributes either way —
+    there is nothing to gain from churning it.
+    """
+    dst.assign(src)
+    for ns in namespaces:
+        ns_dst = getattr(dst, ns, None)
+        ns_src = getattr(src, ns, None)
+        if ns_dst is None or ns_src is None:
+            continue
+        for attr in vars(ns_src):
+            s = getattr(ns_src, attr, None)
+            d = getattr(ns_dst, attr, None)
+            if isinstance(s, wp.array) and isinstance(d, wp.array):
+                d.assign(s)
+
+
+MUJOCO_DEFAULT_CONTYPE = 1
+MUJOCO_DEFAULT_CONAFFINITY = 1
+"""What a geom with no authored mask collides with: everything, bit 1.
+
+MuJoCo's own default, and measured to be what mjlab's ground carries. A
+shape Newton built itself -- the terrain plane -- has no preserved mask,
+and treating it as anything else would invent a rule no asset states.
+"""
+
+
+def _never_collides(builder, shape: int) -> bool:
+    """Is this shape masked 0/0 -- collides with nothing, in MuJoCo's terms?"""
+    from newton._src.solvers.mujoco.collision_masks import MUJOCO_COLLISION_MASK_UNSET
+
+    attrs = builder.custom_attributes
+    contype = (attrs["mujoco:contype"].values or {}).get(shape, MUJOCO_COLLISION_MASK_UNSET)
+    conaffinity = (attrs["mujoco:conaffinity"].values or {}).get(shape, MUJOCO_COLLISION_MASK_UNSET)
+    if MUJOCO_COLLISION_MASK_UNSET in (contype, conaffinity):
+        return False
+    return (int(contype) & 0xFFFFFFFF) == 0 and (int(conaffinity) & 0xFFFFFFFF) == 0
+
+
+def _forbidden_pairs(builder, shapes, against=None) -> list[tuple[int, int]]:
+    """Pairs among ``shapes`` that the MJCF's masks say must never touch.
+
+    ``against`` narrows the comparison to pairs that include one of ITS
+    shapes, and the post-replication ground pass must use it. The shape
+    count there is ``num_worlds * shapes_per_world``, and the all-pairs
+    upper triangle of that is quadratic: go2 at 4096 worlds carries
+    188416 colliding shapes, whose triangle is 1.8e10 pairs -- numpy asks
+    for 132 GiB and the build dies before a single mask is read. Ground
+    against everything else is linear in the same count.
+
+    MuJoCo's rule verbatim: a pair may touch when
+    ``(contype_a & conaffinity_b) | (contype_b & conaffinity_a)`` is
+    non-zero. Everything else is forbidden, and this returns those.
+
+    Newton preserves each shape's authored ``contype`` / ``conaffinity``
+    but does not always USE them: reusing an MJCF's masks requires every
+    colliding shape to have come from the same ``add_mjcf`` call, and
+    replication stamps a fresh ``collision_mask_domain`` per world while
+    the terrain has none at all, so the condition never holds for us.
+    Newton then compiles fresh masks from its own allowed-pair set, which
+    has no way to know what the MJCF meant -- and K1's foot shell, masked
+    4/4 against a 1/1 ground, lands on the ground.
+
+    So state the forbidden pairs in the one language Newton always
+    honours. ``shape_collision_filter_pairs`` is Newton's own mechanism
+    and is respected whichever branch the mask handling takes.
+
+    Reading the masks in ONE vocabulary, ignoring the domain, is the same
+    bet the Genesis manager makes and the same one mjlab has always made:
+    within a scene, a non-default bit means the same thing in every asset.
+    """
+    import numpy as np
+    from newton._src.solvers.mujoco.collision_masks import MUJOCO_COLLISION_MASK_UNSET
+
+    attrs = builder.custom_attributes
+    contype_attr = attrs.get("mujoco:contype")
+    conaffinity_attr = attrs.get("mujoco:conaffinity")
+    if contype_attr is None or conaffinity_attr is None:
+        raise RuntimeError(
+            "Newton kept no 'mujoco:contype' / 'mujoco:conaffinity' on this "
+            "builder, so the MJCF's collision masks cannot be honoured. Either "
+            "SolverMuJoCo.register_custom_attributes was not called before the "
+            "import, or Newton renamed the attributes."
+        )
+    contype_values = contype_attr.values or {}
+    conaffinity_values = conaffinity_attr.values or {}
+
+    def mask(shape: int) -> tuple[int, int]:
+        a = contype_values.get(shape, MUJOCO_COLLISION_MASK_UNSET)
+        b = conaffinity_values.get(shape, MUJOCO_COLLISION_MASK_UNSET)
+        if a == MUJOCO_COLLISION_MASK_UNSET or b == MUJOCO_COLLISION_MASK_UNSET:
+            return MUJOCO_DEFAULT_CONTYPE, MUJOCO_DEFAULT_CONAFFINITY
+        return int(a) & 0xFFFFFFFF, int(b) & 0xFFFFFFFF
+
+    def columns(subset):
+        subset = list(subset)
+        return (
+            np.array([mask(s)[0] for s in subset], dtype=np.int64),
+            np.array([mask(s)[1] for s in subset], dtype=np.int64),
+            np.array(subset, dtype=np.int64),
+        )
+
+    contype, conaffinity, index = columns(shapes)
+    if against is None:
+        row, col = np.triu_indices(len(index), k=1)
+        a = (contype[row], conaffinity[row], index[row])
+        b = (contype[col], conaffinity[col], index[col])
+    else:
+        g_contype, g_conaffinity, g_index = columns(against)
+        row = np.repeat(np.arange(len(g_index)), len(index))
+        col = np.tile(np.arange(len(index)), len(g_index))
+        a = (g_contype[row], g_conaffinity[row], g_index[row])
+        b = (contype[col], conaffinity[col], index[col])
+
+    allowed = (a[0] & b[1]) | (b[0] & a[1])
+    blocked = (allowed == 0) & (a[2] != b[2])
+    return list(zip(a[2][blocked].tolist(), b[2][blocked].tolist()))
+
+
+@dataclass
+class NewtonSceneManagerConfig:
+    """Configuration for Newton scene management.
+
+    This config defines the simulation parameters and lists of entities/sensors
+    to be created in the scene.
+
+    Example:
+        config = NewtonSceneManagerConfig(
+            num_worlds=4096,
+            entities=[
+                NewtonEntityConfig(
+                    entity_name="robot",
+                    urdf_path="/path/to/robot.urdf",
+                    floating=True,
+                    sites={"base_imu": "base"},  # Create IMU site on base body
+                ),
+            ],
+            sensors=[
+                NewtonIMUSensorConfig(
+                    sensor_name="imu",
+                    entity_name="robot",
+                    site_names=["base_imu"],
+                ),
+            ],
+            terrain_cfg=TerrainCfg(terrain_type="plane"),
+        )
+    """
+
+    num_worlds: int
+
+    # Entity and sensor configurations
+    entities: list[NewtonEntityConfig] | dict[str, EntityCfg | NewtonEntityCfg] = field(default_factory=dict)
+    # Passive rigid objects (no actuated joints) — graspable objects, props,
+    # static fixtures. Loaded into the separate ``self.rigid_objects`` registry.
+    rigid_objects: dict[str, EntityCfg | NewtonEntityCfg] = field(default_factory=dict)
+    sensors: list[NewtonSensorConfig] | None = None
+    # Simulator-agnostic contact sensors (ContactSensorCfg). Handled
+    # separately from ``sensors`` (which only holds NewtonSensorConfig
+    # subclasses); each becomes a ``NewtonContactSensor`` wrapper around a
+    # native ``SensorContact``, with optional substep history.
+    contact_sensors: list[ContactSensorCfg] | None = None
+
+    # Simulator-agnostic cameras (CameraSensorCfg); each becomes a
+    # ``NewtonCameraSensor`` driving a native ``SensorTiledCamera``.
+    cameras: tuple[CameraSensorCfg, ...] = ()
+
+    # Terrain (flat plane by default; generator → heightfield) — fed to a
+    # NewtonTerrainImporter constructed via ManagerRegistry.
+    terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
+
+    # Simulation parameters
+    dt: float = 1.0 / 100.0
+    substeps: int = 10
+    gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
+    env_spacing: tuple[float, float, float] = (2.0, 2.0, 0.0)
+
+    # Solver
+    solver_type: Literal["xpbd", "mujoco"] = "mujoco"  # "xpbd" or "mujoco"
+    solver_cfg: SolverMuJoCoCfg = field(default_factory=SolverMuJoCoCfg)
+
+    # Collision broad-phase sizing. ``None`` keeps Newton's default
+    # (1e6 triangle pairs). Rough-terrain scenes need a much larger
+    # buffer: ``model.collide()`` emits two triangle pairs per
+    # heightfield cell under every robot collision shape, summed across
+    # all worlds, so a flat ground plane needs ~0 but a heightfield with
+    # thousands of cells × thousands of worlds overflows 1e6. Setting it
+    # too low silently drops contacts (robots sink / jitter on the
+    # terrain).
+    collision_max_triangle_pairs: int | None = None
+
+    rigid_gap: float | None = None
+    """Contact-detection gap in metres, written onto every shape.
+
+    ``None`` leaves Newton's ``ModelBuilder.rigid_gap`` default of 0.1
+    alone, which is what every preset has run with and what their
+    ``nconmax`` budgets were measured against. Not changed globally for
+    that reason.
+
+    What the 0.1 does: the MJCF declares no gap, so the importer leaves
+    ``ShapeConfig.gap`` at ``None`` and the builder default wins
+    (``newton/_src/sim/builder.py``). The broad phase then expands each
+    AABB by ``margin + gap`` on BOTH sides of a pair, so anything within
+    0.2 m is enumerated and reaches the narrow phase as a contact row.
+    Those rows carry zero force and occupy an ``nconmax`` slot each.
+    Measured on the tong bench at rest: mjlab 16 rows against Newton's
+    260, and every one of the 244 extra sat between 79 and 199.99 mm.
+
+    mjlab reads 0 from the same file. A scene that wants the two to
+    detect contact at the same distance sets this to 0.0 and can then
+    size ``nconmax`` to the contacts that actually exist.
+    """
+
+    # Mirror of ``NewtonSceneConfig.request_qfrc_actuator`` — see that
+    # field's comment. True is the historical behavior.
+    request_qfrc_actuator: bool = True
+
+
+class NewtonSceneManager(BaseManager):
+    """Manages Newton scene creation and simulation.
+
+    This manager handles:
+    1. Creating entities (robots, objects) from configuration
+    2. Setting up sensors (IMU, Contact, etc.)
+    3. Building and stepping the simulation
+
+    The scene is built in two phases:
+    1. register_entities(): Add all entities to the builder
+    2. build_scene(): Finalize and create solver/state
+
+    Example:
+        scene_manager = NewtonSceneManager(env, config)
+        scene_manager.register_entities()
+        scene_manager.build_scene()
+
+        # In simulation loop:
+        scene_manager.step()
+    """
+
+    def __init__(self, env: World, config: NewtonSceneManagerConfig):
+        super().__init__(env)
+        self.config = config
+
+        # Newton objects
+        self.model: newton.Model | None = None
+        self.solver: Any = None
+        self.state_0: newton.State | None = None
+        self.state_1: newton.State | None = None
+        self.control: newton.Control | None = None
+        self.contacts: newton.Contacts | None = None
+        self.collision_pipeline: Any = None
+
+        # Whether the solver accepts the same ``State`` object as both step
+        # input and output. Set per solver in :meth:`build_scene`; see
+        # :meth:`_substep_loop` for what it buys us.
+        self._use_single_state: bool = False
+
+        # ArticulationView per entity (created in build_scene)
+        self.articulation_views: dict[str, ArticulationView] = {}
+
+        # NewtonLabelIndexing per entity (created in build_scene). Cached
+        # entity-scoped slices of model.body_label / shape_label, queried by
+        # the contact-sensor wrapper to resolve ``(entity, pattern)`` → model
+        # indices in O(matches) per call instead of O(model_labels × patterns).
+        self.label_indexing: dict[str, NewtonLabelIndexing] = {}
+
+        # Entity tracking
+        self.entities: dict[str, Any] = {}  # entity_name -> entity info
+        self._entity_builders: dict[str, newton.ModelBuilder] = {}  # Temporary during build
+        # Passive rigid objects — separate registry (mirrors IsaacLab's
+        # scene.articulations vs scene.rigid_objects). Same {config, builder,
+        # shape_count} info shape as ``self.entities``.
+        self.rigid_objects: dict[str, Any] = {}
+        self._rigid_object_builders: dict[str, newton.ModelBuilder] = {}
+        self._body_name_to_idx: dict[str, dict[str, int]] = defaultdict(dict)  # entity_name -> {body_name: body_idx}
+
+        # Sensor tracking
+        self.sensors: dict[str, Any] = {}  # sensor_name -> sensor object
+        # CameraSensorCfg-backed cameras (also in ``self.sensors``); kept
+        # apart because they are the ones ``render_cameras`` drives.
+        self._cameras: dict[str, NewtonCameraSensor] = {}
+        # ContactSensorCfg-backed wrappers (subset of ``self.sensors`` —
+        # the wrapper objects are also stored under their ``cfg.name`` in
+        # ``self.sensors`` so generic sensor iteration sees them).
+        self._contact_sensor_wrappers: dict[str, Any] = {}
+
+        # Kinematic trees (for observation functions)
+        self.trees: dict[str, Any] = {}
+
+        # Terrain importer (owns terrain data + per-env origins / curriculum).
+        # Constructed via ManagerRegistry so the scene manager doesn't know
+        # the concrete subclass.
+        self.terrain = ManagerRegistry.create(
+            "newton",
+            "terrain",
+            cfg=self.config.terrain_cfg,
+            num_envs=self.config.num_worlds,
+            device=self.env.device,
+        )
+
+        # Internal
+        self.substep_dt = config.dt / config.substeps
+
+        # CUDA graph populated by ``capture()`` once the physics loop
+        # is captured. Kept as an attribute from init so ``_step`` can
+        # reference ``self.graph`` during the initial capture pass
+        # without hitting AttributeError. ``use_cuda_graph`` mirrors
+        # Newton's example convention (see
+        # ``newton/examples/robot/example_robot_policy.py``) —
+        # JaxRLWorld's NewtonSceneManager always captures in
+        # ``_post_setup``, so the flag is effectively always True, but
+        # exposing it lets ``_step``'s ``need_state_copy`` guard match
+        # the Newton reference implementation line-for-line.
+        self.use_cuda_graph = True
+        self.graph = None
+
+    @property
+    def robot(self) -> Any:
+        """For compatibility - returns model in Newton."""
+        return self.model
+
+    @property
+    def state(self) -> newton.State:
+        """Current state (state_0)."""
+        return self.state_0
+
+    @property
+    def env_origins(self) -> torch.Tensor:
+        """Per-env world-frame spawn offsets ``(num_envs, 3)``.
+
+        Sourced from the ``TerrainImporter`` sub-terrain grid; all-zeros
+        when terrain is a flat plane.
+        """
+        return self.terrain.env_origins
+
+    def find_body_names(self, body_names: list[str], entity_name: str = "robot") -> list[str]:
+        """Resolve regex body-name patterns to concrete body names.
+
+        Cross-sim signature matches Genesis and mjlab. Newton currently
+        supports a single robot, so ``entity_name`` is accepted for API
+        symmetry but the lookup is always against the model-wide body
+        label list.
+        """
+        # Source body names from ArticulationView — bare leaf names,
+        # shared across worlds. Avoids per-Newton-loader XPath quirks.
+        view = self.articulation_views.get(entity_name, self.articulation_views.get("robot"))
+        if view is None:
+            raise ValueError(f"No ArticulationView for entity {entity_name!r}; did build_scene() run?")
+        _, names = string_utils.resolve_matching_names(body_names, list(view.link_names), preserve_order=True)
+        return names
+
+    def get_visual_meshes(self, body_names: tuple[str, ...]):
+        """Per-body visual ``trimesh.Trimesh`` in body-local frame for the
+        viser ghost overlay. Newton path: ``solver.mj_model`` is per-env
+        replicated (scoped ``env_0/robot/...`` names, unusable for a
+        single-robot mesh harvest), so re-parse the original MJCF into
+        a clean single-robot MjModel and hand it to the shared extractor."""
+        robot_cfg = self.config.entities["robot"]
+        model = mujoco.MjModel.from_xml_path(robot_cfg.mjcf_path)
+        return extract_visual_meshes_from_mj_model(model, body_names)
+
+    def _prefix_names(
+        self, entity_name: str, names: str | list[str] | list[int] | None
+    ) -> str | list[str] | list[int] | None:
+        if names is None:
+            return None
+
+        # Get actual prefix from entity's robot config
+        entity_config = self.entities[entity_name]["config"]
+        prefix = getattr(entity_config, "body_label_prefix", None)
+        if prefix is None:
+            return names
+
+        if isinstance(names, list):
+            if all(isinstance(n, int) for n in names):
+                return names
+            return [f"{prefix}/{n}" if "/" not in n else n for n in names]
+        if isinstance(names, str):
+            return f"{prefix}/{names}" if "/" not in names else names
+        return names
+
+    def register_entities(self) -> None:
+        """Register articulated entities and passive rigid objects from config."""
+        for entity_name, cfg in self.config.entities.items():
+            self._register_entity(entity_name, cfg)
+        for object_name, cfg in self.config.rigid_objects.items():
+            self._register_rigid_object(object_name, cfg)
+
+    def _register_entity(self, entity_name: str, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Register a single articulated entity (robot) from its unified config."""
+        builder, info = self._build_entity(entity_name, cfg)
+        self._entity_builders[entity_name] = builder
+        self.entities[entity_name] = info
+
+    def _register_rigid_object(self, object_name: str, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Register a single passive rigid object from its unified config.
+
+        Loaded identically to an articulated entity (a rigid object is just a
+        zero-actuator entity), but tracked in the separate ``rigid_objects``
+        registry and built into each world by :meth:`build_scene` alongside the
+        robots.
+
+        ``floating=False`` — a table, a tank, a machine frame — is loaded as a
+        **kinematic free body**, not as a body welded to the world: the root
+        joint is a free joint and the root body carries
+        ``BodyFlags.KINEMATIC``, "a user-prescribed body that does not respond
+        to applied forces". Gravity and contacts leave it exactly where it was
+        put (``SolverMuJoCo`` gives its DOFs ``KINEMATIC_ARMATURE = 1e10``),
+        while the pose stays ordinary per-environment state that a reset event
+        can write — which a welded body does not have. That is what makes an
+        immovable fixture placeable per env at all. Anything hanging off that
+        root (a hinged jaw, a lid) stays dynamic and articulates normally.
+
+        This mirrors IsaacLab, whose manipulation tasks declare their table as
+        a ``RigidObjectCfg`` with ``kinematic_enabled=True`` rather than as a
+        fixed-base entity. Welding is left to articulations (``entities``),
+        whose bases are structural.
+        """
+        immovable = not cfg.floating
+        builder, info = self._build_entity(object_name, replace(cfg, floating=True) if immovable else cfg)
+        if immovable:
+            # ROOT ONLY. Newton rejects a kinematic body whose joint parent is
+            # another body ("Only root bodies ... can be kinematic",
+            # ModelBuilder._validate_kinematic_joint_attachment). Flagging a
+            # whole multi-body entity builds a model Newton would have refused
+            # had the flags been set before the joints, and its solver then
+            # folds the chain into one prescribed body — a contact on a child
+            # link gets reported against the root. Pinning the root alone is
+            # what makes the fixture immovable anyway.
+            roots = [j for j in range(len(builder.joint_parent)) if builder.joint_parent[j] == -1]
+            if len(roots) != 1:
+                raise ValueError(
+                    f"Rigid object '{object_name}' has {len(roots)} world-rooted joints; "
+                    "a non-floating rigid object must have exactly one root body."
+                )
+            builder.body_flags[builder.joint_child[roots[0]]] = int(newton.BodyFlags.KINEMATIC)
+        info["kinematic"] = immovable
+        self._rigid_object_builders[object_name] = builder
+        self.rigid_objects[object_name] = info
+
+    def _build_entity(self, name: str, cfg: EntityCfg | NewtonEntityCfg) -> tuple[newton.ModelBuilder, dict]:
+        """Build a Newton ModelBuilder for one entity (robot or rigid object).
+
+        Terrain is NOT an entity — it's owned by ``self.terrain`` (a
+        :class:`TerrainImporter`) and added separately during the scene-merge
+        step. Shared by :meth:`_register_entity` and
+        :meth:`_register_rigid_object`.
+        """
+        if name in self.entities or name in self.rigid_objects:
+            raise ValueError(f"Entity '{name}' already registered")
+
+        builder = newton.ModelBuilder()
+        self._apply_rigid_gap(builder)
+        newton.solvers.SolverMuJoCo.register_custom_attributes(builder)
+
+        if cfg.usd_path:
+            self._load_usd_entity(builder, cfg)
+        elif cfg.mjcf_path:
+            self._load_mjcf_entity(builder, cfg)
+        elif cfg.urdf_path:
+            self._load_urdf_entity(builder, cfg)
+        else:
+            raise ValueError(f"Entity '{name}' has no mjcf_path, urdf_path, or usd_path")
+
+        info = {
+            "config": cfg,
+            "builder": builder,
+            "shape_count": len(builder.shape_label),
+        }
+        return builder, info
+
+    def _load_urdf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Load URDF entity from unified config."""
+        shape_cfg = getattr(cfg, "shape_cfg", None)
+        if shape_cfg is not None:
+            builder.default_shape_cfg = shape_cfg
+
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
+        ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
+        builder.add_urdf(
+            cfg.urdf_path,
+            xform=xform,
+            floating=cfg.floating,
+            enable_self_collisions=cfg.enable_self_collisions,
+            collapse_fixed_joints=False,
+            ignore_inertial_definitions=ignore_inertial,
+        )
+        self._apply_entity_post_load(builder, cfg)
+
+    def _load_mjcf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Load MJCF (MuJoCo XML) entity via ``ModelBuilder.add_mjcf``.
+
+        Parallels :meth:`_load_urdf_entity`: the only format-specific
+        work is the ``add_mjcf`` call (with ``parse_sites=True`` so
+        MJCF ``<site>`` tags are preserved as first-class shapes);
+        everything after that — collapsing fixed joints, applying
+        actuator gains and armature, mesh approximation, site
+        creation — is shared with the URDF loader via
+        :meth:`_apply_entity_post_load`.
+
+        The MJCF source is expected to contain an ``<actuator>``
+        block; Newton's MJCF loader reads that block to set each
+        DOF's ``joint_target_mode``, which ``SolverMuJoCo`` in turn
+        uses to decide whether to create a MuJoCo actuator per DOF.
+        MJCFs that ship without ``<actuator>`` (e.g. mjlab's
+        booster_t1 ``t1.xml``, which wires actuators via runtime
+        Python) leave every mode at ``NONE`` and produce ``nu=0``;
+        use a robot asset that includes ``<actuator>`` instead.
+        """
+        shape_cfg = getattr(cfg, "shape_cfg", None)
+        if shape_cfg is not None:
+            builder.default_shape_cfg = shape_cfg
+
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
+        ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
+        builder.add_mjcf(
+            cfg.mjcf_path,
+            xform=xform,
+            floating=cfg.floating,
+            enable_self_collisions=cfg.enable_self_collisions,
+            collapse_fixed_joints=False,
+            ignore_inertial_definitions=ignore_inertial,
+            parse_sites=True,
+            ignore_names=["floor", "ground"],
+        )
+        self._apply_entity_post_load(builder, cfg)
+
+    def _apply_entity_post_load(
+        self,
+        builder: newton.ModelBuilder,
+        cfg: EntityCfg | NewtonEntityCfg,
+    ) -> None:
+        """Shared post-load work for URDF and MJCF entities.
+
+        Runs after the format-specific ``add_urdf`` / ``add_mjcf``
+        call, in this order:
+
+        1. ``collapse_fixed_joints(joints_to_keep=cfg.links_to_keep)``
+           so fixed-joint merging respects user-requested link
+           retention (e.g. foot frames needed for sensors).
+        2. Actuator gain and armature pattern application.
+           Implicit actuators (``ImplicitActuatorCfg``) set
+           ``ke``/``kd`` so Newton's internal PD drives the joint;
+           explicit actuators (IdealPD, Delayed, …) zero those so
+           only the external torque loop is active. Armature is
+           always set since it is a physical property.
+        3. Mesh approximation via
+           ``builder.approximate_meshes(cfg.mesh_approximation)``.
+        4. Optional IMU / sensor ``sites`` declared on
+           ``NewtonEntityCfg.sites``.
+        """
+        if cfg.collapse_fixed_joints:
+            # Newton's ``collapse_fixed_joints`` uses literal string
+            # equality for ``joints_to_keep`` (builder.collapse_fixed_joints
+            # → ``joint["label"] in joints_to_keep``), with no
+            # wildcard / regex support. We widen bare leaf names to
+            # ``*/<name>`` (a no-op for patterns already containing
+            # '/' or glob metachars) and expand against the loaded
+            # ``builder.joint_label`` set via ``fnmatch``, then hand
+            # Newton the resolved literal labels. This mirrors how
+            # actuator ``target_names_expr`` (``apply_joint_params_by_pattern``
+            # canonicalises via ``leaf_name``) and sensor body patterns
+            # (scene.py sensor block uses ``fnmatch``) already resolve
+            # cross-format labels — so the same bare leaf pattern in
+            # cfg works for URDF flat labels (``entity/joint``) and
+            # MJCF XPath labels (``entity/.../joint``) uniformly.
+            if cfg.links_to_keep:
+                from fnmatch import fnmatch
+
+                patterns = as_leaf_globs(list(cfg.links_to_keep))
+                all_labels = list(builder.joint_label)
+                expanded = sorted({label for pat in patterns for label in all_labels if fnmatch(label, pat)})
+                if not expanded:
+                    raise ValueError(
+                        f"links_to_keep={cfg.links_to_keep!r} (widened to "
+                        f"{patterns!r}) matched zero joint labels. "
+                        f"Sample available labels: {all_labels[:8]}"
+                    )
+            else:
+                expanded = []
+            builder.collapse_fixed_joints(joints_to_keep=expanded)
+
+        # Auto-extract ``body_label_prefix`` from the loaded labels when the
+        # user did not pin it explicitly. URDF body labels start with the
+        # robot's ``<robot name="...">`` (e.g. ``go2_description/base``) while
+        # MJCF labels start with the ``add_mjcf`` ``name`` argument plus the
+        # XPath hierarchy (e.g. ``go2/worldbody/trunk``). Hardcoding a single
+        # prefix in user config silently breaks one of the two formats —
+        # sensor pattern ``"X/*"`` matches zero labels when the actual prefix
+        # is ``"Y"``, leaving sensing_bodies=[] and the contact reward at 0.
+        if getattr(cfg, "body_label_prefix", None) is None and builder.body_label:
+            cfg.body_label_prefix = builder.body_label[0].split("/")[0]
+
+        prefix = getattr(cfg, "body_label_prefix", None)
+        ke_map: dict[str, float] = {}
+        kd_map: dict[str, float] = {}
+        armature_map: dict[str, float] = {}
+        effort_limit_map: dict[str, float] = {}
+        friction_map: dict[str, float] = {}
+        # Per-DOF ``joint_target_mode``: only populated for joints
+        # driven by an ``ImplicitActuatorCfg`` (mode = POSITION so
+        # ``SolverMuJoCo`` creates a position actuator). Explicit
+        # actuators stay at the NONE default — they write torques
+        # directly via ``control.joint_f`` and don't need an mjwarp
+        # actuator entry.
+        target_mode_map: dict[str, int] = {}
+
+        # ``apply_joint_params_by_pattern`` canonicalises candidate
+        # joint labels via ``leaf_name()`` before regex-matching, so
+        # the maps here must hold *bare* patterns (IsaacLab convention):
+        # ``".*_hip_joint"`` not ``"<entity>/.*_hip_joint"``.
+
+        for act_cfg in cfg.articulation.actuators:
+            is_explicit = not isinstance(act_cfg, ImplicitActuatorCfg)
+
+            if is_explicit:
+                for pattern in act_cfg.target_names_expr:
+                    ke_map[pattern] = 0.0
+                    kd_map[pattern] = 0.0
+            else:
+                if isinstance(act_cfg.stiffness, dict):
+                    ke_map.update(act_cfg.stiffness)
+                elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                    for pattern in act_cfg.target_names_expr:
+                        ke_map[pattern] = act_cfg.stiffness
+
+                if isinstance(act_cfg.damping, dict):
+                    kd_map.update(act_cfg.damping)
+                elif act_cfg.damping is not None and act_cfg.damping > 0:
+                    for pattern in act_cfg.target_names_expr:
+                        kd_map[pattern] = act_cfg.damping
+
+                # Implicit actuator → flip mode to POSITION so mjwarp
+                # builds a position actuator for these joints.
+                for pattern in act_cfg.target_names_expr:
+                    target_mode_map[pattern] = int(JointTargetMode.POSITION)
+
+            if isinstance(act_cfg.armature, dict):
+                armature_map.update(act_cfg.armature)
+            elif isinstance(act_cfg.armature, int | float) and act_cfg.armature > 0:
+                for pattern in act_cfg.target_names_expr:
+                    armature_map[pattern] = act_cfg.armature
+
+            # Effort limit — overrides XML's actuatorfrcrange (which becomes
+            # joint.actfrcrange in Newton's MuJoCo solver).
+            if isinstance(act_cfg.effort_limit, dict):
+                effort_limit_map.update(act_cfg.effort_limit)
+            elif isinstance(act_cfg.effort_limit, int | float) and act_cfg.effort_limit > 0:
+                for pattern in act_cfg.target_names_expr:
+                    effort_limit_map[pattern] = float(act_cfg.effort_limit)
+
+            # Frictionloss — overrides XML-declared joint frictionloss.
+            # Mirrors MuJoCo's dof_frictionloss / Genesis' set_dofs_frictionloss
+            # so the three sims share one authoritative value at build time.
+            # ``None`` keeps the asset's own value; a number forces it,
+            # zero included. Testing ``> 0`` instead made a configured zero
+            # indistinguishable from saying nothing.
+            if act_cfg.frictionloss is not None:
+                for pattern in act_cfg.target_names_expr:
+                    friction_map[pattern] = float(act_cfg.frictionloss)
+
+        if ke_map or kd_map or armature_map or effort_limit_map or friction_map or target_mode_map:
+            apply_joint_params_by_pattern(
+                builder,
+                ke_map=ke_map or None,
+                kd_map=kd_map or None,
+                armature_map=armature_map or None,
+                effort_limit_map=effort_limit_map or None,
+                friction_map=friction_map or None,
+                target_mode_map=target_mode_map or None,
+            )
+
+        # Sanity check: every ``ImplicitActuatorCfg`` must resolve to ≥1
+        # joint. Catches typo'd ``target_names_expr`` patterns that would
+        # silently leave ``joint_target_mode`` at NONE — mjwarp then
+        # builds no actuator and the simulator never runs PD, even
+        # though we wrote ke/kd. The original Implicit-vs-DelayedPD
+        # divergence on g1_29dof + Newton (asset has no ``<actuator>``
+        # block) hit this exact silent-fail.
+        if target_mode_map:
+            joint_leaves = {leaf_name(label) for label in builder.joint_label}
+            for act_cfg in cfg.articulation.actuators:
+                if not isinstance(act_cfg, ImplicitActuatorCfg):
+                    continue
+                matched_any = False
+                for pattern in act_cfg.target_names_expr:
+                    if any(re.fullmatch(pattern, j) for j in joint_leaves):
+                        matched_any = True
+                        break
+                if not matched_any:
+                    raise ValueError(
+                        f"ImplicitActuatorCfg target_names_expr={list(act_cfg.target_names_expr)!r} "
+                        f"matched 0 joints in the loaded entity — mjwarp will not build a position "
+                        f"actuator and the simulator's PD will be inert. "
+                        f"Available joint leaf names (first 16): {sorted(joint_leaves)[:16]}"
+                    )
+        # Priority is whatever the MJCF says. This used to paint
+        # ``geom_priority = 1`` onto every collision shape, working around a
+        # Newton parser that dropped the XML attribute when visuals were
+        # parsed — and in doing so erased what the assets author. g1, go2,
+        # K1 and T1 all give their feet ``priority="1"`` with an explicit
+        # friction beside it, so the foot's parameters win against the
+        # priority-0 ground rather than being max()ed with it; painting
+        # every shape the same value makes every pair tie, which is max()
+        # again. The workaround defeated the thing it was written to
+        # protect.
+        #
+        # The parser bug is fixed as of newton 1.6.0.dev0, measured by
+        # ``scripts/diag/newton_geom_priority_parse_diag``: every authored
+        # priority survives, through a ``<default>`` class and a per-geom
+        # override alike, with visuals parsed and without.
+        if cfg.mesh_approximation is not None:
+            builder.approximate_meshes(cfg.mesh_approximation)
+
+        sites = getattr(cfg, "sites", None)
+        if sites:
+            self._create_sites_from_dict(builder, sites, prefix)
+
+    def _load_usd_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
+        """Load USD entity from unified config."""
+        shape_cfg = getattr(cfg, "shape_cfg", None)
+        if shape_cfg is not None:
+            builder.default_shape_cfg = shape_cfg
+
+        xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
+
+        builder.add_usd(
+            cfg.usd_path,
+            xform=xform,
+            collapse_fixed_joints=cfg.collapse_fixed_joints,
+            enable_self_collisions=cfg.enable_self_collisions,
+        )
+
+        # Mesh approximation
+        if cfg.mesh_approximation is not None:
+            builder.approximate_meshes(cfg.mesh_approximation)
+
+        # Apply gains from articulation actuators. Bare patterns only —
+        # ``apply_joint_params_by_pattern`` canonicalises candidate
+        # joint labels via ``leaf_name()``.
+        prefix = getattr(cfg, "body_label_prefix", None)
+        ke_map: dict[str, float] = {}
+        kd_map: dict[str, float] = {}
+        armature_map: dict[str, float] = {}
+        effort_limit_map: dict[str, float] = {}
+        friction_map: dict[str, float] = {}
+
+        for act_cfg in cfg.articulation.actuators:
+            for pattern in act_cfg.target_names_expr:
+                if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                    ke_map[pattern] = act_cfg.stiffness
+                if act_cfg.damping is not None and act_cfg.damping > 0:
+                    kd_map[pattern] = act_cfg.damping
+                if act_cfg.armature > 0:
+                    armature_map[pattern] = act_cfg.armature
+                if isinstance(act_cfg.effort_limit, int | float) and act_cfg.effort_limit > 0:
+                    effort_limit_map[pattern] = float(act_cfg.effort_limit)
+                if act_cfg.frictionloss is not None:
+                    friction_map[pattern] = float(act_cfg.frictionloss)
+
+        if ke_map or kd_map or armature_map or effort_limit_map or friction_map:
+            apply_joint_params_by_pattern(
+                builder,
+                ke_map=ke_map or None,
+                kd_map=kd_map or None,
+                armature_map=armature_map or None,
+                effort_limit_map=effort_limit_map or None,
+                friction_map=friction_map or None,
+            )
+
+        # Sites
+        sites = getattr(cfg, "sites", None)
+        if sites:
+            self._create_sites_from_dict(builder, sites, prefix)
+
+    def _create_sites_from_dict(
+        self, builder: newton.ModelBuilder, sites: dict[str, str], prefix: str | None = None
+    ) -> None:
+        """Create sensor sites from a {site_name: body_name} dict.
+
+        ``body_name`` is matched as a regex against the builder's body
+        leaf names (IsaacLab convention). ``prefix`` is unused here —
+        Newton's MJCF XPath labels are canonicalised via
+        :func:`leaf_name` inside :meth:`_find_body_by_name`, so callers
+        pass bare names (``"torso_link"``) or bare regex patterns.
+        """
+        for site_name, body_name in sites.items():
+            body_idx = self._find_body_by_name(builder, body_name)
+            if body_idx is not None:
+                builder.add_site(body_idx, label=site_name)
+            else:
+                raise ValueError(f"Body '{body_name}' not found for site '{site_name}'")
+
+    @staticmethod
+    def _find_body_by_name(builder: newton.ModelBuilder, body_name: str) -> int | None:
+        """Find body index by name in the builder.
+
+        Runs at builder-time (before ``builder.finalize()``) so
+        ArticulationView is not yet available; we canonicalize the
+        candidate labels to their leaf segments here via
+        :func:`leaf_name` so downstream callers can pass bare body
+        names (``"torso_link"``) regardless of whether the loader
+        stored a flat ``g1_29dof/torso_link`` or a deep MJCF XPath
+        like ``g1_29dof/worldbody/pelvis/.../torso_link``. The
+        pattern itself is still ``re.fullmatch``'d so regex forms
+        (``".*Trunk"``) keep working unchanged.
+        """
+        for i, name in enumerate(builder.body_label):
+            if re.fullmatch(body_name, leaf_name(name)):
+                return i
+        return None
+
+    def _apply_rigid_gap(self, builder) -> None:
+        """Set the contact-detection gap, if this scene asked for one.
+
+        Every builder that receives shapes needs it: the gap is read when
+        a shape is added (``shape_gap.append(cfg.gap if cfg.gap is not
+        None else self.rigid_gap)``), and ``add_builder`` only merges
+        lists that were already fixed.
+        """
+        if self.config.rigid_gap is not None:
+            builder.rigid_gap = self.config.rigid_gap
+
+    def _honour_mjcf_masks(self, builder, what: str, ground_only: bool = False) -> None:
+        """Register the pairs the assets' collision masks forbid.
+
+        Only shapes that collide at all are considered: a shape without the
+        ``COLLIDE_SHAPES`` flag takes no part in any pair, and including
+        them would register a filter for every combination of geoms that
+        were never going to touch.
+
+        ``ground_only`` restricts the pass to pairs involving a world-level
+        shape. The full pass is quadratic and belongs on the single-world
+        template, where the shape count is small; the ground pass runs
+        against every replicated shape and has to stay linear.
+        """
+        from newton import ShapeFlags
+
+        flags = builder.shape_flags
+        colliding = [i for i in range(len(flags)) if int(flags[i]) & int(ShapeFlags.COLLIDE_SHAPES)]
+
+        # A geom masked 0/0 collides with NOTHING -- that is what the two
+        # zeroes mean in MuJoCo, and Genesis drops such geoms at import for
+        # the same reason. Saying so by clearing the collide flag is both
+        # the faithful statement and a far smaller one: K1 carries 17 such
+        # shapes per world against 10 that do collide, and expressing
+        # "never" as a filter pair against every other shape turned 44
+        # pairs into 350 -- which replication then multiplies by the
+        # environment count.
+        if not ground_only:
+            silent = {i for i in colliding if _never_collides(builder, i)}
+            for i in silent:
+                flags[i] = int(flags[i]) & ~int(ShapeFlags.COLLIDE_SHAPES)
+            if silent and build_summary_enabled():
+                print(
+                    f"[newton] collision masks: {len(silent)} shapes masked 0/0 " f"withdrawn from collision ({what})"
+                )
+            colliding = [i for i in colliding if i not in silent]
+
+        if len(colliding) < 2:
+            return
+
+        if ground_only:
+            ground = [
+                i
+                for i in colliding
+                if any(hint in builder.shape_label[i].lower() for hint in ("ground", "terrain", "plane"))
+            ]
+            if not ground:
+                return
+            pairs = _forbidden_pairs(builder, colliding, against=ground)
+        else:
+            pairs = _forbidden_pairs(builder, colliding)
+
+        if not pairs:
+            return
+        builder.shape_collision_filter_pairs.extend(pairs)
+        if build_summary_enabled():
+            print(
+                f"[newton] collision masks: {len(pairs)} forbidden pairs "
+                f"({what}, {len(colliding)} colliding shapes)"
+            )
+
+    def build_scene(self) -> None:
+        """Build the complete scene with all entities replicated."""
+        if not self._entity_builders:
+            raise RuntimeError("No entities registered. Call register_entities() first.")
+
+        # Create scene builder and replicate entities
+        scene_builder = newton.ModelBuilder()
+        self._apply_rigid_gap(scene_builder)
+
+        # When the scene has more than one (non-ground) robot, namespace each
+        # robot's labels with its entities={...} dict-key name so that
+        # per-entity scoping (ArticulationView pattern, NewtonContactSensor
+        # _resolve_indices, _prefix_names, find_body_names — all keyed on
+        # cfg.body_label_prefix) stays unambiguous even when the robots are
+        # loaded from the same MJCF/URDF (which would otherwise give them an
+        # identical model-name prefix). Single-robot scenes are left untouched
+        # (prefix stays the auto-extracted model name). The label *leaves* are
+        # unchanged either way, so leaf-name-based matching is unaffected.
+        # Terrain (flat plane or generated heightfield) — added once,
+        # globally, via the TerrainImporter. Not an entity, so the merge
+        # loop below sees only robots.
+        terrain_builder = newton.ModelBuilder()
+        self._apply_rigid_gap(terrain_builder)
+        newton.solvers.SolverMuJoCo.register_custom_attributes(terrain_builder)
+        self.terrain.import_into_builder(terrain_builder)
+        scene_builder.add_builder(terrain_builder)
+
+        n_robot_entities = len(self._entity_builders)
+
+        # Assemble one per-world template (all articulated entities + all
+        # passive rigid objects) and replicate it across worlds in a single
+        # call — the idiomatic Newton pattern (``scene.replicate`` is what the
+        # examples use; one ``add_world`` per world is the manual equivalent).
+        # Robots keep the previous prefix policy: ``None`` for a single robot
+        # so its body / site / sensor labels stay bare (sensor lookups match
+        # by exact name); each rigid object is name-prefixed so its own
+        # ArticulationView (pattern ``{name}*``) resolves to only its bodies.
+        world_template = newton.ModelBuilder()
+        self._apply_rigid_gap(world_template)
+        newton.solvers.SolverMuJoCo.register_custom_attributes(world_template)
+        for entity_name, entity_builder in self._entity_builders.items():
+            label_prefix = entity_name if n_robot_entities > 1 else None
+            world_template.add_builder(entity_builder, label_prefix=label_prefix)
+            if label_prefix is not None:
+                self.entities[entity_name]["config"].body_label_prefix = label_prefix
+        for object_name, object_builder in self._rigid_object_builders.items():
+            world_template.add_builder(object_builder, label_prefix=object_name)
+            self.rigid_objects[object_name]["config"].body_label_prefix = object_name
+
+        # Before replication: pairs registered on the template are copied
+        # with it, so one pass over a single world's shapes covers every
+        # world. Robot-against-prop lives here -- a gripper closing on a
+        # tool is that pair -- and the ground does not, because it is added
+        # once to the scene rather than per world.
+        self._honour_mjcf_masks(world_template, "one world")
+
+        scene_builder.replicate(world_template, self.config.num_worlds)
+
+        # After replication: the ground exists only on the scene builder, so
+        # its pairs have to be stated against the replicated shape indices.
+        self._honour_mjcf_masks(scene_builder, "against the ground", ground_only=True)
+
+        # Finalize model
+        self.model = scene_builder.finalize()
+
+        # Request state attributes needed by sensors
+        self._request_sensor_state_attributes()
+
+        # Create solver
+        if self.config.solver_type == "xpbd":
+            self.solver = newton.solvers.SolverXPBD(self.model)
+            self._use_mujoco_contacts = False
+            # XPBD integrates directly on the State arrays, so input and output
+            # must be distinct buffers (matches isaaclab_newton's
+            # ``NewtonXPBDManager._use_single_state = False``).
+            self._use_single_state = False
+        elif self.config.solver_type == "mujoco":
+            scfg = self.config.solver_cfg
+            # Perf-experiment escape hatch (default: preset value).
+            # JAXRLWORLD_NEWTON_MJC_CONTACTS=1 forces mjwarp-native
+            # collision (use_mujoco_contacts=True) — on heightfield
+            # terrain that replaces Newton's MPR collide() pipeline
+            # (whose hfield midphase enumerates triangle candidates by
+            # XY footprint with no z-culling) with mjwarp's native
+            # HFIELD path, the same one mjlab runs. =0 forces the
+            # Newton pipeline.
+            use_mjc_contacts = scfg.use_mujoco_contacts
+            mjc_override = os.environ.get("JAXRLWORLD_NEWTON_MJC_CONTACTS", "")
+            if mjc_override:
+                use_mjc_contacts = mjc_override == "1"
+            self._use_mujoco_contacts = use_mjc_contacts
+            self.solver = newton.solvers.SolverMuJoCo(
+                self.model,
+                solver=scfg.solver,
+                integrator=scfg.integrator,
+                cone=scfg.cone,
+                iterations=scfg.iterations,
+                ls_iterations=scfg.ls_iterations,
+                njmax=scfg.njmax,
+                nconmax=scfg.nconmax,
+                impratio=scfg.impratio,
+                tolerance=scfg.tolerance,
+                ls_tolerance=scfg.ls_tolerance,
+                ccd_tolerance=scfg.ccd_tolerance,
+                ccd_iterations=scfg.ccd_iterations,
+                sdf_iterations=scfg.sdf_iterations,
+                use_mujoco_contacts=use_mjc_contacts,
+                use_mujoco_cpu=scfg.use_mujoco_cpu,
+                enable_multiccd=scfg.enable_multiccd,
+                disable_contacts=scfg.disable_contacts,
+            )
+            # SolverMuJoCo's constructor exposes no disable-bit control, but
+            # mjwarp reads ``opt.disableflags`` from the host at kernel-launch
+            # time, so applying the bits right after construction — before the
+            # first step and any CUDA-graph capture — is equivalent to setting
+            # them in the spec. Same name-to-bit convention as mjlab's
+            # ``MujocoCfg.disableflags`` (``mujoco.mjtDisableBit.mjDSBL_<NAME>``).
+            if scfg.disableflags:
+                disable_bits = 0
+                for flag_name in scfg.disableflags:
+                    disable_bits |= int(getattr(mujoco.mjtDisableBit, f"mjDSBL_{flag_name.upper()}"))
+                self.solver.mj_model.opt.disableflags |= disable_bits
+                self.solver.mjw_model.opt.disableflags |= disable_bits
+            # SolverMuJoCo is a reduced-coordinate solver: the authoritative
+            # state lives in its own ``mjw_data`` (qpos/qvel) and the Newton
+            # ``State`` is only an in/out sync surface, so passing the same
+            # object as ``state_in`` and ``state_out`` is safe. Newton's own
+            # SolverMuJoCo example does exactly that
+            # (``newton/examples/sensors/example_sensor_contact.py``), as does
+            # ``isaaclab_newton``'s ``NewtonMJWarpManager``
+            # (``_use_single_state = True``). See :meth:`_substep_loop`.
+            self._use_single_state = True
+        else:
+            raise ValueError(f"Unsupported solver type: {self.config.solver_type}")
+
+        # Create state and control
+        self.state_0 = self.model.state()
+        self.state_1 = self.model.state()
+        self.control = self.model.control()
+
+        # NOTE: FK is called later after state initialization in reset()
+        # Initial FK with model defaults (will be updated in reset)
+        newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
+
+        # Create collision pipeline. Pass an enlarged triangle-pair buffer
+        # only when the scene requests it (rough terrain); otherwise keep
+        # Newton's default so flat-ground scenes are unaffected.
+        #
+        # Perf-experiment escape hatches (defaults unchanged when unset):
+        #   JAXRLWORLD_NEWTON_TRI_PAIRS_TOTAL=<n> — override the TOTAL
+        #     triangle-pair buffer. Several narrow-phase kernels
+        #     (scan/compaction) run over buffer CAPACITY, not demand, so
+        #     an oversized buffer costs collide time every physics step.
+        #     verify_buffers stays on: undersizing prints an overflow
+        #     warning instead of silently dropping contacts.
+        #   JAXRLWORLD_NEWTON_NO_VERIFY=1 — drop the per-collide buffer
+        #     verification kernel (Newton docs recommend disabling in hot
+        #     loops once sizes are known adequate).
+        verify = os.environ.get("JAXRLWORLD_NEWTON_NO_VERIFY", "0") != "1"
+        tri_override = os.environ.get("JAXRLWORLD_NEWTON_TRI_PAIRS_TOTAL", "")
+        if self._use_mujoco_contacts:
+            # mjwarp runs collision internally and ``_step`` skips
+            # ``model.collide()`` entirely — a CollisionPipeline here
+            # would only allocate multi-hundred-MB contact/triangle-pair
+            # buffers that are never filled (measured: 6.76M-row rigid
+            # buffer sitting at 0 on g1 rough). ``solver.step`` still
+            # requires a Contacts container; size it the way Newton's
+            # own basic_heightfield example does on this path.
+            self.collision_pipeline = None
+            self.contacts = newton.Contacts(self.solver.get_max_contact_count(), 0)
+        elif self.config.collision_max_triangle_pairs is not None or tri_override:
+            max_pairs = int(tri_override) if tri_override else self.config.collision_max_triangle_pairs
+            self.collision_pipeline = newton.CollisionPipeline(
+                self.model,
+                max_triangle_pairs=max_pairs,
+                verify_buffers=verify,
+            )
+            self.contacts = self.collision_pipeline.contacts()
+        else:
+            self.collision_pipeline = newton.CollisionPipeline(self.model, verify_buffers=verify)
+            self.contacts = self.collision_pipeline.contacts()
+
+        # Update entity tracking with replicated info
+        for entity_name in self.entities:
+            self.entities[entity_name]["model"] = self.model
+
+        # Build ArticulationView for each entity BEFORE sensor creation —
+        # contact sensors now source their body-name filters from the
+        # view (bare leaf names) instead of raw ``model.body_label``.
+        self._build_robot_view()
+
+        # Cache per-entity NewtonLabelIndexing for the contact-sensor
+        # resolver. Articulation entities are looked up by their (auto-
+        # extracted) ``body_label_prefix``; the singleton ``"terrain"``
+        # entry covers the TerrainImporter-owned ``"ground_plane"`` shape.
+        self._build_label_indexing()
+
+        # Create NewtonSensorConfig sensors (IMU / FrameTransform).
+        self._create_sensors()
+
+        # Create simulator-agnostic ContactSensorCfg wrappers. Each builds
+        # its own native ``SensorContact`` (which requests the ``force``
+        # contact attribute on construction), so this MUST run before the
+        # ``newton.Contacts`` allocation below. The wrapper is stored under
+        # ``cfg.name`` in ``self.sensors`` (generic iteration, pretty
+        # print) AND in ``self._contact_sensor_wrappers`` (per-step history
+        # push, allocation gating).
+        if self.config.contact_sensors:
+            for cs_cfg in self.config.contact_sensors:
+                if not isinstance(cs_cfg, ContactSensorCfg):
+                    raise TypeError(
+                        f"NewtonSceneManagerConfig.contact_sensors expects ContactSensorCfg, "
+                        f"got {type(cs_cfg).__name__}"
+                    )
+                if cs_cfg.name in self.sensors:
+                    raise ValueError(f"Sensor '{cs_cfg.name}' already exists")
+                wrapper = NewtonContactSensor(self, cs_cfg)
+                self.sensors[cs_cfg.name] = wrapper
+                self._contact_sensor_wrappers[cs_cfg.name] = wrapper
+
+        # Cameras. Deferred to the end of the build: placing one needs
+        # the body-name index, which only exists once the model is
+        # finalized.
+        for camera_cfg in self.config.cameras:
+            if camera_cfg.name in self.sensors:
+                raise ValueError(f"Sensor '{camera_cfg.name}' already exists")
+            entity_cfg = self.config.entities[camera_cfg.entity_name]
+            link_name, offset, optics = camera_cfg.resolve(entity_cfg.mjcf_path)
+            camera = NewtonCameraSensor(
+                env=self.env,
+                cfg=camera_cfg,
+                link_name=link_name,
+                offset=offset,
+                optics=optics,
+            )
+            self.sensors[camera_cfg.name] = camera
+            self._cameras[camera_cfg.name] = camera
+
+        # Create sensor-specific contacts with extended attributes
+        has_contact_sensor = bool(self._contact_sensor_wrappers)
+        if has_contact_sensor:
+            self.sensor_contacts = newton.Contacts(
+                self.solver.get_max_contact_count(),
+                0,
+                device=self.model.device,
+                requested_attributes=self.model.get_requested_contact_attributes(),
+            )
+        else:
+            self.sensor_contacts = None
+
+        # Clean up temporary builders
+        self._entity_builders.clear()
+
+        # Validate actuator parameters
+        self._validate_mujoco_actuators()
+
+        # Build kinematic trees for URDF entities
+        self._set_kinematic_trees()
+
+    def _validate_mujoco_actuators(self) -> None:
+        """Validate MuJoCo actuator parameters after solver creation.
+
+        Two actuator families are supported:
+
+        * **Affine-bias** (``biastype == mjBIAS_AFFINE``): created by
+          Newton's URDF loader and by MJCF ``<position>`` /
+          ``<velocity>`` tags. Stores position gain ``kp`` in
+          ``gainprm[0]`` and the matching ``-kp`` / ``-kd`` in
+          ``biasprm[1:3]``. For these we sanity-check that
+          ``gainprm[0] == -biasprm[1]`` so the position gain and
+          bias are internally consistent.
+
+        * **No-bias** (``biastype == mjBIAS_NONE``): created by MJCF
+          ``<motor>`` tags (direct torque actuators). ``gainprm[0]``
+          holds the gear ratio (typically 1.0) and ``biasprm`` is
+          zero. For these the position/velocity gain checks do not
+          apply — JaxRLWorld drives these joints via the external
+          torque loop regardless — and the consistency assertion
+          would spuriously fire if we reused the affine logic.
+        """
+        if self.config.solver_type != "mujoco":
+            return
+
+        mj_model = self.solver.mj_model
+        num_actuators = mj_model.nu
+        if num_actuators == 0:
+            print("✓ MuJoCo actuators validated: 0 actuators (no external control)")
+            return
+
+        import mujoco  # noqa: PLC0415 — lazy to avoid mjwarp import at module load
+
+        gainprm = mj_model.actuator_gainprm
+        biasprm = mj_model.actuator_biasprm
+        biastype = mj_model.actuator_biastype
+
+        affine_mask = biastype == int(mujoco.mjtBias.mjBIAS_AFFINE)
+        motor_mask = biastype == int(mujoco.mjtBias.mjBIAS_NONE)
+
+        # Per-actuator ke / kd. Meaning depends on biastype — for
+        # motor-type actuators gainprm[0] is the gear ratio, not a
+        # position gain, and biasprm is zero.
+        ke = gainprm[:, 0]
+        kd = -biasprm[:, 2]
+        ke_bias = -biasprm[:, 1]
+
+        # Gains are always non-negative regardless of actuator type.
+        assert (ke >= 0).all(), f"Negative actuator gains: {ke}"
+
+        if affine_mask.any():
+            assert (kd[affine_mask] >= 0).all(), f"Negative velocity gains on affine actuators: {kd[affine_mask]}"
+            assert np.allclose(ke[affine_mask], ke_bias[affine_mask]), "Position gain/bias mismatch on affine actuators"
+
+        num_affine = int(affine_mask.sum())
+        num_motor = int(motor_mask.sum())
+        num_other = num_actuators - num_affine - num_motor
+        print(
+            f"✓ MuJoCo actuators validated: {num_actuators} total "
+            f"({num_affine} affine, {num_motor} motor, {num_other} other)"
+        )
+        if num_affine > 0:
+            num_zero_affine = int((ke[affine_mask] == 0).sum())
+            print(f"  affine ke range: [{ke[affine_mask].min():.2f}, {ke[affine_mask].max():.2f}]")
+            print(f"  affine kd range: [{kd[affine_mask].min():.2f}, {kd[affine_mask].max():.2f}]")
+            if num_zero_affine > 0:
+                print(f"  ({num_zero_affine} affine joints with ke=0: explicit actuator mode)")
+        if num_motor > 0:
+            print(f"  motor gear range: [{ke[motor_mask].min():.2f}, {ke[motor_mask].max():.2f}]")
+
+    def _build_robot_view(self) -> None:
+        """Create an ArticulationView for each non-ground-plane entity.
+
+        Uses each entity's body_label_prefix to select only that entity's
+        articulation, excluding ground plane and other global shapes.
+
+        The view is built **without** ``exclude_joint_types``: keeping
+        the free (or fixed) root joint preserves alignment between the
+        view's DOF space and ``model.joint_q`` / ``joint_qd`` so
+        ``newton_q_indices`` / ``newton_qd_indices`` (computed off
+        ``model.joint_q_start`` — full model coord space) index both
+        ``view.get_dof_positions`` and the zero-copy
+        ``state.joint_q.reshape(num_worlds, coords_per_world)`` views
+        consistently. Free-joint DoFs are filtered out later via user
+        pattern matching (bare actuated regexes like
+        ``"FR_hip_joint"`` never fullmatch Newton's multi-DOF names
+        like ``"root_joint:0"``).
+        """
+        for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
+            cfg = entity_info["config"]
+            prefix = getattr(cfg, "body_label_prefix", None)
+            # Delimited on "/", matching the rule NewtonLabelIndexing uses:
+            # the label either IS the prefix or lies under it. A bare
+            # ``f"{prefix}*"`` glob also swallows every sibling whose name
+            # merely starts with the same characters, so an entity named
+            # "robot" would take "robot_right"'s articulation into its own
+            # view and report two articulations per world.
+            pattern = [prefix, f"{prefix}/*"] if prefix else "*"
+            self.articulation_views[entity_name] = ArticulationView(
+                self.model,
+                pattern=pattern,
+            )
+
+    def _build_label_indexing(self) -> None:
+        """Cache one :class:`NewtonLabelIndexing` per addressable entity.
+
+        Articulation entities are scoped by ``body_label_prefix``; the
+        terrain (owned by :class:`~jaxrlworld.rl.terrains.TerrainImporter`,
+        not registered in ``self.entities``) is registered as a
+        singleton under the sentinel name ``"terrain"``.
+
+        Done once here so the contact-sensor wrapper (and any future
+        consumer) can resolve patterns in O(matches) instead of
+        re-scanning ``model.body_label`` / ``model.shape_label`` on
+        every sensor construction.
+        """
+        for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
+            cfg = entity_info["config"]
+            prefix = getattr(cfg, "body_label_prefix", None)
+            self.label_indexing[entity_name] = NewtonLabelIndexing.from_articulation(
+                name=entity_name,
+                model=self.model,
+                prefix=prefix,
+                num_envs=self.model.world_count,
+            )
+
+        # Singleton terrain — the TerrainImporter adds either a flat
+        # ``add_ground_plane`` shape or a ``add_shape_heightfield`` with
+        # label ``"ground_plane"``; both carry that exact label so a
+        # literal equality predicate suffices.
+        self.label_indexing["terrain"] = NewtonLabelIndexing.from_singleton(
+            name="terrain",
+            model=self.model,
+            shape_label_predicate=lambda lbl: lbl == "ground_plane",
+            body_label_predicate=None,
+        )
+
+    @property
+    def robot_view(self) -> ArticulationView:
+        """Shortcut for the 'robot' entity's ArticulationView."""
+        return self.articulation_views["robot"]
+
+    @property
+    def robot_data(self):
+        """NewtonRobotData from the environment (single instance)."""
+        return self.env._robot_data
+
+    @property
+    def robot_state(self):
+        """Alias for robot_data (backward compat)."""
+        return self.robot_data
+
+    @property
+    def robot_state_writer(self):
+        """NewtonRobotStateWriter from the environment (single instance).
+
+        Mutation companion to ``robot_data`` — used by event terms and
+        reset functions for joint/root writes and FK evaluation.
+        """
+        return self.env._robot_state_writer
+
+    def _set_kinematic_trees(self) -> None:
+        """Build kinematic trees for entities with URDF or MJCF source."""
+
+        def _resolve(name: str):
+            cfg = self.entities[name]["config"]
+            mjcf_path = getattr(cfg, "mjcf_path", None)
+            if mjcf_path:
+                return ("mjcf_path", mjcf_path)
+            urdf_path = getattr(cfg, "urdf_path", None)
+            if urdf_path:
+                return ("urdf", urdf_path)
+            return None
+
+        self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
+
+    def _request_sensor_state_attributes(self) -> None:
+        """Request extended state attributes needed by sensors and data-API.
+
+        Requests ``mujoco:qfrc_actuator`` when using the MuJoCo solver
+        (gated by ``NewtonSceneConfig.request_qfrc_actuator``, default
+        True) so :attr:`NewtonRobotData.applied_torque` is readable
+        uniformly (energy-based termination, actuator-torque rewards).
+        The allocation is small, but the request also makes the solver
+        run a MJ->Newton conversion kernel every substep, which a preset
+        that never reads ``applied_torque`` can opt out of.
+        """
+        if self.config.solver_type == "mujoco" and self.config.request_qfrc_actuator:
+            self.model.request_state_attributes("mujoco:qfrc_actuator")
+
+        if not self.config.sensors:
+            return
+
+        for sensor_config in self.config.sensors:
+            if isinstance(sensor_config, NewtonIMUSensorConfig):
+                # IMU needs body_qdd
+                self.model.request_state_attributes("body_qdd")
+                break  # Only need to request once
+
+    def _create_sensors(self) -> None:
+        """Create all sensors from config."""
+        if not self.config.sensors:
+            return
+
+        for sensor_config in self.config.sensors:
+            self._create_sensor(sensor_config)
+
+    def _create_sensor(self, config: NewtonSensorConfig) -> None:
+        """Create a single sensor from its config."""
+        if config.sensor_name in self.sensors:
+            raise ValueError(f"Sensor '{config.sensor_name}' already exists")
+
+        if isinstance(config, NewtonIMUSensorConfig):
+            all_site_indices = [idx for idx, key in enumerate(self.model.shape_label) if key in config.site_names]
+
+            if not all_site_indices:
+                raise ValueError(f"No sites found matching {config.site_names}")
+
+            if config.sensor_name in self.sensors:
+                raise ValueError(f"Sensor '{config.sensor_name}' already exists")
+
+            sensor = newton.sensors.SensorIMU(self.model, all_site_indices)
+            self.sensors[config.sensor_name] = sensor
+
+        elif isinstance(config, NewtonFrameTransformSensorConfig):
+            site_indices = [idx for idx, key in enumerate(self.model.shape_label) if key in config.site_names]
+
+            if site_indices:
+                sensor = config.create_sensor(self.model, site_indices)
+                self.sensors[config.sensor_name] = sensor
+
+    def capture(self):
+        # CUDA graph capture is only valid on a CUDA device. On CPU
+        # (e.g. a Mac dev box running the viewer) ``wp.ScopedCapture``
+        # can't record kernels like ``wp.utils.array_scan`` used by
+        # Newton's mesh-plane narrow phase, and silently dropping them
+        # would replay stale contacts. Fall back to running ``_step()``
+        # directly every control step (``step()`` already takes that
+        # branch when ``self.graph is None``).
+        if not self.model.device.is_cuda:
+            self.use_cuda_graph = False
+            self.graph = None
+            return
+
+        # ``control.joint_target_q`` is left exactly as Newton allocated it.
+        # This used to build a replacement from "one floating base plus one
+        # target per action", which describes a scene holding a single robot
+        # and nothing else. Two robots make that description wrong in both
+        # length and order: the array is sized for the whole model — every
+        # joint of every entity, including the slots a FIXED joint keeps
+        # when its entity does not collapse them — while the replacement was
+        # sized by the action dim, so the second robot's targets were written
+        # past its end. Newton's own array is already the right length, in
+        # the layout its model snapshot chose, with the FREE joint's
+        # quaternion slot valid; the writers index it in place through
+        # ``joint_target_q_start``.
+        # Warm-up: run one step eagerly so lazy allocations (mjwarp
+        # scratch, contact buffers) happen OUTSIDE the capture — Newton's
+        # examples all step once before capturing, because a graph that
+        # contains allocation nodes re-allocates on every launch and can
+        # fail at launch time with a mempool OOM. The state this step
+        # advances is discarded: every entry point (runner, evaluator,
+        # diags, viewer) resets all envs before its first real step.
+        self._step()
+        with wp.ScopedCapture() as capture:
+            self._step()
+        self.graph = capture.graph
+
+    def build_articulation_indexing(self, actuated_dof_names: list[str], entity_name: str = "robot"):
+        """Build ArticulationIndexing for the Newton model in canonical joint order.
+
+        Joint order is computed by a DFS walk of the kinematic body tree
+        (siblings sorted alphabetically by bare body name at each level),
+        emitting each body's inbound joint when visited. This pins the order
+        to the kinematic structure + names so it agrees with Genesis / mjlab
+        for the same robot regardless of how each backend's parser flattened
+        the tree internally. ``actuated_dof_names`` then filters that
+        canonical list in canonical (not query) order.
+
+        Args:
+            actuated_dof_names: Regex patterns for actuated joints (bare names).
+
+        Returns:
+            ArticulationIndexing with canonical ↔ simulator mappings.
+        """
+        view = self.articulation_views.get(entity_name)
+        if view is None:
+            raise ValueError(
+                "build_articulation_indexing called before _build_robot_view; "
+                "ArticulationView must be created before action-manager init."
+            )
+        joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
+        if not joint_names_raw:
+            raise ValueError("Newton model has no joint labels")
+        num_worlds = self.model.world_count
+        joints_per_world = len(joint_names_raw) // num_worlds
+        # Map each of THIS entity's joints to its world-0 joint index through
+        # the view's full labels. Matching on leaf names against world 0's
+        # whole joint list — the previous approach — picks the first entity
+        # that happens to own a joint of that name, so two arms that both
+        # call a joint "joint1" resolve to the same one. Restricted to world
+        # 0 because ``replicate`` copies labels verbatim into every world, so
+        # a map over the full list would resolve to the last world's copy.
+        label_to_world0 = {label: i for i, label in enumerate(joint_names_raw[:joints_per_world])}
+        view_label_of = dict(zip(view.joint_names, view.joint_labels, strict=True))
+
+        # Canonical joint order from a DFS walk of the kinematic body tree.
+        # Filtered to joints that ArticulationView surfaced (multi-DOF roots
+        # like ``floating_base`` are excluded by ``view.joint_names``).
+        actuatable_names = list(view.joint_names)
+        entity_info = self.entities.get(entity_name) or self.rigid_objects[entity_name]
+        canonical_full = _canonical_joint_order_newton(
+            self.model,
+            num_worlds=num_worlds,
+            body_prefix=getattr(entity_info["config"], "body_label_prefix", None),
+        )
+        canonical_actuatable = [n for n in canonical_full if n in set(actuatable_names)]
+        matched_names, _ = filter_canonical_to_actuated(canonical_actuatable, actuated_dof_names)
+        # An entity with zero actuated joints (e.g. a free-flying drone)
+        # is a legitimate case — return an empty ArticulationIndexing
+        # so the action manager can still operate via term-based actions.
+        if not matched_names:
+            empty_long = torch.zeros(0, device=self.device, dtype=torch.long)
+            empty_float = torch.zeros(0, device=self.device, dtype=torch.float32)
+            return ArticulationIndexing(
+                joint_names=(),
+                sim_indices=empty_long,
+                sim_to_canonical=empty_long.clone(),
+                joint_limits_lower=empty_float,
+                joint_limits_upper=empty_float.clone(),
+                newton_q_indices=empty_long.clone(),
+                newton_qd_indices=empty_long.clone(),
+            )
+
+        # Matched bare names → model-global joint indices (for q/qd lookup).
+        original_indices = [label_to_world0[view_label_of[n]] for n in matched_names]
+
+        joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
+        joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
+        q_indices = torch.tensor([int(joint_q_start[j]) for j in original_indices], device=self.device)
+        qd_indices = torch.tensor([int(joint_qd_start[j]) for j in original_indices], device=self.device)
+        sim_indices = qd_indices
+
+        sim_to_canonical = torch.zeros_like(sim_indices)
+        for canonical_i, _sim_i in enumerate(sim_indices):
+            sim_to_canonical[canonical_i] = canonical_i  # identity since RobotData indexes via sim_indices.
+
+        dofs_per_world = self.model.joint_dof_count // num_worlds
+        coords_per_world = self.model.joint_coord_count // num_worlds
+        # These index world 0 of arrays the whole scene shares, so an index
+        # past that world's share addresses another world's memory — or,
+        # past the array, trips a device-side assert several kernels later
+        # with a stack pointing at whatever ran next. Checked here, where
+        # the entity that produced it is still known.
+        _reject_out_of_range(q_indices, coords_per_world, entity_name, matched_names, "coordinate")
+        _reject_out_of_range(qd_indices, dofs_per_world, entity_name, matched_names, "dof")
+        lower_all = wp.to_torch(self.model.joint_limit_lower)[:dofs_per_world]
+        upper_all = wp.to_torch(self.model.joint_limit_upper)[:dofs_per_world]
+        lower = lower_all[qd_indices]
+        upper = upper_all[qd_indices]
+
+        return ArticulationIndexing(
+            joint_names=tuple(matched_names),
+            sim_indices=sim_indices,
+            sim_to_canonical=sim_to_canonical,
+            joint_limits_lower=lower,
+            joint_limits_upper=upper,
+            newton_q_indices=q_indices,
+            newton_qd_indices=qd_indices,
+        )
+
+    def step(self) -> None:
+        """Advance physics by one control step (multiple substeps)."""
+        if self.graph:
+            wp.capture_launch(self.graph)
+        else:
+            self._step()
+
+        # Torch-side sensor bookkeeping (substep history push). The
+        # warp-kernel half of the sensor refresh runs inside ``_step``
+        # — and therefore inside the captured graph — see
+        # ``_update_sensors_native``.
+        self._update_sensors()
+
+    def _step(self):
+        # When substeps is odd AND the physics loop is wrapped in a
+        # CUDA graph, a plain ``state_0, state_1 = state_1, state_0``
+        # swap on every substep would leave the two state references
+        # crossed (relative to the capture) on exit — the graph was
+        # recorded against specific memory addresses, so replay would
+        # read/write the wrong state. Newton's own example
+        # ``newton/examples/robot/example_robot_policy.py:326-342``
+        # handles this by copying state on the final odd iteration
+        # instead of swapping. We mirror that here line-for-line
+        # against Newton's reference.
+        # Only the double-buffered path can leave the two state references
+        # crossed on exit; the single-state path never swaps, so it needs no
+        # copy regardless of the substep parity.
+        need_state_copy = self.use_cuda_graph and self.config.substeps % 2 == 1 and not self._use_single_state
+        last_idx = self.config.substeps - 1
+
+        # With use_mujoco_contacts=True the mjwarp solver runs its own
+        # collision internally and IGNORES the Newton contacts argument —
+        # running the CollisionPipeline would be pure dead work (Newton's
+        # own basic_heightfield example skips it the same way).
+        if not self._use_mujoco_contacts:
+            self.contacts = self.model.collide(
+                self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
+            )
+        self._substep_loop(need_state_copy, last_idx)
+        # Sensor refresh, warp-kernel half. Lives inside ``_step`` so the
+        # captured CUDA graph replays it instead of the host relaunching
+        # every kernel each step (Newton's own sensor examples capture
+        # their sensor updates the same way, e.g. example_sensor_imu).
+        self._update_sensors_native()
+
+    def _substep_loop(self, need_state_copy: bool, last_idx: int) -> None:
+        if self._use_single_state:
+            # Single-state path (SolverMuJoCo). ``state_0`` is both input and
+            # output, so there is no reference swap and no end-of-loop copy.
+            # Two consequences, both intended:
+            #
+            #  * The full ``State`` copy that ``need_state_copy`` forced on
+            #    every physics step at the (universally used) ``substeps=1``
+            #    setting is gone. With substeps=1 this is a mathematical
+            #    identity — the old path ran ``step(A -> B)`` and then copied
+            #    B back into A; this runs ``step(A -> A)`` from the same
+            #    inputs.
+            #  * External link wrenches survive the whole physics step. The
+            #    enclosing ``NewtonEnv._step_physics`` clears and writes
+            #    ``state_0.body_f`` once per decimation iteration; under the
+            #    old swap the write landed on a buffer that stopped being the
+            #    solver's input after the first substep, so with
+            #    ``substeps > 1`` a propeller thrust / viewer drag force was
+            #    silently dropped on the remaining substeps. Do NOT add a
+            #    per-substep ``clear_forces()`` here: ``_apply_mjc_control``
+            #    reads ``state_in.body_f`` every substep and
+            #    ``_update_newton_state`` never writes it back, so the single
+            #    write is exactly the intended constant force over the step.
+            for _ in range(self.config.substeps):
+                self.solver.step(self.state_0, self.state_0, self.control, self.contacts, self.substep_dt)
+            return
+
+        for i in range(self.config.substeps):
+            # NOTE: ``state_0.clear_forces()`` USED to live here. Moved
+            # out to ``NewtonEnv._step_physics`` so that callers writing
+            # to ``state_0.body_f`` (e.g. PropellerThrustAction's body
+            # wrench dispatch) can do so AFTER the clear but BEFORE the
+            # solver runs — matches Newton's example convention
+            # (``clear_forces → user wrench write → solver.step``) seen
+            # in every newton/examples/*/example_*.py. Existing JaxRLWorld
+            # newton presets only write ``control.joint_f`` (never
+            # ``state.body_f``), so removing the per-substep clear here
+            # has no effect on go2/g1/t1 tasks — body_f simply stays at
+            # whatever the enclosing _step_physics wrote (zero for
+            # legacy tasks, the propeller wrench for drone tasks).
+            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
+
+            if need_state_copy and i == last_idx:
+                # Copy state_1 → state_0 so the final result lives in
+                # the same buffer the graph capture started with.
+                # Uses ``_state_assign_full`` (not bare ``assign``) so
+                # extended attributes under namespaces like
+                # ``state.mujoco.qfrc_actuator`` also propagate —
+                # Newton's built-in assign skips them.
+                _state_assign_full(self.state_0, self.state_1)
+            else:
+                # Swap states (reference rebind, no memory copy).
+                self.state_0, self.state_1 = self.state_1, self.state_0
+
+    def _update_sensors_native(self) -> None:
+        """Warp-kernel half of the sensor refresh — CUDA-graph safe.
+
+        Runs at the tail of ``_step`` (inside the captured graph): the
+        mjwarp contact export plus every native sensor's kernel launches
+        (SensorContact accumulation, IMU, frame transforms). Nothing
+        here may allocate or run torch ops — the warm-up step before
+        capture triggers any first-call allocations these make.
+        """
+        if self._contact_sensor_wrappers:
+            self.solver.update_contacts(self.sensor_contacts, self.state_0)
+
+        for sensor in self.sensors.values():
+            if isinstance(sensor, NewtonContactSensor):
+                sensor.update_native(self.state_0, self.sensor_contacts)
+            elif hasattr(sensor, "update"):
+                sensor.update(self.state_0)  # IMU takes State
+
+    def _update_sensors(self) -> None:
+        """Torch half of the sensor refresh — never inside the graph.
+
+        Called once per ``scene.step()`` after the graph launch. Pushes
+        one substep frame into each contact wrapper's ring buffer (a
+        torch scatter over warp-backed memory, which must stay outside
+        the capture).
+        """
+        for sensor in self._contact_sensor_wrappers.values():
+            sensor.push_history()
+
+    def reset(self, env_ids=None) -> None:
+        """Reset specified environments to model defaults (joint_q, joint_qd).
+
+        Supports partial reset: only the given *env_ids* are overwritten while
+        the remaining environments keep their current state.
+
+        This bypasses the ``RobotStateWriterProtocol`` because the model
+        defaults live as warp arrays inside ``view.get_dof_*(model)`` and
+        we want to feed them straight into ``view.set_dof_*(state)``
+        without a torch round-trip.
+        """
+        if env_ids is None or len(env_ids) == 0:
+            return
+
+        view = self.robot_view
+
+        # Build warp mask inline (avoid torch round-trip).
+        mask_torch = torch.zeros(self.model.world_count, dtype=torch.bool, device=self.env.device)
+        mask_torch[env_ids] = True
+        mask = wp.from_torch(mask_torch)
+
+        # Copy model defaults into state for the reset environments
+        view.set_dof_positions(self.state_0, view.get_dof_positions(self.model), mask=mask)
+        view.set_dof_velocities(self.state_0, view.get_dof_velocities(self.model), mask=mask)
+
+        # Re-evaluate FK for reset environments only
+        view.eval_fk(self.state_0, mask=mask)
+
+    def get_sensor(self, sensor_name: str) -> Any:
+        """Get a sensor by name."""
+        return self.sensors.get(sensor_name)
+
+    @property
+    def camera_sensors(self) -> dict:
+        """The sim-agnostic cameras, by name."""
+        return self._cameras
+
+    def render_cameras(self) -> None:
+        """Raytrace every camera against the current state."""
+        for camera in self._cameras.values():
+            camera.render()
+
+    def get_body_positions(self) -> wp.array:
+        """Get body positions [num_bodies, 7] (pos + quat)."""
+        return self.state_0.body_q
+
+    def get_body_velocities(self) -> wp.array:
+        """Get body velocities [num_bodies, 6] (linear + angular)."""
+        return self.state_0.body_qd
+
+    def get_joint_positions(self) -> wp.array:
+        """Get joint positions [joint_coord_count]."""
+        return self.state_0.joint_q
+
+    def get_joint_velocities(self) -> wp.array:
+        """Get joint velocities [joint_dof_count]."""
+        return self.state_0.joint_qd

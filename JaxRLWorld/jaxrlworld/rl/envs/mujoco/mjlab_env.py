@@ -1,0 +1,499 @@
+"""MuJoCo/mjlab environment for jaxrlworld.
+
+This module provides MujocoEnv, which wraps mjlab's Scene and Simulation
+while following jaxrlworld's World interface and manager pattern.
+"""
+
+from __future__ import annotations
+
+import torch
+import warp as wp
+from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
+
+from jaxrlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
+from jaxrlworld.rl.configs.common_config_classes import VisualizationConfig
+from jaxrlworld.rl.configs.mujoco_config_classes import (
+    MujocoActionConfig,
+    MujocoEnvConfig,
+    MujocoObservationConfig,
+    MujocoSceneConfig,
+)
+from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.envs.site_frames import resolve_sites
+from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
+from jaxrlworld.rl.envs.world import World
+from jaxrlworld.rl.utils import set_seed
+
+
+class MujocoEnv(World):
+    """MuJoCo/mjlab environment following jaxrlworld's World interface.
+
+    This environment wraps mjlab's Scene and Simulation while providing
+    the standard jaxrlworld manager-based architecture.
+
+    Example:
+        from mjlab.scene import SceneCfg
+        from mjlab.entity import EntityCfg
+
+        scene_cfg = SceneCfg(
+            num_envs=4096,
+            entities={"robot": robot_entity_cfg},
+        )
+
+        mujoco_scene_cfg = MujocoSceneConfig(
+            mjlab_scene_cfg=scene_cfg,
+        )
+
+        env = MujocoEnv(
+            num_envs=4096,
+            env_cfg=env_cfg,
+            scene_cfg=mujoco_scene_cfg,
+            ...
+        )
+    """
+
+    sim_name: str = "Mujoco"
+    sim_type: str = "mujoco"
+
+    def __init__(
+        self,
+        num_envs: int,
+        env_cfg: MujocoEnvConfig,
+        scene_cfg: MujocoSceneConfig,
+        visualization_cfg: VisualizationConfig,
+        obs_cfg: MujocoObservationConfig,
+        act_cfg: MujocoActionConfig,
+        reward_cfg: RewardConfig,
+        command_cfg: CommandConfig,
+        event_cfg: EventConfig,
+        curriculum_cfg: CurriculumManagerConfig,
+    ):
+        configure_warp_logging()
+        set_seed(env_cfg.seed)
+        # Seed warp's kernel RNG (mjwarp uses it). We don't go through
+        # mjlab's ``ManagerBasedRlEnv`` so its ``seed_rng`` never fires;
+        # match its warp-seeding step here. NB: mjwarp itself still has
+        # known non-determinism (mujoco_warp#562) — this only pins the
+        # RNG, not the solver's parallel reductions.
+        wp.rand_init(wp.int32(env_cfg.seed))
+        super().__init__()
+
+        self.seed = env_cfg.seed
+        self.num_envs = num_envs
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+        # Store high-level configs
+        self.env_cfg = env_cfg
+        self.scene_cfg = scene_cfg
+        self.visualization_cfg = visualization_cfg
+        self.obs_cfg = obs_cfg
+        self.act_cfg = act_cfg
+        self.reward_cfg = reward_cfg
+        self.command_cfg = command_cfg
+        self.event_cfg = event_cfg
+        self.curriculum_cfg = curriculum_cfg
+
+        # Timing (will be updated after scene is built)
+        self.decimation = env_cfg.decimation
+        self.physics_dt = scene_cfg.physics_dt
+        self.control_dt = self.physics_dt * self.decimation
+
+        # Initialize buffers
+        self._init_buffers()
+
+        # Setup environment
+        self._setup_environment()
+
+    @property
+    def robot(self):
+        """Get the main robot entity."""
+        return self.scene_manager.robot
+
+    @property
+    def robot_data(self):
+        return self.get_robot_data("robot")
+
+    def get_robot_data(self, entity_name: str = "robot"):
+        """Articulation state reader; see :meth:`World.get_entity_data` for any entity.
+
+        This used to fall back to ``scene_manager.get_entity(name).data`` when
+        the name was absent from the cache. mjlab keeps articulations and
+        passive bodies in ONE ``Scene.entities`` registry, so that fallback
+        resolved rigid objects too — and handed back mjlab's raw ``EntityData``
+        instead of the ``MujocoRigidObjectData`` wrapper, while Genesis and
+        Newton raised ``KeyError`` for the same call. Same preset, different
+        outcome per backend. Rigid objects now go through
+        :meth:`World.get_entity_data`, so this stays articulation-only and
+        matches the other two backends.
+        """
+        return self._robot_data_cache[entity_name]
+
+    def get_robot_state_writer(self, entity_name: str = "robot"):
+        """Return the write-API companion to ``get_robot_data``.
+
+        Mirrors NewtonEnv / GenesisEnv: callers can use a single
+        cross-sim accessor to mutate joint and root state via the
+        ``RobotStateWriterProtocol`` shape (see
+        ``managers/common/robot_state_writer_protocol.py``).
+        """
+        return self._robot_state_writer_cache[entity_name]
+
+    def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        # Build a transient mjlab SceneEntityCfg purely so we can reuse
+        # mjlab's resolver — never expose this object to JaxRLWorld
+        # callers (the mjlab type is an internal backend detail).
+        mjlab_cfg = _MjlabSceneEntityCfg(
+            name=selector.name,
+            joint_names=tuple(selector.joint_names) if selector.joint_names else None,
+            body_names=tuple(selector.body_names) if selector.body_names else None,
+            geom_names=tuple(selector.geom_names) if selector.geom_names else None,
+            site_names=tuple(selector.site_names) if selector.site_names else None,
+            actuator_names=(tuple(selector.actuator_names) if selector.actuator_names else None),
+            preserve_order=selector.preserve_order,
+        )
+        mjlab_cfg.resolve(self.scene_manager.scene)
+
+        joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
+            selector.joint_names,
+            preserve_order=selector.preserve_order,
+            entity_name=selector.name,
+        )
+
+        def _to_tensor(ids, requested) -> torch.Tensor | None:
+            if not requested:
+                return None
+            if isinstance(ids, slice):
+                return None
+            return torch.as_tensor(list(ids), device=self.device, dtype=torch.long)
+
+        def _names(attr_value, requested) -> list[str] | None:
+            """mjlab populates ``names_attr`` after resolve when requested."""
+            if not requested:
+                return None
+            if attr_value is None:
+                return None
+            return list(attr_value)
+
+        # One resolution, both halves. See ``resolve_sites``: taking the
+        # names from the backend's resolver instead orders them by its own
+        # table, and the consumers that pair ids with names then read the
+        # wrong column.
+        site_ids, site_names = resolve_sites(self, selector.name, selector.site_names)
+
+        return ResolvedEntity(
+            source_selector=selector,
+            name=selector.name,
+            joint_ids=joint_ids,
+            joint_ids_native=_to_tensor(mjlab_cfg.joint_ids, selector.joint_names),
+            body_ids=_to_tensor(mjlab_cfg.body_ids, selector.body_names),
+            geom_ids=_to_tensor(mjlab_cfg.geom_ids, selector.geom_names),
+            site_ids=site_ids,
+            actuator_ids=_to_tensor(mjlab_cfg.actuator_ids, selector.actuator_names),
+            joint_names=joint_names_resolved if selector.joint_names is not None else None,
+            body_names=_names(mjlab_cfg.body_names, selector.body_names),
+            geom_names=_names(mjlab_cfg.geom_names, selector.geom_names),
+            site_names=site_names,
+            actuator_names=_names(mjlab_cfg.actuator_names, selector.actuator_names),
+        )
+
+    def _build_scene(self) -> None:
+        """Create MuJoCo/mjlab scene via ManagerRegistry."""
+        # Sync num_envs (eval env may override env_cfg.num_envs)
+        self.scene_cfg.num_envs = self.num_envs
+
+        SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
+        SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
+        self.scene_manager = SceneCls(
+            env=self,
+            config=SceneCfgCls(
+                device=str(self.device),
+                robot_entity_name=self.scene_cfg.robot_entity_name,
+                num_envs=self.scene_cfg.num_envs,
+                env_spacing=self.scene_cfg.env_spacing,
+                physics_dt=self.scene_cfg.physics_dt,
+                # Read straight off the config. Every field below is
+                # declared on ``MujocoSceneConfig`` with its own default, so
+                # a getattr fallback here was a second copy of each default
+                # in a second file -- including the solver budget and the
+                # friction cone. Two copies of a physics default is one too
+                # many: change the dataclass and this file quietly keeps
+                # using the old number for any config that lacks the field,
+                # rather than failing where the mistake is.
+                substeps=self.scene_cfg.substeps,
+                entities=self.scene_cfg.entities,
+                rigid_objects=self.scene_cfg.rigid_objects,
+                sensors=self.scene_cfg.sensors,
+                cameras=self.scene_cfg.cameras,
+                terrain_cfg=self.scene_cfg.terrain_cfg,
+                solver_iterations=self.scene_cfg.solver_iterations,
+                solver_ls_iterations=self.scene_cfg.solver_ls_iterations,
+                ccd_iterations=self.scene_cfg.ccd_iterations,
+                nconmax=self.scene_cfg.nconmax,
+                njmax=self.scene_cfg.njmax,
+                impratio=self.scene_cfg.impratio,
+                cone=self.scene_cfg.cone,
+                contact_sensor_maxmatch=self.scene_cfg.contact_sensor_maxmatch,
+                # Legacy — declared on the dataclass like everything else.
+                mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
+                mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
+                unified_entities=self.scene_cfg.unified_entities,
+            ),
+        )
+        self.scene_manager.build_scene()
+
+        # physics_dt stays at the config-level dt (before substep
+        # division), matching Newton's convention. The MuJoCo solver's
+        # actual timestep is dt/substeps, but that's internal to the
+        # scene manager — the env and reward/obs code only sees the
+        # config-level dt × decimation = control_dt.
+        self.physics_dt = self.scene_cfg.physics_dt
+        self.control_dt = self.physics_dt * self.decimation
+
+    def _build_sim_managers(self) -> None:
+        """Create MuJoCo-specific managers via ManagerRegistry."""
+        ActCls = ManagerRegistry.get_class(self.sim_type, "action")
+        ActCfgCls = ManagerRegistry.get_config_class(self.sim_type, "action")
+        self.act_manager = ActCls(
+            env=self,
+            config=ActCfgCls(
+                actuated_dof_names=self.act_cfg.actuated_dof_names,
+                scale=self.act_cfg.action_scale,
+                clip=self.act_cfg.clip_actions,
+                offset=self.act_cfg.offset,
+                settle_steps=self.act_cfg.settle_steps,
+                joint_limit_soft_factor=self.act_cfg.joint_limit_soft_factor,
+                action_terms=self.act_cfg.action_terms,
+            ),
+        )
+
+        # Build MujocoRobotData using ArticulationIndexing
+        from jaxrlworld.rl.envs.mujoco.robot_data import MujocoRigidObjectData, MujocoRobotData
+        from jaxrlworld.rl.envs.mujoco.robot_state_writer import MujocoRobotStateWriter
+
+        self._robot_data_cache = {}
+        self._robot_state_writer_cache = {}
+        # One indexing and one home pose PER entity, for the reason spelled
+        # out in GenesisEnv: a shared indexing points a second robot's reads
+        # and writes at the first robot's joints without complaint.
+        for name, entity in self.scene_manager.entities.items():
+            indexing = self.entity_indexing(name)
+            self._robot_data_cache[name] = MujocoRobotData(
+                entity=entity,
+                joint_ids=indexing.sim_indices,
+                num_envs=self.num_envs,
+                device=self.device,
+                env=self,
+                entity_name=name,
+                default_joint_pos=self._resolve_default_joint_pos(name),
+            )
+            self._robot_state_writer_cache[name] = MujocoRobotStateWriter(
+                env=self,
+                entity=entity,
+                joint_ids=indexing.sim_indices,
+            )
+
+        # Passive rigid objects — RigidObjectData (root + body, no joints).
+        empty_joint_ids = torch.zeros(0, device=self.device, dtype=torch.long)
+        for name, entity in self.scene_manager.rigid_objects.items():
+            self._rigid_object_data_cache[name] = MujocoRigidObjectData(
+                entity=entity,
+                joint_ids=empty_joint_ids,
+                num_envs=self.num_envs,
+                device=self.device,
+                env=self,
+                entity_name=name,
+                default_joint_pos=None,
+            )
+            # mjlab's root writes go through the per-entity Entity object, so the
+            # robot writer is already per-entity-correct for a rigid object; the
+            # empty joint_ids make the joint writes no-ops.
+            self._rigid_object_state_writer_cache[name] = MujocoRobotStateWriter(
+                env=self,
+                entity=entity,
+                joint_ids=empty_joint_ids,
+            )
+
+        ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
+        self.obs_manager = ObsCls(
+            env=self,
+            config=self.obs_cfg,
+        )
+
+        ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
+        self.contact_manager = ContactCls(env=self)
+        self.contact_manager.register_sensors()
+
+        if self.visualization_cfg.viewer_type == "viser":
+            # Same unified ViserScene path as Genesis/Newton (so ViserSceneConfig
+            # applies to MuJoCo too — configurable ground + robot material).
+            from jaxrlworld.rl.vis.viser import ViserVisualizationManager
+            from jaxrlworld.rl.vis.viser.bridges import MujocoBridge
+            from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
+
+            viser_cfg = ViserViewerConfig(
+                port=self.visualization_cfg.viser_port,
+                share=self.visualization_cfg.viser_share,
+                enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
+                enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
+                scene=self.visualization_cfg.viser_scene,
+            )
+            self.visualization_manager = ViserVisualizationManager(
+                env=self, bridge=MujocoBridge(self.scene_manager), config=viser_cfg
+            )
+            self.visualization_manager.setup()
+        else:
+            self.visualization_manager = None
+
+    def _pre_manager_setup(self) -> None:
+        """Expand mjlab model fields for per-env domain randomization.
+
+        Runs between scene build and manager creation — the same lifecycle
+        point as mjlab's own ``ManagerBasedRlEnv`` (Sim init -> expand ->
+        build managers).  ``expand_model_fields`` replaces the GPU arrays
+        behind the nominated fields and re-captures the CUDA graphs, so it
+        must happen while nothing else can hold references to the old
+        arrays.  The previous placement (``_post_setup``, i.e. AFTER every
+        manager was constructed) violated that contract and surfaced as
+        ``CUDA_ERROR_ILLEGAL_ADDRESS`` at the first reset-time DR write.
+
+        The field list comes from :func:`collect_expand_fields`, which reads
+        each DR term's ``@requires_model_fields`` declaration rather than a
+        lookup table maintained here. See
+        :mod:`jaxrlworld.rl.envs.mdp.events.dr._model_fields` for why the
+        declaration belongs next to the function that writes the field, and
+        for the derived-field write sets a recompute pulls in.
+        """
+        # Local import: the ``dr`` package's ``__init__`` pulls in ``unified``,
+        # which imports the mujoco event adapter and resolves back into this
+        # env package (circular at load time).
+        from jaxrlworld.rl.envs.mdp.events.dr._model_fields import collect_expand_fields
+
+        self._assert_recompute_level_names()
+
+        dr_fields = collect_expand_fields(self.event_cfg)
+        if dr_fields:
+            self.scene_manager.sim.expand_model_fields(dr_fields)
+
+    @staticmethod
+    def _assert_recompute_level_names() -> None:
+        """Fail loudly if our ``RecomputeLevel`` names drift from mjlab's.
+
+        DR terms declare their recompute level with JaxRLWorld's own enum so
+        that ``unified.py`` needs no module-level mjlab import, and
+        ``Simulation.recompute_constants`` dispatches on ``level.name``. A
+        rename upstream would otherwise only surface as an ``AttributeError``
+        deep inside the first reset-time recompute, long after build.
+        """
+        from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
+
+        from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeLevel
+
+        unknown = {level.name for level in RecomputeLevel} - {level.name for level in MjlabRecomputeLevel}
+        if unknown:
+            raise RuntimeError(
+                f"RecomputeLevel names {sorted(unknown)} are not present on mjlab's "
+                f"RecomputeLevel ({sorted(level.name for level in MjlabRecomputeLevel)}). "
+                f"Simulation.recompute_constants dispatches with getattr(mujoco_warp, "
+                f"level.name), so the two enums must stay name-compatible; update "
+                f"jaxrlworld.rl.envs.mdp.events.dr._model_fields.RecomputeLevel."
+            )
+
+    def _step_physics(self) -> None:
+        for _ in range(self.decimation):
+            self.act_manager.apply_actions(self.act_manager.processed_actions)
+            self.scene_manager.write_data_to_sim()
+            if self._external_wrench is not None:
+                self._write_external_wrench()
+            self.scene_manager.step()
+            self.scene_manager.update(dt=self.physics_dt)
+            self.contact_manager.advance(dt=self.physics_dt)
+
+        # Update visualization
+        if self.visualization_manager is not None:
+            self.visualization_manager.advance()
+
+    def _write_external_wrench(self) -> None:
+        """Apply the viewer force via mjlab's ``xfrc_applied`` entity API."""
+        link_name, force_w, env_idx = self._external_wrench
+        entity = self.scene_manager.get_entity("robot")
+        rd = self.get_robot_data("robot")
+        body_id = rd.find_body_index(link_name.rsplit("/", 1)[-1])
+        env_ids = torch.tensor([int(env_idx)], device=self.device)
+        forces = force_w.view(1, 1, 3)
+        torques = torch.zeros_like(forces)
+        entity.write_external_wrench_to_sim(
+            forces=forces,
+            torques=torques,
+            env_ids=env_ids,
+            body_ids=[int(body_id)],
+        )
+
+    def _flush_external_wrench(self) -> None:
+        """Zero the persistent ``xfrc_applied`` slot on release."""
+        link_name, _force_w, env_idx = self._external_wrench
+        entity = self.scene_manager.get_entity("robot")
+        body_id = self.get_robot_data("robot").find_body_index(link_name.rsplit("/", 1)[-1])
+        zeros = torch.zeros(1, 1, 3, device=self.device)
+        entity.write_external_wrench_to_sim(
+            forces=zeros,
+            torques=zeros,
+            env_ids=torch.tensor([int(env_idx)], device=self.device),
+            body_ids=[int(body_id)],
+        )
+
+    def _reset_scene(self, env_ids: torch.Tensor) -> None:
+        """Reset mjwarp ``Data`` and the mjlab scene buffers for ``env_ids``.
+
+        ``scene_manager.reset`` runs ``mjwarp.reset_data`` (qpos -> qpos0,
+        qvel/qacc/warmstart/act/ctrl cleared for the masked worlds) followed by
+        ``Scene.reset``. It used to be the FIRST statement of
+        :meth:`_reset_idx`, i.e. ahead of ``curriculum_manager.compute`` — which
+        meant a curriculum term reading the ending episode's terminal state saw
+        ``qpos0`` instead. mjlab and IsaacLab both order curriculum compute
+        before ``sim.reset``; routing this through the
+        :meth:`~jaxrlworld.rl.envs.world.World._reset_scene` hook restores that
+        order without duplicating the reset sequence here.
+        """
+        self.scene_manager.reset(env_ids)
+
+    def _reset_idx(self, env_ids: torch.Tensor) -> None:
+        """Reset with mjlab-specific write to sim.
+
+        The mjwarp/scene reset itself now happens in :meth:`_reset_scene`,
+        which the base ``_reset_idx`` invokes at the correct point in the
+        sequence (after curriculum compute, before the reset events).
+        """
+        super()._reset_idx(env_ids)
+
+        if len(env_ids) > 0:
+            self.scene_manager.write_data_to_sim()
+            # forward() for reset envs is now handled by the
+            # consolidated _post_reset_forward() hook which runs
+            # sim.forward() for ALL envs (reset + non-reset).
+
+    def _post_reset_forward(self) -> None:
+        """Refresh all MuJoCo derived quantities for every environment.
+
+        mjlab's native env calls ``sim.forward()`` once after resets
+        to recompute xpos, xquat, site positions, cvel, and sensor
+        data from the current qpos/qvel — covering both freshly-reset
+        envs and non-reset envs whose kinematics were last updated
+        inside the decimation loop's ``scene.update(dt)`` call.
+        """
+        self.scene_manager.forward()
+
+    def _render_sensors(self) -> None:
+        """mjlab's sense pipeline: BVH refit, camera rendering, raycasting.
+
+        Its own docstring says once per step, immediately before the
+        observation, and ``ManagerBasedRlEnv`` calls it as the last step
+        of both ``step`` and ``reset``. It used to ride along inside the
+        FK hook above, which runs before the commands and before the
+        interval events — so a camera would have been rendered from a
+        state the returned observation no longer described.
+
+        Returns immediately when no sensor needs it, so presets without
+        cameras or raycasts pay nothing.
+        """
+        self.scene_manager.sim.sense()

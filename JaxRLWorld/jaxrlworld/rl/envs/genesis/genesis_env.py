@@ -1,0 +1,377 @@
+import genesis as gs
+import torch
+from genesis.utils.misc import set_random_seed as _gs_set_random_seed
+
+from jaxrlworld.rl.configs import (
+    ActionConfig,
+    CommandConfig,
+    CurriculumManagerConfig,
+    EnvConfig,
+    EventConfig,
+    ObservationConfig,
+    RewardConfig,
+    SceneConfig,
+    VisualizationConfig,
+)
+from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.managers import (
+    VisualizationManager,
+    VisualizationManagerConfig,
+)
+from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.envs.site_frames import resolve_sites
+from jaxrlworld.rl.envs.world import World
+from jaxrlworld.rl.utils import entity_utils as _eu, set_seed
+
+
+class GenesisEnv(World):
+    sim_name: str = "Genesis"
+    sim_type: str = "genesis"
+
+    def __init__(
+        self,
+        num_envs: int,
+        env_cfg: EnvConfig,
+        scene_cfg: SceneConfig,
+        visualization_cfg: VisualizationConfig,
+        obs_cfg: ObservationConfig,
+        act_cfg: ActionConfig,
+        reward_cfg: RewardConfig,
+        command_cfg: CommandConfig,
+        event_cfg: EventConfig,
+        curriculum_cfg: CurriculumManagerConfig,
+    ):
+        # Initialise the Genesis runtime on first use.  Kept here (rather than
+        # at package import) so a Newton-/MuJoCo-only process never imports or
+        # initialises Genesis.
+        #
+        # ``gs.init(seed=...)`` seeds Python/NumPy/Torch RNGs *and* the
+        # Quadrants (warp) kernel RNG. We also want to reseed on every
+        # subsequent env construction (curriculum / re-init paths), so
+        # call ``set_random_seed`` directly when Genesis is already up.
+        if not gs._initialized:
+            gs.init(logging_level="warning", seed=env_cfg.seed, performance_mode=env_cfg.performance_mode)
+        else:
+            _gs_set_random_seed(env_cfg.seed)
+
+        set_seed(env_cfg.seed)
+        super().__init__()
+
+        self.seed = env_cfg.seed
+        self.num_envs = num_envs
+        self.device = gs.device
+
+        # Store configs
+        self.env_cfg = env_cfg
+        self.scene_cfg = scene_cfg
+        self.visualization_cfg = visualization_cfg
+        self.obs_cfg = obs_cfg
+        self.act_cfg = act_cfg
+        self.reward_cfg = reward_cfg
+        self.command_cfg = command_cfg
+        self.event_cfg = event_cfg
+        self.curriculum_cfg = curriculum_cfg
+
+        # Timing
+        self.physics_dt = scene_cfg.sim_options.dt
+        self.decimation = env_cfg.decimation
+        self.control_dt = self.physics_dt * self.decimation
+
+        # Pre-DR baselines for Genesis DR terms that only support
+        # operation="scale" (pd gains, armature). Keyed by
+        # ``(entity_name, param)``; captured lazily on a term's first call so
+        # 'scale' multiplies the BUILD-TIME value instead of the previously
+        # randomized one (which compounds into a log random-walk across
+        # resets). Counterpart of Newton's ``_dr_baselines`` snapshot.
+        self._genesis_dr_baselines: dict = {}
+
+        # Initialize buffers
+        self._init_buffers()
+
+        # Setup
+        self._setup_environment()
+
+    @property
+    def robot(self):
+        return self.scene_manager.robot
+
+    @property
+    def robot_data(self):
+        return self.get_robot_data("robot")
+
+    def get_robot_data(self, entity_name: str = "robot"):
+        return self._robot_data_cache[entity_name]
+
+    def get_robot_state_writer(self, entity_name: str = "robot"):
+        """Return the write-API companion to ``get_robot_data``.
+
+        Mirrors NewtonEnv / MujocoEnv: callers can use a single
+        cross-sim accessor to mutate joint and root state via the
+        ``RobotStateWriterProtocol`` shape (see
+        ``managers/common/robot_state_writer_protocol.py``).
+        """
+        return self._robot_state_writer_cache[entity_name]
+
+    def resolve_selector(self, selector: SceneEntitySelector) -> ResolvedEntity:
+        entity = self.scene_manager[selector.name]
+
+        joint_ids, joint_names_resolved = self._resolve_canonical_joint_ids(
+            selector.joint_names,
+            preserve_order=selector.preserve_order,
+            entity_name=selector.name,
+        )
+
+        body_ids = None
+        body_names_resolved = None
+        if selector.body_names is not None:
+            link_ids_local, link_names_matched = _eu.find_links(
+                entity,
+                list(selector.body_names),
+                global_ids=False,
+                preserve_order=selector.preserve_order,
+            )
+            body_ids = torch.tensor(link_ids_local, device=self.device, dtype=torch.long)
+            body_names_resolved = list(link_names_matched)
+
+        # Genesis has no first-class actuator concept; act_manager owns
+        # the actuator ↔ joint mapping (1:1 with actuated joints), so
+        # actuator_ids reuses the canonical joint resolution.
+        actuator_ids = None
+        actuator_names_resolved = None
+        if selector.actuator_names is not None:
+            actuator_ids, actuator_names_resolved = self._resolve_canonical_joint_ids(
+                selector.actuator_names,
+                preserve_order=selector.preserve_order,
+                entity_name=selector.name,
+            )
+
+        if selector.geom_names is not None:
+            raise NotImplementedError(
+                "Genesis geoms have no names; use SceneEntitySelector.body_names "
+                "and let the backend expand to the link's collision geoms."
+            )
+        # One resolution for both halves — see ``resolve_sites``.
+        site_ids, site_names = resolve_sites(self, selector.name, selector.site_names)
+
+        return ResolvedEntity(
+            source_selector=selector,
+            name=selector.name,
+            joint_ids=joint_ids,
+            joint_ids_native=None,
+            body_ids=body_ids,
+            geom_ids=None,
+            site_ids=site_ids,
+            site_names=site_names,
+            actuator_ids=actuator_ids,
+            joint_names=joint_names_resolved if selector.joint_names is not None else None,
+            body_names=body_names_resolved,
+            actuator_names=actuator_names_resolved,
+        )
+
+    @property
+    def scene(self) -> gs.Scene:
+        return self.scene_manager.scene
+
+    def _build_scene(self) -> None:
+        """Create Genesis scene and visualization manager."""
+        SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
+        SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
+
+        self.scene_manager = SceneCls(
+            env=self,
+            config=SceneCfgCls(
+                sim_options=self.scene_cfg.sim_options,
+                viewer_options=self.scene_cfg.viewer_options,
+                vis_options=self.scene_cfg.vis_options,
+                rigid_options=self.scene_cfg.rigid_options,
+                entities=self.scene_cfg.entities,
+                rigid_objects=self.scene_cfg.rigid_objects,
+                sensors=self.scene_cfg.sensors,
+                cameras=getattr(self.scene_cfg, "cameras", ()),
+                env_spacing=self.scene_cfg.env_spacing,
+                show_viewer=self.visualization_cfg.show_viewer,
+                num_envs=self.num_envs,
+                device=str(self.device),
+                terrain_cfg=self.scene_cfg.terrain_cfg,
+            ),
+        )
+
+        # Visualization (created before register_entities which references it).
+        self.vis_manager = VisualizationManager(
+            env=self,
+            config=VisualizationManagerConfig(
+                show_viewer=self.visualization_cfg.show_viewer,
+                record_video=self.visualization_cfg.record_video,
+                video_dir=self.visualization_cfg.video_dir,
+                video_fps=self.visualization_cfg.video_fps,
+                record_env_ids=self.visualization_cfg.record_env_ids,
+                grid_layout=self.visualization_cfg.grid_layout,
+                enable_command_arrow=self.visualization_cfg.enable_command_arrow,
+                command_arrow_radius=self.visualization_cfg.command_arrow_radius,
+                command_arrow_length_scale=self.visualization_cfg.command_arrow_length_scale,
+                max_arrow_length=self.visualization_cfg.max_arrow_length,
+                enable_text_hud=self.visualization_cfg.enable_text_hud,
+                hud_position=self.visualization_cfg.hud_position,
+                feet_names=self.visualization_cfg.feet_names,
+                extra_hud_items=self.visualization_cfg.extra_hud_items,
+            ),
+        )
+
+        self.scene_manager.register_entities()
+        self.scene_manager.build_scene()
+
+        # Replace with unified Viser viewer after scene is built.
+        if self.visualization_cfg.viewer_type == "viser":
+            from jaxrlworld.rl.vis.viser import ViserVisualizationManager
+            from jaxrlworld.rl.vis.viser.bridges import GenesisBridge
+            from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
+
+            bridge = GenesisBridge(self.scene_manager)
+            viser_cfg = ViserViewerConfig(
+                port=self.visualization_cfg.viser_port,
+                share=self.visualization_cfg.viser_share,
+                enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
+                enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
+                scene=self.visualization_cfg.viser_scene,
+            )
+            self.vis_manager = ViserVisualizationManager(env=self, bridge=bridge, config=viser_cfg)
+
+    def _build_sim_managers(self) -> None:
+        """Create Genesis-specific managers via ManagerRegistry.
+
+        Order matters: the ActionManager must exist before the
+        ObservationManager because the latter resolves SceneEntitySelector
+        params in ``__init__`` and ``resolve_selector`` needs
+        ``act_manager.actuated_joint_names`` for the canonical joint order.
+        (Newton / MuJoCo already build act → obs.)
+        """
+        ActCls = ManagerRegistry.get_class(self.sim_type, "action")
+        ActCfgCls = ManagerRegistry.get_config_class(self.sim_type, "action")
+        self.act_manager = ActCls(
+            env=self,
+            config=ActCfgCls(
+                actuated_dof_names=self.act_cfg.actuated_dof_names,
+                clip=self.act_cfg.clip_actions,
+                scale=self.act_cfg.action_scale,
+                offset=self.act_cfg.offset,
+                settle_steps=self.act_cfg.settle_steps,
+                joint_limit_soft_factor=self.act_cfg.joint_limit_soft_factor,
+                action_terms=self.act_cfg.action_terms,
+            ),
+        )
+
+        ObsCls = ManagerRegistry.get_class(self.sim_type, "observation")
+        self.obs_manager = ObsCls(
+            env=self,
+            config=self.obs_cfg,
+        )
+
+        ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
+        self.contact_manager = ContactCls(env=self)
+        contact_sensors = getattr(self.scene_cfg, "contact_sensors", None)
+        if contact_sensors:
+            for sensor_cfg in contact_sensors:
+                self.contact_manager.register_sensor(sensor_cfg)
+
+        from jaxrlworld.rl.envs.genesis.robot_data import GenesisRigidObjectData, GenesisRobotData
+        from jaxrlworld.rl.envs.genesis.robot_state_writer import GenesisRobotStateWriter
+
+        self._robot_data_cache = {}
+        self._robot_state_writer_cache = {}
+        # One indexing and one home pose PER entity. Handing every entity the
+        # driven robot's indexing made a second robot's joint reads and
+        # writes address the first robot's DOFs, silently.
+        for name, entity in self.scene_manager.entities.items():
+            indexing = self.entity_indexing(name)
+            self._robot_data_cache[name] = GenesisRobotData(
+                entity=entity,
+                actuated_dof_ids=indexing.sim_indices,
+                num_envs=self.num_envs,
+                device=self.device,
+                env=self,
+                entity_name=name,
+                default_joint_pos=self._resolve_default_joint_pos(name),
+                soft_joint_pos_limit_factor=self.scene_cfg.entities[name].articulation.soft_joint_pos_limit_factor,
+            )
+            self._robot_state_writer_cache[name] = GenesisRobotStateWriter(
+                env=self,
+                entity=entity,
+                actuated_dof_ids=indexing.sim_indices,
+            )
+
+        # Passive rigid objects (config.rigid_objects) — read via
+        # get_rigid_object_data(name) -> RigidObjectData (root + body, no
+        # joints). No actuated DOFs, so actuated_dof_ids is empty.
+        for name, entity in self.scene_manager.rigid_objects.items():
+            self._rigid_object_data_cache[name] = GenesisRigidObjectData(
+                entity=entity,
+                actuated_dof_ids=[],
+                num_envs=self.num_envs,
+                device=self.device,
+                env=self,
+                entity_name=name,
+                default_joint_pos=None,
+            )
+            # Genesis root writes go through the per-entity RigidEntity (set_pos /
+            # set_quat), so the robot writer is per-entity-correct for a rigid
+            # object; the empty actuated_dof_ids make the joint writes no-ops.
+            self._rigid_object_state_writer_cache[name] = GenesisRobotStateWriter(
+                env=self,
+                entity=entity,
+                actuated_dof_ids=[],
+            )
+
+    def _post_reset_forward(self) -> None:
+        """Make a state written without stepping visible to the readers.
+
+        Genesis's setters update the solver immediately, so unlike mjlab
+        there is no forward pass to run. What goes stale is this repo's
+        own per-step read cache: ``RobotData``'s getters memoize on
+        ``_cache_generation``, which normally advances once per physics
+        substep, so a joint angle written between steps reads back as
+        the value from before the write — the write looks lost when it
+        was only unseen.
+        """
+        self._invalidate_cache()
+
+    def _render_sensors(self) -> None:
+        """Draw the cameras against the state the observation reports."""
+        self.scene_manager.render_cameras()
+
+    def _step_physics(self) -> None:
+        """Genesis physics step with decimation.
+
+        When an actuator model is active, torques are recomputed every
+        substep using the latest joint state (matching IsaacLab behavior).
+        For position control without an actuator, re-applying the same
+        target each substep is a harmless no-op.
+        """
+        for _ in range(self.decimation):
+            self.act_manager.apply_actions(self.act_manager.processed_actions)
+            if self._external_wrench is not None:
+                self._write_external_wrench()
+            self.scene_manager.step()
+            # The physics state just advanced; bump the read-cache generation
+            # so per-step-memoized reads (RobotData / contact sensors) can
+            # never serve a pre-substep value inside the decimation loop —
+            # the explicit-actuator PD path re-reads joint state each substep.
+            self._invalidate_cache()
+            self.contact_manager.advance(dt=self.physics_dt)
+        self.vis_manager.advance()
+
+    def _write_external_wrench(self) -> None:
+        """Apply the viewer wrench via the rigid solver's per-link force API."""
+        link_name, force_w, env_idx = self._external_wrench
+        robot = self.scene_manager["robot"]
+        link_ids_global, _ = _eu.find_links(robot, [link_name.rsplit("/", 1)[-1]], global_ids=True)
+        self.scene.rigid_solver.apply_links_external_force(
+            force=force_w.view(1, 3),
+            links_idx=link_ids_global,
+            envs_idx=[int(env_idx)],
+            ref=gs.link_ref_frame.link_COM,
+            local=False,
+        )
+
+    def _flush_external_wrench(self) -> None:
+        """Zero all external forces (viewer is the only writer)."""
+        self.scene.rigid_solver.clear_external_force()

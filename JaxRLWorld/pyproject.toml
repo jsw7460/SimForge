@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rlworld"
+name = "jaxrlworld"
 version = "0.1.0"
 description = "Modular RL framework for robot locomotion across simulators"
 license = {file = "LICENSE"}
@@ -40,7 +40,7 @@ dev = [
     "ruff",
     "pre-commit",
 ]
-all = ["rlworld[wandb]"]
+all = ["jaxrlworld[wandb]"]
 
 [project.urls]
 Homepage = "https://github.com/jsw7460/SimForge"
@@ -93,7 +93,7 @@ fixable = ["ALL"]
 "scripts/**/*.py" = ["E402"]  # scripts often set env vars before imports
 
 [tool.ruff.lint.isort]
-known-first-party = ["rlworld"]
+known-first-party = ["jaxrlworld"]
 combine-as-imports = true
 
 [tool.ruff.format]
@@ -105,7 +105,7 @@ docstring-code-format = false  # don't reformat code blocks inside docstrings
 where = ["."]
 
 [tool.setuptools.package-data]
-rlworld = [
+jaxrlworld = [
     "assets/**/*.urdf",
     "assets/**/*.xacro",
     "assets/**/*.stl",
