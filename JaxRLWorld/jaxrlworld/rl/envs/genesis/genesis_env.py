@@ -346,15 +346,10 @@ class GenesisEnv(World):
         For position control without an actuator, re-applying the same
         target each substep is a harmless no-op.
         """
-        for substep in range(self.decimation):
+        for _ in range(self.decimation):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             if self._external_wrench is not None:
                 self._write_external_wrench()
-            # Batched push wrench: Genesis auto-clears applied wrenches at the
-            # end of every scene.step, so one write before the first substep
-            # gives the one-substep-per-control-step cadence.
-            if self._push_wrench is not None and substep == 0:
-                self._write_push_wrench()
             self.scene_manager.step()
             # The physics state just advanced; bump the read-cache generation
             # so per-step-memoized reads (RobotData / contact sensors) can
@@ -363,19 +358,6 @@ class GenesisEnv(World):
             self._invalidate_cache()
             self.contact_manager.advance(dt=self.physics_dt)
         self.vis_manager.advance()
-
-    def _write_push_wrench(self) -> None:
-        """Apply the batched push wrench at the target link's COM (all envs)."""
-        entity_name, body_name, _body_id, force_w, torque_w = self._push_wrench_world()
-        robot = self.scene_manager[entity_name]
-        link_ids_global, _ = _eu.find_links(robot, [body_name], global_ids=True)
-        self.scene.rigid_solver.apply_links_external_wrench(
-            force=force_w,
-            torque=torque_w,
-            links_idx=link_ids_global,
-            ref=gs.link_ref_frame.link_COM,
-            local=False,
-        )
 
     def _write_external_wrench(self) -> None:
         """Apply the viewer wrench via the rigid solver's per-link force API."""

@@ -400,20 +400,11 @@ class MujocoEnv(World):
             )
 
     def _step_physics(self) -> None:
-        for substep in range(self.decimation):
+        for _ in range(self.decimation):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             self.scene_manager.write_data_to_sim()
             if self._external_wrench is not None:
                 self._write_external_wrench()
-            # Batched push wrench: xfrc_applied persists across substeps, so
-            # write it for the first substep and zero it on the second to get
-            # the one-substep-per-control-step cadence set_push_wrench
-            # promises (decimation >= 2 for every preset using it).
-            if self._push_wrench is not None:
-                if substep == 0:
-                    self._write_push_wrench(zero=False)
-                elif substep == 1:
-                    self._write_push_wrench(zero=True)
             self.scene_manager.step()
             self.scene_manager.update(dt=self.physics_dt)
             self.contact_manager.advance(dt=self.physics_dt)
@@ -437,25 +428,6 @@ class MujocoEnv(World):
             env_ids=env_ids,
             body_ids=[int(body_id)],
         )
-
-    def _write_push_wrench(self, zero: bool) -> None:
-        """Write (or zero) the batched push wrench via mjlab's xfrc API."""
-        entity_name, _body_name, body_id, force_w, torque_w = self._push_wrench_world()
-        if zero:
-            force_w = torch.zeros_like(force_w)
-            torque_w = torch.zeros_like(torque_w)
-        entity = self.scene_manager.get_entity(entity_name)
-        entity.write_external_wrench_to_sim(
-            forces=force_w.view(self.num_envs, 1, 3),
-            torques=torque_w.view(self.num_envs, 1, 3),
-            env_ids=self._all_env_ids_cached(),
-            body_ids=[int(body_id)],
-        )
-
-    def _all_env_ids_cached(self) -> torch.Tensor:
-        if not hasattr(self, "_all_env_ids"):
-            self._all_env_ids = torch.arange(self.num_envs, device=self.device)
-        return self._all_env_ids
 
     def _flush_external_wrench(self) -> None:
         """Zero the persistent ``xfrc_applied`` slot on release."""
