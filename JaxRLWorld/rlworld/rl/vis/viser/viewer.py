@@ -9,7 +9,7 @@ Works with any simulator through SimulatorBridge.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import trimesh
@@ -185,11 +185,28 @@ class ViserVisualizationManager:
                 scene=self.scene,
             )
 
-        # Contact-force arrows (GUI folder; off until toggled).
+        # Contact visualisation: sensor-group arrows plus the engine's own
+        # contacts (each class gates on its own backend, so at most one of
+        # the two engine overlays has anything to show). Their controls go
+        # in one tab — built from the constructor they would land at the
+        # root of the panel and follow the viewer onto every other tab.
         self._contact_overlay = ContactForceOverlay(self.server, self.env)
-        # Engine-level contact decor (each class gates on its own backend).
         self._mjv_contacts = MjvContactOverlay(self.server, self.env)
         self._gs_contacts = GenesisContactOverlay(self.server, self.env)
+        self._build_contacts_tab(tabs)
+
+    def _build_contacts_tab(self, tabs: Any) -> None:
+        """One "Contacts" tab holding every contact overlay's controls.
+
+        Skipped when no overlay applies, so a backend without contact
+        sensors or engine access does not get an empty tab.
+        """
+        overlays = (self._contact_overlay, self._mjv_contacts, self._gs_contacts)
+        if not any(o.is_available for o in overlays):
+            return
+        with tabs.add_tab("Contacts"):
+            for overlay in overlays:
+                overlay.build_ui()
 
     def _on_env_switch(self) -> None:
         """Handle environment index change."""

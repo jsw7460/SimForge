@@ -133,17 +133,34 @@ class ViserPlayViewer(PlayViewerBase):
         if ForceDragController.is_supported(self._play_scene):
             self._force_drag = ForceDragController(self._server, self.env, self._play_scene)
             self._force_drag.build_ui(tabs)
-        # Contact-force arrows (GUI folder; off until toggled).
+        # Contact visualisation: sensor-group arrows plus the engine's own
+        # contacts (each class gates on its own backend, so at most one of
+        # the two engine overlays has anything to show). Their controls go
+        # in one tab — built from the constructor they would land at the
+        # root of the panel and follow the viewer onto every other tab.
         self._contact_overlay = ContactForceOverlay(self._server, self.env)
-        # Engine-level contact decor (each class gates on its own backend).
         self._mjv_contacts = MjvContactOverlay(self._server, self.env)
         self._gs_contacts = GenesisContactOverlay(self._server, self.env)
+        self._build_contacts_tab(tabs)
         # Motion picker (only renders when the env exposes a 'motion' command
         # term — i.e. tracking presets; no-op on locomotion / getup / ...).
         self._build_motion_controls(tabs)
 
         self._update_status_display()
         print(f"[PlayViewer] Started on port {self._port}. Open the URL above to view. Press Play to start.")
+
+    def _build_contacts_tab(self, tabs: Any) -> None:
+        """One "Contacts" tab holding every contact overlay's controls.
+
+        Skipped when no overlay applies, so a backend without contact
+        sensors or engine access does not get an empty tab.
+        """
+        overlays = (self._contact_overlay, self._mjv_contacts, self._gs_contacts)
+        if not any(o.is_available for o in overlays):
+            return
+        with tabs.add_tab("Contacts"):
+            for overlay in overlays:
+                overlay.build_ui()
 
     def _build_controls_tab(self, tabs: Any) -> None:
         with tabs.add_tab("Controls", icon=viser.Icon.SETTINGS):

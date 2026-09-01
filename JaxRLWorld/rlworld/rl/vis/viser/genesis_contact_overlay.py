@@ -61,6 +61,21 @@ class GenesisContactOverlay:
         robot = env.scene_manager[env.robot_entity_name]
         self._robot_geom_range = (int(robot.geom_start), int(robot.geom_end))
 
+    @property
+    def is_available(self) -> bool:
+        """Whether this overlay has anything to offer on this backend."""
+        return self._available
+
+    def build_ui(self) -> None:
+        """Add the controls to whatever GUI container is open.
+
+        Separate from ``__init__`` so the caller decides where they go —
+        called from the constructor, the folder lands at the root of the
+        panel and shows on every tab.
+        """
+        if not self._available:
+            return
+        server = self._server
         with server.gui.add_folder("Engine contacts", expand_by_default=False):
             self._show_points = server.gui.add_checkbox("Contact points", initial_value=False)
             self._show_forces = server.gui.add_checkbox("Contact forces", initial_value=False)

@@ -69,13 +69,27 @@ class ContactForceOverlay:
         # Only groups that actually track forces: a fields=('found',)
         # group has nothing to draw and contact_force() refuses it.
         groups = [g for g in env.contact_manager.group_names() if "force" in env.contact_manager._groups[g].fields]
+        self._groups = groups
         self._available = bool(groups)
+
+    @property
+    def is_available(self) -> bool:
+        """Whether this overlay has anything to offer on this backend."""
+        return self._available
+
+    def build_ui(self) -> None:
+        """Add the controls to whatever GUI container is open.
+
+        Separate from ``__init__`` so the caller decides where they go —
+        called from the constructor, the folder lands at the root of the
+        panel and shows on every tab.
+        """
         if not self._available:
             return
-
+        server = self._server
         with server.gui.add_folder("Contact forces", expand_by_default=False):
             self._enable = server.gui.add_checkbox("Show", initial_value=False)
-            self._group = server.gui.add_dropdown("Group", options=tuple(groups), initial_value=groups[0])
+            self._group = server.gui.add_dropdown("Group", options=tuple(self._groups), initial_value=self._groups[0])
             self._scale = server.gui.add_slider("Scale (m/N)", min=0.001, max=0.02, step=0.001, initial_value=0.005)
             self._threshold = server.gui.add_slider("Min force (N)", min=0.0, max=20.0, step=0.5, initial_value=1.0)
             self._status = server.gui.add_markdown("")
