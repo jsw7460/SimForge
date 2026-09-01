@@ -191,6 +191,59 @@ class World(ABC):
         """
         return None
 
+    # ========== Batched push wrench (event-driven, cross-sim) ==========
+    #
+    # A per-env wrench on ONE body, applied on the FIRST physics substep of
+    # every control step while set. This reproduces the Isaac Gym cadence of
+    # calling ``apply_rigid_body_force_tensors`` once per control step (the
+    # force acts for a single simulate() call), which is what force-window
+    # disturbance events ported from Isaac Gym expect. Event terms own the
+    # timing; backends consume the buffer inside ``_step_physics``.
+
+    _push_wrench: tuple[str, str, torch.Tensor, torch.Tensor, bool] | None = None
+
+    def set_push_wrench(
+        self,
+        body_name: str,
+        force: torch.Tensor | None,
+        torque: torch.Tensor | None,
+        entity_name: str = "robot",
+        local: bool = True,
+    ) -> None:
+        """Set (or clear, with ``force=None``) the batched push wrench.
+
+        Args:
+            body_name: Target body (bare name).
+            force: ``(num_envs, 3)`` force [N], or ``None`` to clear.
+            torque: ``(num_envs, 3)`` torque [N*m] about the body COM.
+            entity_name: Owning entity.
+            local: When True the wrench is given in the BODY frame and is
+                rotated into world coordinates at each application using
+                the body's current orientation (Isaac ``LOCAL_SPACE``).
+        """
+        if force is None:
+            self._push_wrench = None
+            return
+        if torque is None:
+            torque = torch.zeros_like(force)
+        self._push_wrench = (entity_name, body_name, force, torque, local)
+
+    def _push_wrench_world(self) -> tuple[str, str, int, torch.Tensor, torch.Tensor]:
+        """Resolve the stored push wrench to world coordinates.
+
+        Returns ``(entity_name, body_name, body_id, force_w, torque_w)``.
+        """
+        from jaxrlworld.rl.utils.quat_utils import quat_rotate_wxyz
+
+        entity_name, body_name, force, torque, local = self._push_wrench
+        rd = self.get_entity_data(entity_name)
+        body_id = rd.find_body_index(body_name)
+        if local:
+            quat = rd.body_quat_w_all[:, body_id]
+            force = quat_rotate_wxyz(quat, force)
+            torque = quat_rotate_wxyz(quat, torque)
+        return entity_name, body_name, body_id, force, torque
+
     def _update_num_step_calls(self) -> None:
         self._env_step_counter += 1
 
@@ -825,6 +878,7 @@ class World(ABC):
             "bootstrap_mask": self.termination_manager.bootstrap_buf,
             **self.obs_manager.extras,
             **self.termination_manager.extras,
+            **self.command_manager.extras,
         }
         result = (self.obs_manager.get_observation(), self.rew_buf, terminated, truncated, self.extras)
 

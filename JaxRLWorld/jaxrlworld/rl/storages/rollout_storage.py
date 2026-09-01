@@ -135,6 +135,11 @@ class RolloutStorage:
         self.log_probs = jnp.zeros((T, N))
         self.mu = jnp.zeros((T, N) + self.action_shape)
         self.sigma = jnp.zeros((T, N) + self.action_shape)
+        # Truncation-without-reset mask, written by PPO.process_env_step only
+        # when the per-epoch-GAE update path is active (stays all-False and
+        # unread otherwise). Marks steps whose reward the update replaces
+        # with V(s_t) and where GAE cuts (time-outs + command resamples).
+        self.trunc_masks = jnp.zeros((T, N), dtype=jnp.bool_)
         # Filled by compute_returns()
         self.advantages: jax.Array | None = None
         self.returns: jax.Array | None = None

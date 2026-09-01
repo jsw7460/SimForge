@@ -45,6 +45,14 @@ class PPOConfig(BaseConfig):
     # When False, normalize once per rollout in compute_returns (rsl_rl default).
     normalize_advantage_per_minibatch: bool = True
     value_loss_coef: float = 1.0
+    # Action-bound penalty on the (unsquashed) policy mean outside [-1, 1]
+    # (booster_gym bound loss); 0 disables. Works in both update paths.
+    bound_loss_coef: float = 0.0
+    # booster_gym-style update: num_learning_epochs FULL-batch gradient steps,
+    # each recomputing values / GAE / advantage normalization with the current
+    # critic, with rewards at truncation steps (time-outs and the env's
+    # trunc_no_reset_mask) replaced by V(s_t). Requires num_mini_batches=1.
+    recompute_gae_per_epoch: bool = False
     use_truth_value_for_actor: bool = False
     use_truth_value_for_critic: bool = True
     use_barrier_style: bool = False

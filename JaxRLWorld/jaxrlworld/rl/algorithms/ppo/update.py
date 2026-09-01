@@ -13,7 +13,7 @@ from jaxrlworld.rl.algorithms.ppo.losses import (
 )
 from jaxrlworld.rl.algorithms.ppo.symmetry import symmetry_mirror_loss
 from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
-from jaxrlworld.rl.storages.rollout_storage import RolloutBatch
+from jaxrlworld.rl.storages.rollout_storage import RolloutBatch, compute_gae
 
 # ==================== Data Structures ====================
 
@@ -137,6 +137,7 @@ def compute_batch_loss(
     key: jax.Array,
     symmetry_spec=None,
     symmetry_coef: float = 0.0,
+    bound_loss_coef: float = 0.0,
 ) -> tuple[jax.Array, PPOLossInfo]:
     """Compute loss for a single batch."""
     model = eqx.combine(params, static)
@@ -178,6 +179,15 @@ def compute_batch_loss(
     entropy_mean = entropy.mean()
     total_loss = policy_loss + value_loss_coef * value_loss - entropy_coef * entropy_mean
 
+    # Action-bound penalty on the (unsquashed) policy mean outside [-1, 1]
+    # (booster_gym's bound loss). Static coefficient — no cost when 0.
+    bound_loss = jnp.zeros(())
+    if bound_loss_coef > 0.0:
+        bound_loss = (
+            jnp.square(jnp.maximum(mu_new - 1.0, 0.0)).mean() + jnp.square(jnp.minimum(mu_new + 1.0, 0.0)).mean()
+        )
+        total_loss = total_loss + bound_loss_coef * bound_loss
+
     # Left/right symmetry (mirror) auxiliary loss. symmetry_coef is a Python
     # static scalar, so this branch is resolved at trace time (no cost when off).
     mirror_loss = jnp.zeros(())
@@ -186,7 +196,7 @@ def compute_batch_loss(
         mirror_loss = symmetry_mirror_loss(model, batch.actor_observations, symmetry_spec, mkey)
         total_loss = total_loss + symmetry_coef * mirror_loss
 
-    aux = {**actor_aux, **critic_aux, "mirror_loss": mirror_loss}
+    aux = {**actor_aux, **critic_aux, "mirror_loss": mirror_loss, "bound_loss": bound_loss}
 
     loss_info = PPOLossInfo(
         policy_loss=policy_loss,
@@ -210,7 +220,7 @@ def compute_batch_loss(
 # ``params`` is NOT donated — on the first update its leaves are the
 # initial model's arrays, which the runner's ``actor_critic`` reference
 # still shares; donating them would invalidate that object's buffers.
-@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10, 12), donate_argnums=(2,))
+@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10, 12, 13), donate_argnums=(2,))
 def update_all_batches(
     params: Any,
     static: Any,
@@ -225,6 +235,7 @@ def update_all_batches(
     desired_kl: float,
     symmetry_spec: Any,
     symmetry_coef: float,
+    bound_loss_coef: float,
     flat_batch: RolloutBatch,
     batch_indices: jax.Array,
     key: jax.Array,
@@ -282,6 +293,7 @@ def update_all_batches(
                 subkey,
                 symmetry_spec,
                 symmetry_coef,
+                bound_loss_coef,
             )
 
         # Compute loss and gradients
@@ -340,3 +352,151 @@ def update_all_batches(
     final_carry, outputs = jax.lax.scan(scan_fn, init_carry, batch_indices)
 
     return final_carry.params, final_carry.opt_state, outputs, final_carry.key
+
+
+# ==================== Full-batch update with per-epoch GAE ====================
+
+
+@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 10, 11, 12, 13), donate_argnums=(2,))
+def update_recompute_gae_epochs(
+    params: Any,
+    static: Any,
+    opt_state: optax.OptState,
+    optimizer: optax.GradientTransformation,
+    clip_param: float,
+    value_loss_coef: float,
+    entropy_coef: float,
+    use_clipped_value_loss: bool,
+    bound_loss_coef: float,
+    symmetry_spec: Any,
+    symmetry_coef: float,
+    num_epochs: int,
+    gamma: float,
+    gae_lambda: float,
+    actor_obs: jax.Array,
+    critic_obs: jax.Array,
+    actions: jax.Array,
+    old_log_probs: jax.Array,
+    old_mu: jax.Array,
+    old_sigma: jax.Array,
+    rewards: jax.Array,
+    episode_starts: jax.Array,
+    trunc_mask: jax.Array,
+    last_critic_obs: jax.Array,
+    last_dones: jax.Array,
+    key: jax.Array,
+) -> tuple[Any, optax.OptState, ScanOutput, jax.Array, jax.Array]:
+    """booster_gym-style update: ``num_epochs`` FULL-batch gradient steps,
+    each recomputing values, GAE and advantage normalization with the
+    CURRENT critic before taking one step.
+
+    Per epoch (matching booster_gym's ``Runner.train`` inner loop):
+
+      1. ``values = V(critic_obs)`` fresh (also ``V(last_critic_obs)``)
+      2. ``rewards[trunc_mask] = values[trunc_mask]`` — truncation steps
+         (time-outs and command resamples without reset) get their reward
+         replaced by the value estimate, which makes their TD error zero
+      3. GAE with the episode cut extended by ``trunc_mask``
+      4. ``returns = values + advantages`` (constant target for the MSE)
+      5. one full-batch gradient step (advantages normalized over the
+         whole batch inside :func:`compute_batch_loss`)
+
+    Shapes: rollout tensors are ``(T, N, ...)``; obs must be plain arrays
+    (no image groups — the PPO wrapper enforces that).
+
+    Returns ``(params, opt_state, outputs, key, last_epoch_returns_flat)``;
+    the extra returns tensor feeds the batch-statistics metrics.
+    """
+    T, N = rewards.shape
+    flat_actor = actor_obs.reshape((T * N,) + actor_obs.shape[2:])
+    flat_critic = critic_obs.reshape((T * N,) + critic_obs.shape[2:])
+    flat_actions = actions.reshape((T * N,) + actions.shape[2:])
+    flat_log_probs = old_log_probs.reshape(T * N)
+    flat_mu = old_mu.reshape((T * N,) + old_mu.shape[2:])
+    flat_sigma = old_sigma.reshape((T * N,) + old_sigma.shape[2:])
+
+    # The truncation cut, folded into the episode-start convention
+    # compute_gae consumes: a truncation at t starts a "new episode" at t+1.
+    episode_starts_gae = episode_starts.at[1:].set(episode_starts[1:] | trunc_mask[:-1])
+    last_dones_gae = last_dones | trunc_mask[-1]
+
+    def epoch_fn(carry: ScanCarry, _x) -> tuple[ScanCarry, tuple[ScanOutput, jax.Array]]:
+        params, opt_state, key = carry.params, carry.opt_state, carry.key
+        key, subkey = jax.random.split(key)
+
+        model = eqx.combine(params, static)
+        values_flat, _ = model.evaluate_value(flat_critic)
+        values = values_flat.squeeze(-1).reshape(T, N)
+        last_values, _ = model.evaluate_value(last_critic_obs)
+        last_values = last_values.squeeze(-1)
+
+        rewards_eff = jnp.where(trunc_mask, values, rewards)
+        advantages, returns = compute_gae(
+            rewards=rewards_eff,
+            values=values,
+            episode_starts=episode_starts_gae,
+            last_values=last_values,
+            last_dones=last_dones_gae,
+            gamma=gamma,
+            gae_lambda=gae_lambda,
+        )
+
+        batch = RolloutBatch(
+            actor_observations=flat_actor,
+            critic_observations=flat_critic,
+            actions=flat_actions,
+            values=values.reshape(T * N),
+            advantages=advantages.reshape(T * N),
+            returns=returns.reshape(T * N),
+            old_log_probs=flat_log_probs,
+            old_mu=flat_mu,
+            old_sigma=flat_sigma,
+        )
+
+        def loss_fn(p):
+            return compute_batch_loss(
+                p,
+                static,
+                batch,
+                clip_param,
+                value_loss_coef,
+                entropy_coef,
+                use_clipped_value_loss,
+                True,  # normalize_advantages: full-batch, per epoch
+                subkey,
+                symmetry_spec,
+                symmetry_coef,
+                bound_loss_coef,
+            )
+
+        (loss, loss_info), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        updates, new_opt_state = optimizer.update(grads, opt_state, params)
+        new_params = optax.apply_updates(params, updates)
+
+        new_carry = ScanCarry(
+            params=new_params,
+            opt_state=new_opt_state,
+            key=key,
+            early_stopped=carry.early_stopped,
+        )
+        output = ScanOutput(
+            policy_loss=loss_info.policy_loss,
+            value_loss=loss_info.value_loss,
+            entropy=loss_info.entropy,
+            approx_kl=loss_info.approx_kl,
+            analytical_kl=loss_info.analytical_kl,
+            clip_fraction=loss_info.clip_fraction,
+            did_update=jnp.array(True),
+            aux=loss_info.aux,
+        )
+        return new_carry, (output, returns.reshape(T * N))
+
+    init_carry = ScanCarry(
+        params=params,
+        opt_state=opt_state,
+        key=key,
+        early_stopped=jnp.array(False),
+    )
+    final_carry, (outputs, returns_per_epoch) = jax.lax.scan(epoch_fn, init_carry, None, length=num_epochs)
+
+    return final_carry.params, final_carry.opt_state, outputs, final_carry.key, returns_per_epoch[-1]

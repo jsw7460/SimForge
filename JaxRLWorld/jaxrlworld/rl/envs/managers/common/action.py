@@ -701,6 +701,17 @@ class ActionManagerBase(BaseManager):
         # so gain dicts from robot configs match without prefix awareness.
         bare_names = [name.rsplit("/", 1)[-1] for name in joint_names]
 
+        # A config that names its own class wins over the built-in map —
+        # this is how external packages plug in custom actuator models.
+        if cfg.class_type is not None:
+            return cfg.class_type(
+                cfg,
+                num_envs=self.env.num_envs,
+                num_joints=num_joints,
+                device=self.device,
+                joint_names=bare_names,
+            )
+
         for cfg_type, actuator_cls in cls_map:
             if isinstance(cfg, cfg_type):
                 return actuator_cls(

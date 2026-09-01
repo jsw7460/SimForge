@@ -27,10 +27,11 @@ from jaxrlworld.rl.algorithms.ppo.update import (
     forward_policy_and_value_deterministic,
     get_value,
     update_all_batches,
+    update_recompute_gae_epochs,
 )
 from jaxrlworld.rl.modules.normalization import EmpiricalNormalization
 from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
-from jaxrlworld.rl.storages.rollout_storage import RolloutStorage
+from jaxrlworld.rl.storages.rollout_storage import RolloutBatch, RolloutStorage
 
 
 def _as_obs_shape(shape):
@@ -186,6 +187,8 @@ class PPO(OnPolicyAlgorithm):
         normalize_advantage_per_minibatch: bool = True,
         symmetry_spec=None,
         symmetry_coef: float = 0.0,
+        bound_loss_coef: float = 0.0,
+        recompute_gae_per_epoch: bool = False,
         optimizer_class=None,
         key: jax.Array = None,
         **kwargs,
@@ -245,6 +248,23 @@ class PPO(OnPolicyAlgorithm):
         # runner from the env's obs layout; coef 0 disables (no trace cost).
         self.symmetry_spec = symmetry_spec
         self.symmetry_coef = symmetry_coef
+        # booster_gym-recipe options (see update_recompute_gae_epochs):
+        # bound_loss_coef adds the action-bound penalty on the policy mean in
+        # BOTH update paths; recompute_gae_per_epoch switches update() to
+        # full-batch epochs with per-epoch value/GAE recomputation and
+        # truncation-mask reward substitution.
+        self.bound_loss_coef = bound_loss_coef
+        self.recompute_gae_per_epoch = recompute_gae_per_epoch
+        if recompute_gae_per_epoch:
+            if num_mini_batches != 1:
+                raise ValueError("recompute_gae_per_epoch is a FULL-batch update; set num_mini_batches=1.")
+            if use_value_normalization:
+                raise ValueError("recompute_gae_per_epoch does not support value normalization.")
+            if use_early_stop:
+                raise ValueError("recompute_gae_per_epoch does not support KL early stopping.")
+        # Bootstrap inputs captured by compute_returns for the per-epoch path.
+        self._recompute_last_critic_obs = None
+        self._recompute_last_dones = None
         # Filled by _compute_metrics each update; consumed by the
         # adaptive-LR schedule in the same update() call.
         self._last_analytical_kl_mean = 0.0
@@ -401,8 +421,19 @@ class PPO(OnPolicyAlgorithm):
         else:
             self.transition.episode_starts = self._last_dones
 
-        # Handle timeout (truncated-only; vectorized — no host sync)
-        self._handle_timeout(truncated, terminated, infos)
+        # Handle timeout (truncated-only; vectorized — no host sync).
+        # The per-epoch-GAE path replaces the gamma*V(final) reward bonus with
+        # booster_gym's reward substitution (reward <- V(s_t) at truncation
+        # steps, applied inside the update), so the bonus must not also run.
+        if self.recompute_gae_per_epoch:
+            bootstrap_mask = infos.get("bootstrap_mask")
+            if bootstrap_mask is None:
+                bootstrap_mask = truncated & ~terminated
+            trunc_no_reset = infos.get("trunc_no_reset_mask")
+            mask = bootstrap_mask if trunc_no_reset is None else (bootstrap_mask | trunc_no_reset)
+            self.storage.trunc_masks = self.storage.trunc_masks.at[self.storage.step].set(mask)
+        else:
+            self._handle_timeout(truncated, terminated, infos)
 
         # Add to storage
         self.storage.add_transition(
@@ -470,6 +501,13 @@ class PPO(OnPolicyAlgorithm):
         Args:
             last_critic_obs: Critic observations for the last state
         """
+        if self.recompute_gae_per_epoch:
+            # GAE runs inside update(), once per epoch with fresh values;
+            # only the bootstrap inputs are captured here.
+            self._recompute_last_critic_obs = last_critic_obs
+            self._recompute_last_dones = self._last_dones
+            return
+
         last_values = _evaluate_bootstrap_values(self.train_state.model, last_critic_obs)
 
         # Hook 3a (value normalization, opt-in): last_values comes from the
@@ -508,6 +546,9 @@ class PPO(OnPolicyAlgorithm):
 
     def update(self) -> PPOMetrics:
         """Update policy and value networks with early stopping and adaptive LR."""
+        if self.recompute_gae_per_epoch:
+            return self._update_recompute_gae()
+
         key = self.train_state.key
         key, subkey = jax.random.split(key)
 
@@ -543,6 +584,7 @@ class PPO(OnPolicyAlgorithm):
             desired_kl,
             self.symmetry_spec,
             self.symmetry_coef,
+            self.bound_loss_coef,
             flat_batch,
             batch_indices,
             subkey,
@@ -580,6 +622,88 @@ class PPO(OnPolicyAlgorithm):
 
         self.storage.clear()
 
+        return metrics
+
+    def _update_recompute_gae(self) -> PPOMetrics:
+        """booster_gym-style update: full-batch epochs with per-epoch GAE.
+
+        Requires plain-array observations (no image groups) and the
+        bootstrap inputs captured by :meth:`compute_returns`.
+        """
+        if isinstance(self.storage.actor_obs, dict) or isinstance(self.storage.critic_obs, dict):
+            raise NotImplementedError("recompute_gae_per_epoch does not support dict (image) observations.")
+        if self._recompute_last_critic_obs is None:
+            raise RuntimeError("compute_returns() must run before update() (bootstrap inputs missing).")
+
+        key = self.train_state.key
+        key, subkey = jax.random.split(key)
+
+        params, static = eqx.partition(
+            self.train_state.model,
+            eqx.is_inexact_array,
+            is_leaf=lambda x: isinstance(x, EmpiricalNormalization),
+        )
+
+        new_params, new_opt_state, outputs, new_key, last_returns = update_recompute_gae_epochs(
+            params,
+            static,
+            self.train_state.opt_state,
+            self.optimizer,
+            self.clip_param,
+            self.value_loss_coef,
+            self.entropy_coef,
+            self.use_clipped_value_loss,
+            self.bound_loss_coef,
+            self.symmetry_spec,
+            self.symmetry_coef,
+            self.num_learning_epochs,
+            self.gamma,
+            self.lam,
+            self.storage.actor_obs,
+            self.storage.critic_obs,
+            self.storage.actions,
+            self.storage.log_probs,
+            self.storage.mu,
+            self.storage.sigma,
+            self.storage.rewards,
+            self.storage.episode_starts,
+            self.storage.trunc_masks,
+            self._recompute_last_critic_obs,
+            self._recompute_last_dones,
+            subkey,
+        )
+
+        new_model = eqx.combine(new_params, static)
+        self.train_state = PPOTrainState(model=new_model, opt_state=new_opt_state, key=new_key)
+
+        # Metrics: same reducer as the scan path, fed a minimal flat batch
+        # (only actions / returns / actor obs are read) and one index row
+        # covering the whole batch.
+        T, N = self.storage.rewards.shape
+        batch_size = T * N
+        flat_batch = RolloutBatch(
+            actor_observations=self.storage.actor_obs.reshape((batch_size,) + self.storage.actor_obs.shape[2:]),
+            critic_observations=self.storage.critic_obs.reshape((batch_size,) + self.storage.critic_obs.shape[2:]),
+            actions=self.storage.actions.reshape((batch_size,) + self.storage.actions.shape[2:]),
+            values=self.storage.values.reshape(batch_size),
+            advantages=last_returns,  # placeholder, unread by metrics
+            returns=last_returns,
+            old_log_probs=self.storage.log_probs.reshape(batch_size),
+            old_mu=self.storage.mu.reshape((batch_size,) + self.storage.mu.shape[2:]),
+            old_sigma=self.storage.sigma.reshape((batch_size,) + self.storage.sigma.shape[2:]),
+        )
+        batch_indices = jnp.arange(batch_size)[None, :]
+        metrics = self._compute_metrics(outputs, flat_batch, batch_indices)
+
+        if self.schedule == "adaptive" and self.desired_kl is not None:
+            self._adaptive_learning_rate(self._last_analytical_kl_mean)
+
+        if self.obs_normalization:
+            flat_actor, flat_critic = self.storage.get_flat_observations()
+            new_model = _update_normalizers(self.train_state.model, flat_actor, flat_critic)
+            self.train_state = self.train_state._replace(model=new_model)
+
+        self.storage.clear()
         return metrics
 
     def _compute_metrics(self, outputs: ScanOutput, flat_batch, batch_indices) -> PPOMetrics:

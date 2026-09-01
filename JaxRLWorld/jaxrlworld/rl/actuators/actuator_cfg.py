@@ -43,6 +43,14 @@ class ActuatorBaseCfg:
     """
 
     target_names_expr: tuple[str, ...] = ()
+
+    class_type: type | None = None
+    """Actuator class to instantiate for this config. ``None`` (default)
+    uses the built-in cfg-type -> class mapping in the action manager;
+    setting it lets external packages plug in custom actuator models
+    without editing that map (same pattern as ``ActionTermCfg.class_type``).
+    The class must accept the ``ActuatorBase`` constructor signature."""
+
     stiffness: float | dict[str, float] | None = None
     damping: float | dict[str, float] | None = None
     effort_limit: float | dict[str, float] | None = None

@@ -128,6 +128,8 @@ class OnPolicyRunner(BaseRunner):
             normalize_advantage_per_minibatch=alg_cfg.normalize_advantage_per_minibatch,
             symmetry_spec=symmetry_spec,
             symmetry_coef=symmetry_coef,
+            bound_loss_coef=alg_cfg.bound_loss_coef,
+            recompute_gae_per_epoch=alg_cfg.recompute_gae_per_epoch,
             key=key,
         )
 
@@ -307,6 +309,7 @@ class OnPolicyRunner(BaseRunner):
             # check_bool_dlpack_bridge.
             terminal_obs = infos.get("final_observation")
             bootstrap_mask = infos.get("bootstrap_mask")
+            trunc_no_reset = infos.get("trunc_no_reset_mask")
 
             sources = self._obs_sources(obs_dict, "actor", "")
             sources.update(self._obs_sources(obs_dict, "critic", ""))
@@ -322,6 +325,10 @@ class OnPolicyRunner(BaseRunner):
                 # absent -> PPO falls back to ``truncated & ~terminated``.
                 if bootstrap_mask is not None:
                     sources["bootstrap_mask"] = bootstrap_mask.to(torch.uint8)
+            if trunc_no_reset is not None:
+                # Truncation WITHOUT reset (e.g. command-resample steps) — only
+                # consumed by PPO's recompute_gae_per_epoch path.
+                sources["trunc_no_reset_mask"] = trunc_no_reset.to(torch.uint8)
 
             converted = torch_to_jax_many(sources)
 
@@ -339,6 +346,8 @@ class OnPolicyRunner(BaseRunner):
                 }
                 if bootstrap_mask is not None:
                     infos_jax["bootstrap_mask"] = converted["bootstrap_mask"].astype(jnp.bool_)
+            if trunc_no_reset is not None:
+                infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"].astype(jnp.bool_)
             self.alg.process_env_step(
                 rewards_jax,
                 terminated_jax,

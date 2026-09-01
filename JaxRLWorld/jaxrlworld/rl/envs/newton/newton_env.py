@@ -393,6 +393,11 @@ class NewtonEnv(World):
             # (mirrors the propeller action convention).
             if self._external_wrench is not None:
                 self._write_external_wrench()
+            # Batched push wrench: body_f is cleared every substep above, so
+            # a single write on the first substep gives exactly the
+            # one-substep-per-control-step cadence.
+            if self._push_wrench is not None and substep == 0:
+                self._write_push_wrench()
             self.scene_manager.step()
             # The physics state just advanced; bump the read-cache generation
             # so per-step-memoized reads (RobotData) can never serve a
@@ -413,6 +418,21 @@ class NewtonEnv(World):
     def _render_sensors(self) -> None:
         """Raytrace the cameras against the state the observation reports."""
         self.scene_manager.render_cameras()
+
+    def _write_push_wrench(self) -> None:
+        """Add the batched push wrench into ``state_0.body_f`` for all envs."""
+        _entity_name, _body_name, body_id, force_w, torque_w = self._push_wrench_world()
+        model = self.scene_manager.model
+        num_worlds = model.world_count
+        num_bodies_per_world = model.body_count // num_worlds
+        body_f = wp.to_torch(self.scene_manager.state_0.body_f).view(num_worlds, num_bodies_per_world, 6)
+        # Same slot convention as _write_external_wrench: [force, torque].
+        body_f[:, int(body_id), 0:3] += force_w
+        body_f[:, int(body_id), 3:6] += torque_w
+        wp.copy(
+            self.scene_manager.state_0.body_f,
+            wp.from_torch(body_f.view(-1, 6), dtype=wp.spatial_vector, requires_grad=False),
+        )
 
     def _write_external_wrench(self) -> None:
         """Add the viewer force into ``state_0.body_f`` for one body/env.

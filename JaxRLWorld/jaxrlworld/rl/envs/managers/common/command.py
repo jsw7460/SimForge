@@ -39,6 +39,12 @@ class CommandManager(BaseManager):
 
         self._terms: dict[str, CommandTerm] = {}
 
+        # Per-step signals a command term wants surfaced in the env's step
+        # ``extras`` (World merges this dict into the step infos). Terms
+        # write entries during ``compute``; empty by default so presets
+        # without such terms are unaffected.
+        self.extras: dict[str, torch.Tensor] = {}
+
         # Maps column name → (term_name, column_index).
         #
         # Each CommandTerm declares column_names for its command dimensions.
