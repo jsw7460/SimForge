@@ -94,5 +94,5 @@ checkpoints/
 *.local.md
 MUJOCO_LOG.TXT
 
-# Raw retargeted-motion CSVs (intermediate; converted NPZs live in rlworld_private)
+# Raw retargeted-motion CSVs (intermediate; converted NPZs live in jaxrlworld_private)
 /lafan1_g1_raw/

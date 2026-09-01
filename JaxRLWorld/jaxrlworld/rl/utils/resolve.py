@@ -36,17 +36,38 @@ def callable_to_string(fn: Callable) -> str:
     return f"{module}:{qualname}"
 
 
+#: What the package was called before 2026-09. Checkpoints written then
+#: record module paths under this name; see the error raised below.
+_FORMER_PACKAGE = "rlworld"
+
+
 def resolve_callable(ref: str) -> Callable:
     """Resolve a ``"module:qualname"`` string to the actual callable.
 
-    Raises ``ImportError`` if the module cannot be found,
-    ``AttributeError`` if the attribute path is invalid.
+    Raises ``ImportError`` if the module cannot be found, and says how to
+    migrate when the module is missing only because the reference predates
+    the package's rename. ``AttributeError`` if the attribute path is
+    invalid.
     """
     if ":" not in ref:
         raise ValueError(f"Invalid callable reference {ref!r}. Expected 'module.path:attr.name' format.")
 
     module_path, attr_path = ref.split(":", 1)
-    module = importlib.import_module(module_path)
+    try:
+        module = importlib.import_module(module_path)
+    except ModuleNotFoundError as exc:
+        if module_path.split(".", 1)[0] != _FORMER_PACKAGE:
+            raise
+        raise ModuleNotFoundError(
+            f"{ref!r} names this package as {_FORMER_PACKAGE!r}, which it was called "
+            "before it was renamed to 'jaxrlworld'. A checkpoint saved then records "
+            "its reward, termination and event functions by module path, so its "
+            "config.yaml has to be rewritten before it will load:\n\n"
+            "    python -m jaxrlworld.scripts.migrate_checkpoint_module_paths <checkpoint-dir>\n\n"
+            "The rewrite is not done here on the reader's behalf. A checkpoint is a "
+            "record of what was run; quietly reinterpreting one leaves no trace that "
+            "it was ever written under a different name."
+        ) from exc
 
     obj = module
     for attr in attr_path.split("."):
