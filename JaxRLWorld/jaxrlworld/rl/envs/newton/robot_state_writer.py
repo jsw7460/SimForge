@@ -47,6 +47,8 @@ import torch
 import warp as wp
 from torch import Tensor
 
+from jaxrlworld.rl.utils.quat_utils import quat_rotate_wxyz
+
 if TYPE_CHECKING:
     from newton.selection import ArticulationView
 
@@ -182,14 +184,30 @@ class NewtonRobotStateWriter:
         ang_vel: Tensor,
         env_ids: Tensor | None = None,
     ) -> None:
-        """Write root link linear + angular velocity."""
+        """Write root link linear + angular velocity.
+
+        ``lin_vel`` is the LINK-ORIGIN velocity — the quantity
+        ``RobotData.root_link_lin_vel_w`` reads back. Newton's root
+        velocity state is referenced at the body CoM, so the write
+        transfers it first: ``v_C = v_O + omega x (R @ c)``. Without
+        this the write/read pair is asymmetric whenever ``ang_vel`` is
+        non-zero (the mjlab/Genesis writers take origin velocities), and
+        an injected (v, omega) reads back as ``v - omega x (R @ c)`` —
+        caught by the K1 cross-sim parity diag. Uses the CURRENT root
+        orientation, so write the pose before the velocity (every reset
+        event already does).
+        """
         if self._root_vel is None:
             raise ValueError(
                 "Cannot write root velocity for a welded articulation: it has no root "
                 "velocity coordinates. Its pose can still be written."
             )
         rows = env_ids if env_ids is not None else slice(None)
-        self._root_vel[rows, 0:3] = lin_vel
+        rd = self._env.get_robot_data(self._entity_name)
+        c = rd._body_com_local_view()[rd._root_body_index]
+        quat_wxyz = self._root_pose[rows, 3:7][..., [3, 0, 1, 2]]
+        r_world = quat_rotate_wxyz(quat_wxyz, c.expand_as(lin_vel))
+        self._root_vel[rows, 0:3] = lin_vel + torch.cross(ang_vel, r_world, dim=-1)
         self._root_vel[rows, 3:6] = ang_vel
 
     # ------------------------------------------------------------------
@@ -250,9 +268,14 @@ class NewtonRigidObjectStateWriter:
     full-width buffer and only fill the reset rows.
     """
 
-    def __init__(self, env: NewtonEnv, view: ArticulationView, immovable: bool = False) -> None:
+    def __init__(self, env: NewtonEnv, view: ArticulationView, data, immovable: bool = False) -> None:
         self._env = env
         self._view = view
+        # The paired NewtonRigidObjectData. The velocity write reads the
+        # object's current orientation and CoM offset from the very same
+        # source the reader uses, so the origin<->CoM transfer below can
+        # never drift out of sync with the read side.
+        self._data = data
         self._immovable = immovable
         # Persistent mask buffers — see ``_persistent_mask``.
         self._mask_torch: Tensor | None = None
@@ -295,6 +318,15 @@ class NewtonRigidObjectStateWriter:
     def set_root_velocity(self, lin_vel: Tensor, ang_vel: Tensor, env_ids: Tensor | None = None) -> None:
         """Write root spatial velocity (Newton layout: linear, angular).
 
+        ``lin_vel`` is the LINK-ORIGIN velocity (what
+        ``RigidObjectData.root_link_lin_vel_w`` reads back); Newton's root
+        velocity state is CoM-referenced, so it is transferred before
+        storing: ``v_C = v_O + omega x (R @ c)`` — the same asymmetry fix
+        as the articulation writer above. For a prop whose inertial origin
+        coincides with the link origin (c = 0, e.g. the cube/table props)
+        the transfer is an exact identity. Uses the CURRENT orientation,
+        so write the pose before the velocity.
+
         Raises:
             ValueError: If the entity is immovable. A kinematic body does have
                 velocity DOFs, but they are pinned by a huge armature and mean
@@ -306,6 +338,12 @@ class NewtonRigidObjectStateWriter:
                 "Cannot write root velocity for fixed-base entity: it does not respond to applied "
                 "forces. Its pose can still be set per environment."
             )
+        rows = env_ids if env_ids is not None else slice(None)
+        rd = self._data
+        c = rd._body_com_local_view()[rd._root_body_index]
+        quat_wxyz = rd.root_quat_wxyz(self._env.scene_manager.state)[rows]
+        r_world = quat_rotate_wxyz(quat_wxyz, c.expand_as(lin_vel))
+        lin_vel = lin_vel + torch.cross(ang_vel, r_world, dim=-1)
         velocities = self._staged(env_ids, torch.cat([lin_vel, ang_vel], dim=-1), 6)
         state = self._env.scene_manager.state
         self._view.set_root_velocities(

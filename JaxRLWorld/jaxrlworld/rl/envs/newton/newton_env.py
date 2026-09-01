@@ -308,7 +308,7 @@ class NewtonEnv(World):
             # Immovability is read off the model once (welded, or kinematic)
             # and handed to the writer so both sides agree on one source.
             self._rigid_object_state_writer_cache[name] = NewtonRigidObjectStateWriter(
-                self, view, immovable=data.is_fixed_base
+                self, view, data, immovable=data.is_fixed_base
             )
 
     def _post_setup(self) -> None:
