@@ -276,7 +276,16 @@ def resolve_mjcf_geom_groups(mjcf_path: str, visible_geometry: str) -> tuple[int
             )
 
     groups: dict[int, set[bool]] = {}
-    for geom in root.iter("geom"):
+    # Only geoms that exist in the scene. ``root.iter`` would also walk
+    # the <geom> elements INSIDE <default> blocks, which are attribute
+    # templates rather than geoms — and a nested default that sets only
+    # friction (inheriting its group from the enclosing class, as
+    # MuJoCo defaults do) then reads as an anonymous colliding geom in
+    # group 0, failing the mixed-group check on an asset whose real
+    # geoms are split perfectly.
+    worldbody = root.find("worldbody")
+    scene_geoms = worldbody.iter("geom") if worldbody is not None else ()
+    for geom in scene_geoms:
         base_group, base_collides = class_defaults.get(geom.get("class", ""), (0, True))
         group = int(geom.get("group", base_group))
         contype = geom.get("contype")
