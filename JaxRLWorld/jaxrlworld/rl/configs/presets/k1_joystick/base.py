@@ -97,7 +97,7 @@ class K1JoystickConfig:
 
     sim_type: str = "newton"
     robot: K1Config = field(default_factory=K1Config)
-    num_envs: int = 8192
+    num_envs: int = 16384
     seed: int = 42
     episode_length_s: float = 20.0
 
@@ -128,6 +128,11 @@ class K1JoystickConfig:
     # PPO adds mirror_loss_coeff * MSE(pi(mirror(o)), mirror(pi(o))) to enforce
     # left/right equivariance. Mirror operator auto-built (see ppo.symmetry).
     mirror_symmetry_coeff: float = 0.0
+
+    # Absolute-heading command. True generates wz from the heading error
+    # instead of sampling it, which is what kills the yaw drift documented
+    # below; False falls back to sampling wz from ``ang_vel_range``.
+    heading_command: bool = True
 
     # Rewards (upstream reward_config; zero-weight terms omitted).
     tracking_sigma: float = 0.25
@@ -410,15 +415,16 @@ class K1JoystickConfig:
                 lin_vel_y_range=self.lin_vel_y_range,
                 ang_vel_range=self.ang_vel_range,
                 rel_standing_envs=0.15,
-                # Heading control (always on): the ang_vel (wz) command is generated
-                # as wz = stiffness * (heading_target - heading_w), so the policy holds
-                # an ABSOLUTE heading instead of tracking a yaw RATE. Rate-only commands
-                # let a small yaw bias accumulate into a large heading rotation
-                # (k1_yaw_drift_diag: ~2.5 deg/s under wz=0 -> ~50 deg per episode),
-                # including the left/right-SYMMETRIC vy->wz coupling that the mirror
-                # loss cannot catch (it satisfies mirror symmetry). Heading control
-                # forces wz to null out any heading error, killing the drift at the source.
-                heading_command=True,
+                # Heading control (on by default): the ang_vel (wz) command is
+                # generated as wz = stiffness * (heading_target - heading_w), so the
+                # policy holds an ABSOLUTE heading instead of tracking a yaw RATE.
+                # Rate-only commands let a small yaw bias accumulate into a large
+                # heading rotation (k1_yaw_drift_diag: ~2.5 deg/s under wz=0 ->
+                # ~50 deg per episode), including the left/right-SYMMETRIC vy->wz
+                # coupling that the mirror loss cannot catch (it satisfies mirror
+                # symmetry). Heading control forces wz to null out any heading
+                # error, killing the drift at the source.
+                heading_command=self.heading_command,
                 heading_control_stiffness=0.5,
                 rel_heading_envs=1.0,
             ),
