@@ -6,6 +6,7 @@ import statistics
 import sys
 import traceback
 from collections import deque
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Union
 
@@ -627,6 +628,9 @@ class WandbLogger:
         project_name: str,
         group_name: str,
         run_name: str,
+        job_type: str | None = None,
+        tags: Sequence[str] = (),
+        notes: str | None = None,
         cfg: Dict = None,
     ):
         if run_name is None:
@@ -641,12 +645,19 @@ class WandbLogger:
         # No Settings(start_method=...): wandb deprecated it as
         # non-functional, and newer releases (CHTC images) reject the
         # field outright with a pydantic extra_forbidden error.
+        # ``group``/``job_type``/``tags`` are the axes the W&B UI groups and
+        # filters on. Anything already in ``cfg`` needs no encoding here —
+        # the run config is uploaded whole, so a comparison nobody planned
+        # for (a reward weight, a DR range) is still available afterwards.
         self.run = wandb.init(
             project=project_name,
             dir=log_dir,
             config=cfg,
             group=group_name,
             name=run_name,
+            job_type=job_type,
+            tags=list(tags) or None,
+            notes=notes,
         )
         # ``get_url`` is deprecated (removed after the warning stage);
         # ``run.url`` is the long-standing property both old and new

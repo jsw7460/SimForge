@@ -221,14 +221,11 @@ class BaseRunner(ABC):
         self.wandb_url = None
         self.use_wandb = use_wandb
         if use_wandb:
-            group_name = self.runner_cfg.run_name
-            run_name = self.runner_cfg.run_name + f"_seed{self.env.seed}"
             self.wandb_logger = WandbLogger(
                 project_name=self.runner_cfg.wandb_project,
-                group_name=group_name,
-                run_name=run_name,
                 log_dir=self.wandb_log_dir,
                 cfg=self.cfgs.recursive_to_dict(),
+                **self._wandb_identity(),
             )
             self.wandb_url = self.wandb_logger.wandb_url
 
@@ -290,6 +287,35 @@ class BaseRunner(ABC):
                     device=self.device,
                     gamma=self.cfgs.algorithm.gamma,
                 )
+
+    def _wandb_identity(self) -> dict:
+        """The W&B axes for this run: group, name, job type, tags, notes.
+
+        The run config is uploaded whole, so nothing here needs to encode a
+        comparison. These are only what the UI groups and filters on before
+        anyone opens the config: which batch a run belongs to, which
+        simulator produced it, and which preset it came from.
+
+        ``WANDB_RUN_GROUP`` and ``WANDB_NOTES`` are read by W&B itself; they
+        are read here too so the values also reach the run name and so a
+        config field can override them.
+        """
+        cfg = self.runner_cfg
+        # "...configs.presets.k1_joystick.no_heading" -> ("k1_joystick", "no_heading")
+        preset_path = self.cfgs.preset_module or ""
+        _, _, preset_tail = preset_path.partition(".presets.")
+        preset_tags = [part for part in preset_tail.split(".") if part and part != "base"]
+
+        group = cfg.wandb_group or os.environ.get("WANDB_RUN_GROUP") or cfg.run_name
+        tags = [self.cfgs.sim_type, *preset_tags, *cfg.wandb_tags]
+
+        return {
+            "group_name": group,
+            "run_name": f"{cfg.run_name}-s{self.env.seed}",
+            "job_type": cfg.wandb_job_type or self.cfgs.sim_type,
+            "tags": list(dict.fromkeys(tag for tag in tags if tag)),
+            "notes": os.environ.get("WANDB_NOTES") or None,
+        }
 
     def _update_reward_stats(
         self,

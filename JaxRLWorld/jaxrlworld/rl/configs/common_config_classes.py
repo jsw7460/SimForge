@@ -777,6 +777,21 @@ class RunnerConfig(BaseConfig):
     run_name: str = ""
     logger: str = "wandb"
     wandb_project: str = "SimForge"
+
+    # W&B grouping axes. The run config is uploaded whole, so these only
+    # need to carry what the UI groups and filters on before you look at
+    # the config: which batch a run belongs to, which simulator produced
+    # it, and a few coarse labels.
+    #
+    # ``wandb_group`` collects the runs you want averaged or overlaid --
+    # by default one submission, taken from the ``WANDB_RUN_GROUP``
+    # environment variable that W&B itself reads, falling back to the run
+    # name so a single local run still groups with its own seeds.
+    # ``wandb_job_type`` defaults to the simulator. ``wandb_tags`` are
+    # added to the ones derived from the preset.
+    wandb_group: str | None = None
+    wandb_job_type: str | None = None
+    wandb_tags: tuple = ()
     save_interval: int = 1000
     # Cadence of the rolling ``checkpoint_latest`` (full-parameter D2H +
     # disk write). 1 restores the old save-every-iteration behavior; the
