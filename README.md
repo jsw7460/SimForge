@@ -8,17 +8,6 @@ itself is `jaxrlworld/` inside [`JaxRLWorld/`](JaxRLWorld); `SimForge/` is the
 umbrella repo that pins specific simulator versions as git submodules so
 external users can clone a single, reproducible stack.
 
-<p align="center">
-  <em><b>Sim2real</b> — a PPO joystick policy trained with SimForge, deployed on a real Booster K1.</em>
-</p>
-
-https://github.com/user-attachments/assets/d25ec1ff-3eb8-4b15-b1f6-2919f052d3e6
-
-<p align="center">
-  <em>A Unitree G1 tracking a reference motion with a SimForge-trained policy.</em>
-</p>
-
-https://github.com/user-attachments/assets/29446d78-2332-4cb7-9b6e-c618789c01f1
 
 <p align="center">
   <img src="docs/demo.gif" alt="A single PPO policy trained in Newton, evaluated in Genesis, Newton, and MuJoCo" width="900"/>
@@ -44,13 +33,26 @@ https://github.com/user-attachments/assets/29446d78-2332-4cb7-9b6e-c618789c01f1
   <em>One PPO policy trained on <code>go2/newton/rough</code> (rough terrain), evaluated across all three simulators.</em>
 </p>
 
+
+<p align="center">
+  <em><b>Sim2real</b> — a PPO joystick policy trained with SimForge, deployed on a real Booster K1.</em>
+</p>
+
+https://github.com/user-attachments/assets/d25ec1ff-3eb8-4b15-b1f6-2919f052d3e6
+
+<p align="center">
+  <em>A Unitree G1 tracking a reference motion with a SimForge-trained policy.</em>
+</p>
+
+https://github.com/user-attachments/assets/29446d78-2332-4cb7-9b6e-c618789c01f1
+
 ## Highlights
 
-- **Sim2real, not just cross-sim.** Policies trained with SimForge run
+- **Sim-to-real** Policies trained with SimForge run
   on real hardware — Booster K1, Unitree G1, and Unitree Go2 (videos
   above and in [Sim2real](#sim2real)). Cross-sim additionally provides
   a hardware-free testbed for sim2real-style experiments (e.g., system
-  identification); the same task config drives all three backends.
+  identification).
 - **9 task configurations × 3 simulators = 27 ready combinations**
   covering Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and
   the Booster T1 and K1 humanoids.
