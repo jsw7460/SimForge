@@ -1,23 +1,3 @@
-
-
-https://github.com/user-attachments/assets/dff7c848-b4ac-4323-9a7f-2e74b96170e7
-
-
-
-https://github.com/user-attachments/assets/e9f765da-2eac-408f-8c2d-2ad7d1f033b9
-
-
-
-https://github.com/user-attachments/assets/49849991-7381-4347-849e-6853217f5d4e
-
-
-
-https://github.com/user-attachments/assets/a3b68d46-92eb-439f-a6a2-02d422558bb6
-
-
-
-https://github.com/user-attachments/assets/29446d78-2332-4cb7-9b6e-c618789c01f1
-
 # SimForge
 
 A JAX-based reinforcement learning framework for legged-robot locomotion,
