@@ -49,9 +49,10 @@ external users can clone a single, reproducible stack.
   above and in [Sim2real](#sim2real)). Cross-sim additionally provides
   a hardware-free testbed for sim2real-style experiments (e.g., system
   identification).
-- **9 task configurations × 3 simulators = 27 ready combinations**
-  covering Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), and
-  the Booster T1 and K1 humanoids.
+- **10 task configurations × 3 simulators = 30 ready combinations**
+  covering Unitree G1 (29-DOF humanoid), Unitree Go2 (quadruped), the
+  Booster T1 and K1 humanoids, and the I2RT YAM arm (state- and
+  vision-based manipulation).
 - **PPO is the default for all locomotion tasks** across the three
   simulators. **PPO, SAC and TD3** are checked against
   [Stable-Baselines3][sb3] on six Gymnasium MuJoCo tasks under identical
@@ -76,7 +77,8 @@ trained and evaluated end-to-end with PPO.
 | `t1_getup`                   | Booster T1   | ✓       | ✓      | ✓      |
 | `t1_tracking`                | Booster T1   | ✓       | ✓      | ✓      |
 | `k1_joystick`                | Booster K1   | ✓       | ✓      | ✓      |
-| `k1_joystick` (g1 recipe)    | Booster K1   | ✓       | ✓      | ✓      |
+| `yam_lift` (state)           | I2RT YAM     | ✓       | ✓      | ✓      |
+| `yam_lift` (vision)          | I2RT YAM     | ✓       | ✓      | ✓      |
 
 ## Sim2real
 
