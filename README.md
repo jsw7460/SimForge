@@ -35,16 +35,12 @@ external users can clone a single, reproducible stack.
 
 
 <p align="center">
-  <em><b>Sim2real</b> — a PPO joystick policy trained with SimForge, deployed on a real Booster K1.</em>
+  <em><b>Sim2real</b> — SimForge-trained policies on real hardware: a Booster K1 joystick policy (left) and a Unitree G1 tracking a reference motion (right).</em>
 </p>
 
-https://github.com/user-attachments/assets/d25ec1ff-3eb8-4b15-b1f6-2919f052d3e6
-
-<p align="center">
-  <em>A Unitree G1 tracking a reference motion with a SimForge-trained policy.</em>
-</p>
-
-https://github.com/user-attachments/assets/29446d78-2332-4cb7-9b6e-c618789c01f1
+| Booster K1 — joystick walking | Unitree G1 — motion tracking |
+| :---: | :---: |
+| <video src="https://github.com/user-attachments/assets/d25ec1ff-3eb8-4b15-b1f6-2919f052d3e6"></video> | <video src="https://github.com/user-attachments/assets/29446d78-2332-4cb7-9b6e-c618789c01f1"></video> |
 
 ## Highlights
 
@@ -86,23 +82,9 @@ trained and evaluated end-to-end with PPO.
 
 More real-robot deployments of SimForge-trained policies:
 
-<p align="center">
-  <em>Velocity-command tracking on a Unitree G1.</em>
-</p>
-
-https://github.com/user-attachments/assets/a3b68d46-92eb-439f-a6a2-02d422558bb6
-
-<p align="center">
-  <em>Joystick locomotion on a Unitree Go2.</em>
-</p>
-
-https://github.com/user-attachments/assets/eadaa7c5-1c00-4c3b-af3b-943c8acecf13
-
-<p align="center">
-  <em>Go2 joystick locomotion, top-down view.</em>
-</p>
-
-https://github.com/user-attachments/assets/c69a6e77-6552-43d1-ac43-7c97e28ee5f1
+| Unitree G1 — velocity tracking | Unitree Go2 — joystick | Go2 — top-down view |
+| :---: | :---: | :---: |
+| <video src="https://github.com/user-attachments/assets/a3b68d46-92eb-439f-a6a2-02d422558bb6"></video> | <video src="https://github.com/user-attachments/assets/eadaa7c5-1c00-4c3b-af3b-943c8acecf13"></video> | <video src="https://github.com/user-attachments/assets/c69a6e77-6552-43d1-ac43-7c97e28ee5f1"></video> |
 
 ## Benchmarks
 
