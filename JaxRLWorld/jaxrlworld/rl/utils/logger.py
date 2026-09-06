@@ -649,6 +649,15 @@ class WandbLogger:
         # filters on. Anything already in ``cfg`` needs no encoding here —
         # the run config is uploaded whole, so a comparison nobody planned
         # for (a reward weight, a DR range) is still available afterwards.
+        #
+        # init_timeout is raised from the 90 s default: on a shared cluster
+        # the run-init GraphQL POST can be slow to answer, and the pinned
+        # wandb gives up after one attempt, so a slow-but-working node was
+        # failing the whole job at startup with "context deadline exceeded".
+        # A node with no network at all still fails -- no timeout reaches a
+        # host that does not resolve -- but a reachable, slow one now waits
+        # instead of aborting. Overridable via ``WANDB_INIT_TIMEOUT``.
+        init_timeout = float(os.environ.get("WANDB_INIT_TIMEOUT", "300"))
         self.run = wandb.init(
             project=project_name,
             dir=log_dir,
@@ -658,6 +667,7 @@ class WandbLogger:
             job_type=job_type,
             tags=list(tags) or None,
             notes=notes,
+            settings=wandb.Settings(init_timeout=init_timeout),
         )
         # ``get_url`` is deprecated (removed after the warning stage);
         # ``run.url`` is the long-standing property both old and new
