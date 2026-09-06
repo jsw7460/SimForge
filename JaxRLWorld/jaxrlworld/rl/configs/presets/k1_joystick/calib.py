@@ -2,25 +2,26 @@
 parameters.
 
 Same task/rewards/DR/mirror loss as :class:`K1G1RecipeConfig`;
-only the plant differs. The values come from replaying real K1 walking logs (the d6
-session, collected with a policy from this recipe) in Newton and
-fitting the plant so the replayed states match the hardware states —
-judged purely on hardware-observable kinematics (encoders + IMU), no
-torque-sensor channel.
+only the plant differs. The values come from replaying real K1 logs in
+Newton and fitting the plant so the replayed states match the hardware
+states — judged purely on hardware-observable kinematics (encoders +
+IMU), no torque-sensor channel. The current table is the fit from a
+10 s optimized excitation-schedule collection: it cross-predicts the
+held-out 102 s walking session BETTER (-14% vs nominal) than the
+walking session's own fit does in-sample (-11%), so it is the best
+plant estimate available.
 
-Calibrated (replay fit improves 9.9% over the reference plant, and the
-two terms below carry all of it):
+Calibrated (the two terms below carry the whole fit):
 
-* ``armature`` — the legs run 10-30% above the Booster reference
-  values and the arm reflected inertia is ~20x the reference 0.001
-  (0.019-0.022 kg·m², a typical geared-motor range; the reference was
-  an order-of-magnitude understatement, and the free-swinging arms are
-  the cleanest axis in the fit). Left/right averaged — the per-side
-  splits (5-15%) cost only ~1% replay fit and the motors are
-  identical per pair.
+* ``armature`` — the legs run 30-45% above the Booster reference
+  values (knee 0.127 vs 0.096) and the arm reflected inertia is far
+  above the reference 0.001 (shoulder-pitch 0.055 — free-swinging arms
+  are the cleanest axis in the fit; the reference was an order-of-
+  magnitude understatement). Left/right averaged — symmetrization was
+  A/B-verified to cost ~0.5%p of replay fit.
 * ``tau_lpf_time_constant`` — first-order torque lag per actuator
-  group. Small everywhere (sub-physics-step for most groups);
-  shoulder ~17 ms and hip_roll ~11 ms are the only visible lags.
+  group. Sub-physics-step for the sagittal leg groups; head ~11 ms,
+  shoulder ~16 ms, hip_roll ~9 ms are the visible lags.
 
 Explicitly NOT changed (the replay fit found no signal): ``dyn_gain``
 (velocity-gated efficiency came out 0.95-1.0 — the walking-time torque
@@ -42,33 +43,35 @@ from jaxrlworld.rl.configs.robots.k1 import K1Config, _pattern_dict
 from .g1_recipe import K1G1RecipeConfig
 
 # L/R-averaged calibrated armature [kg·m²] (head joints are unpaired
-# and keep their own fitted values).
+# and keep their own fitted values). Source: the excitation-schedule
+# replay fit that cross-predicts every held-out walking log best; the
+# symmetrized+lag form was A/B-verified within ~0.5%p of the full fit.
 _CALIB_ARMATURE = {
-    r".*AAHead_yaw": 0.001104,
-    r".*Head_pitch": 0.003769,
-    r".*_Shoulder_Pitch": 0.018872,
-    r".*_Shoulder_Roll": 0.022372,
-    r".*_Elbow_Pitch": 0.000656,
-    r".*_Elbow_Yaw": 0.002851,
-    r".*_Hip_Pitch": 0.052666,
-    r".*_Hip_Roll": 0.042265,
-    r".*_Hip_Yaw": 0.038228,
-    r".*_Knee_Pitch": 0.111964,
-    r".*_Ankle_Pitch": 0.069102,
-    r".*_Ankle_Roll": 0.062764,
+    r".*AAHead_yaw": 0.000600,
+    r".*Head_pitch": 0.005750,
+    r".*_Shoulder_Pitch": 0.055078,
+    r".*_Shoulder_Roll": 0.011444,
+    r".*_Elbow_Pitch": 0.002902,
+    r".*_Elbow_Yaw": 0.012227,
+    r".*_Hip_Pitch": 0.070082,
+    r".*_Hip_Roll": 0.046692,
+    r".*_Hip_Yaw": 0.041349,
+    r".*_Knee_Pitch": 0.126687,
+    r".*_Ankle_Pitch": 0.074305,
+    r".*_Ankle_Roll": 0.070259,
 }
 
 # Calibrated torque-lag time constants [s] per actuator group.
 _CALIB_TAU_LPF_S = _pattern_dict(
     {
-        "head": 0.006145,
-        "shoulder": 0.017061,
-        "elbow": 0.000923,
-        "hip_pitch": 0.000946,
-        "hip_roll": 0.010645,
-        "hip_yaw": 0.001800,
-        "knee": 0.005541,
-        "ankle": 0.000774,
+        "head": 0.010712,
+        "shoulder": 0.015748,
+        "elbow": 0.001611,
+        "hip_pitch": 0.000592,
+        "hip_roll": 0.008802,
+        "hip_yaw": 0.003612,
+        "knee": 0.004461,
+        "ankle": 0.000081,
     }
 )
 
