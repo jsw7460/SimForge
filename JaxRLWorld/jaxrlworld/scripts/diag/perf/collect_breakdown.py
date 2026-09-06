@@ -19,7 +19,10 @@ for operation. It is a copy rather than instrumentation of the real one
 on purpose: the env-var-gated profilers that used to live inside the
 managers were removed, and nothing here runs unless this script is
 invoked. The copy has to be kept in step with the original — if the two
-drift, this measures a loop that no longer exists.
+drift, this measures a loop that no longer exists. It did drift once:
+this kept timing a ``.cpu()`` round trip for the done flags after the
+runner had moved them into the batched uint8 DLPack crossing, and
+reported 2% of the step going somewhere nothing goes.
 
 Every section synchronizes before it is timed. Without that, work queued
 by one section lands in whichever later section happens to synchronize,
@@ -47,7 +50,7 @@ from jaxrlworld.rl.configs.presets.k1_joystick.base import K1JoystickConfig
 from jaxrlworld.rl.configs.presets.k1_joystick.g1_recipe import K1G1RecipeConfig
 from jaxrlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from jaxrlworld.rl.runners import BaseRunner
-from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax, torch_to_jax_many
 
 _PRESETS = {
     "go2": Go2FlatConfig,
@@ -131,7 +134,10 @@ def main() -> int:
         # requested backend's simulator is loaded (each per-sim config
         # module imports its engine at module scope).
         gait = {
-            "genesis": ("jaxrlworld.rl.configs.presets.go2.genesis.gait_conditioned", "Go2GaitConditionedGenesisConfig"),
+            "genesis": (
+                "jaxrlworld.rl.configs.presets.go2.genesis.gait_conditioned",
+                "Go2GaitConditionedGenesisConfig",
+            ),
             "newton": ("jaxrlworld.rl.configs.presets.go2.newton.gait_conditioned", "Go2GaitConditionedNewtonConfig"),
             "mujoco": ("jaxrlworld.rl.configs.presets.go2.mujoco.gait_conditioned", "Go2GaitConditionedMujocoConfig"),
         }
@@ -193,33 +199,47 @@ def main() -> int:
         if record:
             timer.stop("env.step (the simulator)")
 
+        # One batched crossing for every tensor of the step, bool flags
+        # cast to uint8 so DLPack carries a first-class dtype — the
+        # runner's ``torch_to_jax_many`` path. Timed as one section
+        # because that is what it is: a single wait for the whole step.
         timer.start()
         dones = terminated | truncated
-        actor_obs = torch_to_jax(obs_dict["actor"])
-        critic_obs = torch_to_jax(obs_dict["critic"])
-        rewards_jax = torch_to_jax(rewards)
-        if record:
-            timer.stop("torch -> jax (obs, rewards)", actor_obs)
+        terminal_obs = infos.get("final_observation")
+        bootstrap_mask = infos.get("bootstrap_mask")
+        trunc_no_reset = infos.get("trunc_no_reset_mask")
 
-        # The runner's own comment says DLPack cannot carry booleans, so
-        # these two go through the host. Two forced device-to-host round
-        # trips per step, every step.
-        timer.start()
-        terminated_jax = jnp.asarray(terminated.cpu().numpy())
-        truncated_jax = jnp.asarray(truncated.cpu().numpy())
+        sources = runner._obs_sources(obs_dict, "actor", "")
+        sources.update(runner._obs_sources(obs_dict, "critic", ""))
+        sources["reward"] = rewards
+        sources["terminated"] = terminated.to(torch.uint8)
+        sources["truncated"] = truncated.to(torch.uint8)
+        if terminal_obs is not None:
+            sources.update(runner._obs_sources(terminal_obs, "critic", "final_"))
+            if bootstrap_mask is not None:
+                sources["bootstrap_mask"] = bootstrap_mask.to(torch.uint8)
+        if trunc_no_reset is not None:
+            sources["trunc_no_reset_mask"] = trunc_no_reset.to(torch.uint8)
+
+        converted = torch_to_jax_many(sources)
+        actor_obs = runner._assemble_obs(converted, "actor", "")
+        critic_obs = runner._assemble_obs(converted, "critic", "")
+        rewards_jax = converted["reward"]
+        terminated_jax = converted["terminated"].astype(jnp.bool_)
+        truncated_jax = converted["truncated"].astype(jnp.bool_)
         if record:
-            timer.stop("done flags via host (.cpu)", terminated_jax)
+            timer.stop("torch -> jax (every tensor of the step)", terminated_jax)
 
         timer.start()
         infos_jax = {}
-        if infos.get("final_observation") is not None:
-            # The runner narrows ``env.terminal_obs_groups`` to the critic's
-            # groups, so ``final_observation`` no longer carries "actor".
+        if terminal_obs is not None:
             infos_jax["final_observation"] = {
-                "critic": torch_to_jax(infos["final_observation"]["critic"]),
+                "critic": runner._assemble_obs(converted, "critic", "final_"),
             }
-            if infos.get("bootstrap_mask") is not None:
-                infos_jax["bootstrap_mask"] = jnp.asarray(infos["bootstrap_mask"].cpu().numpy())
+            if bootstrap_mask is not None:
+                infos_jax["bootstrap_mask"] = converted["bootstrap_mask"].astype(jnp.bool_)
+        if trunc_no_reset is not None:
+            infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"].astype(jnp.bool_)
         if record:
             timer.stop("final_observation handling")
 
