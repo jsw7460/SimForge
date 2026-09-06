@@ -50,6 +50,22 @@ class ViserCameraPanel:
         shapes = self._env.obs_manager.calculate_obs_shapes()
         return {group: shape for group, shape in shapes.items() if isinstance(shape, tuple) and len(shape) == 3}
 
+    def _channel_names(self, group: str, channels: int) -> list[str] | None:
+        """Name each channel after the observation term that produced it.
+
+        A stacked group is built from one term per camera, in
+        declaration order — the same order the channels concatenate in —
+        so the term names ARE the channel names, read from the
+        manager's own resolved term table (``_group_terms``, an ordered
+        dict per group). Falls back to indices when the term count does
+        not match the channel count — a single multi-channel term such
+        as RGB."""
+        terms = self._env.obs_manager._group_terms.get(group)
+        if terms is None:
+            return None
+        names = list(terms)
+        return names if len(names) == channels else None
+
     @staticmethod
     def _scale_for(height: int, width: int) -> int:
         return max(1, _TARGET_PIXELS // max(height, width))
@@ -63,8 +79,11 @@ class ViserCameraPanel:
             for group, (channels, height, width) in self._groups.items():
                 with self._server.gui.add_folder(f"{group}  ({channels}x{height}x{width})"):
                     scale = self._scale_for(height, width)
+                    term_names = self._channel_names(group, channels)
                     for channel in range(channels):
-                        label = group if channels == 1 else f"{group} [{channel}]"
+                        label = (
+                            term_names[channel] if term_names else (group if channels == 1 else f"{group} [{channel}]")
+                        )
                         self._handles[(group, channel)] = self._server.gui.add_image(
                             np.zeros((height * scale, width * scale, 3), dtype=np.uint8),
                             label=label,
