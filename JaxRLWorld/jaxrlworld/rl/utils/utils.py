@@ -91,10 +91,10 @@ def setup_log_dir(output_dir: str | None = None) -> tuple[str, str]:
             return candidate, wandb_dir
         raise RuntimeError(f"Could not claim a unique log dir near {base_models}")
 
-    # On CHTC, ``EXP_OUTPUT_DIR`` is set to ``/staging`` (data-transfer
-    # dir, not writable) when running inside a job slot — fall back to the
-    # current scratch directory so policy load (which forces this path on
-    # every checkpoint) doesn't abort the run.
+    # ``EXP_OUTPUT_DIR`` may point at a read-only location (e.g. a
+    # data-transfer directory that is not writable from the run) — fall
+    # back to the current working directory so policy load, which forces
+    # this path on every checkpoint, doesn't abort the run.
     try:
         models_log_dir, wandb_log_dir = _claim(models_log_dir, wandb_log_dir)
     except PermissionError:

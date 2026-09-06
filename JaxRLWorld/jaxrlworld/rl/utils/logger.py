@@ -43,7 +43,7 @@ class ConsoleWriter:
         self.pad = 35
         # Rich live dashboard: one in-place-updating panel instead of a
         # ~40-line block scrolling by every iteration. Only when stdout
-        # is a real terminal — log files, tee pipes, and CHTC condor
+        # is a real terminal — log files, tee pipes, and batch/redirected
         # jobs keep the plain scrolling blocks (they need parseable,
         # append-only text). JAXRLWORLD_PLAIN_LOG=1 forces plain.
         self._live = None
@@ -643,20 +643,16 @@ class WandbLogger:
             run_name = ct_now.strftime("run_%Y%m%d_%H%M%S_CT")
 
         # No Settings(start_method=...): wandb deprecated it as
-        # non-functional, and newer releases (CHTC images) reject the
-        # field outright with a pydantic extra_forbidden error.
+        # non-functional, and newer releases reject the field outright with
+        # a pydantic extra_forbidden error.
         # ``group``/``job_type``/``tags`` are the axes the W&B UI groups and
         # filters on. Anything already in ``cfg`` needs no encoding here —
         # the run config is uploaded whole, so a comparison nobody planned
         # for (a reward weight, a DR range) is still available afterwards.
         #
-        # init_timeout is raised from the 90 s default: on a shared cluster
-        # the run-init GraphQL POST can be slow to answer, and the pinned
-        # wandb gives up after one attempt, so a slow-but-working node was
-        # failing the whole job at startup with "context deadline exceeded".
-        # A node with no network at all still fails -- no timeout reaches a
-        # host that does not resolve -- but a reachable, slow one now waits
-        # instead of aborting. Overridable via ``WANDB_INIT_TIMEOUT``.
+        # init_timeout is raised from the 90 s default so a slow network
+        # does not abort run init with "context deadline exceeded".
+        # Overridable via ``WANDB_INIT_TIMEOUT``.
         init_timeout = float(os.environ.get("WANDB_INIT_TIMEOUT", "300"))
         self.run = wandb.init(
             project=project_name,
