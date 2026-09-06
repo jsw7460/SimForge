@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
-from jaxrlworld.rl.utils.quat_utils import quat_from_angle_axis_wxyz, quat_mul_wxyz
+from jaxrlworld.rl.utils.quat_utils import quat_from_euler_zyx_wxyz, quat_mul_wxyz
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.world import World
@@ -236,12 +236,15 @@ def reset_root_state_uniform(
         # simulator's buffer copy expects.
         quat_wxyz = default_quat_t.contiguous()
     else:
-        roll, pitch, yaw = pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
-        q_roll = quat_from_angle_axis_wxyz(roll, _constant((1.0, 0.0, 0.0), device_str))
-        q_pitch = quat_from_angle_axis_wxyz(pitch, _constant((0.0, 1.0, 0.0), device_str))
-        q_yaw = quat_from_angle_axis_wxyz(yaw, _constant((0.0, 0.0, 1.0), device_str))
-        delta_quat = quat_mul_wxyz(quat_mul_wxyz(q_yaw, q_pitch), q_roll)
-        quat_wxyz = quat_mul_wxyz(default_quat_t, delta_quat)
+        delta_quat = quat_from_euler_zyx_wxyz(pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5])
+        # Multiplying by the identity returns the operand bit for bit, and
+        # the identity is the default: skipping it saves the largest of
+        # the launches this branch still makes. Decided on the config
+        # tuple, so nothing is read back from the device.
+        if tuple(default_quat_wxyz) == (1.0, 0.0, 0.0, 0.0):
+            quat_wxyz = delta_quat
+        else:
+            quat_wxyz = quat_mul_wxyz(default_quat_t, delta_quat)
 
     # ── Velocity ──────────────────────────────────────────────────
     lin_vel = torch.zeros((n, 3), device=device)

@@ -68,6 +68,45 @@ def quat_from_angle_axis_wxyz(angle: Tensor, axis: Tensor) -> Tensor:
     return torch.cat([w.unsqueeze(-1), xyz], dim=-1)
 
 
+def quat_from_euler_zyx_wxyz(roll: Tensor, pitch: Tensor, yaw: Tensor) -> Tensor:
+    """``yaw * pitch * roll`` as one quaternion (wxyz), roll applied first.
+
+    Bit-identical to composing three ``quat_from_angle_axis_wxyz`` about
+    the unit axes with two ``quat_mul_wxyz``: that chain multiplies by
+    exact zeros and ones, which drop out of IEEE arithmetic without
+    changing a bit, and the products below are what remain, in the same
+    association. What the chain also costs is about a hundred tiny
+    kernel launches for the six sin/cos and three 4x4 products; this is
+    twenty. It matters on the reset path, where every launch is paid for
+    a handful of environments.
+
+    Args:
+        roll, pitch, yaw: Angles in radians, shape (...,).
+
+    Returns:
+        Quaternion in (w, x, y, z) format, shape (..., 4).
+    """
+    half = torch.stack([roll, pitch, yaw], dim=-1) * 0.5
+    s = torch.sin(half)
+    c = torch.cos(half)
+    sr, sp, sy = s.unbind(-1)
+    cr, cp, cy = c.unbind(-1)
+    # The four products the zero-elimination leaves from yaw * pitch.
+    a = cy * cp
+    b = sy * sp
+    c_ = cy * sp
+    d = sy * cp
+    return torch.stack(
+        [
+            a * cr + b * sr,
+            a * sr - b * cr,
+            c_ * cr + d * sr,
+            d * cr - c_ * sr,
+        ],
+        dim=-1,
+    )
+
+
 def quat_mul_wxyz(q1: Tensor, q2: Tensor) -> Tensor:
     """Multiply two quaternions (wxyz convention).
 

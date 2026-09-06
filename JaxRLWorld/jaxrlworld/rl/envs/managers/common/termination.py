@@ -72,8 +72,17 @@ class TerminationManager(BaseManager):
         self._term_dones: dict[str, torch.Tensor] = {
             name: torch.zeros(env.num_envs, dtype=torch.bool, device=self.device) for name in self._all_terms
         }
+        # One (n_terms, num_envs) tensor, and the per-name dict holds VIEWS
+        # into its rows. Readers and the per-step ``+=`` see the dict they
+        # always did; :meth:`reset` works on the whole tensor at once, so a
+        # reset step costs one gather, one reduction and one scatter instead
+        # of three launches per term. The dict must never be rebound
+        # (``self._episode_fires[name] = ...``) or the row stops being one.
+        self._episode_fires_all: torch.Tensor = torch.zeros(
+            (len(self._all_terms), env.num_envs), dtype=torch.long, device=self.device
+        )
         self._episode_fires: dict[str, torch.Tensor] = {
-            name: torch.zeros(env.num_envs, dtype=torch.long, device=self.device) for name in self._all_terms
+            name: self._episode_fires_all[i] for i, name in enumerate(self._all_terms)
         }
 
         # Iteration-window accumulators consumed by
@@ -92,8 +101,13 @@ class TerminationManager(BaseManager):
         # device-to-host copy that waits for every kernel queued so far,
         # paid so a ratio could be logged once an iteration.
         self._iter_reset_count: torch.Tensor = torch.zeros((), dtype=torch.long, device=self.device)
+        # Same layout as ``_episode_fires``: a (n_terms,) tensor with 0-d
+        # views per name, so the reset-step accumulation is one vector add.
+        self._iter_fire_counts_all: torch.Tensor = torch.zeros(
+            len(self._all_terms), dtype=torch.long, device=self.device
+        )
         self._iter_fire_counts: dict[str, torch.Tensor] = {
-            name: torch.zeros((), dtype=torch.long, device=self.device) for name in self._all_terms
+            name: self._iter_fire_counts_all[i] for i, name in enumerate(self._all_terms)
         }
 
         # Last-step union of non-timeout termination fires; consumed by
@@ -253,9 +267,11 @@ class TerminationManager(BaseManager):
         n_reset = env_ids.numel() if hasattr(env_ids, "numel") else len(env_ids)
         if n_reset > 0:
             self._iter_reset_count += n_reset
-            for name, fires in self._episode_fires.items():
-                self._iter_fire_counts[name] += (fires[env_ids] > 0).long().sum()
-                fires[env_ids] = 0
+            # Every term at once. Integer counts, so the result is exactly
+            # the per-term loop's.
+            fires = self._episode_fires_all[:, env_ids]
+            self._iter_fire_counts_all += (fires > 0).sum(dim=1)
+            self._episode_fires_all[:, env_ids] = 0
 
         self.episode_count[env_ids] += 1
         self.episode_length_buf[env_ids] = 0
