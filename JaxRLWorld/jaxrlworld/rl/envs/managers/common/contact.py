@@ -335,21 +335,30 @@ class BaseContactManager(BaseManager, ABC):
         # Without ``+ dt`` here ``last_*_time`` would be one substep
         # shorter than mjlab's, drifting ``feet_air_time`` reward magnitudes
         # away from the reference.
-        g.last_air_time = torch.where(is_landing, g.current_air_time + dt, g.last_air_time)
-        g.last_contact_time = torch.where(is_liftoff, g.current_contact_time + dt, g.last_contact_time)
-
-        g.current_contact_time = torch.where(
+        # Written IN PLACE, never rebound. Everything downstream — reward
+        # terms, the observation builder, and a CUDA graph capturing
+        # either — keeps a reference to these buffers, and a rebinding
+        # here would leave every such reference on a stale tensor. The
+        # ``out=`` target is one of the ``where`` inputs, which
+        # TensorIterator handles as an in-place elementwise op; the
+        # ``+ dt`` temporaries are read before anything is written, so
+        # each update sees exactly the pre-update values the old
+        # rebinding version saw. Same launches as before.
+        torch.where(is_landing, g.current_air_time + dt, g.last_air_time, out=g.last_air_time)
+        torch.where(is_liftoff, g.current_contact_time + dt, g.last_contact_time, out=g.last_contact_time)
+        torch.where(
             is_contact,
             g.current_contact_time + dt,
             torch.zeros_like(g.current_contact_time),
+            out=g.current_contact_time,
         )
-        g.current_air_time = torch.where(
+        torch.where(
             ~is_contact,
             g.current_air_time + dt,
             torch.zeros_like(g.current_air_time),
+            out=g.current_air_time,
         )
-
-        g._prev_is_contact = is_contact
+        g._prev_is_contact.copy_(is_contact)
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None or len(env_ids) == 0:

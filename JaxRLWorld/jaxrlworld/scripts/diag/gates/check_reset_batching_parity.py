@@ -78,12 +78,66 @@ def check_termination_reset(seeds: int = 20, n_terms: int = 6, num_envs: int = 4
     print(f"  termination.reset: {seeds} seeds x {n_terms} terms exact")
 
 
+def _old_contact_frame(prev, cur_air, cur_con, last_air, last_con, is_contact, dt):
+    """The rebinding formulation ``_apply_contact_frame`` had."""
+    is_landing = ~prev & is_contact
+    is_liftoff = prev & ~is_contact
+    last_air = torch.where(is_landing, cur_air + dt, last_air)
+    last_con = torch.where(is_liftoff, cur_con + dt, last_con)
+    cur_con = torch.where(is_contact, cur_con + dt, torch.zeros_like(cur_con))
+    cur_air = torch.where(~is_contact, cur_air + dt, torch.zeros_like(cur_air))
+    return is_contact, cur_air, cur_con, last_air, last_con
+
+
+def check_contact_frame(seeds: int = 10, num_envs: int = 2048, n: int = 4, substeps: int = 64) -> None:
+    from types import SimpleNamespace
+
+    from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
+
+    dt = 0.005
+    fields = ("_prev_is_contact", "current_air_time", "current_contact_time", "last_air_time", "last_contact_time")
+    for seed in range(seeds):
+        g = torch.Generator().manual_seed(seed)
+        shape = (num_envs, n)
+        state = [torch.zeros(shape, dtype=torch.bool), *(torch.rand(shape, generator=g) * 0.1 for _ in range(4))]
+        group = SimpleNamespace(**{name: value.clone() for name, value in zip(fields, state)})
+        handed_in = [getattr(group, name) for name in fields]
+        for _ in range(substeps):
+            is_contact = torch.rand(shape, generator=g) < 0.5
+            state = _old_contact_frame(*state, is_contact, dt)
+            BaseContactManager._apply_contact_frame(group, is_contact, dt)
+        for name, old in zip(fields, state):
+            assert torch.equal(old, getattr(group, name)), f"seed {seed}: {name} differs"
+        # The buffers must still be the objects handed in — that is the point.
+        for name, before in zip(fields, handed_in):
+            assert getattr(group, name) is before, f"{name} was rebound"
+    print(f"  contact frame: {seeds} seeds x {substeps} substeps bit-identical, buffers never rebound")
+
+
+def check_peak_height_update(seeds: int = 10, num_envs: int = 2048, n: int = 2) -> None:
+    for seed in range(seeds):
+        g = torch.Generator().manual_seed(seed)
+        peak = torch.rand((num_envs, n), generator=g)
+        foot = torch.rand((num_envs, n), generator=g)
+        in_air = torch.rand((num_envs, n), generator=g) < 0.5
+        first = torch.rand((num_envs, n), generator=g) < 0.2
+        old = torch.where(in_air, torch.maximum(peak, foot), peak)
+        old = torch.where(first, torch.zeros_like(old), old)
+        new = peak.clone()
+        torch.where(in_air, torch.maximum(new, foot), new, out=new)
+        torch.where(first, torch.zeros_like(new), new, out=new)
+        assert torch.equal(old, new), f"seed {seed}: peak height update differs"
+    print(f"  peak heights: {seeds} seeds bit-identical in place")
+
+
 def main() -> None:
     print("=" * 78)
     print("RESET BATCHING PARITY")
     print("=" * 78)
     check_quaternion()
     check_termination_reset()
+    check_contact_frame()
+    check_peak_height_update()
     print("  PASS")
     print("=" * 78)
 

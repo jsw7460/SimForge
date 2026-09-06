@@ -682,10 +682,14 @@ class FeetSwingHeightTracker:
         is_contact = env.contact_manager.is_contact(self._contact_group, order=self._contact_order)
         in_air = ~is_contact
 
-        self.peak_heights = torch.where(
+        # In place: ``peak_heights`` is state other code (and a CUDA graph
+        # capturing this term) holds a reference to, so it must stay one
+        # buffer. ``out=`` aliasing an input is an in-place elementwise op.
+        torch.where(
             in_air,
             torch.maximum(self.peak_heights, foot_heights),
             self.peak_heights,
+            out=self.peak_heights,
         )
 
         first_contact = env.contact_manager.compute_first_contact(self._contact_group, order=self._contact_order)
@@ -699,11 +703,7 @@ class FeetSwingHeightTracker:
         cost = torch.sum(err_term * first_contact.float(), dim=1) * active
 
         # Reset peaks for feet that just landed.
-        self.peak_heights = torch.where(
-            first_contact,
-            torch.zeros_like(self.peak_heights),
-            self.peak_heights,
-        )
+        torch.where(first_contact, torch.zeros_like(self.peak_heights), self.peak_heights, out=self.peak_heights)
         return -cost
 
     def reset(self, env_ids: torch.Tensor) -> None:
