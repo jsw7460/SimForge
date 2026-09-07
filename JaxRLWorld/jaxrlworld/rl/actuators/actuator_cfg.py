@@ -124,6 +124,17 @@ class IdealPDActuatorCfg(ActuatorBaseCfg):
     dyn_gain: float | dict[str, float] | None = None
     dyn_gain_velocity: float | dict[str, float] | None = None
 
+    # Run the torque chain (PD, saturation, lag, efficiency, the effort
+    # clip) through ``torch.compile``. It is elementwise math on the
+    # joint-state tensors the action manager hands in — nothing
+    # engine-side is traced — and eager it is ~20 tiny launches per
+    # physics substep; fused it is one or two kernels. Fused
+    # multiply-adds round differently, so torques differ from the eager
+    # chain in their last bits (~1e-7 relative): a run is no longer
+    # bit-reproducible against one made with this off. False keeps the
+    # eager chain.
+    compile_kernel: bool = True
+
 
 @dataclass
 class DelayedPDActuatorCfg(IdealPDActuatorCfg):

@@ -46,6 +46,10 @@ def _make_actuator(min_delay: int, max_delay: int, num_envs: int) -> DelayedPDAc
         dyn_gain_velocity=0.5,
         min_delay=min_delay,
         max_delay=max_delay,
+        # This gate is about dispatch, not the torque chain: the eager
+        # chain is what the inline old formulation below reproduces
+        # exactly (check_actuator_compile_parity covers the compiled one).
+        compile_kernel=False,
     )
     return DelayedPDActuator(cfg, num_envs=num_envs, num_joints=len(_JOINTS), device="cpu", joint_names=_JOINTS)
 

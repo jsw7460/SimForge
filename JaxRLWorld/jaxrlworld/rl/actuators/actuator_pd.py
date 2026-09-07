@@ -86,6 +86,17 @@ class IdealPDActuator(ActuatorBase):
             if bool((self.dyn_gain <= 0.0).any()) or bool((self.dyn_gain_velocity <= 0.0).any()):
                 raise ValueError("dyn_gain and dyn_gain_velocity must be > 0")
 
+        # The torque chain as one compiled program (see the cfg field).
+        # Compiled as a bound method so a subclass's ``_clip_effort``
+        # override is traced into the same graph; the gain / limit
+        # tensors are read from ``self`` on every call, so an in-place
+        # domain-randomization write to them is seen by the next substep.
+        self._chain = (
+            torch.compile(self._torque_chain, fullgraph=True, dynamic=False)
+            if cfg.compile_kernel
+            else self._torque_chain
+        )
+
     def reset(self, env_ids: Sequence[int]) -> None:
         # A stale lag state would inject a phantom torque transient on
         # the first post-reset step.
@@ -98,27 +109,44 @@ class IdealPDActuator(ActuatorBase):
         joint_pos: torch.Tensor,
         joint_vel: torch.Tensor,
     ) -> torch.Tensor:
-        error_pos = target_pos - joint_pos
+        computed, applied, lpf_state = self._chain(target_pos, joint_pos, joint_vel)
         # Raw PD torque (kept in computed_effort for logging/diagnostics).
-        self.computed_effort = self.stiffness * error_pos - self.damping * joint_vel
+        self.computed_effort = computed
+        self.applied_effort = applied
+        if self._use_lpf:
+            self._lpf_state = lpf_state
+        return applied
+
+    def _torque_chain(
+        self,
+        target_pos: torch.Tensor,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """PD -> saturation -> lag -> efficiency -> clip, as pure tensor
+        math: returns ``(raw PD torque, applied torque, new lag state)``
+        and writes nothing, so it compiles as one graph."""
+        error_pos = target_pos - joint_pos
+        computed = self.stiffness * error_pos - self.damping * joint_vel
         if self._use_tau_scale:
-            effort = self.tau_scale * torch.tanh(self.computed_effort / self.tau_scale)
+            effort = self.tau_scale * torch.tanh(computed / self.tau_scale)
         else:
-            effort = self.computed_effort
+            effort = computed
         # Motor-side torque bandwidth (first-order lag), then the
         # velocity-gated transmission efficiency downstream of it.
+        lpf_state = None
         if self._use_lpf:
             alpha = self._lpf_dt / (self.tau_lpf_tc + self._lpf_dt)
-            self._lpf_state = self._lpf_state + alpha * (effort - self._lpf_state)
-            effort = self._lpf_state
+            lpf_state = self._lpf_state + alpha * (effort - self._lpf_state)
+            effort = lpf_state
         if self._use_dyn_gain:
             gate = 1.0 - (1.0 - self.dyn_gain) * torch.tanh(joint_vel.abs() / self.dyn_gain_velocity)
             effort = effort * gate
         if self._use_tn:
-            self.applied_effort = self._clip_effort_tn(effort, joint_vel)
+            applied = self._clip_effort_tn(effort, joint_vel)
         else:
-            self.applied_effort = self._clip_effort(effort)
-        return self.applied_effort
+            applied = self._clip_effort(effort)
+        return computed, applied, lpf_state
 
     def _clip_effort_tn(self, effort: torch.Tensor, joint_vel: torch.Tensor) -> torch.Tensor:
         """Piecewise-linear torque-speed clip (booster_train T-N curve): the
