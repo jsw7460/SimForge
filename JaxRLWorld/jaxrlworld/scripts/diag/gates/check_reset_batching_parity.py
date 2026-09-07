@@ -114,6 +114,58 @@ def check_contact_frame(seeds: int = 10, num_envs: int = 2048, n: int = 4, subst
     print(f"  contact frame: {seeds} seeds x {substeps} substeps bit-identical, buffers never rebound")
 
 
+def check_stacked_timing(seeds: int = 10, num_envs: int = 2048, substeps: int = 64, widths=(2, 1, 4)) -> None:
+    """``BaseContactManager.advance`` runs the frame arithmetic ONCE over
+    every group's buffers stacked side by side, each group's own buffers
+    being column views of that stack. Per column that is the same
+    elementwise arithmetic the old per-group loop ran; this checks it,
+    through resets, against that loop on independent tensors."""
+    from types import SimpleNamespace
+
+    from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
+
+    class _Manager(BaseContactManager):
+        frames: dict[str, torch.Tensor] = {}
+
+        def _compute_group_contact_force(self, group):
+            return None
+
+        def _compute_group_is_contact(self, group):
+            return self.frames[group.name]
+
+    dt = 0.005
+    fields = BaseContactManager._TIMING_FIELDS
+    for seed in range(seeds):
+        g = torch.Generator().manual_seed(seed)
+        m = _Manager(SimpleNamespace(num_envs=num_envs, control_dt=0.02, device="cpu", _env_step_counter=0))
+        for i, w in enumerate(widths):
+            m._register_group(f"g{i}", [f"b{i}{j}" for j in range(w)], ("found",))
+        refs = {
+            name: SimpleNamespace(**{f: getattr(grp, f).clone() for f in fields}) for name, grp in m._groups.items()
+        }
+        for k in range(substeps):
+            m.frames = {
+                name: torch.rand((num_envs, grp.num_tracked), generator=g) < 0.5 for name, grp in m._groups.items()
+            }
+            if k % 9 == 0:
+                n_reset = int(torch.randint(1, 256, (), generator=g))
+                env_ids = torch.randperm(num_envs, generator=g)[:n_reset]
+                m.reset(env_ids)
+                for ref in refs.values():
+                    for f in fields:
+                        getattr(ref, f)[env_ids] = 0
+            m.advance(dt)
+            for name, ref in refs.items():
+                BaseContactManager._apply_contact_frame(ref, m.frames[name], dt)
+        for name, ref in refs.items():
+            grp = m._groups[name]
+            for f in fields:
+                assert torch.equal(getattr(ref, f), getattr(grp, f)), f"seed {seed}: {name}.{f} differs"
+            # The accessors must hand out the live column views, not copies.
+            assert m.current_air_time(name).data_ptr() == grp.current_air_time.data_ptr()
+    print(f"  stacked contact timing: {seeds} seeds x {substeps} substeps x {len(widths)} groups bit-identical")
+
+
 def check_peak_height_update(seeds: int = 10, num_envs: int = 2048, n: int = 2) -> None:
     for seed in range(seeds):
         g = torch.Generator().manual_seed(seed)
@@ -137,6 +189,7 @@ def main() -> None:
     check_quaternion()
     check_termination_reset()
     check_contact_frame()
+    check_stacked_timing()
     check_peak_height_update()
     print("  PASS")
     print("=" * 78)

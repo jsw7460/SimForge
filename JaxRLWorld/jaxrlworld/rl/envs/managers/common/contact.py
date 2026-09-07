@@ -80,6 +80,16 @@ class BaseContactManager(BaseManager, ABC):
         self.num_envs = env.num_envs
         self.dt = env.control_dt
         self._groups: dict[str, ContactGroup] = {}
+        # Every group's timing state side by side — see ``_all_groups``.
+        self._all: ContactGroup | None = None
+
+    _TIMING_FIELDS = (
+        "current_air_time",
+        "current_contact_time",
+        "last_air_time",
+        "last_contact_time",
+        "_prev_is_contact",
+    )
 
     # ------------------------------------------------------------------
     # Group registration (called by subclasses)
@@ -101,6 +111,37 @@ class BaseContactManager(BaseManager, ABC):
             _prev_is_contact=torch.zeros(shape, dtype=torch.bool, device=self.device),
         )
         self._groups[name] = group
+        self._all = None
+
+    def _all_groups(self) -> ContactGroup:
+        """Every group's timing state as ONE ``(num_envs, total_tracked)``
+        tensor per field, groups side by side in registration order.
+
+        The per-substep arithmetic is elementwise, so running it once over
+        the concatenation is the same per column as running it once per
+        group — for one set of launches instead of one per group. Each
+        group's own buffers become column views of the stacked tensors, so
+        the accessors, ``reset`` and every reader keep working unchanged
+        and see the same values. Built on first use; rebuilt (carrying the
+        current values) if a group is registered after that.
+        """
+        if self._all is None:
+            groups = list(self._groups.values())
+            stacked = {f: torch.cat([getattr(g, f) for g in groups], dim=1) for f in self._TIMING_FIELDS}
+            self._all = ContactGroup(
+                name="*",
+                tracked_names=[n for g in groups for n in g.tracked_names],
+                num_tracked=sum(g.num_tracked for g in groups),
+                fields=(),
+                **stacked,
+            )
+            start = 0
+            for g in groups:
+                cols = slice(start, start + g.num_tracked)
+                start += g.num_tracked
+                for f in self._TIMING_FIELDS:
+                    setattr(g, f, getattr(self._all, f)[:, cols])
+        return self._all
 
     # ------------------------------------------------------------------
     # Abstract — subclass must implement per-group
@@ -311,19 +352,24 @@ class BaseContactManager(BaseManager, ABC):
         ``mjlab/envs/manager_based_rl_env.py`` which both
         ``scene.update(physics_dt)`` per substep.
         """
-        for group in self._groups.values():
-            self._advance_group(group, dt)
+        if not self._groups:
+            return
+        self._apply_contact_frame(self._all_groups(), self._compute_all_is_contact(), dt)
 
-    def _advance_group(self, g: ContactGroup, dt: float) -> None:
-        self._apply_contact_frame(g, self._compute_group_is_contact(g), dt)
+    def _compute_all_is_contact(self) -> torch.Tensor:
+        """``(num_envs, total_tracked)`` bool, groups side by side in registration order."""
+        groups = list(self._groups.values())
+        if len(groups) == 1:
+            return self._compute_group_is_contact(groups[0])
+        return torch.cat([self._compute_group_is_contact(g) for g in groups], dim=1)
 
     @staticmethod
     def _apply_contact_frame(g: ContactGroup, is_contact: torch.Tensor, dt: float) -> None:
         """Accumulate one substep's contact boolean into the timing buffers.
 
-        Split out of :meth:`_advance_group` so backends that can fetch the
-        whole substep history in one read (Genesis's native sensor ring)
-        can replay the frames through the exact same arithmetic.
+        ``g`` is normally the stacked all-groups view from
+        :meth:`_all_groups`; a backend that computes every group's frame
+        in one pass (Genesis) calls this directly with that frame.
         """
         is_landing = ~g._prev_is_contact & is_contact
         is_liftoff = g._prev_is_contact & ~is_contact
@@ -361,14 +407,14 @@ class BaseContactManager(BaseManager, ABC):
         g._prev_is_contact.copy_(is_contact)
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
-        if env_ids is None or len(env_ids) == 0:
+        if env_ids is None or len(env_ids) == 0 or not self._groups:
             return
-        for g in self._groups.values():
-            g.current_air_time[env_ids] = 0.0
-            g.current_contact_time[env_ids] = 0.0
-            g.last_air_time[env_ids] = 0.0
-            g.last_contact_time[env_ids] = 0.0
-            g._prev_is_contact[env_ids] = False
+        g = self._all_groups()
+        g.current_air_time[env_ids] = 0.0
+        g.current_contact_time[env_ids] = 0.0
+        g.last_air_time[env_ids] = 0.0
+        g.last_contact_time[env_ids] = 0.0
+        g._prev_is_contact[env_ids] = False
 
     def refresh_after_reset(self, env_ids: torch.Tensor | None = None) -> None:
         """Recompute contact state for the freshly written reset poses.

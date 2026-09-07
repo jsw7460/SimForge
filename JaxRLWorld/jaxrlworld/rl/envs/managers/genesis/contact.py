@@ -44,26 +44,42 @@ class ContactManager(BaseContactManager):
         self._register_group(cfg.name, sensor.tracked_names, cfg.fields)
         self._batch = None
 
+    def _get_batch(self) -> GenesisContactBatch:
+        if self._batch is None:
+            # The batch lays its columns out in sensor order and the timing
+            # update runs over the stacked groups in registration order;
+            # ``register_sensor`` creates both from one call, so they agree.
+            if list(self._sensors) != list(self._groups):
+                raise RuntimeError(
+                    f"Genesis contact sensors {list(self._sensors)} and groups {list(self._groups)} are out of order."
+                )
+            self._batch = GenesisContactBatch(
+                self.env,
+                self._list_reader,
+                list(self._sensors.values()),
+                compile_kernels=self.env.env_cfg.compile_contact_kernels,
+            )
+        return self._batch
+
     def _capture_all(self) -> None:
-        """One fused capture for every group (see GenesisContactBatch)."""
+        """One fused capture for every group, rings only (see GenesisContactBatch)."""
         if not self._sensors:
             return
-        if self._batch is None:
-            self._batch = GenesisContactBatch(self.env, self._list_reader, list(self._sensors.values()))
-        self._batch.capture_substep()
+        self._get_batch().capture_substep()
 
     # -- per-substep capture + timing accumulation --
 
     def advance(self, dt: float) -> None:
         """Capture one contact frame for all groups from the shared list
-        read, then run the base per-substep timing arithmetic on it.
+        read and run the per-substep timing arithmetic on it, in one pass.
 
         ``GenesisEnv._step_physics`` bumps the cache generation after
         every ``scene.step``, so the shared collider read is fresh
         exactly once per substep no matter how many groups exist.
         """
-        self._capture_all()
-        super().advance(dt=dt)
+        if not self._sensors:
+            return
+        self._get_batch().capture_and_advance(self._all_groups(), dt)
 
     # -- abstract impl --
 

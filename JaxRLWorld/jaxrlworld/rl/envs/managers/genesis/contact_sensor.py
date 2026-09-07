@@ -49,11 +49,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
+import torch._dynamo
 from genesis.utils.geom import inv_transform_by_quat
 from genesis.utils.misc import qd_to_torch
 
 from jaxrlworld.rl.configs.sensors import ContactSensorCfg
 from jaxrlworld.rl.envs.genesis.robot_data import _per_step_read
+from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
 from jaxrlworld.rl.utils import entity_utils as eu
 
 if TYPE_CHECKING:
@@ -94,20 +96,25 @@ class GenesisContactListReader:
         self._quat_by_entity: dict[int, torch.Tensor] = {}
 
     @_per_step_read
-    def raw(self):
-        """``(link_a, link_b, force, row_valid)`` for the current substep.
+    def raw_parts(self):
+        """``(link_a, link_b, force, n_live)`` for the current substep.
 
         ``link_a``/``link_b``: (num_envs, C) global link indices;
         ``force``: (num_envs, C, 3) world-frame contact force (applied to
-        side b; side a receives ``-force``); ``row_valid``: (num_envs, C)
-        bool masking each env's live rows via the collider's
-        ``n_contacts`` counter (rows beyond it are stale on the zero-copy
-        path).
+        side b; side a receives ``-force``); ``n_live``: (num_envs,) the
+        collider's live-row counter (rows at or beyond it are stale on
+        the zero-copy path and must be masked).
         """
         solver = self._env.scene_manager.scene.sim.rigid_solver
         cd = solver.collider.get_contacts(as_tensor=True, to_torch=True)
-        link_a, link_b, force = cd["link_a"], cd["link_b"], cd["force"]
         n_live = qd_to_torch(solver.collider._collider_state.n_contacts, copy=False)
+        return cd["link_a"], cd["link_b"], cd["force"], n_live
+
+    @_per_step_read
+    def raw(self):
+        """:meth:`raw_parts` with the live-row counter expanded to a
+        ``(num_envs, C)`` bool ``row_valid`` mask."""
+        link_a, link_b, force, n_live = self.raw_parts()
         row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
         return link_a, link_b, force, row_valid
 
@@ -401,9 +408,23 @@ class GenesisContactBatch:
     Per-column math is identical to ``capture_substep``'s: ``found`` is
     bit-identical, ``force`` can differ only by the reduction scheduling
     inside the single larger einsum (float sum order).
+
+    The whole substep — frame, history rings, and the contact-timing
+    update over every group — is one function of plain tensors
+    (:meth:`_substep_impl`), and with ``compile_kernels`` it runs through
+    ``torch.compile``: eager it is ~75 launches of tiny elementwise
+    kernels, fused it is a handful. The engine is never traced: the
+    contact list and link quaternions are read into tensors first and
+    handed in.
     """
 
-    def __init__(self, env: GenesisEnv, reader: GenesisContactListReader, sensors: list[GenesisContactSensor]):
+    def __init__(
+        self,
+        env: GenesisEnv,
+        reader: GenesisContactListReader,
+        sensors: list[GenesisContactSensor],
+        compile_kernels: bool = False,
+    ):
         self._reader = reader
         self._sensors = sensors
         device = env.device
@@ -440,10 +461,101 @@ class GenesisContactBatch:
         self._force_cols = torch.tensor(fcols, dtype=torch.long, device=device) if fcols else None
         self._force_all_cols = self._force_cols is not None and len(fcols) == start
 
-    def capture_substep(self) -> None:
-        """Compute this substep's frames for every group and push them."""
-        link_a, link_b, force, row_valid = self._reader.raw()
+        self._compiled = compile_kernels
+        self._substep = (
+            torch.compile(self._substep_impl, fullgraph=True, dynamic=False) if compile_kernels else self._substep_impl
+        )
 
+    # -- per-substep driver -------------------------------------------
+
+    def _gather_inputs(self) -> tuple:
+        """Everything :meth:`_substep_impl` needs, read out of the engine."""
+        link_a, link_b, force, n_live = self._reader.raw_parts()
+        if self._compiled:
+            # The contact list is truncated to the widest env's live count,
+            # so its row axis changes from substep to substep. Every other
+            # shape is fixed; this one must be symbolic, or each new width
+            # is a ~2 s recompile and, past Dynamo's recompile limit, a
+            # silent drop back to eager.
+            for t in (link_a, link_b, force):
+                torch._dynamo.mark_dynamic(t, 1)
+        quats = [self._reader.links_quat(s._entity) for s in self._force_sensors]
+        found_hists = [s._found_hist for s in self._sensors]
+        force_hists = [s._force_hist for s in self._force_sensors]
+        return link_a, link_b, force, n_live, quats, found_hists, force_hists
+
+    def _store_rings(self, found_hists: list[torch.Tensor], force_hists: list[torch.Tensor]) -> None:
+        for s, hist in zip(self._sensors, found_hists):
+            s._found_hist = hist
+        for s, hist in zip(self._force_sensors, force_hists):
+            s._force_hist = hist
+
+    def capture_substep(self) -> None:
+        """Compute this substep's frames for every group and push them
+        onto the rings — eager, no timing update. The post-reset refresh
+        and the diagnostics use this; the training loop goes through
+        :meth:`capture_and_advance`."""
+        found_hists, force_hists = self._substep_impl(*self._gather_inputs(), None, 0.0)
+        self._store_rings(found_hists, force_hists)
+
+    def capture_and_advance(self, timing: ContactGroup, dt: float) -> None:
+        """One training substep: frames, rings, and the contact-timing
+        update of ``timing`` (the manager's stacked all-groups buffers,
+        whose columns are in the same order as this batch's)."""
+        found_hists, force_hists = self._substep(*self._gather_inputs(), timing, dt)
+        self._store_rings(found_hists, force_hists)
+
+    def _substep_impl(
+        self,
+        link_a: torch.Tensor,
+        link_b: torch.Tensor,
+        force: torch.Tensor,
+        n_live: torch.Tensor,
+        quats: list[torch.Tensor],
+        found_hists: list[torch.Tensor],
+        force_hists: list[torch.Tensor],
+        timing: ContactGroup | None,
+        dt: float,
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+        """The substep as a function of tensors — the unit ``torch.compile`` sees.
+
+        Returns the rolled rings (fresh tensors, so frames already handed
+        out by the read paths stay valid snapshots); the timing buffers
+        are updated in place, as ``_apply_contact_frame`` always has.
+        """
+        row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
+        found, f_local = self._frame(link_a, link_b, force, row_valid, quats)
+
+        new_found = []
+        for sl, hist in zip(self._slices, found_hists):
+            rolled = torch.roll(hist, 1, dims=1)
+            rolled[:, 0] = found[:, sl]
+            new_found.append(rolled)
+        new_force = []
+        fstart = 0
+        for s, hist in zip(self._force_sensors, force_hists):
+            n = s._num_primary
+            rolled = torch.roll(hist, 1, dims=1)
+            rolled[:, 0] = f_local[:, fstart : fstart + n]
+            fstart += n
+            new_force.append(rolled)
+
+        if timing is not None:
+            # ``found`` IS what each group's ``read_found`` returns after
+            # the push, so this is the base manager's advance, in-graph.
+            BaseContactManager._apply_contact_frame(timing, found, dt)
+        return new_found, new_force
+
+    def _frame(
+        self,
+        link_a: torch.Tensor,
+        link_b: torch.Tensor,
+        force: torch.Tensor,
+        row_valid: torch.Tensor,
+        quats: list[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """This substep's ``found`` ``(B, P_total)`` and link-local force
+        ``(B, P_force, 3)`` (``None`` when no group tracks force)."""
         on_a = link_a.unsqueeze(-1) == self._all_primary  # (B, C, P_total)
         on_b = link_b.unsqueeze(-1) == self._all_primary
 
@@ -477,17 +589,9 @@ class GenesisContactBatch:
                 sub_a = pmask_a[:, :, self._force_cols]
                 sub_b = pmask_b[:, :, self._force_cols]
             f_world = torch.einsum("ncp,nci->npi", sub_b.float() - sub_a.float(), force)
-            quats = torch.cat(
-                [self._reader.links_quat(s._entity)[:, s._primary_local] for s in self._force_sensors],
+            primary_quats = torch.cat(
+                [q[:, s._primary_local] for q, s in zip(quats, self._force_sensors)],
                 dim=1,
             )
-            f_local = inv_transform_by_quat(f_world, quats)
-
-        fstart = 0
-        for s, sl in zip(self._sensors, self._slices):
-            if s._track_force:
-                n = s._num_primary
-                s.push_frame(found[:, sl], f_local[:, fstart : fstart + n])
-                fstart += n
-            else:
-                s.push_frame(found[:, sl], None)
+            f_local = inv_transform_by_quat(f_world, primary_quats)
+        return found, f_local

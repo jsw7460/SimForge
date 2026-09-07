@@ -50,6 +50,14 @@ class EnvConfig(BaseConfig):
     # tool that edits the scene after build sets False. Only honored by
     # the process's FIRST Genesis env (``gs.init`` runs once per process).
     performance_mode: bool = True
+    # Run the per-substep contact capture + contact-timing update through
+    # ``torch.compile`` (``GenesisContactBatch``). It is plain tensor math
+    # on tensors already handed out of the engine — nothing engine-side is
+    # traced — and eager it is ~75 tiny launches per substep; fused it is
+    # a handful. ``found`` and the timing buffers are bit-identical to the
+    # eager path; the link-frame force can differ in its last bits (fused
+    # multiply-add, reduction order). False keeps the eager path.
+    compile_contact_kernels: bool = True
 
 
 @dataclass
