@@ -330,6 +330,77 @@ def _probe_step_phases(env, timer: _Timer, actions: torch.Tensor) -> None:
     _time_probes(timer, probes, repeats)
     _probe_physics_substep(env, timer, repeats)
     _probe_observation_terms(env, timer, repeats)
+    _probe_reads_vs_arithmetic(env, timer, repeats)
+
+
+def _probe_reads_vs_arithmetic(env, timer: _Timer, repeats: int) -> None:
+    """Split the reward and observation terms into engine reads and math.
+
+    A term function reads state out of the engine and then does a little
+    arithmetic on it. The per-term probe above times the terms with the
+    per-step read cache warm, so it sees only the arithmetic; in the
+    real step the rewards run first after physics and pay every cold
+    read, and the observations run after them on a warm cache. Whether
+    fusing the arithmetic (torch.compile) can buy anything depends on
+    which of the two the manager's time is.
+
+    Each probe runs every term of the manager in order; the "cold" one
+    bumps the read-cache generation first, exactly as the step does after
+    physics. Stateful reward terms advance their state on every call,
+    which is harmless for timing; nothing reads this env afterwards.
+    """
+    print()
+    print("=" * 78)
+    print("ENGINE READS vs ARITHMETIC  (all terms of a manager, in order)")
+    print("=" * 78)
+
+    rm = env.reward_manager
+    om = env.obs_manager
+
+    def reward_terms() -> None:
+        for name, term in rm.reward_terms.items():
+            if name in rm._instances:
+                rm._instances[name](env)
+            else:
+                rm._resolved_fns[name](env, **term.params)
+
+    def obs_terms() -> None:
+        for group_name, terms in om._group_terms.items():
+            for term_name, obs_term in terms.items():
+                om._resolved_fns[group_name][term_name](env, **obs_term.params)
+
+    def cold(fn):
+        def run():
+            env._invalidate_cache()
+            fn()
+
+        return run
+
+    probes = {
+        "reward terms, cold cache (reads + math)": cold(reward_terms),
+        "reward terms, warm cache (math only)": reward_terms,
+        "reward_manager.set_rewards, cold": cold(
+            lambda: rm.set_rewards(reward_buffer=env.rew_buf, reward_buffer_per_type=env.rew_buf_per_type)
+        ),
+        "obs terms, cold cache (reads + math)": cold(obs_terms),
+        "obs terms, warm cache (math only)": obs_terms,
+        "obs_manager.process_observations, cold": cold(lambda: om.process_observations(update_history=True)),
+        "obs_manager.process_observations, warm": lambda: om.process_observations(update_history=True),
+    }
+    _time_probes(timer, probes, repeats)
+    med = {name: statistics.median(timer.samples[name]) for name in probes}
+    reads_r = med["reward terms, cold cache (reads + math)"] - med["reward terms, warm cache (math only)"]
+    glue_r = med["reward_manager.set_rewards, cold"] - med["reward terms, cold cache (reads + math)"]
+    reads_o = med["obs terms, cold cache (reads + math)"] - med["obs terms, warm cache (math only)"]
+    glue_o = med["obs_manager.process_observations, warm"] - med["obs terms, warm cache (math only)"]
+    print(
+        f"  {'reward: engine reads / math / manager glue':<46}{reads_r:7.3f} / {med['reward terms, warm cache (math only)']:6.3f} / {glue_r:6.3f} ms"
+    )
+    print(
+        f"  {'obs:    engine reads / math / manager glue':<46}{reads_o:7.3f} / {med['obs terms, warm cache (math only)']:6.3f} / {glue_o:6.3f} ms"
+    )
+    print("  (math and glue are what a compiled term chain could fuse; reads are not)")
+    print("=" * 78)
 
 
 def _probe_physics_substep(env, timer: _Timer, repeats: int) -> None:
