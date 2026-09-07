@@ -162,6 +162,17 @@ class DelayedPDActuator(IdealPDActuator):
             dtype=torch.long,
         )
         self._max_delay = max_delay
+        self._env_idx = torch.arange(num_envs, device=device)
+        # ``_read_idx[h]`` is the ring slot each env reads when the write
+        # head sits at ``h``. The delay only changes at reset, so the table
+        # is rebuilt there and ``compute`` does a row lookup instead of
+        # recomputing the modular arithmetic every substep.
+        self._read_idx = torch.empty(max_delay, num_envs, device=device, dtype=torch.long)
+        self._rebuild_read_idx(slice(None))
+
+    def _rebuild_read_idx(self, env_ids) -> None:
+        heads = torch.arange(self._max_delay, device=self._device).unsqueeze(1)
+        self._read_idx[:, env_ids] = (heads - 1 - self._delay[env_ids].unsqueeze(0)) % self._max_delay
 
     def reset(self, env_ids: Sequence[int]) -> None:
         super().reset(env_ids)
@@ -173,6 +184,7 @@ class DelayedPDActuator(IdealPDActuator):
             device=self._device,
             dtype=torch.long,
         )
+        self._rebuild_read_idx(env_ids)
 
     def compute(
         self,
@@ -185,9 +197,7 @@ class DelayedPDActuator(IdealPDActuator):
         self._head = (self._head + 1) % self._max_delay
 
         # Read delayed targets: for each env, go back self._delay[i] steps
-        read_idx = (self._head - 1 - self._delay) % self._max_delay  # (num_envs,)
-        env_idx = torch.arange(self._num_envs, device=self._device)
-        delayed_target = self._buffer[read_idx, env_idx]  # (num_envs, num_joints)
+        delayed_target = self._buffer[self._read_idx[self._head], self._env_idx]  # (num_envs, num_joints)
         return super().compute(delayed_target, joint_pos, joint_vel)
 
 

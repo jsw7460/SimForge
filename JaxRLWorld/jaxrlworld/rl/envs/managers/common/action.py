@@ -160,6 +160,9 @@ class ActionManagerBase(BaseManager):
         # _actuators: list of (actuator_instance, joint_indices_into_action_dim)
         self._actuators: list[tuple] = []
         self._has_explicit_actuators = False
+        # True when one explicit actuator drives every actuated joint in
+        # the manager's own order, so its subset IS the full-width tensor.
+        self._single_full_width_actuator = False
         self._build_actuators_from_entity()
 
         # ── Term-based action system (optional) ──────────────────
@@ -664,6 +667,18 @@ class ActionManagerBase(BaseManager):
 
         self._has_explicit_actuators = len(self._actuators) > 0
 
+        # The common robot declares one actuator over ``.*``: its joint
+        # index is then the identity, and gathering the three inputs and
+        # scattering the result back is five copies per substep that move
+        # nothing. Decide that once here; ``_compute_actuator_torques``
+        # hands the full-width tensors straight to the actuator.
+        if len(self._actuators) == 1:
+            joint_idx = self._actuators[0][1]
+            n = len(self._actuated_joint_names)
+            self._single_full_width_actuator = joint_idx.numel() == n and bool(
+                torch.equal(joint_idx, torch.arange(n, device=self.device))
+            )
+
         # Mixing implicit and explicit actuator groups on one entity is not
         # supported: once ANY explicit actuator exists, apply_actions routes
         # ALL actuated joints through the force path, so implicit-group joints
@@ -809,6 +824,8 @@ class ActionManagerBase(BaseManager):
         """Actuator-model torques for one entity's joint position target."""
         joint_pos = self._get_joint_pos(entity_name)
         joint_vel = self._get_joint_vel(entity_name)
+        if self._single_full_width_actuator and target.shape[1] == len(self._actuated_joint_names):
+            return self._actuators[0][0].compute(target, joint_pos, joint_vel)
         full_torques = torch.zeros_like(target)
         for actuator, joint_idx in self._actuators:
             target_subset = target[:, joint_idx]
