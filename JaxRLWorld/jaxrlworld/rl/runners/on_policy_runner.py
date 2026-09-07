@@ -335,8 +335,11 @@ class OnPolicyRunner(BaseRunner):
             actor_obs = self._assemble_obs(converted, "actor", "")
             critic_obs = self._assemble_obs(converted, "critic", "")
             rewards_jax = converted["reward"]
-            terminated_jax = converted["terminated"].astype(jnp.bool_)
-            truncated_jax = converted["truncated"].astype(jnp.bool_)
+            # The flags stay uint8: process_env_step reads them as
+            # ``!= 0`` inside its one dispatch, so a cast here would be
+            # one more eager program per flag for nothing.
+            terminated_jax = converted["terminated"]
+            truncated_jax = converted["truncated"]
 
             # Process step
             infos_jax = {}
@@ -345,9 +348,9 @@ class OnPolicyRunner(BaseRunner):
                     "critic": self._assemble_obs(converted, "critic", "final_"),
                 }
                 if bootstrap_mask is not None:
-                    infos_jax["bootstrap_mask"] = converted["bootstrap_mask"].astype(jnp.bool_)
+                    infos_jax["bootstrap_mask"] = converted["bootstrap_mask"]
             if trunc_no_reset is not None:
-                infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"].astype(jnp.bool_)
+                infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"]
             self.alg.process_env_step(
                 rewards_jax,
                 terminated_jax,

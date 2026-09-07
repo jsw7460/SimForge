@@ -225,8 +225,8 @@ def main() -> int:
         actor_obs = runner._assemble_obs(converted, "actor", "")
         critic_obs = runner._assemble_obs(converted, "critic", "")
         rewards_jax = converted["reward"]
-        terminated_jax = converted["terminated"].astype(jnp.bool_)
-        truncated_jax = converted["truncated"].astype(jnp.bool_)
+        terminated_jax = converted["terminated"]
+        truncated_jax = converted["truncated"]
         if record:
             timer.stop("torch -> jax (every tensor of the step)", terminated_jax)
 
@@ -237,9 +237,9 @@ def main() -> int:
                 "critic": runner._assemble_obs(converted, "critic", "final_"),
             }
             if bootstrap_mask is not None:
-                infos_jax["bootstrap_mask"] = converted["bootstrap_mask"].astype(jnp.bool_)
+                infos_jax["bootstrap_mask"] = converted["bootstrap_mask"]
         if trunc_no_reset is not None:
-            infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"].astype(jnp.bool_)
+            infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"]
         if record:
             timer.stop("final_observation handling")
 

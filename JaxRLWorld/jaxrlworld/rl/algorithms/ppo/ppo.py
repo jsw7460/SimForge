@@ -406,93 +406,57 @@ class PPO(OnPolicyAlgorithm):
     ) -> None:
         """Process environment step and store transition.
 
+        ``terminated`` / ``truncated`` and the masks in ``infos`` may be
+        bool or the uint8 the torch->jax bridge carries.
+
+        Timeout bootstrap: ``gamma * V(final_obs)`` is added to the reward
+        of every env-slot that hit a time-limit truncation but did NOT
+        genuinely terminate — the env-provided ``bootstrap_mask``
+        (termination manager: per-term ``bootstrap_value``; ManiSkill:
+        ``success``), else ``truncated & ~terminated``, which guards the
+        rare step where both flags fire at once. V runs on the full batch
+        and is masked, so no host sync and no dynamic shapes. The
+        per-epoch-GAE path replaces that bonus with reward substitution
+        inside the update, so it writes the truncation mask row instead.
+
+        Everything past the critic forward is one dispatch
+        (``RolloutStorage.record_step``).
+
         NOTE: Observation normalizer is NOT updated here. It is updated
         once per iteration in update() after the gradient step, to ensure
         consistency between collection-time and update-time normalization
         (matching Brax PPO behavior).
         """
-        dones = terminated | truncated
+        bootstrap_values = None
+        if not self.recompute_gae_per_epoch and "final_observation" in infos:
+            bootstrap_values = _evaluate_bootstrap_values(self.train_state.model, infos["final_observation"]["critic"])
+            # Hook 2 (value normalization, opt-in): critic outputs in
+            # normalized space; convert to raw before adding to raw rewards.
+            if self.value_normalizer is not None:
+                bootstrap_values = self.value_normalizer.unnormalize(bootstrap_values[..., None]).squeeze(-1)
 
-        # Transition assignment
-        self.transition.rewards = rewards
-        self.transition.dones = dones
-        if self._last_dones is None:
-            self.transition.episode_starts = jnp.zeros_like(dones)
-        else:
-            self.transition.episode_starts = self._last_dones
-
-        # Handle timeout (truncated-only; vectorized — no host sync).
-        # The per-epoch-GAE path replaces the gamma*V(final) reward bonus with
-        # booster_gym's reward substitution (reward <- V(s_t) at truncation
-        # steps, applied inside the update), so the bonus must not also run.
-        if self.recompute_gae_per_epoch:
-            bootstrap_mask = infos.get("bootstrap_mask")
-            if bootstrap_mask is None:
-                bootstrap_mask = truncated & ~terminated
-            trunc_no_reset = infos.get("trunc_no_reset_mask")
-            mask = bootstrap_mask if trunc_no_reset is None else (bootstrap_mask | trunc_no_reset)
-            self.storage.trunc_masks = self.storage.trunc_masks.at[self.storage.step].set(mask)
-        else:
-            self._handle_timeout(truncated, terminated, infos)
-
-        # Add to storage
-        self.storage.add_transition(
+        dones = self.storage.record_step(
             actor_obs=self.transition.actor_observations,
             critic_obs=self.transition.critic_observations,
             actions=self.transition.actions,
-            rewards=self.transition.rewards,
-            dones=self.transition.dones,
-            episode_starts=self.transition.episode_starts,
             values=self.transition.values,
             log_probs=self.transition.actions_log_prob,
             mu=self.transition.action_mean,
             sigma=self.transition.action_sigma,
+            rewards=rewards,
+            terminated=terminated,
+            truncated=truncated,
+            last_dones=self._last_dones,
+            bootstrap_values=bootstrap_values,
+            bootstrap_mask=infos.get("bootstrap_mask"),
+            trunc_no_reset=infos.get("trunc_no_reset_mask"),
+            gamma=self.gamma,
+            recompute_gae=self.recompute_gae_per_epoch,
         )
 
         # Clear and update
         self.transition.clear()
         self._last_dones = dones
-
-    def _handle_timeout(
-        self,
-        truncated: jax.Array,
-        terminated: jax.Array,
-        infos: Dict[str, Any],
-    ) -> None:
-        """Bootstrap terminal value for truncated-only episodes (vectorized).
-
-        Adds ``gamma * V(final_obs)`` to the reward for env-slots that hit a
-        time-limit truncation but did NOT genuinely terminate. The
-        ``truncated & ~terminated`` mask guards the rare but real case where
-        an env emits both flags on the same step (e.g. max-episode-length is
-        reached on the same physics step a fall is detected) — without the
-        guard we would over-bootstrap a real termination.
-
-        Implementation runs V on the full ``(num_envs, obs_dim)`` final-obs
-        tensor and multiplies by the mask, so there is no host-device sync,
-        no dynamic-shape indexing, and no JIT recompilation pressure on
-        truncated counts.
-        """
-        if "final_observation" not in infos:
-            return
-
-        final_critic = infos["final_observation"]["critic"]
-        bootstrap_values = _evaluate_bootstrap_values(self.train_state.model, final_critic)
-
-        # Hook 2 (value normalization, opt-in): critic outputs in
-        # normalized space; convert to raw before adding to raw rewards.
-        if self.value_normalizer is not None:
-            bootstrap_values = self.value_normalizer.unnormalize(bootstrap_values[..., None]).squeeze(-1)
-
-        # Prefer the env-provided bootstrap mask (termination manager builds it
-        # from per-term ``bootstrap_value``; ManiSkill adapter from ``success``).
-        # Falls back to ``truncated & ~terminated`` for envs that don't provide
-        # one — identical to the historical behaviour.
-        bootstrap_mask = infos.get("bootstrap_mask")
-        if bootstrap_mask is None:
-            bootstrap_mask = truncated & ~terminated
-        bonus = bootstrap_mask.astype(self.transition.rewards.dtype) * (self.gamma * bootstrap_values)
-        self.transition.rewards = self.transition.rewards + bonus
 
     def compute_returns(self, last_critic_obs: jax.Array) -> None:
         """

@@ -34,6 +34,55 @@ def _write_step(buffers: tuple[jax.Array, ...], index: jax.Array, values: tuple[
     return tuple(jax.tree.map(lambda b, v: b.at[index].set(v), buffer, value) for buffer, value in zip(buffers, values))
 
 
+@partial(jax.jit, donate_argnums=(0, 1), static_argnames=("gamma", "recompute_gae"))
+def _record_step(
+    buffers: tuple[jax.Array, ...],
+    index: jax.Array,
+    fields: tuple[jax.Array, ...],
+    rewards: jax.Array,
+    terminated: jax.Array,
+    truncated: jax.Array,
+    last_dones: jax.Array | None,
+    bootstrap_values: jax.Array | None,
+    bootstrap_mask: jax.Array | None,
+    trunc_no_reset: jax.Array | None,
+    gamma: float,
+    recompute_gae: bool,
+):
+    """Everything ``PPO.process_env_step`` does to a step, in one dispatch.
+
+    The flag casts, ``dones``, the timeout bootstrap bonus, the
+    episode-start row and the row write used to be a dozen separate
+    eager JAX ops around :func:`_write_step`; each is its own XLA
+    program, and the launch overhead of a dozen of them was most of
+    what recording a step cost. The critic forward that produces
+    ``bootstrap_values`` stays its own compiled call (it is a model).
+
+    ``terminated`` / ``truncated`` / the masks may arrive as bool or as
+    the uint8 the torch->jax bridge carries; ``!= 0`` reads both. The
+    buffers and the row counter are donated, as in :func:`_write_step`.
+    """
+    terminated = terminated != 0
+    truncated = truncated != 0
+    dones = terminated | truncated
+    mask = (truncated & ~terminated) if bootstrap_mask is None else (bootstrap_mask != 0)
+    if recompute_gae:
+        trunc_mask = mask if trunc_no_reset is None else (mask | (trunc_no_reset != 0))
+    else:
+        trunc_mask = None
+        if bootstrap_values is not None:
+            rewards = rewards + mask.astype(rewards.dtype) * (gamma * bootstrap_values)
+    episode_starts = jnp.zeros_like(dones) if last_dones is None else (last_dones != 0)
+
+    actor_obs, critic_obs, actions, values, log_probs, mu, sigma = fields
+    row = (actor_obs, critic_obs, actions, rewards, dones, episode_starts, values, log_probs, mu, sigma, trunc_mask)
+    written = tuple(
+        buffer if value is None else jax.tree.map(lambda b, v: b.at[index].set(v), buffer, value)
+        for buffer, value in zip(buffers, row)
+    )
+    return written, index + 1, dones
+
+
 ObsShape = tuple[int, ...] | dict[str, tuple[int, ...]]
 """One group's per-env shape, or a dict of them when the policy reads
 several observation groups (a state vector plus one or more images)."""
@@ -119,6 +168,9 @@ class RolloutStorage:
         self.action_shape = action_shape
 
         self.step = 0
+        # Device-side twin of ``step`` for ``record_step``: a traced row
+        # index that never needs a host->device copy per step.
+        self._index = jnp.zeros((), dtype=jnp.int32)
         self._allocate_buffers()
 
     # ---------------------------------------------------------------- alloc
@@ -202,9 +254,83 @@ class RolloutStorage:
         )
         self.step += 1
 
+    def record_step(
+        self,
+        actor_obs: jax.Array,
+        critic_obs: jax.Array,
+        actions: jax.Array,
+        values: jax.Array,
+        log_probs: jax.Array,
+        mu: jax.Array,
+        sigma: jax.Array,
+        rewards: jax.Array,
+        terminated: jax.Array,
+        truncated: jax.Array,
+        last_dones: jax.Array | None,
+        bootstrap_values: jax.Array | None,
+        bootstrap_mask: jax.Array | None,
+        trunc_no_reset: jax.Array | None,
+        gamma: float,
+        recompute_gae: bool,
+    ) -> jax.Array:
+        """Record one step through :func:`_record_step`; returns ``dones``.
+
+        The reward written is ``rewards`` plus the timeout bootstrap bonus
+        when ``bootstrap_values`` is given (and ``recompute_gae`` is off);
+        with ``recompute_gae`` the truncation mask row is written instead.
+        """
+        if self.step >= self.num_steps:
+            raise RuntimeError("Storage overflow.")
+        buffers = (
+            self.actor_obs,
+            self.critic_obs,
+            self.actions,
+            self.rewards,
+            self.dones,
+            self.episode_starts,
+            self.values,
+            self.log_probs,
+            self.mu,
+            self.sigma,
+            self.trunc_masks,
+        )
+        (
+            (
+                self.actor_obs,
+                self.critic_obs,
+                self.actions,
+                self.rewards,
+                self.dones,
+                self.episode_starts,
+                self.values,
+                self.log_probs,
+                self.mu,
+                self.sigma,
+                self.trunc_masks,
+            ),
+            self._index,
+            dones,
+        ) = _record_step(
+            buffers,
+            self._index,
+            (actor_obs, critic_obs, actions, values, log_probs, mu, sigma),
+            rewards,
+            terminated,
+            truncated,
+            last_dones,
+            bootstrap_values,
+            bootstrap_mask,
+            trunc_no_reset,
+            gamma=gamma,
+            recompute_gae=recompute_gae,
+        )
+        self.step += 1
+        return dones
+
     def clear(self) -> None:
         """Reset for next rollout. Buffers are reused; advantages/returns dropped."""
         self.step = 0
+        self._index = jnp.zeros((), dtype=jnp.int32)
         self.advantages = None
         self.returns = None
 
