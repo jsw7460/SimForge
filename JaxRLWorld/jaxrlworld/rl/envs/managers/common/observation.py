@@ -321,7 +321,11 @@ class ObservationManager(BaseManager):
                     # for every other reader (or write into the simulator).
                     obs_value = obs_value.clip(min=clip[0], max=clip[1])
 
-                obs_value = obs_value * scale
+                # ``x * 1.0`` is ``x`` bit for bit, and on a preset whose
+                # terms all carry the default scale it was a launch per
+                # term per build for nothing.
+                if scale != 1.0:
+                    obs_value = obs_value * scale
 
                 # Stochastic delay (mjlab pipeline position: after scale,
                 # before history). The delay state must advance exactly
