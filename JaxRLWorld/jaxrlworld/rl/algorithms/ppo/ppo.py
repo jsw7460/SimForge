@@ -31,7 +31,7 @@ from jaxrlworld.rl.algorithms.ppo.update import (
 )
 from jaxrlworld.rl.modules.normalization import EmpiricalNormalization
 from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
-from jaxrlworld.rl.storages.rollout_storage import RolloutBatch, RolloutStorage
+from jaxrlworld.rl.storages.rollout_storage import RolloutBatch, RolloutStorage, StepLayout, layout_column
 
 
 def _as_obs_shape(shape):
@@ -52,6 +52,23 @@ def _evaluate_bootstrap_values(model: PPOActorCritic, critic_obs: jax.Array) -> 
     A truncation happens somewhere in the batch on essentially every
     step, so this runs on essentially every step.
     """
+    values, _ = model.evaluate_value(critic_obs)
+    return values.squeeze(-1)
+
+
+@eqx.filter_jit
+def _evaluate_bootstrap_values_packed(
+    model: PPOActorCritic,
+    packed: jax.Array,
+    layout: StepLayout,
+    images: Dict[str, jax.Array] | None,
+) -> jax.Array:
+    """:func:`_evaluate_bootstrap_values` on the ``final_critic`` column of
+    a packed step, the slice taken inside the compiled call. ``images``
+    are the critic's image groups of the terminal observation, joined to
+    the vector under the model's own group keys."""
+    vector = layout_column(packed, layout, "final_critic")
+    critic_obs = vector if images is None else {"critic": vector, **images}
     values, _ = model.evaluate_value(critic_obs)
     return values.squeeze(-1)
 
@@ -457,6 +474,44 @@ class PPO(OnPolicyAlgorithm):
         # Clear and update
         self.transition.clear()
         self._last_dones = dones
+
+    def process_env_step_packed(
+        self,
+        packed: jax.Array,
+        layout: StepLayout,
+        final_images: Dict[str, jax.Array] | None = None,
+    ) -> tuple[jax.Array, jax.Array]:
+        """:meth:`process_env_step` on a packed step (:data:`StepLayout`).
+
+        Two compiled calls in total — the bootstrap critic forward and the
+        record — and nothing sliced eagerly. Returns the step's actor and
+        critic observation vectors for the next policy forward.
+        """
+        names = {name for name, _, _ in layout}
+        bootstrap_values = None
+        if not self.recompute_gae_per_epoch and "final_critic" in names:
+            bootstrap_values = _evaluate_bootstrap_values_packed(self.train_state.model, packed, layout, final_images)
+            if self.value_normalizer is not None:
+                bootstrap_values = self.value_normalizer.unnormalize(bootstrap_values[..., None]).squeeze(-1)
+
+        dones, next_actor, next_critic = self.storage.record_step_packed(
+            actor_obs=self.transition.actor_observations,
+            critic_obs=self.transition.critic_observations,
+            actions=self.transition.actions,
+            values=self.transition.values,
+            log_probs=self.transition.actions_log_prob,
+            mu=self.transition.action_mean,
+            sigma=self.transition.action_sigma,
+            packed=packed,
+            layout=layout,
+            last_dones=self._last_dones,
+            bootstrap_values=bootstrap_values,
+            gamma=self.gamma,
+            recompute_gae=self.recompute_gae_per_epoch,
+        )
+        self.transition.clear()
+        self._last_dones = dones
+        return next_actor, next_critic
 
     def compute_returns(self, last_critic_obs: jax.Array) -> None:
         """

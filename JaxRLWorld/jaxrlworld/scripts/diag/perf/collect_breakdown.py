@@ -50,7 +50,7 @@ from jaxrlworld.rl.configs.presets.k1_joystick.base import K1JoystickConfig
 from jaxrlworld.rl.configs.presets.k1_joystick.g1_recipe import K1G1RecipeConfig
 from jaxrlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from jaxrlworld.rl.runners import BaseRunner
-from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax, torch_to_jax_many
+from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax_many
 
 _PRESETS = {
     "go2": Go2FlatConfig,
@@ -170,8 +170,11 @@ def main() -> int:
         env.termination_manager.episode_length_buf = torch.randint_like(
             env.episode_length_buf, high=int(env.max_episode_length)
         )
-    actor_obs = torch_to_jax(obs_dict["actor"])
-    critic_obs = torch_to_jax(obs_dict["critic"])
+    # The runner's own conversion, so a vision preset gets its image
+    # groups alongside the state vector — the shape the model was built
+    # against — instead of the bare vector.
+    actor_obs = runner._pack_obs(obs_dict, "actor")
+    critic_obs = runner._pack_obs(obs_dict, "critic")
 
     timer = _Timer()
     done_steps: list[int] = []
@@ -209,49 +212,29 @@ def main() -> int:
         bootstrap_mask = infos.get("bootstrap_mask")
         trunc_no_reset = infos.get("trunc_no_reset_mask")
 
-        sources = runner._obs_sources(obs_dict, "actor", "")
-        sources.update(runner._obs_sources(obs_dict, "critic", ""))
-        sources["reward"] = rewards
-        sources["terminated"] = terminated.to(torch.uint8)
-        sources["truncated"] = truncated.to(torch.uint8)
+        packed, layout = runner._pack_step(
+            obs_dict, rewards, terminated, truncated, terminal_obs, bootstrap_mask, trunc_no_reset
+        )
+        sources = {"packed": packed}
+        sources.update(runner._image_sources(obs_dict, "actor", ""))
+        sources.update(runner._image_sources(obs_dict, "critic", ""))
         if terminal_obs is not None:
-            sources.update(runner._obs_sources(terminal_obs, "critic", "final_"))
-            if bootstrap_mask is not None:
-                sources["bootstrap_mask"] = bootstrap_mask.to(torch.uint8)
-        if trunc_no_reset is not None:
-            sources["trunc_no_reset_mask"] = trunc_no_reset.to(torch.uint8)
-
+            sources.update(runner._image_sources(terminal_obs, "critic", "final_"))
         converted = torch_to_jax_many(sources)
-        actor_obs = runner._assemble_obs(converted, "actor", "")
-        critic_obs = runner._assemble_obs(converted, "critic", "")
-        rewards_jax = converted["reward"]
-        terminated_jax = converted["terminated"]
-        truncated_jax = converted["truncated"]
         if record:
-            timer.stop("torch -> jax (every tensor of the step)", terminated_jax)
+            timer.stop("torch -> jax (every tensor of the step)", converted["packed"])
 
         timer.start()
-        infos_jax = {}
-        if terminal_obs is not None:
-            infos_jax["final_observation"] = {
-                "critic": runner._assemble_obs(converted, "critic", "final_"),
-            }
-            if bootstrap_mask is not None:
-                infos_jax["bootstrap_mask"] = converted["bootstrap_mask"]
-        if trunc_no_reset is not None:
-            infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"]
+        final_images = runner._image_dict(converted, "critic", "final_") if terminal_obs is not None else None
         if record:
             timer.stop("final_observation handling")
 
         timer.start()
-        runner.alg.process_env_step(
-            rewards_jax,
-            terminated_jax,
-            truncated_jax,
-            infos_jax,
-            next_actor_obs=actor_obs,
-            next_critic_obs=critic_obs,
+        converted["actor"], converted["critic"] = runner.alg.process_env_step_packed(
+            converted["packed"], layout, final_images
         )
+        actor_obs = runner._assemble_obs(converted, "actor", "")
+        critic_obs = runner._assemble_obs(converted, "critic", "")
         if record:
             timer.stop("process_env_step (storage)")
 

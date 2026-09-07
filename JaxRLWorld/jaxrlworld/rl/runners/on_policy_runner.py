@@ -204,9 +204,9 @@ class OnPolicyRunner(BaseRunner):
         before. With them it is a dict keyed by group name — the same
         keys the model was built against.
 
-        One conversion, so one wait. The collection loop instead splits
-        this into :meth:`_obs_sources` / :meth:`_assemble_obs` and pays a
-        single wait for every tensor of the step (see
+        One conversion, so one wait. The collection loop instead packs
+        the step (:meth:`_pack_step`), converts it with the image groups
+        in one batch and rebuilds through :meth:`_assemble_obs` (see
         ``torch_to_jax_many``).
         """
         vector = torch_to_jax(obs_dict[role])
@@ -217,18 +217,6 @@ class OnPolicyRunner(BaseRunner):
         packed.update({group: torch_to_jax(obs_dict[group]) for group in image_groups})
         return packed
 
-    def _obs_sources(self, obs_dict, role: str, prefix: str) -> Dict[str, Any]:
-        """The torch tensors one model's observation is built from.
-
-        Keys are prefixed so the actor's, the critic's and a terminal
-        observation's groups can share one conversion batch. Two roles
-        naming the same image group collapse to one entry, which is
-        correct: it is the same tensor.
-        """
-        sources = {f"{prefix}{role}": obs_dict[role]}
-        sources.update({f"{prefix}{group}": obs_dict[group] for group in self.image_groups_by_role[role]})
-        return sources
-
     def _assemble_obs(self, converted: Dict[str, Any], role: str, prefix: str):
         """Rebuild :meth:`_pack_obs`'s shape from a converted batch."""
         vector = converted[f"{prefix}{role}"]
@@ -238,6 +226,75 @@ class OnPolicyRunner(BaseRunner):
         packed = {role: vector}
         packed.update({group: converted[f"{prefix}{group}"] for group in image_groups})
         return packed
+
+    def _image_sources(self, obs_dict, role: str, prefix: str) -> Dict[str, Any]:
+        """One model's image groups for the conversion batch.
+
+        Keys are prefixed so the actor's, the critic's and a terminal
+        observation's groups can share one batch. Two roles naming the
+        same image group collapse to one entry, which is correct: it is
+        the same tensor.
+        """
+        return {f"{prefix}{group}": obs_dict[group] for group in self.image_groups_by_role[role]}
+
+    def _image_dict(self, converted: Dict[str, Any], role: str, prefix: str) -> Dict[str, Any] | None:
+        """One model's converted image groups under their own names, or
+        ``None`` when the model reads no images."""
+        image_groups = self.image_groups_by_role[role]
+        if not image_groups:
+            return None
+        return {group: converted[f"{prefix}{group}"] for group in image_groups}
+
+    def _pack_step(
+        self,
+        obs_dict,
+        rewards: torch.Tensor,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+        terminal_obs,
+        bootstrap_mask: torch.Tensor | None,
+        trunc_no_reset: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, tuple[tuple[str, int, int], ...]]:
+        """Every vector of the step as one ``(num_envs, total)`` float32
+        tensor plus its column layout (``StepLayout``).
+
+        One crossing instead of one per tensor: each DLPack conversion
+        copies and is its own dispatch, and a step carries up to eight of
+        them. The flags ride as 0/1 floats and are read back as ``!= 0``
+        inside the compiled record, so the round trip is exact. Image
+        groups keep their own conversions (their shapes and dtypes
+        differ).
+        """
+        columns: list[torch.Tensor] = []
+        layout: list[tuple[str, int, int]] = []
+        start = 0
+
+        def add(name: str, tensor: torch.Tensor) -> None:
+            nonlocal start
+            width = tensor.shape[1]
+            columns.append(tensor)
+            layout.append((name, start, width))
+            start += width
+
+        add("actor", obs_dict["actor"])
+        add("critic", obs_dict["critic"])
+        add("reward", rewards.unsqueeze(1))
+        add("terminated", terminated.unsqueeze(1).to(torch.float32))
+        add("truncated", truncated.unsqueeze(1).to(torch.float32))
+        if terminal_obs is not None:
+            # Only the critic's terminal observation is consumed
+            # (bootstrap value); nothing reads an "actor" entry.
+            add("final_critic", terminal_obs["critic"])
+            # Bootstrap mask (truncations + non-absorbing terminations).
+            # Only meaningful on done steps (final_observation present);
+            # absent -> PPO falls back to ``truncated & ~terminated``.
+            if bootstrap_mask is not None:
+                add("bootstrap_mask", bootstrap_mask.unsqueeze(1).to(torch.float32))
+        if trunc_no_reset is not None:
+            # Truncation WITHOUT reset (e.g. command-resample steps) — only
+            # consumed by PPO's recompute_gae_per_epoch path.
+            add("trunc_no_reset", trunc_no_reset.unsqueeze(1).to(torch.float32))
+        return torch.cat(columns, dim=1), tuple(layout)
 
     def _get_initial_obs(self) -> PPO.ActInput:
         """Get initial observation as JAX arrays."""
@@ -291,74 +348,42 @@ class OnPolicyRunner(BaseRunner):
                 _step_i,
             )
 
-            # Convert to JAX. Every tensor of the step crosses in ONE
-            # batch, because each conversion has to wait for its copy to
-            # run before the source can be released (see
-            # ``torch_to_jax_many``) and one wait for the step is far
-            # cheaper than one per tensor. The uint8 casts below have to
-            # be built into the batch rather than converted separately:
-            # the mapping is what keeps those temporaries alive across
-            # the wait.
+            # Convert to JAX. Every vector of the step is packed into ONE
+            # tensor (``_pack_step``) and crosses in one conversion; the
+            # image groups, if any, join it in the same batch so there is
+            # one wait for the step (see ``torch_to_jax_many``; the
+            # mapping is what keeps the temporaries alive across it).
             #
             # Bool tensors must not go through DLPack as BOOL (its bool
             # dtype exchange is what once produced rare random bit flips).
-            # Crossing as uint8 sidesteps that entirely: the device-side
-            # cast allocates a fresh 0/1 buffer, DLPack carries a
-            # first-class dtype, and JAX reconstructs bool with a defined
-            # nonzero->True cast. Adoption was gated on
-            # check_bool_dlpack_bridge.
+            # The flags ride in the packed tensor as 0/1 floats and are
+            # read back with a defined ``!= 0`` inside the compiled
+            # record. Adoption was gated on check_bool_dlpack_bridge and
+            # check_record_step_bitwise.
             terminal_obs = infos.get("final_observation")
             bootstrap_mask = infos.get("bootstrap_mask")
             trunc_no_reset = infos.get("trunc_no_reset_mask")
 
-            sources = self._obs_sources(obs_dict, "actor", "")
-            sources.update(self._obs_sources(obs_dict, "critic", ""))
-            sources["reward"] = rewards
-            sources["terminated"] = terminated.to(torch.uint8)
-            sources["truncated"] = truncated.to(torch.uint8)
+            packed, layout = self._pack_step(
+                obs_dict, rewards, terminated, truncated, terminal_obs, bootstrap_mask, trunc_no_reset
+            )
+            sources: Dict[str, Any] = {"packed": packed}
+            sources.update(self._image_sources(obs_dict, "actor", ""))
+            sources.update(self._image_sources(obs_dict, "critic", ""))
             if terminal_obs is not None:
-                # Only the critic's terminal observation is consumed
-                # (bootstrap value); nothing reads an "actor" entry.
-                sources.update(self._obs_sources(terminal_obs, "critic", "final_"))
-                # Bootstrap mask (truncations + non-absorbing terminations).
-                # Only meaningful on done steps (final_observation present);
-                # absent -> PPO falls back to ``truncated & ~terminated``.
-                if bootstrap_mask is not None:
-                    sources["bootstrap_mask"] = bootstrap_mask.to(torch.uint8)
-            if trunc_no_reset is not None:
-                # Truncation WITHOUT reset (e.g. command-resample steps) — only
-                # consumed by PPO's recompute_gae_per_epoch path.
-                sources["trunc_no_reset_mask"] = trunc_no_reset.to(torch.uint8)
+                sources.update(self._image_sources(terminal_obs, "critic", "final_"))
 
             converted = torch_to_jax_many(sources)
 
+            # Process step: the bootstrap critic forward and the record are
+            # the only dispatches; the next observation vectors come back
+            # out of the record instead of being sliced eagerly.
+            final_images = self._image_dict(converted, "critic", "final_") if terminal_obs is not None else None
+            converted["actor"], converted["critic"] = self.alg.process_env_step_packed(
+                converted["packed"], layout, final_images
+            )
             actor_obs = self._assemble_obs(converted, "actor", "")
             critic_obs = self._assemble_obs(converted, "critic", "")
-            rewards_jax = converted["reward"]
-            # The flags stay uint8: process_env_step reads them as
-            # ``!= 0`` inside its one dispatch, so a cast here would be
-            # one more eager program per flag for nothing.
-            terminated_jax = converted["terminated"]
-            truncated_jax = converted["truncated"]
-
-            # Process step
-            infos_jax = {}
-            if terminal_obs is not None:
-                infos_jax["final_observation"] = {
-                    "critic": self._assemble_obs(converted, "critic", "final_"),
-                }
-                if bootstrap_mask is not None:
-                    infos_jax["bootstrap_mask"] = converted["bootstrap_mask"]
-            if trunc_no_reset is not None:
-                infos_jax["trunc_no_reset_mask"] = converted["trunc_no_reset_mask"]
-            self.alg.process_env_step(
-                rewards_jax,
-                terminated_jax,
-                truncated_jax,
-                infos_jax,
-                next_actor_obs=actor_obs,
-                next_critic_obs=critic_obs,
-            )
 
             # Update statistics
             self._update_reward_stats(

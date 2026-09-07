@@ -34,8 +34,33 @@ def _write_step(buffers: tuple[jax.Array, ...], index: jax.Array, values: tuple[
     return tuple(jax.tree.map(lambda b, v: b.at[index].set(v), buffer, value) for buffer, value in zip(buffers, values))
 
 
-@partial(jax.jit, donate_argnums=(0, 1), static_argnames=("gamma", "recompute_gae"))
-def _record_step(
+StepLayout = tuple[tuple[str, int, int], ...]
+"""Column layout of a packed step: ``(name, start, width)`` per field.
+
+The torch->jax bridge carries every vector of a step in ONE ``(num_envs,
+total)`` float32 tensor — actor and critic observation, reward, the
+flags as 0/1, the terminal critic observation and the masks when the
+step has them — because each separate conversion is its own copy and
+its own dispatch. Names: ``actor``, ``critic``, ``reward``,
+``terminated``, ``truncated``, and optionally ``final_critic``,
+``bootstrap_mask``, ``trunc_no_reset``. Static, so it is part of the
+compiled program's signature.
+"""
+
+
+def layout_column(packed: jax.Array, layout: StepLayout, name: str) -> jax.Array | None:
+    """The named field of a packed step, or ``None`` if the step lacks it.
+
+    Width-1 fields come back as ``(num_envs,)``. Inside ``jit`` these
+    slices are free; outside they would each be a dispatch.
+    """
+    for field, start, width in layout:
+        if field == name:
+            return packed[:, start] if width == 1 else packed[:, start : start + width]
+    return None
+
+
+def _record_impl(
     buffers: tuple[jax.Array, ...],
     index: jax.Array,
     fields: tuple[jax.Array, ...],
@@ -49,7 +74,7 @@ def _record_step(
     gamma: float,
     recompute_gae: bool,
 ):
-    """Everything ``PPO.process_env_step`` does to a step, in one dispatch.
+    """Everything ``PPO.process_env_step`` does to a step, as one program.
 
     The flag casts, ``dones``, the timeout bootstrap bonus, the
     episode-start row and the row write used to be a dozen separate
@@ -58,9 +83,11 @@ def _record_step(
     what recording a step cost. The critic forward that produces
     ``bootstrap_values`` stays its own compiled call (it is a model).
 
-    ``terminated`` / ``truncated`` / the masks may arrive as bool or as
-    the uint8 the torch->jax bridge carries; ``!= 0`` reads both. The
-    buffers and the row counter are donated, as in :func:`_write_step`.
+    ``terminated`` / ``truncated`` / the masks may arrive as bool, as
+    the uint8 the bridge used to carry, or as the 0/1 floats of a packed
+    step; ``!= 0`` reads all three. Traced by :func:`_record_step` and
+    :func:`_record_packed`, which donate the buffers and the row counter
+    as :func:`_write_step` does.
     """
     terminated = terminated != 0
     truncated = truncated != 0
@@ -81,6 +108,72 @@ def _record_step(
         for buffer, value in zip(buffers, row)
     )
     return written, index + 1, dones
+
+
+@partial(jax.jit, donate_argnums=(0, 1), static_argnames=("gamma", "recompute_gae"))
+def _record_step(
+    buffers: tuple[jax.Array, ...],
+    index: jax.Array,
+    fields: tuple[jax.Array, ...],
+    rewards: jax.Array,
+    terminated: jax.Array,
+    truncated: jax.Array,
+    last_dones: jax.Array | None,
+    bootstrap_values: jax.Array | None,
+    bootstrap_mask: jax.Array | None,
+    trunc_no_reset: jax.Array | None,
+    gamma: float,
+    recompute_gae: bool,
+):
+    """:func:`_record_impl` on separately converted step tensors."""
+    return _record_impl(
+        buffers,
+        index,
+        fields,
+        rewards,
+        terminated,
+        truncated,
+        last_dones,
+        bootstrap_values,
+        bootstrap_mask,
+        trunc_no_reset,
+        gamma,
+        recompute_gae,
+    )
+
+
+@partial(jax.jit, donate_argnums=(0, 1), static_argnames=("layout", "gamma", "recompute_gae"))
+def _record_packed(
+    buffers: tuple[jax.Array, ...],
+    index: jax.Array,
+    fields: tuple[jax.Array, ...],
+    packed: jax.Array,
+    last_dones: jax.Array | None,
+    bootstrap_values: jax.Array | None,
+    layout: StepLayout,
+    gamma: float,
+    recompute_gae: bool,
+):
+    """:func:`_record_impl` on a packed step (see :data:`StepLayout`).
+
+    Also returns the step's actor and critic observation columns, so the
+    next policy forward gets them without a slice dispatch of its own.
+    """
+    written, index, dones = _record_impl(
+        buffers,
+        index,
+        fields,
+        layout_column(packed, layout, "reward"),
+        layout_column(packed, layout, "terminated"),
+        layout_column(packed, layout, "truncated"),
+        last_dones,
+        bootstrap_values,
+        layout_column(packed, layout, "bootstrap_mask"),
+        layout_column(packed, layout, "trunc_no_reset"),
+        gamma,
+        recompute_gae,
+    )
+    return written, index, dones, layout_column(packed, layout, "actor"), layout_column(packed, layout, "critic")
 
 
 ObsShape = tuple[int, ...] | dict[str, tuple[int, ...]]
@@ -326,6 +419,71 @@ class RolloutStorage:
         )
         self.step += 1
         return dones
+
+    def _buffer_tuple(self) -> tuple:
+        return (
+            self.actor_obs,
+            self.critic_obs,
+            self.actions,
+            self.rewards,
+            self.dones,
+            self.episode_starts,
+            self.values,
+            self.log_probs,
+            self.mu,
+            self.sigma,
+            self.trunc_masks,
+        )
+
+    def _set_buffer_tuple(self, buffers: tuple) -> None:
+        (
+            self.actor_obs,
+            self.critic_obs,
+            self.actions,
+            self.rewards,
+            self.dones,
+            self.episode_starts,
+            self.values,
+            self.log_probs,
+            self.mu,
+            self.sigma,
+            self.trunc_masks,
+        ) = buffers
+
+    def record_step_packed(
+        self,
+        actor_obs: jax.Array,
+        critic_obs: jax.Array,
+        actions: jax.Array,
+        values: jax.Array,
+        log_probs: jax.Array,
+        mu: jax.Array,
+        sigma: jax.Array,
+        packed: jax.Array,
+        layout: StepLayout,
+        last_dones: jax.Array | None,
+        bootstrap_values: jax.Array | None,
+        gamma: float,
+        recompute_gae: bool,
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """:meth:`record_step` from a packed step; returns ``(dones,
+        next_actor_vector, next_critic_vector)``."""
+        if self.step >= self.num_steps:
+            raise RuntimeError("Storage overflow.")
+        buffers, self._index, dones, next_actor, next_critic = _record_packed(
+            self._buffer_tuple(),
+            self._index,
+            (actor_obs, critic_obs, actions, values, log_probs, mu, sigma),
+            packed,
+            last_dones,
+            bootstrap_values,
+            layout=layout,
+            gamma=gamma,
+            recompute_gae=recompute_gae,
+        )
+        self._set_buffer_tuple(buffers)
+        self.step += 1
+        return dones, next_actor, next_critic
 
     def clear(self) -> None:
         """Reset for next rollout. Buffers are reused; advantages/returns dropped."""

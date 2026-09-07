@@ -148,6 +148,87 @@ def run_case(name: str, dict_obs: bool, mode: str, seed: int) -> None:
     print(f"  {name:<28} {T} steps bitwise")
 
 
+def _pack(fields, rewards, terminated, truncated, final_critic, env_mask, trunc_no_reset, dict_obs):
+    """The runner's ``_pack_step`` on JAX arrays: one float32 row per env."""
+    actor = fields[0]["actor"] if dict_obs else fields[0]
+    critic = fields[1]["critic"] if dict_obs else fields[1]
+    columns, layout, start = [], [], 0
+
+    def add(name, arr):
+        nonlocal start
+        arr = arr.astype(jnp.float32)
+        columns.append(arr)
+        layout.append((name, start, arr.shape[1]))
+        start += arr.shape[1]
+
+    add("actor", actor)
+    add("critic", critic)
+    add("reward", rewards[:, None])
+    add("terminated", terminated[:, None])
+    add("truncated", truncated[:, None])
+    if final_critic is not None:
+        add("final_critic", final_critic)
+        if env_mask is not None:
+            add("bootstrap_mask", env_mask[:, None])
+    if trunc_no_reset is not None:
+        add("trunc_no_reset", trunc_no_reset[:, None])
+    return jnp.concatenate(columns, axis=1), tuple(layout)
+
+
+def run_packed_case(name: str, dict_obs: bool, mode: str, seed: int) -> None:
+    """``record_step_packed`` against ``record_step`` on the same inputs."""
+    key = jax.random.PRNGKey(seed)
+    actor_shape = {"actor": (OBS,), "cam": IMG} if dict_obs else (OBS,)
+    critic_shape = {"critic": (OBS + 4,), "cam": IMG} if dict_obs else (OBS + 4,)
+    ref = RolloutStorage(N, T, actor_shape, critic_shape, (ACT,))
+    new = RolloutStorage(N, T, actor_shape, critic_shape, (ACT,))
+    recompute = mode == "recompute_gae"
+    last_ref = last_new = jnp.ones((N,), dtype=jnp.bool_)
+    for t in range(T):
+        key, sub = jax.random.split(key)
+        fields, rewards, terminated, truncated, values = _random_step(sub, dict_obs)
+        has_final = t % 3 != 1
+        key, km, kt, kf = jax.random.split(key, 4)
+        env_mask = (jax.random.uniform(km, (N,)) < 0.2).astype(jnp.uint8) if has_final and t % 2 == 0 else None
+        trunc_no_reset = (jax.random.uniform(kt, (N,)) < 0.1).astype(jnp.uint8) if recompute and t % 4 == 0 else None
+        final_critic = jax.random.normal(kf, (N, OBS + 4)) if has_final else None
+        bootstrap = values if (has_final and not recompute) else None
+
+        last_ref = ref.record_step(
+            *fields,
+            rewards=rewards,
+            terminated=terminated,
+            truncated=truncated,
+            last_dones=last_ref,
+            bootstrap_values=bootstrap,
+            bootstrap_mask=env_mask,
+            trunc_no_reset=trunc_no_reset,
+            gamma=GAMMA,
+            recompute_gae=recompute,
+        )
+        packed, layout = _pack(fields, rewards, terminated, truncated, final_critic, env_mask, trunc_no_reset, dict_obs)
+        last_new, next_actor, next_critic = new.record_step_packed(
+            *fields,
+            packed=packed,
+            layout=layout,
+            last_dones=last_new,
+            bootstrap_values=bootstrap,
+            gamma=GAMMA,
+            recompute_gae=recompute,
+        )
+        assert np.array_equal(np.asarray(last_ref), np.asarray(last_new)), f"{name}: dones differ at t={t}"
+        actor = fields[0]["actor"] if dict_obs else fields[0]
+        critic = fields[1]["critic"] if dict_obs else fields[1]
+        assert np.array_equal(np.asarray(next_actor), np.asarray(actor)), f"{name}: actor column differs at t={t}"
+        assert np.array_equal(np.asarray(next_critic), np.asarray(critic)), f"{name}: critic column differs at t={t}"
+
+    for field, a in _buffers(ref).items():
+        b = _buffers(new)[field]
+        for x, y in zip(jax.tree.leaves(a), jax.tree.leaves(b), strict=True):
+            assert np.array_equal(np.asarray(x), np.asarray(y)), f"{name}: {field} differs"
+    print(f"  {name:<28} {T} steps bitwise")
+
+
 def main() -> None:
     print(f"record_step vs eager sequence ({jax.default_backend()})")
     run_case("fallback mask, vector obs", False, "fallback", 0)
@@ -155,6 +236,10 @@ def main() -> None:
     run_case("first step (no last_dones)", False, "no_last_dones", 2)
     run_case("recompute_gae mask row", False, "recompute_gae", 3)
     run_case("env mask, dict obs", True, "env_mask", 4)
+    print("record_step_packed vs record_step")
+    run_packed_case("packed, vector obs", False, "env_mask", 5)
+    run_packed_case("packed, recompute_gae", False, "recompute_gae", 6)
+    run_packed_case("packed, dict obs", True, "env_mask", 7)
     print("PASS")
 
 
