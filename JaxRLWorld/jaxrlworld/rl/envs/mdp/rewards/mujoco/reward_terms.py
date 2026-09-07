@@ -18,6 +18,7 @@ from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import (
     penalize_contact_force_count,
     penalize_feet_clearance,
     penalize_feet_slip,
+    penalize_feet_slip_fd,
     penalize_lin_vel_z,
     penalize_soft_landing,
 )
@@ -283,6 +284,23 @@ def feet_slip(
     ``left_ankle_roll_link``. ``None`` keeps the natural group order.
     """
     return penalize_feet_slip(
+        env,
+        contact_group=contact_group,
+        command_threshold=command_threshold,
+        contact_order=contact_order,
+        asset_cfg=asset_cfg,
+    )
+
+
+def feet_slip_fd(
+    env: MujocoEnv,
+    contact_group: str = "feet_ground_contact",
+    command_threshold: float = 0.01,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+    contact_order: list[str] | None = None,
+) -> torch.Tensor:
+    """``feet_slip`` with the finite-difference foot velocity."""
+    return penalize_feet_slip_fd(
         env,
         contact_group=contact_group,
         command_threshold=command_threshold,

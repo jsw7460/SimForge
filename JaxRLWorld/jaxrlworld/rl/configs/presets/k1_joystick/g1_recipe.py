@@ -199,8 +199,11 @@ class K1G1RecipeConfig(K1JoystickConfig):
                     "contact_order": feet_contact_order,
                 },
             )
+            # FD velocity, not the engine's instantaneous read: mjlab's
+            # cvel is one substep stale at the step boundary, which
+            # inflates touchdown slip ~2.8x against newton/genesis.
             feet_slip = RewardTermConfig(
-                func=rf.feet_slip_mjlab,
+                func=rf.feet_slip_fd_mjlab,
                 weight=0.1,
                 params={
                     "asset_cfg": feet_selector,
@@ -310,8 +313,10 @@ class K1G1RecipeConfig(K1JoystickConfig):
                     "contact_order": feet_contact_order,
                 },
             )
+            # Same FD velocity switch as the newton/genesis branch, so
+            # all three backends price slip from the same read.
             feet_slip = RewardTermConfig(
-                func=rf.feet_slip,
+                func=rf.feet_slip_fd,
                 weight=0.1,
                 params={
                     "contact_group": "feet_ground_contact",
