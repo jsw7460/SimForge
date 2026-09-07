@@ -17,6 +17,10 @@ Examples:
     python -m jaxrlworld.scripts.evaluation.eval_cross_sim \
         --policy_path outputs/models/.../checkpoint_latest/ \
         --eval_sim genesis --eval
+
+    # Straight from a W&B run (downloads/caches the latest checkpoint)
+    python -m jaxrlworld.scripts.evaluation.eval_cross_sim \
+        --wandb_run_path <entity>/<project>/<run_id> --eval_sim newton
 """
 
 import argparse
@@ -27,7 +31,7 @@ from jaxrlworld.rl.vis.viser import get_look, list_looks
 
 def main():
     parser = argparse.ArgumentParser(description="Cross-simulator evaluation")
-    parser.add_argument("--policy_path", type=str, required=True, help="Checkpoint path")
+    parser.add_argument("--policy_path", type=str, default=None, help="Checkpoint path")
     parser.add_argument("--wandb_run_path", type=str, default=None, help="W&B run path")
     parser.add_argument("--eval_sim", type=str, required=True, choices=["genesis", "newton", "mujoco"])
     parser.add_argument(
@@ -53,6 +57,9 @@ def main():
         "Omit to use the preset's default (near-black metallic robot, earthy ground, outdoor sun).",
     )
     args = parser.parse_args()
+
+    if (args.policy_path is None) == (args.wandb_run_path is None):
+        parser.error("pass exactly one of --policy_path / --wandb_run_path")
 
     overrides: dict = {
         "env": {
