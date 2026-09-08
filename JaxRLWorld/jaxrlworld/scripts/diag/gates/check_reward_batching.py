@@ -105,6 +105,10 @@ def main() -> int:
     torch.manual_seed(args.seed)
     env = _build_env(args.preset, args.sim, args.num_envs)
     mgr = env.reward_manager
+    # This gate feeds synthetic term values through the patched
+    # per-term seam; the compiled chain bypasses that seam, so run the
+    # manager eagerly whatever the preset asks for.
+    mgr._compile_terms = False
     terms = mgr.reward_terms
     device = env.device
     sigma = mgr.config.shaping_sigma

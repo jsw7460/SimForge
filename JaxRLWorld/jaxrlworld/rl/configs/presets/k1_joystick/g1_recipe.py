@@ -227,7 +227,8 @@ class K1G1RecipeConfig(K1JoystickConfig):
             )
 
         # No total_clip: the G1 recipe does not floor the summed reward.
-        return _RewardsCfg()
+        # The chain is checked compiled (check_reward_compile_parity).
+        return _RewardsCfg(compile_terms=True)
 
     def _build_reward_mujoco(self) -> RewardConfig:
         """mjlab backend: same set via rewards.mujoco.reward_terms."""
@@ -335,4 +336,5 @@ class K1G1RecipeConfig(K1JoystickConfig):
             )
 
         # No total_clip: the G1 recipe does not floor the summed reward.
-        return _RewardsCfg()
+        # The chain is checked compiled (check_reward_compile_parity).
+        return _RewardsCfg(compile_terms=True)

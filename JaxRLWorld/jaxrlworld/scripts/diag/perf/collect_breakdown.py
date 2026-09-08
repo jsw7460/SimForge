@@ -393,9 +393,18 @@ def _probe_reads_vs_arithmetic(env, timer: _Timer, repeats: int) -> None:
     glue_r = med["reward_manager.set_rewards, cold"] - med["reward terms, cold cache (reads + math)"]
     reads_o = med["obs terms, cold cache (reads + math)"] - med["obs terms, warm cache (math only)"]
     glue_o = med["obs_manager.process_observations, warm"] - med["obs terms, warm cache (math only)"]
-    print(
-        f"  {'reward: engine reads / math / manager glue':<46}{reads_r:7.3f} / {med['reward terms, warm cache (math only)']:6.3f} / {glue_r:6.3f} ms"
-    )
+    if rm._compile_terms:
+        # The manager runs the compiled chain, so its total is not "terms
+        # plus glue" any more: the eager term rows above are what the
+        # chain replaced, and set_rewards is what it costs now.
+        print(
+            f"  {'reward: engine reads / eager math / compiled chain':<46}{reads_r:7.3f} / "
+            f"{med['reward terms, warm cache (math only)']:6.3f} / {med['reward_manager.set_rewards, cold']:6.3f} ms"
+        )
+    else:
+        print(
+            f"  {'reward: engine reads / math / manager glue':<46}{reads_r:7.3f} / {med['reward terms, warm cache (math only)']:6.3f} / {glue_r:6.3f} ms"
+        )
     print(
         f"  {'obs:    engine reads / math / manager glue':<46}{reads_o:7.3f} / {med['obs terms, warm cache (math only)']:6.3f} / {glue_o:6.3f} ms"
     )

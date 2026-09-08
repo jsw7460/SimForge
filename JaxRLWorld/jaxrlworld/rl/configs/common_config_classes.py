@@ -35,6 +35,17 @@ class RewardConfig(BaseConfig):
     # ``(0.0, 10000.0)`` floors the summed reward at zero so penalty-heavy
     # steps cannot go negative.
     total_clip: tuple[float, float] | None = None
+    # Run every term, the weighting and the mode combination as one
+    # ``torch.compile``d program. The engine reads the terms make are
+    # done eagerly beforehand into a snapshot (``reward_view.py``); the
+    # terms themselves are unchanged. Eager, a dozen terms are ~150
+    # tiny launches per step; fused they are a handful. Fused
+    # multiply-adds round differently, so rewards differ from the eager
+    # chain in their last bits (~1e-7 relative). Off by default: a term
+    # that does something the snapshot cannot serve raises at the first
+    # compiled call, so a preset opts in once its chain is checked
+    # (check_reward_compile_parity).
+    compile_terms: bool = False
 
 
 @dataclass

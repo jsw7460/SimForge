@@ -95,6 +95,10 @@ def _capture_step(env, action) -> dict[str, np.ndarray]:
     from jaxrlworld.rl.envs.managers.common.reward import get_weight_value
 
     mgr = env.reward_manager
+    # The compiled chain (``compile_terms``) bypasses the per-term seam
+    # patched below; the terms are the same either way, so capture them
+    # from the eager path.
+    mgr._compile_terms = False
     captured: dict[str, np.ndarray] = {}
     orig = mgr._compute_weighted_reward
 

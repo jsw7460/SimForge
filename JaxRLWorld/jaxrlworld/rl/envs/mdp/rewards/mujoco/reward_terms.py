@@ -160,7 +160,10 @@ def flat_orientation(
 
     # Check if body_ids is a valid list/tuple (not None, not slice)
     if asset_cfg.body_ids is not None and not isinstance(asset_cfg.body_ids, slice):
-        body_quat_w = robot.data.body_link_quat_w[:, asset_cfg.body_ids[0], :]  # [num_envs, 4]
+        # Gather by the id tensor and take the first row, rather than
+        # index by ``body_ids[0]``: a 0-d tensor used as an index is a
+        # data-dependent integer the compiled reward chain cannot trace.
+        body_quat_w = robot.data.body_link_quat_w[:, asset_cfg.body_ids, :][:, 0, :]  # [num_envs, 4]
         gravity_w = robot.data.gravity_vec_w  # [num_envs, 3]
         projected_gravity_b = quat_apply_inverse(body_quat_w, gravity_w)  # [num_envs, 3]
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)

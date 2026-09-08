@@ -8,6 +8,7 @@ from jaxrlworld.rl.configs.base_config import iter_terms
 from jaxrlworld.rl.configs.common_config_classes import RewardConfig
 from jaxrlworld.rl.configs.rewards import RewardTermConfig, get_weight_value
 from jaxrlworld.rl.envs.managers.base import BaseManager
+from jaxrlworld.rl.envs.managers.common.reward_view import RecordingEnvView, RewardEnvView, RewardReadRecord
 
 # Backward-compatible alias (used by ManagerRegistry and imports)
 RewardManagerConfig = RewardConfig
@@ -53,6 +54,17 @@ class RewardManager(BaseManager):
         # Lazily-built caches for set_rewards (see the methods below).
         self._exp_shaped_mask_cached: torch.Tensor | None = None
         self._zero_reward_cached: torch.Tensor | None = None
+        # Previous-step foot positions of the finite-difference slip
+        # terms (``rewards.common.reward_terms._fd_foot_velocity``),
+        # keyed by term key; plain tensor state the terms update in place.
+        self._fd_prev_foot_pos: dict[str, torch.Tensor] = {}
+        # The compiled chain (``config.compile_terms``). Built after the
+        # first call, which runs eagerly through the recorders of
+        # ``reward_view`` to learn what the terms read.
+        self._compile_terms = config.compile_terms
+        self._view: RewardEnvView | None = None
+        self._compiled_chain = None
+        self._weights_cache: tuple[tuple[float, ...], torch.Tensor] | None = None
 
     def get_term_cfg(self, name: str) -> RewardTermConfig:
         """Return the live RewardTermConfig for a registered term.
@@ -83,21 +95,87 @@ class RewardManager(BaseManager):
         differs in the last bits. Per-term values themselves
         (``_compute_weighted_reward``) are computed exactly as before.
         """
-        mode = self.config.reward_mode
-
         if not self.reward_terms:
             if self.config.total_clip is not None:
                 reward_buffer.clamp_(*self.config.total_clip)
             reward_buffer_per_type["total_reward"] = reward_buffer
             return
 
-        values = []
-        for name, reward_term in self.reward_terms.items():
-            reward_value = self._compute_weighted_reward(name, reward_term)
-            reward_buffer_per_type[name] = reward_value
-            values.append(reward_value)
-        stacked = torch.stack(values, dim=0)
+        if not self._compile_terms:
+            stacked = self._compute_stacked(self.env)
+            self._combine(stacked, reward_buffer)
+        elif self._view is None:
+            # First call: eager, through the recorders, so the snapshot
+            # knows what to read from now on. Same values as the eager
+            # path; also warms every lazily-built cache the terms keep.
+            record = RewardReadRecord()
+            stacked = self._compute_stacked(RecordingEnvView(self.env, record))
+            self._combine(stacked, reward_buffer)
+            self._view = RewardEnvView(self.env, record)
+            self._compiled_chain = torch.compile(self._chain, fullgraph=True, dynamic=False)
+        else:
+            self._view.refresh()
+            stacked = self._compiled_chain(self._view, self._weights(), self._active(), reward_buffer)
 
+        for i, name in enumerate(self.reward_terms):
+            reward_buffer_per_type[name] = stacked[i]
+        reward_buffer_per_type["total_reward"] = reward_buffer
+
+    def _compute_stacked(self, env) -> torch.Tensor:
+        """Every weighted term, eagerly, as ``(n_terms, num_envs)``.
+
+        On the real env this goes through :meth:`_compute_weighted_reward`
+        — the seam the reward diagnostics patch to intercept term values —
+        and on a recording view through :meth:`_weighted_term` directly.
+        """
+        if env is self.env:
+            values = [self._compute_weighted_reward(name, term) for name, term in self.reward_terms.items()]
+        else:
+            values = [self._weighted_term(name, term, env) for name, term in self.reward_terms.items()]
+        return torch.stack(values, dim=0)
+
+    def _chain(self, env, weights: torch.Tensor, active: tuple[bool, ...], reward_buffer: torch.Tensor) -> torch.Tensor:
+        """The compiled program: every active term on the snapshot view,
+        the weighting, and the mode combination into ``reward_buffer``.
+
+        ``active`` is the per-term "runs this step" flag (a zero-weight
+        pure term is skipped, as the eager path skips it); as a tuple of
+        Python bools it is part of the compiled program's signature, so a
+        weight schedule crossing zero recompiles once. ``weights`` already
+        carries ``control_dt``.
+        """
+        raws = []
+        for i, (name, term) in enumerate(self.reward_terms.items()):
+            if not active[i]:
+                raws.append(self._zero_reward())
+            elif name in self._instances:
+                raws.append(self._instances[name](env))
+            else:
+                raws.append(self._resolved_fns[name](env, **term.params))
+        stacked = torch.stack(raws, dim=0) * weights[:, None]
+        self._combine(stacked, reward_buffer)
+        return stacked
+
+    def _weights(self) -> torch.Tensor:
+        """``(n_terms,)`` of ``weight * control_dt``, re-uploaded only when a
+        weight changes (a schedule or the curriculum manager)."""
+        step = self.env_step_calls
+        dt = self.env.control_dt
+        values = tuple(get_weight_value(term.weight, step) * dt for term in self.reward_terms.values())
+        if self._weights_cache is None or self._weights_cache[0] != values:
+            self._weights_cache = (values, torch.tensor(values, device=self.device, dtype=torch.float32))
+        return self._weights_cache[1]
+
+    def _active(self) -> tuple[bool, ...]:
+        step = self.env_step_calls
+        return tuple(
+            get_weight_value(term.weight, step) != 0.0 or name in self._instances
+            for name, term in self.reward_terms.items()
+        )
+
+    def _combine(self, stacked: torch.Tensor, reward_buffer: torch.Tensor) -> None:
+        """Fold the weighted terms into ``reward_buffer`` per ``reward_mode``."""
+        mode = self.config.reward_mode
         if mode == "sum":
             reward_buffer += stacked.sum(dim=0)
         elif mode == "exponential":
@@ -120,8 +198,6 @@ class RewardManager(BaseManager):
         if self.config.total_clip is not None:
             reward_buffer.clamp_(*self.config.total_clip)
 
-        reward_buffer_per_type["total_reward"] = reward_buffer
-
     def _exp_shaped_mask(self, stacked: torch.Tensor) -> torch.Tensor:
         """Static ``(n_terms, 1)`` float mask of ``exp_shaping`` flags."""
         if self._exp_shaped_mask_cached is None:
@@ -130,6 +206,9 @@ class RewardManager(BaseManager):
         return self._exp_shaped_mask_cached
 
     def _compute_weighted_reward(self, name: str, reward_term: RewardTermConfig) -> torch.Tensor:
+        return self._weighted_term(name, reward_term, self.env)
+
+    def _weighted_term(self, name: str, reward_term: RewardTermConfig, env) -> torch.Tensor:
         weight = get_weight_value(reward_term.weight, self.env_step_calls)
         # A statically-zero pure-function term contributes nothing and has
         # no state to advance — skip its kernels entirely. Stateful terms
@@ -138,9 +217,9 @@ class RewardManager(BaseManager):
             return self._zero_reward()
 
         if name in self._instances:
-            raw_reward = self._instances[name](self.env)
+            raw_reward = self._instances[name](env)
         else:
-            raw_reward = self._resolved_fns[name](self.env, **reward_term.params)
+            raw_reward = self._resolved_fns[name](env, **reward_term.params)
 
         return raw_reward * weight * self.env.control_dt
 

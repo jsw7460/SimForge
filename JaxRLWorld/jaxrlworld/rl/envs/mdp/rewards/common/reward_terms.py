@@ -399,9 +399,6 @@ def _feet_contact_order(asset_cfg: ResolvedEntity, contact_order: list[str] | No
 # cache: entries outlive dead envs, which is harmless — a fresh env
 # starts masked (episode_length_buf <= 1) so an id()-reuse collision
 # can never leak a stale difference into a reward.
-_fd_prev_foot_pos: dict[tuple[int, str], torch.Tensor] = {}
-
-
 def _fd_foot_velocity(env: World, key: str, foot_pos: torch.Tensor) -> torch.Tensor:
     """Per-control-step finite-difference velocity of the given foot positions.
 
@@ -428,14 +425,20 @@ def _fd_foot_velocity(env: World, key: str, foot_pos: torch.Tensor) -> torch.Ten
     pre-teleport pose, so the raw difference would be a spawn jump, not
     slip. The first call after construction returns zeros for the same
     reason.
+
+    The previous position lives on the reward manager, keyed by ``key``,
+    and is overwritten in place: plain tensor state on an object the
+    compiled reward chain can reach, no module-level registry keyed by
+    ``id(env)`` and no fresh allocation per step.
     """
-    cache_key = (id(env), key)
-    prev = _fd_prev_foot_pos.get(cache_key)
-    _fd_prev_foot_pos[cache_key] = foot_pos.clone()
+    store = env.reward_manager._fd_prev_foot_pos
+    prev = store.get(key)
     if prev is None:
+        store[key] = foot_pos.clone()
         return torch.zeros_like(foot_pos)
     vel = (foot_pos - prev) / env.control_dt
-    vel[env.episode_length_buf <= 1] = 0.0
+    vel = torch.where((env.episode_length_buf <= 1).view(-1, 1, 1), torch.zeros_like(vel), vel)
+    prev.copy_(foot_pos)
     return vel
 
 
@@ -684,13 +687,10 @@ class FeetSwingHeightTracker:
 
         # In place: ``peak_heights`` is state other code (and a CUDA graph
         # capturing this term) holds a reference to, so it must stay one
-        # buffer. ``out=`` aliasing an input is an in-place elementwise op.
-        torch.where(
-            in_air,
-            torch.maximum(self.peak_heights, foot_heights),
-            self.peak_heights,
-            out=self.peak_heights,
-        )
+        # buffer. Written through ``copy_`` rather than ``out=``: a plain
+        # in-place op the compiled reward chain tracks unambiguously
+        # across the read of the buffer below and the second write.
+        self.peak_heights.copy_(torch.where(in_air, torch.maximum(self.peak_heights, foot_heights), self.peak_heights))
 
         first_contact = env.contact_manager.compute_first_contact(self._contact_group, order=self._contact_order)
 
@@ -703,7 +703,7 @@ class FeetSwingHeightTracker:
         cost = torch.sum(err_term * first_contact.float(), dim=1) * active
 
         # Reset peaks for feet that just landed.
-        torch.where(first_contact, torch.zeros_like(self.peak_heights), self.peak_heights, out=self.peak_heights)
+        self.peak_heights.copy_(torch.where(first_contact, torch.zeros_like(self.peak_heights), self.peak_heights))
         return -cost
 
     def reset(self, env_ids: torch.Tensor) -> None:
