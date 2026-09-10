@@ -193,8 +193,9 @@ def inject_into_scene(
     visualizer = scene._visualizer
     old_context = visualizer._context
 
-    # Create new context with same options
-    new_context = RLWorldRasterizerContext(scene.vis_options, overlay_settings=overlay_settings)
+    # Create new context with same options. The scene keeps every option group on ``scene.options``
+    # (``SceneOptions``); the visualizer's context was built from its ``vis`` group.
+    new_context = RLWorldRasterizerContext(scene.options.vis, overlay_settings=overlay_settings)
 
     # Copy essential state from old context
     new_context._scene = old_context._scene
@@ -215,8 +216,11 @@ def inject_into_scene(
     new_context.seg_node_map = old_context.seg_node_map
     new_context.seg_color_map = old_context.seg_color_map
 
-    # Copy rendering state (buffer management moved to JIT renderer in Genesis v0.4.6)
+    # Copy rendering state (buffer management moved to JIT renderer in Genesis v0.4.6).
+    # ``rendered_envs_mask`` is derived from ``rendered_envs_idx`` inside ``build()``, which the
+    # fresh context never ran, and every debug/link-frame draw passes it as ``envs=``.
     new_context.rendered_envs_idx = old_context.rendered_envs_idx
+    new_context.rendered_envs_mask = old_context.rendered_envs_mask
 
     # Copy flags
     new_context.world_frame_shown = old_context.world_frame_shown

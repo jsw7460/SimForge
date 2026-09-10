@@ -122,7 +122,7 @@ def _probe_scene(scene, robot, tag: str, drive=None, start_step: int = 0) -> Non
             drive(start_step + k)
         for _ in range(_DECIMATION):
             scene.step()
-        samples.append(solver.collider._collider_state.n_contacts.to_numpy())
+        samples.append(solver.collider.collider_state.n_contacts.to_numpy())
     arr = np.stack(samples)
     _stage(
         f"{tag} contacts/env: mean {arr.mean():.2f}  p99 {np.percentile(arr, 99):.0f}  "
@@ -650,7 +650,7 @@ def raw_genesis_contact_list(num_envs: int, steps: int, warmup: int) -> dict:
         scene.step()
     (feet_found, feet_force), (self_found, _self_force) = read_all()
     z = robot.get_pos()[:, 2]
-    nc = scene.rigid_solver.collider._collider_state.n_contacts.to_numpy()
+    nc = scene.rigid_solver.collider.collider_state.n_contacts.to_numpy()
     cd = robot.get_contacts()
     _stage(
         f"rawcontactlist state: base z mean {z.mean():.3f} min {z.min():.3f} max {z.max():.3f}; "

@@ -107,7 +107,7 @@ class GenesisContactListReader:
         """
         solver = self._env.scene_manager.scene.sim.rigid_solver
         cd = solver.collider.get_contacts(as_tensor=True, to_torch=True)
-        n_live = qd_to_torch(solver.collider._collider_state.n_contacts, copy=False)
+        n_live = qd_to_torch(solver.collider.collider_state.n_contacts, copy=False)
         return cd["link_a"], cd["link_b"], cd["force"], n_live
 
     @_per_step_read

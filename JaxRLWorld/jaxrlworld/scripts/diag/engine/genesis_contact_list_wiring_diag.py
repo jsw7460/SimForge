@@ -153,7 +153,7 @@ def run_cell(preset: str, num_envs: int, num_steps: int, warmup: int, seed: int)
         """This file's own found/force math from the collider state."""
         cd = solver.collider.get_contacts(as_tensor=True, to_torch=True)
         link_a, link_b, force = cd["link_a"], cd["link_b"], cd["force"]
-        n_live = qd_to_torch(solver.collider._collider_state.n_contacts, copy=False)
+        n_live = qd_to_torch(solver.collider.collider_state.n_contacts, copy=False)
         row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
         primary, counterpart = m["primary_g"], m["counterpart"]
         on_p_a = link_a.unsqueeze(-1) == primary

@@ -131,7 +131,7 @@ def _measure_genesis(solver, foot_geoms: list[int], ground_geoms: list[int]) -> 
     ratio = solver.get_geoms_friction_ratio(geoms_idx=foot_geoms)  # (B, n_foot)
     written = base_mu.unsqueeze(0).to(ratio.device) * ratio
 
-    cs = solver.collider._collider_state
+    cs = solver.collider.collider_state
     n_con = qd_to_torch(cs.n_contacts, copy=True).long()  # (B,)
     fric = qd_to_torch(cs.contact_data.friction, transpose=True, copy=True)  # (B, max_c)
     geom_a = qd_to_torch(cs.contact_data.geom_a, transpose=True, copy=True).long()

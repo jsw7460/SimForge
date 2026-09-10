@@ -138,7 +138,7 @@ def main() -> int:
     def read_list():
         cd = solver.collider.get_contacts(as_tensor=True, to_torch=True)
         link_a, link_b, force = cd["link_a"], cd["link_b"], cd["force"]
-        n_live = qd_to_torch(solver.collider._collider_state.n_contacts, copy=False)
+        n_live = qd_to_torch(solver.collider.collider_state.n_contacts, copy=False)
         row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
         links_quat = robot.get_links_quat()
         feet = list_group(link_a, link_b, force, row_valid, links_quat, feet_links_g, ground_links_g)

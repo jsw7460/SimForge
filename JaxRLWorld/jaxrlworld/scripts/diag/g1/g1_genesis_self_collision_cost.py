@@ -59,7 +59,7 @@ def measure(env, steps: int, warmup: int) -> dict:
 
     solver = env.scene_manager.scene.sim.rigid_solver
     pairs = int(solver.collider._n_possible_pairs)
-    width = int(solver.collider._collider_state.contact_data.geom_a.shape[0])
+    width = int(solver.collider.collider_state.contact_data.geom_a.shape[0])
 
     # The engine alone, with the substep loop's other work left out.
     torch.cuda.synchronize()

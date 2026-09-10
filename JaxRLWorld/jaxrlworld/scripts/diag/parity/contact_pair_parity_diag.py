@@ -216,7 +216,7 @@ def genesis_pairs(env, vocab: set[str]) -> tuple[Counter, set[str]]:
                 keys[int(geom.idx)] = key(link.name, GENESIS_TYPE.get(int(geom.type), "?"), vocab)
     seen = {leaf(link.name, vocab) for entity in solver.entities for link in entity.links}
 
-    state = solver.collider._collider_state
+    state = solver.collider.collider_state
     n_con = _np(qd_to_torch(state.n_contacts, copy=True))
     geom_a = _np(qd_to_torch(state.contact_data.geom_a, transpose=True, copy=True))
     geom_b = _np(qd_to_torch(state.contact_data.geom_b, transpose=True, copy=True))

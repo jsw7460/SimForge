@@ -190,10 +190,10 @@ def _genesis_dump(env, cfg) -> dict:
         ncon, ncon_path = _walk_paths(
             rs,
             [
-                ("collider", "_collider_state", "n_contacts"),
+                ("collider", "collider_state", "n_contacts"),
                 ("collider", "contact_data", "n_contacts"),
                 ("collider", "n_contacts"),
-                ("_collider_state", "n_contacts"),
+                ("collider_state", "n_contacts"),
                 ("_contacts", "n_contacts"),
                 ("contacts", "n_contacts"),
             ],
@@ -210,8 +210,8 @@ def _genesis_dump(env, cfg) -> dict:
         # formula, same pyramidal cone — so anything that differs MUST
         # live in one of these fields.
         try:
-            cs = rs.collider._collider_state.contact_data
-            cs_count = rs.collider._collider_state.n_contacts
+            cs = rs.collider.collider_state.contact_data
+            cs_count = rs.collider.collider_state.n_contacts
             constraint = getattr(rs, "constraint_state", None) or getattr(rs, "_constraint_state", None)
             n_env0 = int(_try_arr(cs_count)[0])
             metrics: dict = {
@@ -1289,7 +1289,7 @@ def _capture_sim(
             rs = env.scene_manager.scene.sim.rigid_solver
             # Genesis stores contacts under collider state. Path may vary
             # across versions, so guard each step.
-            n_contacts = _safe_get(rs, "collider", "_collider_state", "n_contacts")
+            n_contacts = _safe_get(rs, "collider", "collider_state", "n_contacts")
             if n_contacts is None:
                 n_contacts = _safe_get(rs, "collider", "contact_data", "n_contacts")
             if n_contacts is not None:

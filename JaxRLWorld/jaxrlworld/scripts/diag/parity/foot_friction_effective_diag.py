@@ -153,7 +153,7 @@ def genesis_rows(env, report: bool = False) -> np.ndarray:
                 # that is the question.
                 owner[gid] = f"{link.name}/g{gid - link.geom_start}"
 
-    state = solver.collider._collider_state
+    state = solver.collider.collider_state
     n_con = _np(qd_to_torch(state.n_contacts, copy=True))
     mu = _np(qd_to_torch(state.contact_data.friction, transpose=True, copy=True))
     geom_a = _np(qd_to_torch(state.contact_data.geom_a, transpose=True, copy=True))

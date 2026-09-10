@@ -12,7 +12,7 @@ picture pinpoints the EXACT stage that drops the short capsules.
 
 Stages probed per capsule:
 
-  S1. ``rs.collider._collider_info.collision_pair_idx[i_capsule, i_plane]``
+  S1. ``rs.collider.collider_info.collision_pair_idx[i_capsule, i_plane]``
       — compile-time pair admission (set in
       ``Genesis/genesis/engine/solvers/rigid/collider/collider.py::_compute_collision_pair_idx``).
       Returns ``-1`` if the pair is filtered out (contype/conaffinity, fixed,
@@ -188,7 +188,7 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
     except Exception as e:
         out["use_split_narrowphase_err"] = repr(e)
     try:
-        csc = rs.collider._collider_static_config
+        csc = rs.collider.collider_config
         out["has_non_box_plane_convex_convex"] = bool(getattr(csc, "has_non_box_plane_convex_convex", None))
         out["has_convex_specialization"] = bool(getattr(csc, "has_convex_specialization", None))
         out["has_terrain"] = bool(getattr(csc, "has_terrain", None)) if hasattr(csc, "has_terrain") else None
@@ -233,7 +233,7 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
 
     # ── S1. compile-time pair admission via ``collision_pair_idx`` ─────────
     try:
-        cpi_arr = _try_arr(rs.collider._collider_info.collision_pair_idx)
+        cpi_arr = _try_arr(rs.collider.collider_info.collision_pair_idx)
         out["S1_collision_pair_idx_shape"] = (
             [len(cpi_arr), len(cpi_arr[0]) if cpi_arr else None] if isinstance(cpi_arr, list) and cpi_arr else None
         )
@@ -428,7 +428,7 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
                         c["S5b_err"] = repr(ee)
                 # S6. Genesis collider contact buffer (env 0).
                 try:
-                    cs = rs.collider._collider_state
+                    cs = rs.collider.collider_state
                     n_env0 = int(_try_arr(cs.n_contacts)[0])
                     ga_arr = _try_arr(cs.contact_data.geom_a)
                     gb_arr = _try_arr(cs.contact_data.geom_b)
@@ -475,7 +475,7 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
                     out["S6_tb"] = traceback.format_exc()
 
                 # S7. runtime collider knobs.
-                ci = rs.collider._collider_info
+                ci = rs.collider.collider_info
                 ro = env.scene_manager.config.rigid_options
                 out["S7_collider_knobs"] = {
                     "mc_tolerance": _safe(lambda ci=ci: float(_try_arr(ci.mc_tolerance)[0]))

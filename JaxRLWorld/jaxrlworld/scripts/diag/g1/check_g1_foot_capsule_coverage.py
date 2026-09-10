@@ -286,7 +286,7 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
         # Re-query collider.get_contacts; the parity diag already proved this
         # is correct after the n_env0 slice fix.
         try:
-            ncon_per_env = _try_arr(rs.collider._collider_state.n_contacts)
+            ncon_per_env = _try_arr(rs.collider.collider_state.n_contacts)
             n_env0 = int(ncon_per_env[0]) if isinstance(ncon_per_env, list) and ncon_per_env else 32
             out["n_contacts_env0"] = n_env0
 
@@ -341,8 +341,8 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
         try:
             ro = env.scene_manager.config.rigid_options
             collider = rs.collider
-            collider_info = getattr(collider, "_collider_info", None)
-            collider_static = getattr(collider, "_collider_static_config", None)
+            collider_info = getattr(collider, "collider_info", None)
+            collider_static = getattr(collider, "collider_config", None)
             out["genesis_collider_config"] = {
                 "max_collision_pairs": getattr(ro, "max_collision_pairs", None),
                 "contact_pruning_tolerance": getattr(ro, "contact_pruning_tolerance", None),
