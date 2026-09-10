@@ -1,3 +1,7 @@
+from jaxrlworld.rl.envs.mdp.commands.adaptive_velocity import (
+    AdaptiveVelocityCommandTerm,
+    AdaptiveVelocityCommandTermCfg,
+)
 from jaxrlworld.rl.envs.mdp.commands.lifting import LiftingCommand, LiftingCommandCfg
 from jaxrlworld.rl.envs.mdp.commands.motion import (
     MotionCommand,
@@ -6,6 +10,8 @@ from jaxrlworld.rl.envs.mdp.commands.motion import (
 )
 
 __all__ = [
+    "AdaptiveVelocityCommandTerm",
+    "AdaptiveVelocityCommandTermCfg",
     "LiftingCommand",
     "LiftingCommandCfg",
     "MotionCommand",

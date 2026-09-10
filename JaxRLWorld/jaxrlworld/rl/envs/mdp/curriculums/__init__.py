@@ -5,6 +5,7 @@ curriculum configs (list of stage dicts with ``step`` + ``weight`` /
 ``params`` keys) work unchanged in JaxRLWorld.
 """
 
+from .command_velocity_range import command_velocity_range
 from .step_stages import (
     RewardCurriculumStage,
     TerminationCurriculumStage,
@@ -15,6 +16,7 @@ from .step_stages import (
 __all__ = [
     "RewardCurriculumStage",
     "TerminationCurriculumStage",
+    "command_velocity_range",
     "reward_curriculum",
     "termination_curriculum",
 ]
