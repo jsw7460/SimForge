@@ -528,9 +528,21 @@ class RolloutStorage:
 
     def get_flat_observations(self) -> tuple[jax.Array, jax.Array]:
         """Return ``(flat_actor_obs, flat_critic_obs)`` flattened to
-        ``[num_steps * num_envs, *obs_shape]`` for normalizer updates."""
-        flat_actor = _obs_reshape(self.actor_obs, self.actor_obs_shape, (-1,))
-        flat_critic = _obs_reshape(self.critic_obs, self.critic_obs_shape, (-1,))
+        ``[num_steps * num_envs, *obs_shape]`` for normalizer updates.
+
+        Image groups are left out: the normalizers read the state
+        vector alone (images are never normalized), and flattening a
+        vision rollout's image storage here materialised a copy of the
+        largest tensors in the run at the moment VRAM is tightest.
+        """
+
+        def vectors_only(shape: ObsShape) -> ObsShape:
+            if isinstance(shape, dict):
+                return {g: s for g, s in shape.items() if len(s) == 1}
+            return shape
+
+        flat_actor = _obs_reshape(self.actor_obs, vectors_only(self.actor_obs_shape), (-1,))
+        flat_critic = _obs_reshape(self.critic_obs, vectors_only(self.critic_obs_shape), (-1,))
         return flat_actor, flat_critic
 
     def get_flat_actions(self) -> jax.Array:
