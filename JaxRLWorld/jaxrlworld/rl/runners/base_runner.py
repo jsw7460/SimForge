@@ -550,6 +550,15 @@ class BaseRunner(ABC):
         """Run the deterministic eval loop on ``eval_env`` and return stats."""
         eval_start = time.time()
 
+        # An eval env is a separate world whose global step counter
+        # walks at its own (much slower) pace, so anything scheduled on
+        # ``env_step_counter`` — curricula, observation anneals — would
+        # run at a stale phase: an annealed privileged term would sit in
+        # its hold phase forever and the eval would score a policy the
+        # training no longer produces. Mirror the training clock so
+        # evaluation happens at the training run's phase.
+        eval_env.env_step_counter = self.env.env_step_counter
+
         num_envs = eval_env.num_envs
         target_episodes = self.runner_cfg.eval_num_episodes
         deterministic = self.runner_cfg.eval_deterministic

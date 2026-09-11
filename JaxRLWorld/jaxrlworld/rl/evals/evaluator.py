@@ -156,6 +156,13 @@ class PolicyEvaluator:
         )
         self.env.reset()
 
+        # The checkpoint's policy lived at a training phase; anything
+        # scheduled on the global step counter (curricula, observation
+        # anneals) must be evaluated at that phase, not restarted from
+        # zero — a fresh clock would hand an annealed-out observation
+        # back to a policy that finished training without it.
+        self.env.env_step_counter = int(metadata["iteration"]) * self.eval_cfgs.algorithm.num_steps_per_env
+
         # Validate dims BEFORE loading weights (fail fast on mismatch)
         if self._cross_sim:
             self._validate_dims(metadata)

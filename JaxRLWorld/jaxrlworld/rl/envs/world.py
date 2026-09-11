@@ -196,8 +196,19 @@ class World(ABC):
 
     @property
     def env_step_counter(self) -> int:
-        """Number of step() calls on this environment instance."""
+        """Number of step() calls on this environment instance.
+
+        This is the global training clock: curricula and any
+        observation scheduled on training progress read it. It is
+        writable so a world standing in for another — an eval env, or
+        an env rebuilt around a checkpoint — can mirror that world's
+        clock instead of starting its schedules over from zero.
+        """
         return self._env_step_counter
+
+    @env_step_counter.setter
+    def env_step_counter(self, value: int) -> None:
+        self._env_step_counter = int(value)
 
     # ========== Properties ==========
 
