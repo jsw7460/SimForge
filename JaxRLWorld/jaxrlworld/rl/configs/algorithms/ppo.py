@@ -65,3 +65,12 @@ class PPOConfig(BaseConfig):
     # and restores a real SymmetryConfig on checkpoint load; use_mirror_loss=False
     # keeps the mirror loss off unless a preset turns it on.
     symmetry_cfg: SymmetryConfig = field(default_factory=SymmetryConfig)
+
+    def __post_init__(self) -> None:
+        if self.entropy_coef < 0:
+            raise ValueError(
+                f"entropy_coef must be >= 0 (got {self.entropy_coef}): the loss "
+                "subtracts entropy_coef * entropy, so positive means an entropy "
+                "bonus. Configs whose trainer ADDS the term (e.g. booster_gym "
+                "yamls with entropy_coef: -0.01) must flip the sign when ported."
+            )
