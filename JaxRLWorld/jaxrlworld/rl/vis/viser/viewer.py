@@ -28,9 +28,8 @@ if TYPE_CHECKING:
     from jaxrlworld.rl.envs.world import World
 
 
-# Arrow colors (RGB 0-255).
-_CMD_ARROW_COLOR = (50, 200, 50)  # Green for command velocity
-_ACTUAL_ARROW_COLOR = (200, 130, 30)  # Orange for actual velocity
+# Arrow colors (RGB 0-255). The velocity arrows take theirs from the
+# look (``ViserSceneConfig.command_arrow_color`` / ``actual_arrow_color``).
 _ANG_VEL_POS_COLOR = (200, 50, 200)  # Magenta for positive angular vel
 _ANG_VEL_NEG_COLOR = (50, 200, 200)  # Cyan for negative angular vel
 
@@ -116,7 +115,8 @@ class ViserViewerConfig:
     enable_actual_vel_arrow: bool = True
     scene: ViserSceneConfig | None = None
     """Look of the 3D scene (ground / robot material / shadows). ``None`` →
-    :class:`ViserSceneConfig` defaults (near-white ground, dark metallic robot)."""
+    the ``"default"`` look in ``looks.py`` (the mjbatch look: warm grey
+    checker, flat grey sky, sim-native robot colors)."""
 
 
 class ViserVisualizationManager:
@@ -291,7 +291,7 @@ class ViserVisualizationManager:
                 vx,
                 vy,
                 yaw,
-                color=_CMD_ARROW_COLOR,
+                color=self.scene.scene_config.command_arrow_color,
                 name="/overlay/cmd_arrow",
                 old_handles=self._cmd_arrow_handles,
             )
@@ -307,7 +307,7 @@ class ViserVisualizationManager:
                     float(actual_vel[0]),
                     float(actual_vel[1]),
                     yaw,
-                    color=_ACTUAL_ARROW_COLOR,
+                    color=self.scene.scene_config.actual_arrow_color,
                     name="/overlay/actual_arrow",
                     old_handles=self._actual_arrow_handles,
                 )

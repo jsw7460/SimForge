@@ -15,9 +15,8 @@ from dataclasses import replace
 
 from .scene_config import ViserSceneConfig
 
-# Glossy dark robot on a glass-polished light checkerboard + blue sky.
-# Shared by the "ceramic_white" and "default" entries (``get_look`` hands
-# out fresh copies, so sharing the instance is safe).
+# Glossy dark robot on a glass-polished light checkerboard + blue sky
+# (``get_look`` hands out fresh copies, so sharing an instance is safe).
 _CERAMIC_WHITE = ViserSceneConfig(
     robot_color=(18, 18, 20),
     robot_metalness=0.0,
@@ -48,8 +47,7 @@ _CERAMIC_WHITE = ViserSceneConfig(
 
 # The MuJoCo / dm_control house style (as seen in OGBench renders):
 # dark-navy two-tone grid with light cross lines under a satin polish,
-# a starfield night sky, and sim-native robot colors.  Shared by the
-# "mujoco" and "default" entries.
+# a starfield night sky, and sim-native robot colors.
 _MUJOCO = ViserSceneConfig(
     robot_color=None,
     ground_texture="navy_grid",
@@ -74,12 +72,52 @@ _MUJOCO = ViserSceneConfig(
     hemisphere_intensity=0.35,
 )
 
+# The package default: the look of mjbatch's example renders (its
+# ``theme.xml`` on the stock MuJoCo renderer). A warm grey-beige checker
+# whose two cells are one shade apart, a single flat warm-grey sky with
+# no horizon, one sun
+# from the front-left, no reflections anywhere, the robot in its own
+# colors, and a 38-degree lens. The renders also fade the floor into
+# the sky between 4 and 14 m (fog); viser exposes no fog, so that one
+# element is approximated by ``ground_fog`` (rings of sky color over the
+# floor). Overlays take the theme's espresso / ivory / brick palette.
+_MJBATCH = ViserSceneConfig(
+    robot_color=None,
+    ground_texture="taupe_checker",
+    # theme.xml: texrepeat .625 per metre with texuniform → a 1.6 m tile
+    # of 0.8 m cells; 50 m / 31.25 tiles = 1.6 m.
+    ground_texture_tiles=31.25,
+    ground_metalness=0.0,
+    ground_roughness=0.9,
+    env_map=None,
+    sky_background=True,
+    sky_kind="flat",
+    sky_color=(120, 115, 107),
+    sky_horizon_color=(120, 115, 107),
+    sky_sun_glow=False,
+    # <light dir="-.7 .5 -.6" diffuse=".65"> + headlight ambient .3
+    sun_direction=(-0.7, 0.5, -0.6),
+    sun_color=(255, 250, 242),
+    sun_intensity=0.65,
+    ambient_intensity=0.3,
+    hemisphere_intensity=0.15,
+    hemisphere_ground_color=(184, 176, 163),
+    cast_shadow=True,
+    receive_shadow=True,
+    ground_fog=(4.0, 14.0),
+    command_arrow_color=(64, 46, 36),
+    actual_arrow_color=(247, 240, 224),
+    ghost_color=(158, 77, 51),
+    ghost_opacity=0.35,
+    camera_fov_deg=38.0,
+)
+
 # name -> ViserSceneConfig.  Keep these as plain instances; ``get_look``
 # hands out a fresh copy so callers can't mutate the shared template.
 VISER_LOOKS: dict[str, ViserSceneConfig] = {
-    # The package default — the "mujoco" look (also the fallback when no
+    # The package default — the "mjbatch" look (also the fallback when no
     # ``viser_scene`` / ``--look`` is given; see ``ViserScene``).
-    "default": _MUJOCO,
+    "default": _MJBATCH,
     # Dark veined marble under glass-polished specular + carbon-finish
     # robot, lit by the "studio" HDRI (the former package default).
     "polished": ViserSceneConfig(),
@@ -151,6 +189,8 @@ VISER_LOOKS: dict[str, ViserSceneConfig] = {
     "ceramic_white": _CERAMIC_WHITE,
     # See ``_MUJOCO`` above.
     "mujoco": _MUJOCO,
+    # See ``_MJBATCH`` above.
+    "mjbatch": _MJBATCH,
     # Keep the simulator's own per-link mesh colors / textures (the unitree
     # robots' black/grey parts, etc.) on the polished slate.
     "sim_native": ViserSceneConfig(robot_color=None),

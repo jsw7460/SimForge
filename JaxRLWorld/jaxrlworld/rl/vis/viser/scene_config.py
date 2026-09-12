@@ -109,7 +109,8 @@ class ViserSceneConfig:
     sky_kind: str = "gradient"
     """Which backdrop to use when ``sky_background=True``.  ``"gradient"``
     (default) → procedural sky from ``sky_color`` / ``sky_horizon_color``
-    / ``sky_sun_glow``; ``"construction"`` → the bundled hazy
+    / ``sky_sun_glow``; ``"flat"`` → one ``sky_color`` everywhere, no
+    horizon; ``"construction"`` → the bundled hazy
     construction-site panorama (sky + crane + scaffolded buildings); a
     file path → load that image as the backdrop."""
     sky_color: tuple[int, int, int] = (138, 184, 235)
@@ -118,3 +119,29 @@ class ViserSceneConfig:
     """Hazy color near the horizon."""
     sky_sun_glow: bool = True
     """Add a soft warm glow in the upper part of the sky backdrop."""
+
+    # ── Distance fog on the ground ──────────────────────────────────
+    ground_fog: tuple[float, float] | None = None
+    """``(start, end)`` in metres from the tracked body: past ``start`` the
+    floor fades into ``sky_color`` and is fully hidden past ``end`` —
+    MuJoCo's ``fogstart`` / ``fogend`` for the floor. viser exposes no
+    fog, so this is flat rings of sky color and rising opacity laid just
+    above the ground; they sit at the scene origin, which camera
+    tracking keeps on the robot. ``None`` → off."""
+    ground_fog_rings: int = 24
+    """Rings between ``start`` and ``end``; more is smoother."""
+
+    # ── Overlay palette ─────────────────────────────────────────────
+    command_arrow_color: tuple[int, int, int] = (50, 200, 50)
+    """Commanded-velocity arrow (RGB 0-255)."""
+    actual_arrow_color: tuple[int, int, int] = (200, 130, 30)
+    """Measured-velocity arrow."""
+    ghost_color: tuple[int, int, int] = (120, 200, 255)
+    """Reference-pose ghost of the motion-tracking presets."""
+    ghost_opacity: float = 0.35
+
+    # ── Camera ──────────────────────────────────────────────────────
+    camera_fov_deg: float | None = None
+    """Vertical field of view given to every connecting client, in
+    degrees. ``None`` keeps viser's default. Narrower than MuJoCo's 45
+    (38, say) compresses the perspective into a mild telephoto."""

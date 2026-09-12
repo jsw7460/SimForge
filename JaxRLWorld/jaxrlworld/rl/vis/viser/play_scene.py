@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 import numpy as np
 import viser
 
+from .looks import get_look
+
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.managers.mujoco.scene import MujocoSceneManager
 
@@ -54,6 +56,11 @@ class PlayScene(Protocol):
     @property
     def scene_offset(self) -> np.ndarray: ...
 
+    @property
+    def look(self) -> ViserSceneConfig:
+        """The scene's ``ViserSceneConfig``: overlays take their palette from it."""
+        ...
+
     def create(self, server: viser.ViserServer) -> None: ...
     def begin_frame(self) -> None: ...
     def update(self) -> None: ...
@@ -85,6 +92,10 @@ class BridgePlayScene:
         from .scene import ViserScene
 
         self._scene = ViserScene.create(server, self._bridge, scene_config=self._scene_config)
+
+    @property
+    def look(self) -> ViserSceneConfig:
+        return self._scene.scene_config
 
     @property
     def env_idx(self) -> int:
@@ -163,6 +174,12 @@ class MujocoPlayScene:
         mj_model = self._scene_manager.mj_model
         num_envs = self._scene_manager.scene.num_envs
         self._mj_scene = MjlabViserScene(server, mj_model, num_envs)
+
+    @property
+    def look(self) -> ViserSceneConfig:
+        # mjlab draws its own ground and lights; only the overlay palette
+        # of the package default look applies here.
+        return get_look("default")
 
     @property
     def env_idx(self) -> int:

@@ -29,7 +29,6 @@ from .overlays import ViserDebugOverlays, ViserTermOverlays
 from .play_scene import PlayScene
 from .play_viewer_base import PlayViewerBase
 from .viewer import (
-    _ACTUAL_ARROW_COLOR,
     _ANG_VEL_NEG_COLOR,
     _ANG_VEL_POS_COLOR,
     _ANG_VEL_THRESHOLD,
@@ -38,7 +37,6 @@ from .viewer import (
     _ARROW_LENGTH_SCALE,
     _ARROW_SHAFT_RADIUS,
     _ARROW_Z_OFFSET,
-    _CMD_ARROW_COLOR,
     _HEAD_LENGTH_RATIO,
     _MAX_ARROW_LENGTH,
     _SHAFT_LENGTH_RATIO,
@@ -109,7 +107,8 @@ class ViserPlayViewer(PlayViewerBase):
 
         # Translucent reference-pose overlay (no-op when the env has no
         # 'motion' command — e.g. locomotion / getup presets).
-        self._motion_ghost = MotionGhost(self._server, self.env)
+        look = self._play_scene.look
+        self._motion_ghost = MotionGhost(self._server, self.env, color=look.ghost_color, opacity=look.ghost_opacity)
 
         # GUI.
         tabs = self._server.gui.add_tab_group()
@@ -592,7 +591,7 @@ class ViserPlayViewer(PlayViewerBase):
                 float(cmd_vx[env_idx]),
                 float(cmd_vy[env_idx]),
                 tracked.yaw,
-                _CMD_ARROW_COLOR,
+                self._play_scene.look.command_arrow_color,
                 "/overlay/cmd_arrow",
                 self._cmd_arrow_handles,
             )
@@ -605,7 +604,7 @@ class ViserPlayViewer(PlayViewerBase):
                 float(tracked.body_velocity[0]),
                 float(tracked.body_velocity[1]),
                 tracked.yaw,
-                _ACTUAL_ARROW_COLOR,
+                self._play_scene.look.actual_arrow_color,
                 "/overlay/actual_arrow",
                 self._actual_arrow_handles,
             )

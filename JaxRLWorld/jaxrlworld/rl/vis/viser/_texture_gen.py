@@ -397,6 +397,9 @@ _MARBLE_PATH = os.path.join(_ASSETS_DIR, "marble_texture.png")
 _CONCRETE_PATH = os.path.join(_ASSETS_DIR, "concrete_texture.png")
 _CONSTRUCTION_BACKDROP_PATH = os.path.join(_ASSETS_DIR, "construction_backdrop.png")
 _CHECKER_PATH = os.path.join(_ASSETS_DIR, "checker_texture.png")
+_TAUPE_CHECKER_PATH = os.path.join(_ASSETS_DIR, "taupe_checker_texture.png")
+# A warm grey-beige pair one shade apart: the grid is felt, not read.
+TAUPE_CHECKER_COLORS = ((184, 176, 163), (173, 166, 153))
 _NAVY_GRID_PATH = os.path.join(_ASSETS_DIR, "navy_grid_texture.png")
 _STARFIELD_BACKDROP_PATH = os.path.join(_ASSETS_DIR, "starfield_backdrop.png")
 
@@ -426,6 +429,11 @@ def checker_texture_path() -> str:
     return _CHECKER_PATH
 
 
+def taupe_checker_texture_path() -> str:
+    """Path to the bundled ``taupe_checker_texture.png`` (low-contrast warm grey)."""
+    return _TAUPE_CHECKER_PATH
+
+
 if __name__ == "__main__":
     os.makedirs(_ASSETS_DIR, exist_ok=True)
     generate_ground_texture().save(_DEFAULT_PATH)
@@ -438,6 +446,8 @@ if __name__ == "__main__":
     print(f"wrote {_CONSTRUCTION_BACKDROP_PATH}")
     generate_checker_texture().save(_CHECKER_PATH)
     print(f"wrote {_CHECKER_PATH}")
+    generate_checker_texture(color_a=TAUPE_CHECKER_COLORS[0], color_b=TAUPE_CHECKER_COLORS[1]).save(_TAUPE_CHECKER_PATH)
+    print(f"wrote {_TAUPE_CHECKER_PATH}")
     generate_navy_grid_texture().save(_NAVY_GRID_PATH)
     print(f"wrote {_NAVY_GRID_PATH}")
     generate_starfield_backdrop().save(_STARFIELD_BACKDROP_PATH)

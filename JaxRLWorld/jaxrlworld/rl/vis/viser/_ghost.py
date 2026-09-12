@@ -26,21 +26,18 @@ if TYPE_CHECKING:
     from jaxrlworld.rl.envs.world import World
 
 
-# Pale-cyan, fairly translucent — reads cleanly against both the live
-# robot and the default viser background.
-_GHOST_COLOR_RGB = (120, 200, 255)
-_GHOST_OPACITY = 0.35
-
-
 class MotionGhost:
-    """Per-body ghost meshes + per-tick transform updates."""
+    """Per-body ghost meshes + per-tick transform updates.
+
+    ``color`` / ``opacity`` come from the look
+    (``ViserSceneConfig.ghost_color`` / ``ghost_opacity``)."""
 
     def __init__(
         self,
         server: viser.ViserServer,
         env: World,
-        color: tuple[int, int, int] = _GHOST_COLOR_RGB,
-        opacity: float = _GHOST_OPACITY,
+        color: tuple[int, int, int],
+        opacity: float,
     ) -> None:
         self._server = server
         self._env = env

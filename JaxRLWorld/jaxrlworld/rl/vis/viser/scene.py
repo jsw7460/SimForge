@@ -33,6 +33,9 @@ _BUNDLED_CONSTRUCTION_BACKDROP = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets", "construction_backdrop.png"
 )
 _BUNDLED_NAVY_GRID_TEXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "navy_grid_texture.png")
+_BUNDLED_TAUPE_CHECKER_TEXTURE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "assets", "taupe_checker_texture.png"
+)
 _BUNDLED_STARFIELD_BACKDROP = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets", "starfield_backdrop.png"
 )
@@ -42,6 +45,7 @@ _GROUND_TEXTURE_ALIASES = {
     "concrete": _BUNDLED_CONCRETE_TEXTURE,
     "checker": _BUNDLED_CHECKER_TEXTURE,
     "navy_grid": _BUNDLED_NAVY_GRID_TEXTURE,
+    "taupe_checker": _BUNDLED_TAUPE_CHECKER_TEXTURE,
 }
 _SKY_IMAGE_ALIASES = {
     "construction": _BUNDLED_CONSTRUCTION_BACKDROP,
@@ -117,6 +121,20 @@ def _pbr_visual(
 
 
 _GROUND_QUAD_FACES = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
+_FOG_HEIGHT = 0.002  # fog rings float this far above the floor: no z-fighting
+
+
+def _annulus(r_inner: float, r_outer: float, segments: int) -> trimesh.Trimesh:
+    """A flat ring in the XY plane."""
+    theta = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
+    ring = np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=1)
+    vertices = np.concatenate([ring * r_inner, ring * r_outer], axis=0)
+    nxt = (np.arange(segments) + 1) % segments
+    inner, outer = np.arange(segments), np.arange(segments) + segments
+    faces = np.concatenate(
+        [np.stack([inner, outer, outer[nxt]], axis=1), np.stack([inner, outer[nxt], inner[nxt]], axis=1)], axis=0
+    )
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
 
 def _terrain_face_shading(mesh: trimesh.Trimesh) -> None:
@@ -296,6 +314,7 @@ class ViserScene:
         self._body_frames: dict[int, Any] = {}
         self._fixed_frame: viser.SceneNodeHandle | None = None
         self._ground_handle: Any = None
+        self._fog_handles: list[Any] = []
 
         # Debug visualization queues.
         self._arrow_queue: deque[_ArrowRequest] = deque()
@@ -309,9 +328,11 @@ class ViserScene:
         # Build scene.
         self._create_mesh_handles()
         self._create_ground_plane()
+        self._create_ground_fog()
         self._setup_environment()
         self._setup_lighting()
         self._setup_sky()
+        self._setup_camera()
 
     @classmethod
     def create(
@@ -405,6 +426,31 @@ class ViserScene:
             receive_shadow=cfg.receive_shadow,
         )
 
+    def _create_ground_fog(self) -> None:
+        """Rings of sky color and rising opacity over the floor, from
+        ``ground_fog[0]`` to ``ground_fog[1]`` m; the last runs to the
+        ground's corner so the quad's edge never shows (see the config)."""
+        cfg = self.scene_config
+        if cfg.ground_fog is None:
+            return
+        start, end = cfg.ground_fog
+        n = cfg.ground_fog_rings
+        edges = np.linspace(start, end, n + 1).tolist() + [cfg.ground_size]
+        for i in range(n + 1):
+            mesh = _annulus(edges[i], edges[i + 1], segments=96)
+            self._fog_handles.append(
+                self.server.scene.add_mesh_simple(
+                    f"/ground_fog/ring_{i}",
+                    vertices=mesh.vertices.astype(np.float32),
+                    faces=mesh.faces.astype(np.int32),
+                    color=cfg.sky_color,
+                    opacity=min(1.0, (i + 1) / n),
+                    cast_shadow=False,
+                    receive_shadow=False,
+                    position=(0.0, 0.0, _FOG_HEIGHT),
+                )
+            )
+
     def _setup_environment(self) -> None:
         """Apply image-based lighting (HDRI env map) for glossy reflections.
 
@@ -475,6 +521,8 @@ class ViserScene:
             return
         if cfg.sky_kind == "gradient":
             img = _make_sky_image(cfg.sky_color, cfg.sky_horizon_color, cfg.sun_color if cfg.sky_sun_glow else None)
+        elif cfg.sky_kind == "flat":
+            img = np.full((64, 64, 3), cfg.sky_color, dtype=np.uint8)
         else:
             path = _SKY_IMAGE_ALIASES.get(cfg.sky_kind, cfg.sky_kind)
             if not os.path.isfile(path):
@@ -485,6 +533,18 @@ class ViserScene:
                 )
             img = np.array(Image.open(path).convert("RGB"))
         self.server.scene.set_background_image(img)
+
+    def _setup_camera(self) -> None:
+        """Camera defaults the look asks for, applied to each client as it
+        connects (the camera is per client, not per scene)."""
+        fov_deg = self.scene_config.camera_fov_deg
+        if fov_deg is None:
+            return
+        fov = float(np.deg2rad(fov_deg))
+
+        @self.server.on_client_connect
+        def _(client: viser.ClientHandle) -> None:
+            client.camera.fov = fov
 
     def update(self) -> None:
         """Update all dynamic body transforms from the bridge.
@@ -658,6 +718,9 @@ class ViserScene:
             self._fixed_frame = None
         if self._ground_handle is not None:
             self._ground_handle.remove()
+        for h in self._fog_handles:
+            h.remove()
+        self._fog_handles.clear()
         for h in self._arrow_handles:
             h.remove()
         for h in self._sphere_handles:
