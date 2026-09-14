@@ -25,12 +25,16 @@ import jax.numpy as jnp
 
 
 class MirrorSpec(NamedTuple):
-    """Static mirror operators (int perm + float sign) per obs group + action."""
+    """Static mirror operators (int perm + float sign): actor obs + action.
+
+    Only the actor group is mirrored — the loss is
+    ``MSE(pi(mirror(o)), mirror(pi(o)))`` on actor observations; critic
+    observations (which may contain non-mirrorable privileged entries
+    such as raw DR draws) are never mirrored.
+    """
 
     actor_perm: jnp.ndarray
     actor_sign: jnp.ndarray
-    critic_perm: jnp.ndarray
-    critic_sign: jnp.ndarray
     action_perm: jnp.ndarray
     action_sign: jnp.ndarray
 
@@ -67,6 +71,28 @@ _JOINT_TERMS = frozenset(
 )
 # Per-foot gait phase encoding: assumed layout [left_block(2), right_block(2)].
 _PHASE_TERMS = frozenset({"gait_phase_encoding"})
+# Mutable so out-of-tree obs terms can register (via the functions below).
+_JOINT_TERMS = set(_JOINT_TERMS)
+
+
+def register_mirror_rule(func_name: str, perm: list[int], sign: list[float]) -> None:
+    """Register the left/right mirror rule of an out-of-tree obs term.
+
+    ``perm``/``sign`` are LOCAL to the term's slice. Must run before
+    :func:`build_mirror_spec` (i.e. at import time of the module that
+    defines the obs function). Re-registration must be identical.
+    """
+    if len(perm) != len(sign):
+        raise ValueError(f"perm/sign length mismatch for {func_name!r}")
+    existing = _FIXED_TERM_RULES.get(func_name)
+    if existing is not None and existing != (perm, sign):
+        raise ValueError(f"conflicting mirror rule re-registration for {func_name!r}")
+    _FIXED_TERM_RULES[func_name] = (list(perm), list(sign))
+
+
+def register_joint_mirror_term(func_name: str) -> None:
+    """Mark an out-of-tree obs term as joint-shaped (L<->R joint perm)."""
+    _JOINT_TERMS.add(func_name)
 
 
 def _joint_perm_sign(joint_names: Sequence[str]) -> tuple[list[int], list[float]]:
@@ -139,12 +165,9 @@ def build_mirror_spec(obs_manager, joint_names: Sequence[str]) -> MirrorSpec:
     obs_manager.calculate_obs_dim()
     jperm, jsign = _joint_perm_sign(joint_names)
     ap, as_ = _build_group(obs_manager, "actor", jperm, jsign)
-    cp, cs = _build_group(obs_manager, "critic", jperm, jsign)
     return MirrorSpec(
         actor_perm=jnp.asarray(ap, dtype=jnp.int32),
         actor_sign=jnp.asarray(as_, dtype=jnp.float32),
-        critic_perm=jnp.asarray(cp, dtype=jnp.int32),
-        critic_sign=jnp.asarray(cs, dtype=jnp.float32),
         action_perm=jnp.asarray(jperm, dtype=jnp.int32),
         action_sign=jnp.asarray(jsign, dtype=jnp.float32),
     )
