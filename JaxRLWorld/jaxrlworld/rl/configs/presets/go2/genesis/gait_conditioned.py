@@ -115,7 +115,11 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
                 params={"gait_force_sigma": 100.0},
             )
             tracking_contacts_shaped_vel = RewardTermConfig(
-                func=rf_genesis.wtw_tracking_contacts_shaped_vel,
+                # FD foot velocity: the native instantaneous reads differ per
+                # backend (mjlab substep-stale cvel, Newton CoM-frame body_qd)
+                # and split the penalty up to 1.19x on identical behavior
+                # (go2_wtw_reward_forensics).
+                func=rf_genesis.wtw_tracking_contacts_shaped_vel_fd,
                 weight=4.0,
                 params={"gait_vel_sigma": 10.0},
             )
@@ -145,6 +149,13 @@ class Go2GaitConditionedGenesisConfig(Go2FlatConfig):
             feet_slip = RewardTermConfig(
                 func=rf_genesis.wtw_feet_slip,
                 weight=0.04,
+                # Force-gated contact (>1 N, both-step sticky): the native
+                # gates disagree (Newton force-based, others narrowphase
+                # found) and the found gate keeps counting slip through
+                # zero-force chatter instants — a measured 1.65x
+                # mujoco/newton split on the same behavior
+                # (go2_wtw_reward_forensics).
+                params={"force_gate_n": 1.0},
             )
             action_smoothness_1 = RewardTermConfig(
                 func=rf_wtw.penalize_action_smoothness_1,

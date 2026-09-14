@@ -18,6 +18,7 @@ from jaxrlworld.rl.envs.mdp.observations.newton.body_utils import (
 )
 from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import (
     _fd_foot_velocity,
+    _sticky_mask,
     get_leg_xy_signs,
     penalize_contact_force_count,
 )
@@ -28,7 +29,7 @@ from jaxrlworld.rl.utils.quat_utils import quat_apply_yaw_wxyz, quat_conjugate_w
 # ── Walk-These-Ways reward terms (Newton) ────────────────────────────────
 
 
-def wtw_feet_slip(env: "NewtonLocomotionEnv") -> torch.Tensor:
+def wtw_feet_slip(env: "NewtonLocomotionEnv", force_gate_n: float | None = None) -> torch.Tensor:
     """WTW feet slip: penalize foot xy travel while in contact OR was in contact.
 
     The foot velocity is the per-step finite difference of the foot body
@@ -43,9 +44,13 @@ def wtw_feet_slip(env: "NewtonLocomotionEnv") -> torch.Tensor:
     feet_vel = _fd_foot_velocity(env, "wtw_feet_slip", result.data)
     vel_sq = torch.sum(torch.square(feet_vel[..., :2]), dim=-1)
 
-    contact = env.contact_manager.is_contact("feet_ground_contact", order=result.body_names)
-    prev_contact = env.contact_manager.prev_is_contact("feet_ground_contact", order=result.body_names)
-    contact_filt = contact | prev_contact
+    if force_gate_n is None:
+        contact = env.contact_manager.is_contact("feet_ground_contact", order=result.body_names)
+        prev_contact = env.contact_manager.prev_is_contact("feet_ground_contact", order=result.body_names)
+        contact_filt = contact | prev_contact
+    else:
+        fnorm = env.contact_manager.contact_force("feet_ground_contact", order=result.body_names).norm(dim=-1)
+        contact_filt = _sticky_mask(env, "wtw_feet_slip_gate", fnorm > force_gate_n)
     return -torch.sum(contact_filt.float() * vel_sq, dim=-1)
 
 
@@ -78,6 +83,26 @@ def wtw_tracking_contacts_shaped_vel(
 
     body_qd = wp.to_torch(_state.body_qd).reshape(env.num_envs, cache.bodies_per_env, 6)
     feet_vel = body_qd[:, result.body_indices, :3]
+    foot_vel_norm = torch.norm(feet_vel, dim=-1)
+
+    desired_contact = env.gait_manager.desired_contact_states
+
+    reward = -(desired_contact * (1.0 - torch.exp(-(foot_vel_norm**2) / gait_vel_sigma)))
+    return reward.mean(dim=-1)
+
+
+def wtw_tracking_contacts_shaped_vel_fd(
+    env: "NewtonLocomotionEnv",
+    gait_vel_sigma: float = 10.0,
+) -> torch.Tensor:
+    """:func:`wtw_tracking_contacts_shaped_vel` on the per-step FD foot
+    velocity — the only velocity convention identical across simulators
+    (the native read here is the CoM-frame ``body_qd``; see
+    ``common.reward_terms._fd_foot_velocity``).
+    """
+    feet_bodies = env.gait_manager.foot_names
+    result = get_bodies_pos_with_contact(env, feet_bodies)
+    feet_vel = _fd_foot_velocity(env, "wtw_shaped_vel", result.data)
     foot_vel_norm = torch.norm(feet_vel, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states

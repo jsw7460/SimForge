@@ -7,7 +7,10 @@ See genesis/gait_conditioned.py for detailed documentation.
 from dataclasses import dataclass, field
 
 from jaxrlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
-from jaxrlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun, MujocoObservationConfig as ObservationConfig
+from jaxrlworld.rl.configs.mujoco_config_classes import (
+    MujocoConfigsForRun,
+    MujocoObservationConfig as ObservationConfig,
+)
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
@@ -115,7 +118,11 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
                 params={"contact_group": "feet_ground_contact", "gait_force_sigma": 100.0},
             )
             tracking_contacts_shaped_vel = RewardTermConfig(
-                func=rf_mujoco.wtw_tracking_contacts_shaped_vel,
+                # FD foot velocity: the native instantaneous reads differ per
+                # backend (mjlab substep-stale cvel, Newton CoM-frame body_qd)
+                # and split the penalty up to 1.19x on identical behavior
+                # (go2_wtw_reward_forensics).
+                func=rf_mujoco.wtw_tracking_contacts_shaped_vel_fd,
                 weight=4.0,
                 params={"gait_vel_sigma": 10.0, "asset_cfg": foot_asset_cfg},
             )
@@ -141,7 +148,12 @@ class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
             feet_slip = RewardTermConfig(
                 func=rf_mujoco.wtw_feet_slip,
                 weight=0.04,
-                params={"contact_group": "feet_ground_contact", "asset_cfg": foot_asset_cfg},
+                # Force-gated contact (>1 N, both-step sticky): the native gates
+                # disagree (Newton force-based, others narrowphase-found) and the
+                # found gate keeps counting slip through zero-force chatter
+                # instants — a measured 1.65x mujoco/newton split on the same
+                # behavior (go2_wtw_reward_forensics).
+                params={"contact_group": "feet_ground_contact", "asset_cfg": foot_asset_cfg, "force_gate_n": 1.0},
             )
             action_smoothness_1 = RewardTermConfig(
                 func=rf_wtw.penalize_action_smoothness_1,

@@ -442,6 +442,27 @@ def _fd_foot_velocity(env: World, key: str, foot_pos: torch.Tensor) -> torch.Ten
     return vel
 
 
+def _sticky_mask(env: World, key: str, mask: torch.Tensor) -> torch.Tensor:
+    """``mask | previous-step mask``, with the previous value stored on the
+    reward manager like :func:`_fd_foot_velocity`'s positions.
+
+    Backs force-gated contact filters: each backend's native
+    ``is_contact`` uses a different rule (Newton ``|F| > 1e-6``, the
+    others narrowphase ``found``), and on a chattering hard-contact
+    engine ``found`` stays true through zero-force instants — gating by
+    the same force threshold on every backend is the only comparable
+    filter.
+    """
+    store = env.reward_manager._fd_prev_foot_pos
+    prev = store.get(key)
+    if prev is None:
+        store[key] = mask.clone()
+        return mask
+    out = mask | prev
+    prev.copy_(mask)
+    return out
+
+
 def penalize_feet_clearance(
     env: World,
     target_height: float,

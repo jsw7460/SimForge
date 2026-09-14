@@ -11,6 +11,7 @@ from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     VariablePostureTracker,
     _fd_foot_velocity,
+    _sticky_mask,
     flat_orientation as flat_orientation_l2_common,
     get_leg_xy_signs,
     penalize_angular_momentum_l2,
@@ -551,6 +552,7 @@ def _site_ids_matching_gait(env: MujocoLocomotionEnv, asset_cfg: ResolvedEntity)
 def wtw_feet_slip(
     env: MujocoLocomotionEnv,
     contact_group: str = "feet_ground_contact",
+    force_gate_n: float | None = None,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
     """WTW feet slip: penalize foot xy travel while in contact OR was in contact.
@@ -569,9 +571,16 @@ def wtw_feet_slip(
     contact_order = _contact_order_matching_gait(env, contact_group)
     site_ids = _site_ids_matching_gait(env, asset_cfg)
 
-    in_contact = env.contact_manager.is_contact(contact_group, order=contact_order)
-    prev_contact = env.contact_manager.prev_is_contact(contact_group, order=contact_order)
-    contact_filt = (in_contact | prev_contact).float()
+    if force_gate_n is None:
+        # Native gate (mjlab: narrowphase found) — NOT comparable across
+        # sims on chattering contacts; kept as the default for existing
+        # runs.
+        in_contact = env.contact_manager.is_contact(contact_group, order=contact_order)
+        prev_contact = env.contact_manager.prev_is_contact(contact_group, order=contact_order)
+        contact_filt = (in_contact | prev_contact).float()
+    else:
+        fnorm = env.contact_manager.contact_force(contact_group, order=contact_order).norm(dim=-1)
+        contact_filt = _sticky_mask(env, "wtw_feet_slip_gate", fnorm > force_gate_n).float()
 
     foot_pos = robot.data.site_pos_w[:, site_ids]
     foot_vel = _fd_foot_velocity(env, "wtw_feet_slip", foot_pos)
@@ -612,6 +621,28 @@ def wtw_tracking_contacts_shaped_vel(
     robot = env.scene_manager.get_entity(asset_cfg.name)
     site_ids = _site_ids_matching_gait(env, asset_cfg)
     foot_vel = robot.data.site_lin_vel_w[:, site_ids, :]
+    foot_vel_norm = torch.norm(foot_vel, dim=-1)
+
+    desired_contact = env.gait_manager.desired_contact_states
+
+    reward = -(desired_contact * (1.0 - torch.exp(-(foot_vel_norm**2) / gait_vel_sigma)))
+    return reward.mean(dim=-1)
+
+
+def wtw_tracking_contacts_shaped_vel_fd(
+    env: MujocoLocomotionEnv,
+    gait_vel_sigma: float = 10.0,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """:func:`wtw_tracking_contacts_shaped_vel` on the per-step FD foot
+    velocity instead of the instantaneous read — mjlab's ``cvel`` is one
+    substep stale at the step boundary, and the FD convention is the
+    only one identical across simulators (see ``_fd_foot_velocity``).
+    """
+    robot = env.scene_manager.get_entity(asset_cfg.name)
+    site_ids = _site_ids_matching_gait(env, asset_cfg)
+    foot_pos = robot.data.site_pos_w[:, site_ids]
+    foot_vel = _fd_foot_velocity(env, "wtw_shaped_vel", foot_pos)
     foot_vel_norm = torch.norm(foot_vel, dim=-1)
 
     desired_contact = env.gait_manager.desired_contact_states
