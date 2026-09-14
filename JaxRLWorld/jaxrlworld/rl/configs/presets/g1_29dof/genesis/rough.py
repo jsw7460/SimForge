@@ -16,6 +16,9 @@ class G1RoughGenesisConfig(G1FlatConfig):
     sim_type: str = "genesis"
     run_name: str = "G1_29dof_Rough_Genesis"
     use_rough_terrain: bool = True
+    # The rough policy is converged well before the flat preset's 30000;
+    # the runs of 2026-09-12 blew up on every backend past ~15000.
+    max_iterations: int = 10000
 
 
 def get_config() -> GenesisConfigsForRun:
