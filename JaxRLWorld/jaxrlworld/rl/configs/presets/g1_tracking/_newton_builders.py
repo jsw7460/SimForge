@@ -134,7 +134,14 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
             ls_iterations=20,
             ccd_iterations=50,
             njmax=1500,
-            nconmax=150,
+            # Per-env contact budget; mjwarp also caps BROADPHASE candidate
+            # pairs with it and drops the excess silently (a warning on
+            # stdout is all). A 12000-env training launch on 2026-09-15
+            # reported a live demand of 152-158; 220 = demand x ~1.4, the
+            # same margin the g1_29dof preset uses. Costs EPA scratch
+            # (num_envs x nconmax x 5 x ccd_iterations vec3): ~7.9 GB at
+            # 12000 envs, up from ~5.4 GB at 150.
+            nconmax=220,
         ),
         entities={
             "robot": NewtonEntityCfg(
