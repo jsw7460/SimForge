@@ -36,6 +36,12 @@ class ObservationManager(BaseManager):
         self.obs_dict = {}
         self.extras = {}
 
+        # Cross-step state for observation terms that need it (an
+        # episode-scoped dropout mask, a previous-step value), keyed by
+        # term-chosen strings — the observation-side twin of the reward
+        # manager's ``_fd_prev_foot_pos`` store.
+        self._term_state: dict[str, torch.Tensor | int] = {}
+
         # Discover groups: any attribute that is an ObservationGroupConfig
         self._groups: dict[str, ObservationGroupConfig] = {}
         for attr_name in dir(config):
