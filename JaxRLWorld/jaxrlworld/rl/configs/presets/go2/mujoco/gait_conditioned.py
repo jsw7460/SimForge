@@ -4,9 +4,17 @@ Observation structure matching Walk-These-Ways (69 dim).
 See genesis/gait_conditioned.py for detailed documentation.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from jaxrlworld.rl.configs.common_config_classes import CommandConfig, GaitConfig, ObservationGroupConfig, RewardConfig
+from jaxrlworld.rl.configs.algorithms.ppo import PPOConfig
+from jaxrlworld.rl.configs.common_config_classes import (
+    CommandConfig,
+    DefaultInit,
+    GaitConfig,
+    NNConfig,
+    ObservationGroupConfig,
+    RewardConfig,
+)
 from jaxrlworld.rl.configs.mujoco_config_classes import (
     MujocoConfigsForRun,
     MujocoObservationConfig as ObservationConfig,
@@ -40,6 +48,24 @@ from jaxrlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_mujoco
 class Go2GaitConditionedMujocoConfig(Go2FlatConfig):
     sim_type: str = "mujoco"
     run_name: str = "Go2_GaitConditioned_Mujoco"
+
+    def _build_algorithm_config(self) -> PPOConfig:
+        return replace(
+            super()._build_algorithm_config(),
+            actor_lr=5e-4,
+            critic_lr=5e-4,
+            num_learning_epochs=8,
+            num_mini_batches=8,
+            desired_kl=0.02,
+            clip_param=0.3,
+            entropy_coef=0.003,
+        )
+
+    def _build_nn_config(self) -> NNConfig:
+        cfg = super()._build_nn_config()
+        cfg.policy.actor.init = DefaultInit()
+        cfg.policy.critic.init = DefaultInit()
+        return cfg
 
     def _build_command_config(self) -> CommandConfig:
         return CommandConfig(
