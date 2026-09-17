@@ -33,10 +33,11 @@ Adjust if swings come out too flat or too high.
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from jaxrlworld.rl.configs.common_config_classes import RewardConfig
+from jaxrlworld.rl.configs.algorithms.ppo import PPOConfig
+from jaxrlworld.rl.configs.common_config_classes import DefaultInit, NNConfig, RewardConfig
 from jaxrlworld.rl.configs.rewards import RewardTermConfig
 from jaxrlworld.rl.configs.scene import SceneEntitySelector
 from jaxrlworld.rl.envs.mdp.rewards import k1_locomotion as k1_rf
@@ -60,6 +61,24 @@ class K1G1RecipeConfig(K1JoystickConfig):
     action_scale: Any = 1.0
     action_clip: tuple = (-100.0, 100.0)
     run_name: str | None = None
+
+    def _build_algorithm_config(self) -> PPOConfig:
+        return replace(
+            super()._build_algorithm_config(),
+            actor_lr=5e-4,
+            critic_lr=5e-4,
+            optimizer_betas=(0.95, 0.999),
+            num_learning_epochs=8,
+            num_mini_batches=8,
+            max_grad_norm=0.5,
+            entropy_coef=0.002,
+        )
+
+    def _build_nn_config(self) -> NNConfig:
+        cfg = super()._build_nn_config()
+        cfg.policy.actor.init = DefaultInit()
+        cfg.policy.critic.init = DefaultInit()
+        return cfg
 
     # The g1-recipe enables the left/right mirror-symmetry loss by default.
     mirror_symmetry_coeff: float = 1.0
