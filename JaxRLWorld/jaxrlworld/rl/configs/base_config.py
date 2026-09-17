@@ -24,10 +24,13 @@ def parse_override_args() -> Dict[str, Any]:
 
             category = parts[0]
 
-            # Parse the value
+            # Parse the value. A JSON list or object (``hidden_dims=[512,256]``,
+            # ``optimizer_betas=[0.9,0.95]``) comes through as that value.
             try:
                 if value.lower() in ("true", "false"):
                     typed_value = value.lower() == "true"
+                elif value[:1] in ("[", "{"):
+                    typed_value = json.loads(value)
                 elif "." in value or "e" in value.lower():
                     typed_value = float(value)
                 else:
@@ -62,18 +65,22 @@ def _print_override_changes(overrides, config):
     print(f"{Fore.YELLOW}Applying command line overrides:{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}\n")
 
+    def current(config_obj, param):
+        """The value about to be replaced. ``_type`` names the class of a
+        nested config that a ``{"_type": ...}`` override swaps out."""
+        if isinstance(config_obj, dict):
+            return config_obj.get(param)
+        if param == "_type":
+            return type(config_obj).__name__
+        return getattr(config_obj, param)
+
     def print_nested_changes(params, current_config, prefix=""):
         for param, value in params.items():
+            current_value = current(current_config, param)
             if isinstance(value, dict):
-                current_value = (
-                    current_config[param] if isinstance(current_config, dict) else getattr(current_config, param)
-                )
                 print(f"{prefix}{param}:")
                 print_nested_changes(value, current_value, prefix + "  ")
             else:
-                current_value = (
-                    current_config[param] if isinstance(current_config, dict) else getattr(current_config, param)
-                )
                 print(f"{prefix}{param}:")
                 print(f"{prefix}  {Fore.RED}- From: {current_value}{Style.RESET_ALL}")
                 print(f"{prefix}  {Fore.GREEN}+ To: {value}{Style.RESET_ALL}")
@@ -413,19 +420,34 @@ class BaseConfig:
         for config_type, params in kwargs.items():
             if not hasattr(self, config_type):
                 raise ValueError(f"Unknown config type: {config_type}")
-
-            config_obj = getattr(self, config_type)
-            for param_name, value in params.items():
-                # Check immutable settings if defined
+            for param_name in params:
                 if config_type in immutable and param_name in immutable[config_type]:
                     raise ValueError(f"Cannot override immutable setting: {config_type}.{param_name}")
+            _apply_override_params(getattr(self, config_type), params, config_type)
 
-                if not hasattr(config_obj, param_name):
-                    raise ValueError(f"Unknown parameter: {config_type}.{param_name}")
 
-                if isinstance(value, dict) and isinstance(getattr(config_obj, param_name), dict):
-                    current_dict = getattr(config_obj, param_name).copy()
-                    current_dict.update(value)
-                    setattr(config_obj, param_name, current_dict)
-                else:
-                    setattr(config_obj, param_name, value)
+def _apply_override_params(config_obj: Any, params: Dict[str, Any], path: str) -> None:
+    """Write ``params`` onto ``config_obj``, descending into nested configs.
+
+    Dotted overrides reach any depth (``nn.actor.activation=relu``,
+    ``nn.actor.init.output_gain=0.1``): a dict value merges into a dict
+    attribute and is applied field by field into a nested config object.
+    A dict carrying ``_type`` replaces the nested object outright and is
+    hydrated by the parent's ``__post_init__``, which also re-coerces
+    plain strings (an activation name) the way construction does.
+    """
+    for param_name, value in params.items():
+        if not hasattr(config_obj, param_name):
+            raise ValueError(f"Unknown parameter: {path}.{param_name}")
+        current = getattr(config_obj, param_name)
+        if isinstance(value, dict) and isinstance(current, dict):
+            merged = current.copy()
+            merged.update(value)
+            setattr(config_obj, param_name, merged)
+        elif isinstance(value, dict) and isinstance(current, BaseConfig) and "_type" not in value:
+            _apply_override_params(current, value, f"{path}.{param_name}")
+        else:
+            setattr(config_obj, param_name, value)
+    post_init = getattr(type(config_obj), "__post_init__", None)
+    if post_init is not None:
+        post_init(config_obj)
