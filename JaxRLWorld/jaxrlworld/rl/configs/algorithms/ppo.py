@@ -33,8 +33,14 @@ class PPOConfig(BaseConfig):
     num_learning_epochs: int = 5
     num_mini_batches: int = 4
     schedule: str = "adaptive"
+    # Optimizer by name, as the off-policy algorithms already take it;
+    # ``adam`` with these betas is what every existing preset was trained
+    # with. ``weight_decay`` applies to ``adamw`` and ``lion`` only.
+    optimizer: str = "adam"
+    optimizer_betas: tuple = (0.9, 0.999)
     # Adam epsilon. SB3's PPO pins 1e-5; optax's default is 1e-8.
     optimizer_eps: float = 1e-8
+    weight_decay: float = 0.0
     use_clipped_value_loss: bool = False
     # Value-target normalization (skrl-style). When True, the critic learns
     # in normalized return space and outputs are inverse-normalized for GAE

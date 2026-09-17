@@ -134,6 +134,28 @@ def _metric_values(model: PPOActorCritic, outputs, flat_actions, flat_returns, m
     )
 
 
+def _optimizer_factory(name: str, betas: tuple, eps: float, weight_decay: float):
+    """The optax constructor for ``name``, learning rate left open (the
+    labelled optimizer injects it). Decay is refused where the optimizer
+    has no such term rather than dropped."""
+    b1, b2 = (float(b) for b in betas)
+    if name == "adam":
+        factory = partial(optax.adam, b1=b1, b2=b2, eps=eps)
+    elif name == "adamw":
+        return partial(optax.adamw, b1=b1, b2=b2, eps=eps, weight_decay=weight_decay)
+    elif name == "lion":
+        return partial(optax.lion, b1=b1, b2=b2, weight_decay=weight_decay)
+    elif name == "rmsprop":
+        factory = partial(optax.rmsprop, decay=b2, eps=eps, momentum=b1 if b1 > 0.0 else None)
+    elif name == "sgd":
+        factory = partial(optax.sgd, momentum=b1 if b1 > 0.0 else None)
+    else:
+        raise ValueError(f"Unknown optimizer {name!r}; one of adam, adamw, lion, rmsprop, sgd")
+    if weight_decay != 0.0:
+        raise ValueError(f"weight_decay={weight_decay} has no meaning for {name!r}; use adamw or lion")
+    return factory
+
+
 class PPOTrainState(NamedTuple):
     """Training state for PPO."""
 
@@ -200,7 +222,10 @@ class PPO(OnPolicyAlgorithm):
         desired_kl: float = 0.01,
         use_value_normalization: bool = False,
         use_early_stop: bool = False,
+        optimizer: str = "adam",
+        optimizer_betas: tuple = (0.9, 0.999),
         optimizer_eps: float = 1e-8,
+        weight_decay: float = 0.0,
         normalize_advantage_per_minibatch: bool = True,
         symmetry_spec=None,
         symmetry_coef: float = 0.0,
@@ -285,7 +310,9 @@ class PPO(OnPolicyAlgorithm):
         # Filled by _compute_metrics each update; consumed by the
         # adaptive-LR schedule in the same update() call.
         self._last_analytical_kl_mean = 0.0
-        self.optimizer_class = optimizer_class or partial(optax.adam, eps=optimizer_eps)
+        self.optimizer_class = optimizer_class or _optimizer_factory(
+            optimizer, optimizer_betas, optimizer_eps, weight_decay
+        )
 
         # Check if model has normalizers enabled
         self.obs_normalization = actor_critic.actor_obs_normalizer is not None
