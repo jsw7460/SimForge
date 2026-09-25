@@ -15,9 +15,14 @@ Exported forward (matches ``ppo_ac.py:366-372`` + ``normalization.py:46``
     a = ELU(L0(z)); a = ELU(L1(a)); a = ELU(L2(a)); a = L3(a)   # no out-act
     a = tanh(a)                                    # iff squashed_gaussian
 
-The deploy side is responsible for the rest of the pipeline (identity for
-K1: clip(-1,1) then *1.0), the obs assembly/order, the gait-phase clock,
-and the action-joint permutation. None of that lives in this module.
+The deploy side is responsible for the rest of the pipeline (clip, scale,
+offset), the obs assembly, the gait-phase clock, and the action-joint
+permutation. None of that lives in this module. What this module DOES pin
+down is the observation column order: it is read off the trained env's
+observation manager and written to the sidecar as ``obs_layout``, because
+two recipes can share a 75-D actor and still place their blocks
+differently -- a deploy stack that assumed one order would run the other
+recipe's policy on scrambled input without any dimension check noticing.
 
 Run on the training box (needs the sim backend the checkpoint used)::
 
@@ -139,6 +144,57 @@ def _validate(model, torch_mod, actor_obs_dim, mean, var, n, seed):
     return max_abs
 
 
+# Observation term function -> the label the deploy stack assembles by.
+# Keyed by the function's name so a preset may call its terms whatever it
+# likes (``gyro`` in one, ``base_ang_vel`` in another); what matters is the
+# quantity. A term whose function is not listed here has no deploy-side
+# counterpart, and the export refuses rather than emit a layout the deploy
+# stack cannot honour.
+_OBS_LABEL_BY_FUNC = {
+    "base_ang_vel": "base_ang_vel",
+    "projected_gravity": "projected_gravity",
+    "velocity_command": "velocity_command",
+    "dof_pos_nominal_difference": "dof_pos_minus_default",
+    "dof_pos_nominal_difference_biased": "dof_pos_minus_default",
+    "dof_vel": "dof_vel",
+    "raw_actions": "last_action",
+    "gait_phase_encoding": "gait_phase_cos_sin",
+}
+
+
+def _actor_obs_layout(env, actor_obs_dim: int, num_actions: int) -> list[str]:
+    """``["label(width)", ...]`` for the actor group, in column order, from the env."""
+    expected_width = {
+        "base_ang_vel": 3,
+        "projected_gravity": 3,
+        "velocity_command": 3,
+        "dof_pos_minus_default": num_actions,
+        "dof_vel": num_actions,
+        "last_action": num_actions,
+        "gait_phase_cos_sin": 4,
+    }
+    layout: list[str] = []
+    total = 0
+    for term_name, func, width in env.obs_manager.term_layout("actor"):
+        func_name = func.__name__
+        if func_name not in _OBS_LABEL_BY_FUNC:
+            raise SystemExit(
+                f"[export] actor term {term_name!r} uses {func_name!r}, which has no "
+                f"deploy-side counterpart. Known: {sorted(_OBS_LABEL_BY_FUNC)}"
+            )
+        label = _OBS_LABEL_BY_FUNC[func_name]
+        if width != expected_width[label]:
+            raise SystemExit(
+                f"[export] actor term {term_name!r} ({label}) is {width} wide, expected "
+                f"{expected_width[label]}; a history-stacked or reshaped term cannot be deployed"
+            )
+        layout.append(f"{label}({width})")
+        total += width
+    if total != actor_obs_dim:
+        raise SystemExit(f"[export] actor layout sums to {total}, model expects {actor_obs_dim}")
+    return layout
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Export K1 actor to TorchScript.")
     src = ap.add_mutually_exclusive_group(required=True)
@@ -204,21 +260,14 @@ def main() -> None:
     action_clip_high = np.asarray(am._clip_high.detach().cpu().numpy(), dtype=float).tolist()
     action_offset = np.asarray(am._offset[0].detach().cpu().numpy(), dtype=float).tolist()
 
-    # Sidecar metadata for the deploy repo (obs is single-frame, no history).
+    # Sidecar metadata for the deploy repo. Joint names are written bare
+    # (simulator prefixes such as "K1_booster/" stripped), which is how the
+    # evaluator compares them too.
     canonical = metadata.get("canonical_joint_names") or list(am.actuated_joint_names)
-    # Phase is present only when the dim exceeds the phase-less base (the G1
-    # recipe drops it -> 75-D; pal keeps it -> 79-D).
-    uses_phase = actor_obs_dim > (9 + 3 * num_actions)
-    obs_layout = [
-        "base_ang_vel(3)",
-        "projected_gravity(3)",
-        "velocity_command(3)",
-        f"dof_pos_minus_default({num_actions})",
-        f"dof_vel({num_actions})",
-        f"last_action({num_actions})",
-    ]
-    if uses_phase:
-        obs_layout.append("gait_phase_cos_sin(4)")
+    canonical = [n.rsplit("/", 1)[-1] for n in canonical]
+
+    obs_layout = _actor_obs_layout(evaluator.env, actor_obs_dim, num_actions)
+    uses_phase = any(entry.startswith("gait_phase_cos_sin(") for entry in obs_layout)
     meta = {
         "actor_obs_dim": actor_obs_dim,
         "num_actions": num_actions,
@@ -249,6 +298,7 @@ def main() -> None:
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
 
+    print(f"[export] obs layout: {' '.join(obs_layout)}")
     print(f"[export] saved TorchScript: {args.output}")
     print(f"[export] saved metadata:    {meta_path}")
 

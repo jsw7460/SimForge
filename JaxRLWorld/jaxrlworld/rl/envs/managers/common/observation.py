@@ -281,6 +281,27 @@ class ObservationManager(BaseManager):
             result = observations[:, start_idx:end_idx]
         return result
 
+    def term_layout(self, group_name: str) -> list[tuple[str, callable, int]]:
+        """``(term_name, resolved_func, width)`` for a flat group, in column order.
+
+        The columns of a flat group are the terms concatenated in config
+        order, so this is the authoritative description of what each slice
+        of the group vector holds. Anything that has to rebuild the vector
+        outside this manager (a deploy stack, a checkpoint exporter) reads
+        the order from here instead of restating it.
+        """
+        if not self._is_term_indices_built:
+            self._build_term_indices()
+        if group_name not in self._group_term_indices:
+            if group_name in self._group_terms:
+                raise ValueError(
+                    f"Group {group_name!r} is not a flat vector per env (shape "
+                    f"{self._group_obs_shapes[group_name]}), so it has no column layout."
+                )
+            raise KeyError(f"No observation group {group_name!r}. Groups: {sorted(self._group_term_indices)}.")
+        funcs = self._resolved_fns[group_name]
+        return [(name, funcs[name], end - start) for name, (start, end) in self._group_term_indices[group_name].items()]
+
     def get_raw_term(self, term_func: callable, **params) -> torch.Tensor:
         return term_func(self.env, **params)
 
