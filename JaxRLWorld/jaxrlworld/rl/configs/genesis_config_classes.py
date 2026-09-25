@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, Dict, Literal, Union
 
 import genesis as gs
 
-from .algorithms import AlgorithmConfig, get_algorithm_config_class
+from .algorithms import AlgorithmConfig, PPOConfig, get_algorithm_config_class
 from .base_config import BaseConfig
 from .common_config_classes import (
     CommandConfig,
@@ -140,7 +140,7 @@ class GenesisConfigsForRun(BaseConfig):
     event: EventConfig = field(default_factory=EventConfig)
     gait: "GaitConfig | None" = None
     curriculum: "CurriculumManagerConfig" = field(default_factory=lambda: _default_curriculum_cfg())
-    algorithm: AlgorithmConfig = field(default_factory=AlgorithmConfig)
+    algorithm: AlgorithmConfig = field(default_factory=PPOConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)
 
