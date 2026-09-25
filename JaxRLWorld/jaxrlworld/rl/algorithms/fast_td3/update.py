@@ -64,9 +64,13 @@ def act_with_noise(
     # Get deterministic action (normalization handled inside model.act())
     actions, _ = model.act(actor_obs, key=action_key)
 
-    # Add per-environment exploration noise
+    # Add per-environment exploration noise. A squashed actor lives in
+    # [-1, 1], so its explored action is kept there, as the target path
+    # keeps it; an unsquashed actor has no such range and is left alone.
     noise = jax.random.normal(noise_key, actions.shape) * noise_scales
-    actions = jnp.clip(actions + noise, -1.0, 1.0)
+    actions = actions + noise
+    if model.is_squashed:
+        actions = jnp.clip(actions, -1.0, 1.0)
 
     values = model.evaluate(actor_obs, critic_obs, key=key)
     return actions, values, key
