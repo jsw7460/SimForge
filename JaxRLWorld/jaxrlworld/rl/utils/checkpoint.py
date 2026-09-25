@@ -29,7 +29,54 @@ def load_checkpoint_metadata(checkpoint_path: str) -> dict:
 
 
 def load_config_from_checkpoint(metadata: dict) -> "ConfigsForRun":
-    """Reconstruct config from checkpoint by re-running the preset.
+    """Reconstruct the config a checkpoint was trained with.
+
+    The preset named in ``config.yaml`` is rebuilt (see
+    :func:`_rebuild_preset`), then every value the saved config differs
+    in from that rebuild, whether a command-line or programmatic override
+    applied after ``build()`` or a preset default that has since changed,
+    is written back, so the result is the saved config, with named terms
+    intact. A saved field the current preset no longer has, or a value
+    it holds immutable, raises rather than being dropped.
+    """
+    config_dict = metadata["config"]
+    cfgs = _rebuild_preset(config_dict)
+    restore_saved_config(cfgs, config_dict)
+    return cfgs
+
+
+def restore_saved_config(cfgs: "ConfigsForRun", saved: dict) -> None:
+    """Write the leaves of ``saved`` that differ from ``cfgs`` back onto it.
+
+    ``saved`` is a ``recursive_to_dict()`` output (after its YAML round
+    trip). The differences are applied through ``apply_overrides`` and
+    the result is checked to serialize back to ``saved``.
+    """
+    from jaxrlworld.rl.configs.base_config import diff_config_dicts, flatten_leaf_paths
+
+    diff = diff_config_dicts(saved, cfgs.recursive_to_dict())
+    scalar_drift = {k: v for k, v in diff.items() if not isinstance(v, dict)}
+    if scalar_drift:
+        raise ValueError(
+            f"Saved config differs from the rebuilt preset in top-level fields {sorted(scalar_drift)}; "
+            "these identify the preset itself and cannot be overridden"
+        )
+    if not diff:
+        return
+    cfgs.apply_overrides(**diff)
+    residual = diff_config_dicts(saved, cfgs.recursive_to_dict())
+    if residual:
+        raise ValueError(
+            "Saved config could not be restored onto the rebuilt preset; still differing after the "
+            f"override pass: {flatten_leaf_paths(residual)}"
+        )
+    paths = flatten_leaf_paths(diff)
+    shown = ", ".join(paths[:20]) + (f", ... ({len(paths) - 20} more)" if len(paths) > 20 else "")
+    print(f"[checkpoint] restored {len(paths)} config value(s) that differ from the rebuilt preset: {shown}")
+
+
+def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":
+    """Re-run the preset named in a saved config.
 
     Resolution order (most specific → least specific):
 
@@ -57,7 +104,6 @@ def load_config_from_checkpoint(metadata: dict) -> "ConfigsForRun":
     """
     import importlib
 
-    config_dict = metadata.get("config", {})
     preset_module_path = config_dict.get("preset_module")
 
     if preset_module_path is None:

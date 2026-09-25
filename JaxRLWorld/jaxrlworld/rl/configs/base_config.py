@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import json
 import sys
@@ -426,12 +427,20 @@ class BaseConfig:
             _apply_override_params(getattr(self, config_type), params, config_type)
 
 
+def _is_config_object(obj: Any) -> bool:
+    """A nested config that dotted overrides descend into: a ``BaseConfig``
+    or a plain dataclass such as a reward/event/observation term."""
+    return isinstance(obj, BaseConfig) or (dataclasses.is_dataclass(obj) and not isinstance(obj, type))
+
+
 def _apply_override_params(config_obj: Any, params: Dict[str, Any], path: str) -> None:
     """Write ``params`` onto ``config_obj``, descending into nested configs.
 
     Dotted overrides reach any depth (``nn.actor.activation=relu``,
-    ``nn.actor.init.output_gain=0.1``): a dict value merges into a dict
-    attribute and is applied field by field into a nested config object.
+    ``reward.track_lin_vel.weight=3.5``): a dict value is applied field by
+    field into a nested config object, whether a ``BaseConfig`` or a plain
+    term dataclass, and merges into a dict attribute, descending likewise
+    into dict entries that are config objects (``scene.entities.robot``).
     A dict carrying ``_type`` replaces the nested object outright and is
     hydrated by the parent's ``__post_init__``, which also re-coerces
     plain strings (an activation name) the way construction does.
@@ -442,12 +451,90 @@ def _apply_override_params(config_obj: Any, params: Dict[str, Any], path: str) -
         current = getattr(config_obj, param_name)
         if isinstance(value, dict) and isinstance(current, dict):
             merged = current.copy()
-            merged.update(value)
+            for key, entry in value.items():
+                if (
+                    isinstance(entry, dict)
+                    and key in merged
+                    and _is_config_object(merged[key])
+                    and "_type" not in entry
+                ):
+                    _apply_override_params(merged[key], entry, f"{path}.{param_name}.{key}")
+                else:
+                    merged[key] = entry
             setattr(config_obj, param_name, merged)
-        elif isinstance(value, dict) and isinstance(current, BaseConfig) and "_type" not in value:
+        elif isinstance(value, dict) and _is_config_object(current) and "_type" not in value:
             _apply_override_params(current, value, f"{path}.{param_name}")
         else:
             setattr(config_obj, param_name, value)
     post_init = getattr(type(config_obj), "__post_init__", None)
     if post_init is not None:
         post_init(config_obj)
+
+
+# ── Saved-config reconciliation ─────────────────────────────────────────────
+
+
+def diff_config_dicts(saved: Dict[str, Any], current: Dict[str, Any], path: str = "") -> Dict[str, Any]:
+    """The nested subset of ``saved`` whose leaves differ from ``current``.
+
+    Both are ``recursive_to_dict()`` outputs (``saved`` typically after a
+    YAML round trip), so callables are ``"module:qualname"`` strings and
+    tuples are lists on both sides. The result has the shape
+    ``apply_overrides`` takes: a nested dict of the differing leaves, or
+    the whole saved subtree where its ``_type`` names another class than
+    the current one (that subtree is then hydrated by ``_type``). A key
+    absent from ``current`` is kept, so applying the diff fails loudly on
+    a field the current preset no longer has. A saved ``None`` against a
+    nested config disables it (a term switched off for the run). A saved
+    dict facing a plain value, or a sequence of nested mappings that
+    differs, cannot be expressed as an override and raises. Subtrees are
+    copied, so applying the result never mutates ``saved`` (hydration of
+    a ``_type`` dict consumes it).
+    """
+    diff: Dict[str, Any] = {}
+    for key, saved_value in saved.items():
+        leaf_path = f"{path}.{key}" if path else key
+        if key not in current:
+            diff[key] = copy.deepcopy(saved_value)
+            continue
+        current_value = current[key]
+        if isinstance(saved_value, dict) and isinstance(current_value, dict):
+            if saved_value.get("_type") != current_value.get("_type"):
+                diff[key] = copy.deepcopy(saved_value)
+            else:
+                sub = diff_config_dicts(saved_value, current_value, leaf_path)
+                if sub:
+                    diff[key] = sub
+        elif saved_value is None and current_value is not None:
+            # A nested config (a named term) disabled by the saved run.
+            diff[key] = None
+        elif isinstance(saved_value, dict) or isinstance(current_value, dict):
+            raise ValueError(
+                f"{leaf_path}: saved {type(saved_value).__name__} against current {type(current_value).__name__}; "
+                "a nested config cannot be reconciled with a plain value"
+            )
+        elif isinstance(saved_value, list) or isinstance(current_value, list):
+            if saved_value != current_value:
+                if any(isinstance(el, dict) for el in (saved_value or [])) or any(
+                    isinstance(el, dict) for el in (current_value or [])
+                ):
+                    raise ValueError(
+                        f"{leaf_path}: a sequence of nested configs differs from the saved one; "
+                        "it cannot be reconciled as an override"
+                    )
+                diff[key] = list(saved_value)
+        elif saved_value != current_value:
+            diff[key] = saved_value
+    return diff
+
+
+def flatten_leaf_paths(nested: Dict[str, Any], path: str = "") -> list[str]:
+    """Dotted paths of every leaf in a nested override dict."""
+    paths: list[str] = []
+    for key, value in nested.items():
+        leaf_path = f"{path}.{key}" if path else key
+        if isinstance(value, dict) and value:
+            paths.extend(flatten_leaf_paths(value, leaf_path))
+        else:
+            paths.append(leaf_path)
+    return paths
