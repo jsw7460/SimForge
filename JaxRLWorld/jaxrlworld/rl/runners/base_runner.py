@@ -889,6 +889,9 @@ class BaseRunner(ABC):
             "total_timesteps": self.total_timesteps,
             "total_time": self.total_time,
             "current_learning_iteration": self.current_learning_iteration,
+            # The env clock drives curricula, reward schedules and observation
+            # anneals; a resumed run continues it rather than restarting at 0.
+            "env_step_counter": self.env.env_step_counter,
             "jax_key": np.array(self.key).tolist(),
             "wandb_run_path": self.wandb_logger.run.path if self.wandb_logger else None,
             **alg_metadata,
@@ -907,6 +910,28 @@ class BaseRunner(ABC):
             os.path.join(checkpoint_dir, "train_state.yaml"),
             train_state,
         )
+
+    def _restore_train_state(self, metadata: dict) -> None:
+        """Restore the runner-level state a checkpoint's ``train_state.yaml`` holds.
+
+        Iteration, timestep and wall-time counters, the JAX key, and the
+        env clock. A checkpoint written before the env clock was saved
+        cannot be resumed faithfully by a preset whose curricula or
+        schedules read that clock, so the key is required; add
+        ``env_step_counter`` to its ``train_state.yaml`` by hand (0 is
+        exact for a preset with nothing clock-driven).
+        """
+        self.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
+        self.total_timesteps = metadata["total_timesteps"]
+        self.total_time = metadata.get("total_time", 0)
+        self.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)
+        if "env_step_counter" not in metadata:
+            raise KeyError(
+                "train_state.yaml has no 'env_step_counter'; this checkpoint predates the env clock being "
+                "saved. Add the key (the number of env steps taken when it was written; 0 if nothing in "
+                "the preset is clock-driven) to resume from it."
+            )
+        self.env.env_step_counter = metadata["env_step_counter"]
 
     def _save_latest_checkpoint(self, iteration: int) -> None:
         """Save the rolling ``checkpoint_latest``.

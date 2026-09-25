@@ -510,10 +510,7 @@ class ModelBasedRunner(BaseRunner):
         runner = cls(env=env, cfgs=cfgs, use_wandb=use_wandb)
         runner.alg.load_train_state(checkpoint_path, metadata)
 
-        runner.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
-        runner.total_timesteps = metadata["total_timesteps"]
-        runner.total_time = metadata.get("total_time", 0)
-        runner.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)
+        runner._restore_train_state(metadata)
 
         print(f"Loaded checkpoint from {checkpoint_path}")
         print(f"  Algorithm: {runner.algorithm_name}")
