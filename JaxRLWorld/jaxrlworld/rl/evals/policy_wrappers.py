@@ -10,7 +10,7 @@ import torch
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch
 
 if TYPE_CHECKING:
-    from jaxrlworld.rl.envs.multi_sim_world import _JointPermutation
+    from jaxrlworld.rl.envs.joint_permutation import JointPermutation
     from jaxrlworld.rl.runners import BaseRunner
 
 
@@ -29,7 +29,7 @@ class PolicyWrapper(ABC):
         self,
         runner: "BaseRunner",
         device: torch.device,
-        joint_perm: "_JointPermutation | None" = None,
+        joint_perm: "JointPermutation | None" = None,
     ):
         self.device = device
         self._runner_process_action = runner._process_action_for_env
@@ -41,7 +41,7 @@ class PolicyWrapper(ABC):
         cls,
         runner: "BaseRunner",
         device: torch.device,
-        joint_perm: "_JointPermutation | None" = None,
+        joint_perm: "JointPermutation | None" = None,
     ) -> "PolicyWrapper":
         """Factory: returns appropriate subclass based on algorithm type."""
         if hasattr(runner.alg, "act_with_t0"):
@@ -94,7 +94,7 @@ class ModelPolicyWrapper(PolicyWrapper):
         self,
         runner: "BaseRunner",
         device: torch.device,
-        joint_perm: "_JointPermutation | None" = None,
+        joint_perm: "JointPermutation | None" = None,
     ):
         super().__init__(runner, device, joint_perm=joint_perm)
         model = runner.alg.train_state.model
@@ -121,7 +121,7 @@ class MPCPolicyWrapper(PolicyWrapper):
         self,
         runner: "BaseRunner",
         device: torch.device,
-        joint_perm: "_JointPermutation | None" = None,
+        joint_perm: "JointPermutation | None" = None,
     ):
         super().__init__(runner, device, joint_perm=joint_perm)
         self._runner = runner

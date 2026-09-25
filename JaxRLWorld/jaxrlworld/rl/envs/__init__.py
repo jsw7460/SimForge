@@ -1,6 +1,6 @@
 """Environment exports.
 
-Sim-agnostic pieces (``World``, lifecycle, stats collector, ``MultiSimWorld``)
+Sim-agnostic pieces (``World``, lifecycle, stats collector, joint permutation)
 load eagerly.  The concrete per-sim ``World`` subclasses each ``import`` a
 heavyweight simulator package at module load (Genesis → ``genesis``,
 Newton → ``warp`` + ``newton``, MuJoCo → ``mjlab``; ``GymnasiumEnv`` and
@@ -14,8 +14,8 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING
 
+from .joint_permutation import JointPermutation, find_joint_obs_slices
 from .lifecycle import LifecycleEvent, LifecycleManager
-from .multi_sim_world import MultiSimWorld
 from .stats_collector import EpisodeStatsCollector
 from .world import World
 
@@ -54,7 +54,8 @@ __all__ = [
     "LifecycleEvent",
     "LifecycleManager",
     "EpisodeStatsCollector",
-    "MultiSimWorld",
+    "JointPermutation",
+    "find_joint_obs_slices",
     "GenesisEnv",
     "GenesisLocomotionEnv",
     "NewtonEnv",

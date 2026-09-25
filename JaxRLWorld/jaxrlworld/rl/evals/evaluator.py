@@ -340,17 +340,15 @@ class PolicyEvaluator:
     def _build_joint_permutation(self, metadata: dict):
         """Build a joint permutation for cross-sim evaluation.
 
-        During multisim training, MultiSimWorld permutes obs/actions between
-        each simulator's native joint order and a canonical (first sim) order.
-        The policy learns in canonical order.  When evaluating on a single sim,
-        we need to apply the same permutation.
+        The policy reads joint-indexed observation columns and writes action
+        columns in the joint order of the simulator it was trained on
+        (``canonical_joint_names`` in the checkpoint). Evaluating on a
+        simulator with another joint order applies the permutation between
+        the two.
 
-        Returns _JointPermutation if reordering is needed, else None.
+        Returns JointPermutation if reordering is needed, else None.
         """
-        from jaxrlworld.rl.envs.multi_sim_world import (
-            MultiSimWorld,
-            _JointPermutation,
-        )
+        from jaxrlworld.rl.envs.joint_permutation import JointPermutation, find_joint_obs_slices
 
         eval_names = list(self.env.act_manager.actuated_joint_names)
 
@@ -376,13 +374,13 @@ class PolicyEvaluator:
             return None
 
         # Build permutation.
-        joint_slices = MultiSimWorld._find_joint_obs_slices(
+        joint_slices = find_joint_obs_slices(
             self.env,
             self.env.num_actions,
         )
         obs_dims = self.env.obs_manager.calculate_obs_dim()
 
-        perm = _JointPermutation(
+        perm = JointPermutation(
             canonical_names=canonical_names,
             sim_names=eval_names,
             obs_group_joint_slices=joint_slices,

@@ -231,11 +231,6 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
 
 def detect_sim_type(metadata: dict) -> str:
     """Detect simulator type from checkpoint metadata."""
-    # Multisim checkpoint (new format)
-    train_sims = metadata.get("train_sim_names")
-    if train_sims and len(train_sims) > 1:
-        return "MultiSim(" + "+".join(train_sims) + ")"
-
     env_name = metadata.get("config", {}).get("env", {}).get("env_name", "")
     if "Genesis" in env_name:
         return "Genesis"

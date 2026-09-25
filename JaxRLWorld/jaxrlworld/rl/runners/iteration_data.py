@@ -19,7 +19,6 @@ class EpisodeStats:
     length_buffer: list[float]
     reward_stats: dict[str, dict[str, float]]
     success_rate: float | None = None
-    per_sim_stats: dict[str, EpisodeStats] | None = None
 
     @property
     def mean_return(self) -> float:
@@ -45,19 +44,6 @@ class EpisodeStats:
         for reward_name, stats in self.reward_stats.items():
             for category, val in stats.items():
                 d[f"Rewards/{category}/{reward_name}"] = val
-
-        # Per-sim stats
-        if self.per_sim_stats:
-            for sim_name, sim_stats in self.per_sim_stats.items():
-                if sim_stats.return_buffer:
-                    d[f"PerSim/{sim_name}/mean_return"] = sim_stats.mean_return
-                if sim_stats.length_buffer:
-                    d[f"PerSim/{sim_name}/mean_episode_length"] = sim_stats.mean_episode_length
-                if sim_stats.success_rate is not None:
-                    d[f"PerSim/{sim_name}/success_rate"] = sim_stats.success_rate
-                for reward_name, stats in sim_stats.reward_stats.items():
-                    for category, val in stats.items():
-                        d[f"PerSim/{sim_name}/Rewards/{category}/{reward_name}"] = val
 
         return d
 

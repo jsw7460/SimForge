@@ -274,19 +274,6 @@ class BaseRunner(ABC):
             gamma=self.cfgs.algorithm.gamma,
         )
 
-        # Per-sim stats collectors for MultiSimWorld
-        from jaxrlworld.rl.envs.multi_sim_world import MultiSimWorld
-
-        if isinstance(self.env, MultiSimWorld):
-            self._per_sim_collectors: dict[str, EpisodeStatsCollector] = {}
-            for sub_env in self.env.envs:
-                self._per_sim_collectors[sub_env.sim_name] = EpisodeStatsCollector(
-                    num_envs=sub_env.num_envs,
-                    max_episode_length=sub_env.max_episode_length,
-                    device=self.device,
-                    gamma=self.cfgs.algorithm.gamma,
-                )
-
     def _wandb_identity(self) -> dict:
         """The W&B axes for this run: group, name, job type, tags, notes.
 
@@ -322,23 +309,8 @@ class BaseRunner(ABC):
         dones: torch.Tensor,
         success: torch.Tensor | None = None,
     ) -> None:
-        """Update reward statistics including per-sim collectors."""
+        """Update reward statistics."""
         self.reward_statistics.update(reward_info=reward_info, dones=dones, success=success)
-
-        if hasattr(self, "_per_sim_collectors"):
-            offset = 0
-            for sub_env in self.env.envs:
-                n = sub_env.num_envs
-                collector = self._per_sim_collectors[sub_env.sim_name]
-                sub_reward_info = {k: v[offset : offset + n] for k, v in reward_info.items()}
-                sub_dones = dones[offset : offset + n]
-                sub_success = success[offset : offset + n] if success is not None else None
-                collector.update(
-                    reward_info=sub_reward_info,
-                    dones=sub_dones,
-                    success=sub_success,
-                )
-                offset += n
 
     def _init_action_scaling(self) -> None:
         """Initialize action scaling parameters."""
@@ -417,8 +389,6 @@ class BaseRunner(ABC):
             # accumulator. ``consume_episode_stats`` returns keys of the
             # form ``Episode_Termination/<name>`` and clears the window
             # so successive iterations report disjoint episodes.
-            # Duck-typed so MultiSimWorld's proxy (which implements the
-            # same method) works transparently.
             term_mgr = getattr(self.env, "termination_manager", None)
             if term_mgr is not None and hasattr(term_mgr, "consume_episode_stats"):
                 term_log = term_mgr.consume_episode_stats()
@@ -428,11 +398,8 @@ class BaseRunner(ABC):
                     _wandb.log(term_log, step=self.total_timesteps)
 
     def _build_episode_stats(self) -> EpisodeStats:
-        """Build EpisodeStats from reward_statistics, including per-sim stats if MultiSim."""
-        stats = self.reward_statistics.snapshot()
-        if hasattr(self, "_per_sim_collectors"):
-            stats.per_sim_stats = {name: collector.snapshot() for name, collector in self._per_sim_collectors.items()}
-        return stats
+        """Build EpisodeStats from reward_statistics."""
+        return self.reward_statistics.snapshot()
 
     def close(self):
         """Clean up resources."""
@@ -883,13 +850,8 @@ class BaseRunner(ABC):
             **alg_metadata,
         }
 
-        # Save canonical joint names and training sim info for cross-sim eval.
-        from jaxrlworld.rl.envs.multi_sim_world import MultiSimWorld
-
-        if isinstance(self.env, MultiSimWorld):
-            train_state["canonical_joint_names"] = list(self.env.envs[0].act_manager.actuated_joint_names)
-            train_state["train_sim_names"] = [e.sim_name for e in self.env.envs]
-        elif hasattr(self.env, "act_manager"):
+        # Save the training joint order for cross-sim eval.
+        if hasattr(self.env, "act_manager"):
             train_state["canonical_joint_names"] = list(self.env.act_manager.actuated_joint_names)
 
         dump_yaml(
