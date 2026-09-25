@@ -198,12 +198,19 @@ def replay_motion(
         # data.xpos / xquat are (nbody, 3) / (nbody, 4 wxyz) — world frame.
         out_body_pos[t] = data.xpos
         out_body_quat[t] = data.xquat
-        # Per-body spatial velocity at link origin in world frame.
+        # Per-body spatial velocity at the body FRAME ORIGIN (xpos), world
+        # frame. ``mj_objectVelocity`` takes its reference point from the
+        # object type: ``mjOBJ_BODY`` is the body's inertial frame (xipos, the
+        # CoM), ``mjOBJ_XBODY`` the body frame (xpos). The consumers compare
+        # these against link-origin velocities (mjlab ``body_link_lin_vel_w``,
+        # the RobotData protocol), and the positions above are xpos, so the
+        # velocity must be taken at xpos too; at the CoM it is off by
+        # ``omega x (R c)`` per body, which for a swinging limb is not small.
         for bid in range(B):
             mujoco.mj_objectVelocity(
                 model,
                 data,
-                mujoco.mjtObj.mjOBJ_BODY,
+                mujoco.mjtObj.mjOBJ_XBODY,
                 bid,
                 vel_buf,
                 0,
