@@ -7,6 +7,8 @@ from typing import Any, ClassVar, Dict, TypeVar
 
 from colorama import Fore, Style
 
+from jaxrlworld.rl.configs.rewards.reward_term_config import WeightSchedule
+
 T = TypeVar("T", bound="BaseConfig")
 
 
@@ -16,7 +18,7 @@ def parse_override_args() -> Dict[str, Any]:
 
     for arg in override_args:
         try:
-            path, value = arg.split("=")
+            path, value = arg.split("=", 1)
             parts = path.split(".")
 
             if len(parts) < 2:
@@ -78,7 +80,13 @@ def _print_override_changes(overrides, config):
     def print_nested_changes(params, current_config, prefix=""):
         for param, value in params.items():
             current_value = current(current_config, param)
-            if isinstance(value, dict):
+            if isinstance(value, dict) and value.get("_type") not in (None, type(current_value).__name__):
+                # The nested config is replaced by another class; its fields
+                # exist on the new type only, so the old object is not read.
+                print(f"{prefix}{param}:")
+                print(f"{prefix}  {Fore.RED}- From: {type(current_value).__name__}{Style.RESET_ALL}")
+                print(f"{prefix}  {Fore.GREEN}+ To: {value}{Style.RESET_ALL}")
+            elif isinstance(value, dict):
                 print(f"{prefix}{param}:")
                 print_nested_changes(value, current_value, prefix + "  ")
             else:
@@ -163,6 +171,8 @@ def _convert_value(v: Any) -> Any:
         return v.tolist()
     if isinstance(v, np.integer | np.floating | np.bool_):
         return v.item()
+    if isinstance(v, WeightSchedule):
+        return v.to_dict()
     if callable(v):
         from jaxrlworld.rl.utils.resolve import callable_to_string
 
@@ -481,8 +491,9 @@ def diff_config_dicts(saved: Dict[str, Any], current: Dict[str, Any], path: str 
     YAML round trip), so callables are ``"module:qualname"`` strings and
     tuples are lists on both sides. The result has the shape
     ``apply_overrides`` takes: a nested dict of the differing leaves, or
-    the whole saved subtree where its ``_type`` names another class than
-    the current one (that subtree is then hydrated by ``_type``). A key
+    the whole saved subtree where it carries a ``_type`` and differs at
+    all (the subtree is then hydrated as one object, which is the only
+    way a non-config object such as a weight schedule can be rebuilt). A key
     absent from ``current`` is kept, so applying the diff fails loudly on
     a field the current preset no longer has. A saved ``None`` against a
     nested config disables it (a term switched off for the run). A saved
@@ -499,12 +510,18 @@ def diff_config_dicts(saved: Dict[str, Any], current: Dict[str, Any], path: str 
             continue
         current_value = current[key]
         if isinstance(saved_value, dict) and isinstance(current_value, dict):
-            if saved_value.get("_type") != current_value.get("_type"):
+            sub = diff_config_dicts(saved_value, current_value, leaf_path)
+            if saved_value.get("_type") != current_value.get("_type") or (sub and "_type" in saved_value):
                 diff[key] = copy.deepcopy(saved_value)
-            else:
-                sub = diff_config_dicts(saved_value, current_value, leaf_path)
-                if sub:
-                    diff[key] = sub
+            elif sub:
+                diff[key] = sub
+        elif (isinstance(saved_value, dict) and "_type" in saved_value) or (
+            isinstance(current_value, dict) and "_type" in current_value
+        ):
+            # A typed object (a weight schedule) against a plain value, or
+            # the reverse: the whole saved value replaces the current one.
+            if saved_value != current_value:
+                diff[key] = copy.deepcopy(saved_value)
         elif saved_value is None and current_value is not None:
             # A nested config (a named term) disabled by the saved run.
             diff[key] = None

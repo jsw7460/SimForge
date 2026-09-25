@@ -6,4 +6,5 @@ from .reward_term_config import (
     StepSchedule,
     WeightSchedule,
     get_weight_value,
+    weight_schedule_from_dict,
 )
