@@ -228,6 +228,7 @@ class BaseRunner(ABC):
                 **self._wandb_identity(),
             )
             self.wandb_url = self.wandb_logger.wandb_url
+            self.wandb_logger.record_run_location(self.model_log_dir)
 
         # Training parameters
         self.save_interval = self.runner_cfg.save_interval

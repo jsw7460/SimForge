@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import socket
 import statistics
 import sys
 import traceback
@@ -46,8 +47,17 @@ class ConsoleWriter:
         # is a real terminal — log files, tee pipes, and batch/redirected
         # jobs keep the plain scrolling blocks (they need parseable,
         # append-only text). JAXRLWORLD_PLAIN_LOG=1 forces plain.
+        #
+        # The terminal is judged and drawn on through ``sys.__stdout__``,
+        # the stream as it was before anything wrapped it. wandb's console
+        # capture replaces ``sys.stdout`` with a proxy that still answers
+        # ``isatty()`` with the terminal's answer, so drawing through
+        # ``sys.stdout`` put every 4 Hz redraw of the panel into the run's
+        # output.log -- gigabytes of the same frame over a long training.
         self._live = None
-        self._live_disabled = os.environ.get("JAXRLWORLD_PLAIN_LOG", "0") == "1" or not sys.stdout.isatty()
+        self._live_disabled = (
+            os.environ.get("JAXRLWORLD_PLAIN_LOG", "0") == "1" or sys.__stdout__ is None or not sys.__stdout__.isatty()
+        )
         # Rolling window for the dashboard's timing statistics.
         self._roll: deque = deque(maxlen=50)
         self._prev_rewards: Dict[str, float] = {}
@@ -63,7 +73,7 @@ class ConsoleWriter:
             print("[ConsoleWriter] rich not installed — falling back to plain block logging.")
             self._live_disabled = True
             return None
-        self._console = Console()
+        self._console = Console(file=sys.__stdout__)
         self._live = Live(console=self._console, refresh_per_second=4, transient=False)
         self._live.start()
         atexit.register(self._stop_live)
@@ -653,7 +663,14 @@ class WandbLogger:
         # init_timeout is raised from the 90 s default so a slow network
         # does not abort run init with "context deadline exceeded".
         # Overridable via ``WANDB_INIT_TIMEOUT``.
+        #
+        # console="off": everything worth keeping is logged as metrics; the
+        # terminal transcript is not, and capturing it made output.log the
+        # largest file of a run (a per-iteration block over 100k iterations,
+        # and before the ConsoleWriter fix, every redraw of the live panel).
+        # WANDB_CONSOLE=wrap restores capture for a run that needs it.
         init_timeout = float(os.environ.get("WANDB_INIT_TIMEOUT", "300"))
+        console = os.environ.get("WANDB_CONSOLE", "off")
         self.run = wandb.init(
             project=project_name,
             dir=log_dir,
@@ -663,7 +680,7 @@ class WandbLogger:
             job_type=job_type,
             tags=list(tags) or None,
             notes=notes,
-            settings=wandb.Settings(init_timeout=init_timeout),
+            settings=wandb.Settings(init_timeout=init_timeout, console=console),
         )
         # ``get_url`` is deprecated (removed after the warning stage);
         # ``run.url`` is the long-standing property both old and new
@@ -671,6 +688,22 @@ class WandbLogger:
         self.wandb_url = self.run.url
         os.makedirs(log_dir, exist_ok=True)
         self.log_dir = log_dir
+
+    def record_run_location(self, model_log_dir: str) -> None:
+        """Pin where this run's checkpoints live, on which machine.
+
+        Goes into both the run config (a filterable column in the runs
+        table) and the summary (the Overview page), so the path survives
+        with the run even though the console transcript is not captured.
+        The hostname is recorded because the path is local to the box.
+        """
+        location = {
+            "model_log_dir": os.path.abspath(model_log_dir),
+            "hostname": socket.gethostname(),
+        }
+        self.run.config.update(location, allow_val_change=True)
+        for key, value in location.items():
+            self.run.summary[key] = value
 
     def log_iteration(self, data: IterationData, step: int):
         """Log typed IterationData to WandB."""
