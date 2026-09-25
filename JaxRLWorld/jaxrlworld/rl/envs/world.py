@@ -524,13 +524,11 @@ class World(ABC):
             spaces.Box: Continuous action space with shape (num_actions,)
         """
         num_actions = self.act_manager.total_action_dim
-        # Get clip range from action manager if available
-        if hasattr(self.act_manager, "clip") and self.act_manager.clip is not None:
-            low, high = self.act_manager.clip
-        elif hasattr(self.act_manager, "clip_actions") and self.act_manager.clip_actions is not None:
-            low, high = self.act_manager.clip_actions
-        else:
+        clip_bounds = self.act_manager.clip_bounds
+        if clip_bounds is None:
             low, high = -np.inf, np.inf
+        else:
+            low, high = clip_bounds
 
         return spaces.Box(
             low=np.float32(low),
