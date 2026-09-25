@@ -259,7 +259,7 @@ def plan_mppi_inner(
     action_low = jnp.array(model.action_low_tuple)
     action_high = jnp.array(model.action_high_tuple)
 
-    key, pi_key, sample_key, select_key = jax.random.split(key, 4)
+    key, pi_key, sample_key, select_key, noise_key = jax.random.split(key, 5)
 
     # Sample trajectory candidates from learned policy
     pi_actions = _sample_policy_trajectories(
@@ -349,8 +349,10 @@ def plan_mppi_inner(
     rand_idx = gumbel_softmax_sample(final_score, select_key)
     action = final_elite_actions[0, rand_idx]
 
-    # Add exploration noise if not in eval mode
-    noise = jax.random.normal(select_key, (action_dim,)) * final_std[0]
+    # Exploration noise, from its own key: sharing ``select_key`` with the
+    # elite draw above would correlate which trajectory is picked with the
+    # perturbation added to it.
+    noise = jax.random.normal(noise_key, (action_dim,)) * final_std[0]
     action = jnp.where(eval_mode, action, action + noise)
     # Clip final action to action bounds
     # Original: jnp.clip(action, -1.0, 1.0)
