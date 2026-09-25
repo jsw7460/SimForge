@@ -103,26 +103,6 @@ else:
     ConfigsForRun = object
 
 
-def configs_from_dict(data: dict) -> ConfigsForRun:
-    """Create the appropriate ConfigsForRun from a dict.
-
-    Looks for ``sim_type`` first (new convention), then falls back to
-    the legacy ``simulator`` key for backward compatibility.  The
-    sim-specific config class is imported lazily so callers that only
-    need one simulator don't pay the others' import cost.
-    """
-    sim_type = data.get("sim_type") or data.get("simulator")
-    if sim_type is None:
-        raise ValueError("Cannot determine simulator: dict must contain 'sim_type' or 'simulator' key.")
-
-    loc = _CONFIGS_FOR_RUN_LOCATIONS.get(sim_type)
-    if loc is None:
-        raise ValueError(f"Unknown sim_type={sim_type!r}. Available: {list(_CONFIGS_FOR_RUN_LOCATIONS.keys())}")
-    submod, attr = loc
-    cls = getattr(importlib.import_module(submod, __name__), attr)
-    return cls.from_dict(data)
-
-
 __all__ = [
     "CommandTermConfig",
     "CommandConfig",
@@ -153,7 +133,6 @@ __all__ = [
     "TerminationResult",
     "TerminationTermConfig",
     "ConfigsForRun",
-    "configs_from_dict",
     # lazy (Genesis-flavoured)
     "ActionConfig",
     "EnvConfig",

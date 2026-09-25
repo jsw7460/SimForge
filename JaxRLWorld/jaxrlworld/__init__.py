@@ -19,7 +19,6 @@ __all__ = [
     "OffPolicyRunner",
     "ModelBasedRunner",
     # Configs
-    "configs_from_dict",
     "GenesisConfigsForRun",
     "NewtonConfigsForRun",
     "MujocoConfigsForRun",
@@ -49,7 +48,6 @@ def __getattr__(name):
         return getattr(runners, name)
 
     if name in (
-        "configs_from_dict",
         "GenesisConfigsForRun",
         "NewtonConfigsForRun",
         "MujocoConfigsForRun",
