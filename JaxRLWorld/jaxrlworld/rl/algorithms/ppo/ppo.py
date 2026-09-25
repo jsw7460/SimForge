@@ -229,6 +229,7 @@ class PPO(OnPolicyAlgorithm):
         normalize_advantage_per_minibatch: bool = True,
         symmetry_spec=None,
         symmetry_coef: float = 0.0,
+        symmetry_augment: bool = False,
         bound_loss_coef: float = 0.0,
         recompute_gae_per_epoch: bool = False,
         optimizer_class=None,
@@ -290,6 +291,12 @@ class PPO(OnPolicyAlgorithm):
         # runner from the env's obs layout; coef 0 disables (no trace cost).
         self.symmetry_spec = symmetry_spec
         self.symmetry_coef = symmetry_coef
+        # Mirror data augmentation: doubles every minibatch inside the
+        # update (static flag, no cost when off). Needs a spec with the
+        # critic operator; the runner builds it that way when this is on.
+        if symmetry_augment and (symmetry_spec is None or symmetry_spec.critic_perm is None):
+            raise ValueError("symmetry_augment=True requires a MirrorSpec built with include_critic=True")
+        self.symmetry_augment = symmetry_augment
         # booster_gym-recipe options (see update_recompute_gae_epochs):
         # bound_loss_coef adds the action-bound penalty on the policy mean in
         # BOTH update paths; recompute_gae_per_epoch switches update() to
@@ -360,6 +367,63 @@ class PPO(OnPolicyAlgorithm):
     @property
     def actor_critic(self):
         return self.train_state.model
+
+    # ── construction from config ─────────────────────────────────────
+
+    @staticmethod
+    def _ppo_kwargs(cfg) -> Dict[str, Any]:
+        """The constructor arguments a ``PPOConfig`` supplies (the runner's list)."""
+        return dict(
+            num_learning_epochs=cfg.num_learning_epochs,
+            num_mini_batches=cfg.num_mini_batches,
+            clip_param=cfg.clip_param,
+            gamma=cfg.gamma,
+            lam=cfg.lam,
+            value_loss_coef=cfg.value_loss_coef,
+            entropy_coef=cfg.entropy_coef,
+            actor_lr=cfg.actor_lr,
+            critic_lr=cfg.critic_lr,
+            max_grad_norm=cfg.max_grad_norm,
+            use_clipped_value_loss=cfg.use_clipped_value_loss,
+            schedule=cfg.schedule,
+            desired_kl=cfg.desired_kl,
+            use_value_normalization=cfg.use_value_normalization,
+            use_early_stop=cfg.use_early_stop,
+            optimizer=cfg.optimizer,
+            optimizer_betas=cfg.optimizer_betas,
+            optimizer_eps=cfg.optimizer_eps,
+            weight_decay=cfg.weight_decay,
+            normalize_advantage_per_minibatch=cfg.normalize_advantage_per_minibatch,
+            bound_loss_coef=cfg.bound_loss_coef,
+            recompute_gae_per_epoch=cfg.recompute_gae_per_epoch,
+        )
+
+    @classmethod
+    def from_config(cls, cfg, actor_critic: PPOActorCritic, env, key: jax.Array, **symmetry) -> "PPO":
+        """Build the algorithm from its config.
+
+        ``symmetry`` carries ``symmetry_spec`` / ``symmetry_coef`` /
+        ``symmetry_augment`` from the runner, which builds the mirror
+        operators off the env's observation layout. ``env`` is unused
+        here; a subclass that needs the env (a motion prior reading the
+        observation layout and the control rate) takes it from the same
+        signature.
+        """
+        return cls(actor_critic=actor_critic, key=key, **cls._ppo_kwargs(cfg), **symmetry)
+
+    # ── per-step reward hook ─────────────────────────────────────────
+
+    def shape_step_reward(self, rewards, obs_dict, dones):
+        """Per-step reward shaping; identity for PPO.
+
+        Called by the runner on every rollout step with the torch reward
+        tensor from ``env.step``, the full observation dict and the done
+        flags; returns a tensor of the same shape and device. An algorithm
+        that adds a reward the env cannot produce (a learned discriminator's
+        style reward, an intrinsic reward) overrides this, the way rsl_rl's
+        PPO adds its RND reward inside ``process_env_step``.
+        """
+        return rewards
 
     def _create_optimizers(self, model: PPOActorCritic) -> optax.GradientTransformation:
         """Create optimizer with separate learning rates for actor/critic/std."""
@@ -631,6 +695,7 @@ class PPO(OnPolicyAlgorithm):
             self.symmetry_spec,
             self.symmetry_coef,
             self.bound_loss_coef,
+            self.symmetry_augment,
             flat_batch,
             batch_indices,
             subkey,
@@ -702,6 +767,7 @@ class PPO(OnPolicyAlgorithm):
             self.bound_loss_coef,
             self.symmetry_spec,
             self.symmetry_coef,
+            self.symmetry_augment,
             self.num_learning_epochs,
             self.gamma,
             self.lam,

@@ -45,7 +45,7 @@ def main() -> int:
     print("=" * 70)
 
     # This raises if any term lacks a rule or a layout gap exists.
-    spec = build_mirror_spec(env.obs_manager, jn)
+    spec = build_mirror_spec(env.obs_manager, jn, include_critic=True)
     print(
         f"\nbuild_mirror_spec OK — actor_dim={spec.actor_perm.shape[0]} "
         f"critic_dim={spec.critic_perm.shape[0]} action_dim={spec.action_perm.shape[0]}"

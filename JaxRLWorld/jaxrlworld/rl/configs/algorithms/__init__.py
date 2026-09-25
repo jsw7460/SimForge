@@ -1,3 +1,4 @@
+from .amp_ppo import AmpConfig, AmpPPOConfig
 from .fast_td3 import FastTD3Config
 from .ppo import PPOConfig
 from .sac import SACConfig
@@ -6,13 +7,14 @@ from .tdmpc2 import TDMPC2Config
 
 ALGORITHM_CONFIGS = {
     "PPO": PPOConfig,
+    "AMP_PPO": AmpPPOConfig,
     "TD3": TD3Config,
     "SAC": SACConfig,
     "FastTD3": FastTD3Config,
     "TDMPC2": TDMPC2Config,
 }
 
-AlgorithmConfig = PPOConfig | TD3Config | SACConfig | FastTD3Config | TDMPC2Config
+AlgorithmConfig = PPOConfig | AmpPPOConfig | TD3Config | SACConfig | FastTD3Config | TDMPC2Config
 
 
 def get_algorithm_config_class(algorithm_name: str):

@@ -147,6 +147,8 @@ def main() -> int:
             desired_kl,
             alg.symmetry_spec,
             alg.symmetry_coef,
+            alg.bound_loss_coef,
+            alg.symmetry_augment,
             flat_batch,
             batch_indices,
             jax.random.PRNGKey(1),

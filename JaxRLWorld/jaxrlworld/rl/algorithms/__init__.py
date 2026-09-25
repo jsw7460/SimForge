@@ -1,5 +1,6 @@
 from enum import Enum
 
+from .amp_ppo import AmpPPO  # noqa: E402 - after .ppo, which it extends
 from .fast_td3 import FastTD3
 from .ppo import PPO
 from .sac import SAC
@@ -17,6 +18,10 @@ class PolicyType(Enum):
 ALGORITHM_REGISTRY = {
     "PPO": {
         "class": "jaxrlworld.rl.algorithms.ppo.PPO",
+        "policy_type": PolicyType.ON_POLICY,
+    },
+    "AMP_PPO": {
+        "class": "jaxrlworld.rl.algorithms.amp_ppo.AmpPPO",
         "policy_type": PolicyType.ON_POLICY,
     },
     "SAC": {

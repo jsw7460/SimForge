@@ -192,6 +192,35 @@ def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _D
 
 
 @EnvStepCache()
+def joint_pos_rel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Positions of the SELECTED joints relative to their default, canonical order.
+
+    :func:`dof_pos_nominal_difference` restricted to ``asset_cfg.joint_ids``,
+    the joints the selector's ``joint_names`` patterns matched (all joints
+    for the default selector). Mirrors mjlab's ``joint_pos_rel`` with a
+    joint-subset ``SceneEntityCfg``; a discriminator or reward that scores
+    only the legs takes this with ``joint_names=(".*_Hip_.*", ...)``.
+
+    Returns:
+        Tensor of shape (num_envs, num_selected_joints).
+    """
+    rd = env.get_entity_data(asset_cfg.name)
+    return (rd.joint_pos - rd.default_joint_pos.unsqueeze(0))[:, asset_cfg.joint_ids]
+
+
+@EnvStepCache()
+def joint_vel_rel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
+    """Velocities of the SELECTED joints, canonical order (default velocity is zero).
+
+    :func:`dof_vel` restricted to ``asset_cfg.joint_ids``; see :func:`joint_pos_rel`.
+
+    Returns:
+        Tensor of shape (num_envs, num_selected_joints).
+    """
+    return env.get_entity_data(asset_cfg.name).joint_vel[:, asset_cfg.joint_ids]
+
+
+@EnvStepCache()
 def foot_height(
     env: World,
     body_names: tuple[str, ...] | None = None,

@@ -1,8 +1,17 @@
 """Left/right symmetry (mirror) support for on-policy PPO.
 
 A trained symmetric-morphology policy should be left/right equivariant:
-``pi(mirror(o)) == mirror(pi(o))``. We enforce this with an auxiliary mirror
-loss (option A) — no minibatch resizing, JAX-friendly.
+``pi(mirror(o)) == mirror(pi(o))``. Two ways to get there, both from Mittal
+et al. (ICRA 2024) and both available here:
+
+- **mirror loss** (``use_mirror_loss``): an auxiliary
+  ``MSE(pi(mirror(o)), mirror(pi(o)))`` on the actor observations.
+- **data augmentation** (``use_data_augmentation``): every minibatch is
+  doubled with its mirror image -- actor obs, critic obs and actions
+  mirrored, the rollout scalars (old log-prob, value, advantage, return)
+  repeated -- and the PPO losses run on all 2N samples. The paper's
+  preferred option; see :func:`augment_minibatch` for the exact rule,
+  which follows rsl_rl's ``Symmetry.augment_batch``.
 
 The mirror operator on the (flat) observation and action vectors is a single
 gather + sign flip: ``x_mirror = x[..., perm] * sign``. The ``(perm, sign)``
@@ -22,21 +31,28 @@ from typing import NamedTuple, Sequence
 
 import jax
 import jax.numpy as jnp
+import numpy as np
+
+from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity
 
 
 class MirrorSpec(NamedTuple):
-    """Static mirror operators (int perm + float sign): actor obs + action.
+    """Static mirror operators (int perm + float sign): actor obs, action, critic obs.
 
-    Only the actor group is mirrored — the loss is
-    ``MSE(pi(mirror(o)), mirror(pi(o)))`` on actor observations; critic
-    observations (which may contain non-mirrorable privileged entries
-    such as raw DR draws) are never mirrored.
+    The mirror loss needs only the actor group. Data augmentation also
+    evaluates the critic on mirrored samples, so it needs the critic
+    group too; ``critic_perm``/``critic_sign`` are ``None`` unless the spec
+    was built with ``include_critic=True`` (a critic may carry privileged
+    entries with no mirror image, e.g. raw DR draws, and building its
+    operator raises on any such term).
     """
 
     actor_perm: jnp.ndarray
     actor_sign: jnp.ndarray
     action_perm: jnp.ndarray
     action_sign: jnp.ndarray
+    critic_perm: jnp.ndarray | None = None
+    critic_sign: jnp.ndarray | None = None
 
 
 # ── per-term local mirror rules (perm within the term, sign per element) ──────
@@ -58,6 +74,15 @@ _FIXED_TERM_RULES: dict[str, tuple[list[int], list[float]]] = {
     "feet_air_time": ([1, 0], [1.0, 1.0]),
     # per-foot world linear velocity [Lx,Ly,Lz, Rx,Ry,Rz]: swap feet + flip y.
     "feet_lin_vel_w": ([3, 4, 5, 0, 1, 2], [1.0, -1.0, 1.0, 1.0, -1.0, 1.0]),
+    # Privileged per-foot terms (common.proprioception), feet ordered
+    # [left, right] by the preset's ``body_names``: scalars swap feet.
+    "foot_height": ([1, 0], [1.0, 1.0]),
+    "foot_air_time": ([1, 0], [1.0, 1.0]),
+    "foot_contact_indicator": ([1, 0], [1.0, 1.0]),
+    # per-foot contact force [Lx,Ly,Lz, Rx,Ry,Rz] (log-scaled, sign kept by
+    # the scaling): swap feet AND flip the lateral component. A force is a
+    # vector; its y component reverses under the mirror like a velocity's.
+    "foot_contact_forces": ([3, 4, 5, 0, 1, 2], [1.0, -1.0, 1.0, 1.0, -1.0, 1.0]),
 }
 # Terms that mirror with the L<->R joint permutation (pos/vel/torque/action-like).
 _JOINT_TERMS = frozenset(
@@ -67,6 +92,10 @@ _JOINT_TERMS = frozenset(
         "dof_vel",
         "raw_actions",
         "applied_torque",
+        # Joint-subset terms: their selector's ``joint_ids`` restricts the
+        # L<->R permutation to the selected joints (see _subset_joint_rule).
+        "joint_pos_rel",
+        "joint_vel_rel",
     }
 )
 # Per-foot gait phase encoding: assumed layout [left_block(2), right_block(2)].
@@ -113,13 +142,43 @@ def _joint_perm_sign(joint_names: Sequence[str]) -> tuple[list[int], list[float]
     return perm, sign
 
 
-def _term_local_rule(func_name: str, dim: int, jperm, jsign) -> tuple[list[int], list[float]]:
+def _subset_joint_rule(joint_ids: Sequence[int], jperm, jsign) -> tuple[list[int], list[float]]:
+    """The L<->R joint rule restricted to the canonical joints ``joint_ids``.
+
+    Local index ``k`` holds canonical joint ``joint_ids[k]``; its mirror
+    partner ``jperm[joint_ids[k]]`` must itself be selected, otherwise the
+    subset has no mirror image (a left-leg-only term, say) and the build
+    fails rather than mirroring half of it. For the full ``arange`` subset
+    this is exactly the global rule.
+    """
+    ids = [int(i) for i in joint_ids]
+    where = {j: k for k, j in enumerate(ids)}
+    perm, sign = [], []
+    for k, j in enumerate(ids):
+        mate = int(jperm[j])
+        if mate not in where:
+            raise ValueError(
+                f"joint subset {ids} is not closed under the left/right mirror: joint {j}'s mirror "
+                f"partner {mate} is not selected"
+            )
+        perm.append(where[mate])
+        sign.append(float(jsign[j]))
+    return perm, sign
+
+
+def _term_local_rule(
+    func_name: str, dim: int, jperm, jsign, joint_ids: Sequence[int] | None = None
+) -> tuple[list[int], list[float]]:
     if func_name in _FIXED_TERM_RULES:
         p, s = _FIXED_TERM_RULES[func_name]
         if len(p) != dim:
             raise ValueError(f"mirror rule for '{func_name}' has dim {len(p)} != term dim {dim}")
         return list(p), list(s)
     if func_name in _JOINT_TERMS:
+        if joint_ids is not None:
+            if dim != len(joint_ids):
+                raise ValueError(f"joint term '{func_name}' dim {dim} != {len(joint_ids)} selected joints")
+            return _subset_joint_rule(joint_ids, jperm, jsign)
         if dim != len(jperm):
             raise ValueError(f"joint term '{func_name}' dim {dim} != num joints {len(jperm)}")
         return list(jperm), list(jsign)
@@ -145,7 +204,14 @@ def _build_group(obs_manager, group: str, jperm, jsign) -> tuple[list[int], list
     covered = 0
     for tname, (s, e) in idx.items():
         fname = terms[tname].resolved_func.__name__
-        lp, ls = _term_local_rule(fname, e - s, jperm, jsign)
+        # A joint term reads its joints through a resolved selector whose
+        # ``joint_ids`` (canonical order) is the whole robot for the default
+        # selector and a subset for an explicit ``joint_names`` pattern.
+        selector = terms[tname].params.get("asset_cfg")
+        joint_ids = (
+            selector.joint_ids.tolist() if isinstance(selector, ResolvedEntity) and fname in _JOINT_TERMS else None
+        )
+        lp, ls = _term_local_rule(fname, e - s, jperm, jsign, joint_ids)
         for k in range(e - s):
             perm[s + k] = s + lp[k]  # local perm is within the term slice
             sign[s + k] = ls[k]
@@ -155,22 +221,51 @@ def _build_group(obs_manager, group: str, jperm, jsign) -> tuple[list[int], list
     return perm, sign
 
 
-def build_mirror_spec(obs_manager, joint_names: Sequence[str]) -> MirrorSpec:
+def build_mirror_spec(obs_manager, joint_names: Sequence[str], include_critic: bool = False) -> MirrorSpec:
     """Build the MirrorSpec from the env's observation layout + joint names.
 
     ``joint_names`` must be the ACTION/obs joint order (e.g.
     ``env.act_manager.actuated_joint_names``). Raises if any obs term lacks a
-    mirror rule or if a group's slices leave a gap (fail loud, never silent)."""
+    mirror rule or if a group's slices leave a gap (fail loud, never silent).
+    ``include_critic`` additionally builds the critic operator, which data
+    augmentation needs; it raises the same way on a critic term without a
+    rule."""
     # Ensure the (lazy) per-term slice map + obs_dict are populated.
     obs_manager.calculate_obs_dim()
     jperm, jsign = _joint_perm_sign(joint_names)
     ap, as_ = _build_group(obs_manager, "actor", jperm, jsign)
+    critic_perm = critic_sign = None
+    if include_critic:
+        cp, cs = _build_group(obs_manager, "critic", jperm, jsign)
+        critic_perm = jnp.asarray(cp, dtype=jnp.int32)
+        critic_sign = jnp.asarray(cs, dtype=jnp.float32)
     return MirrorSpec(
         actor_perm=jnp.asarray(ap, dtype=jnp.int32),
         actor_sign=jnp.asarray(as_, dtype=jnp.float32),
         action_perm=jnp.asarray(jperm, dtype=jnp.int32),
         action_sign=jnp.asarray(jsign, dtype=jnp.float32),
+        critic_perm=critic_perm,
+        critic_sign=critic_sign,
     )
+
+
+def joint_mirror_perm_sign(joint_names: Sequence[str]) -> tuple[np.ndarray, np.ndarray]:
+    """The L<->R joint permutation and sign of :func:`_joint_perm_sign`, as arrays."""
+    perm, sign = _joint_perm_sign(joint_names)
+    return np.asarray(perm, dtype=np.int64), np.asarray(sign, dtype=np.float32)
+
+
+def group_mirror_operator(obs_manager, group: str, joint_names: Sequence[str]) -> tuple[np.ndarray, np.ndarray]:
+    """``(perm, sign)`` of one observation group's mirror, from its live term layout.
+
+    The same construction ``build_mirror_spec`` uses for the actor and
+    critic, for any flat group (the AMP discriminator's, say). Raises on a
+    term without a rule or on a joint subset that is not mirror-closed.
+    """
+    obs_manager.calculate_obs_dim()
+    jperm, jsign = _joint_perm_sign(joint_names)
+    perm, sign = _build_group(obs_manager, group, jperm, jsign)
+    return np.asarray(perm, dtype=np.int64), np.asarray(sign, dtype=np.float32)
 
 
 def mirror(x: jnp.ndarray, perm: jnp.ndarray, sign: jnp.ndarray) -> jnp.ndarray:
@@ -205,6 +300,45 @@ def mirror_qvel(qvel: jnp.ndarray, joint_perm: jnp.ndarray, joint_sign: jnp.ndar
     ang = qvel[..., 3:6] * jnp.asarray([-1.0, 1.0, -1.0])
     jv = qvel[..., 6:][..., joint_perm] * joint_sign
     return jnp.concatenate([lin, ang, jv], axis=-1)
+
+
+def augment_minibatch(
+    spec: MirrorSpec,
+    actor_obs: jnp.ndarray,
+    critic_obs: jnp.ndarray,
+    actions: jnp.ndarray,
+    old_log_probs: jnp.ndarray,
+    old_values: jnp.ndarray,
+    advantages: jnp.ndarray,
+    returns: jnp.ndarray,
+) -> tuple[jnp.ndarray, ...]:
+    """Double a minibatch with its mirror image (rsl_rl ``Symmetry.augment_batch``).
+
+    Rows ``[:N]`` are the originals, rows ``[N:]`` their mirrors. Actor obs,
+    critic obs and actions are mirrored; the rollout scalars are repeated,
+    so a mirrored sample keeps the ORIGINAL sample's old log-prob, value,
+    advantage and return. The PPO ratio of a mirrored row is therefore
+    ``pi_new(K a | L o) / pi_old(a | o)``, which is what makes the update
+    pull the policy toward equivariance (Mittal et al. 2024, Eq. 6). The
+    caller keeps entropy and the adaptive-KL statistic on the originals
+    only, as rsl_rl does. Call after advantage normalization, so the
+    statistic is the one the N originals define.
+    """
+    if spec.critic_perm is None:
+        raise ValueError("data augmentation needs a MirrorSpec built with include_critic=True")
+    actor_obs = jnp.concatenate([actor_obs, mirror(actor_obs, spec.actor_perm, spec.actor_sign)], axis=0)
+    critic_obs = jnp.concatenate([critic_obs, mirror(critic_obs, spec.critic_perm, spec.critic_sign)], axis=0)
+    actions = jnp.concatenate([actions, mirror(actions, spec.action_perm, spec.action_sign)], axis=0)
+    repeat = lambda x: jnp.concatenate([x, x], axis=0)  # noqa: E731 - one-line local helper
+    return (
+        actor_obs,
+        critic_obs,
+        actions,
+        repeat(old_log_probs),
+        repeat(old_values),
+        repeat(advantages),
+        repeat(returns),
+    )
 
 
 def symmetry_mirror_loss(model, actor_obs: jnp.ndarray, spec: MirrorSpec, key) -> jnp.ndarray:

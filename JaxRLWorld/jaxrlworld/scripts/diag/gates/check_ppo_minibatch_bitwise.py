@@ -187,7 +187,8 @@ def leaves_of(new_params, new_opt_state, outputs, new_key):
 
 def run_case(dict_obs: bool, old_api: bool):
     st, params, static, optimizer, opt_state, key = make_case(dict_obs)
-    common = (params, static, opt_state, optimizer, 0.2, 1.0, 0.01, False, True, False, 1e10, None, 0.0)
+    # ... desired_kl, symmetry_spec, symmetry_coef, bound_loss_coef, symmetry_augment
+    common = (params, static, opt_state, optimizer, 0.2, 1.0, 0.01, False, True, False, 1e10, None, 0.0, 0.0, False)
     if old_api:
         batches = st.get_stacked_batches(num_minibatches=4, num_epochs=2, key=key)
         out = U.update_all_batches(*common, batches, key)

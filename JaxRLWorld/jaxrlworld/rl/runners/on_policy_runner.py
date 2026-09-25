@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 
+from jaxrlworld.rl.algorithms import get_algorithm_class
 from jaxrlworld.rl.algorithms.ppo import PPO
 from jaxrlworld.rl.algorithms.ppo.symmetry import build_mirror_spec
 from jaxrlworld.rl.configs import ConfigsForRun
@@ -97,43 +98,39 @@ class OnPolicyRunner(BaseRunner):
         """Initialize PPO algorithm."""
         symmetry_spec = None
         symmetry_coef = 0.0
+        symmetry_augment = False
         sc = alg_cfg.symmetry_cfg
-        if sc is not None and sc.use_mirror_loss:
+        if sc is not None and (sc.use_mirror_loss or sc.use_data_augmentation):
             if self.actor_image_groups:
                 raise ValueError(
-                    "The mirror loss permutes observation entries, which has no meaning for an image: "
+                    "Mirror symmetry permutes observation entries, which has no meaning for an image: "
                     "mirroring a camera view means flipping pixels and re-deriving what the flipped "
                     "scene should look like. Turn off symmetry_cfg for a vision policy."
                 )
-            symmetry_spec = build_mirror_spec(self.env.obs_manager, list(self.env.act_manager.actuated_joint_names))
-            symmetry_coef = sc.mirror_loss_coeff
-        return PPO(
+            # Data augmentation evaluates the critic on mirrored samples too,
+            # so its spec carries the critic operator; the build raises on a
+            # critic term with no mirror rule rather than leaving it unmirrored.
+            symmetry_spec = build_mirror_spec(
+                self.env.obs_manager,
+                list(self.env.act_manager.actuated_joint_names),
+                include_critic=sc.use_data_augmentation,
+            )
+            symmetry_coef = sc.mirror_loss_coeff if sc.use_mirror_loss else 0.0
+            symmetry_augment = sc.use_data_augmentation
+        # The algorithm class comes from the registry (PPO, or a subclass
+        # such as AMP_PPO) and reads its own settings off the config; the
+        # runner only adds the mirror operators it built from the env.
+        alg_cls = get_algorithm_class(alg_cfg.algorithm_name)
+        if not (isinstance(alg_cls, type) and issubclass(alg_cls, PPO)):
+            raise TypeError(f"{alg_cfg.algorithm_name!r} resolves to {alg_cls!r}, which is not a PPO variant")
+        return alg_cls.from_config(
+            alg_cfg,
             actor_critic=self.actor_critic,
-            num_learning_epochs=alg_cfg.num_learning_epochs,
-            num_mini_batches=alg_cfg.num_mini_batches,
-            clip_param=alg_cfg.clip_param,
-            gamma=alg_cfg.gamma,
-            lam=alg_cfg.lam,
-            value_loss_coef=alg_cfg.value_loss_coef,
-            entropy_coef=alg_cfg.entropy_coef,
-            actor_lr=alg_cfg.actor_lr,
-            critic_lr=alg_cfg.critic_lr,
-            max_grad_norm=alg_cfg.max_grad_norm,
-            use_clipped_value_loss=alg_cfg.use_clipped_value_loss,
-            schedule=alg_cfg.schedule,
-            desired_kl=alg_cfg.desired_kl,
-            use_value_normalization=alg_cfg.use_value_normalization,
-            use_early_stop=alg_cfg.use_early_stop,
-            optimizer=alg_cfg.optimizer,
-            optimizer_betas=alg_cfg.optimizer_betas,
-            optimizer_eps=alg_cfg.optimizer_eps,
-            weight_decay=alg_cfg.weight_decay,
-            normalize_advantage_per_minibatch=alg_cfg.normalize_advantage_per_minibatch,
+            env=self.env,
+            key=key,
             symmetry_spec=symmetry_spec,
             symmetry_coef=symmetry_coef,
-            bound_loss_coef=alg_cfg.bound_loss_coef,
-            recompute_gae_per_epoch=alg_cfg.recompute_gae_per_epoch,
-            key=key,
+            symmetry_augment=symmetry_augment,
         )
 
     def _init_ppo_actor_critic(self, policy_cfg, key: jax.Array) -> None:
@@ -307,15 +304,18 @@ class OnPolicyRunner(BaseRunner):
             self._pack_obs(obs, "critic"),
         )
 
-    def _postprocess_step_reward(self, rewards, actions, obs_dict, step_i):
-        """Per-step reward-shaping hook; identity by default.
+    def _postprocess_step_reward(self, rewards, actions, obs_dict, step_i, dones):
+        """Per-step reward-shaping hook: the algorithm's ``shape_step_reward``.
 
-        Override to add an externally-computed reward term before it
-        enters the algorithm. ``rewards`` is the torch reward tensor from
-        ``env.step``; return a tensor of the same shape/device. ``self.env``
-        is accessible for reading state. Called every rollout step.
+        Identity for PPO; an algorithm that adds its own reward term (a
+        motion prior's style reward) implements it there. A runner may
+        still override this to add an externally-computed term — one the
+        env's reward manager cannot produce because it depends on a window
+        of steps or a separate evaluation env. ``rewards`` is the torch
+        reward tensor from ``env.step``; return a tensor of the same
+        shape/device. Called every rollout step.
         """
-        return rewards
+        return self.alg.shape_step_reward(rewards, obs_dict, dones)
 
     def _collect_experience(
         self,
@@ -349,6 +349,7 @@ class OnPolicyRunner(BaseRunner):
                 actions_torch,
                 obs_dict,
                 _step_i,
+                dones,
             )
 
             # Convert to JAX. Every vector of the step is packed into ONE

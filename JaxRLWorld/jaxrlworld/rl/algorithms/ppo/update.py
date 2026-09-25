@@ -11,7 +11,7 @@ from jaxrlworld.rl.algorithms.ppo.losses import (
     compute_policy_loss,
     compute_value_loss,
 )
-from jaxrlworld.rl.algorithms.ppo.symmetry import symmetry_mirror_loss
+from jaxrlworld.rl.algorithms.ppo.symmetry import augment_minibatch, symmetry_mirror_loss
 from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from jaxrlworld.rl.storages.rollout_storage import RolloutBatch, compute_gae
 
@@ -138,53 +138,82 @@ def compute_batch_loss(
     symmetry_spec=None,
     symmetry_coef: float = 0.0,
     bound_loss_coef: float = 0.0,
+    symmetry_augment: bool = False,
 ) -> tuple[jax.Array, PPOLossInfo]:
-    """Compute loss for a single batch."""
+    """Compute loss for a single batch.
+
+    With ``symmetry_augment`` (a Python static, resolved at trace time) the
+    minibatch is doubled with its left/right mirror before the losses:
+    policy and value losses run over all 2N rows, while entropy, the
+    adaptive-KL statistic and the bound penalty stay on the N originals --
+    the rsl_rl convention this reproduces. With the flag off every slice
+    below is the full batch and the computation is unchanged.
+    """
     model = eqx.combine(params, static)
 
     advantages = batch.advantages
     if normalize_advantages:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-    log_probs, entropy, mu_new, sigma_new, actor_aux = model.evaluate_actions(
-        batch.actor_observations, batch.actions, key=key
-    )
-    values, critic_aux = model.evaluate_value(batch.critic_observations)
+    n_orig = batch.actions.shape[0]
+    actor_obs = batch.actor_observations
+    critic_obs = batch.critic_observations
+    actions = batch.actions
+    old_log_probs = batch.old_log_probs
+    old_values = batch.values
+    returns = batch.returns
+    if symmetry_augment:
+        (actor_obs, critic_obs, actions, old_log_probs, old_values, advantages, returns) = augment_minibatch(
+            symmetry_spec, actor_obs, critic_obs, actions, old_log_probs, old_values, advantages, returns
+        )
+
+    log_probs, entropy, mu_new, sigma_new, actor_aux = model.evaluate_actions(actor_obs, actions, key=key)
+    values, critic_aux = model.evaluate_value(critic_obs)
     values = values.squeeze(-1)
 
-    policy_loss, approx_kl, clip_fraction = compute_policy_loss(
+    policy_loss, _approx_kl_all_rows, clip_fraction = compute_policy_loss(
         log_probs=log_probs,
-        old_log_probs=batch.old_log_probs,
+        old_log_probs=old_log_probs,
         advantages=advantages,
         clip_param=clip_param,
     )
+    # Sample KL of the policy update, on the ORIGINAL rows only. A mirrored
+    # row's ratio pi_new(K a | L o) / pi_old(a | o) measures the policy's
+    # left/right asymmetry, not how far this update moved it; averaged in,
+    # it reported KLs in the tens on an unchanged policy and would trip the
+    # early stop on every minibatch. The clipped fraction stays over all rows
+    # (with the flag off both reduce to the full batch, unchanged).
+    log_ratio_orig = log_probs[:n_orig] - old_log_probs[:n_orig]
+    approx_kl = ((jnp.exp(log_ratio_orig) - 1.0) - log_ratio_orig).mean()
 
     # Closed-form KL on the base Gaussian — used by the adaptive-LR schedule.
-    # Lower-variance signal than approx_kl; matches rsl_rl PPO.
+    # Lower-variance signal than approx_kl; matches rsl_rl PPO. Originals
+    # only: the stored (old_mu, old_sigma) exist for those rows alone.
     analytical_kl = compute_analytical_kl(
-        mu_new=mu_new,
-        sigma_new=sigma_new,
+        mu_new=mu_new[:n_orig],
+        sigma_new=sigma_new[:n_orig],
         mu_old=batch.old_mu,
         sigma_old=batch.old_sigma,
     )
 
     value_loss = compute_value_loss(
         values=values,
-        old_values=batch.values,
-        returns=batch.returns,
+        old_values=old_values,
+        returns=returns,
         clip_param=clip_param,
         use_clipped=use_clipped_value_loss,
     )
 
-    entropy_mean = entropy.mean()
+    entropy_mean = entropy[:n_orig].mean()
     total_loss = policy_loss + value_loss_coef * value_loss - entropy_coef * entropy_mean
 
     # Action-bound penalty on the (unsquashed) policy mean outside [-1, 1]
     # (booster_gym's bound loss). Static coefficient — no cost when 0.
     bound_loss = jnp.zeros(())
     if bound_loss_coef > 0.0:
+        mu_orig = mu_new[:n_orig]
         bound_loss = (
-            jnp.square(jnp.maximum(mu_new - 1.0, 0.0)).mean() + jnp.square(jnp.minimum(mu_new + 1.0, 0.0)).mean()
+            jnp.square(jnp.maximum(mu_orig - 1.0, 0.0)).mean() + jnp.square(jnp.minimum(mu_orig + 1.0, 0.0)).mean()
         )
         total_loss = total_loss + bound_loss_coef * bound_loss
 
@@ -220,7 +249,7 @@ def compute_batch_loss(
 # ``params`` is NOT donated — on the first update its leaves are the
 # initial model's arrays, which the runner's ``actor_critic`` reference
 # still shares; donating them would invalidate that object's buffers.
-@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10, 12, 13), donate_argnums=(2,))
+@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14), donate_argnums=(2,))
 def update_all_batches(
     params: Any,
     static: Any,
@@ -236,6 +265,7 @@ def update_all_batches(
     symmetry_spec: Any,
     symmetry_coef: float,
     bound_loss_coef: float,
+    symmetry_augment: bool,
     flat_batch: RolloutBatch,
     batch_indices: jax.Array,
     key: jax.Array,
@@ -255,6 +285,7 @@ def update_all_batches(
         normalize_advantages: Whether to normalize advantages (static)
         use_early_stop: Whether to use KL-based early stopping (static)
         desired_kl: Target KL for early stopping (static, used as threshold)
+        symmetry_augment: Double every minibatch with its mirror (static)
         flat_batch: The whole rollout, flat: ``[T*N, ...]`` per field
         batch_indices: Shuffled minibatch rows into ``flat_batch``,
             ``(num_batches, minibatch_size)`` — each scan step gathers
@@ -294,6 +325,7 @@ def update_all_batches(
                 symmetry_spec,
                 symmetry_coef,
                 bound_loss_coef,
+                symmetry_augment,
             )
 
         # Compute loss and gradients
@@ -357,7 +389,7 @@ def update_all_batches(
 # ==================== Full-batch update with per-epoch GAE ====================
 
 
-@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 10, 11, 12, 13), donate_argnums=(2,))
+@partial(jax.jit, static_argnums=(3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14), donate_argnums=(2,))
 def update_recompute_gae_epochs(
     params: Any,
     static: Any,
@@ -370,6 +402,7 @@ def update_recompute_gae_epochs(
     bound_loss_coef: float,
     symmetry_spec: Any,
     symmetry_coef: float,
+    symmetry_augment: bool,
     num_epochs: int,
     gamma: float,
     gae_lambda: float,
@@ -467,6 +500,7 @@ def update_recompute_gae_epochs(
                 symmetry_spec,
                 symmetry_coef,
                 bound_loss_coef,
+                symmetry_augment,
             )
 
         (loss, loss_info), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)

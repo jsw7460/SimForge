@@ -5,16 +5,25 @@ from ..base_config import BaseConfig
 
 @dataclass
 class SymmetryConfig(BaseConfig):
-    """Left/right mirror-symmetry auxiliary loss (option A: mirror loss).
+    """Left/right mirror symmetry for PPO (Mittal et al., ICRA 2024).
 
-    Adds ``mirror_loss_coeff * MSE(pi(mirror(o)).mean, mirror(pi(o).mean))`` to
-    the PPO loss, enforcing left/right equivariance of the policy. The mirror
-    operator is built automatically from the observation layout + joint names
-    (see rl.algorithms.ppo.symmetry). No obs/action space change.
+    Two independent switches, usable together:
+
+    - ``use_mirror_loss``: adds ``mirror_loss_coeff * MSE(pi(mirror(o)).mean,
+      mirror(pi(o).mean))`` to the PPO loss.
+    - ``use_data_augmentation``: doubles every minibatch with its mirror image
+      (actor obs, critic obs, actions mirrored; old log-prob, value, advantage
+      and return repeated) and runs the policy and value losses over all 2N
+      rows. The paper's preferred option. Requires every critic term to have a
+      mirror rule as well.
+
+    The mirror operator is built automatically from the observation layout +
+    joint names (see rl.algorithms.ppo.symmetry). No obs/action space change.
     """
 
     use_mirror_loss: bool = False
     mirror_loss_coeff: float = 1.0
+    use_data_augmentation: bool = False
 
 
 @dataclass
