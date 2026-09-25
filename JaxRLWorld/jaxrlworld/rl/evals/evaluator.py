@@ -200,7 +200,7 @@ class PolicyEvaluator:
         """Apply evaluation-mode defaults to configs.
 
         - Disables observation noise on every group via disable_corruption()
-        - Removes interval and reset_dr events
+        - Removes interval, interval_dr and reset_dr events
         """
         # Disable observation noise on every group
         if hasattr(self.eval_cfgs, "observation"):
@@ -247,11 +247,12 @@ class PolicyEvaluator:
         """Prepare configs for cross-simulator evaluation.
 
         Uses the target sim's env/scene/reward/etc. config, but copies
-        algorithm, nn, and observation config from the checkpoint so the
-        model architecture and obs dims match the saved weights.
-
-        The observation terms are serialized to YAML with callable func fields
-        auto-converted to string references, then reconstructed via from_dict().
+        algorithm and nn config from the checkpoint so the model
+        architecture matches the saved weights, and requires the target's
+        observation layout to match the checkpoint's: the observation
+        functions are simulator-specific, so they are not copied, and a
+        same-width layout with other terms, scales or history would feed
+        the policy scrambled input that no dimension check catches.
         """
         from copy import deepcopy
 
@@ -269,19 +270,8 @@ class PolicyEvaluator:
         if train_nn:
             cfgs.nn = type(cfgs.nn).from_dict(train_nn)
 
-        # Copy observation config from checkpoint
-        # obs_group dicts are reconstructed to ObservationTermConfig via from_dict()
-        train_obs = train_config.get("observation", {})
-        if train_obs:
-            train_obs_group = train_obs.get("obs_group")
-            if train_obs_group is not None:
-                # In-place update: obs_group values are dicts from YAML,
-                # assigned directly. Managers resolve func strings lazily.
-                cfgs.observation.obs_group = train_obs_group
-                print_info(f"Copied observation terms from checkpoint (groups: {list(train_obs_group.keys())})")
-            # Eval flow always disables corruption afterwards via
-            # _apply_eval_defaults; nothing to preserve from the checkpoint
-            # snapshot here.
+        # The observation layout must be the training one, term for term.
+        _check_observation_parity(train_config["observation"], cfgs.observation.recursive_to_dict())
 
         # Apply user overrides
         if extra_overrides is not None:
@@ -339,8 +329,7 @@ class PolicyEvaluator:
         print_info(f"Eval env dims: actor_obs={env_actor_obs}, critic_obs={env_critic_obs}, actions={env_action_dim}")
         print_warning(
             "If weight loading fails with shape mismatch, your eval obs terms "
-            "differ from training. Pass the same obs terms via "
-            "eval_cfgs.observation.obs_group."
+            "differ from training. Pass eval_cfgs built from the training preset."
         )
 
     def _build_joint_permutation(self, metadata: dict):
@@ -762,3 +751,49 @@ class PolicyEvaluator:
 
         print_success(f"Results saved to: {results_file}")
         print(f"         {Colors.DIM}({os.path.abspath(results_file)}){Colors.RESET}")
+
+
+def _check_observation_parity(train_obs: dict, eval_obs: dict) -> None:
+    """Require the eval observation config to lay out the checkpoint's.
+
+    Both are ``recursive_to_dict()`` forms of an observation config: groups
+    in order, each holding its terms in column order. Group names, term
+    names and order, and every term field except ``func`` must agree; the
+    function is compared by its bare name only, since the same quantity is
+    read through a simulator-specific function on each backend. Differences
+    are reported together.
+    """
+
+    def func_name(ref) -> str:
+        return str(ref).rsplit(":", 1)[-1].rsplit(".", 1)[-1]
+
+    problems: list[str] = []
+    train_groups = {k: v for k, v in train_obs.items() if isinstance(v, dict)}
+    eval_groups = {k: v for k, v in eval_obs.items() if isinstance(v, dict)}
+    if list(train_groups) != list(eval_groups):
+        problems.append(f"groups: checkpoint {list(train_groups)} vs eval {list(eval_groups)}")
+    for group in train_groups.keys() & eval_groups.keys():
+        t_terms = {k: v for k, v in train_groups[group].items() if isinstance(v, dict)}
+        e_terms = {k: v for k, v in eval_groups[group].items() if isinstance(v, dict)}
+        if list(t_terms) != list(e_terms):
+            problems.append(f"{group}: terms {list(t_terms)} vs eval {list(e_terms)}")
+        for name in t_terms.keys() & e_terms.keys():
+            t_term, e_term = t_terms[name], e_terms[name]
+            for field in sorted(t_term.keys() | e_term.keys()):
+                t_val, e_val = t_term.get(field), e_term.get(field)
+                if field == "func":
+                    t_val, e_val = func_name(t_val), func_name(e_val)
+                if t_val != e_val:
+                    problems.append(f"{group}.{name}.{field}: checkpoint {t_val!r} vs eval {e_val!r}")
+        t_scalars = {k: v for k, v in train_groups[group].items() if not isinstance(v, dict)}
+        e_scalars = {k: v for k, v in eval_groups[group].items() if not isinstance(v, dict)}
+        for field in sorted(t_scalars.keys() | e_scalars.keys()):
+            if t_scalars.get(field) != e_scalars.get(field):
+                problems.append(
+                    f"{group}.{field}: checkpoint {t_scalars.get(field)!r} vs eval {e_scalars.get(field)!r}"
+                )
+    if problems:
+        raise ValueError(
+            "Cross-sim eval observation config differs from the checkpoint's; the policy would read a "
+            "different layout than it was trained on:\n  " + "\n  ".join(problems)
+        )

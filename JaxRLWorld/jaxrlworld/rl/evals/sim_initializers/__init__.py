@@ -150,6 +150,20 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     preset_module_path = config_dict.get("preset_module")
     preset_class_name = config_dict.get("preset_class_name")
 
+    def build_with_kwargs(cls, preset_kwargs: dict | None):
+        """Instantiate a preset class with the checkpoint's kwargs, refusing any it lacks."""
+        field_names = {f.name for f in fields(cls)}
+        kwargs = dict(preset_kwargs or {})
+        unknown = sorted(set(kwargs) - field_names)
+        if unknown:
+            raise ValueError(
+                f"Checkpoint preset kwargs {unknown} are not fields of {cls.__name__}; the eval env "
+                "cannot be rebuilt faithfully. Pass eval_cfgs manually."
+            )
+        if "sim_type" in field_names:
+            kwargs["sim_type"] = sim_key
+        return cls(**kwargs).build()
+
     # --- Strategy 1: path substitution (sim-specific subclass) ---
     if preset_module_path is not None:
         parts = preset_module_path.split(".")
@@ -159,9 +173,29 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
             target_module_path = ".".join(parts)
             try:
                 mod = importlib.import_module(target_module_path)
-                return mod.get_config()
             except ModuleNotFoundError:
-                pass  # fall through
+                mod = None
+            if mod is not None:
+                preset_kwargs = config_dict.get("preset_kwargs") or {}
+                if not preset_kwargs:
+                    return mod.get_config()
+                # The target module's own preset class carries the kwargs
+                # (its name differs per simulator, so it is found by
+                # convention: the buildable *Config class defined there).
+                target_cls = next(
+                    (
+                        obj
+                        for obj in vars(mod).values()
+                        if isinstance(obj, type) and is_dataclass(obj) and hasattr(obj, "build")
+                    ),
+                    None,
+                )
+                if target_cls is None:
+                    raise ValueError(
+                        f"Checkpoint carries preset kwargs {sorted(preset_kwargs)} but {target_module_path!r} "
+                        "defines no buildable preset class to apply them to. Pass eval_cfgs manually."
+                    )
+                return build_with_kwargs(target_cls, preset_kwargs)
 
     # --- Strategy 2: unified-config reinstantiation ---
     if preset_module_path and preset_class_name:
@@ -183,9 +217,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
                         "preset to capture its kwargs (see K1JoystickConfig."
                         "_get_preset_kwargs) and retrain, or pass eval_cfgs manually."
                     )
-                kwargs = {k: v for k, v in preset_kwargs.items() if k in field_names}
-                kwargs["sim_type"] = sim_key
-                return cls(**kwargs).build()
+                return build_with_kwargs(cls, preset_kwargs)
 
     raise ValueError(
         f"Could not resolve cross-sim config for target_sim={sim_key!r}. "
