@@ -184,77 +184,6 @@ class DistributionalQNetwork(eqx.Module):
         return self.get_value(probs)
 
 
-def project_distribution(
-    next_probs: jax.Array,
-    rewards: jax.Array,
-    bootstrap: jax.Array,
-    discount: jax.Array,
-    num_atoms: int,
-    v_min: float,
-    v_max: float,
-) -> jax.Array:
-    """
-    Project target distribution onto fixed support.
-
-    Args:
-        next_probs: Next state probabilities [batch, num_atoms]
-        rewards: Rewards [batch,]
-        bootstrap: Bootstrap mask (1 if not terminal) [batch,]
-        discount: Discount factor (gamma^n for n-step) [batch,]
-        num_atoms: Number of atoms
-        v_min: Minimum value
-        v_max: Maximum value
-
-    Returns:
-        Projected distribution [batch, num_atoms]
-    """
-    delta_z = (v_max - v_min) / (num_atoms - 1)
-    support = jnp.linspace(v_min, v_max, num_atoms)
-
-    # Compute target support: r + gamma * z
-    # rewards: [batch,], bootstrap: [batch,], discount: [batch,], support: [num_atoms,]
-    target_z = rewards[:, None] + bootstrap[:, None] * discount[:, None] * support[None, :]
-    target_z = jnp.clip(target_z, v_min, v_max)
-
-    # Compute projection indices
-    b = (target_z - v_min) / delta_z
-    l = jnp.floor(b).astype(jnp.int32)
-    u = jnp.ceil(b).astype(jnp.int32)
-
-    # Handle l == u edge case: ensure l != u so probability mass is not lost
-    is_int = l == u
-    l = jnp.where(is_int & (l > 0), l - 1, l)
-    u = jnp.where(is_int & (u < num_atoms - 1), u + 1, u)
-
-    # Clamp indices
-    l = jnp.clip(l, 0, num_atoms - 1)
-    u = jnp.clip(u, 0, num_atoms - 1)
-
-    # Distribute probability mass
-    batch_size = rewards.shape[0]
-    proj_dist = jnp.zeros((batch_size, num_atoms))
-
-    # Lower projection
-    lower_weight = next_probs * (u.astype(jnp.float32) - b)
-    # Upper projection
-    upper_weight = next_probs * (b - l.astype(jnp.float32))
-
-    # Scatter add using segment_sum approach
-    def scatter_add_row(carry, inputs):
-        proj_row, l_idx, u_idx, l_weight, u_weight = inputs
-        proj_row = proj_row.at[l_idx].add(l_weight)
-        proj_row = proj_row.at[u_idx].add(u_weight)
-        return None, proj_row
-
-    _, proj_dist = jax.lax.scan(
-        scatter_add_row,
-        None,
-        (jnp.zeros((batch_size, num_atoms)), l, u, lower_weight, upper_weight),
-    )
-
-    return proj_dist
-
-
 def project_distribution_batched(
     next_probs: jax.Array,
     rewards: jax.Array,
@@ -264,54 +193,47 @@ def project_distribution_batched(
     v_min: float,
     v_max: float,
 ) -> jax.Array:
-    """
-    Vectorized projection of target distribution.
+    """Project the Bellman target distribution onto the fixed support (C51).
+
+    Each source atom ``z_j`` moves to ``r + bootstrap * discount * z_j``,
+    clipped to ``[v_min, v_max]``, and its mass is split linearly between
+    the two support atoms that bracket the target. With ``b`` the target
+    in atom units, the lower atom is ``floor(b)`` and the upper one is the
+    next atom (or the last atom when ``b`` lands on it); the weights are
+    ``1 - (b - l)`` and ``b - l``. A target that lands exactly on an atom
+    therefore keeps all of its mass on that atom, since ``b - l == 0``.
+
+    Args:
+        next_probs: Next-state distribution, ``[batch, num_atoms]``.
+        rewards, bootstrap, discount: ``[batch]`` (a trailing unit axis is
+            accepted). ``bootstrap`` is 1 for a non-terminal next state.
+
+    Returns:
+        Projected distribution, ``[batch, num_atoms]``; each row sums to
+        the row sum of ``next_probs``.
     """
     delta_z = (v_max - v_min) / (num_atoms - 1)
     support = jnp.linspace(v_min, v_max, num_atoms)
 
-    # Squeeze to [batch] if needed
-    rewards = jnp.squeeze(rewards)
-    bootstrap = jnp.squeeze(bootstrap)
-    discount = jnp.squeeze(discount)
+    rewards = rewards.reshape(-1)
+    bootstrap = bootstrap.reshape(-1)
+    discount = discount.reshape(-1)
 
-    # Compute target support: r + gamma * z [batch, num_atoms]
+    # Target support r + gamma * z, in atom units: [batch, num_atoms]
     target_z = rewards[:, None] + bootstrap[:, None] * discount[:, None] * support[None, :]
     target_z = jnp.clip(target_z, v_min, v_max)
-
-    # Compute projection indices [batch, num_atoms]
     b = (target_z - v_min) / delta_z
-    l = jnp.floor(b).astype(jnp.int32)
-    u = jnp.ceil(b).astype(jnp.int32)
 
-    # Handle l == u edge case: ensure l != u so probability mass is not lost
-    # When l == u and l > 0: shift l down
-    # When l == u and l == 0: shift u up
-    is_int = l == u
-    l = jnp.where(is_int & (l > 0), l - 1, l)
-    u = jnp.where(is_int & (u < num_atoms - 1), u + 1, u)
+    lower = jnp.clip(jnp.floor(b).astype(jnp.int32), 0, num_atoms - 1)
+    upper = jnp.minimum(lower + 1, num_atoms - 1)
+    upper_weight = b - lower.astype(b.dtype)
+    lower_weight = 1.0 - upper_weight
 
-    # Clamp indices
-    l = jnp.clip(l, 0, num_atoms - 1)
-    u = jnp.clip(u, 0, num_atoms - 1)
-
-    # Compute weights [batch, num_atoms]
-    u_weight = b - l.astype(jnp.float32)
-    l_weight = 1.0 - u_weight
-
-    # Weighted probabilities [batch, num_atoms]
-    l_weighted_probs = next_probs * l_weight
-    u_weighted_probs = next_probs * u_weight
-
-    # Use one-hot for scatter [batch, num_atoms, num_atoms]
-    l_one_hot = jax.nn.one_hot(l, num_atoms)
-    u_one_hot = jax.nn.one_hot(u, num_atoms)
-
-    # proj[batch, dst] = sum over src of (weighted_prob[batch, src] * one_hot[batch, src, dst])
-    proj_dist = jnp.sum(l_weighted_probs[:, :, None] * l_one_hot, axis=1) + jnp.sum(
-        u_weighted_probs[:, :, None] * u_one_hot, axis=1
-    )
-
+    # Scatter-add along the atom axis: proj[i, lower[i, j]] += p[i, j] * w_l[i, j], likewise for upper.
+    rows = jnp.arange(next_probs.shape[0])[:, None]
+    proj_dist = jnp.zeros_like(next_probs)
+    proj_dist = proj_dist.at[rows, lower].add(next_probs * lower_weight)
+    proj_dist = proj_dist.at[rows, upper].add(next_probs * upper_weight)
     return proj_dist
 
 
