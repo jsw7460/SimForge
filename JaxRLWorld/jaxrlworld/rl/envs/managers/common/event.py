@@ -29,7 +29,7 @@ class EventManager(BaseManager):
         self.num_envs = env.num_envs
 
         # Discover named terms and resolve callables
-        self._all_terms: dict[str, EventTermConfig] = iter_terms(config, EventTermConfig)
+        self._all_terms: dict[str, EventTermConfig] = self._own_terms(iter_terms(config, EventTermConfig))
         self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
         # Replace SceneEntitySelector params with their resolved ResolvedEntity.
         for term in self._all_terms.values():

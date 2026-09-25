@@ -36,7 +36,7 @@ class RewardManager(BaseManager):
         self.config = config
 
         # Discover named terms from config attributes
-        self.reward_terms: dict[str, RewardTermConfig] = iter_terms(config, RewardTermConfig)
+        self.reward_terms: dict[str, RewardTermConfig] = self._own_terms(iter_terms(config, RewardTermConfig))
 
         # Resolve func (callable or string) → actual callable, cached at init
         self._resolved_fns: dict[str, object] = {}

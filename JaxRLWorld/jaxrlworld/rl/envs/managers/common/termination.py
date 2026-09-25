@@ -38,7 +38,7 @@ class TerminationManager(BaseManager):
         self._episode_length_s = episode_length_s
 
         # Discover named terms
-        self._all_terms: dict[str, TerminationTermConfig] = iter_terms(config, TerminationTermConfig)
+        self._all_terms: dict[str, TerminationTermConfig] = self._own_terms(iter_terms(config, TerminationTermConfig))
         self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
         # Replace SceneEntitySelector params with their resolved ResolvedEntity.
         for term in self._all_terms.values():

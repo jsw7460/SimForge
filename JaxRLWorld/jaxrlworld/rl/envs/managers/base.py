@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import inspect
 from typing import TYPE_CHECKING
 
@@ -22,14 +23,35 @@ class BaseManager:
         return self.env._env_step_counter
 
     # ------------------------------------------------------------------ #
-    #  Setup-time SceneEntitySelector resolution                          #
+    #  Term ownership and setup-time SceneEntitySelector resolution       #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _own_terms(terms: dict) -> dict:
+        """Per-manager copies of the config's term objects.
+
+        Named terms are class attributes of their config, so every instance
+        of that config class, and every ``deepcopy`` of it (the in-training
+        eval config), shares one term object per name. A manager writes
+        into its terms, resolving selectors into ``params`` and, through
+        ``get_term_cfg``, letting a curriculum move weights and params, so
+        it works on copies: the term is shallow-copied and given its own
+        ``params`` dict. The config keeps the declarative term untouched,
+        and a second env built from the same config resolves afresh.
+        """
+        owned = {}
+        for name, term in terms.items():
+            own = copy.copy(term)
+            own.params = dict(term.params)
+            owned[name] = own
+        return owned
 
     def _resolve_term_selectors(self, func, params: dict) -> None:
         """Replace SceneEntitySelector entries in ``params`` with their
         resolved :class:`ResolvedEntity`, **in place**.
 
-        Two cases:
+        ``params`` is a manager-owned dict (see :meth:`_own_terms`), never
+        the config's. Two cases:
 
         1. User supplied a selector in ``params`` (e.g.
            ``params["asset_cfg"] = SceneEntitySelector(...)``) — resolved
@@ -39,13 +61,9 @@ class BaseManager:
            — discovered via :func:`inspect.signature` on ``func`` (or its
            ``__init__`` for class-based terms) and injected.
 
-        Mutating ``params`` is safe: ``ResolvedEntity`` holds only a name,
-        index tensors and matched-name lists — no sim-native handle — so a
-        config carrying it still deep-copies cleanly (the config is cloned
-        for the eval env, which then re-uses these resolved indices because
-        it's the same robot model).  Parameters whose value/default is not
-        a :class:`SceneEntitySelector` are left untouched, so legacy terms
-        (``entity_name="robot"``) keep working until migrated.
+        Parameters whose value/default is not a :class:`SceneEntitySelector`
+        are left untouched, so legacy terms (``entity_name="robot"``) keep
+        working until migrated.
         """
         # Case 1: user-provided selectors.
         for key, value in list(params.items()):

@@ -51,8 +51,8 @@ class ObservationManager(BaseManager):
             if isinstance(val, ObservationGroupConfig):
                 self._groups[attr_name] = val
 
-        # Discover terms within each group, resolve callables, and resolve
-        # any SceneEntitySelector in each term's params in place.  Every
+        # Discover terms within each group (as manager-owned copies), resolve
+        # callables, and resolve any SceneEntitySelector in each term's params.  Every
         # sim builds the ActionManager before the ObservationManager (see
         # the per-sim ``_build_sim_managers``), so ``env.act_manager`` —
         # which resolve_selector needs for canonical joint names — already
@@ -60,7 +60,7 @@ class ObservationManager(BaseManager):
         self._group_terms: dict[str, dict[str, ObservationTermConfig]] = {}
         self._resolved_fns: dict[str, dict[str, callable]] = {}
         for group_name, group_cfg in self._groups.items():
-            terms = iter_terms(group_cfg, ObservationTermConfig)
+            terms = self._own_terms(iter_terms(group_cfg, ObservationTermConfig))
             self._group_terms[group_name] = terms
             self._resolved_fns[group_name] = {name: t.resolved_func for name, t in terms.items()}
             for t in terms.values():
