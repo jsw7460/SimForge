@@ -329,17 +329,22 @@ class OffPolicyRunner(BaseRunner):
 
             converted = torch_to_jax_many(sources)
 
-            next_actor_obs = converted["actor"]
-            next_critic_obs = converted["critic"]
+            # The observation the policy acts on next: what the env reports
+            # after autoreset, so an env that timed out is seen in its new
+            # episode. The replay copy below differs for those envs.
+            policy_next_actor_obs = converted["actor"]
+            policy_next_critic_obs = converted["critic"]
+            next_actor_obs = policy_next_actor_obs
+            next_critic_obs = policy_next_critic_obs
             rewards_jax = converted["reward"]
             # Bool must not cross as BOOL (DLPack's bool exchange once
             # produced rare bit flips); uint8 in, bool out inside JAX.
             terminated_jax = converted["terminated"].astype(jnp.bool_)
             truncated_jax = converted["truncated"].astype(jnp.bool_)
 
-            # Handle truncated episodes: use final_observation for bootstrap
+            # Truncated episodes: the stored transition bootstraps from the
+            # episode's final observation, never from the reset state.
             if final_obs is not None:
-                # Replace next_obs for truncated (not terminated) envs
                 truncated_only = (truncated_jax & ~terminated_jax)[:, None]
                 next_actor_obs = jnp.where(truncated_only, converted["final_actor"], next_actor_obs)
                 next_critic_obs = jnp.where(truncated_only, converted["final_critic"], next_critic_obs)
@@ -372,9 +377,13 @@ class OffPolicyRunner(BaseRunner):
                 success=infos.get("success", None),
             )
 
-            # Update observations
-            actor_obs = next_actor_obs
-            critic_obs = next_critic_obs
+            # Advance to the post-reset observation, not the replay copy: a
+            # timed-out env is already in its next episode, and acting on
+            # the old episode's final observation would pick the next action
+            # from a state the env is no longer in and store a transition
+            # from that state.
+            actor_obs = policy_next_actor_obs
+            critic_obs = policy_next_critic_obs
 
         # One-shot obs normalizer update — every env-time obs contributes
         # exactly once per collection cycle, regardless of how many gradient
