@@ -61,7 +61,6 @@ _MUJOCO_NAMES = {
     "MujocoActionManager",
     "MujocoActionManagerConfig",
     "MujocoContactManager",
-    "MujocoRewardManager",
 }
 
 
@@ -123,7 +122,6 @@ __all__ = [
     "MujocoActionManager",
     "MujocoActionManagerConfig",
     "MujocoContactManager",
-    "MujocoRewardManager",
     # Backward compatibility
     "ActionManager",
     "ActionManagerConfig",

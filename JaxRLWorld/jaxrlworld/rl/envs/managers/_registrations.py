@@ -84,13 +84,11 @@ def _register_mujoco() -> None:
     from jaxrlworld.rl.envs.managers.common import (
         ObservationManager,
         ObsManagerConfig,
-        RewardManagerConfig,
     )
     from jaxrlworld.rl.envs.managers.mujoco import (
         MujocoActionManager,
         MujocoActionManagerConfig,
         MujocoContactManager,
-        MujocoRewardManager,
         MujocoSceneManager,
         MujocoSceneManagerConfig,
     )
@@ -100,8 +98,6 @@ def _register_mujoco() -> None:
     ManagerRegistry.register("mujoco", "action", MujocoActionManager, MujocoActionManagerConfig)
     ManagerRegistry.register("mujoco", "observation", ObservationManager, ObsManagerConfig)
     ManagerRegistry.register("mujoco", "contact", MujocoContactManager)
-    # MuJoCo overrides the common reward manager with MujocoRewardManager
-    ManagerRegistry.register("mujoco", "reward", MujocoRewardManager, RewardManagerConfig)
     ManagerRegistry.register("mujoco", "terrain", MujocoTerrainImporter)
 
 

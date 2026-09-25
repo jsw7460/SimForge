@@ -636,9 +636,8 @@ class World(ABC):
     def _build_common_managers(self) -> None:
         """Create simulator-agnostic managers (command, reward, termination, event).
 
-        The reward manager class is resolved via ManagerRegistry so that
-        backends like MuJoCo automatically get MujocoRewardManager without
-        needing a subclass hook.
+        The reward manager class is resolved via ManagerRegistry, so a
+        backend can substitute its own without a subclass hook.
         """
         from jaxrlworld.rl.envs.managers import (
             CommandManager,
