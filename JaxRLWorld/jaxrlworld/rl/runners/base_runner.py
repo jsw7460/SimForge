@@ -936,16 +936,20 @@ class BaseRunner(ABC):
     def _save_latest_checkpoint(self, iteration: int) -> None:
         """Save the rolling ``checkpoint_latest``.
 
-        Written to a temp dir first and swapped in with renames, so a
-        valid latest checkpoint exists at every instant (the old
-        rmtree-then-write left a window with none).
+        Written to a temp dir first and swapped in with two renames, so a
+        complete checkpoint is on disk at every instant: ``checkpoint_latest``
+        is absent only between the two renames, during which the previous
+        one is intact under ``checkpoint_latest.old``. Leftovers of a run
+        interrupted inside this routine (``.tmp``, ``.old``) are cleared
+        first, since a non-empty ``.old`` would block the first rename.
         """
         latest_dir = os.path.join(self.model_log_dir, "checkpoint_latest")
         tmp_dir = latest_dir + ".tmp"
-        if os.path.exists(tmp_dir):
-            shutil.rmtree(tmp_dir)
-        self._save_checkpoint_to(tmp_dir, iteration)
         old_dir = latest_dir + ".old"
+        for leftover in (tmp_dir, old_dir):
+            if os.path.exists(leftover):
+                shutil.rmtree(leftover)
+        self._save_checkpoint_to(tmp_dir, iteration)
         if os.path.exists(latest_dir):
             os.rename(latest_dir, old_dir)
         os.rename(tmp_dir, latest_dir)
