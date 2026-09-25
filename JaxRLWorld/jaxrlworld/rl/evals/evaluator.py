@@ -208,14 +208,16 @@ class PolicyEvaluator:
 
             disable_corruption(self.eval_cfgs.observation)
 
-        # Disable interval and domain randomization events
+        # Disable interval events and domain randomization in both of its
+        # modes (per-reset and on the global interval timer); "reset" and
+        # "startup" terms stay, they place the robot.
         if hasattr(self.eval_cfgs, "event"):
             from jaxrlworld.rl.configs.base_config import iter_terms
             from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
 
             event_cfg = self.eval_cfgs.event
             for name, term in iter_terms(event_cfg, EventTermConfig).items():
-                if term.mode in ("interval", "reset_dr"):
+                if term.mode in ("interval", "interval_dr", "reset_dr"):
                     setattr(event_cfg, name, None)
 
     @staticmethod

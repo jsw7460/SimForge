@@ -502,13 +502,14 @@ class BaseRunner(ABC):
 
             disable_corruption(eval_cfgs.observation)
 
-        # Disable interval events (external forces, disturbances) by setting to None
+        # Disable interval events (external forces, disturbances) and the
+        # interval-timer domain randomization by setting them to None.
         if self.runner_cfg.eval_disable_interval_events and hasattr(eval_cfgs, "event"):
             from jaxrlworld.rl.configs.base_config import iter_terms
             from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
 
             for name, term in iter_terms(eval_cfgs.event, EventTermConfig).items():
-                if term.mode == "interval":
+                if term.mode in ("interval", "interval_dr"):
                     setattr(eval_cfgs.event, name, None)
 
         # Disable viewer
