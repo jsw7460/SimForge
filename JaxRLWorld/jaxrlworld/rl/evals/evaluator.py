@@ -199,9 +199,14 @@ class PolicyEvaluator:
     def _apply_eval_defaults(self) -> None:
         """Apply evaluation-mode defaults to configs.
 
+        - Seeds the env with the evaluator's ``seed`` (the physics envs read
+          ``env_cfg.seed``; the evaluator reports this seed, so it is the one
+          the env must use)
         - Disables observation noise on every group via disable_corruption()
         - Removes interval, interval_dr and reset_dr events
         """
+        self.eval_cfgs.env.seed = self.seed
+
         # Disable observation noise on every group
         if hasattr(self.eval_cfgs, "observation"):
             from jaxrlworld.rl.configs.common_config_classes import disable_corruption
