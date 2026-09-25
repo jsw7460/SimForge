@@ -934,12 +934,17 @@ class PPO(OnPolicyAlgorithm):
         """
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         eqx.tree_serialise_leaves(model_path, self.train_state.model)
+        # The value-target normalizer lives outside the model; the critic's
+        # outputs are only meaningful against its statistics.
+        if self.value_normalizer is not None:
+            eqx.tree_serialise_leaves(os.path.join(checkpoint_dir, "value_normalizer.eqx"), self.value_normalizer)
 
         return {
             "alg_class": self.__class__.__name__,
             "alg_key": np.array(self.train_state.key),
             "actor_lr": self.actor_lr,
             "critic_lr": self.critic_lr,
+            "value_normalization": self.value_normalizer is not None,
         }
 
     def load_train_state(self, checkpoint_dir: str, metadata: Dict[str, Any]) -> None:
@@ -965,6 +970,20 @@ class PPO(OnPolicyAlgorithm):
             opt_state=new_opt_state,
             key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
+
+        if self.value_normalizer is not None:
+            normalizer_path = os.path.join(checkpoint_dir, "value_normalizer.eqx")
+            if not os.path.isfile(normalizer_path):
+                raise FileNotFoundError(
+                    f"{normalizer_path} is missing: this checkpoint has no value-normalizer statistics, so "
+                    "its critic cannot be resumed with use_value_normalization=True."
+                )
+            self.value_normalizer = eqx.tree_deserialise_leaves(normalizer_path, self.value_normalizer)
+        elif metadata.get("value_normalization", False):
+            raise ValueError(
+                "Checkpoint was trained with use_value_normalization=True but this run has it off; the "
+                "critic's outputs are in the normalized scale."
+            )
 
         self.actor_lr = metadata.get("actor_lr", self.actor_lr)
         self.critic_lr = metadata.get("critic_lr", self.critic_lr)
