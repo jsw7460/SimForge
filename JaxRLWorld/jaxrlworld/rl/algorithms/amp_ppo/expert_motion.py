@@ -70,8 +70,11 @@ def amp_feature_layout(obs_manager, group: str = "amp") -> list[AmpFeatureTerm]:
 
     Raises on a term with no expert definition, on a history-bearing term
     (the discriminator history is assembled by the algorithm, on both sides,
-    so a term-level history would be applied twice), and on a width that
-    disagrees with the term's joint selection.
+    so a term-level history would be applied twice), on a term with a scale,
+    clip, noise or delay (the expert side renders raw quantities, so any of
+    these would make the same motion a different feature for the policy
+    than for the expert), and on a width that disagrees with the term's
+    joint selection.
     """
     terms = obs_manager._group_terms[group]
     layout: list[AmpFeatureTerm] = []
@@ -81,6 +84,12 @@ def amp_feature_layout(obs_manager, group: str = "amp") -> list[AmpFeatureTerm]:
             raise ValueError(
                 f"AMP term {name!r} carries history_length={cfg.history_length}; the algorithm stacks the "
                 "discriminator history itself, so AMP group terms must be single-frame."
+            )
+        if cfg.scale != 1.0 or cfg.clip is not None or cfg.noise is not None or cfg.delay_max_lag > 0:
+            raise ValueError(
+                f"AMP term {name!r} sets scale={cfg.scale}, clip={cfg.clip}, noise={cfg.noise}, "
+                f"delay_max_lag={cfg.delay_max_lag}; the expert features are rendered raw, so AMP group "
+                "terms must be raw as well."
             )
         func_name = func.__name__
         if func_name in _JOINT_POS_TERMS or func_name in _JOINT_VEL_TERMS:
