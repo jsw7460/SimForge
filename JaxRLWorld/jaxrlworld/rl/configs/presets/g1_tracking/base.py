@@ -85,7 +85,7 @@ class G1TrackingConfig:
     robot: G1MujocoConfig = field(default_factory=G1MujocoConfig)
 
     # Environment / training.
-    num_envs: int = 4096
+    num_envs: int = 12000
     # Mjlab's tracking_env_cfg.py uses 10s episodes for G1.
     episode_length_s: float = 10.0
     seed: int = 42
