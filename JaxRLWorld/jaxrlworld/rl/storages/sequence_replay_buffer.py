@@ -172,13 +172,14 @@ class SequenceReplayBuffer:
             env_indices: [batch_size]
             start_positions: [batch_size]
         """
-        # Maximum valid start position
+        # A sequence spans ``horizon`` stored transitions, so with ``n``
+        # transitions in logical order the starts are ``0 .. n - horizon``
+        # inclusive; the bound below is exclusive.
         if self.filled_size >= self.size_per_env:
-            # Buffer is full: any position could be a start, but we must
-            # check episode boundaries. Avoid the `horizon` positions before ptr.
-            max_logical_start = self.size_per_env - self.horizon
+            # Full buffer: logical offsets count from ``ptr`` (the oldest row).
+            max_logical_start = self.size_per_env - self.horizon + 1
         else:
-            max_logical_start = max(1, self.filled_size - self.horizon)
+            max_logical_start = self.filled_size - self.horizon + 1
 
         collected_envs = []
         collected_pos = []
@@ -219,15 +220,14 @@ class SequenceReplayBuffer:
                 break
 
         if remaining > 0:
-            # Fallback: allow boundary-crossing sequences if we can't find enough valid ones
-            fallback_envs = rng.integers(0, self.num_envs, size=remaining)
-            if self.filled_size >= self.size_per_env:
-                fallback_logical = rng.integers(0, max_logical_start, size=remaining)
-                fallback_pos = (self.ptr + fallback_logical) % self.size_per_env
-            else:
-                fallback_pos = rng.integers(0, max(1, max_logical_start), size=remaining)
-            collected_envs.append(fallback_envs)
-            collected_pos.append(fallback_pos)
+            # A sequence that crosses an episode boundary would train the
+            # dynamics on a reset as if it were a transition, so the batch
+            # is refused rather than padded with such sequences.
+            raise RuntimeError(
+                f"Could not sample {batch_size} within-episode sequences of length {self.horizon} "
+                f"after {max_attempts} rounds ({remaining} short): episodes are too short for this "
+                f"horizon or the buffer holds too little data (filled {self.filled_size}/{self.size_per_env} per env)"
+            )
 
         env_indices = np.concatenate(collected_envs)[:batch_size]
         start_positions = np.concatenate(collected_pos)[:batch_size]
@@ -251,8 +251,8 @@ class SequenceReplayBuffer:
               rewards: [horizon, batch_size, 1]
               terminated: [horizon, batch_size, 1]
         """
-        if self.filled_size < self.horizon + 1:
-            raise ValueError(f"Not enough data: need at least {self.horizon + 1} steps, have {self.filled_size}")
+        if self.filled_size < self.horizon:
+            raise ValueError(f"Not enough data: need at least {self.horizon} steps, have {self.filled_size}")
 
         seed = int(jax.random.randint(key, (), 0, 2**31 - 1))
         rng = np.random.default_rng(seed)
