@@ -3,7 +3,7 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict
 
 if TYPE_CHECKING:
     import gymnasium as gym
@@ -15,13 +15,11 @@ import torch
 
 from jaxrlworld.rl.algorithms.base import ActInput, RLAlgorithm
 from jaxrlworld.rl.configs import ConfigsForRun
-from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.envs import EpisodeStatsCollector, World
 from jaxrlworld.rl.envs.utils.lazy_import_check import assert_single_sim_loaded
 from jaxrlworld.rl.runners.iteration_data import EpisodeStats, IterationData
 from jaxrlworld.rl.utils import setup_log_dir
 from jaxrlworld.rl.utils.console import GREEN, RESET
-from jaxrlworld.rl.utils.dynamics_dataset import DynamicsDataset
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 from jaxrlworld.rl.utils.logger import ConsoleWriter, WandbLogger
 
@@ -806,18 +804,6 @@ class BaseRunner(ABC):
             stats["raw"] = actions_flat
         return stats
 
-    def act(
-        self,
-        obs: dict[str, torch.Tensor],
-        robot_states: torch.Tensor,
-        deterministic: bool = False,
-    ) -> torch.Tensor:
-        """Get action from policy (torch interface for compatibility)."""
-        actor_obs = torch_to_jax(obs["actor"])
-        critic_obs = torch_to_jax(obs["critic"])
-        action_jax = self.alg.act(self.alg.ActInput(actor_obs, critic_obs), deterministic)
-        return jax_to_torch(action_jax, self.device)
-
     @classmethod
     @abstractmethod
     def load_checkpoint(
@@ -981,264 +967,3 @@ class BaseRunner(ABC):
         # synchronous disk I/O — every iteration was pure overhead.
         if it % self.runner_cfg.latest_checkpoint_interval == 0:
             self._save_latest_checkpoint(it)
-
-    def collect_dynamics_dataset(
-        self,
-        num_samples: int,
-        use_random_policy: bool = False,
-        auxiliary_terms: List[ObservationTermConfig] | None = None,
-        progress_interval: int = 100,
-    ) -> DynamicsDataset:
-        """
-        Collect dynamics dataset with optional auxiliary observations.
-
-        Args:
-            num_samples: Number of transitions to collect
-            use_random_policy: If True, use random actions; if False, use current policy
-            auxiliary_terms: List of observation terms to compute but NOT include in policy obs.
-            progress_interval: Print progress every N samples
-
-        Returns:
-            DynamicsDataset with collected transitions and auxiliary observations
-        """
-        print(f"\n{'=' * 60}")
-        print("Collecting Dynamics Dataset")
-        print(f"{'=' * 60}")
-        print(f"Target samples: {num_samples}")
-        print(f"Policy: {'Random' if use_random_policy else 'Current Policy'}")
-        print(f"Num environments: {self.env.num_envs}")
-
-        if auxiliary_terms:
-            print("\nAuxiliary observations to collect:")
-            for i, term in enumerate(auxiliary_terms):
-                term_name = getattr(term.func, "__name__", f"term_{i}")
-                print(f"  [{i + 1}] {term_name} (scale={term.scale})")
-        else:
-            print("\nNo auxiliary observations requested")
-
-        # Storage for policy observations
-        observations_list = []
-        actions_list = []
-        next_observations_list = []
-        dones_list = []
-
-        # Storage for auxiliary observations
-        auxiliary_obs_dict = {}
-        next_auxiliary_obs_dict = {}
-
-        if auxiliary_terms:
-            for i, term in enumerate(auxiliary_terms):
-                term_name = getattr(term.func, "__name__", f"term_{i}")
-                auxiliary_obs_dict[term_name] = []
-                next_auxiliary_obs_dict[term_name] = []
-
-        # Reset environment
-        obs_dict, info = self.env.reset()
-
-        robot_states = self.env.get_robot_state()
-
-        collected = 0
-        episode_count = 0
-
-        # Episode return tracking
-        episode_returns = []
-        current_returns = torch.zeros(self.env.num_envs, device=self.device)
-
-        if not use_random_policy:
-            self.set_eval_mode()
-
-        with torch.no_grad():
-            while collected < num_samples:
-                actor_obs = obs_dict["actor"]
-
-                # Compute auxiliary observations (CURRENT state)
-                if auxiliary_terms:
-                    for term in auxiliary_terms:
-                        term_name = getattr(term.func, "__name__", "unknown")
-                        aux_value = term.func(self.env, **term.params)
-                        aux_value = aux_value * term.scale
-                        auxiliary_obs_dict[term_name].append(aux_value.clone().cpu())
-
-                # Choose action
-                if use_random_policy:
-                    actions = torch.randn(self.env.num_envs, self.env.num_actions, device=self.device)
-                    actions = torch.clamp(actions, -1.0, 1.0)
-                else:
-                    actions = self.act(obs_dict, robot_states, deterministic=True)
-
-                # Step environment
-                next_obs_dict, _, rewards, dones, infos = self.env.step(actions)
-                next_robot_states = self.env.get_robot_state()
-                next_actor_obs = next_obs_dict["actor"]
-
-                # Update episode returns
-                current_returns += rewards
-
-                if dones.any():
-                    completed_returns = current_returns[dones].cpu().tolist()
-                    episode_returns.extend(completed_returns)
-                    current_returns[dones] = 0.0
-
-                # Compute auxiliary observations (NEXT state)
-                if auxiliary_terms:
-                    for term in auxiliary_terms:
-                        term_name = getattr(term.func, "__name__", "unknown")
-                        next_aux_value = term.func(self.env, **term.params)
-                        next_aux_value = next_aux_value * term.scale
-                        next_auxiliary_obs_dict[term_name].append(next_aux_value.clone().cpu())
-
-                # Store policy observations and actions
-                observations_list.append(actor_obs.clone().cpu())
-                actions_list.append(actions.clone().cpu())
-                next_observations_list.append(next_actor_obs.clone().cpu())
-                dones_list.append(dones.clone().cpu())
-
-                # Update
-                obs_dict = next_obs_dict
-                robot_states = next_robot_states
-                collected += self.env.num_envs
-
-                episode_count += dones.sum().item()
-
-                if collected % progress_interval == 0:
-                    if episode_returns:
-                        mean_return = sum(episode_returns) / len(episode_returns)
-                        recent_returns = episode_returns[-100:]
-                        recent_mean = sum(recent_returns) / len(recent_returns)
-                        min_ret = min(episode_returns)
-                        max_ret = max(episode_returns)
-                        print(
-                            f"Collected: {collected}/{num_samples} | "
-                            f"Episodes: {episode_count} | "
-                            f"Return: {mean_return:.2f} (recent: {recent_mean:.2f}) | "
-                            f"Range: [{min_ret:.2f}, {max_ret:.2f}]"
-                        )
-                    else:
-                        print(f"Collected: {collected}/{num_samples} | Episodes: {episode_count}")
-
-        if not use_random_policy:
-            self.set_train_mode()
-
-        # Helper function to reorder parallel data
-        def reorder_parallel_data(data_list: List[torch.Tensor], num_envs: int, target_size: int) -> torch.Tensor:
-            data = torch.cat(data_list, dim=0)
-            num_steps = len(data_list)
-
-            if data.dim() == 1:
-                data = data.reshape(num_steps, num_envs)
-                data = data.permute(1, 0)
-                data = data.reshape(-1)[:target_size]
-            else:
-                dim = data.shape[1]
-                data = data.reshape(num_steps, num_envs, dim)
-                data = data.permute(1, 0, 2)
-                data = data.reshape(-1, dim)[:target_size]
-
-            return data
-
-        # Reorder policy observations
-        observations = reorder_parallel_data(observations_list, self.env.num_envs, num_samples)
-        actions = reorder_parallel_data(actions_list, self.env.num_envs, num_samples)
-        next_observations = reorder_parallel_data(next_observations_list, self.env.num_envs, num_samples)
-        dones = reorder_parallel_data(dones_list, self.env.num_envs, num_samples)
-
-        # Reorder auxiliary observations
-        auxiliary_obs = {}
-        next_auxiliary_obs = {}
-
-        for term_name, values in auxiliary_obs_dict.items():
-            if values:
-                auxiliary_obs[term_name] = reorder_parallel_data(values, self.env.num_envs, num_samples)
-
-        for term_name, values in next_auxiliary_obs_dict.items():
-            if values:
-                next_auxiliary_obs[term_name] = reorder_parallel_data(values, self.env.num_envs, num_samples)
-
-        # Create dataset with metadata
-        metadata = {
-            "collection_iteration": self.current_learning_iteration,
-            "collection_timesteps": self.total_timesteps,
-            "policy_type": "random" if use_random_policy else "trained",
-            "num_envs": self.env.num_envs,
-            "episodes_collected": episode_count,
-            "env_name": self.cfgs.env.env_name,
-            "obs_dim": observations.shape[1],
-            "action_dim": actions.shape[1],
-            "auxiliary_terms": list(auxiliary_obs.keys()) if auxiliary_obs else [],
-            "mean_return": sum(episode_returns) / len(episode_returns) if episode_returns else 0.0,
-            "std_return": (
-                sum((r - sum(episode_returns) / len(episode_returns)) ** 2 for r in episode_returns)
-                / len(episode_returns)
-            )
-            ** 0.5
-            if len(episode_returns) > 1
-            else 0.0,
-            "min_return": min(episode_returns) if episode_returns else 0.0,
-            "max_return": max(episode_returns) if episode_returns else 0.0,
-            "total_episodes": len(episode_returns),
-        }
-
-        dataset = DynamicsDataset(
-            observations=observations,
-            actions=actions,
-            next_observations=next_observations,
-            dones=dones,
-            auxiliary_obs=auxiliary_obs,
-            next_auxiliary_obs=next_auxiliary_obs,
-            metadata=metadata,
-        )
-
-        print(f"\n{GREEN}✓ Dataset collection complete!{RESET}")
-        print(f"  - Collected: {len(dataset)} transitions")
-        print(f"  - Episodes: {episode_count}")
-        print(f"  - Episode ends: {dones.sum().item()}")
-        print(f"  - Policy obs shape: {observations.shape}")
-        print(f"  - Action shape: {actions.shape}")
-
-        if episode_returns:
-            print("\n  - Return Statistics:")
-            print(f"    * Mean: {metadata['mean_return']:.2f}")
-            print(f"    * Std:  {metadata['std_return']:.2f}")
-            print(f"    * Min:  {metadata['min_return']:.2f}")
-            print(f"    * Max:  {metadata['max_return']:.2f}")
-
-        if auxiliary_obs:
-            print("\n  - Auxiliary observations:")
-            for key, tensor in auxiliary_obs.items():
-                print(f"    * {key}: {tensor.shape}")
-
-        return dataset
-
-    def save_dataset_checkpoint(
-        self, dataset: DynamicsDataset, save_name: str | None = None, include_policy: bool = True
-    ) -> str:
-        """Save dataset checkpoint with runner state."""
-        from jaxrlworld.rl.utils.dataset_manager import DatasetCheckpointHandler
-
-        if save_name is None:
-            save_name = f"dataset_iter{self.current_learning_iteration}_size{len(dataset)}.pt"
-
-        save_path = os.path.join(self.model_log_dir, save_name)
-
-        DatasetCheckpointHandler.save_dataset_checkpoint(
-            runner=self, dataset=dataset, path=save_path, include_policy=include_policy
-        )
-
-        return save_path
-
-    def collect_and_save_dataset(
-        self,
-        num_samples: int,
-        save_name: str | None = None,
-        use_random_policy: bool = False,
-        auxiliary_terms: List[ObservationTermConfig] | None = None,
-        include_policy: bool = True,
-    ) -> Tuple[DynamicsDataset, str]:
-        """Convenience method to collect and save dataset in one call."""
-        dataset = self.collect_dynamics_dataset(
-            num_samples=num_samples, use_random_policy=use_random_policy, auxiliary_terms=auxiliary_terms
-        )
-
-        save_path = self.save_dataset_checkpoint(dataset=dataset, save_name=save_name, include_policy=include_policy)
-
-        return dataset, save_path
