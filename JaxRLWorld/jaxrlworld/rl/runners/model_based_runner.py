@@ -303,7 +303,11 @@ class ModelBasedRunner(BaseRunner):
             batch_size,
         )
 
-        if self.alg.replay_buffer.size >= min_buffer_size:
+        # The sampler needs ``horizon`` consecutive transitions per env, a
+        # per-env count the total-size threshold does not imply when many
+        # envs collect a few steps each.
+        buffer = self.alg.replay_buffer
+        if buffer.size >= min_buffer_size and buffer.filled_size >= buffer.horizon:
             training_start = time.time()
 
             if not getattr(self, "_pretrained", False):
