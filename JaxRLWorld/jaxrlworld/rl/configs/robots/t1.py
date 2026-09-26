@@ -1,6 +1,6 @@
 """Booster T1 humanoid robot configuration.
 
-Numbers mirror ``Mjlab/src/mjlab/asset_zoo/robots/booster_t1/t1_constants.py``
+Numbers mirror ``vendor/Mjlab/src/mjlab/asset_zoo/robots/booster_t1/t1_constants.py``
 (same natural frequency / damping ratio / reflected-inertia formula) so that
 Newton/Genesis/MuJoCo share identical PD gains, armature, effort, and action
 scale. Reference for motor specs:

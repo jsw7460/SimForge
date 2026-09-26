@@ -1,7 +1,7 @@
 """Base class for interactive play viewers with real-time pacing.
 
 Ported from Mjlab's BaseViewer, adapted for JaxRLWorld's World/PolicyWrapper
-interface. See Mjlab/src/mjlab/viewer/base.py for the original design and
+interface. See vendor/Mjlab/src/mjlab/viewer/base.py for the original design and
 budget accumulator documentation.
 
 Budget Accumulator

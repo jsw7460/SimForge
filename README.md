@@ -145,7 +145,7 @@ bash JaxRLWorld/jaxrlworld/scripts/benchmark/sb3_compare/sweep.bash
 ## Installation
 
 JaxRLWorld pins specific versions of [Genesis][genesis], [Newton][newton],
-and [mjlab][mjlab] as git submodules under this `SimForge/` repo.
+and [mjlab][mjlab] as git submodules under `vendor/` in this `SimForge/` repo.
 
 ### 1. Clone with submodules
 
@@ -174,9 +174,9 @@ Each simulator has its own install notes — consult its README for CUDA
 and system prerequisites. Typically:
 
 ```bash
-pip install -e Mjlab/
-pip install -e Newton/
-pip install -e Genesis/
+pip install -e vendor/Mjlab/
+pip install -e vendor/Newton/
+pip install -e vendor/Genesis/
 ```
 
 ### 4. Install JaxRLWorld and JAX-CUDA

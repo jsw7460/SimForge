@@ -12,7 +12,7 @@ rollout:
              signed contact force (a-side: -f, b-side: +f), rotated into
              the LINK LOCAL frame (native kernel applies
              inv_transform_by_quat with the link quaternion —
-             Genesis/genesis/engine/sensors/contact_force.py)
+             vendor/Genesis/genesis/engine/sensors/contact_force.py)
 
 List-side footgun handled the way production code must: rows past each
 env's live ``n_contacts`` counter are stale on the zero-copy path, so

@@ -47,7 +47,7 @@ class Go2Config(RobotConfig):
     """Configuration for Unitree Go2 quadruped robot."""
 
     name: str = "go2"
-    urdf_path: str = "Genesis/genesis/assets/urdf/go2/urdf/go2.urdf"
+    urdf_path: str = "vendor/Genesis/genesis/assets/urdf/go2/urdf/go2.urdf"
     mjcf_path: str = "JaxRLWorld/jaxrlworld/assets/unitree_go2/xmls/go2.xml"
 
     # base_init_height: float = 0.278

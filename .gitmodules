@@ -1,12 +1,12 @@
 [submodule "Mjlab"]
-	path = Mjlab
+	path = vendor/Mjlab
 	url = https://github.com/jsw7460/mjlab.git
 	branch = main
 [submodule "Newton"]
-	path = Newton
+	path = vendor/Newton
 	url = https://github.com/jsw7460/newton.git
 	branch = main
 [submodule "Genesis"]
-	path = Genesis
+	path = vendor/Genesis
 	url = https://github.com/jsw7460/Genesis.git
-	branch = main
+	branch = feature/mjcf-contact-exclude-pair-list
