@@ -93,6 +93,23 @@ def _discriminator_optimizer(
     return optimizer, labels
 
 
+def velocity_from_positions(frames: jax.Array, fd: tuple[tuple[int, int], tuple[int, int]], dt: float) -> jax.Array:
+    """``(.., K, D)`` frames with the velocity block rewritten as ``(q_t - q_{t-1}) / dt``.
+
+    ``fd = ((pos_start, pos_end), (vel_start, vel_end))`` are the two
+    blocks' column ranges; the first frame of a window takes the forward
+    difference (its predecessor is outside the window). Applied identically
+    to policy and expert windows, so the discriminator compares like with
+    like whatever velocity either side started from.
+    """
+    (ps, pe), (vs, ve) = fd
+    q = frames[..., ps:pe]
+    backward = (q[..., 1:, :] - q[..., :-1, :]) / dt
+    first = backward[..., :1, :]
+    vel = jnp.concatenate([first, backward], axis=-2)
+    return jnp.concatenate([frames[..., :vs], vel, frames[..., ve:]], axis=-1)
+
+
 @eqx.filter_jit
 def _shape_step(
     disc: Discriminator,
@@ -103,16 +120,19 @@ def _shape_step(
     rewards: jax.Array,
     style_weight: jax.Array,
     dt: jax.Array,
+    fd: tuple[tuple[int, int], tuple[int, int]] | None,
 ):
     """Push one frame, score the window, blend the reward.
 
     ``history`` is chronological ``(N, K, D)``; the new frame enters at the
     end. Envs flagged done received their post-reset observation, so their
-    whole history becomes that frame.
+    whole history becomes that frame. ``fd`` (static) selects the
+    position-difference velocity of :func:`velocity_from_positions`.
     """
     pushed = jnp.concatenate([history[:, 1:], amp_obs[:, None, :]], axis=1)
     history = jnp.where(dones[:, None, None], amp_obs[:, None, :], pushed)
-    window = history.reshape(history.shape[0], -1)
+    frames = history if fd is None else velocity_from_positions(history, fd, dt)
+    window = frames.reshape(history.shape[0], -1)
     style_raw = discriminator_reward(disc, norm, window)
     task = (1.0 - style_weight) * rewards
     style = style_weight * dt * style_raw
@@ -179,7 +199,17 @@ class AdversarialMotionPrior:
         control_dt: float,
         learning_rate: float,
         key: jax.Array,
+        fd_blocks: tuple[tuple[int, int], tuple[int, int]] | None = None,
     ):
+        """``fd_blocks`` are the ``(joint_pos, joint_vel)`` column ranges of the
+        feature vector when ``cfg.joint_velocity_from_positions`` is on
+        (the algorithm derives them from the layout); ``None`` otherwise."""
+        if cfg.joint_velocity_from_positions != (fd_blocks is not None):
+            raise ValueError("fd_blocks must be given exactly when joint_velocity_from_positions is on")
+        if fd_blocks is not None:
+            (ps, pe), (vs, ve) = fd_blocks
+            if pe - ps != ve - vs or not (0 <= ps < pe <= feature_dim and 0 <= vs < ve <= feature_dim):
+                raise ValueError(f"joint position block {(ps, pe)} and velocity block {(vs, ve)} do not match")
         if cfg.num_amp_obs_steps < 1:
             raise ValueError(f"num_amp_obs_steps must be >= 1, got {cfg.num_amp_obs_steps}")
         if not 0.0 <= cfg.style_reward_weight <= 1.0:
@@ -197,7 +227,12 @@ class AdversarialMotionPrior:
         self.learning_rate = float(learning_rate)
 
         self.expert = expert
-        self.expert_windows = jnp.asarray(history_windows(expert.features, expert.clip_start, self.num_steps))
+        self.fd_blocks = fd_blocks
+        windows = jnp.asarray(history_windows(expert.features, expert.clip_start, self.num_steps))
+        if fd_blocks is not None:
+            frames = windows.reshape(windows.shape[0], self.num_steps, self.feature_dim)
+            windows = velocity_from_positions(frames, fd_blocks, self.control_dt).reshape(windows.shape[0], -1)
+        self.expert_windows = windows
         self.expert_probs = jnp.asarray(expert_frame_probabilities(expert, cfg.dataset_weights), dtype=jnp.float32)
 
         key, k_disc = jax.random.split(key)
@@ -257,6 +292,7 @@ class AdversarialMotionPrior:
             rewards,
             jnp.asarray(self.style_weight, dtype=jnp.float32),
             jnp.asarray(self.control_dt, dtype=jnp.float32),
+            self.fd_blocks,
         )
         self._current.append(window)
         self._task_sum = self._task_sum + task_mean

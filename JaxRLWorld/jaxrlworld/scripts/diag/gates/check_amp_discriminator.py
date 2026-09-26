@@ -47,7 +47,7 @@ from jaxrlworld.rl.algorithms.amp_ppo.discriminator import (
     discriminator_reward,
     minibatch_std,
 )
-from jaxrlworld.rl.algorithms.amp_ppo.expert_motion import ExpertMotionSet
+from jaxrlworld.rl.algorithms.amp_ppo.expert_motion import ExpertMotionSet, history_windows
 from jaxrlworld.rl.configs.algorithms.amp_ppo import AmpConfig
 from jaxrlworld.rl.modules.normalization import EmpiricalNormalization
 
@@ -341,6 +341,68 @@ def main() -> int:
         chk("update without new rollout windows refused", False)
     except RuntimeError:
         chk("update without new rollout windows refused", True)
+
+    print("\n=== 6b. joint velocity from positions (same function on both sides) ===")
+    D, K, N = 8, 4, 3  # features: joint_pos[0:3], joint_vel[3:6], other[6:8]
+    fd = ((0, 3), (3, 6))
+    dt = 0.02
+    T = 40
+    feats = rng.normal(size=(T, D)).astype(np.float32)
+    expert = ExpertMotionSet(
+        features=feats,
+        clip_start=np.asarray([0, 25, 40]),
+        clip_names=("a", "b"),
+        fps=50.0,
+        source_index=np.asarray([0, 1]),
+    )
+    cfg = AmpConfig(
+        motion_files=("a.npz", "b.npz"),
+        root_body_name="Trunk",
+        num_amp_obs_steps=K,
+        discriminator_hidden_dims=(8, 8),
+        replay_buffer_size=64,
+        joint_velocity_from_positions=True,
+    )
+    prior = AdversarialMotionPrior(cfg, expert, D, dt, 1e-3, jax.random.PRNGKey(3), fd_blocks=fd)
+    raw = history_windows(feats, expert.clip_start, K).reshape(-1, K, D)
+    ew = np.asarray(prior.expert_windows).reshape(-1, K, D)
+    q = raw[:, :, 0:3]
+    want = np.concatenate([(q[:, 1:2] - q[:, 0:1]) / dt, (q[:, 1:] - q[:, :-1]) / dt], axis=1)
+    chk(
+        "expert windows: velocity block == (q_t - q_{t-1}) / dt, forward at the first frame",
+        np.abs(ew[:, :, 3:6] - want).max() < 1e-4,
+        f"max |Δ| {np.abs(ew[:, :, 3:6] - want).max():.1e}",
+    )
+    chk(
+        "expert windows: other blocks untouched",
+        np.array_equal(ew[:, :, 0:3], raw[:, :, 0:3]) and np.array_equal(ew[:, :, 6:8], raw[:, :, 6:8]),
+    )
+    chk("expert windows at a clip start (backfilled) have zero velocity", np.abs(ew[25, :, 3:6]).max() < 1e-6)
+    obs = [rng.normal(size=(N, D)).astype(np.float32) for _ in range(K + 1)]
+    for o in obs:
+        prior.shape_rewards(jnp.asarray(o), jnp.zeros(N, bool), jnp.zeros(N, jnp.float32))
+    pw = np.asarray(prior._current[-1]).reshape(N, K, D)
+    qp = np.stack(obs[1:], axis=1)[:, :, 0:3]
+    want_p = np.concatenate([(qp[:, 1:2] - qp[:, 0:1]) / dt, (qp[:, 1:] - qp[:, :-1]) / dt], axis=1)
+    chk(
+        "policy windows: the same velocity rule (the sim's joint_vel block is discarded)",
+        np.abs(pw[:, :, 3:6] - want_p).max() < 1e-4,
+        f"max |Δ| {np.abs(pw[:, :, 3:6] - want_p).max():.1e}",
+    )
+    chk(
+        "policy windows right after the first frame (backfilled) have zero velocity",
+        np.abs(np.asarray(prior._current[0]).reshape(N, K, D)[:, :, 3:6]).max() < 1e-6,
+    )
+    try:
+        AdversarialMotionPrior(cfg, expert, D, dt, 1e-3, jax.random.PRNGKey(3))
+        chk("flag on without blocks refused", False)
+    except ValueError:
+        chk("flag on without blocks refused", True)
+    try:
+        AdversarialMotionPrior(cfg, expert, D, dt, 1e-3, jax.random.PRNGKey(3), fd_blocks=((0, 3), (3, 5)))
+        chk("mismatched block widths refused", False)
+    except ValueError:
+        chk("mismatched block widths refused", True)
 
     print("\n=== 7. training on separable windows, learning-rate rewrite, checkpoint round trip ===")
     D, K = 6, 3

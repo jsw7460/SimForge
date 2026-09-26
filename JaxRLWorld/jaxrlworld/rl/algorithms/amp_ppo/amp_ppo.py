@@ -12,10 +12,17 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import jax
+import numpy as np
 import torch
 
 from jaxrlworld.rl.algorithms.amp_ppo.amp import AdversarialMotionPrior
-from jaxrlworld.rl.algorithms.amp_ppo.expert_motion import amp_feature_layout, feature_dim, load_expert_motions
+from jaxrlworld.rl.algorithms.amp_ppo.expert_motion import (
+    _JOINT_POS_TERMS,
+    _JOINT_VEL_TERMS,
+    amp_feature_layout,
+    feature_dim,
+    load_expert_motions,
+)
 from jaxrlworld.rl.algorithms.amp_ppo.metrics import AmpPPOMetrics
 from jaxrlworld.rl.algorithms.ppo.ppo import PPO
 from jaxrlworld.rl.configs.algorithms.amp_ppo import AmpPPOConfig
@@ -59,8 +66,25 @@ class AmpPPO(PPO):
             float(env.control_dt),
             cfg.amp.discriminator_lr if cfg.amp.discriminator_lr is not None else cfg.actor_lr,
             k_amp,
+            fd_blocks=cls._position_velocity_blocks(layout) if cfg.amp.joint_velocity_from_positions else None,
         )
         return cls(amp=amp, actor_critic=actor_critic, key=key, **cls._ppo_kwargs(cfg), **symmetry)
+
+    @staticmethod
+    def _position_velocity_blocks(layout) -> tuple[tuple[int, int], tuple[int, int]]:
+        """Column ranges of the joint-position and joint-velocity terms, which must select the same joints."""
+        starts = np.concatenate([[0], np.cumsum([t.width for t in layout])])
+        pos = [k for k, t in enumerate(layout) if t.func_name in _JOINT_POS_TERMS]
+        vel = [k for k, t in enumerate(layout) if t.func_name in _JOINT_VEL_TERMS]
+        if len(pos) != 1 or len(vel) != 1:
+            raise ValueError(
+                "joint_velocity_from_positions needs exactly one joint-position and one joint-velocity term in the AMP group"
+            )
+        if not np.array_equal(layout[pos[0]].joint_ids, layout[vel[0]].joint_ids):
+            raise ValueError(
+                "joint_velocity_from_positions: the joint-position and joint-velocity terms select different joints"
+            )
+        return (int(starts[pos[0]]), int(starts[pos[0] + 1])), (int(starts[vel[0]]), int(starts[vel[0] + 1]))
 
     # ── rollout ──────────────────────────────────────────────────────
 

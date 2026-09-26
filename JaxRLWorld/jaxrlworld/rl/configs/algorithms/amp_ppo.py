@@ -37,6 +37,17 @@ class AmpConfig(BaseConfig):
     """Observation group the discriminator scores, single-frame terms only."""
     num_amp_obs_steps: int = 10
     """Frames per discriminator sample."""
+    joint_velocity_from_positions: bool = False
+    """Replace the window's joint-velocity block, on BOTH sides, by the
+    difference of the window's own joint-position frames, ``(q_t - q_{t-1}) / dt``
+    (the first frame takes the forward difference). The simulator's
+    instantaneous joint velocities carry high-frequency content (PD and
+    contact transients sampled at the control rate) that an interpolated
+    motion capture clip cannot have, so a discriminator fed both learns to
+    tell them apart by that texture and the policy can never remove it.
+    With this on, the velocity is the same function of the positions on
+    both sides. Requires the group's joint-position and joint-velocity
+    terms to select the same joints."""
 
     style_reward_weight: float = 0.3
     reward_scale: float = 1.0
