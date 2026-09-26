@@ -901,6 +901,17 @@ class BaseRunner(ABC):
         if os.path.exists(old_dir):
             shutil.rmtree(old_dir)
 
+    def _save_final_checkpoint(self) -> None:
+        """Checkpoint the last iteration of learn() when it missed the save grid.
+
+        Iterations run over ``[start, start + N)``, so the last one is on
+        the ``save_interval`` grid only by coincidence; a run still ends
+        with its final policy on disk.
+        """
+        last = self.current_learning_iteration - 1
+        if last >= self.initial_learning_iteration and last % self.runner_cfg.save_interval != 0:
+            self.checkpoint(last)
+
     def post_iteration(self, data: IterationData, total_iter: int, it: int = 0):
         """Post-iteration processing."""
         self.current_learning_iteration += 1

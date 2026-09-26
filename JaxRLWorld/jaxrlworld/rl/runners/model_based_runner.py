@@ -357,7 +357,7 @@ class ModelBasedRunner(BaseRunner):
         total_iter = self.current_learning_iteration + num_learning_iterations
         self.initial_learning_iteration = self.current_learning_iteration
 
-        for it in range(self.initial_learning_iteration, total_iter + 1):
+        for it in range(self.initial_learning_iteration, total_iter):
             self.it = it
 
             data = self._run_training_iteration(
@@ -368,6 +368,8 @@ class ModelBasedRunner(BaseRunner):
 
             obs = data.last_obs
             self.post_iteration(data, total_iter, it)
+
+        self._save_final_checkpoint()
 
     def _get_action_statistics(self) -> Dict[str, Any]:
         """Extract recent action statistics from replay buffer."""
