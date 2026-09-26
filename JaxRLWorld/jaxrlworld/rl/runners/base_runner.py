@@ -444,13 +444,11 @@ class BaseRunner(ABC):
 
     def set_eval_mode(self):
         """Set all components to evaluation mode (no-op for JAX)."""
-        if hasattr(self.alg, "test_mode"):
-            self.alg.test_mode()
+        self.alg.test_mode()
 
     def set_train_mode(self):
         """Set all components to training mode (no-op for JAX)."""
-        if hasattr(self.alg, "train_mode"):
-            self.alg.train_mode()
+        self.alg.train_mode()
 
     # ==================== In-Training Evaluation ====================
 
@@ -494,7 +492,7 @@ class BaseRunner(ABC):
             eval_cfgs = self._create_eval_configs()
             self._eval_env = self._create_env_from_config(
                 eval_cfgs,
-                gym_env_factory=getattr(self, "gym_env_factory", None),
+                gym_env_factory=self.gym_env_factory,
             )
         return self._eval_env
 
@@ -686,7 +684,7 @@ class BaseRunner(ABC):
             return self._heldout_eval_envs
 
         self._heldout_eval_envs: Dict[str, World] = {}
-        extra = getattr(self.runner_cfg, "eval_extra_motion_files", None) or {}
+        extra = self.runner_cfg.eval_extra_motion_files
         for label, files in extra.items():
             if not files:
                 continue
@@ -753,9 +751,8 @@ class BaseRunner(ABC):
         ``(num_steps * num_envs, action_dim)`` array into wandb and
         dominate the per-iteration logging cost.
         """
-        logging_cfg = getattr(self.runner_cfg, "logging", None)
-        want_scalars = bool(getattr(logging_cfg, "action_dist", False))
-        want_hist = bool(getattr(logging_cfg, "action_histogram", False))
+        want_scalars = self.runner_cfg.logging.action_dist
+        want_hist = self.runner_cfg.logging.action_histogram
 
         if not (want_scalars or want_hist):
             return {}

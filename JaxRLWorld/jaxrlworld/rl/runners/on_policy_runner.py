@@ -477,8 +477,8 @@ class OnPolicyRunner(BaseRunner):
         whole rollout's actions every iteration — and, sitting between
         compute_returns and update(), charged it to learning_time.
         """
-        logging_cfg = getattr(self.runner_cfg, "logging", None)
-        if not (getattr(logging_cfg, "action_dist", False) or getattr(logging_cfg, "action_histogram", False)):
+        logging_cfg = self.runner_cfg.logging
+        if not (logging_cfg.action_dist or logging_cfg.action_histogram):
             return {}
         # Returns flattened [num_steps * num_envs, action_dim]; the helper
         # reshape internally if it needs the (T, N, D) layout.
