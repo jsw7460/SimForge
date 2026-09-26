@@ -439,26 +439,26 @@ class FastTD3(OffPolicyAlgorithm):
                 actor_key,
             )
 
-            actor_loss = float(actor_info["actor_loss"])
-            action_mean = float(actor_info["action_mean"])
-            action_std = float(actor_info["action_std"])
-            actor_q_value = float(actor_info["actor_q_value"])
-
             self.train_state = self.train_state._replace(
                 model=new_model,
                 actor_opt_state=new_actor_opt_state,
             )
         else:
-            actor_loss = 0.0
-            action_mean = 0.0
-            action_std = 0.0
-            actor_q_value = 0.0
+            actor_info = None
 
         jax.block_until_ready(self.train_state.model)
 
-        # Build metrics
         if not build_metrics:
             return None
+        # Device-to-host reads of the actor scalars, only for an update
+        # that reports them.
+        if actor_info is None:
+            actor_loss = action_mean = action_std = actor_q_value = 0.0
+        else:
+            actor_loss = float(actor_info["actor_loss"])
+            action_mean = float(actor_info["action_mean"])
+            action_std = float(actor_info["action_std"])
+            actor_q_value = float(actor_info["actor_q_value"])
         return self._build_metrics(critic_info, actor_loss, action_mean, action_std, actor_q_value, batch)
 
     def _build_metrics(
