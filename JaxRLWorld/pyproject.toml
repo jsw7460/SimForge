@@ -7,7 +7,7 @@ name = "jaxrlworld"
 version = "0.1.0"
 description = "Modular RL framework for robot locomotion across simulators"
 license = {file = "LICENSE"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["reinforcement-learning", "robotics", "locomotion", "simulation", "jax"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -15,15 +15,21 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
+    "jax>=0.4.30",
     "equinox>=0.11.0",
     "optax>=0.2.0",
+    "numpy>=1.26",
+    # The env side (observations, rewards, replay of torch tensors) and
+    # the JAX<->torch bridge are torch; the simulators bring their own
+    # pin, this one only states the requirement.
+    "torch>=2.2",
     "gymnasium>=0.29.0",
+    "colorama>=0.4",
     "pytz",
     "pyyaml>=6.0",
     # Live training dashboard (ConsoleWriter falls back to plain block
