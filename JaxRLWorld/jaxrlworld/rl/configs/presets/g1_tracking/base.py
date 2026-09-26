@@ -90,7 +90,7 @@ class G1TrackingConfig:
     episode_length_s: float = 10.0
     seed: int = 42
 
-    # Domain-randomization cadence, as on g1_29dof and k1_joystick. When
+    # Domain-randomization cadence, as on g1_29dof and k1_velocity. When
     # set, the sim builders' per-reset reset_dr terms instead re-sample
     # together on ONE global timer every this many seconds — all envs at
     # once, a single recompute per period — rather than once per reset.

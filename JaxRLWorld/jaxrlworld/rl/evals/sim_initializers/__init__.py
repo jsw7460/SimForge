@@ -214,7 +214,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
                         "checkpoint, so the eval env cannot be rebuilt faithfully -- "
                         "reconstructing from class defaults would silently drop any "
                         "non-default constructor kwargs the training run used. Fix the "
-                        "preset to capture its kwargs (see K1JoystickConfig."
+                        "preset to capture its kwargs (see K1VelocityConfig."
                         "_get_preset_kwargs) and retrain, or pass eval_cfgs manually."
                     )
                 return build_with_kwargs(cls, preset_kwargs)

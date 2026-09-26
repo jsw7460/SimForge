@@ -261,7 +261,7 @@ def main() -> None:
     action_offset = np.asarray(am._offset[0].detach().cpu().numpy(), dtype=float).tolist()
 
     # Sidecar metadata for the deploy repo. Joint names are written bare
-    # (simulator prefixes such as "K1_booster/" stripped), which is how the
+    # (simulator prefixes such as "K1/" stripped), which is how the
     # evaluator compares them too.
     canonical = metadata.get("canonical_joint_names") or list(am.actuated_joint_names)
     canonical = [n.rsplit("/", 1)[-1] for n in canonical]

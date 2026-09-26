@@ -287,7 +287,7 @@ class BaseRunner(ABC):
         config field can override them.
         """
         cfg = self.runner_cfg
-        # "...configs.presets.k1_joystick.no_heading" -> ("k1_joystick", "no_heading")
+        # "...configs.presets.k1_velocity.amp" -> ("k1_velocity", "amp")
         preset_path = self.cfgs.preset_module or ""
         _, _, preset_tail = preset_path.partition(".presets.")
         preset_tags = [part for part in preset_tail.split(".") if part and part != "base"]

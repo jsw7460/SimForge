@@ -1,0 +1,68 @@
+{
+  "source": "whirlwind-ams/lafan_locomotion_k1",
+  "revision": "8cb1332286a7d28d3f9ffc4c27bb2de3b861cbae",
+  "file": "data/motions.parquet",
+  "output_fps": 50.0,
+  "mjcf": "JaxRLWorld-private/jaxrlworld_private/assets/K1_booster/k1_booster.xml",
+  "joint_names": [
+    "Head_Yaw",
+    "Head_Pitch",
+    "Left_Shoulder_Pitch",
+    "Left_Shoulder_Roll",
+    "Left_Elbow_Pitch",
+    "Left_Elbow_Yaw",
+    "Right_Shoulder_Pitch",
+    "Right_Shoulder_Roll",
+    "Right_Elbow_Pitch",
+    "Right_Elbow_Yaw",
+    "Left_Hip_Pitch",
+    "Left_Hip_Roll",
+    "Left_Hip_Yaw",
+    "Left_Knee_Pitch",
+    "Left_Ankle_Pitch",
+    "Left_Ankle_Roll",
+    "Right_Hip_Pitch",
+    "Right_Hip_Roll",
+    "Right_Hip_Yaw",
+    "Right_Knee_Pitch",
+    "Right_Ankle_Pitch",
+    "Right_Ankle_Roll"
+  ],
+  "clips": [
+    {
+      "name": "run2_subject1_05",
+      "input_frames": 1068,
+      "output_frames": 1779
+    },
+    {
+      "name": "run2_subject1_06",
+      "input_frames": 670,
+      "output_frames": 1115
+    },
+    {
+      "name": "run2_subject1_07",
+      "input_frames": 1255,
+      "output_frames": 2090
+    },
+    {
+      "name": "walk3_subject2_01",
+      "input_frames": 470,
+      "output_frames": 782
+    },
+    {
+      "name": "walk3_subject2_02",
+      "input_frames": 2332,
+      "output_frames": 3885
+    },
+    {
+      "name": "walk3_subject2_03",
+      "input_frames": 316,
+      "output_frames": 525
+    },
+    {
+      "name": "walk3_subject2_04",
+      "input_frames": 998,
+      "output_frames": 1662
+    }
+  ]
+}

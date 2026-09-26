@@ -28,7 +28,7 @@ import torch._dynamo
 
 from jaxrlworld.rl.runners import BaseRunner
 
-_DEFAULT_PRESET = "jaxrlworld.rl.configs.presets.k1_joystick.g1_recipe:K1G1RecipeConfig"
+_DEFAULT_PRESET = "jaxrlworld.rl.configs.presets.k1_velocity.base:K1VelocityConfig"
 
 
 def _build_env(preset: str, sim: str, num_envs: int):

@@ -31,7 +31,7 @@ import torch
 from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
 from jaxrlworld.rl.envs.managers.genesis.contact_sensor import GenesisContactBatch
 
-_DEFAULT_PRESET = "jaxrlworld.rl.configs.presets.k1_joystick.g1_recipe:K1G1RecipeConfig"
+_DEFAULT_PRESET = "jaxrlworld.rl.configs.presets.k1_velocity.base:K1VelocityConfig"
 
 
 def _build_env(preset: str, num_envs: int):
