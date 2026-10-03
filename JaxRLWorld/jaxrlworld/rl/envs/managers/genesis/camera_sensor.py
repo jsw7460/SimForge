@@ -148,7 +148,9 @@ class GenesisCameraSensor:
         # image of the wrong moment and nothing about its shape or range
         # gives it away.
         _, depth, _, _ = self._camera.render(rgb=False, depth=True, force_render=True)
-        depth_tensor = depth if isinstance(depth, torch.Tensor) else torch.as_tensor(depth)
+        # Genesis no longer sets torch's global default device, so a NumPy
+        # depth (non-batched renderer) is placed on the env device here.
+        depth_tensor = depth if isinstance(depth, torch.Tensor) else torch.as_tensor(depth, device=self._env.device)
         # Genesis reports a ray that hit nothing as +inf; mjlab and
         # Newton report 0.0, and the observation term's contract is 0.0.
         # Left alone it poisons everything downstream — a mean becomes
