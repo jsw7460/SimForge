@@ -36,7 +36,7 @@ Query API
 fullmatch against the leaf segment) plus ``exclude`` (regex, search
 against the leaf) and return the matched **model-global** indices,
 world-major. The result is suitable for
-:class:`newton.sensors.SensorContact`'s ``sensing_obj_*`` /
+:class:`newton.sensors.SensorContact`'s ``sensing_*`` /
 ``counterpart_*`` kwargs.
 """
 

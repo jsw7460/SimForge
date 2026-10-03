@@ -129,9 +129,9 @@ class NewtonContactSensor:
 
         sensing_kwargs: dict[str, list[int]] = {}
         if cfg.primary.mode == "body":
-            sensing_kwargs["sensing_obj_bodies"] = primary_indices
+            sensing_kwargs["sensing_bodies"] = primary_indices
         else:
-            sensing_kwargs["sensing_obj_shapes"] = primary_indices
+            sensing_kwargs["sensing_shapes"] = primary_indices
 
         # ---- resolve secondary → counterpart whitelist (NO inversion) ----
         self._has_counterpart = cfg.secondary is not None
@@ -188,16 +188,16 @@ class NewtonContactSensor:
         )
 
         # ---- derive tracked names (world-0 order, from the native sensor) ----
-        obj_type = self._native.sensing_obj_type  # "body" | "shape"
+        obj_type = self._native.sensing_type  # "body" | "shape"
         label_list = model.body_label if obj_type == "body" else model.shape_label
-        n_total = len(self._native.sensing_obj_idx)
+        n_total = len(self._native.sensing_indices)
         if n_total % self.num_envs != 0:
             raise RuntimeError(
                 f"Newton backend: ContactSensorCfg {cfg.name!r} resolved {n_total} sensing objects "
                 f"which is not divisible by world_count={self.num_envs}; cannot derive per-env tracking."
             )
         self._n_per_env = n_total // self.num_envs
-        first_env_indices = self._native.sensing_obj_idx[: self._n_per_env]
+        first_env_indices = self._native.sensing_indices[: self._n_per_env]
         self._tracked_names: list[str] = [leaf_name(label_list[idx]) for idx in first_env_indices]
 
         # ---- substep history ring buffer ----------------------------
