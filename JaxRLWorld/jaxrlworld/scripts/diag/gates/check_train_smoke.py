@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -149,7 +150,15 @@ def main() -> int:
         if ckpt is None:
             problems.append(f"no checkpoint_{args.iters - 1}")
         status = "PASS" if not problems else "FAIL"
-        last = next((line for line in reversed(text.splitlines()) if line.strip()), "")
+        # The exception line, not the trailer some frameworks print after it
+        # (JAX's "internal frames removed" note, a CUDA abort banner).
+        lines = [line for line in text.splitlines() if line.strip()]
+        errors = [
+            line
+            for line in lines
+            if re.search(r"(Error|Exception|CUDA_ERROR_\w+)\b", line) and not line.startswith(" ")
+        ]
+        last = (errors or lines or [""])[-1]
         detail = "" if not problems else f"{', '.join(problems)} | {last[:150]}"
         print(f"[{status}] {r.label}:{r.sim}  ({secs:.0f}s)  {detail}", flush=True)
         results.append((r, status, secs, detail))
