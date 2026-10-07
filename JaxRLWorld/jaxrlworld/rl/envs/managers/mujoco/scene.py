@@ -215,6 +215,9 @@ class MujocoSceneManagerConfig:
     impratio: float = 1.0
     cone: Literal["pyramidal", "elliptic"] = "pyramidal"
     contact_sensor_maxmatch: int = 64
+    # MuJoCo Warp's in-kernel overflow / solver-budget warning print; see
+    # ``MujocoSceneConfig.warn_overflow``.
+    warn_overflow: bool = False
 
     # Legacy — set by mjlab_env for backward compat
     mjlab_scene_cfg: Any = None
@@ -476,6 +479,7 @@ class MujocoSceneManager(BaseManager):
                     disableflags=("nativeccd",),
                 ),
                 contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
+                warn_overflow=self.config.warn_overflow,
             )
 
         # Update physics dt (the per-substep dt used by MuJoCo internally)

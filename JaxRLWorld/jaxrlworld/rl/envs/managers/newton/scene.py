@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Dict, Literal
 
 import mujoco
+import mujoco_warp
 import newton
 import numpy as np
 import torch
@@ -1157,9 +1158,7 @@ class NewtonSceneManager(BaseManager):
             for i in silent:
                 flags[i] = int(flags[i]) & ~int(ShapeFlags.COLLIDE_SHAPES)
             if silent and build_summary_enabled():
-                print(
-                    f"[newton] collision masks: {len(silent)} shapes masked 0/0 " f"withdrawn from collision ({what})"
-                )
+                print(f"[newton] collision masks: {len(silent)} shapes masked 0/0 withdrawn from collision ({what})")
             colliding = [i for i in colliding if i not in silent]
 
         if len(colliding) < 2:
@@ -1181,10 +1180,7 @@ class NewtonSceneManager(BaseManager):
             return
         builder.shape_collision_filter_pairs.extend(pairs)
         if build_summary_enabled():
-            print(
-                f"[newton] collision masks: {len(pairs)} forbidden pairs "
-                f"({what}, {len(colliding)} colliding shapes)"
-            )
+            print(f"[newton] collision masks: {len(pairs)} forbidden pairs ({what}, {len(colliding)} colliding shapes)")
 
     def build_scene(self) -> None:
         """Build the complete scene with all entities replicated."""
@@ -1309,6 +1305,9 @@ class NewtonSceneManager(BaseManager):
                     disable_bits |= int(getattr(mujoco.mjtDisableBit, f"mjDSBL_{flag_name.upper()}"))
                 self.solver.mj_model.opt.disableflags |= disable_bits
                 self.solver.mjw_model.opt.disableflags |= disable_bits
+            # Same timing for the overflow print: mjwarp bakes the flag into
+            # the kernels it builds at the first step.
+            self.solver.mjw_model.opt.warn_overflow = int(mujoco_warp.OverflowType.ALL) if scfg.warn_overflow else 0
             # SolverMuJoCo is a reduced-coordinate solver: the authoritative
             # state lives in its own ``mjw_data`` (qpos/qvel) and the Newton
             # ``State`` is only an in/out sync surface, so passing the same

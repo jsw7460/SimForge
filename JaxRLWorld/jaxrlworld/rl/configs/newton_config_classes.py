@@ -94,6 +94,13 @@ class SolverMuJoCoCfg(BaseConfig):
     # the same collision pipeline on both mjwarp backends.
     disableflags: tuple[str, ...] = ()
 
+    # MuJoCo Warp prints from its kernels when a world overflows a buffer
+    # or exhausts a solver / line-search iteration budget. The print sits
+    # inside the captured CUDA graph, so a budget hit by most worlds every
+    # substep slows the step several-fold. Off by default, as before MuJoCo
+    # Warp 3.13 added the print; ``check_solver_convergence`` counts the hits.
+    warn_overflow: bool = False
+
 
 @dataclass
 class NewtonSceneConfig(BaseConfig):

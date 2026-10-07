@@ -17,8 +17,11 @@ Both MuJoCo Warp backends: ``--sim mujoco`` (mjlab) and ``--sim newton``
 (``SolverMuJoCo``). The preset's own solver settings are used unless
 ``--iterations`` / ``--ls-iterations`` override them, through the same
 config fields the presets set. The bitmask is cleared before every control
-step, so a hit is attributed to the step whose substeps produced it; the
-engine's warning print is switched off for the run.
+step, so a hit is attributed to the step whose substeps produced it. The
+engine's warning print is switched off through the scene config's
+``warn_overflow`` before the env is built: the kernels bake the flag in
+when they are first built and captured, so a flag set later is ignored on
+the GPU, and the print inside the captured graph would dominate the timing.
 
     python -m jaxrlworld.scripts.diag.perf.check_solver_convergence --preset g1_flat --sim mujoco
     python -m jaxrlworld.scripts.diag.perf.check_solver_convergence --preset g1_flat --sim mujoco --ls-iterations 50
@@ -46,11 +49,13 @@ BUFFER_BITS = {
 
 def _override(cfgs, sim: str, iterations: int | None, ls_iterations: int | None) -> None:
     if sim == "mujoco":
+        cfgs.scene.warn_overflow = False
         if iterations is not None:
             cfgs.scene.solver_iterations = iterations
         if ls_iterations is not None:
             cfgs.scene.solver_ls_iterations = ls_iterations
     else:
+        cfgs.scene.solver_cfg.warn_overflow = False
         if iterations is not None:
             cfgs.scene.solver_cfg.iterations = iterations
         if ls_iterations is not None:
@@ -81,8 +86,8 @@ def main() -> int:
     _override(cfgs, args.sim, args.iterations, args.ls_iterations)
     env = BaseRunner.create_with_env(cfgs, use_wandb=False).env
     model, data = _mjw(env, args.sim)
-    # The bits are read here; the engine's per-hit print would flood stdout.
-    model.opt.warn_overflow = 0
+    if model.opt.warn_overflow != 0:
+        raise RuntimeError(f"warn_overflow is {model.opt.warn_overflow}; the scene config did not reach the model")
     env.reset()
     overflow = wp.to_torch(data.overflow)
     print(

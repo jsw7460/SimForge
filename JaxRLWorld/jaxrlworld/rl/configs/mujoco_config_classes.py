@@ -82,6 +82,12 @@ class MujocoSceneConfig(BaseConfig):
     impratio: float = 1.0
     cone: Literal["pyramidal", "elliptic"] = "pyramidal"
     contact_sensor_maxmatch: int = 64
+    # MuJoCo Warp prints from its kernels when a world overflows a buffer
+    # or exhausts a solver / line-search iteration budget. The print sits
+    # inside the captured CUDA graph, so a budget hit by most worlds every
+    # substep slows the step several-fold. Off by default, as before MuJoCo
+    # Warp 3.13 added the print; ``check_solver_convergence`` counts the hits.
+    warn_overflow: bool = False
 
     # Preset info for auto-resolving non-serializable mjlab objects at eval time
     preset_class_name: str | None = None
