@@ -192,10 +192,14 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         entities={"robot": robot_entity},
         sensors=(feet_ground_cfg, self_collision_cfg),
         # Flat follows the Mjlab-Velocity-Flat-Unitree-G1 reference
-        # (iterations 10 / ls 20, njmax 300, nconmax auto); rough keeps
-        # the previously measured budgets.
-        solver_iterations=50 if cfg.use_rough_terrain else 10,
-        solver_ls_iterations=50 if cfg.use_rough_terrain else 20,
+        # (njmax 300, nconmax auto) except for the solver budget: the
+        # reference's iterations 10 / ls 20 leave the line search
+        # unconverged in ~75% of world-substeps and the Newton loop in
+        # ~1% (check_solver_convergence, 8192 envs, random actions);
+        # 20 / 50 converges every world at +3% step time. Rough keeps the
+        # previously measured budgets.
+        solver_iterations=50 if cfg.use_rough_terrain else 20,
+        solver_ls_iterations=50,
         ccd_iterations=50,
         nconmax=100 if cfg.use_rough_terrain else None,
         njmax=1500 if cfg.use_rough_terrain else 300,

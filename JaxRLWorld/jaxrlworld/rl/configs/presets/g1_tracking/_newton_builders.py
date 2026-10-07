@@ -130,8 +130,13 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         solver_type="mujoco",
         robot_cfg=r,
         solver_cfg=SolverMuJoCoCfg(
-            iterations=10,
-            ls_iterations=20,
+            # The reference's iterations 10 / ls 20 leave the line search
+            # unconverged in ~60% of world-substeps and the Newton loop in
+            # ~16% (check_solver_convergence, 8192 envs, random actions);
+            # 20 / 50 converges every world at +17% step time, all of it
+            # the Newton iterations the 10-cap used to cut short.
+            iterations=20,
+            ls_iterations=50,
             ccd_iterations=50,
             njmax=1500,
             # Per-env contact budget; mjwarp also caps BROADPHASE candidate

@@ -170,8 +170,12 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         robot_entity_name="robot",
         entities={"robot": robot_entity},
         sensors=(self_collision_cfg,),
-        solver_iterations=10,
-        solver_ls_iterations=20,
+        # The reference's iterations 10 / ls 20 leave the line search
+        # unconverged in ~68% of world-substeps and the Newton loop in
+        # ~2% (check_solver_convergence, 8192 envs, random actions);
+        # 20 / 50 converges every world at +1.4% step time.
+        solver_iterations=20,
+        solver_ls_iterations=50,
         ccd_iterations=50,
         nconmax=35,
         njmax=250,

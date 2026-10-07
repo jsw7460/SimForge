@@ -178,10 +178,15 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
 
     # Solver / arena settings are pinned to mjlab_playground's getup
     # task (src/mjlab_playground/getup/getup_env_cfg.py:252-261) so the
-    # MuJoCo path is bit-for-bit compatible with mjlab's reference
-    # implementation of fall-recovery:
-    #   njmax=200, impratio=10, cone=elliptic, iterations=10,
-    #   ls_iterations=20, ccd_iterations=default (50), nconmax=auto
+    # MuJoCo path follows mjlab's reference implementation of
+    # fall-recovery:
+    #   njmax=200, impratio=10, cone=elliptic, ccd_iterations=default
+    #   (50), nconmax=auto
+    # The one departure is the solver budget. The reference's
+    # iterations=10 / ls_iterations=20 leave the line search unconverged
+    # in ~70% of world-substeps and the Newton loop in ~1%
+    # (check_solver_convergence, 8192 envs, random actions); 20 / 50
+    # converges every world at +5% step time.
     return MujocoSceneConfig(
         physics_dt=physics_dt,
         substeps=substeps,
@@ -190,8 +195,8 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         robot_entity_name="robot",
         entities={"robot": robot_entity},
         sensors=(self_collision_cfg,),
-        solver_iterations=10,
-        solver_ls_iterations=20,
+        solver_iterations=20,
+        solver_ls_iterations=50,
         ccd_iterations=50,
         nconmax=None,  # mjlab_playground leaves this unset → auto
         njmax=200,  # mjlab_playground getup explicit value

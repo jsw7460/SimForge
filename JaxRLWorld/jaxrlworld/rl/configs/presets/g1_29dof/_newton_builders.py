@@ -158,8 +158,13 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
             # velocities were already coming back down. That is a constraint
             # solve failing to condition, not a joint diverging.
             impratio=1.0,
-            iterations=50 if cfg.use_rough_terrain else 10,
-            ls_iterations=50 if cfg.use_rough_terrain else 20,
+            # Flat ran the reference's iterations 10 / ls 20, which leave
+            # the line search unconverged in ~73% of world-substeps and
+            # the Newton loop in ~1% (check_solver_convergence, 8192 envs,
+            # random actions); 20 / 50 converges every world at +3% step
+            # time. Rough keeps the previously measured budgets.
+            iterations=50 if cfg.use_rough_terrain else 20,
+            ls_iterations=50,
             # Down from the canonical recipe's 50: under the new mjwarp
             # the EPA scratch is 6 arrays totalling num_envs x nconmax x
             # (280 + 132 x ccd_iterations) bytes -- 24.8 GB at 16384

@@ -96,8 +96,12 @@ def build_scene(cfg: K1VelocityConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         solver_cfg=SolverMuJoCoCfg(
             cone="pyramidal",
             impratio=1.0,
-            iterations=10,
-            ls_iterations=20,
+            # The source's iterations 10 / ls 20 leave the line search
+            # unconverged in ~24% of world-substeps
+            # (check_solver_convergence, 8192 envs, random actions);
+            # 20 / 50 converges every world at +0.1% step time.
+            iterations=20,
+            ls_iterations=50,
             ccd_iterations=50,
             # A full-body collision model with self-collision on generates far
             # more contact and constraint rows than the feet-only K1 asset, so

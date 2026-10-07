@@ -206,9 +206,12 @@ def build_scene(cfg: K1VelocityConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         cone="pyramidal",
         entities={"robot": robot_entity},
         sensors=(feet_ground, non_foot_ground, self_collision),
-        # The source's solver budget for this task.
-        solver_iterations=10,
-        solver_ls_iterations=20,
+        # The source's solver budget is iterations 10 / ls 20, which
+        # leaves the line search unconverged in ~27% of world-substeps
+        # (check_solver_convergence, 8192 envs, random actions); 20 / 50
+        # converges every world at +0.4% step time.
+        solver_iterations=20,
+        solver_ls_iterations=50,
         ccd_iterations=50,
         # Contact budgets are the source's flat-terrain values. A full-body
         # collision model with self-collision enabled generates far more
