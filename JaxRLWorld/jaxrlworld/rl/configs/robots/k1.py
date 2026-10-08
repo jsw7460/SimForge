@@ -218,12 +218,12 @@ class K1Config(RobotConfig):
         Each foot collides through one convex hull of its own mesh, not the
         sphere cluster the public K1 asset uses.
         """
-        return ("left_foot_collision", "right_foot_collision")
+        return "left_foot_collision", "right_foot_collision"
 
     @property
     def foot_site_names(self) -> tuple[str, ...]:
         """Foot reference sites (foot-link origin), left then right."""
-        return ("left_foot", "right_foot")
+        return "left_foot", "right_foot"
 
     @property
     def foot_sole_site_names(self) -> tuple[str, ...]:
@@ -233,7 +233,7 @@ class K1Config(RobotConfig):
         measured from them is ~3 cm smaller than the same target measured
         from :attr:`foot_site_names`.
         """
-        return ("left_foot_sole", "right_foot_sole")
+        return "left_foot_sole", "right_foot_sole"
 
     @property
     def non_foot_body_pattern(self) -> str:
@@ -243,3 +243,8 @@ class K1Config(RobotConfig):
         exact names rather than a substring.
         """
         return r"(?!left_foot_link$|right_foot_link$).*"
+
+    @property
+    def non_foot_geom_pattern(self) -> str:
+        """Every collision geom except the two feet's (the body shells)."""
+        return r"(?!left_foot_collision$|right_foot_collision$).*_collision"

@@ -92,6 +92,7 @@ _PUBLIC = [
     ("t1_tracking_tf", f"cls:{_P}.t1_tracking.transformer:T1TrackingTransformerConfig", _SIMS),
     ("k1_velocity", f"cls:{_P}.k1_velocity.base:K1VelocityConfig", _SIMS),
     ("k1_amp", f"cls:{_P}.k1_velocity.amp:K1AmpConfig", _SIMS),
+    ("k1_getup", f"cls:{_P}.k1_getup.base:K1GetupConfig", _SIMS),
     ("yam_lift", f"cls:{_P}.yam_lift.base:YamLiftConfig", _SIMS),
     ("yam_lift_vision", f"cls:{_P}.yam_lift.vision:YamLiftVisionConfig", ("mujoco",)),
     ("yam_dual", f"cls:{_P}.yam_dual.base:YamDualArmConfig", _SIMS),
