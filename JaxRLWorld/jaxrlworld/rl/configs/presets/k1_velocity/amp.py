@@ -17,3 +17,7 @@ from jaxrlworld.rl.configs.presets.k1_velocity.base import K1VelocityConfig
 class K1AmpConfig(K1VelocityConfig):
     use_amp: bool = True
     algorithm_name: str = "AMP_PPO"
+    # The prior was tuned without mirror augmentation; keep the source's
+    # plain actor head and minibatches here.
+    symmetry_data_augmentation: bool = False
+    actor_output_gain: float = 1.0

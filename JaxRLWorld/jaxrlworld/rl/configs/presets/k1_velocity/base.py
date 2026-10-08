@@ -266,10 +266,12 @@ class K1VelocityConfig:
     # Left/right symmetry (Mittal et al. 2024). The source's "-DA" tasks double
     # each minibatch with mirrored samples; that is symmetry_data_augmentation
     # here. The auxiliary mirror loss is the paper's weaker alternative and is
-    # kept as a separate switch. Both default off, matching the source's plain
-    # "Flat-Booster-K1" task.
+    # kept as a separate switch. Augmentation is on by default: the mirrored
+    # rows' ratio is the policy's own left/right asymmetry, so the actor head
+    # starts small (actor_output_gain) to keep those ratios inside the clip.
     mirror_symmetry_coeff: float = 0.0
-    symmetry_data_augmentation: bool = False
+    symmetry_data_augmentation: bool = True
+    actor_output_gain: float = 0.01
 
     # ── Adversarial motion prior ─────────────────────────────────────
     # The source's "-Amp" tasks add an ``amp`` observation group the
@@ -884,19 +886,21 @@ class K1VelocityConfig:
         return motion_files
 
     def _build_algorithm_config(self) -> PPOConfig:
+        # PPO recipe from the mujoco hyperparameter search with mirror data
+        # augmentation (2000-iteration budget, scored on the mean return).
         ppo = dict(
-            clip_param=0.2,
+            clip_param=0.2224,
             obs_normalization=True,
-            entropy_coef=0.01,
+            entropy_coef=0.00289387,
             gamma=0.99,
             lam=0.95,
-            actor_lr=1.0e-3,
-            critic_lr=1.0e-3,
+            actor_lr=1.21684e-3,
+            critic_lr=1.21684e-3,
             max_grad_norm=1.0,
-            num_learning_epochs=5,
+            num_learning_epochs=8,
             num_mini_batches=4,
             schedule="adaptive",
-            desired_kl=0.01,
+            desired_kl=0.011698,
             use_clipped_value_loss=True,
             value_loss_coef=1.0,
             symmetry_cfg=SymmetryConfig(
@@ -941,7 +945,7 @@ class K1VelocityConfig:
             policy=PPOPolicyConfig(
                 actor=MLPActorCfg(
                     activation=Activation.ELU,
-                    init=OrthoInit(output_gain=1.0),
+                    init=OrthoInit(output_gain=self.actor_output_gain),
                     hidden_dims=list(self.actor_hidden_dims),
                 ),
                 critic=MLPCriticCfg(
