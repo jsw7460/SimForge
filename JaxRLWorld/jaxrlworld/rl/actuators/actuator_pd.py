@@ -149,11 +149,23 @@ class IdealPDActuator(ActuatorBase):
         return computed, applied, lpf_state
 
     def _clip_effort_tn(self, effort: torch.Tensor, joint_vel: torch.Tensor) -> torch.Tensor:
-        """Piecewise-linear torque-speed clip (booster_train T-N curve): the
-        deliverable torque is ``effort_limit`` for ``|vel| <= knee_point``, then
-        ramps linearly to 0 at ``velocity_limit``."""
+        """Piecewise-linear torque-speed clip (booster_train T-N curve).
+
+        Torque that DRIVES the joint on in its direction of motion is bounded
+        by the curve: ``effort_limit`` for ``|vel| <= knee_point``, then a
+        linear ramp to 0 at ``velocity_limit``. Torque AGAINST the motion
+        (braking) is bounded by ``effort_limit`` alone.
+
+        The source clips both directions by the curve, which leaves a joint
+        past its velocity limit with no torque at all: it coasts, bounces off
+        its position limit and, with no passive damping, never stops (the K1
+        head yaw did exactly this after a getup). A motor's torque-speed curve
+        is a limit on driving torque; braking torque is available at any speed.
+        """
         tau_linear = self.effort_limit * (self._vel_limit - joint_vel.abs()) / self._tn_denom
-        max_effort = torch.minimum(tau_linear.clamp(min=0.0), self.effort_limit)
+        driving_max = torch.minimum(tau_linear.clamp(min=0.0), self.effort_limit)
+        braking = effort * joint_vel < 0.0
+        max_effort = torch.where(braking, self.effort_limit, driving_max)
         return torch.clip(effort, min=-max_effort, max=max_effort)
 
 

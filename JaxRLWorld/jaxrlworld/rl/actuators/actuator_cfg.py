@@ -96,9 +96,12 @@ class IdealPDActuatorCfg(ActuatorBaseCfg):
     tau_scale: float | dict[str, float] | None = None
 
     # Piecewise-linear torque-speed (T-N) curve. When BOTH ``velocity_limit``
-    # and ``knee_point_velocity`` are set, the deliverable torque is full
-    # ``effort_limit`` for |vel| <= knee_point, then ramps linearly to zero at
-    # ``velocity_limit`` (booster_train BoosterDelayedPDActuator). Same
+    # and ``knee_point_velocity`` are set, the torque driving the joint on in
+    # its direction of motion is full ``effort_limit`` for |vel| <= knee_point,
+    # then ramps linearly to zero at ``velocity_limit`` (booster_train
+    # BoosterDelayedPDActuator); torque against the motion stays bounded by
+    # ``effort_limit`` (a departure from the source, which clips both
+    # directions -- see ``IdealPDActuator._clip_effort_tn``). Same
     # scalar-or-dict format as ``stiffness``. ``None`` ⇒ plain box clip.
     knee_point_velocity: float | dict[str, float] | None = None
 
