@@ -354,15 +354,17 @@ def build_dr_terms(cfg: Go2FlatConfig) -> Dict[str, EventTermConfig]:
             mode="interval_dr",
             interval_dr_period_s=_DR_INTERVAL_PERIOD_S,
             params={
-                # mjlab parity: mjlab abs (0.3, 1.2) divided by the mjcf
-                # class-default foot friction 0.4 → ratio (0.75, 3.0).
-                # Genesis's set_friction_ratio multiplies the mjcf-derived
-                # default by this ratio, so the effective contact friction
-                # range matches mjlab's abs DR. foot 4 link only,
-                # shared_random so all four feet get the same ratio
-                # within an env (mjlab shared_random=True parity).
+                # mjlab parity: mjlab abs (0.3, 1.2) divided by the asset's
+                # foot friction 0.6 (``go2.xml`` foot class, the value mjlab
+                # runs the feet at) → ratio (0.5, 2.0). Genesis's
+                # set_friction_ratio multiplies the mjcf-derived default by
+                # this ratio, so the effective contact friction range
+                # matches mjlab's abs DR. The ratio was computed against a
+                # stale 0.4 for a while, which put this cell on (0.45, 1.8).
+                # foot 4 link only, shared_random so all four feet get the
+                # same ratio within an env (mjlab shared_random=True parity).
                 "asset_cfg": SceneEntitySelector(name="robot", body_names=tuple(cfg.robot.foot_names)),
-                "friction_range": (0.75, 3.0),
+                "friction_range": (0.5, 2.0),
                 "operation": "scale",
                 "shared_random": True,
             },
