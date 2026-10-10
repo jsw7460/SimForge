@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, Dict
 from mjlab.asset_zoo.robots import G1_ACTION_SCALE as MJLAB_G1_ACTION_SCALE
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import get_spec as g1_get_spec
 
-from jaxrlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg
 from jaxrlworld.rl.configs import RewardConfig, TerminationTermConfig
 from jaxrlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -32,6 +31,7 @@ from jaxrlworld.rl.configs.mujoco_config_classes import (
 )
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from jaxrlworld.rl.configs.presets.g1_29dof._actuator_recipe import actuator_recipe
 from jaxrlworld.rl.configs.rewards import RewardTermConfig
 from jaxrlworld.rl.configs.scene import SceneEntitySelector
 from jaxrlworld.rl.configs.scene.unified_entity_config import (
@@ -144,6 +144,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         history_length=timing["decimation"],
     )
 
+    ActuatorCls, _delay_kwargs = actuator_recipe(cfg)
     robot_entity = MujocoEntityCfg(
         urdf_path=r.urdf_path,
         init_state=InitialStateCfg(
@@ -153,27 +154,19 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         floating=True,
         articulation=ArticulationCfg(
             actuators=(
-                # Flat follows the Mjlab-Velocity-Flat-Unitree-G1 reference:
-                # builtin position actuators (PD inside mjwarp). The
-                # explicit torch PD with command delay ran per substep and
-                # cost ~0.4 ms/step at 16384 envs on top of the solver.
-                # Rough keeps the DelayedPD sim2real modeling.
-                ImplicitActuatorCfg(
+                # Actuator class shared with the Newton / Genesis builders
+                # (see ``_actuator_recipe``). ``effort_limit`` is the per-motor
+                # torque ceiling mjlab's G1 reference clamps at (25 / 88 /
+                # 139 / 5 N·m); without it the asset has no actuatorfrcrange
+                # and the policy could command unbounded torque.
+                ActuatorCls(
                     target_names_expr=(".*",),
                     stiffness=r.p_gains,
                     damping=r.d_gains,
                     armature=r.armature,
+                    effort_limit=r.effort_limits,
                     frictionloss=0.3,
-                )
-                if not cfg.use_rough_terrain
-                else DelayedPDActuatorCfg(
-                    target_names_expr=(".*",),
-                    stiffness=r.p_gains,
-                    damping=r.d_gains,
-                    armature=r.armature,
-                    frictionloss=0.3,
-                    min_delay=0,
-                    max_delay=2,
+                    **_delay_kwargs,
                 ),
             ),
         ),

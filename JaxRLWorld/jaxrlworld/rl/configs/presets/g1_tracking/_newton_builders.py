@@ -172,6 +172,10 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
+                            # mjlab's per-motor torque ceiling; the asset has
+                            # no actuatorfrcrange, so without it torque is
+                            # unbounded.
+                            effort_limit=r.effort_limits,
                         ),
                     ),
                 ),

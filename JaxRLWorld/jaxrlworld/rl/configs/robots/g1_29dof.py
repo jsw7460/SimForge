@@ -186,6 +186,33 @@ class G1MujocoConfig(RobotConfig):
         }
     )
 
+    # Per-motor torque ceilings, the values mjlab's G1 reference clamps at
+    # (``g1_constants.py``: 5020 → 25, 7520_14 → 88, 7520_22 → 139, 4010 → 5,
+    # waist / ankle 4-bar linkages → 2 × 5020). Keyed like ``p_gains`` so the
+    # mjlab builder expands them onto the same per-pattern actuators. The
+    # asset itself carries no ``actuatorfrcrange``, so without this the
+    # actuators run unbounded on every backend.
+    effort_limits: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_pitch_joint": EFFORT_7520_14,
+            ".*_hip_yaw_joint": EFFORT_7520_14,
+            ".*waist_yaw_joint": EFFORT_7520_14,
+            ".*_hip_roll_joint": EFFORT_7520_22,
+            ".*_knee_joint": EFFORT_7520_22,
+            ".*waist_pitch_joint": EFFORT_WAIST,
+            ".*waist_roll_joint": EFFORT_WAIST,
+            ".*_ankle_pitch_joint": EFFORT_ANKLE,
+            ".*_ankle_roll_joint": EFFORT_ANKLE,
+            ".*_shoulder_pitch_joint": EFFORT_5020,
+            ".*_shoulder_roll_joint": EFFORT_5020,
+            ".*_shoulder_yaw_joint": EFFORT_5020,
+            ".*_elbow_joint": EFFORT_5020,
+            ".*_wrist_roll_joint": EFFORT_5020,
+            ".*_wrist_pitch_joint": EFFORT_4010,
+            ".*_wrist_yaw_joint": EFFORT_4010,
+        }
+    )
+
     foot_names: List[str] = field(default_factory=lambda: ["left_ankle_roll_link", "right_ankle_roll_link"])
 
     # ── Per-joint PD overrides (Newton only, default None = legacy) ──

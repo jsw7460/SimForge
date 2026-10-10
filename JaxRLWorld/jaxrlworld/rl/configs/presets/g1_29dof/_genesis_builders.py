@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Dict
 
 import genesis as gs
 
-from jaxrlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg
 from jaxrlworld.rl.configs import TerminationTermConfig
 from jaxrlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -31,6 +30,7 @@ from jaxrlworld.rl.configs.genesis_config_classes import (
 )
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from jaxrlworld.rl.configs.presets.g1_29dof._actuator_recipe import actuator_recipe
 from jaxrlworld.rl.configs.rewards import RewardTermConfig
 from jaxrlworld.rl.configs.robots.g1_29dof import G1_ACTION_SCALE
 from jaxrlworld.rl.configs.scene import SceneEntitySelector
@@ -109,6 +109,7 @@ def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> EnvConfig:
 def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
     r = cfg.robot
     sim_dt = timing["dt"]
+    ActuatorCls, _delay_kwargs = actuator_recipe(cfg)
 
     return SceneConfig(
         entities={
@@ -121,26 +122,17 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
                 floating=True,
                 articulation=ArticulationCfg(
                     actuators=(
-                        # Flat follows the Mjlab-Velocity-Flat-Unitree-G1
-                        # reference: implicit (simulator-internal) PD, no
-                        # command delay. Rough keeps the DelayedPD
-                        # sim2real modeling.
-                        ImplicitActuatorCfg(
+                        # Actuator class shared with the MuJoCo / Newton
+                        # builders (see ``_actuator_recipe``); effort_limit
+                        # is mjlab's per-motor torque ceiling.
+                        ActuatorCls(
                             target_names_expr=(".*",),
                             stiffness=r.p_gains,
                             damping=r.d_gains,
                             armature=r.armature,
+                            effort_limit=r.effort_limits,
                             frictionloss=0.3,
-                        )
-                        if not cfg.use_rough_terrain
-                        else DelayedPDActuatorCfg(
-                            target_names_expr=(".*",),
-                            stiffness=r.p_gains,
-                            damping=r.d_gains,
-                            armature=r.armature,
-                            frictionloss=0.3,
-                            min_delay=0,
-                            max_delay=2,
+                            **_delay_kwargs,
                         ),
                     ),
                 ),

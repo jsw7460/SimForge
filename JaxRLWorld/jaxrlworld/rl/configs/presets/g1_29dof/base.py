@@ -136,12 +136,15 @@ class G1FlatConfig:
     run_name: str | None = None
 
     # ── Actuator model ────────────────────────────────────────────────
-    # Newton only. False (default) keeps the trained DelayedPD actuator
-    # (command delay) so existing training/eval is bit-identical. True
-    # swaps in IdealPDActuatorCfg (explicit PD, no delay) — used by the
-    # explicit-PD collection arm so kp/kd map onto a clean
-    # explicit-PD torque path (matches the Go2 setup).
-    use_ideal_pd_actuator: bool = True
+    # Read by all three scene builders through ``actuator_recipe``. False
+    # (default) is the training plant: implicit (engine-side) position
+    # actuators on flat, DelayedPD (command delay 0..2 substeps) on rough.
+    # True swaps in IdealPDActuatorCfg (explicit PD, no delay) for the
+    # explicit-PD collection arm, so kp/kd map onto a clean torque path.
+    # This used to default to True while only the Newton builder read it,
+    # which gave Newton a different actuator from MuJoCo / Genesis on every
+    # build that did not go through ``mlp.get_config``.
+    use_ideal_pd_actuator: bool = False
 
     # ── Rough terrain ─────────────────────────────────────────────────
     use_rough_terrain: bool = False
