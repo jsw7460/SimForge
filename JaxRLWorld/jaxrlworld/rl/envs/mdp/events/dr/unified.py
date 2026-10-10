@@ -751,10 +751,8 @@ def _selected_joint_ids(env, asset_cfg) -> torch.Tensor | None:
     return asset_cfg.joint_ids
 
 
-def _slice_dofs(values: torch.Tensor, sel: torch.Tensor | None) -> torch.Tensor:
+def _slice_dofs(values: torch.Tensor, sel: torch.Tensor) -> torch.Tensor:
     """Select DOF columns from a per-DOF tensor of shape ``(n,)`` or ``(B, n)``."""
-    if sel is None:
-        return values
     return values[sel] if values.dim() == 1 else values[:, sel]
 
 
@@ -772,6 +770,20 @@ def _newton_dof_view(values: torch.Tensor) -> torch.Tensor:
     if values.dim() == 3 and values.shape[1] == 1:
         return values[:, 0]
     raise NotImplementedError(f"Unexpected Newton view attribute shape {tuple(values.shape)}")
+
+
+def _newton_cols(env, selected: torch.Tensor | None) -> torch.Tensor:
+    """Per-env DOF columns of a Newton view attribute for a canonical joint subset.
+
+    ``None`` (no ``joint_names`` on the selector) means every ACTUATED joint,
+    which is still a column subset: the robot's ``ArticulationView`` spans
+    every joint of the articulation including the floating base's six DOFs,
+    so writing a whole row would put joint friction / damping / armature on
+    the base. mjlab's counterparts address ``joint_v_adr``, which excludes
+    the free joint, so this keeps the three backends on the same DOFs.
+    """
+    qd_indices = env.act_manager.indexing.newton_qd_indices
+    return qd_indices if selected is None else qd_indices[selected]
 
 
 def _genesis_require_batched_links_info(entity, term_name: str) -> None:
@@ -827,8 +839,14 @@ def _genesis_sel_dofs(env, resolved):
     if hit is not None:
         return hit
     selected = _selected_joint_ids(env, resolved)
-    sel_dofs = None if selected is None else env.act_manager.indexing.sim_indices[selected]
-    sel_np = None if sel_dofs is None else sel_dofs.cpu().numpy()
+    # No ``joint_names`` means every ACTUATED dof, never ``dofs_idx_local=None``:
+    # to Genesis that is the entity's whole dof list, floating base included,
+    # so joint friction / damping / armature DR would land on the base's six
+    # dofs on this backend only (mjlab's ``joint_v_adr`` excludes the free
+    # joint).
+    sim_indices = env.act_manager.indexing.sim_indices
+    sel_dofs = sim_indices if selected is None else sim_indices[selected]
+    sel_np = sel_dofs.cpu().numpy()
     _GENESIS_SEL_DOFS_CACHE[resolved] = (sel_dofs, sel_np)
     return sel_dofs, sel_np
 
@@ -840,9 +858,10 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
             f"(got {operation!r}); set_dofs_kp/kv take absolute values."
         )
     entity = env.scene_manager[resolved.name]
-    # Canonical joint subset -> Genesis local dof indices (None = all dofs).
+    # Canonical joint subset -> Genesis local dof indices (all actuated dofs
+    # when the selector names no joints).
     sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
-    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
+    n_sel = len(sel_dofs)
     # Values are passed as device tensors: Genesis's setters run them
     # through ``torch.as_tensor(..., device=gs.device)``, so a numpy
     # detour costs a D2H sync plus an H2D upload for nothing.
@@ -868,29 +887,21 @@ def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
     # Canonical joint subset -> per-env dof columns of the view attributes
-    # (same mapping RobotData uses; None = all dofs).
-    selected = _selected_joint_ids(env, asset_cfg)
-    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
+    # (same mapping RobotData uses; the actuated columns when no subset).
+    cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
     notify = False
     for attr_name, value_range in (("joint_target_ke", kp_range), ("joint_target_kd", kd_range)):
         if value_range is None:
             continue
         values = wp.to_torch(view.get_attribute(attr_name, model))
         defaults = getattr(env._dr_baselines, attr_name)
-        if cols is None:
-            sampled = sample((len(env_ids),) + values.shape[1:], *value_range, env.device, distribution)
-            if operation == "abs":
-                values[env_ids] = sampled
-            else:
-                values[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+        vals2d = _newton_dof_view(values)
+        defs2d = _newton_dof_view(defaults)
+        sampled = sample((len(env_ids), len(cols)), *value_range, env.device, distribution)
+        if operation == "abs":
+            vals2d[env_ids[:, None], cols[None, :]] = sampled
         else:
-            vals2d = _newton_dof_view(values)
-            defs2d = _newton_dof_view(defaults)
-            sampled = sample((len(env_ids), len(cols)), *value_range, env.device, distribution)
-            if operation == "abs":
-                vals2d[env_ids[:, None], cols[None, :]] = sampled
-            else:
-                vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+            vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
         view.set_attribute(attr_name, model, values)
         notify = True
     if notify:
@@ -1009,7 +1020,7 @@ def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation,
         raise NotImplementedError(f"Genesis joint_armature DR only supports operation='scale' (got {operation!r}).")
     entity = env.scene_manager[resolved.name]
     sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
-    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
+    n_sel = len(sel_dofs)
     base = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "armature", entity.get_dofs_armature), sel_dofs)
     ratios = sample((len(env_ids), n_sel), *armature_range, env.device, distribution)
     arm_new = (base * ratios) if base.dim() == 1 else (base[env_ids] * ratios)
@@ -1026,24 +1037,16 @@ def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
-    selected = _selected_joint_ids(env, asset_cfg)
-    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
+    cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
     armature = wp.to_torch(view.get_attribute("joint_armature", model))
     defaults = env._dr_baselines.joint_armature
-    if cols is None:
-        sampled = sample((len(env_ids),) + armature.shape[1:], *armature_range, env.device, distribution)
-        if operation == "abs":
-            armature[env_ids] = sampled
-        else:
-            armature[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+    vals2d = _newton_dof_view(armature)
+    defs2d = _newton_dof_view(defaults)
+    sampled = sample((len(env_ids), len(cols)), *armature_range, env.device, distribution)
+    if operation == "abs":
+        vals2d[env_ids[:, None], cols[None, :]] = sampled
     else:
-        vals2d = _newton_dof_view(armature)
-        defs2d = _newton_dof_view(defaults)
-        sampled = sample((len(env_ids), len(cols)), *armature_range, env.device, distribution)
-        if operation == "abs":
-            vals2d[env_ids[:, None], cols[None, :]] = sampled
-        else:
-            vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+        vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
     view.set_attribute("joint_armature", model, armature)
     _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
@@ -1107,7 +1110,7 @@ def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, oper
         )
     entity = env.scene_manager[resolved.name]
     sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
-    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
+    n_sel = len(sel_dofs)
     values = sample((len(env_ids), n_sel), *friction_range, env.device, distribution)
     entity.set_dofs_frictionloss(
         frictionloss=values,
@@ -1122,24 +1125,16 @@ def _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
-    selected = _selected_joint_ids(env, asset_cfg)
-    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
+    cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
     friction = wp.to_torch(view.get_attribute("joint_friction", model))
     defaults = env._dr_baselines.joint_friction
-    if cols is None:
-        sampled = sample((len(env_ids),) + friction.shape[1:], *friction_range, env.device, distribution)
-        if operation == "abs":
-            friction[env_ids] = sampled
-        else:
-            friction[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+    vals2d = _newton_dof_view(friction)
+    defs2d = _newton_dof_view(defaults)
+    sampled = sample((len(env_ids), len(cols)), *friction_range, env.device, distribution)
+    if operation == "abs":
+        vals2d[env_ids[:, None], cols[None, :]] = sampled
     else:
-        vals2d = _newton_dof_view(friction)
-        defs2d = _newton_dof_view(defaults)
-        sampled = sample((len(env_ids), len(cols)), *friction_range, env.device, distribution)
-        if operation == "abs":
-            vals2d[env_ids[:, None], cols[None, :]] = sampled
-        else:
-            vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+        vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
     view.set_attribute("joint_friction", model, friction)
     _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
@@ -1209,7 +1204,7 @@ def _genesis_joint_damping_backend(env, env_ids, resolved, damping_range, operat
         )
     entity = env.scene_manager[resolved.name]
     sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
-    n_sel = entity.n_dofs if sel_dofs is None else len(sel_dofs)
+    n_sel = len(sel_dofs)
     values = sample((len(env_ids), n_sel), *damping_range, env.device, distribution)
     entity.set_dofs_damping(
         damping=values,
@@ -1224,27 +1219,18 @@ def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
-    selected = _selected_joint_ids(env, asset_cfg)
-    cols = None if selected is None else env.act_manager.indexing.newton_qd_indices[selected]
+    cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
     damping = wp.to_torch(view.get_attribute("joint_damping", model))
     # abs replaces the value outright, so no baseline is needed (newton's DR
     # baseline snapshot does not capture joint_damping); only the scale/add
     # paths dereference it.
-    if cols is None:
-        sampled = sample((len(env_ids),) + damping.shape[1:], *damping_range, env.device, distribution)
-        if operation == "abs":
-            damping[env_ids] = sampled
-        else:
-            defaults = env._dr_baselines.joint_damping
-            damping[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
+    vals2d = _newton_dof_view(damping)
+    sampled = sample((len(env_ids), len(cols)), *damping_range, env.device, distribution)
+    if operation == "abs":
+        vals2d[env_ids[:, None], cols[None, :]] = sampled
     else:
-        vals2d = _newton_dof_view(damping)
-        sampled = sample((len(env_ids), len(cols)), *damping_range, env.device, distribution)
-        if operation == "abs":
-            vals2d[env_ids[:, None], cols[None, :]] = sampled
-        else:
-            defs2d = _newton_dof_view(env._dr_baselines.joint_damping)
-            vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
+        defs2d = _newton_dof_view(env._dr_baselines.joint_damping)
+        vals2d[env_ids[:, None], cols[None, :]] = apply_operation(defs2d[env_ids][:, cols], sampled, operation)
     view.set_attribute("joint_damping", model, damping)
     _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
