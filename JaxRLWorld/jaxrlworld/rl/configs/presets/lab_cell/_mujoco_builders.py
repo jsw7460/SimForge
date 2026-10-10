@@ -78,6 +78,8 @@ def build_scene(cfg: LabCellConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
             soft_joint_pos_limit_factor=0.9,
         ),
         spec_fn=go2_get_spec,
+        # Off for this cell's quadruped on the Newton and Genesis builders too.
+        enable_self_collisions=False,
     )
     # Two robots' limits and contacts against one buffer; an overflow
     # prints nefc overflow and silently DROPS constraints.

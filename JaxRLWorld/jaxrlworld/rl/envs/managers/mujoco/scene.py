@@ -168,6 +168,29 @@ def _rigid_object_spec_fn(source_path: str, floating: bool):
     return spec_fn
 
 
+def _spec_fn_without_self_collisions(spec_fn: Callable) -> Callable:
+    """Wrap an entity ``spec_fn`` so no two bodies of that entity collide.
+
+    mjlab has no self-collision switch: the model's own ``contype`` /
+    ``conaffinity`` decide, and the arm assets leave every pair enabled.
+    Newton reads ``EntityCfg.enable_self_collisions`` and Genesis has its
+    scene-wide ``enable_self_collision``, so a preset that turned it off
+    there still paid for, and felt, intra-entity contacts on this backend.
+    A ``<contact><exclude>`` per body pair is MuJoCo's spelling of the same
+    switch; ``MjSpec.attach`` prefixes the pair's body names with the rest.
+    """
+
+    def wrapped():
+        spec = spec_fn()
+        bodies = [body for body in spec.bodies if body.name != "world"]
+        for i, body_a in enumerate(bodies):
+            for body_b in bodies[i + 1 :]:
+                spec.add_exclude(name=f"{body_a.name}-{body_b.name}", bodyname1=body_a.name, bodyname2=body_b.name)
+        return spec
+
+    return wrapped
+
+
 @dataclass
 class MujocoSceneManagerConfig:
     """Internal config consumed by MujocoSceneManager.
@@ -626,6 +649,8 @@ class MujocoSceneManager(BaseManager):
                 from jaxrlworld.rl.utils.resolve import resolve_callable
 
                 spec_fn = resolve_callable(spec_fn)
+            if not cfg.enable_self_collisions:
+                spec_fn = _spec_fn_without_self_collisions(spec_fn)
             mjlab_cfg = MjlabEntityCfg(
                 init_state=init_state,
                 spec_fn=spec_fn,

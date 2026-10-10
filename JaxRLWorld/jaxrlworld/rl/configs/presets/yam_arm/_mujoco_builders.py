@@ -138,6 +138,10 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         # mjlab builds articulations from a spec function, not a path.
         spec_fn=YamSpecFn(mjcf_path=r.mjcf_path),
         mjcf_path=r.mjcf_path,
+        # The arm's own links cannot reach each other in the poses this
+        # preset visits, and self-collision is the dominant cost; off on
+        # all three backends (Genesis: RigidOptions.enable_self_collision).
+        enable_self_collisions=False,
     )
 
     return MujocoSceneConfig(
