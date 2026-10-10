@@ -757,13 +757,10 @@ class K1VelocityConfig:
 
         terms: Dict[str, EventTermConfig] = {
             "dr_foot_friction": friction_term,
-            # The trunk carries the payload, so its mass and COM move further
-            # than the limbs'.
-            "dr_trunk_mass": EventTermConfig(
-                func=unified_dr.randomize_body_mass,
-                mode="reset_dr",
-                params={"asset_cfg": trunk, "mass_range": (0.95, 1.05), "operation": "scale"},
-            ),
+            # The trunk carries the payload, so its COM moves further than the
+            # limbs'. Its mass is drawn by ``dr_link_mass`` below along with
+            # every other link's; a trunk-only mass term ahead of it would be
+            # overwritten, since every backend scales from the asset default.
             "dr_trunk_com": EventTermConfig(
                 func=unified_dr.randomize_body_com_offset,
                 mode="reset_dr",
