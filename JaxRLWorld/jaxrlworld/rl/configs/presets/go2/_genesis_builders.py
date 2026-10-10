@@ -233,6 +233,13 @@ def build_action(cfg: Go2FlatConfig) -> ActionConfig:
 
 
 def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
+    # Above the class, not in its body: a class attribute that is not a term
+    # is serialized with the reward config and refuses to restore on a
+    # backend whose builder lacks it.
+    feet_selector = SceneEntitySelector(
+        name="robot", body_names=("FR_foot", "FL_foot", "RR_foot", "RL_foot"), preserve_order=True
+    )
+
     @dataclass
     class _RewardsCfg(RewardConfig):
         # Tracking rewards (common — uses RobotData interface)
@@ -276,9 +283,6 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             },
         )
 
-        feet_selector = SceneEntitySelector(
-            name="robot", body_names=("FR_foot", "FL_foot", "RR_foot", "RL_foot"), preserve_order=True
-        )
         feet_swing_height = RewardTermConfig(
             func=rf_mjlab.feet_swing_height_mjlab,
             weight=0.25,

@@ -337,6 +337,10 @@ def build_action(cfg: Go2FlatConfig) -> NewtonActionConfig:
 def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
     r = cfg.robot
     feet = list(r.foot_names)
+    # Above the class, not in its body: a class attribute that is not a term
+    # is serialized with the reward config and refuses to restore on a
+    # backend whose builder lacks it.
+    feet_selector = SceneEntitySelector(name="robot", body_names=tuple(feet), preserve_order=True)
 
     @dataclass
     class _RewardsCfg(RewardConfig):
@@ -377,7 +381,6 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
                 "running_threshold": 1.5,
             },
         )
-        feet_selector = SceneEntitySelector(name="robot", body_names=tuple(feet), preserve_order=True)
         feet_swing_height = RewardTermConfig(
             func=rf_mjlab.feet_swing_height_mjlab,
             weight=0.25,

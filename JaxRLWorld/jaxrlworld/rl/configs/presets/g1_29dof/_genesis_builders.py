@@ -259,6 +259,20 @@ def build_action(cfg: G1FlatConfig) -> ActionConfig:
 
 def build_reward(cfg: G1FlatConfig) -> RewardConfig:
     feet_links = ["left_ankle_roll_link", "right_ankle_roll_link"]
+    # Feet rewards — position/velocity reads use the foot-pad frame body
+    # (welded child of ankle_roll_link at +0.04m fore / -0.037m sole;
+    # matches mjlab's `left_foot` site so values agree across sims).
+    # Contacts still come from ankle_roll_link (the frame body has no
+    # collision geom), so we pass contact_order explicitly.
+    # Above the class, not in its body: a class attribute that is not a term
+    # is serialized with the reward config and refuses to restore on a
+    # backend whose builder lacks it.
+    feet_selector = SceneEntitySelector(
+        name="robot",
+        body_names=("left_foot_frame", "right_foot_frame"),
+        preserve_order=True,
+    )
+    feet_contact_order = list(feet_links)
 
     @dataclass
     class _RewardsCfg(RewardConfig):
@@ -350,17 +364,6 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             weight=0.1,
         )
 
-        # Feet rewards — position/velocity reads use the foot-pad frame body
-        # (welded child of ankle_roll_link at +0.04m fore / -0.037m sole;
-        # matches mjlab's `left_foot` site so values agree across sims).
-        # Contacts still come from ankle_roll_link (the frame body has no
-        # collision geom), so we pass contact_order explicitly.
-        feet_selector = SceneEntitySelector(
-            name="robot",
-            body_names=("left_foot_frame", "right_foot_frame"),
-            preserve_order=True,
-        )
-        feet_contact_order = list(feet_links)
         # feet_clearance / feet_slip read the finite-difference foot velocity (foot
         # displacement over the control step), not the backend's instantaneous read:
         # mjlab's cvel is one substep old by MuJoCo design while Newton and Genesis
