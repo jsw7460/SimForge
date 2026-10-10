@@ -6,6 +6,7 @@ import torch
 from genesis.utils.geom import inv_quat, quat_to_xyz, transform_by_quat
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.observations.joint_indexed import joint_indexed
 from jaxrlworld.rl.envs.utils import EnvStepCache
 from jaxrlworld.rl.utils import entity_utils as eu
 
@@ -122,6 +123,7 @@ def dof_force(
     return entity.get_dofs_force(dofs_idx_local=dofs_idx_local)
 
 
+@joint_indexed
 @EnvStepCache()
 def actuated_dof_force(env: GenesisEnv) -> torch.Tensor:
     """

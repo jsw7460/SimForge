@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from jaxrlworld.rl.envs.mdp.observations.joint_indexed import joint_indexed
 from jaxrlworld.rl.envs.utils import EnvStepCache
 
 from .body_utils import get_bodies_pos
@@ -34,6 +35,7 @@ def projected_gravity(env: NewtonEnv) -> torch.Tensor:
     return result
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos(env: NewtonEnv) -> torch.Tensor:
     """Get actuated joint positions.
@@ -46,6 +48,7 @@ def dof_pos(env: NewtonEnv) -> torch.Tensor:
     return dof_q[:, env.act_manager.actuated_q_indices]
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos_nominal_difference(env: NewtonEnv) -> torch.Tensor:
     """Get joint positions relative to nominal (default) positions.
@@ -60,6 +63,7 @@ def dof_pos_nominal_difference(env: NewtonEnv) -> torch.Tensor:
     return dof_pos(env) - env.robot_data.default_joint_pos
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_vel(env: NewtonEnv) -> torch.Tensor:
     """Get actuated joint velocities.
@@ -72,6 +76,7 @@ def dof_vel(env: NewtonEnv) -> torch.Tensor:
     return dof_qd[:, env.act_manager.actuated_qd_indices]
 
 
+@joint_indexed
 @EnvStepCache()
 def raw_actions(env: NewtonEnv) -> torch.Tensor:
     """Get raw (unprocessed) actions from current step.
@@ -82,6 +87,7 @@ def raw_actions(env: NewtonEnv) -> torch.Tensor:
     return env.act_manager.raw_actions
 
 
+@joint_indexed
 @EnvStepCache()
 def prev_processed_actions(env: NewtonEnv) -> torch.Tensor:
     """Get processed actions from previous step.

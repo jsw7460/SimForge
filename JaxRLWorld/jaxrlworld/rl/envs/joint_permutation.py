@@ -15,21 +15,10 @@ from typing import TYPE_CHECKING, Dict, List, Tuple
 
 import torch
 
+from jaxrlworld.rl.envs.mdp.observations.joint_indexed import joint_indexed_flag
+
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
-
-
-# Joint-indexed observation function names: tensors of shape
-# (num_envs, num_joints) whose columns follow the simulator's joint order.
-_JOINT_INDEXED_OBS_NAMES = frozenset(
-    {
-        "dof_pos",
-        "dof_vel",
-        "dof_pos_nominal_difference",
-        "prev_processed_actions",
-        "raw_actions",
-    }
-)
 
 
 class JointPermutation:
@@ -119,10 +108,14 @@ class JointPermutation:
 def find_joint_obs_slices(env: World, num_actions: int) -> Dict[str, List[Tuple[int, int]]]:
     """Find slices in each obs group's flat vector that are joint-indexed.
 
-    A term is considered joint-indexed if:
-      1. Its function name is in _JOINT_INDEXED_OBS_NAMES, OR
-      2. Its dimension equals num_actions (heuristic fallback)
-         AND its function name suggests joint data.
+    A term is joint-indexed when its observation function is marked
+    ``@joint_indexed`` (:mod:`jaxrlworld.rl.envs.mdp.observations.joint_indexed`);
+    a stacked history widens the term to a multiple of ``num_actions`` and
+    yields one slice per frame. An unmarked term whose width is a multiple of
+    ``num_actions`` is refused rather than guessed about: the earlier
+    name-list approach silently left ``dof_pos_biased``, ``prev_raw_actions``
+    and the K1 terms in simulator order, scrambling the actor input on a
+    cross-simulator evaluation with a non-identity joint permutation.
     """
     # Ensure term indices are built
     if not env.obs_manager._is_term_indices_built:
@@ -131,37 +124,34 @@ def find_joint_obs_slices(env: World, num_actions: int) -> Dict[str, List[Tuple[
 
     result: Dict[str, List[Tuple[int, int]]] = {}
 
-    # ``ObservationManager`` dropped the old ``config.obs_group`` dict
-    # in favor of named-attribute groups discovered at init time and
-    # cached in ``_group_terms: {group_name: {term_name: cfg}}``.
-    # ``_group_term_indices`` is keyed by the same ``term_name`` (not
-    # the underlying callable's ``__name__``), so we filter joint-
-    # indexed terms by function name but look up the flat-vector
-    # slice by term name.
+    # ``_group_terms`` is ``{group_name: {term_name: cfg}}`` and
+    # ``_group_term_indices`` is keyed by the same ``term_name``.
     for group_name, terms_dict in env.obs_manager._group_terms.items():
         slices = []
         term_indices = env.obs_manager._group_term_indices.get(group_name, {})
 
         for term_name, obs_term in terms_dict.items():
-            func_name = getattr(obs_term.func, "__name__", term_name)
-            if func_name not in _JOINT_INDEXED_OBS_NAMES:
-                continue
             if term_name not in term_indices:
                 continue
             start, end = term_indices[term_name]
             term_dim = end - start
-            if term_dim == num_actions:
-                slices.append((start, end))
-            elif term_dim % num_actions == 0:
-                # History buffer flattened into this term's slice.
-                history_len = term_dim // num_actions
-                for h in range(history_len):
-                    slices.append(
-                        (
-                            start + h * num_actions,
-                            start + (h + 1) * num_actions,
-                        )
-                    )
+            flag = joint_indexed_flag(obs_term.func)
+            if flag is None and term_dim % num_actions == 0:
+                raise ValueError(
+                    f"Observation term {group_name}.{term_name} ({obs_term.func!r}) is {term_dim} wide, a multiple "
+                    f"of the {num_actions} actuated joints, but its function is not marked @joint_indexed or "
+                    "@not_joint_indexed. Cross-simulator evaluation must know whether to permute its columns."
+                )
+            if not flag:
+                continue
+            if term_dim % num_actions != 0:
+                raise ValueError(
+                    f"Observation term {group_name}.{term_name} is marked @joint_indexed but is {term_dim} wide, "
+                    f"not a multiple of the {num_actions} actuated joints."
+                )
+            frames = term_dim // num_actions
+            for h in range(frames):
+                slices.append((start + h * num_actions, start + (h + 1) * num_actions))
 
         result[group_name] = slices
 

@@ -6,6 +6,7 @@ import torch
 from genesis.utils.geom import inv_quat, transform_by_quat
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.observations.joint_indexed import joint_indexed
 from jaxrlworld.rl.envs.utils import EnvStepCache
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ def projected_gravity(env: GenesisEnv) -> torch.Tensor:
     return transform_by_quat(gravity, inv_base_quat)
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos(env: GenesisEnv, dofs_idx_local: torch.Tensor | None = None) -> torch.Tensor:
     """Get DOF positions for the robot.
@@ -44,6 +46,7 @@ def dof_pos(env: GenesisEnv, dofs_idx_local: torch.Tensor | None = None) -> torc
     return env.robot.get_dofs_position(dofs_idx_local)
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos_nominal_difference(env: GenesisEnv) -> torch.Tensor:
     # Relative to the nominal standing pose (default_joint_pos), not the
@@ -53,6 +56,7 @@ def dof_pos_nominal_difference(env: GenesisEnv) -> torch.Tensor:
     return dof_pos(env) - env.robot_data.default_joint_pos
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_vel(
     env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, dofs_idx_local: torch.Tensor | None = None
@@ -62,11 +66,13 @@ def dof_vel(
     return env.scene_manager[asset_cfg.name].get_dofs_velocity(dofs_idx_local)
 
 
+@joint_indexed
 @EnvStepCache()
 def raw_actions(env: GenesisEnv):
     return env.act_manager.raw_actions
 
 
+@joint_indexed
 @EnvStepCache()
 def prev_processed_actions(env: GenesisEnv):
     return env.act_manager.processed_actions.clone()

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from jaxrlworld.rl.envs.mdp.observations.joint_indexed import joint_indexed
 from jaxrlworld.rl.envs.utils import EnvStepCache
 
 if TYPE_CHECKING:
@@ -129,6 +130,7 @@ def base_height(env: MujocoEnv) -> torch.Tensor:
 # =============================================================================
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos(env: MujocoEnv) -> torch.Tensor:
     """Get actuated joint positions.
@@ -141,6 +143,7 @@ def dof_pos(env: MujocoEnv) -> torch.Tensor:
     return robot_data.joint_pos[:, joint_ids]
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos_nominal_difference(env: MujocoEnv) -> torch.Tensor:
     """Get joint positions relative to nominal (default) positions.
@@ -155,6 +158,7 @@ def dof_pos_nominal_difference(env: MujocoEnv) -> torch.Tensor:
     return dof_pos(env) - env.robot_data.default_joint_pos
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_vel(env: MujocoEnv) -> torch.Tensor:
     """Get actuated joint velocities.
@@ -189,6 +193,7 @@ def all_joint_vel(env: MujocoEnv) -> torch.Tensor:
     return robot_data.joint_vel
 
 
+@joint_indexed
 @EnvStepCache()
 def joint_pos_rel(env: MujocoEnv) -> torch.Tensor:
     """Get joint positions relative to default positions.
@@ -201,6 +206,7 @@ def joint_pos_rel(env: MujocoEnv) -> torch.Tensor:
     return dof_pos_nominal_difference(env)
 
 
+@joint_indexed
 @EnvStepCache()
 def joint_vel_rel(env: MujocoEnv) -> torch.Tensor:
     """Get joint velocities (default velocity is assumed zero).
@@ -216,6 +222,7 @@ def joint_vel_rel(env: MujocoEnv) -> torch.Tensor:
 # =============================================================================
 
 
+@joint_indexed
 @EnvStepCache()
 def raw_actions(env: MujocoEnv) -> torch.Tensor:
     """Get raw (unprocessed) actions from current step.
@@ -226,6 +233,7 @@ def raw_actions(env: MujocoEnv) -> torch.Tensor:
     return env.act_manager.raw_actions
 
 
+@joint_indexed
 @EnvStepCache()
 def processed_actions(env: MujocoEnv) -> torch.Tensor:
     """Get processed actions from current step.
@@ -236,6 +244,7 @@ def processed_actions(env: MujocoEnv) -> torch.Tensor:
     return env.act_manager.processed_actions
 
 
+@joint_indexed
 @EnvStepCache()
 def prev_processed_actions(env: MujocoEnv) -> torch.Tensor:
     """Get processed actions from previous step.
@@ -246,6 +255,7 @@ def prev_processed_actions(env: MujocoEnv) -> torch.Tensor:
     return env.act_manager.prev_processed_actions.clone()
 
 
+@joint_indexed
 @EnvStepCache()
 def last_action(env: MujocoEnv) -> torch.Tensor:
     """Get last action (alias for processed_actions).
@@ -256,6 +266,7 @@ def last_action(env: MujocoEnv) -> torch.Tensor:
     return processed_actions(env)
 
 
+@joint_indexed
 @EnvStepCache()
 def last_raw_action(env: MujocoEnv) -> torch.Tensor:
     """Get last action (alias for processed_actions).

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.observations.joint_indexed import joint_indexed
 from jaxrlworld.rl.envs.utils import EnvStepCache
 from jaxrlworld.rl.utils.quat_utils import quat_to_euler_wxyz
 
@@ -104,6 +105,7 @@ def _actuated_joint_ids(env: World) -> torch.Tensor | None:
     return None
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Actuated joint positions in act_manager order.
@@ -115,6 +117,7 @@ def dof_pos(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.
     return pos
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Actuated joint positions plus per-env encoder bias.
@@ -129,6 +132,7 @@ def dof_pos_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) ->
     return dof_pos(env, asset_cfg) + env.act_manager.encoder_bias_of(asset_cfg.name)
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Actuated joint velocities in act_manager order.
@@ -140,6 +144,7 @@ def dof_vel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.
     return vel
 
 
+@joint_indexed
 @EnvStepCache()
 def applied_torque(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Per-joint actuator torque actually applied at the last physics substep.
@@ -157,6 +162,7 @@ def applied_torque(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) ->
     return env.get_entity_data(asset_cfg.name).applied_torque
 
 
+@joint_indexed
 @EnvStepCache()
 def dof_pos_nominal_difference(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Joint positions relative to nominal (default) positions, in act_manager order.
@@ -176,6 +182,7 @@ def dof_pos_nominal_difference(env: World, asset_cfg: ResolvedEntity = _DEFAULT_
     return rd.joint_pos - rd.default_joint_pos.unsqueeze(0)
 
 
+@joint_indexed
 def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """:func:`dof_pos_nominal_difference` plus the per-env encoder bias.
 
@@ -191,6 +198,7 @@ def dof_pos_nominal_difference_biased(env: World, asset_cfg: ResolvedEntity = _D
     return rd.joint_pos + env.act_manager.encoder_bias_of(asset_cfg.name) - rd.default_joint_pos.unsqueeze(0)
 
 
+@joint_indexed
 @EnvStepCache()
 def joint_pos_rel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Positions of the SELECTED joints relative to their default, canonical order.
@@ -208,6 +216,7 @@ def joint_pos_rel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> 
     return (rd.joint_pos - rd.default_joint_pos.unsqueeze(0))[:, asset_cfg.joint_ids]
 
 
+@joint_indexed
 @EnvStepCache()
 def joint_vel_rel(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Velocities of the SELECTED joints, canonical order (default velocity is zero).
@@ -273,6 +282,7 @@ def _term_action_slice(env: World, term_name: str | None) -> slice:
     return slices[term_name]
 
 
+@joint_indexed
 @EnvStepCache()
 def prev_processed_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     """Current step's processed actions (used as observation input).
@@ -290,12 +300,14 @@ def prev_processed_actions(env: World, term_name: str | None = None) -> torch.Te
     return env.act_manager.processed_actions[:, _term_action_slice(env, term_name)].clone()
 
 
+@joint_indexed
 @EnvStepCache()
 def prev_raw_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     """Previous step's raw actions, optionally for one action term."""
     return env.act_manager.prev_raw_actions[:, _term_action_slice(env, term_name)]
 
 
+@joint_indexed
 @EnvStepCache()
 def raw_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     """Current step's raw (unprocessed) actions.
@@ -310,6 +322,7 @@ def raw_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     return env.act_manager.raw_actions[:, _term_action_slice(env, term_name)]
 
 
+@joint_indexed
 @EnvStepCache()
 def last_processed_actions(env: World, term_name: str | None = None) -> torch.Tensor:
     """Previous step's processed actions.
