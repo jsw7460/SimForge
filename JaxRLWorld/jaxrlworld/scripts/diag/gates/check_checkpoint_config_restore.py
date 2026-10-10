@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import enum
 import importlib
 import io
 import os
@@ -46,7 +47,15 @@ import tempfile
 from dataclasses import dataclass
 
 from jaxrlworld.rl.configs.algorithms import get_algorithm_config_class
-from jaxrlworld.rl.configs.base_config import _print_override_changes, iter_terms, parse_override_args
+from jaxrlworld.rl.configs.base_config import (
+    BaseConfig,
+    _apply_override_params,
+    _print_override_changes,
+    diff_config_dicts,
+    iter_terms,
+    parse_override_args,
+    update_from_dict,
+)
 from jaxrlworld.rl.configs.common_config_classes import RewardConfig
 from jaxrlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from jaxrlworld.rl.configs.rewards.reward_term_config import LinearSchedule, RewardTermConfig
@@ -232,6 +241,102 @@ def part_a() -> None:
             chk(f"{label} rejected", False, "accepted")
         except ValueError as e:
             chk(f"{label} rejected", True, str(e).splitlines()[1].strip()[:70])
+
+    print("\n=== A7. a term or field the saved run did not have is refused ===")
+
+    @dataclass
+    class _RewardsPlus(_Rewards):
+        added_later = RewardTermConfig(func=resolve_callable, weight=0.5)
+
+    grown = synthetic_build()
+    grown.reward = _RewardsPlus()
+    try:
+        restore_saved_config(grown, yaml_round_trip(synthetic_build()))
+        chk("added reward term raises", False, "no exception")
+    except ValueError as e:
+        chk("added reward term raises", "reward.added_later" in str(e), str(e)[:100])
+    grown_scalar = synthetic_build()
+    grown_scalar.runner.brand_new_knob = 3
+    try:
+        restore_saved_config(grown_scalar, yaml_round_trip(synthetic_build()))
+        chk("added scalar field raises", False, "no exception")
+    except ValueError as e:
+        chk("added scalar field raises", "runner.brand_new_knob" in str(e), str(e)[:100])
+
+    print("\n=== A8. simulator option objects (pydantic-like) round trip ===")
+
+    class _Cone(enum.IntEnum):
+        pyramidal = 0
+        elliptic = 1
+
+    class _FieldInfo:
+        def __init__(self, annotation):
+            self.annotation = annotation
+
+    class _Opts:
+        """Stand-in for a strict pydantic model such as ``gs.options.RigidOptions``."""
+
+        model_fields = {
+            "iterations": _FieldInfo(int),
+            "friction_cone": _FieldInfo(_Cone),
+            "impratio": _FieldInfo(float | None),
+            "gravity": _FieldInfo(tuple[float, float, float]),
+        }
+        _defaults = {"iterations": 25, "friction_cone": _Cone.pyramidal, "impratio": None, "gravity": (0.0, 0.0, -9.81)}
+
+        def __init__(self, **kw):
+            for k, v in kw.items():
+                info = self.model_fields[k]
+                if isinstance(info.annotation, type) and issubclass(info.annotation, enum.Enum):
+                    if not isinstance(v, info.annotation):
+                        raise TypeError(f"{k}: strict enum field got {type(v).__name__}")
+                if k == "gravity" and not isinstance(v, tuple):
+                    raise TypeError("gravity: strict tuple field got list")
+            self.__dict__.update({**self._defaults, **kw})
+            self.model_fields_set = set(kw)
+
+        def model_dump(self):
+            return {k: getattr(self, k) for k in self.model_fields}
+
+    @dataclass
+    class _Holder(BaseConfig):
+        opts: object = None
+
+    holder = _Holder(opts=_Opts(iterations=20, friction_cone=_Cone.elliptic))
+    as_dict = holder.recursive_to_dict()
+    chk(
+        "option object serializes every field with enums as values",
+        as_dict["opts"] == {"iterations": 20, "friction_cone": 1, "impratio": None, "gravity": [0.0, 0.0, -9.81]},
+        f"{as_dict['opts']}",
+    )
+    saved_opts = yaml_round_trip(holder)
+    saved_opts["opts"]["friction_cone"] = 0
+    saved_opts["opts"]["impratio"] = 10.0
+    saved_opts["opts"]["gravity"] = [0.0, 0.0, -1.62]
+    rebuilt = _Holder(opts=_Opts(iterations=20, friction_cone=_Cone.elliptic))
+    diff = diff_config_dicts(saved_opts, rebuilt.recursive_to_dict())
+    _apply_override_params(rebuilt, diff, "holder")
+    chk(
+        "override rebuilds the option object with enum / tuple types restored",
+        rebuilt.opts.friction_cone is _Cone.pyramidal
+        and rebuilt.opts.impratio == 10.0
+        and rebuilt.opts.gravity == (0.0, 0.0, -1.62)
+        and rebuilt.opts.iterations == 20,
+        f"{rebuilt.opts.model_dump()}",
+    )
+    chk(
+        "stated fields are the builder's plus the restored ones",
+        rebuilt.opts.model_fields_set == {"iterations", "friction_cone", "impratio", "gravity"},
+        f"{sorted(rebuilt.opts.model_fields_set)}",
+    )
+    chk("restored object serializes to the saved dict", rebuilt.recursive_to_dict() == saved_opts)
+    via_update = _Holder(opts=_Opts(iterations=20, friction_cone=_Cone.elliptic))
+    update_from_dict(via_update, saved_opts)
+    chk(
+        "update_from_dict rebuilds the option object too",
+        via_update.opts.friction_cone is _Cone.pyramidal and via_update.opts.gravity == (0.0, 0.0, -1.62),
+        f"{via_update.opts.model_dump()}",
+    )
 
 
 def part_b(preset: str, sim_type: str) -> None:

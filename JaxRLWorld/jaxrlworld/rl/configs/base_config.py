@@ -2,7 +2,9 @@ import copy
 import dataclasses
 import json
 import sys
+import typing
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, ClassVar, Dict, TypeVar
 
 from colorama import Fore, Style
@@ -153,8 +155,6 @@ def _convert_value(v: Any) -> Any:
     # enum instance straight through to ``yaml.dump``, which then emits
     # ``!!python/object/apply:...`` tags that ``yaml.safe_load`` refuses
     # to construct (post-strict-typed-NN-config migration symptom).
-    from enum import Enum
-
     if isinstance(v, Enum):
         return v.value
     if isinstance(v, _YAML_SAFE_TYPES):
@@ -163,6 +163,12 @@ def _convert_value(v: Any) -> Any:
         return v.recursive_to_dict()
     if dataclasses.is_dataclass(v) and not isinstance(v, type):
         return _dataclass_to_dict(v)
+    if _is_options_model(v):
+        # A simulator option object (Genesis ``gs.options.*``, a pydantic
+        # model): every field, defaults included, so the saved config
+        # records the plant the run was trained with even where the
+        # simulator's own defaults later move.
+        return {str(k): _convert_value(x) for k, x in v.model_dump().items()}
     if isinstance(v, dict):
         return {str(dk): _convert_value(dv) for dk, dv in v.items()}
     if isinstance(v, list | tuple):
@@ -250,8 +256,11 @@ def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
             # Skip unknown keys silently (fields removed, _EXCLUDE_FROM_SERIALIZATION, etc.)
             continue
 
+        # 0) Simulator option object (pydantic model) + mapping → rebuild it
+        if isinstance(value, Mapping) and _is_options_model(obj_mem):
+            value = _rebuild_options_model(obj_mem, value)
         # 1) Nested mapping → recurse
-        if isinstance(value, Mapping):
+        elif isinstance(value, Mapping):
             if obj_mem is not None and (hasattr(obj_mem, "__dict__") or isinstance(obj_mem, dict)):
                 update_from_dict(obj_mem, value, _ns=key_ns)
                 continue
@@ -443,6 +452,66 @@ def _is_config_object(obj: Any) -> bool:
     return isinstance(obj, BaseConfig) or (dataclasses.is_dataclass(obj) and not isinstance(obj, type))
 
 
+def _is_options_model(obj: Any) -> bool:
+    """A simulator option object: a pydantic model such as Genesis's ``gs.options.RigidOptions``.
+
+    Duck-typed on the pydantic v2 surface so this module needs no pydantic
+    import of its own; the object is an external library's, not one of our
+    configs.
+    """
+    return hasattr(obj, "model_dump") and hasattr(obj, "model_fields_set") and hasattr(type(obj), "model_fields")
+
+
+def _coerce_option_value(annotation: Any, value: Any) -> Any:
+    """Turn a YAML-safe value back into what a strict pydantic field accepts.
+
+    ``_convert_value`` writes enums as their values and tuples as lists;
+    Genesis's options are ``strict=True`` models, which refuse an int for an
+    enum field and a list for a tuple field.
+    """
+    candidates = [annotation, *typing.get_args(annotation)]
+    for candidate in candidates:
+        if isinstance(candidate, type) and issubclass(candidate, Enum) and value is not None:
+            return candidate(value)
+    if isinstance(value, list) and any(typing.get_origin(c) is tuple or c is tuple for c in candidates):
+        return tuple(value)
+    return value
+
+
+def _rebuild_options_model(current: Any, patch: Dict[str, Any]) -> Any:
+    """A new option object: ``current``'s explicitly set fields plus ``patch``.
+
+    Fields the builder left at the simulator default stay that way unless
+    the patch names them, so a restored config carries exactly the saved
+    plant and ``model_fields_set`` still tells which fields were stated.
+    """
+    cls = type(current)
+    kwargs = {name: getattr(current, name) for name in current.model_fields_set}
+    for name, value in patch.items():
+        if name not in cls.model_fields:
+            raise ValueError(f"{cls.__name__} has no field {name!r}")
+        kwargs[name] = _coerce_option_value(cls.model_fields[name].annotation, value)
+    return cls(**kwargs)
+
+
+def missing_from_saved(saved: Dict[str, Any], current: Dict[str, Any], path: str = "") -> list[str]:
+    """Dotted paths present in ``current`` but absent from ``saved``.
+
+    Both are ``recursive_to_dict()`` outputs. A term or field the current
+    preset has and the saved run did not is config the checkpoint never saw
+    (a reward term added after training, a new knob); restoring the saved
+    run onto it must not silently include it.
+    """
+    missing: list[str] = []
+    for key, current_value in current.items():
+        leaf_path = f"{path}.{key}" if path else key
+        if key not in saved:
+            missing.append(leaf_path)
+        elif isinstance(current_value, dict) and isinstance(saved[key], dict) and "_type" not in current_value:
+            missing.extend(missing_from_saved(saved[key], current_value, leaf_path))
+    return missing
+
+
 def _apply_override_params(config_obj: Any, params: Dict[str, Any], path: str) -> None:
     """Write ``params`` onto ``config_obj``, descending into nested configs.
 
@@ -474,6 +543,8 @@ def _apply_override_params(config_obj: Any, params: Dict[str, Any], path: str) -
             setattr(config_obj, param_name, merged)
         elif isinstance(value, dict) and _is_config_object(current) and "_type" not in value:
             _apply_override_params(current, value, f"{path}.{param_name}")
+        elif isinstance(value, dict) and _is_options_model(current):
+            setattr(config_obj, param_name, _rebuild_options_model(current, value))
         else:
             setattr(config_obj, param_name, value)
     post_init = getattr(type(config_obj), "__post_init__", None)

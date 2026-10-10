@@ -64,7 +64,15 @@ class EnvConfig(BaseConfig):
 class SceneConfig(BaseConfig):
     """Genesis scene configuration."""
 
-    _EXCLUDE_FROM_SERIALIZATION = ("sim_options", "viewer_options", "vis_options", "rigid_options", "robot_cfg")
+    # ``sim_options`` / ``rigid_options`` ARE serialized (every field of the
+    # pydantic model, see ``base_config._convert_value``): they are the
+    # plant (dt, substeps, gravity, integrator, solver budget, friction cone,
+    # impratio), and a checkpoint whose config.yaml lacked them was
+    # evaluated on whatever the current builder said, so a later builder
+    # edit silently changed the physics an old Genesis checkpoint ran on.
+    # Viewer / vis options are rendering only; robot_cfg is rebuilt from the
+    # preset.
+    _EXCLUDE_FROM_SERIALIZATION = ("viewer_options", "vis_options", "robot_cfg")
 
     sim_options: gs.options.SimOptions = field(default_factory=gs.options.SimOptions)
     viewer_options: gs.options.ViewerOptions = field(default_factory=gs.options.ViewerOptions)

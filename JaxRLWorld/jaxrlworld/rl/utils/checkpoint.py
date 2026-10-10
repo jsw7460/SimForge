@@ -50,11 +50,22 @@ def restore_saved_config(cfgs: "ConfigsForRun", saved: dict) -> None:
 
     ``saved`` is a ``recursive_to_dict()`` output (after its YAML round
     trip). The differences are applied through ``apply_overrides`` and
-    the result is checked to serialize back to ``saved``.
+    the result is checked to serialize back to ``saved``. Config the
+    rebuilt preset has and the saved run did not (a term or field added
+    since training) raises: the saved run never ran with it, and a restore
+    that let it through would evaluate a different MDP without a word.
     """
-    from jaxrlworld.rl.configs.base_config import diff_config_dicts, flatten_leaf_paths
+    from jaxrlworld.rl.configs.base_config import diff_config_dicts, flatten_leaf_paths, missing_from_saved
 
-    diff = diff_config_dicts(saved, cfgs.recursive_to_dict())
+    current = cfgs.recursive_to_dict()
+    added = missing_from_saved(saved, current)
+    if added:
+        raise ValueError(
+            f"The rebuilt preset has {len(added)} config value(s) the saved run did not: {added[:20]}"
+            f"{' ...' if len(added) > 20 else ''}. They were added after this checkpoint was trained; disable "
+            "them for the evaluation or re-train."
+        )
+    diff = diff_config_dicts(saved, current)
     scalar_drift = {k: v for k, v in diff.items() if not isinstance(v, dict)}
     if scalar_drift:
         raise ValueError(
