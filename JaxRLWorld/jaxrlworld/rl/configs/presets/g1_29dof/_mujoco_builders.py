@@ -207,6 +207,11 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
 
 
 def build_observation(cfg: G1FlatConfig) -> MujocoObservationConfig:
+    # Critic foot height reads the foot-pad frame body on every backend: the
+    # welded child of ankle_roll_link at the sole (where mjlab's ``left_foot``
+    # site sits), so the value is sole height rather than the ankle origin's.
+    foot_frames = ("left_foot_frame", "right_foot_frame")
+
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
         base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
@@ -232,11 +237,7 @@ def build_observation(cfg: G1FlatConfig) -> MujocoObservationConfig:
         dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         base_height_obs = ObservationTermConfig(func=base_height, scale=1.0)
         base_quat_obs = ObservationTermConfig(func=base_quat, scale=1.0)
-        foot_height_obs = ObservationTermConfig(
-            func=foot_height,
-            scale=1.0,
-            params={"site_names": ("left_foot", "right_foot")},
-        )
+        foot_height_obs = ObservationTermConfig(func=foot_height, scale=1.0, params={"body_names": foot_frames})
         foot_air_time_obs = ObservationTermConfig(func=foot_air_time, scale=1.0)
         foot_contact_obs = ObservationTermConfig(func=foot_contact, scale=1.0)
         foot_contact_forces_obs = ObservationTermConfig(func=foot_contact_forces, scale=0.01)
