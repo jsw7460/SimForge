@@ -286,8 +286,13 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             weight=0.1,
         )
 
+        # feet_clearance / feet_slip read the finite-difference foot velocity (foot
+        # displacement over the control step), not the backend's instantaneous read:
+        # mjlab's cvel is one substep old by MuJoCo design while Newton and Genesis
+        # report the post-integration value, a measured 2.8x spread in the slip
+        # penalty on identical physics (see common._fd_foot_velocity).
         feet_clearance = RewardTermConfig(
-            func=rf.feet_clearance,
+            func=rf.feet_clearance_fd,
             weight=2.0,
             params={
                 "asset_cfg": SceneEntitySelector(
@@ -314,7 +319,7 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
         )
 
         feet_slip = RewardTermConfig(
-            func=rf.feet_slip,
+            func=rf.feet_slip_fd,
             weight=0.1,
             params={
                 "contact_group": "feet_ground_contact",

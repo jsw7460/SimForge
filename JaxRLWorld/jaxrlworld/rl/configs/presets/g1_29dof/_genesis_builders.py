@@ -358,8 +358,13 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             preserve_order=True,
         )
         feet_contact_order = list(feet_links)
+        # feet_clearance / feet_slip read the finite-difference foot velocity (foot
+        # displacement over the control step), not the backend's instantaneous read:
+        # mjlab's cvel is one substep old by MuJoCo design while Newton and Genesis
+        # report the post-integration value, a measured 2.8x spread in the slip
+        # penalty on identical physics (see common._fd_foot_velocity).
         feet_clearance = RewardTermConfig(
-            func=rf_mjlab.feet_clearance_mjlab,
+            func=rf_mjlab.feet_clearance_fd_mjlab,
             weight=2.0,
             params={
                 "asset_cfg": feet_selector,
@@ -378,7 +383,7 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             },
         )
         feet_slip = RewardTermConfig(
-            func=rf_mjlab.feet_slip_mjlab,
+            func=rf_mjlab.feet_slip_fd_mjlab,
             weight=0.1,
             params={
                 "asset_cfg": feet_selector,

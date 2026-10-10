@@ -12,7 +12,9 @@ from .reward_terms import (
     # Contact/feet rewards
     feet_air_time,
     feet_clearance,
+    feet_clearance_fd,
     feet_slip,
+    feet_slip_fd,
     flat_orientation,
     # Orientation rewards
     flat_orientation_l2,
@@ -42,7 +44,9 @@ __all__ = [
     # Contact/feet rewards
     "feet_air_time",
     "feet_clearance",
+    "feet_clearance_fd",
     "feet_slip",
+    "feet_slip_fd",
     "soft_landing",
     "body_angular_velocity_penalty",
     # Utility

@@ -489,6 +489,30 @@ def penalize_feet_clearance(
     return -cost * _command_active(env, command_threshold)
 
 
+def penalize_feet_clearance_fd(
+    env: World,
+    target_height: float,
+    command_threshold: float = 0.01,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """``penalize_feet_clearance`` with the finite-difference foot velocity.
+
+    Same height error and command gating; only the xy speed that weights
+    the error changes source — see :func:`_fd_foot_velocity` for why the
+    instantaneous read cannot be compared across backends. The previous
+    positions are keyed by the resolved selector object (one per term,
+    resolved once at manager init) so two clearance terms on different
+    foot sets do not share state.
+    """
+    foot_pos, _ = _foot_pos_vel(env, asset_cfg)
+    foot_vel = _fd_foot_velocity(env, f"feet_clearance_fd:{id(asset_cfg)}", foot_pos)
+    foot_z = foot_pos[..., 2]
+    vel_norm = torch.norm(foot_vel[..., :2], dim=-1)
+    delta = torch.abs(foot_z - target_height)
+    cost = torch.sum(delta * vel_norm, dim=1)
+    return -cost * _command_active(env, command_threshold)
+
+
 def penalize_feet_slip(
     env: World,
     contact_group: str,

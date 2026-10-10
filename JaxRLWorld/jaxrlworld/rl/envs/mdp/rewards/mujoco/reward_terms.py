@@ -18,6 +18,7 @@ from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import (
     penalize_body_ang_vel_xy,
     penalize_contact_force_count,
     penalize_feet_clearance,
+    penalize_feet_clearance_fd,
     penalize_feet_slip,
     penalize_feet_slip_fd,
     penalize_lin_vel_z,
@@ -265,6 +266,21 @@ def feet_clearance(
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_feet_clearance`` (feet via ``asset_cfg.site_names``)."""
     return penalize_feet_clearance(
+        env,
+        target_height=target_height,
+        command_threshold=command_threshold,
+        asset_cfg=asset_cfg,
+    )
+
+
+def feet_clearance_fd(
+    env: MujocoEnv,
+    target_height: float,
+    command_threshold: float = 0.01,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> torch.Tensor:
+    """``feet_clearance`` with the finite-difference foot velocity."""
+    return penalize_feet_clearance_fd(
         env,
         target_height=target_height,
         command_threshold=command_threshold,
