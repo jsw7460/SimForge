@@ -121,6 +121,7 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         fields=("found", "force"),
         reduce="netforce",
         num_slots=1,
+        history_length=timing["decimation"],
     )
 
     body_ground_cfg = ContactSensorCfg(
