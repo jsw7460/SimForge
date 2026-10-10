@@ -80,6 +80,11 @@ class NewtonContactManager(BaseContactManager):
         forward pass — the full MuJoCo pipeline up to constraint forces
         with no integration — so post-reset sensor reads carry the NEW
         pose's contacts and forces, exactly like mjlab's reset path.
+
+        The forward and the native sensor refresh cover every env (the
+        others recompute from an unchanged state); the history rings are
+        written for the reset envs only, since every other env's newest
+        frame is this substep's already.
         """
         if not self._group_sensors:
             return
@@ -107,10 +112,15 @@ class NewtonContactManager(BaseContactManager):
             else:
                 solver._update_mjc_data(solver.mjw_data, sm.model, sm.state_0)
                 mujoco_warp.forward(solver.mjw_model, solver.mjw_data)
-        # Eager path: run both sensor halves (kernels + history push) —
-        # this is a reset, not the captured step.
+        # Eager path: native sensor kernels, then the reset envs' newest
+        # history frame — this is a reset, not the captured step.
         sm._update_sensors_native()
-        sm._update_sensors()
+        if env_ids is None:
+            env_ids = torch.arange(self.env.num_envs, device=self.env.device)
+        for sensor in self._group_sensors.values():
+            sensor.overwrite_latest(env_ids)
+        # The per-step force memo may hold a read from before the reset.
+        self.env._invalidate_cache()
 
     # -- pretty print --
 

@@ -98,6 +98,15 @@ class ContactManager(BaseContactManager):
         """
         return self._sensors[group.name].read_found()
 
+    # -- per-env reset --
+
+    def reset(self, env_ids: torch.Tensor | None = None) -> None:
+        super().reset(env_ids)
+        if env_ids is None or len(env_ids) == 0:
+            return
+        for sensor in self._sensors.values():
+            sensor.reset(env_ids)
+
     # -- post-reset refresh --
 
     def refresh_after_reset(self, env_ids: torch.Tensor | None = None) -> None:
@@ -109,30 +118,36 @@ class ContactManager(BaseContactManager):
         the new poses, while the force field (a constraint-solve
         product) is zeroed for the reset envs instead of leaking the
         pre-reset solve's values into the re-detected slots.
+
+        Only the reset envs lose their contact slots and narrowphase warm
+        start (``collider.clear(env_ids)``). Detection has no per-env entry
+        point, so it re-runs on every env, from an unchanged state and an
+        intact warm start for the others. Their rings are left alone too:
+        the newest frame they hold is this substep's already, and a push
+        would duplicate it and drop their oldest substep.
         """
         if not self._sensors:
             return
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
         solver = self.env.scene_manager.scene.sim.rigid_solver
         force = qd_to_torch(solver.collider.collider_state.contact_data.force, transpose=True, copy=False)
-        # ``collider.clear()`` inside the detection kernel wipes the force
-        # field for EVERY env; the non-reset envs must keep their last
-        # solve's forces (re-detection from unchanged states reproduces
-        # the same slot order), so snapshot and restore around it.
+        # The broadphase clears every env's slots, force included, before
+        # refilling them; the non-reset envs must keep their last solve's
+        # forces (re-detection from unchanged states reproduces the same
+        # slot order), so snapshot and restore around it.
         saved_force = force.clone()
-        solver._kernel_detect_collision()
+        solver.collider.clear(env_ids)
+        solver.collider.detection()
         force.copy_(saved_force)
-        if env_ids is None:
-            force.zero_()
-        else:
-            force[env_ids] = 0.0
+        force[env_ids] = 0.0
         # Detection replaced the collider state in place; drop the shared
         # list-reader cache so the capture below re-pulls it.
         self.env._invalidate_cache()
         # Sensor reads return captured frames, not live collider reads
-        # (``read_found``/``read_force``), so push one frame from the
-        # fresh detection — the Newton counterpart's ``_update_sensors``
-        # call does the same on its side.
-        self._capture_all()
+        # (``read_found``/``read_force``), so the fresh detection goes
+        # into the reset envs' newest slot.
+        self._get_batch().capture_reset(env_ids)
 
     # -- pretty print --
 

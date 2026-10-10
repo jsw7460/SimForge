@@ -367,6 +367,22 @@ class GenesisContactSensor:
             self._force_hist = torch.roll(self._force_hist, 1, dims=1)
             self._force_hist[:, 0] = f_local
 
+    def reset(self, env_ids: torch.Tensor) -> None:
+        """Zero the rings of ``env_ids``, as the Newton and mjlab sensors do on reset.
+
+        Without it a reset env keeps the frames of its ending episode until the
+        next control step overwrites them: a body-ground hit that caused the
+        reset would still read as a hit in the new episode's history. Fresh
+        tensors, so frames handed out by the read paths stay valid snapshots.
+        """
+        found = self._found_hist.clone()
+        found[env_ids] = False
+        self._found_hist = found
+        if self._track_force:
+            force = self._force_hist.clone()
+            force[env_ids] = 0.0
+            self._force_hist = force
+
     def read_force(self) -> torch.Tensor:
         """(num_envs, N, 3) — newest captured link-local net contact force."""
         self._require_force()
@@ -497,6 +513,33 @@ class GenesisContactBatch:
         :meth:`capture_and_advance`."""
         found_hists, force_hists = self._substep_impl(*self._gather_inputs(), None, 0.0)
         self._store_rings(found_hists, force_hists)
+
+    def capture_reset(self, env_ids: torch.Tensor) -> None:
+        """Overwrite the newest frame of ``env_ids`` with the current contact list.
+
+        The post-reset refresh: every other env's rings already hold this
+        substep's frame, so a push would hand them a duplicate and drop
+        their oldest substep. The rings are rebuilt as fresh tensors, as
+        the substep does, so frames already handed out by the read paths
+        stay valid snapshots.
+        """
+        link_a, link_b, force, n_live, quats, found_hists, force_hists = self._gather_inputs()
+        row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
+        found, f_local = self._frame(link_a, link_b, force, row_valid, quats)
+        new_found = []
+        for sl, hist in zip(self._slices, found_hists):
+            fresh = hist.clone()
+            fresh[env_ids, 0] = found[env_ids, sl]
+            new_found.append(fresh)
+        new_force = []
+        fstart = 0
+        for s, hist in zip(self._force_sensors, force_hists):
+            n = s._num_primary
+            fresh = hist.clone()
+            fresh[env_ids, 0] = f_local[env_ids, fstart : fstart + n]
+            fstart += n
+            new_force.append(fresh)
+        self._store_rings(new_found, new_force)
 
     def capture_and_advance(self, timing: ContactGroup, dt: float) -> None:
         """One training substep: frames, rings, and the contact-timing

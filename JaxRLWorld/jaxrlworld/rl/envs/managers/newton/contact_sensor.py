@@ -296,6 +296,18 @@ class NewtonContactSensor:
         self._history[:, :, self._cursor, :] = self.compute_force()
         self._cursor = (self._cursor + 1) % self._history_length
 
+    def overwrite_latest(self, env_ids: torch.Tensor) -> None:
+        """Write the current net force into the newest ring slot of ``env_ids``.
+
+        The post-reset refresh: every other env's ring already holds this
+        substep's frame, so a push would hand them a duplicate and drop
+        their oldest substep. The cursor stays where it is.
+        """
+        if self._history is None:
+            return
+        newest = (self._cursor - 1) % self._history_length
+        self._history[env_ids, :, newest, :] = self.compute_force()[env_ids]
+
     def update(self, state, contacts) -> None:
         """Native refresh + history push in one call (eager paths only)."""
         self.update_native(state, contacts)
