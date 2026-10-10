@@ -157,6 +157,12 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> SceneConfig:
         env_spacing=(2.0, 2.0),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
+            # implicitfast is the MuJoCo-consistent integrator (mjlab and
+            # Newton run it); Genesis's default approximate_implicitfast
+            # folds joint damping into the mass matrix before the
+            # constraint solve. Every other Genesis preset pins it; this
+            # one had been left on the default.
+            integrator=gs.integrator.implicitfast,
             constraint_solver=gs.constraint_solver.Newton,
             constraint_timeconst=0.02,
             iterations=30,

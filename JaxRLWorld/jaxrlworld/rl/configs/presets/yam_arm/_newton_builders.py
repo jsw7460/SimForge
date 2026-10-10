@@ -89,7 +89,8 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> NewtonSceneConfig:
         solver_cfg=SolverMuJoCoCfg(
             impratio=10.0,
             cone="pyramidal",
-            iterations=50,
+            # 20 / 50 on all three backends (see the MuJoCo builder).
+            iterations=20,
             ls_iterations=50,
             ccd_iterations=50,
             # The gripper's many small pad geoms against a workpiece

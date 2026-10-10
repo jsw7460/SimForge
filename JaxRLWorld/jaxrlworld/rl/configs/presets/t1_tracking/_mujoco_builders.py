@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict
 
-from jaxrlworld.rl.actuators import IdealPDActuatorCfg
+from jaxrlworld.rl.actuators import ImplicitActuatorCfg
 from jaxrlworld.rl.configs import RewardConfig, TerminationTermConfig
 from jaxrlworld.rl.configs.common_config_classes import (
     ObservationGroupConfig,
@@ -135,7 +135,11 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         floating=True,
         articulation=ArticulationCfg(
             actuators=(
-                IdealPDActuatorCfg(
+                # Implicit (engine-side) position actuators on all three
+                # backends, as the T1 getup preset; this cell alone used to
+                # run an explicit torch PD, a different plant from the Newton
+                # and Genesis builders of the same preset.
+                ImplicitActuatorCfg(
                     target_names_expr=(".*",),
                     stiffness=r.p_gains,
                     damping=r.d_gains,
@@ -157,8 +161,12 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         robot_entity_name="robot",
         entities={"robot": robot_entity},
         sensors=(self_collision_cfg,),
-        solver_iterations=10,
-        solver_ls_iterations=20,
+        # The reference's iterations 10 / ls 20 leave the line search
+        # unconverged in most world-substeps (check_solver_convergence);
+        # 20 / 50 converges every world. Same budget, cone and impratio on
+        # all three backends of this preset.
+        solver_iterations=20,
+        solver_ls_iterations=50,
         ccd_iterations=50,
         nconmax=None,
         njmax=200,

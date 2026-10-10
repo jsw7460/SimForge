@@ -162,8 +162,24 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> SceneConfig:
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
+            # implicitfast is the MuJoCo-consistent integrator (mjlab and
+            # Newton run it); Genesis's default approximate_implicitfast
+            # folds joint damping into the mass matrix before the
+            # constraint solve. Same solver budget, cone and impratio as
+            # the MuJoCo / Newton builders of this preset (the tracking
+            # recipe's elliptic cone at impratio 10); this cell used to run
+            # Genesis's defaults (pyramidal, impratio 1, 25 / 50).
+            integrator=gs.integrator.implicitfast,
             constraint_solver=gs.constraint_solver.Newton,
             constraint_timeconst=0.02,
+            iterations=20,
+            ls_iterations=50,
+            friction_cone=gs.friction_cone.elliptic,
+            # Genesis defaults elliptic + Newton to 'signorini'; 'convex' is
+            # the mjwarp-equivalent resolution the getup presets pin
+            # (signorini diverged to NaN on their landing impacts).
+            contact_resolution=gs.contact_resolution.convex,
+            impratio=10.0,
             enable_collision=True,
             enable_self_collision=True,
             enable_joint_limit=True,

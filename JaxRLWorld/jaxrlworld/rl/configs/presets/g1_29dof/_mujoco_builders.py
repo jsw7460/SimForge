@@ -189,6 +189,7 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         env_spacing=2.0,
         robot_entity_name="robot",
         cone="pyramidal",
+        impratio=1.0,
         entities={"robot": robot_entity},
         sensors=(feet_ground_cfg, self_collision_cfg),
         # Flat follows the Mjlab-Velocity-Flat-Unitree-G1 reference

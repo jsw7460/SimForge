@@ -108,10 +108,16 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> SceneConfig:
         env_spacing=(2.0, 2.0),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
+            # implicitfast is the MuJoCo-consistent integrator (mjlab and
+            # Newton run it); Genesis's default approximate_implicitfast
+            # folds joint damping into the mass matrix before the
+            # constraint solve.
+            integrator=gs.integrator.implicitfast,
             constraint_solver=gs.constraint_solver.Newton,
             constraint_timeconst=0.02,
-            iterations=30,
-            ls_iterations=40,
+            # 20 / 50 on all three backends (see the MuJoCo builder).
+            iterations=20,
+            ls_iterations=50,
             enable_collision=True,
             # The arm's own links cannot reach each other in the poses this
             # preset visits, and self-collision is the dominant cost.

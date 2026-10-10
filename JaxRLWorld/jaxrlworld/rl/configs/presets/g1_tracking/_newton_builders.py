@@ -137,6 +137,13 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
             # the Newton iterations the 10-cap used to cut short.
             iterations=20,
             ls_iterations=50,
+            # Pyramidal cone at impratio 1, as the MuJoCo builder of this
+            # preset. Left unset, SolverMuJoCoCfg used to default to Newton's
+            # humanoid recipe (elliptic, impratio 100) -- a different friction
+            # cone on this backend only; see the g1_29dof Newton builder for
+            # how that recipe NaN'd there.
+            cone="pyramidal",
+            impratio=1.0,
             ccd_iterations=50,
             njmax=1500,
             # Per-env contact budget; mjwarp also caps BROADPHASE candidate

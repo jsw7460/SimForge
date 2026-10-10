@@ -25,6 +25,7 @@ from jaxrlworld.rl.configs.newton_config_classes import (
     NewtonEnvConfig,
     NewtonObservationConfig,
     NewtonSceneConfig,
+    SolverMuJoCoCfg,
     VisualizationConfig,
 )
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
@@ -130,6 +131,20 @@ def build_scene(cfg: T1TrackingConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
         robot_cfg=r,
+        # Same contact solver as the MuJoCo builder of this preset: elliptic
+        # cone at impratio 10 (the tracking recipe), 20 / 50 iterations. This
+        # builder used to pass no solver_cfg at all, which ran Newton's
+        # humanoid defaults (elliptic, impratio 100, 100 / 50) on this
+        # backend only. nconmax / njmax keep the values that default gave.
+        solver_cfg=SolverMuJoCoCfg(
+            cone="elliptic",
+            impratio=10.0,
+            iterations=20,
+            ls_iterations=50,
+            ccd_iterations=50,
+            nconmax=150,
+            njmax=1500,
+        ),
         entities={
             "robot": NewtonEntityCfg(
                 mjcf_path=r.mjcf_path,

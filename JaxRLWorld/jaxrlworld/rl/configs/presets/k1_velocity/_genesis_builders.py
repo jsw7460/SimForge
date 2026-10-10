@@ -164,8 +164,16 @@ def build_scene(cfg: K1VelocityConfig, timing: Dict[str, Any]) -> SceneConfig:
             # rewards.
             integrator=gs.integrator.implicitfast,
             constraint_solver=gs.constraint_solver.Newton,
-            iterations=10,
-            ls_iterations=20,
+            # Same budget as the MuJoCo / Newton builders: the source's
+            # 10 / 20 leaves the line search unconverged in ~27% of
+            # world-substeps there, and this cell had kept 10 / 20 after
+            # the other two moved.
+            iterations=20,
+            ls_iterations=50,
+            # Stated explicitly (the scene manager requires it): the same
+            # pyramidal cone at impratio 1 the MuJoCo / Newton builders use.
+            friction_cone=gs.friction_cone.pyramidal,
+            impratio=1.0,
             tolerance=1e-5,
             constraint_timeconst=0.02,
             enable_collision=True,

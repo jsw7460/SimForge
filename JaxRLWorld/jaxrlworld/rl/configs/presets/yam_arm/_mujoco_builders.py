@@ -148,8 +148,12 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
         robot_entity_name="robot",
         entities={"robot": robot_entity},
         rigid_objects=build_rigid_objects(cfg),
-        solver_iterations=10,
-        solver_ls_iterations=20,
+        # 20 / 50 on all three backends (this cell ran 10 / 20, Newton
+        # 50 / 50, Genesis 30 / 40): 10 / 20 leaves mjwarp's line search
+        # unconverged in a large share of world-substeps on every robot
+        # measured with check_solver_convergence, and 20 / 50 converges.
+        solver_iterations=20,
+        solver_ls_iterations=50,
         ccd_iterations=50,
         # The arm's own limit + contact constraints overflow a small
         # buffer; an overflow silently DROPS constraints rather than

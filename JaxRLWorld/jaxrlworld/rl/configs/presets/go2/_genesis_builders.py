@@ -184,8 +184,14 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
         sim_options=gs.options.SimOptions(dt=sim_dt, substeps=timing["substeps"]),
         rigid_options=gs.options.RigidOptions(
             dt=sim_dt,
-            iterations=10,
-            ls_iterations=20,
+            # 20 / 50 on all three backends: the reference's 10 / 20 leaves
+            # the line search unconverged (see the MuJoCo builder).
+            iterations=20,
+            ls_iterations=50,
+            # Stated explicitly (the scene manager requires it): the same
+            # pyramidal cone at impratio 1 the MuJoCo / Newton builders use.
+            friction_cone=gs.friction_cone.pyramidal,
+            impratio=1.0,
             # implicitfast is the MuJoCo-consistent integrator. The
             # Genesis default (approximate_implicitfast) folds joint
             # damping into the mass matrix before the constraint solve;

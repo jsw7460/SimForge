@@ -204,6 +204,7 @@ def build_scene(cfg: K1VelocityConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         env_spacing=2.0,
         robot_entity_name="robot",
         cone="pyramidal",
+        impratio=1.0,
         entities={"robot": robot_entity},
         sensors=(feet_ground, non_foot_ground, self_collision),
         # The source's solver budget is iterations 10 / ls 20, which

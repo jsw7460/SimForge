@@ -187,8 +187,10 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
             impratio=1.0,
             ccd_iterations=50,
             cone="pyramidal",
-            ls_iterations=20,
-            iterations=10,
+            # 20 / 50 on all three backends: the reference's 10 / 20 leaves
+            # the line search unconverged (see the MuJoCo builder).
+            ls_iterations=50,
+            iterations=20,
             # mjwarp-native collision on BOTH flat and rough. The old
             # rough-only opt-out (use_mujoco_contacts=False → Newton's
             # MPR collide()) dated from when the terrain was a triangle

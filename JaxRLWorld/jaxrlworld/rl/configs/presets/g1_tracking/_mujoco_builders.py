@@ -176,6 +176,10 @@ def build_scene(cfg: G1TrackingConfig, timing: Dict[str, Any]) -> MujocoSceneCon
         # 20 / 50 converges every world at +1.4% step time.
         solver_iterations=20,
         solver_ls_iterations=50,
+        # Pyramidal cone at impratio 1 (mjlab's tracking reference); stated
+        # on all three backends of this preset.
+        cone="pyramidal",
+        impratio=1.0,
         ccd_iterations=50,
         nconmax=35,
         njmax=250,

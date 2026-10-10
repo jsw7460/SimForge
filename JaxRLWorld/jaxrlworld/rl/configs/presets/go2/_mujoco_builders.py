@@ -196,8 +196,14 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         # terrain (flat plane or generated) — single source of truth.
         terrain_cfg=cfg.make_terrain_cfg(),
         cone="pyramidal",
-        solver_iterations=10,
-        solver_ls_iterations=20,
+        impratio=1.0,
+        # mjlab's go2 reference runs iterations 10 / ls 20, which leaves
+        # the line search unconverged in a large share of world-substeps
+        # (check_solver_convergence); 20 / 50 converges every world, the
+        # same budget the G1 / K1 / T1 presets moved to. Stated on all
+        # three backends of this preset.
+        solver_iterations=20,
+        solver_ls_iterations=50,
         ccd_iterations=50,
         nconmax=35,
         njmax=1500,

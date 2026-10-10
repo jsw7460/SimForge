@@ -117,8 +117,10 @@ def build_scene(cfg: T1GetupConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
         gravity=(0.0, 0.0, -9.81),
         solver_type="mujoco",
         robot_cfg=r,
+        # Same budget as the MuJoCo builder (20 / 50, measured to converge
+        # every world there); this cell ran 50 / 50.
         solver_cfg=SolverMuJoCoCfg(
-            impratio=10.0, cone="elliptic", iterations=50, ls_iterations=50, ccd_iterations=50, nconmax=200
+            impratio=10.0, cone="elliptic", iterations=20, ls_iterations=50, ccd_iterations=50, nconmax=200
         ),
         entities={
             "robot": NewtonEntityCfg(

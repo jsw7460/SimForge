@@ -185,8 +185,16 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> SceneConfig:
             # rewards. implicitfast is the MuJoCo-consistent integrator.
             integrator=gs.integrator.implicitfast,
             constraint_solver=gs.constraint_solver.Newton,
-            iterations=10,
-            ls_iterations=20,
+            # Same budget as the MuJoCo / Newton builders: the reference's
+            # 10 / 20 leaves the line search unconverged in most
+            # world-substeps there, and this cell had kept 10 / 20 after
+            # the other two moved.
+            iterations=50 if cfg.use_rough_terrain else 20,
+            ls_iterations=50,
+            # Stated explicitly (the scene manager requires it): the same
+            # pyramidal cone at impratio 1 the MuJoCo / Newton builders use.
+            friction_cone=gs.friction_cone.pyramidal,
+            impratio=1.0,
             tolerance=1e-5,
             constraint_timeconst=0.02,
             enable_collision=True,
