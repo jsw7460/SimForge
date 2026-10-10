@@ -1273,6 +1273,9 @@ class NewtonSceneManager(BaseManager):
             if mjc_override:
                 use_mjc_contacts = mjc_override == "1"
             self._use_mujoco_contacts = use_mjc_contacts
+            # Fail here, with the field named, if the preset's Newton builder
+            # left a cross-backend solver field unset.
+            scfg.require_solver_fields()
             self.solver = newton.solvers.SolverMuJoCo(
                 self.model,
                 solver=scfg.solver,

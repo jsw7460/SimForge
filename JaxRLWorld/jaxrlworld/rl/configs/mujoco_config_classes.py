@@ -73,14 +73,20 @@ class MujocoSceneConfig(BaseConfig):
     # Terrain (flat plane by default; generator → heightfield).
     terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
-    # Solver settings
-    solver_iterations: int = 10
-    solver_ls_iterations: int = 20
+    # Solver settings. The four contact-solver fields a preset's three
+    # builders must agree on (iterations, line-search iterations, impratio,
+    # friction cone) carry no default: a builder that leaves one unset
+    # fails at scene build (``require_solver_fields``) instead of silently
+    # running MuJoCo's defaults while the Newton builder of the same preset
+    # ran Newton's. Buffer sizes stay defaulted; they are per-backend
+    # capacity, not physics.
+    solver_iterations: int | None = None
+    solver_ls_iterations: int | None = None
     ccd_iterations: int = 50
     nconmax: int | None = 35
     njmax: int | None = 1500
-    impratio: float = 1.0
-    cone: Literal["pyramidal", "elliptic"] = "pyramidal"
+    impratio: float | None = None
+    cone: Literal["pyramidal", "elliptic"] | None = None
     contact_sensor_maxmatch: int = 64
     # MuJoCo Warp prints from its kernels when a world overflows a buffer
     # or exhausts a solver / line-search iteration budget. The print sits
@@ -104,6 +110,28 @@ class MujocoSceneConfig(BaseConfig):
         result.pop("mjlab_sim_cfg", None)
         result.pop("unified_entities", None)
         return result
+
+    def require_solver_fields(self) -> None:
+        """Raise unless every cross-backend contact-solver field is set.
+
+        Called by the mjlab scene manager right before ``MujocoCfg`` is
+        built, so a builder that omits one fails at build with the field
+        named rather than running MuJoCo's defaults the Newton and Genesis
+        builders of the same preset never see.
+        """
+        values = {
+            "solver_iterations": self.solver_iterations,
+            "solver_ls_iterations": self.solver_ls_iterations,
+            "impratio": self.impratio,
+            "cone": self.cone,
+        }
+        missing = [name for name, value in values.items() if value is None]
+        if missing:
+            raise ValueError(
+                f"MujocoSceneConfig leaves {missing} unset. These fields have no default because the "
+                "three backends of a preset must agree on them; set them explicitly in the MuJoCo "
+                "scene builder (match the preset's Newton / Genesis builders)."
+            )
 
 
 @dataclass

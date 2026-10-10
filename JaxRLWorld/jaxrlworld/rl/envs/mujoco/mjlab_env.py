@@ -202,6 +202,9 @@ class MujocoEnv(World):
         # Sync num_envs (eval env may override env_cfg.num_envs)
         self.scene_cfg.num_envs = self.num_envs
 
+        # Fail here, with the field named, if the preset's MuJoCo builder
+        # left a cross-backend solver field unset.
+        self.scene_cfg.require_solver_fields()
         SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
         SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
         self.scene_manager = SceneCls(

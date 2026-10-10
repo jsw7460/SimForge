@@ -206,14 +206,17 @@ class MujocoSceneManagerConfig:
     # Terrain (flat plane by default; generator → injected heightfield).
     terrain_cfg: TerrainCfg = field(default_factory=lambda: TerrainCfg(terrain_type="plane"))
 
-    # Solver
-    solver_iterations: int = 10
-    solver_ls_iterations: int = 20
+    # Solver. Copied field-for-field from ``MujocoSceneConfig`` by
+    # ``MjlabEnv``; the four cross-backend fields have no default there
+    # (``MujocoSceneConfig.require_solver_fields``) and none here, so this
+    # class cannot reintroduce a physics default of its own.
+    solver_iterations: int | None = None
+    solver_ls_iterations: int | None = None
     ccd_iterations: int = 50
     nconmax: int | None = 35
     njmax: int | None = 1500
-    impratio: float = 1.0
-    cone: Literal["pyramidal", "elliptic"] = "pyramidal"
+    impratio: float | None = None
+    cone: Literal["pyramidal", "elliptic"] | None = None
     contact_sensor_maxmatch: int = 64
     # MuJoCo Warp's in-kernel overflow / solver-budget warning print; see
     # ``MujocoSceneConfig.warn_overflow``.

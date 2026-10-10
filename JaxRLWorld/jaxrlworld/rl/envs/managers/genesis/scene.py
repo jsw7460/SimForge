@@ -34,6 +34,13 @@ if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
 
 
+# ``gs.options.RigidOptions`` fields every Genesis scene builder must pass
+# explicitly; the counterparts on the mjlab / Newton configs carry no
+# default either (``MujocoSceneConfig.require_solver_fields``,
+# ``SolverMuJoCoCfg.require_solver_fields``).
+_REQUIRED_RIGID_OPTIONS = ("integrator", "iterations", "ls_iterations", "friction_cone", "impratio")
+
+
 def _canonical_joint_order_genesis(entity: RigidEntity) -> list[str]:
     """Canonical joint name list — DFS walk of ``entity.links`` with
     siblings sorted alphabetically by bare link name at each node,
@@ -543,6 +550,20 @@ class SceneManager(BaseManager):
 
     def _create_scene(self) -> None:
         """Initialize scene with basic settings"""
+        # The contact-solver options a preset's three builders must agree on
+        # have to be stated explicitly: Genesis's own defaults
+        # (approximate_implicitfast, 25 / 50 iterations, impratio None ->
+        # 1 or 100 by cone) are not the mjlab / Newton defaults, so a builder
+        # that leaves one out runs a different plant on this backend only.
+        # ``model_fields_set`` is pydantic's record of the kwargs the builder
+        # passed, as opposed to values that came from the class default.
+        missing = [name for name in _REQUIRED_RIGID_OPTIONS if name not in self.config.rigid_options.model_fields_set]
+        if missing:
+            raise ValueError(
+                f"Genesis RigidOptions leaves {missing} at the engine default. These options have "
+                "no shared default across backends; set them explicitly in the Genesis scene "
+                "builder (match the preset's MuJoCo / Newton builders)."
+            )
         # A camera needs the batch renderer, and Genesis only accepts one
         # when the scene is constructed — adding a camera to a scene
         # without it draws one environment at a time.

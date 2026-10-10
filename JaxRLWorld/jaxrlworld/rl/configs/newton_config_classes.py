@@ -52,27 +52,32 @@ class SolverMuJoCoCfg(BaseConfig):
     defers to Newton's documented 3-tier priority: ctor arg > the model's
     ``mujoco.<option>`` custom attribute > MuJoCo's built-in default.
 
-    Defaults below follow Newton's canonical humanoid-locomotion recipe
-    from ``newton/examples/robot/example_robot_g1.py`` (elliptic friction
-    cone, implicitfast integrator, 100 / 50 iterations, impratio=100),
-    which is what the repository's locomotion-style presets actually want.
+    The contact-solver fields a preset's three builders must agree on --
+    ``cone``, ``impratio``, ``iterations``, ``ls_iterations`` -- carry no
+    default: a builder that leaves one unset fails at scene build
+    (``require_solver_fields``) instead of silently inheriting a value the
+    other two backends do not share. Newton's canonical humanoid recipe
+    (elliptic cone, impratio 100, 100 / 50 iterations) used to sit here as
+    the default while the mjlab config defaulted to pyramidal / 1 / 10 / 20,
+    so any builder that forgot a field ran a different friction cone per
+    backend.
     """
 
     # Core algorithm choices
     solver: Literal["newton", "cg"] | None = "newton"
     integrator: Literal["implicitfast", "euler", "rk4"] | None = "implicitfast"
-    cone: Literal["pyramidal", "elliptic"] | None = "elliptic"
+    cone: Literal["pyramidal", "elliptic"] | None = None
 
     # Iteration budgets
-    iterations: int | None = 100
-    ls_iterations: int | None = 50
+    iterations: int | None = None
+    ls_iterations: int | None = None
 
     # Contact / constraint buffer sizes
     njmax: int | None = 1500
     nconmax: int | None = 150
 
     # Friction cone tuning
-    impratio: float | None = 100.0
+    impratio: float | None = None
 
     # Solver tolerances (None → MuJoCo defaults: 1e-8 / 0.01 / 1e-6)
     tolerance: float | None = None
@@ -100,6 +105,28 @@ class SolverMuJoCoCfg(BaseConfig):
     # substep slows the step several-fold. Off by default, as before MuJoCo
     # Warp 3.13 added the print; ``check_solver_convergence`` counts the hits.
     warn_overflow: bool = False
+
+    def require_solver_fields(self) -> None:
+        """Raise unless every cross-backend contact-solver field is set.
+
+        Called by the Newton scene manager right before the solver is
+        constructed, so a builder that omits one fails at build with the
+        field named rather than running the solver on a default the mjlab
+        and Genesis builders of the same preset never see.
+        """
+        values = {
+            "cone": self.cone,
+            "impratio": self.impratio,
+            "iterations": self.iterations,
+            "ls_iterations": self.ls_iterations,
+        }
+        missing = [name for name, value in values.items() if value is None]
+        if missing:
+            raise ValueError(
+                f"SolverMuJoCoCfg leaves {missing} unset. These fields have no default because the "
+                "three backends of a preset must agree on them; set them explicitly in the Newton "
+                "scene builder (match the preset's MuJoCo / Genesis builders)."
+            )
 
 
 @dataclass
