@@ -280,8 +280,17 @@ class GenesisRigidObjectData(SiteReaderMixin):
         the 2026-07 per-component packing refactor) for per-body model
         values and the existing
         ``body_com_pos_w_all`` / ``body_com_lin_vel_w_all`` /
-        ``body_ang_vel_w_all`` / ``body_quat_w_all`` accessors for state.
-        ``sensor_name`` is ignored.
+        ``body_ang_vel_w_all`` accessors for state. ``sensor_name`` is
+        ignored.
+
+        Genesis stores ``inertial_i`` as the diagonal inertia in the body's
+        INERTIAL frame (the MJCF ``<inertial quat>``), not the link frame,
+        and forward kinematics composes that frame into the world as
+        ``dyn_state.links.i_quat``. The spin term rotates with ``i_quat``;
+        rotating with the link quaternion put every G1 / K1 link whose
+        inertial frame is not the link frame (30 of 32, 23 of 25) in the
+        wrong frame, a 1-2 % median / 6-13 % worst-case error on the total
+        (``check_genesis_angular_momentum_frame``).
         """
         solver = self._entity._solver
         link_ids = self._global_link_ids
@@ -290,7 +299,7 @@ class GenesisRigidObjectData(SiteReaderMixin):
         m = qd_to_torch(solver.dyn_info.links.inertial_mass, None, link_ids, transpose=True, copy=True)
         if m.dim() == 1:
             m = m.unsqueeze(0).expand(self._num_envs, -1)
-        # Per-body local inertia 3x3: (W, B, 3, 3) if batched else (B, 3, 3) → broadcast.
+        # Per-body inertia 3x3 in the inertial frame: (W, B, 3, 3) if batched else (B, 3, 3) → broadcast.
         I_body = qd_to_torch(solver.dyn_info.links.inertial_i, None, link_ids, transpose=True, copy=True)
         if I_body.dim() == 3:
             I_body = I_body.unsqueeze(0).expand(self._num_envs, -1, -1, -1)
@@ -299,9 +308,10 @@ class GenesisRigidObjectData(SiteReaderMixin):
         r_i = self.body_com_pos_w_all  # (W, B, 3)
         v_i = self.body_com_lin_vel_w_all  # (W, B, 3)
         omega_i = self.body_ang_vel_w_all  # (W, B, 3)
-        q_i = self.body_quat_w_all  # (W, B, 4) wxyz
+        # World orientation of each link's INERTIAL frame, (W, B, 4) wxyz.
+        q_i = qd_to_torch(solver.dyn_state.links.i_quat, None, link_ids, transpose=True, copy=True)
 
-        # Spin: sum_i R_i @ I_i_local @ R_i^T @ omega_i.
+        # Spin: sum_i R_i @ I_i_inertial @ R_i^T @ omega_i.
         omega_body = quat_rotate_inverse_wxyz(q_i, omega_i)
         spin_body = torch.einsum("nbij,nbj->nbi", I_body, omega_body)
         spin = quat_rotate_wxyz(q_i, spin_body).sum(dim=1)  # (W, 3)
