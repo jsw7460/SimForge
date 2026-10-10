@@ -8,6 +8,7 @@ identical.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -77,9 +78,11 @@ def build_visualization(cfg: Go2FlatConfig) -> VisualizationConfig:
 def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> EnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
-        roll_pitch_violation = TerminationTermConfig(
-            common_tf.roll_pitch_violation,
-            {"roll_threshold_degree": 30.0, "pitch_threshold_degree": 30.0},
+        # One sim-agnostic cone test on all three backends (this cell used
+        # to run a roll/pitch box, a different fall boundary from MuJoCo).
+        bad_orientation = TerminationTermConfig(
+            common_tf.bad_orientation,
+            {"limit_angle": math.radians(30.0)},
         )
         time_out = TerminationTermConfig(max_episode_exceed)
 

@@ -90,6 +90,32 @@ def nan_detection(
     return TerminationResult(has_nan)
 
 
+def bad_orientation(
+    env: World,
+    limit_angle: float,
+    asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
+) -> TerminationResult:
+    """Terminate when the root link tilts past ``limit_angle`` from upright.
+
+    The tilt is the angle between the root link's up axis and world up,
+    ``acos(-g_z)`` of the body-frame projected gravity, clamped so round-off
+    outside ``[-1, 1]`` cannot produce NaN. A cone test, the same region of
+    orientations mjlab's ``bad_orientation`` terminates on. It is the one
+    fall condition every backend of a preset should share: a roll/pitch box
+    (:func:`roll_pitch_violation`) fires on a different region -- at
+    roll = pitch = 22 deg the tilt is already 30.7 deg -- so wiring the cone
+    on one backend and the box on the others ends episodes differently per
+    simulator for the same fall.
+
+    Args:
+        limit_angle: Maximum tilt from upright, in radians.
+        asset_cfg: Entity whose root link is checked.
+    """
+    gravity_b = env.get_entity_data(asset_cfg.name).projected_gravity_b
+    tilt = torch.acos(torch.clamp(-gravity_b[:, 2], -1.0, 1.0))
+    return TerminationResult(tilt > limit_angle)
+
+
 def roll_pitch_violation(
     env: World,
     roll_threshold_degree: float = 15.0,

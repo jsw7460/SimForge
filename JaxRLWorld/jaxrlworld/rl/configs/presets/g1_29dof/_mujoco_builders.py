@@ -80,8 +80,10 @@ def build_visualization(cfg: G1FlatConfig) -> VisualizationConfig:
 def build_env(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
     @dataclass
     class _TerminationsCfg(TerminationsConfig):
+        # One sim-agnostic cone test on all three backends (Newton / Genesis
+        # used to run a roll/pitch box here, a different fall boundary).
         bad_orientation = TerminationTermConfig(
-            tf.bad_orientation,
+            common_tf.bad_orientation,
             {"limit_angle": math.radians(70.0)},
         )
         time_out = TerminationTermConfig(tf.time_out)

@@ -30,31 +30,6 @@ def time_out(env: MujocoEnv) -> TerminationResult:
     return TerminationResult(terminated, is_timeout=True)
 
 
-def bad_orientation(
-    env: MujocoEnv,
-    limit_angle: float = 1.0,
-) -> TerminationResult:
-    """Terminate when the robot's orientation exceeds the limit angle.
-
-    The limit angle is computed from the projected gravity vector.
-
-    Args:
-        env: The MujocoEnv environment.
-        limit_angle: Maximum allowed tilt angle in radians.
-
-    Returns:
-        TerminationResult for orientation violation.
-    """
-    robot_data = env.scene_manager.robot.data
-    projected_gravity = robot_data.projected_gravity_b
-
-    # acos(-z) gives angle from upright
-    tilt_angle = torch.acos(-projected_gravity[:, 2]).abs()
-    terminated = tilt_angle > limit_angle
-
-    return TerminationResult(terminated)
-
-
 def root_height_below_minimum(
     env: MujocoEnv,
     minimum_height: float = 0.2,
