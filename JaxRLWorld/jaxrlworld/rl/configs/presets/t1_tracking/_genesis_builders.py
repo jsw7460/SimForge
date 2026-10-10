@@ -388,15 +388,23 @@ def build_reward(cfg: T1TrackingConfig) -> RewardConfig:
 
 
 def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
-    """Scalar friction DR only — Genesis can't do per-axis 3-vector friction."""
+    """Scalar friction DR only — Genesis can't do per-axis 3-vector friction.
+
+    Drawn once at startup and once per env, as the MuJoCo and Newton
+    builders draw theirs. Genesis scales the asset friction instead of
+    writing an absolute value, so the (0.8, 1.5) ratio lands on the same
+    absolute band on the eight geoms the asset puts at 1.0 and on 0.6x of
+    it on the one body capsule at 0.6.
+    """
     return {
         "randomize_friction_scalar": EventTermConfig(
             func=unified_dr.randomize_friction,
-            mode="reset_dr",
+            mode="startup",
             params={
                 "asset_cfg": SceneEntitySelector(name="robot"),
                 "friction_range": (0.8, 1.5),
                 "operation": "scale",
+                "shared_random": True,
             },
         ),
     }

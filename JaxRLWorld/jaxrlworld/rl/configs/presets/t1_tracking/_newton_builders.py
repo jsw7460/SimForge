@@ -412,6 +412,7 @@ def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
                 "axes": [0],
                 "operation": "abs",
                 "distribution": "uniform",
+                "shared_random": True,
             },
         ),
         "foot_friction_spin": EventTermConfig(
@@ -423,6 +424,7 @@ def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
                 "axes": [1],
                 "operation": "abs",
                 "distribution": "log_uniform",
+                "shared_random": True,
             },
         ),
         "foot_friction_roll": EventTermConfig(
@@ -434,6 +436,7 @@ def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
                 "axes": [2],
                 "operation": "abs",
                 "distribution": "log_uniform",
+                "shared_random": True,
             },
         ),
     }
