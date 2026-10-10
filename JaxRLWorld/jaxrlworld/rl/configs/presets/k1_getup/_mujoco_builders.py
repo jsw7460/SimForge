@@ -11,7 +11,9 @@ between the two tasks. What this module owns is what a fallen robot changes:
   pyramidal cone at 1 is tuned for walking. The contact budget is left to
   mjwarp's automatic sizing: a robot lying on its shells carries several times
   the contact rows of one standing on its feet, and the velocity preset's
-  fixed ``nconmax`` is sized for the latter.
+  fixed ``nconmax`` is sized for the latter. The constraint-row budget is the
+  Newton builder's 800 for the same reason; the velocity preset's 300 is a
+  standing robot's, and an overflow silently DROPS rows.
 - **Settle hold.** The action manager's settle mask holds the current joint
   position for the first ``settle_steps`` after each reset.
 """
@@ -62,6 +64,7 @@ def build_scene(cfg: K1GetupConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
         cone="elliptic",
         impratio=10.0,
         nconmax=None,
+        njmax=800,
         preset_class_name=type(cfg).__name__,
         preset_module_path=type(cfg).__module__,
     )
