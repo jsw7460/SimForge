@@ -308,10 +308,9 @@ def feet_clearance_mjlab(
 
 
 class feet_swing_height_mjlab:
-    """Thin wrapper around ``common.FeetSwingHeightTracker`` (Genesis legacy reset).
+    """Thin wrapper around ``common.FeetSwingHeightTracker`` (Genesis).
 
-    Preserves bit-identity by setting ``reset_mode="zero"`` (Genesis's
-    original behavior).
+    ``reset_mode="zero"`` on every backend, as mjlab's reference term.
     """
 
     __name__ = "feet_swing_height_mjlab"

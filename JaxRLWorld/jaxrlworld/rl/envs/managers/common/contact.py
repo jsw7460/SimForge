@@ -174,8 +174,9 @@ class BaseContactManager(BaseManager, ABC):
     def _compute_group_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
         """Return contact force history ``(num_envs, group.num_tracked, H, 3)`` or ``None``.
 
-        Override in backends that support substep history (e.g. MuJoCo).
-        Returns ``None`` by default (no history available).
+        Every backend overrides this: MuJoCo, Newton and Genesis each keep
+        the last ``history_length`` substeps of every group's force. This
+        default is the contract for a backend without substep capture.
         """
         return None
 
@@ -268,9 +269,10 @@ class BaseContactManager(BaseManager, ABC):
     def contact_force_history(self, group_name: str, order: list[str] | None = None) -> torch.Tensor | None:
         """Contact force history across substeps. Shape: ``(num_envs, N, H, 3)``.
 
-        Returns ``None`` if the backend does not support substep history
-        (Genesis, Newton). MuJoCo returns history when ``history_length > 0``
-        in the ContactSensorCfg.
+        All three backends return it: MuJoCo when ``history_length > 0`` in
+        the ContactSensorCfg, Newton and Genesis always (their sensors
+        refuse a ``history_length`` below the decimation). ``None`` only
+        comes from a backend that has not implemented substep capture.
         """
         group = self._get_group(group_name)
         self._require_force(group)

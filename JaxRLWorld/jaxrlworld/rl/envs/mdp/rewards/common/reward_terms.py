@@ -551,18 +551,18 @@ def penalize_contact_force_count(
 ) -> torch.Tensor:
     """Count tracked bodies whose contact-force magnitude exceeds a threshold.
 
-    Returns the negated count (penalty). When the backend supports
-    substep history (mjlab when ``history_length > 0``), the threshold
-    check runs across all substeps and a body counts as a hit if **any**
-    substep crossed the threshold. Otherwise we fall back to the
-    instantaneous ``contact_force`` array.
+    Returns the negated count (penalty). With substep history (every
+    backend provides it: MuJoCo when ``history_length > 0``, Newton and
+    Genesis always) the threshold check runs across all substeps and a
+    body counts as a hit if **any** substep crossed the threshold. The
+    instantaneous ``contact_force`` fallback is only for a group registered
+    without history.
 
     This unifies three legacy functions across simulators:
 
-    - mjlab ``self_collision_cost`` (history-aware)
-    - mjlab ``wtw_collision`` (history-aware)
-    - Newton/Genesis ``wtw_collision`` (instantaneous only — those
-      backends always return ``None`` from ``contact_force_history``)
+    - mjlab ``self_collision_cost``
+    - mjlab ``wtw_collision``
+    - Newton/Genesis ``wtw_collision``
 
     The math is identical: ``-sum((force_mag > threshold).float())`` over
     the N tracked bodies of the contact group.
@@ -659,9 +659,12 @@ class FeetSwingHeightTracker:
             to the resolved body-name list when bodies are used.
         use_squared_error: ``True`` for ``error**2`` (mjlab); ``False``
             for ``abs(error)`` (older WTW variant).
-        reset_mode: Per-env reset behavior. ``"zero"`` (Genesis legacy),
-            ``"current_foot_height"`` (Newton legacy), or ``"none"``
-            (MuJoCo legacy — peaks persist across episode resets).
+        reset_mode: Per-env reset behavior. ``"zero"`` (mjlab's reference
+            and every backend wrapper), ``"current_foot_height"`` (re-seed
+            to the foot's current z), or ``"none"`` (peaks persist across
+            episode resets). The last two are kept for experiments; the
+            wrappers all use ``"zero"`` so the three backends charge the
+            same first-landing cost.
     """
 
     __name__ = "FeetSwingHeightTracker"

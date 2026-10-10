@@ -408,11 +408,12 @@ class variable_posture:
 
 
 class feet_swing_height_mjlab:
-    """Thin wrapper around ``common.FeetSwingHeightTracker`` (Newton legacy reset).
+    """Thin wrapper around ``common.FeetSwingHeightTracker`` (Newton).
 
-    Preserves bit-identity by setting ``reset_mode="current_foot_height"``,
-    which re-seeds peak heights to the current foot z on episode reset
-    (Newton's original behavior — different from Genesis/MuJoCo).
+    ``reset_mode="zero"`` on every backend, as mjlab's reference term. The
+    Newton original re-seeded peak heights to the current foot z on reset,
+    which gave this backend a different first-landing cost from Genesis
+    (zero) and MuJoCo (no reset) for the same preset.
     """
 
     __name__ = "feet_swing_height_mjlab"
@@ -433,7 +434,7 @@ class feet_swing_height_mjlab:
             asset_cfg=asset_cfg,
             contact_order=contact_order,
             use_squared_error=True,
-            reset_mode="current_foot_height",
+            reset_mode="zero",
         )
 
     def __call__(self, env: NewtonEnv) -> torch.Tensor:
@@ -474,7 +475,7 @@ class feet_swing_height:
             asset_cfg=asset_cfg,
             contact_order=contact_order,
             use_squared_error=False,
-            reset_mode="current_foot_height",
+            reset_mode="zero",
         )
 
     def __call__(self, env: NewtonEnv) -> torch.Tensor:

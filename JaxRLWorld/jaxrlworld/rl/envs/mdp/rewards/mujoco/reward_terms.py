@@ -400,13 +400,14 @@ class variable_posture:
 
 
 class feet_swing_height:
-    """Thin wrapper around ``common.FeetSwingHeightTracker`` (MuJoCo legacy).
+    """Thin wrapper around ``common.FeetSwingHeightTracker`` (MuJoCo).
 
-    Preserves bit-identity by setting ``reset_mode="none"`` — the
-    original MuJoCo class had no ``reset`` method, so peak heights
-    persisted across episode resets and were only zeroed naturally on
-    landing. ``contact_order=None`` because legacy MuJoCo relies on the
-    natural contact-group order matching site order.
+    ``reset_mode="zero"`` on every backend, as mjlab's reference term: peak
+    heights are cleared for the envs being reset. The original MuJoCo class
+    had no ``reset`` method, so a peak left by the previous episode (a fall
+    that flung a foot to 0.5 m) was charged to the first landing of the
+    next one, on this backend only. ``contact_order=None`` because legacy
+    MuJoCo relies on the natural contact-group order matching site order.
     """
 
     __name__ = "feet_swing_height"
@@ -428,11 +429,14 @@ class feet_swing_height:
             asset_cfg=asset_cfg,
             contact_order=contact_order,
             use_squared_error=True,
-            reset_mode="none",
+            reset_mode="zero",
         )
 
     def __call__(self, env: MujocoEnv, **kwargs) -> torch.Tensor:
         return self._impl(env)
+
+    def reset(self, env_ids: torch.Tensor) -> None:
+        self._impl.reset(env_ids)
 
 
 class posture:
