@@ -18,8 +18,12 @@ mjlab-specific quirks the writer hides from callers:
 - Pose / velocity are passed as concatenated 7-vec (pos + quat) and
   6-vec (lin + ang) respectively. ``set_root_pose`` /
   ``set_root_velocity`` build these tensors internally.
-- ``eval_fk`` is a no-op: mjlab's ``Simulation.step()`` and
-  ``Simulation.forward()`` handle FK internally.
+- ``eval_fk`` is a no-op. mjlab's writes land in ``qpos`` / ``qvel``
+  only and ``xpos``, ``cvel`` and the sensors keep their old values
+  until the next ``Simulation.forward()``, so every write below marks
+  the env's kinematics stale (``World._mark_kinematics_stale``) and
+  ``World.step`` forwards once before the observation; a write made
+  after that pass (a command teleport) triggers one more forward.
 """
 
 from __future__ import annotations
@@ -67,6 +71,7 @@ class MujocoRobotStateWriter:
             env_ids=env_ids,
             joint_ids=self._joint_ids,
         )
+        self._env._mark_kinematics_stale()
 
     def set_dof_velocities(self, values: Tensor, env_ids: Tensor | None = None) -> None:
         """Write actuated joint velocities.
@@ -82,6 +87,7 @@ class MujocoRobotStateWriter:
             env_ids=env_ids,
             joint_ids=self._joint_ids,
         )
+        self._env._mark_kinematics_stale()
 
     def set_dof_state(self, positions: Tensor, velocities: Tensor, env_ids: Tensor | None = None) -> None:
         """Write joint positions and velocities in one native call.
@@ -97,6 +103,7 @@ class MujocoRobotStateWriter:
             env_ids=env_ids,
             joint_ids=self._joint_ids,
         )
+        self._env._mark_kinematics_stale()
 
     # ------------------------------------------------------------------
     # Root writes
@@ -127,8 +134,10 @@ class MujocoRobotStateWriter:
                     "already had a non-mocap root body."
                 )
             self._entity.write_mocap_pose_to_sim(pose, env_ids=env_ids)
+            self._env._mark_kinematics_stale()
             return
         self._entity.write_root_link_pose_to_sim(pose, env_ids=env_ids)
+        self._env._mark_kinematics_stale()
 
     def set_root_velocity(
         self,
@@ -151,13 +160,16 @@ class MujocoRobotStateWriter:
             )
         vel = torch.cat([lin_vel, ang_vel], dim=-1)
         self._entity.write_root_link_velocity_to_sim(vel, env_ids=env_ids)
+        self._env._mark_kinematics_stale()
 
     # ------------------------------------------------------------------
     # FK
     # ------------------------------------------------------------------
 
     def eval_fk(self, env_ids: Tensor | None = None) -> None:
-        """No-op: mjlab updates kinematics inside ``Simulation.step()``."""
+        """No-op: the writes above already marked the kinematics stale, and
+        ``World`` runs mjlab's ``Simulation.forward()`` for all envs at once
+        before the observation (a per-env forward does not exist in mjwarp)."""
         return None
 
     # ==================================================================

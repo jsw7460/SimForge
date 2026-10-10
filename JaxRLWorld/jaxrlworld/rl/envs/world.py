@@ -94,6 +94,11 @@ class World(ABC):
         #   1. After _step_physics()  – physics state changed
         #   2. After _reset_idx()     – reset envs have new state
         self._cache_generation = 0
+        # Set by a backend's state writer when a write (reset event, push,
+        # command teleport) leaves derived kinematics behind the new state;
+        # cleared by the backend's forward hooks. Newton and Genesis refresh
+        # kinematics inside their writers and never set it.
+        self._kinematics_stale = False
 
         self._env_step_counter = 0
         self.lifecycle = LifecycleManager()
@@ -779,41 +784,47 @@ class World(ABC):
             final_observation = {key: self.obs_manager.obs_dict[key].clone() for key in group_names}
             self.obs_manager.rollback_last_history_append(groups=groups)
 
+        # Interval events (push_by_setting_velocity, interval_dr) run here:
+        # after the reward, termination and terminal observation of this
+        # step, which reflect the policy's own action and must not see the
+        # disturbance, and BEFORE the reset and the single forward pass
+        # below, so the returned observation does see it. This is mjlab's
+        # order (interval -> reset -> forward -> command -> observation);
+        # IsaacLab applies interval after the reset instead, which on a
+        # backend whose derived state (cvel, xpos) is only refreshed by an
+        # explicit forward left the observation describing the pre-push
+        # velocity for one step. An env that is pushed and reset in the same
+        # step is reset, as in mjlab.
+        if "interval" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="interval", dt=self.control_dt)
+            self._invalidate_cache()
+        # interval_dr: global-period domain randomization (mass/friction/gains
+        # re-sampled for all envs every interval_dr_period_s, one recompute).
+        if "interval_dr" in self.event_manager.available_modes:
+            self.event_manager.apply(mode="interval_dr", dt=self.control_dt)
+            self._invalidate_cache()
+
         # Reset terminated environments
         self._reset_idx(reset_env_ids)
         self._invalidate_cache()
 
-        # Post-reset forward pass — refresh derived quantities (xpos,
-        # xquat, site positions, sensor data, ...) so the upcoming
-        # observation sees fresh kinematics. Override in backends that
-        # need an explicit FK pass (mjlab: sim.forward()).
+        # The step's one forward pass — refresh derived quantities (xpos,
+        # xquat, site positions, cvel, sensor data, ...) for every env so
+        # the commands and the observation see fresh kinematics after the
+        # physics step, the interval events and the resets. Override in
+        # backends that need an explicit FK pass (mjlab: sim.forward()).
         self._post_reset_forward()
 
-        # Advance commands (timer-based resampling + per-step post-processing)
+        # Advance commands (timer-based resampling + per-step post-processing).
+        # A command may write state (motion rollover teleport, object
+        # re-placement); the writer marks the kinematics stale and the hook
+        # forwards once more only on such steps.
         self.command_manager.compute(self.control_dt)
+        self._forward_if_kinematics_stale()
 
-        # Apply interval events AFTER reset/command and BEFORE the observation
-        # is built in _advance_managers, matching IsaacLab and mjlab (both apply
-        # mode="interval" after the reward/termination/reset block, right before
-        # observation_manager.compute). Interval disturbances (e.g.
-        # push_by_setting_velocity) must NOT contaminate this step's reward or
-        # termination — those reflect the policy's own action — but MUST be
-        # visible to the returned observation so the policy can react next step.
-        # The cache is invalidated afterwards so the obs build sees the new
-        # state written by the events.
-        if hasattr(self, "event_manager") and self.event_manager is not None:
-            if "interval" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="interval", dt=self.control_dt)
-                self._invalidate_cache()
-            # interval_dr: global-period domain randomization (mass/friction/gains
-            # re-sampled for all envs every interval_dr_period_s, one recompute).
-            if "interval_dr" in self.event_manager.available_modes:
-                self.event_manager.apply(mode="interval_dr", dt=self.control_dt)
-                self._invalidate_cache()
-
-        # Rendered sensors last, after the interval events above: mjlab's
-        # own step ends forward -> command -> sense -> observation, and an
-        # image taken before a push describes a robot that has since moved.
+        # Rendered sensors last: mjlab's own step ends forward -> command ->
+        # sense -> observation, and an image taken before a push or a
+        # teleport describes a robot that has since moved.
         self._render_sensors()
 
         # Advance managers
@@ -912,6 +923,26 @@ class World(ABC):
         """
         pass
 
+    def _mark_kinematics_stale(self) -> None:
+        """A state writer wrote qpos/qvel-level state whose derived kinematics
+        the backend only refreshes on an explicit forward pass."""
+        self._kinematics_stale = True
+
+    def _forward_if_kinematics_stale(self) -> None:
+        """Refresh derived kinematics if a writer marked them stale since the
+        last forward, and invalidate the read cache.
+
+        Called after ``command_manager.compute`` so a command that teleports
+        the robot (motion rollover) or re-places an object is seen by the
+        observation of the same step. A backend whose writers mark state
+        stale must override this (mjlab: ``sim.forward()``).
+        """
+        if self._kinematics_stale:
+            raise NotImplementedError(
+                f"{type(self).__name__}: a state writer marked kinematics stale but the backend has no "
+                "forward hook to refresh them"
+            )
+
     def _advance_managers(self) -> None:
         """Advance all managers. Override to add custom managers.
 
@@ -976,6 +1007,7 @@ class World(ABC):
         self._reset_idx(all_env_ids)
         self._post_reset_forward()
         self.command_manager.compute(dt=0.0)
+        self._forward_if_kinematics_stale()
         self._invalidate_cache()
         self._render_sensors()
         self.obs_manager.advance()

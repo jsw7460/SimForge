@@ -483,9 +483,27 @@ class MujocoEnv(World):
         to recompute xpos, xquat, site positions, cvel, and sensor
         data from the current qpos/qvel — covering both freshly-reset
         envs and non-reset envs whose kinematics were last updated
-        inside the decimation loop's ``scene.update(dt)`` call.
+        inside the decimation loop's ``scene.update(dt)`` call. The
+        interval events run before this in ``World.step``, so a push's
+        velocity write is covered by this same pass.
         """
         self.scene_manager.forward()
+        self._kinematics_stale = False
+
+    def _forward_if_kinematics_stale(self) -> None:
+        """One more ``sim.forward()`` when a writer ran after the step's pass.
+
+        mjlab writes land in ``qpos`` / ``qvel`` only; ``xpos``, ``cvel`` and
+        the sensors keep the pre-write values until the next forward. The
+        writers mark the env stale on every write, so a command that
+        teleports the robot (motion rollover) or re-places an object costs
+        exactly one extra forward on the steps it happens, which is what
+        mjlab's own motion command does with its pending-forward flag.
+        """
+        if self._kinematics_stale:
+            self.scene_manager.forward()
+            self._kinematics_stale = False
+            self._invalidate_cache()
 
     def _render_sensors(self) -> None:
         """mjlab's sense pipeline: BVH refit, camera rendering, raycasting.
