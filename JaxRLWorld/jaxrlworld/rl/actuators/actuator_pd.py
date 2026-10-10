@@ -172,9 +172,21 @@ class IdealPDActuator(ActuatorBase):
 class DelayedPDActuator(IdealPDActuator):
     """Ideal PD actuator with delayed command application.
 
-    A circular buffer stores recent position targets.  The target
-    actually sent to the PD computation is lagged by a random number
-    of physics steps sampled at each environment reset.
+    A ring buffer stores recent position targets. The target actually sent
+    to the PD computation is the one pushed ``delay`` substeps ago, with
+    ``delay`` drawn per environment from ``[min_delay, max_delay]`` at every
+    reset.
+
+    The ring has ``max_delay + 1`` slots, one per possible lag. A ring of
+    ``max_delay`` slots aliases lag ``max_delay`` onto lag 0 (reading
+    ``max_delay`` slots back lands on the slot just written), which made one
+    delay value in ``max_delay + 1`` behave as no delay at all.
+
+    Right after a reset the ring holds no command for that environment. The
+    lag is clamped to the number of pushes since the reset, so the first
+    command reaches the PD at once and the lag grows to ``delay`` over the
+    next substeps (IsaacLab's ``DelayBuffer`` semantics) instead of the PD
+    tracking an all-zero joint target for ``delay`` substeps.
     """
 
     cfg: DelayedPDActuatorCfg
@@ -188,10 +200,14 @@ class DelayedPDActuator(IdealPDActuator):
         joint_names: list[str] | None = None,
     ) -> None:
         super().__init__(cfg, num_envs, num_joints, device, joint_names)
+        if cfg.min_delay < 0 or cfg.max_delay < cfg.min_delay:
+            raise ValueError(
+                f"DelayedPDActuatorCfg needs 0 <= min_delay <= max_delay (got {cfg.min_delay}, {cfg.max_delay})"
+            )
 
-        max_delay = max(cfg.max_delay, 1)
-        # Ring buffer: (max_delay, num_envs, num_joints)
-        self._buffer = torch.zeros(max_delay, num_envs, num_joints, device=device)
+        # One slot per possible lag 0..max_delay: (max_delay + 1, num_envs, num_joints).
+        self._num_slots = cfg.max_delay + 1
+        self._buffer = torch.zeros(self._num_slots, num_envs, num_joints, device=device)
         self._head = 0
         # Per-env delay in [min_delay, max_delay]
         self._delay = torch.randint(
@@ -201,22 +217,13 @@ class DelayedPDActuator(IdealPDActuator):
             device=device,
             dtype=torch.long,
         )
-        self._max_delay = max_delay
+        # Pushes since the env's last reset, saturating at max_delay; the
+        # effective lag is min(delay, pushes).
+        self._pushes = torch.zeros(num_envs, device=device, dtype=torch.long)
         self._env_idx = torch.arange(num_envs, device=device)
-        # ``_read_idx[h]`` is the ring slot each env reads when the write
-        # head sits at ``h``. The delay only changes at reset, so the table
-        # is rebuilt there and ``compute`` does a row lookup instead of
-        # recomputing the modular arithmetic every substep.
-        self._read_idx = torch.empty(max_delay, num_envs, device=device, dtype=torch.long)
-        self._rebuild_read_idx(slice(None))
-
-    def _rebuild_read_idx(self, env_ids) -> None:
-        heads = torch.arange(self._max_delay, device=self._device).unsqueeze(1)
-        self._read_idx[:, env_ids] = (heads - 1 - self._delay[env_ids].unsqueeze(0)) % self._max_delay
 
     def reset(self, env_ids: Sequence[int]) -> None:
         super().reset(env_ids)
-        self._buffer[:, env_ids] = 0.0
         self._delay[env_ids] = torch.randint(
             self.cfg.min_delay,
             self.cfg.max_delay + 1,
@@ -224,7 +231,23 @@ class DelayedPDActuator(IdealPDActuator):
             device=self._device,
             dtype=torch.long,
         )
-        self._rebuild_read_idx(env_ids)
+        self._pushes[env_ids] = 0
+
+    def delayed_target(self, target_pos: torch.Tensor) -> torch.Tensor:
+        """Push ``target_pos`` and return the target each env sees this substep.
+
+        Reads ``lag`` slots back from the one just written, with the lag
+        clamped to the pushes the env has made since its reset, so a freshly
+        reset env reads this very command. Advances the ring; call once per
+        substep.
+        """
+        self._buffer[self._head] = target_pos
+        lag = torch.minimum(self._delay, self._pushes)
+        slot = (self._head - lag) % self._num_slots
+        delayed = self._buffer[slot, self._env_idx]  # (num_envs, num_joints)
+        self._head = (self._head + 1) % self._num_slots
+        self._pushes.add_(1).clamp_(max=self.cfg.max_delay)
+        return delayed
 
     def compute(
         self,
@@ -232,13 +255,7 @@ class DelayedPDActuator(IdealPDActuator):
         joint_pos: torch.Tensor,
         joint_vel: torch.Tensor,
     ) -> torch.Tensor:
-        # Push current target into the ring buffer
-        self._buffer[self._head] = target_pos
-        self._head = (self._head + 1) % self._max_delay
-
-        # Read delayed targets: for each env, go back self._delay[i] steps
-        delayed_target = self._buffer[self._read_idx[self._head], self._env_idx]  # (num_envs, num_joints)
-        return super().compute(delayed_target, joint_pos, joint_vel)
+        return super().compute(self.delayed_target(target_pos), joint_pos, joint_vel)
 
 
 class DCMotor(IdealPDActuator):

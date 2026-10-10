@@ -54,14 +54,36 @@ def _make_actuator(min_delay: int, max_delay: int, num_envs: int) -> DelayedPDAc
     return DelayedPDActuator(cfg, num_envs=num_envs, num_joints=len(_JOINTS), device="cpu", joint_names=_JOINTS)
 
 
-def _old_delayed_compute(act: DelayedPDActuator, target, pos, vel) -> torch.Tensor:
-    """``DelayedPDActuator.compute`` as it was before the lookup table."""
-    act._buffer[act._head] = target
-    act._head = (act._head + 1) % act._max_delay
-    read_idx = (act._head - 1 - act._delay) % act._max_delay
-    env_idx = torch.arange(act._num_envs, device=act._device)
-    delayed = act._buffer[read_idx, env_idx]
-    return IdealPDActuator.compute(act, delayed, pos, vel)
+class _ReferenceDelay:
+    """Delayed-target semantics written without a ring buffer.
+
+    Keeps every pushed target in a growing history and, for each env, reads
+    the target pushed ``lag`` pushes ago where ``lag = min(delay, pushes
+    since that env's reset)``. This is what ``DelayedPDActuator`` must
+    reproduce with its ring: lag ``max_delay`` is a distinct slot (an older
+    ring of ``max_delay`` slots aliased it onto lag 0) and a freshly reset
+    env reads its first command at once rather than a zero target.
+    """
+
+    def __init__(self, act: DelayedPDActuator) -> None:
+        self.act = act
+        self.history: list[torch.Tensor] = []
+        self.delay = act._delay.clone()
+        self.reset_push = torch.zeros(act._num_envs, dtype=torch.long)
+        self.env_idx = torch.arange(act._num_envs)
+
+    def reset(self, env_ids: torch.Tensor) -> None:
+        cfg = self.act.cfg
+        self.delay[env_ids] = torch.randint(cfg.min_delay, cfg.max_delay + 1, (len(env_ids),), dtype=torch.long)
+        self.reset_push[env_ids] = len(self.history)
+
+    def delayed(self, target) -> torch.Tensor:
+        self.history.append(target.clone())
+        i = len(self.history) - 1
+        lag = torch.minimum(self.delay, i - self.reset_push)
+        stacked = torch.stack(self.history[max(0, i - int(self.act.cfg.max_delay)) :])
+        offset = i - (stacked.shape[0] - 1)
+        return stacked[i - lag - offset, self.env_idx]
 
 
 def _old_manager_compute(actuators, target, pos, vel) -> torch.Tensor:
@@ -85,7 +107,7 @@ def check_delayed_pd(seeds: int = 8, num_envs: int = 1024, substeps: int = 200, 
         min_delay, max_delay = (6, 12) if seed % 2 == 0 else (0, 3)
         torch.manual_seed(seed)
         new = _make_actuator(min_delay, max_delay, num_envs)
-        old = copy.deepcopy(new)
+        ref = _ReferenceDelay(new)
         g = torch.Generator().manual_seed(seed)
         for k in range(substeps):
             if k % reset_every == 0:
@@ -95,15 +117,24 @@ def check_delayed_pd(seeds: int = 8, num_envs: int = 1024, substeps: int = 200, 
                 torch.manual_seed(seed * 1000 + k)
                 new.reset(env_ids)
                 torch.manual_seed(seed * 1000 + k)
-                old.reset(env_ids)
+                ref.reset(env_ids)
             target, pos, vel = _random_inputs(g, num_envs)
-            tau_new = new.compute(target, pos, vel)
-            tau_old = _old_delayed_compute(old, target, pos, vel)
-            assert torch.equal(tau_old, tau_new), f"seed {seed} substep {k}: delayed PD torque differs"
-            assert torch.equal(old._delay, new._delay), f"seed {seed} substep {k}: delays diverged"
-            assert torch.equal(old._buffer, new._buffer), f"seed {seed} substep {k}: ring buffers diverged"
-            assert old._head == new._head
-    print(f"  delayed PD: {seeds} seeds x {substeps} substeps with resets bit-identical")
+            delayed_ref = ref.delayed(target)
+            delayed_new = new.delayed_target(target)
+            assert torch.equal(delayed_ref, delayed_new), f"seed {seed} substep {k}: delayed target differs"
+            assert torch.equal(ref.delay, new._delay), f"seed {seed} substep {k}: delays diverged"
+            # The torque chain is the same function on bit-identical values,
+            # yet on CPU the result differs by a few float32 ULPs depending on
+            # which allocation the target came from (the ring gather vs. the
+            # reference's stack; a clone of either reproduces the other). The
+            # ring semantics are what this gate pins, exactly, above; the
+            # torque is held to a tolerance well below any physical effect.
+            tau_new = IdealPDActuator.compute(new, delayed_new, pos, vel)
+            tau_ref = IdealPDActuator.compute(new, delayed_ref, pos, vel)
+            assert torch.allclose(tau_ref, tau_new, rtol=1e-5, atol=1e-4), f"seed {seed} substep {k}: torque differs"
+    print(
+        f"  delayed PD: {seeds} seeds x {substeps} substeps with resets; delayed targets bit-identical to the history reference"
+    )
 
 
 def check_manager_fast_path(seeds: int = 8, num_envs: int = 1024, substeps: int = 100) -> None:
