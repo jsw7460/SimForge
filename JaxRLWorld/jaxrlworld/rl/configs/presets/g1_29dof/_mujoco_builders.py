@@ -224,7 +224,7 @@ def build_observation(cfg: G1FlatConfig) -> MujocoObservationConfig:
         # zero), unifying with Newton/Genesis on the obs-bias mechanism.
         dof_pos = ObservationTermConfig(func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01))
         dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
-        actions = ObservationTermConfig(func=raw_actions, scale=1.0)
+        prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
     @dataclass
     class _CriticObsCfg(ObservationGroupConfig):

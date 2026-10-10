@@ -316,14 +316,14 @@ def build_observation(cfg: G1FlatConfig) -> NewtonObservationConfig:
 
     @dataclass
     class _ActorObsCfg(ObservationGroupConfig):
-        base_ang_vel_obs = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
-        projected_gravity_obs = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
+        base_ang_vel = ObservationTermConfig(func=base_ang_vel, scale=1.0, noise=Unoise(-0.2, 0.2))
+        projected_gravity = ObservationTermConfig(func=projected_gravity, scale=1.0, noise=Unoise(-0.05, 0.05))
         command = ObservationTermConfig(func=command_obs, scale=1.0)
         # ``dof_pos_biased`` = robot_data.joint_pos + act_manager.encoder_bias
         # (per-episode static offset from randomize_encoder_bias DR). Critic
         # below keeps unbiased ``dof_pos``.
-        dof_pos_obs = ObservationTermConfig(func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01))
-        dof_vel_obs = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
+        dof_pos = ObservationTermConfig(func=dof_pos_biased, scale=1.0, noise=Unoise(-0.01, 0.01))
+        dof_vel = ObservationTermConfig(func=dof_vel, scale=1.0, noise=Unoise(-1.5, 1.5))
         prev_actions = ObservationTermConfig(func=raw_actions, scale=1.0)
 
     @dataclass
