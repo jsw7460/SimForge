@@ -131,7 +131,6 @@ def _step_n(env, action, n: int) -> bool:
 
 def _newton_control_evidence(env, act_names: list[str]) -> None:
     """Dump the joint targets as written, and as MuJoCo Warp sees them."""
-    import newton
     import warp as wp
 
     sm = env.scene_manager
@@ -142,7 +141,6 @@ def _newton_control_evidence(env, act_names: list[str]) -> None:
     # length of the array it actually writes into. A mismatch means every
     # world past the first lands at the wrong offset.
     n_target = len(sm.control.joint_target_q)
-    print(f"[newton] use_coord_layout_targets = {newton.use_coord_layout_targets}")
     print(
         f"[newton] joint_count={model.joint_count} joint_coord_count={model.joint_coord_count} "
         f"joint_dof_count={model.joint_dof_count}  world_count={n_worlds}"

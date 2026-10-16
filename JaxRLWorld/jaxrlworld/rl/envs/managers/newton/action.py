@@ -48,12 +48,10 @@ class NewtonActionManager(ActionManagerBase):
     """Newton action manager.
 
     Uses ArticulationIndexing for all index mappings. Position targets are
-    written into ``joint_target_q``; under the legacy DOF layout this matches
-    the ``joint_qd`` stride so ``newton_qd_indices`` is the right indexer,
-    but under the coord layout (Newton PR #2965) the same array follows the
-    ``joint_q`` stride and ``newton_q_indices`` must be used instead. Forces
-    are always ``joint_qd``-strided, so ``_apply_force`` keeps
-    ``newton_qd_indices`` unconditionally.
+    written into ``joint_target_q``, which follows the ``joint_q`` stride
+    (7 slots for a FREE joint) and is indexed by ``newton_q_indices``.
+    Forces are ``joint_qd``-strided, so ``_apply_force`` indexes by
+    ``newton_qd_indices``.
     """
 
     def __init__(self, env: World, config: NewtonActionManagerConfig):
@@ -95,20 +93,11 @@ class NewtonActionManager(ActionManagerBase):
         control = self.env.scene_manager.control
         num_worlds = self.env.scene_manager.model.world_count
 
-        # Under the coord layout introduced in Newton PR #2965,
         # ``joint_target_q`` follows the ``joint_q`` stride (7 slots for a
-        # FREE joint) and is indexed by ``newton_q_indices``; under the
-        # legacy DOF layout it follows ``joint_qd`` (6 slots for a FREE
-        # joint) and is indexed by ``newton_qd_indices``.
+        # FREE joint); ``newton_qd_indices`` would land one slot short per
+        # FREE joint. Newton removed the legacy DOF-strided layout in #4757.
         indexing = self.env.entity_indexing(entity_name)
-        # The MODEL's snapshot, not the module-level global. Newton takes
-        # the flag once at ``finalize()`` and states that every layout
-        # decision for that model consults the snapshot, so reading the
-        # global would pick the wrong index array for any model finalized
-        # under a different setting — and the two differ by exactly one
-        # slot per FREE joint, which lands a write just past the end.
-        model = self.env.scene_manager.model
-        write_indices = indexing.newton_q_indices if model.use_coord_layout_targets else indexing.newton_qd_indices
+        write_indices = indexing.newton_q_indices
 
         dest = wp.to_torch(control.joint_target_q)
         if dest.numel() % num_worlds != 0:
