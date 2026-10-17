@@ -22,7 +22,10 @@ inputs.
    differently; the shadow gate allows the same);
 4. a finite-difference term (state on the manager) switched on reports
    zero on its first active step, as the eager path does — a recording
-   that had run it speculatively at step 0 would report a jump here.
+   that had run it speculatively at step 0 would report a jump here;
+5. a term reading ``contact_force_history`` (the substep ring the contact
+   penalties and K1's self-collision count use) is served from the
+   snapshot, re-indexed by ``order=``, and matches eager.
 
 Run::
 
@@ -38,6 +41,7 @@ import torch
 
 from jaxrlworld.rl.configs.common_config_classes import RewardConfig
 from jaxrlworld.rl.configs.rewards import LinearSchedule, RewardTermConfig
+from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
 from jaxrlworld.rl.envs.managers.common.reward import RewardManager
 from jaxrlworld.rl.envs.managers.common.reward_view import RecordingEnvView
 from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import _fd_foot_velocity
@@ -68,11 +72,32 @@ def quat_term(env):
     return env.get_entity_data("robot").root_quat_w[:, 0]
 
 
+def history_term(env):
+    history = env.contact_manager.contact_force_history("feet", order=["rf", "lf"])
+    return history.norm(dim=-1).sum(dim=(1, 2))
+
+
+class _Contacts(BaseContactManager):
+    """A contact manager whose per-substep force ring is a plain tensor fixture."""
+
+    def __init__(self, env):
+        super().__init__(env)
+        self._register_group("feet", ["lf", "rf"], ("force",))
+        self.history = torch.zeros(NUM_ENVS, 2, 4, 3)
+
+    def _compute_group_contact_force(self, group):
+        return self.history[:, :, 0, :]
+
+    def _compute_group_contact_force_history(self, group):
+        return self.history
+
+
 class Rewards(RewardConfig):
     pos = RewardTermConfig(func=pos_term, weight=1.0)
     vel = RewardTermConfig(func=vel_term, weight=0.0)  # switched on at SWITCH_STEP
     fd = RewardTermConfig(func=fd_term, weight=0.0)  # switched on at SWITCH_STEP
     sched = RewardTermConfig(func=quat_term, weight=LinearSchedule(-0.1, 0.1, STEPS))
+    hist = RewardTermConfig(func=history_term, weight=1.0)
 
 
 def make_env(compile_terms: bool):
@@ -91,23 +116,24 @@ def make_env(compile_terms: bool):
         robot_entity_name="robot",
         episode_length_buf=torch.full((NUM_ENVS,), 5, dtype=torch.long),
         scene_manager=SimpleNamespace(),
-        contact_manager=SimpleNamespace(),
         command_manager=SimpleNamespace(),
         act_manager=SimpleNamespace(),
         get_robot_data=lambda name=None: robot,
         get_entity_data=lambda name=None: robot,
     )
+    env.contact_manager = _Contacts(env)
     env.reward_manager = RewardManager(env, Rewards(compile_terms=compile_terms))
     return env, robot
 
 
-def fill(robot, step: int) -> None:
+def fill(env, robot, step: int) -> None:
     """The engine state at ``step``: the same on both managers."""
     g = torch.Generator().manual_seed(1000 + step)
     robot.joint_pos.copy_(torch.randn(NUM_ENVS, NUM_JOINTS, generator=g))
     robot.joint_vel.copy_(torch.randn(NUM_ENVS, NUM_JOINTS, generator=g))
     robot.body_pos_w_all.copy_(torch.randn(NUM_ENVS, 2, 3, generator=g))
     robot.root_quat_w.copy_(torch.randn(NUM_ENVS, 4, generator=g))
+    env.contact_manager.history.copy_(torch.randn(NUM_ENVS, 2, 4, 3, generator=g))
 
 
 def main() -> int:
@@ -138,7 +164,7 @@ def main() -> int:
         for step in range(STEPS):
             for env, robot in ((env_c, robot_c), (env_e, robot_e)):
                 env._env_step_counter = step
-                fill(robot, step)
+                fill(env, robot, step)
                 if step == SWITCH_STEP:
                     for name in ("vel", "fd"):
                         env.reward_manager.get_term_cfg(name).weight = 1.0
@@ -154,6 +180,7 @@ def main() -> int:
                     rec.robot_attrs == {"joint_pos", "root_quat_w"},
                     f"robot attrs {sorted(rec.robot_attrs)}",
                 )
+                chk("contact_force_history read is recorded", rec.contact_force_history == {"feet"})
             if step == SWITCH_STEP:
                 rec = mgr_c._record
                 chk(
