@@ -31,17 +31,26 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
+from jaxrlworld.rl.envs.site_frames import site_lin_vel_w, site_pos_w, site_quat_w
+
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
     from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
 
-# RobotData methods that gather from a full per-body / per-site array;
-# the snapshot holds the array and does the gather in-graph.
+# RobotData methods that gather from a full per-body array; the snapshot
+# holds the array and does the gather in-graph.
 _BY_IDS = {
     "body_pos_w_by_ids": "body_pos_w_all",
     "body_lin_vel_w_by_ids": "body_lin_vel_w_all",
-    "site_pos_w_by_ids": "site_pos_w_all",
-    "site_lin_vel_w_by_ids": "site_lin_vel_w_all",
+}
+# Site reads: SiteReaderMixin composes a site's world pose from its parent
+# body's pose (site_frames.py), so a site read is a read of these body
+# arrays plus a static per-id table the real RobotData keeps. The snapshot
+# redoes the same composition on its own tensors.
+_SITE_READS = {
+    "site_pos_w_by_ids": ("body_pos_w_all", "body_quat_w_all"),
+    "site_lin_vel_w_by_ids": ("body_lin_vel_w_all", "body_ang_vel_w_all", "body_quat_w_all"),
+    "site_quat_w_by_ids": ("body_quat_w_all",),
 }
 
 
@@ -72,6 +81,8 @@ class RewardReadRecord:
         self.contact_is_contact: set[str] = set()
         self.contact_force: set[str] = set()
         self.contact_force_history: set[str] = set()
+        # A site read: the snapshot then carries the entity's per-site table.
+        self.site_table: bool = False
         # Command / action manager reads and the env's own tensor
         # attributes are plain tensors already, but the objects that
         # serve them are not traceable (CommandManager resolves column
@@ -97,6 +108,10 @@ class _RecordingRobotData:
         value = getattr(self._real, name)
         if name in _BY_IDS:
             self._record.robot_attrs.add(_BY_IDS[name])
+            return value
+        if name in _SITE_READS:
+            self._record.robot_attrs.update(_SITE_READS[name])
+            self._record.site_table = True
             return value
         if name == "angular_momentum_w":
 
@@ -244,10 +259,21 @@ class RecordingEnvView:
 
 
 class _RobotDataSnapshot:
-    """Recorded RobotData attributes as plain tensors, plus the gathers."""
+    """Recorded RobotData attributes as plain tensors, plus the gathers.
+
+    Site reads are SiteReaderMixin's arithmetic (site_frames.py) on the
+    snapshot's body arrays. The mixin resolves a site id to its parent
+    body row and local offset through a host-side table lookup
+    (``site_ids.tolist()``), which the compiled program cannot trace, so
+    the snapshot carries the entity's whole site table as tensors and
+    indexes it in-graph: same rows, same offsets, same composition.
+    """
 
     def __init__(self) -> None:
-        self._angmom: dict[str | None, torch.Tensor] = {}
+        self.__dict__["_angmom"] = {}
+        self.__dict__["_site_body_row"] = None
+        self.__dict__["_site_local_pos"] = None
+        self.__dict__["_site_local_quat"] = None
 
     def body_pos_w_by_ids(self, body_ids):
         return self.body_pos_w_all[:, body_ids, :]
@@ -256,10 +282,21 @@ class _RobotDataSnapshot:
         return self.body_lin_vel_w_all[:, body_ids, :]
 
     def site_pos_w_by_ids(self, site_ids):
-        return self.site_pos_w_all[:, site_ids, :]
+        rows = self._site_body_row[site_ids]
+        return site_pos_w(self.body_pos_w_all[:, rows], self.body_quat_w_all[:, rows], self._site_local_pos[site_ids])
 
     def site_lin_vel_w_by_ids(self, site_ids):
-        return self.site_lin_vel_w_all[:, site_ids, :]
+        rows = self._site_body_row[site_ids]
+        return site_lin_vel_w(
+            self.body_lin_vel_w_all[:, rows],
+            self.body_ang_vel_w_all[:, rows],
+            self.body_quat_w_all[:, rows],
+            self._site_local_pos[site_ids],
+        )
+
+    def site_quat_w_by_ids(self, site_ids):
+        rows = self._site_body_row[site_ids]
+        return site_quat_w(self.body_quat_w_all[:, rows], self._site_local_quat[site_ids])
 
     def angular_momentum_w(self, sensor_name: str | None = None):
         return self._angmom[sensor_name]
@@ -353,6 +390,20 @@ class RewardEnvView:
         self._env = env
         self._record = record
         self._robot = _RobotDataSnapshot()
+        if record.site_table:
+            # The entity's site table (parent body row, local offset and
+            # rotation per site id), from the same frames and body index
+            # the SiteReaderMixin uses; built once, read in-graph.
+            rd = env.get_robot_data(env.robot_entity_name)
+            frames = rd._site_frames
+            body_pos = _plain(rd.body_pos_w_all)  # mjlab hands back a warp-backed proxy
+            device, dtype = body_pos.device, body_pos.dtype
+            robot = self._robot.__dict__
+            robot["_site_body_row"] = torch.tensor(
+                [rd.find_body_index(f.body_name) for f in frames], dtype=torch.long, device=device
+            )
+            robot["_site_local_pos"] = torch.tensor([f.local_pos for f in frames], dtype=dtype, device=device)
+            robot["_site_local_quat"] = torch.tensor([f.local_quat_wxyz for f in frames], dtype=dtype, device=device)
         self.scene_manager = _SceneSnapshot()
         for name in record.entity_attrs:
             self.scene_manager._entities[name] = _EntitySnapshot()

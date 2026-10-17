@@ -25,7 +25,10 @@ inputs.
    that had run it speculatively at step 0 would report a jump here;
 5. a term reading ``contact_force_history`` (the substep ring the contact
    penalties and K1's self-collision count use) is served from the
-   snapshot, re-indexed by ``order=``, and matches eager.
+   snapshot, re-indexed by ``order=``, and matches eager;
+6. a term reading sites (``site_pos_w_by_ids`` / ``site_lin_vel_w_by_ids``,
+   the mujoco feet of go2) is composed on the snapshot from the body
+   arrays exactly as ``SiteReaderMixin`` composes it on the engine.
 
 Run::
 
@@ -45,6 +48,7 @@ from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
 from jaxrlworld.rl.envs.managers.common.reward import RewardManager
 from jaxrlworld.rl.envs.managers.common.reward_view import RecordingEnvView
 from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import _fd_foot_velocity
+from jaxrlworld.rl.envs.site_frames import SiteFrame, SiteReaderMixin
 
 NUM_ENVS, NUM_JOINTS = 4, 3
 CONTROL_DT = 0.02
@@ -77,6 +81,57 @@ def history_term(env):
     return history.norm(dim=-1).sum(dim=(1, 2))
 
 
+SITE_IDS = torch.tensor([1, 0])
+
+
+def site_term(env):
+    rd = env.get_entity_data("robot")
+    pos = rd.site_pos_w_by_ids(SITE_IDS)
+    vel = rd.site_lin_vel_w_by_ids(SITE_IDS)
+    return pos.norm(dim=-1).sum(-1) + vel[..., 0].sum(-1)
+
+
+class _Robot(SiteReaderMixin):
+    """RobotData stand-in: plain tensors behind the properties the site mixin composes from."""
+
+    _FRAMES = (
+        SiteFrame("toe", "foot0", (0.1, 0.0, -0.02), (1.0, 0.0, 0.0, 0.0)),
+        SiteFrame("heel", "foot1", (-0.05, 0.01, 0.0), (1.0, 0.0, 0.0, 0.0)),
+    )
+
+    def __init__(self):
+        self.joint_pos = torch.zeros(NUM_ENVS, NUM_JOINTS)
+        self.joint_vel = torch.zeros(NUM_ENVS, NUM_JOINTS)
+        self.root_quat_w = torch.zeros(NUM_ENVS, 4)
+        self._body_pos = torch.zeros(NUM_ENVS, 2, 3)
+        self._body_quat = torch.zeros(NUM_ENVS, 2, 4)
+        self._body_lin_vel = torch.zeros(NUM_ENVS, 2, 3)
+        self._body_ang_vel = torch.zeros(NUM_ENVS, 2, 3)
+
+    @property
+    def _site_frames(self):
+        return self._FRAMES
+
+    def find_body_index(self, body_name: str) -> int:
+        return {"foot0": 0, "foot1": 1}[body_name]
+
+    @property
+    def body_pos_w_all(self):
+        return self._body_pos
+
+    @property
+    def body_quat_w_all(self):
+        return self._body_quat
+
+    @property
+    def body_lin_vel_w_all(self):
+        return self._body_lin_vel
+
+    @property
+    def body_ang_vel_w_all(self):
+        return self._body_ang_vel
+
+
 class _Contacts(BaseContactManager):
     """A contact manager whose per-substep force ring is a plain tensor fixture."""
 
@@ -98,16 +153,12 @@ class Rewards(RewardConfig):
     fd = RewardTermConfig(func=fd_term, weight=0.0)  # switched on at SWITCH_STEP
     sched = RewardTermConfig(func=quat_term, weight=LinearSchedule(-0.1, 0.1, STEPS))
     hist = RewardTermConfig(func=history_term, weight=1.0)
+    site = RewardTermConfig(func=site_term, weight=1.0)
 
 
 def make_env(compile_terms: bool):
     """A tensor stand-in for the engine with a real RewardManager on it."""
-    robot = SimpleNamespace(
-        joint_pos=torch.zeros(NUM_ENVS, NUM_JOINTS),
-        joint_vel=torch.zeros(NUM_ENVS, NUM_JOINTS),
-        body_pos_w_all=torch.zeros(NUM_ENVS, 2, 3),
-        root_quat_w=torch.zeros(NUM_ENVS, 4),
-    )
+    robot = _Robot()
     env = SimpleNamespace(
         device=torch.device("cpu"),
         num_envs=NUM_ENVS,
@@ -131,7 +182,11 @@ def fill(env, robot, step: int) -> None:
     g = torch.Generator().manual_seed(1000 + step)
     robot.joint_pos.copy_(torch.randn(NUM_ENVS, NUM_JOINTS, generator=g))
     robot.joint_vel.copy_(torch.randn(NUM_ENVS, NUM_JOINTS, generator=g))
-    robot.body_pos_w_all.copy_(torch.randn(NUM_ENVS, 2, 3, generator=g))
+    robot._body_pos.copy_(torch.randn(NUM_ENVS, 2, 3, generator=g))
+    quat = torch.randn(NUM_ENVS, 2, 4, generator=g)
+    robot._body_quat.copy_(quat / quat.norm(dim=-1, keepdim=True))
+    robot._body_lin_vel.copy_(torch.randn(NUM_ENVS, 2, 3, generator=g))
+    robot._body_ang_vel.copy_(torch.randn(NUM_ENVS, 2, 3, generator=g))
     robot.root_quat_w.copy_(torch.randn(NUM_ENVS, 4, generator=g))
     env.contact_manager.history.copy_(torch.randn(NUM_ENVS, 2, 4, 3, generator=g))
 
@@ -177,7 +232,15 @@ def main() -> int:
                 rec = mgr_c._record
                 chk(
                     "record after the first call holds only the active terms' reads",
-                    rec.robot_attrs == {"joint_pos", "root_quat_w"},
+                    rec.robot_attrs
+                    == {
+                        "joint_pos",
+                        "root_quat_w",
+                        "body_pos_w_all",
+                        "body_quat_w_all",
+                        "body_lin_vel_w_all",
+                        "body_ang_vel_w_all",
+                    },
                     f"robot attrs {sorted(rec.robot_attrs)}",
                 )
                 chk("contact_force_history read is recorded", rec.contact_force_history == {"feet"})
@@ -185,7 +248,7 @@ def main() -> int:
                 rec = mgr_c._record
                 chk(
                     "switching the terms on extends the record",
-                    {"joint_vel", "body_pos_w_all"} <= rec.robot_attrs,
+                    "joint_vel" in rec.robot_attrs,
                     f"robot attrs {sorted(rec.robot_attrs)}",
                 )
                 fd_first_active = float(per_c["fd"].abs().max())
@@ -217,6 +280,7 @@ def main() -> int:
         later == frozenset(mgr_c.reward_terms),
         str(sorted(later)),
     )
+    chk("site term was computed through the snapshot on every step", "site" in per_c and "site" in per_e)
 
     print(f"\n=== RESULT: {'ALL OK' if not failures else f'{len(failures)} FAILED: {failures}'} ===")
     return 0 if not failures else 1
