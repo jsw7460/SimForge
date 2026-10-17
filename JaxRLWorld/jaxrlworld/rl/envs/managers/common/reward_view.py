@@ -71,7 +71,6 @@ class RewardReadRecord:
         self.sensors: set[str] = set()
         self.contact_is_contact: set[str] = set()
         self.contact_force: set[str] = set()
-        self.contact_force_history: set[str] = set()
         # Command / action manager reads and the env's own tensor
         # attributes are plain tensors already, but the objects that
         # serve them are not traceable (CommandManager resolves column
@@ -199,10 +198,6 @@ class _RecordingContactManager:
         self._record.contact_force.add(group_name)
         return self._real.contact_force(group_name, order)
 
-    def contact_force_history(self, group_name: str, order=None):
-        self._record.contact_force_history.add(group_name)
-        return self._real.contact_force_history(group_name, order)
-
     def __getattr__(self, name: str):
         return getattr(self._real, name)
 
@@ -312,18 +307,16 @@ class _SceneSnapshot:
 class _ContactManagerView:
     """The contact manager with its two engine reads served from tensors.
 
-    ``is_contact``, ``contact_force`` and ``contact_force_history`` are
-    per-group snapshots; the timing helpers (``compute_first_contact``,
-    ``current_air_time``, ...) and the order re-indexing run on the real
-    manager, whose buffers are plain tensors it updates itself every
-    substep.
+    ``is_contact`` and ``contact_force`` are per-group snapshots; the
+    timing helpers (``compute_first_contact``, ``current_air_time``,
+    ...) and the order re-indexing run on the real manager, whose
+    buffers are plain tensors it updates itself every substep.
     """
 
     def __init__(self, real: BaseContactManager):
         self._real = real
         self._is_contact: dict[str, torch.Tensor] = {}
         self._force: dict[str, torch.Tensor] = {}
-        self._force_history: dict[str, torch.Tensor | None] = {}
 
     def is_contact(self, group_name: str, order=None):
         return self._real._apply_order(self._is_contact[group_name], group_name, order)
@@ -333,13 +326,7 @@ class _ContactManagerView:
         return self._real._apply_order_3d(self._force[group_name], group_name, order)
 
     def contact_force_history(self, group_name: str, order=None):
-        """``(num_envs, N, H, 3)`` substep history, or ``None`` from a backend
-        without substep capture — the same contract as the real manager."""
-        self._real._require_force(self._real._get_group(group_name))
-        history = self._force_history[group_name]
-        if history is None or order is None:
-            return history
-        return history[:, self._real._get_reindex(group_name, order), :, :]
+        raise NotImplementedError("contact_force_history is not part of the compiled reward chain's snapshot.")
 
     def __getattr__(self, name: str):
         return getattr(self._real, name)
@@ -405,10 +392,6 @@ class RewardEnvView:
             if force is None:
                 force = torch.zeros(cm.num_envs, group.num_tracked, 3, device=cm.device)
             self.contact_manager._force[name] = force
-        for name in self._record.contact_force_history:
-            group = cm._get_group(name)
-            cm._require_force(group)
-            self.contact_manager._force_history[name] = cm._compute_group_contact_force_history(group)
 
     def get_robot_data(self, entity_name: str | None = None):
         name = entity_name or self._env.robot_entity_name

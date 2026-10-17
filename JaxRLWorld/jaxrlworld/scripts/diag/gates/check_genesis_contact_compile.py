@@ -68,7 +68,7 @@ def main() -> int:
 
     def checked_capture_and_advance(timing, dt: float) -> None:
         inputs = batch._gather_inputs()
-        link_a, link_b, force, n_live, found_hists, force_hists = inputs
+        link_a, link_b, force, n_live, quats, found_hists, force_hists = inputs
         ref_timing = SimpleNamespace(**{f: getattr(timing, f).clone() for f in fields})
         ref_found, ref_force = GenesisContactBatch._substep_impl(
             batch,
@@ -76,6 +76,7 @@ def main() -> int:
             link_b,
             force,
             n_live,
+            quats,
             [h.clone() for h in found_hists],
             [h.clone() for h in force_hists],
             ref_timing,

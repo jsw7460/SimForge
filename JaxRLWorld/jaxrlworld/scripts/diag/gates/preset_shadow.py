@@ -135,15 +135,15 @@ class _ContactShadow:
         self.worst = 0.0
         batch._substep = self
 
-    def __call__(self, link_a, link_b, force, n_live, found_hists, force_hists, timing, dt):
+    def __call__(self, link_a, link_b, force, n_live, quats, found_hists, force_hists, timing, dt):
         before = {f: getattr(timing, f).clone() for f in self._fields}
-        eager = self._batch._substep_impl(link_a, link_b, force, n_live, found_hists, force_hists, timing, dt)
+        eager = self._batch._substep_impl(link_a, link_b, force, n_live, quats, found_hists, force_hists, timing, dt)
         after = {f: getattr(timing, f).clone() for f in self._fields}
         for f in self._fields:
             getattr(timing, f).copy_(before[f])
         for t in (link_a, link_b, force):
             torch._dynamo.mark_dynamic(t, 1)
-        compiled = self._compiled(link_a, link_b, force, n_live, found_hists, force_hists, timing, dt)
+        compiled = self._compiled(link_a, link_b, force, n_live, quats, found_hists, force_hists, timing, dt)
         for f in self._fields:
             self.worst = max(self.worst, _rel(after[f], getattr(timing, f)))
             getattr(timing, f).copy_(after[f])
