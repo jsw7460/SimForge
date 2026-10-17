@@ -94,6 +94,17 @@ class MujocoSceneConfig(BaseConfig):
     # substep slows the step several-fold. Off by default, as before MuJoCo
     # Warp 3.13 added the print; ``check_solver_convergence`` counts the hits.
     warn_overflow: bool = False
+    # mj_step runs forward kinematics before integrating, so after the
+    # decimation loop xpos/xquat/site_xpos/cvel and the sensors describe the
+    # state one physics substep earlier than qpos/qvel. mjlab refreshes them
+    # once, right before the observation, so termination and reward read the
+    # lagged values (a deliberate cost tradeoff in mjlab). Newton and Genesis
+    # read the integrated state. True adds a forward pass right after the
+    # decimation loop so termination and reward see the same instant as on
+    # the other two backends; it also re-solves the contacts at that state,
+    # so the instantaneous contact sensor reads move with it. The substep
+    # history rings are filled inside the loop and are unaffected.
+    forward_after_physics: bool = False
 
     # Preset info for auto-resolving non-serializable mjlab objects at eval time
     preset_class_name: str | None = None

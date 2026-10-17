@@ -413,6 +413,10 @@ class MujocoEnv(World):
             self.scene_manager.update(dt=self.physics_dt)
             self.contact_manager.advance(dt=self.physics_dt)
 
+        # See MujocoSceneConfig.forward_after_physics.
+        if self.scene_cfg.forward_after_physics:
+            self.scene_manager.forward()
+
         # Update visualization
         if self.visualization_manager is not None:
             self.visualization_manager.advance()
