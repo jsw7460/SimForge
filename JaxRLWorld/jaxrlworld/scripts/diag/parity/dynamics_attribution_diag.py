@@ -37,9 +37,10 @@ Stages, one subprocess per preset x stage x backend (single-sim invariant):
      convention), the contact impulse of the touchdown step, and the
      settled ground force against M*g (the force scale).
 
-MuJoCo runs twice in B and C, with ``forward_after_physics`` off (the
-training default) and on, since that switch moves both the kinematic and
-the contact reading.
+MuJoCo runs twice in B and C: as the preset builds it (``mujoco``, the
+training configuration) and with ``forward_after_physics`` forced off
+(``mujoco-nofwd``, mjlab's one-substep-stale reads), since that switch
+moves both the kinematic and the contact reading.
 
 Usage (from the SimForge root):
 
@@ -98,16 +99,17 @@ PRESETS: dict[str, dict] = {
     },
 }
 
-# Cell label -> (backend, MujocoSceneConfig.forward_after_physics).
+# Cell label -> (backend, MujocoSceneConfig.forward_after_physics override;
+# None keeps the preset's value).
 CELLS = {
-    "genesis": ("genesis", False),
-    "newton": ("newton", False),
-    "mujoco": ("mujoco", False),
-    "mujoco+fwd": ("mujoco", True),
+    "genesis": ("genesis", None),
+    "newton": ("newton", None),
+    "mujoco": ("mujoco", None),
+    "mujoco-nofwd": ("mujoco", False),
 }
 # Stage A compares inputs; the forward switch cannot change them.
 STAGE_A_CELLS = ("genesis", "newton", "mujoco")
-STAGE_BC_CELLS = ("genesis", "newton", "mujoco", "mujoco+fwd")
+STAGE_BC_CELLS = ("genesis", "newton", "mujoco", "mujoco-nofwd")
 
 AIR_LIFT = 1.0
 AIR_STEPS = 3
@@ -251,7 +253,7 @@ def build_env(preset: str, cell: str, num_envs: int, stripped: bool):
                 raise AttributeError(f"{cls_name} has no field {key!r}")
             setattr(cfg, key, value)
     cfgs = cfg.build()
-    if sim == "mujoco":
+    if forward is not None:
         cfgs.scene.forward_after_physics = forward
     if stripped:
         _strip(cfgs)
@@ -670,6 +672,9 @@ def report_inputs(out: Path, preset: str, cells: list[str]) -> None:
         flag = "  <-- differs" if any(x > TOL_STATE for x in row) else ""
         print(f"      {key:<20}" + "".join(f"{x:>16.3g}" for x in row) + flag)
 
+    print("\n      solver")
+    print_solver_table(records)
+
     vocab = body_vocab(records)
     print("\n      plant parameters right after reset (per env)")
     print_param_diffs(records, vocab, "params", slice(None))
@@ -700,6 +705,14 @@ def feet_group(contacts: dict) -> str:
     return next(iter(contacts))
 
 
+def print_solver_table(records: dict) -> None:
+    """One row per solver field read from the live engines, one column per cell."""
+    keys = sorted(set().union(*(set(r["solver"]) for r in records.values())))
+    print(f"        {'field':<18}" + "".join(f"{c:>16}" for c in records))
+    for key in keys:
+        print(f"        {key:<18}" + "".join(f"{str(r['solver'].get(key, '-')):>16}" for r in records.values()))
+
+
 def report_stripped(out: Path, preset: str, cells: list[str]) -> None:
     records = {c: r for c in STAGE_BC_CELLS if c in cells and (r := load(out, preset, "BC", c)) is not None}
     if len(records) < 2:
@@ -710,10 +723,7 @@ def report_stripped(out: Path, preset: str, cells: list[str]) -> None:
 
     print("\n  [B/C] DR, pushes, terminations off; identical written state")
     print("      solver")
-    keys = sorted(set().union(*(set(r["solver"]) for r in records.values())))
-    print(f"        {'field':<18}" + "".join(f"{c:>16}" for c in records))
-    for key in keys:
-        print(f"        {key:<18}" + "".join(f"{str(r['solver'].get(key, '-')):>16}" for r in records.values()))
+    print_solver_table(records)
 
     vocab = body_vocab(records)
     print("\n      plant parameters, env 0 (no DR: every env equal)")
