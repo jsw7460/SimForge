@@ -99,8 +99,12 @@ class CommandManager(BaseManager):
     def num_commands(self) -> int:
         return sum(term.command.shape[1] for term in self._terms.values())
 
-    def compute(self, dt: float) -> None:
-        """Advance all terms (timer-based resampling + post-processing)."""
+    def compute(self, dt: float | torch.Tensor) -> None:
+        """Advance all terms (timer-based resampling + post-processing).
+
+        ``dt`` is a scalar, or a ``(num_envs,)`` tensor when the step
+        has to hold some envs' timers still (the envs reset this step).
+        """
         for term in self._terms.values():
             term.compute(dt)
 

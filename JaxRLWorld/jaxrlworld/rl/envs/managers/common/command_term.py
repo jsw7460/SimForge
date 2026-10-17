@@ -173,14 +173,17 @@ class CommandTerm(ABC):
 
     # ── Driver loop ────────────────────────────────────────────────
 
-    def compute(self, dt: float) -> None:
+    def compute(self, dt: float | torch.Tensor) -> None:
         """Advance timer, resample if expired, then post-process.
 
+        ``dt`` is a scalar or a per-env ``(num_envs,)`` tensor (zero for
+        the envs reset this step, whose timers ``reset`` just refilled).
+
         Locked entries (``_externally_controlled``) are protected
-        across both the resample and the post-processing step via a
-        clone-and-restore around them. The clone is skipped when no
-        env has any locked column, so the training-time fast path is
-        bit-identical to the pre-refactor code.
+        across the post-processing step via a clone-and-restore around
+        it. The clone is skipped when no env has any locked column, so
+        the training-time fast path is bit-identical to the
+        pre-refactor code.
         """
         self.time_left -= dt
         resample_ids = (self.time_left <= 0.0).nonzero(as_tuple=False).flatten()

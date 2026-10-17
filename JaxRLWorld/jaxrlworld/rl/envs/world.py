@@ -143,6 +143,8 @@ class World(ABC):
         """Initialize common buffers. Call after setting num_envs and device."""
         self.rew_buf = torch.zeros(self.num_envs, device=self.device)
         self.rew_buf_per_type = defaultdict(lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32))
+        # Per-env command timer dt for steps that reset some envs (see step()).
+        self._command_dt = torch.zeros(self.num_envs, device=self.device)
         self.extras = {}
 
     def _invalidate_cache(self) -> None:
@@ -818,8 +820,17 @@ class World(ABC):
         # Advance commands (timer-based resampling + per-step post-processing).
         # A command may write state (motion rollover teleport, object
         # re-placement); the writer marks the kinematics stale and the hook
-        # forwards once more only on such steps.
-        self.command_manager.compute(self.control_dt)
+        # forwards once more only on such steps. The envs reset this step
+        # get dt=0, as in mjlab: ``_reset_idx`` just refilled their timers,
+        # and charging this step against them would shorten every first
+        # command interval by one control step.
+        if len(reset_env_ids) > 0:
+            command_dt = self._command_dt
+            command_dt.fill_(self.control_dt)
+            command_dt[reset_env_ids] = 0.0
+            self.command_manager.compute(command_dt)
+        else:
+            self.command_manager.compute(self.control_dt)
         self._forward_if_kinematics_stale()
 
         # Rendered sensors last: mjlab's own step ends forward -> command ->
