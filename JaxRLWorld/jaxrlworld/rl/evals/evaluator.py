@@ -117,7 +117,6 @@ class PolicyEvaluator:
             self._cross_sim = False
 
         self._init = get_initializer(self.sim_type)
-        self.device = self._init.init_device()
 
         if record_video:
             self.video_dir = self._generate_video_dir(policy_path, record_video, video_dir)
@@ -155,6 +154,11 @@ class PolicyEvaluator:
             seed=seed,
         )
         self.env.reset()
+        # The env owns the device. Asking the initializer before the env
+        # exists gave Genesis ``gs.device``, which is None until the env
+        # calls ``gs.init`` -- so the evaluation loop's done mask landed
+        # on the CPU and the batch eval crashed on the first step.
+        self.device = self.env.device
 
         # The checkpoint's policy lived at a training phase; anything
         # scheduled on the global step counter (curricula, observation
