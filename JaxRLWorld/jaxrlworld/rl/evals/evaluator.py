@@ -279,8 +279,10 @@ class PolicyEvaluator:
         if train_nn:
             cfgs.nn = type(cfgs.nn).from_dict(train_nn)
 
-        # The observation layout must be the training one, term for term.
+        # The observation layout must be the training one, term for term,
+        # and the action mapping must be the training one too.
         _check_observation_parity(train_config["observation"], cfgs.observation.recursive_to_dict())
+        _check_action_parity(train_config["action"], cfgs.action.recursive_to_dict())
 
         # Apply user overrides
         if extra_overrides is not None:
@@ -758,6 +760,42 @@ class PolicyEvaluator:
 
         print_success(f"Results saved to: {results_file}")
         print(f"         {Colors.DIM}({os.path.abspath(results_file)}){Colors.RESET}")
+
+
+def _check_action_parity(train_action: dict, eval_action: dict) -> None:
+    """Require the eval action mapping to be the checkpoint's.
+
+    Both are ``recursive_to_dict()`` forms of an action config. ``scale``
+    and ``offset`` are compared by kind: an auto mode (``"joint_limit"``,
+    ``"joint_limit_center"``) must be the same string on both sides, and
+    a numeric mapping must be numeric on both (its per-joint constants
+    are spelled in each simulator's own joint vocabulary, so their values
+    are not compared here). The clip bounds and the soft-limit factor must
+    agree exactly: the clip bounds are also the env's action range, which
+    the squashed-policy runner rescales the policy output to, so a wider
+    clip on the eval side multiplies every action by that ratio.
+    """
+
+    def kind(value):
+        return value if isinstance(value, str) else "numeric"
+
+    def exact(value):
+        return tuple(float(v) for v in value) if isinstance(value, list | tuple) else value
+
+    problems: list[str] = []
+    for field in ("action_scale", "offset"):
+        if kind(train_action.get(field)) != kind(eval_action.get(field)):
+            problems.append(f"{field}: checkpoint {train_action.get(field)!r} vs eval {eval_action.get(field)!r}")
+    for field in ("clip_actions", "joint_limit_soft_factor"):
+        if exact(train_action.get(field)) != exact(eval_action.get(field)):
+            problems.append(f"{field}: checkpoint {train_action.get(field)!r} vs eval {eval_action.get(field)!r}")
+    if problems:
+        raise ValueError(
+            "Cross-sim eval action config differs from the checkpoint's; the policy's output would be mapped to "
+            "joint targets it never commanded in training:\n  " + "\n  ".join(problems) + "\n"
+            "The eval preset's action builder must produce the training mapping (every per-simulator builder of a "
+            "preset has to honour the same preset flags)."
+        )
 
 
 def _check_observation_parity(train_obs: dict, eval_obs: dict) -> None:

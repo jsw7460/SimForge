@@ -90,6 +90,16 @@ def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
                 {"margin": 0.5},
             )
 
+        # Terminate when a non-foot body (trunk / hip / thigh) hits the
+        # ground. Reads the ``body_ground_contact`` group declared in
+        # build_scene (feet + calf excluded). Opt-in so the flat PPO
+        # preset's terminations are unchanged.
+        if cfg.terminate_on_body_contact:
+            body_contact = TerminationTermConfig(
+                common_tf.illegal_contact,
+                {"contact_group": "body_ground_contact", "force_threshold": 1.0},
+            )
+
     return MujocoEnvConfig(
         num_envs=cfg.num_envs,
         env_name="MujocoLocomotionEnv",
@@ -218,6 +228,19 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig
 
 def build_action(cfg: Go2FlatConfig) -> MujocoActionConfig:
     r = cfg.robot
+    if cfg.use_joint_limit_action:
+        # Joint-limit auto mapping for bounded ([-1, 1]) policies:
+        # target = action * soft_half_range + default pose, the same
+        # mapping as the Newton builder. The clip bounds double as the
+        # env's action range, which the squashed-policy runner rescales
+        # the tanh output to; they must be the training (-1, 1).
+        return MujocoActionConfig(
+            entity_name="robot",
+            actuated_dof_names=r.actuated_dof_patterns,
+            action_scale="joint_limit",
+            clip_actions=(-1.0, 1.0),
+            offset=r.get_action_offset(),
+        )
     return MujocoActionConfig(
         entity_name="robot",
         actuated_dof_names=r.actuated_dof_patterns,
