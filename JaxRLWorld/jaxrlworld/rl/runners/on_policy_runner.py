@@ -535,6 +535,5 @@ class OnPolicyRunner(BaseRunner):
         print(f"  Iteration: {runner.current_learning_iteration}")
         print(f"  Timesteps: {runner.total_timesteps}")
         print(f"  Total time: {runner.total_time:.2f}s")
-        print("  Note: Optimizer state re-initialized (momentum reset)")
 
         return runner

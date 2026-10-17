@@ -47,6 +47,7 @@ from jaxrlworld.rl.modules.normalization import EmpiricalNormalization
 
 _DISC_FILE = "amp_discriminator.eqx"
 _NORM_FILE = "amp_normalizer.eqx"
+_OPT_FILE = "amp_optimizer_state.eqx"
 
 
 def expert_frame_probabilities(expert: ExpertMotionSet, dataset_weights: Sequence[float] | None) -> np.ndarray:
@@ -384,13 +385,28 @@ class AdversarialMotionPrior:
 
     def save(self, checkpoint_dir: str) -> None:
         eqx.tree_serialise_leaves(os.path.join(checkpoint_dir, _DISC_FILE), self.disc)
+        # Adam moments and injected rates of the discriminator optimizer,
+        # for the same reason PPO saves its own.
+        eqx.tree_serialise_leaves(os.path.join(checkpoint_dir, _OPT_FILE), self.opt_state)
         if self.normalizer is not None:
             eqx.tree_serialise_leaves(os.path.join(checkpoint_dir, _NORM_FILE), self.normalizer)
 
-    def load(self, checkpoint_dir: str) -> None:
+    def load(self, checkpoint_dir: str, optimizer_state: bool) -> None:
+        """Restore the discriminator, its normalizer and, when the checkpoint
+        has it (``optimizer_state``, the flag PPO writes), its optimizer."""
         self.disc = eqx.tree_deserialise_leaves(os.path.join(checkpoint_dir, _DISC_FILE), self.disc)
         if self.normalizer is not None:
             self.normalizer = eqx.tree_deserialise_leaves(os.path.join(checkpoint_dir, _NORM_FILE), self.normalizer)
         params, _ = eqx.partition(self.disc, eqx.is_inexact_array)
         self.opt_state = self.optimizer.init(params)
+        opt_path = os.path.join(checkpoint_dir, _OPT_FILE)
+        if optimizer_state:
+            if not os.path.isfile(opt_path):
+                raise FileNotFoundError(
+                    f"{opt_path} is missing: train_state.yaml says this checkpoint saved its optimizer state."
+                )
+            self.opt_state = eqx.tree_deserialise_leaves(opt_path, self.opt_state)
+            print(f"  AMP discriminator optimizer state restored from {_OPT_FILE}")
+        else:
+            print("  No AMP discriminator optimizer state in this checkpoint: Adam moments start from zero")
         self.set_learning_rate(self.learning_rate)

@@ -131,4 +131,4 @@ class AmpPPO(PPO):
     def load_train_state(self, checkpoint_dir: str, metadata: Dict[str, Any]) -> None:
         super().load_train_state(checkpoint_dir, metadata)
         self.amp.learning_rate = float(metadata.get("amp_discriminator_lr", self.amp.learning_rate))
-        self.amp.load(checkpoint_dir)
+        self.amp.load(checkpoint_dir, optimizer_state=metadata.get("optimizer_state", False))
