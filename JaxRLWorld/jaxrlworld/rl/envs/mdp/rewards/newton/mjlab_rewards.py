@@ -10,10 +10,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
-from jaxrlworld.rl.envs.mdp.observations.newton.body_utils import (
-    get_bodies_height_with_contact,
-    get_bodies_quat,
-)
+from jaxrlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_quat
 from jaxrlworld.rl.envs.mdp.observations.newton.state import (
     _quat_rotate_inverse,
 )
@@ -189,10 +186,12 @@ def feet_air_time_mjlab(
     Returns:
         Reward tensor of shape (num_envs,).
     """
-    result = get_bodies_height_with_contact(env, feet_bodies)
-    contact_indices = result.contact_indices
-
-    current_air_time = env.contact_manager.current_air_time("feet_ground_contact")[:, contact_indices]
+    # The feet are named by their contact-group tracked names; the manager
+    # re-indexes its own columns, so no body lookup through the Newton
+    # body cache (which reads the engine model and cannot run on the
+    # compiled reward chain's snapshot). Same columns, same values.
+    names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
+    current_air_time = env.contact_manager.current_air_time("feet_ground_contact", order=names)
 
     in_range = (current_air_time > threshold_min) & (current_air_time < threshold_max)
     reward = torch.sum(in_range.float(), dim=1)
