@@ -30,7 +30,7 @@ fields w/ torque/dist/...  yes     no         no
 reduce="netforce"          yes     yes        yes
 reduce="none/mindist/..."  yes     no         no
 num_slots > 1              yes     no         no
-global_frame               yes     yes        yes (already world)
+global_frame               yes     n/a        n/a (netforce is world)
 history_length > 0         yes     yes        yes
 ========================  ======  =========  ========
 
@@ -133,10 +133,13 @@ class ContactSensorCfg:
             be ``1`` on the Genesis / Newton backends (and is the
             sensible default everywhere — pattern expansion already
             gives many primaries).
-        global_frame: Report ``force`` in the global (world) frame
-            rather than the contact / link-local frame. Newton already
-            reports world-frame contact force; Genesis rotates the
-            link-local force by the link orientation.
+        global_frame: mjlab only, and only for ``reduce`` modes other
+            than ``"netforce"``: rotate ``force`` from the contact frame
+            to the global (world) frame. With ``"netforce"`` mjlab
+            reports the world frame regardless, and the Genesis and
+            Newton backends (which support ``"netforce"`` only) always
+            report the world-frame net force, so ``force`` is the same
+            quantity on every backend under the default config.
         history_length: If ``> 0``, keep a rolling buffer of the last
             N substeps of ``force``. Set this to your decimation value
             so the buffer covers exactly one policy step — lets

@@ -17,9 +17,12 @@ native-vs-list scene) on every genesis preset's group layout:
 * ``found``: an unfiltered (primary, counterpart) pair exists in the
   contact list.
 * ``force``: sum of signed pair forces on the primary side (``-f`` when
-  the primary link is contact side a, ``+f`` on side b), rotated into
-  the link LOCAL frame with the link quaternion at capture time —
-  matching ``genesis/engine/sensors/contact_force.py``.
+  the primary link is contact side a, ``+f`` on side b), in the WORLD
+  frame — the frame mjlab's ``reduce="netforce"`` sensor and Newton's
+  ``total_force`` report, so a 3-vector consumer (the g1 critic's
+  ``foot_contact_forces``) reads the same quantity on every backend.
+  Genesis's own ``ContactForce`` sensor rotates this into the link
+  frame; that rotation is not applied here.
 * Rows past each env's live ``n_contacts`` counter are stale on the
   zero-copy path and are masked out via the counter, never via field
   sentinels.
@@ -28,9 +31,7 @@ Timing semantics also match the native sensors: one frame is captured
 per substep (``ContactManager.advance`` drives :meth:`capture_substep`)
 into per-group rings, and ``read_found`` / ``read_force`` /
 ``compute_history`` serve captured frames only. Values therefore change
-when physics steps, not when a reset teleports state — a recompute-on-
-read design would rotate the stale contact list with post-reset link
-quaternions.
+when physics steps, not when a reset teleports state.
 
 The agnostic config's ``secondary`` resolves to a POSITIVE counterpart
 link set (the native path inverted it into a blacklist):
@@ -50,7 +51,6 @@ from typing import TYPE_CHECKING
 
 import torch
 import torch._dynamo
-from genesis.utils.geom import inv_transform_by_quat
 from genesis.utils.misc import qd_to_torch
 
 from jaxrlworld.rl.configs.sensors import ContactSensorCfg
@@ -83,17 +83,15 @@ class GenesisContactListReader:
     """One shared, generation-cached read of the solver's contact list.
 
     All contact groups of an env consume the same collider state, so the
-    expensive parts — the ``get_contacts`` readback and the per-entity
-    link-quaternion read — are cached on the env's cache generation
-    (bumped once per substep by ``GenesisEnv._step_physics``) and paid
-    once per substep regardless of the number of groups.
+    expensive part — the ``get_contacts`` readback — is cached on the
+    env's cache generation (bumped once per substep by
+    ``GenesisEnv._step_physics``) and paid once per substep regardless
+    of the number of groups.
     """
 
     def __init__(self, env: GenesisEnv):
         self._env = env
         self._read_cache: dict[str, tuple[int, object]] = {}
-        self._quat_generation = -1
-        self._quat_by_entity: dict[int, torch.Tensor] = {}
 
     @_per_step_read
     def raw_parts(self):
@@ -117,18 +115,6 @@ class GenesisContactListReader:
         link_a, link_b, force, n_live = self.raw_parts()
         row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
         return link_a, link_b, force, row_valid
-
-    def links_quat(self, entity) -> torch.Tensor:
-        """(num_envs, entity_n_links, 4) link quaternions, generation-cached per entity."""
-        gen = self._env._cache_generation
-        if self._quat_generation != gen:
-            self._quat_generation = gen
-            self._quat_by_entity.clear()
-        quat = self._quat_by_entity.get(entity.idx)
-        if quat is None:
-            quat = entity.get_links_quat()
-            self._quat_by_entity[entity.idx] = quat
-        return quat
 
 
 class GenesisContactSensor:
@@ -192,7 +178,6 @@ class GenesisContactSensor:
         # ---- resolve primary links ----------------------------------
         primary_entity_name = cfg.primary.entity or "robot"
         entity = env.scene_manager[primary_entity_name]
-        self._entity = entity
         self._primary_entity_name = primary_entity_name
 
         primary_patterns = (
@@ -219,7 +204,6 @@ class GenesisContactSensor:
         self._link_ids_local: list[int] = link_ids_local
         self._tracked_names: list[str] = link_names
         self._num_primary = len(link_names)
-        self._primary_local = torch.tensor(link_ids_local, dtype=torch.long, device=self.device)
         self._primary_links = torch.tensor(
             [entity.link_start + lid for lid in link_ids_local], dtype=torch.long, device=self.device
         )
@@ -336,14 +320,12 @@ class GenesisContactSensor:
 
         found = (pmask_a | pmask_b).any(1)  # (B, P)
 
-        f_local = None
+        f_world = None
         if self._track_force:
             # World-frame signed sum: the collider force applies to side b;
             # side a receives the opposite sign.
             f_world = torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force)
-            quats = self._reader.links_quat(self._entity)[:, self._primary_local]
-            f_local = inv_transform_by_quat(f_world, quats)
-        self.push_frame(found, f_local)
+        self.push_frame(found, f_world)
 
     # ------------------------------------------------------------------
     # reads (captured frames only)
@@ -353,7 +335,7 @@ class GenesisContactSensor:
         """(num_envs, N) bool — newest captured ``found`` frame."""
         return self._found_hist[:, 0]
 
-    def push_frame(self, found: torch.Tensor, f_local: torch.Tensor | None) -> None:
+    def push_frame(self, found: torch.Tensor, f_world: torch.Tensor | None) -> None:
         """Push one externally computed frame onto the rings.
 
         Used by :class:`GenesisContactBatch`, which computes every
@@ -365,7 +347,7 @@ class GenesisContactSensor:
         self._found_hist[:, 0] = found
         if self._track_force:
             self._force_hist = torch.roll(self._force_hist, 1, dims=1)
-            self._force_hist[:, 0] = f_local
+            self._force_hist[:, 0] = f_world
 
     def reset(self, env_ids: torch.Tensor) -> None:
         """Zero the rings of ``env_ids``, as the Newton and mjlab sensors do on reset.
@@ -384,7 +366,7 @@ class GenesisContactSensor:
             self._force_hist = force
 
     def read_force(self) -> torch.Tensor:
-        """(num_envs, N, 3) — newest captured link-local net contact force."""
+        """(num_envs, N, 3) — newest captured world-frame net contact force."""
         self._require_force()
         return self._force_hist[:, 0]
 
@@ -413,9 +395,9 @@ class GenesisContactSensor:
 class GenesisContactBatch:
     """One fused per-substep capture for every contact group.
 
-    Each group used to run its own primary-link masks, counterpart test,
-    ``einsum`` and frame rotation against the same shared contact-list
-    read — with G groups that is G of everything, all launch-bound small
+    Each group used to run its own primary-link masks, counterpart test
+    and ``einsum`` against the same shared contact-list read — with G
+    groups that is G of everything, all launch-bound small
     kernels (measured ~0.24 ms per group per substep on go2_gait @4096).
     The batch concatenates every group's primary links into one column
     axis and runs each stage once, then hands each sensor its column
@@ -430,8 +412,7 @@ class GenesisContactBatch:
     (:meth:`_substep_impl`), and with ``compile_kernels`` it runs through
     ``torch.compile``: eager it is ~75 launches of tiny elementwise
     kernels, fused it is a handful. The engine is never traced: the
-    contact list and link quaternions are read into tensors first and
-    handed in.
+    contact list is read into tensors first and handed in.
     """
 
     def __init__(
@@ -495,10 +476,9 @@ class GenesisContactBatch:
             # silent drop back to eager.
             for t in (link_a, link_b, force):
                 torch._dynamo.mark_dynamic(t, 1)
-        quats = [self._reader.links_quat(s._entity) for s in self._force_sensors]
         found_hists = [s._found_hist for s in self._sensors]
         force_hists = [s._force_hist for s in self._force_sensors]
-        return link_a, link_b, force, n_live, quats, found_hists, force_hists
+        return link_a, link_b, force, n_live, found_hists, force_hists
 
     def _store_rings(self, found_hists: list[torch.Tensor], force_hists: list[torch.Tensor]) -> None:
         for s, hist in zip(self._sensors, found_hists):
@@ -523,9 +503,9 @@ class GenesisContactBatch:
         the substep does, so frames already handed out by the read paths
         stay valid snapshots.
         """
-        link_a, link_b, force, n_live, quats, found_hists, force_hists = self._gather_inputs()
+        link_a, link_b, force, n_live, found_hists, force_hists = self._gather_inputs()
         row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
-        found, f_local = self._frame(link_a, link_b, force, row_valid, quats)
+        found, f_world = self._frame(link_a, link_b, force, row_valid)
         new_found = []
         for sl, hist in zip(self._slices, found_hists):
             fresh = hist.clone()
@@ -536,7 +516,7 @@ class GenesisContactBatch:
         for s, hist in zip(self._force_sensors, force_hists):
             n = s._num_primary
             fresh = hist.clone()
-            fresh[env_ids, 0] = f_local[env_ids, fstart : fstart + n]
+            fresh[env_ids, 0] = f_world[env_ids, fstart : fstart + n]
             fstart += n
             new_force.append(fresh)
         self._store_rings(new_found, new_force)
@@ -554,7 +534,6 @@ class GenesisContactBatch:
         link_b: torch.Tensor,
         force: torch.Tensor,
         n_live: torch.Tensor,
-        quats: list[torch.Tensor],
         found_hists: list[torch.Tensor],
         force_hists: list[torch.Tensor],
         timing: ContactGroup | None,
@@ -567,7 +546,7 @@ class GenesisContactBatch:
         are updated in place, as ``_apply_contact_frame`` always has.
         """
         row_valid = torch.arange(link_a.shape[1], device=link_a.device)[None, :] < n_live[:, None]
-        found, f_local = self._frame(link_a, link_b, force, row_valid, quats)
+        found, f_world = self._frame(link_a, link_b, force, row_valid)
 
         new_found = []
         for sl, hist in zip(self._slices, found_hists):
@@ -579,7 +558,7 @@ class GenesisContactBatch:
         for s, hist in zip(self._force_sensors, force_hists):
             n = s._num_primary
             rolled = torch.roll(hist, 1, dims=1)
-            rolled[:, 0] = f_local[:, fstart : fstart + n]
+            rolled[:, 0] = f_world[:, fstart : fstart + n]
             fstart += n
             new_force.append(rolled)
 
@@ -595,9 +574,8 @@ class GenesisContactBatch:
         link_b: torch.Tensor,
         force: torch.Tensor,
         row_valid: torch.Tensor,
-        quats: list[torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """This substep's ``found`` ``(B, P_total)`` and link-local force
+        """This substep's ``found`` ``(B, P_total)`` and world-frame force
         ``(B, P_force, 3)`` (``None`` when no group tracks force)."""
         on_a = link_a.unsqueeze(-1) == self._all_primary  # (B, C, P_total)
         on_b = link_b.unsqueeze(-1) == self._all_primary
@@ -624,7 +602,7 @@ class GenesisContactBatch:
         pmask_b = on_b & a_ok_cols
         found = (pmask_a | pmask_b).any(1)  # (B, P_total)
 
-        f_local = None
+        f_world = None
         if self._force_cols is not None:
             if self._force_all_cols:
                 sub_a, sub_b = pmask_a, pmask_b
@@ -632,9 +610,4 @@ class GenesisContactBatch:
                 sub_a = pmask_a[:, :, self._force_cols]
                 sub_b = pmask_b[:, :, self._force_cols]
             f_world = torch.einsum("ncp,nci->npi", sub_b.float() - sub_a.float(), force)
-            primary_quats = torch.cat(
-                [q[:, s._primary_local] for q, s in zip(quats, self._force_sensors)],
-                dim=1,
-            )
-            f_local = inv_transform_by_quat(f_world, primary_quats)
-        return found, f_local
+        return found, f_world

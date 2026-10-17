@@ -13,7 +13,7 @@ groups all actually fire):
     1. FRAME PARITY: after every ``ContactManager.advance`` (i.e. every
        substep), each group's ``read_found``/``read_force`` is compared
        against an INDEPENDENT recomputation from the collider state
-       (this file's own masking/rotation math, the group's primary and
+       (this file's own masking math, the group's primary and
        counterpart link sets re-derived here). Catches generation/cache
        wiring bugs, ring indexing bugs, and stale-row leaks.
     2. TIMING PARITY: the independently recomputed frames are replayed
@@ -104,7 +104,6 @@ def run_cell(preset: str, num_envs: int, num_steps: int, warmup: int, seed: int)
     import importlib
 
     import torch
-    from genesis.utils.geom import inv_transform_by_quat
     from genesis.utils.misc import qd_to_torch
 
     torch.manual_seed(seed)
@@ -138,9 +137,7 @@ def run_cell(preset: str, num_envs: int, num_steps: int, warmup: int, seed: int)
     for name, sensor in sensors.items():
         meta[name] = {
             "sensor": sensor,
-            "entity": sensor._entity,
             "primary_g": sensor._primary_links.clone(),
-            "primary_local": sensor._primary_local.clone(),
             "counterpart": sensor._counterpart_links.clone(),
             "counterpart_is_all": sensor._counterpart_is_all,
         }
@@ -166,9 +163,9 @@ def run_cell(preset: str, num_envs: int, num_steps: int, warmup: int, seed: int)
         pmask_a = on_p_a & b_ok.unsqueeze(-1)
         pmask_b = on_p_b & a_ok.unsqueeze(-1)
         found = (pmask_a | pmask_b).any(1)
+        # World frame, as the sensor reports it (mjlab netforce / Newton parity).
         f_world = torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force)
-        quats = m["entity"].get_links_quat()[:, m["primary_local"]]
-        return found, inv_transform_by_quat(f_world, quats)
+        return found, f_world
 
     stats = {
         name: {
