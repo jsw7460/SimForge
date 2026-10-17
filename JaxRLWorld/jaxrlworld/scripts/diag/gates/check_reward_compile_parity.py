@@ -35,6 +35,10 @@ def _build_env(preset: str, sim: str, num_envs: int):
     mod_path, cls_name = preset.split(":", 1)
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
+    # The gate compares the compiled chain against eager; it turns the
+    # chain on itself so a preset's own setting (every preset leaves it
+    # off) does not decide whether anything is compared.
+    cfgs.reward.compile_terms = True
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     return runner.env
 
@@ -107,8 +111,6 @@ def main() -> int:
     torch.manual_seed(args.seed)
     env = _build_env(args.preset, args.sim, args.num_envs)
     mgr = env.reward_manager
-    if not mgr._compile_terms:
-        raise RuntimeError("compile_terms is off for this preset; nothing to compare.")
     names = list(mgr.reward_terms)
     worst: dict[str, float] = {name: 0.0 for name in names}
     worst["total"] = 0.0

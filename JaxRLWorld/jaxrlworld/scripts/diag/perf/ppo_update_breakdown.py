@@ -85,7 +85,14 @@ def main() -> int:
     alg.storage.clear = lambda: None
 
     # ---- piece 1: compute_returns ------------------------------------
-    t_returns = _timed(lambda: alg.compute_returns(last_critic), args.reps)
+    # compute_returns returns None; wait on what it wrote (advantages,
+    # returns and, under value normalization, the rewritten values), or
+    # the row measures dispatch only and the GAE lands in piece 2.
+    def returns():
+        alg.compute_returns(last_critic)
+        return (alg.storage.advantages, alg.storage.returns, alg.storage.values)
+
+    t_returns = _timed(returns, args.reps)
 
     # ---- piece 2: flat batch + indices -------------------------------
     def flat_and_indices():

@@ -16,7 +16,8 @@ Four modes pin down what a change did:
     eager      the current package with every compiled path switched
                off (reward chain, actuator torque chain, Genesis contact
                substep) — must match ``baseline`` up to run-to-run noise
-    compiled   the current package as configured — checks that every
+    compiled   the current package with every compiled path switched ON
+               (whatever the preset configures) — checks that every
                cell builds, steps, stays finite and never recompiles;
                its trajectory is compared to ``eager`` for information
     shadow     the env runs eager and, at every call, the compiled
@@ -134,16 +135,20 @@ def _load(loader: str, sim: str, num_envs: int):
 
 def _apply_mode(cfgs, mode: str, sim: str) -> None:
     """``eager`` / ``shadow``: every compiled path off (shadow compiles on
-    the side). ``compiled`` / ``baseline``: untouched."""
-    if mode not in ("eager", "shadow"):
+    the side). ``compiled``: every compiled path on, so the mode exercises
+    them whether or not a preset configures them (no preset turns the
+    reward chain on, so "as configured" never compiled it).
+    ``baseline``: untouched."""
+    if mode == "baseline":
         return
-    cfgs.reward.compile_terms = False
+    on = mode == "compiled"
+    cfgs.reward.compile_terms = on
     if sim == "genesis":
-        cfgs.env.compile_contact_kernels = False
+        cfgs.env.compile_contact_kernels = on
     for entity in cfgs.scene.entities.values():
         for act in entity.articulation.actuators:
             if isinstance(act, IdealPDActuatorCfg):
-                act.compile_kernel = False
+                act.compile_kernel = on
 
 
 def _finite(value) -> bool:
@@ -379,6 +384,11 @@ def main() -> int:
     ap.add_argument("--tol", type=float, default=1e-4)
     ap.add_argument("--tol-steps", type=int, default=10)
     ap.add_argument("--only", default=None, help="substring filter on the cell label")
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="shadow: a cell whose compiled reward chain could not run (UNSUPPORTED) fails the sweep",
+    )
     ap.add_argument("--sims", default=",".join(_SIMS))
     ap.add_argument("--num-envs", type=int, default=64)
     ap.add_argument("--steps", type=int, default=60)
@@ -492,8 +502,12 @@ def main() -> int:
                         verdict = "no reference"
                 elif args.mode == "shadow":
                     verdict = _shadow_verdict(data)
-                rows.append((cell, "PASS", data["ms_per_step"], verdict))
-                print(f"PASS  {data['ms_per_step']:6.2f} ms/step  {verdict}  ({wall:.0f}s)")
+                # A shadow cell whose compiled chain could not run is not
+                # a pass of the compiled path; it is named as such in the
+                # table and fails the sweep under --strict.
+                status = "UNSUPPORTED" if "UNSUPPORTED" in verdict else "PASS"
+                rows.append((cell, status, data["ms_per_step"], verdict))
+                print(f"{status}  {data['ms_per_step']:6.2f} ms/step  {verdict}  ({wall:.0f}s)")
             else:
                 proc = type("_rc", (), {"returncode": rc})()
                 tail = ""
@@ -519,13 +533,15 @@ def main() -> int:
     unsupported = 0
     for cell, status, ms, verdict in rows:
         print(f"  {cell:<34}{status:<12}{ms:8.2f} ms/step   {verdict}")
-        failed += status != "PASS"
+        failed += status not in ("PASS", "UNSUPPORTED")
         differs += "DIFFERS" in verdict
-        unsupported += "UNSUPPORTED" in verdict
+        unsupported += status == "UNSUPPORTED"
     print("=" * 100)
     tail = f", {unsupported} reward-compile unsupported" if args.mode == "shadow" else ""
-    print(f"  {len(rows)} cells: {len(rows) - failed} pass, {failed} fail, {differs} differ from reference{tail}")
-    return 1 if (failed or differs) else 0
+    print(
+        f"  {len(rows)} cells: {len(rows) - failed - unsupported} pass, {failed} fail, {differs} differ from reference{tail}"
+    )
+    return 1 if (failed or differs or (args.strict and unsupported)) else 0
 
 
 if __name__ == "__main__":
