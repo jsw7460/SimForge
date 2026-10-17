@@ -263,16 +263,28 @@ class DeviceReplayBuffer:
         self.ptr = (self.ptr + 1) % self.size_per_env
         self.filled_size = min(self.filled_size + 1, self.size_per_env)
 
-    def sample_batch(self, batch_size: int) -> ReplayBatch:
-        """Sample a batch. Indices are drawn on device and stay there."""
+    def _require_sampleable(self) -> None:
+        """Refuse to sample before every env holds a full n-step window.
+
+        ``_sample_indices`` draws start positions in ``[0, filled - n + 1)``
+        with a floor of one position, so a buffer with fewer than
+        ``n_steps`` rows per env would hand out windows that run past the
+        written rows into the zero-initialized ones: a partial reward sum,
+        a zero next observation and no boundary flag — a silent, shaped
+        bootstrap target off nothing. Both samplers go through here.
+        """
         if self.filled_size == 0:
             raise ValueError("Cannot sample from an empty buffer")
         if self.filled_size < self.n_steps:
             raise ValueError(
                 f"Cannot sample n-step ({self.n_steps}) windows from a buffer "
-                f"with only {self.filled_size} filled steps per env; increase "
-                f"learning_starts so collection covers at least n_steps."
+                f"with only {self.filled_size} filled steps per env; the runner "
+                f"waits for n_steps rows per env before the first update."
             )
+
+    def sample_batch(self, batch_size: int) -> ReplayBatch:
+        """Sample a batch. Indices are drawn on device and stay there."""
+        self._require_sampleable()
 
         self.key, subkey = jax.random.split(self.key)
         indices = _sample_indices(
@@ -299,6 +311,7 @@ class DeviceReplayBuffer:
         carried through the scan. The caller owns the key and must
         thread it, so consecutive updates see different batches.
         """
+        self._require_sampleable()
         sampler = TracedSampler(
             num_envs=self.num_envs,
             size_per_env=self.size_per_env,

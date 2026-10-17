@@ -419,7 +419,11 @@ class OffPolicyRunner(BaseRunner):
         batch_size = self.cfgs.algorithm.batch_size
         logging_now = iteration % self.runner_cfg.log_interval == 0
 
-        if self.alg.replay_buffer.size >= self.cfgs.algorithm.learning_starts:
+        # ``learning_starts`` counts transitions over every env, so with
+        # thousands of envs it is met after one step; an n-step window
+        # needs n_steps rows per env before any sample is a real one.
+        buffer = self.alg.replay_buffer
+        if buffer.size >= self.cfgs.algorithm.learning_starts and buffer.filled_size >= buffer.n_steps:
             training_start_time = time.time()
 
             # The algorithm owns the loop: with a device-resident buffer it

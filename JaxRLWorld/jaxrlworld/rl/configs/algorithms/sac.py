@@ -26,6 +26,9 @@ class SACConfig(BaseConfig):
     optimizer: str = "adam"
     optimizer_betas: tuple = (0.9, 0.999)
     optimizer_eps: float = 1e-8
+    # Transitions (summed over envs) the buffer must hold before the first
+    # update; the runner also waits until every env holds ``n_steps`` rows,
+    # since an n-step window drawn earlier would read unwritten rows.
     learning_starts: int = 100
     # Half-width of the uniform warmup action distribution: during the
     # ``learning_starts`` warmup the runner samples actions from
