@@ -60,8 +60,12 @@ class RewardManager(BaseManager):
         self._fd_prev_foot_pos: dict[str, torch.Tensor] = {}
         # The compiled chain (``config.compile_terms``). Built after the
         # first call, which runs eagerly through the recorders of
-        # ``reward_view`` to learn what the terms read.
+        # ``reward_view`` to learn what the terms read. ``_record`` only
+        # grows: a step on which a term runs for the first time (its
+        # weight left zero) is recorded too, and the view rebuilt over it.
         self._compile_terms = config.compile_terms
+        self._record: RewardReadRecord | None = None
+        self._recorded_active: frozenset[str] = frozenset()
         self._view: RewardEnvView | None = None
         self._compiled_chain = None
         self._weights_cache: tuple[tuple[float, ...], torch.Tensor] | None = None
@@ -104,18 +108,30 @@ class RewardManager(BaseManager):
         if not self._compile_terms:
             stacked = self._compute_stacked(self.env)
             self._combine(stacked, reward_buffer)
-        elif self._view is None:
-            # First call: eager, through the recorders, so the snapshot
-            # knows what to read from now on. Same values as the eager
-            # path; also warms every lazily-built cache the terms keep.
-            record = RewardReadRecord()
-            stacked = self._compute_stacked(RecordingEnvView(self.env, record))
-            self._combine(stacked, reward_buffer)
-            self._view = RewardEnvView(self.env, record)
-            self._compiled_chain = torch.compile(self._chain, fullgraph=True, dynamic=False)
         else:
-            self._view.refresh()
-            stacked = self._compiled_chain(self._view, self._weights(), self._active(), reward_buffer)
+            active = self._active()
+            active_names = frozenset(name for name, on in zip(self.reward_terms, active) if on)
+            if self._view is None or not active_names <= self._recorded_active:
+                # The first call, or a term runs for the first time: a
+                # schedule or the curriculum manager raised its weight
+                # from zero, so no recording pass has seen what it reads.
+                # This step runs eagerly through the recorders, the record
+                # grows, and the view is rebuilt over it. The term is run
+                # only now, not speculatively at the first recording, so
+                # the state terms keep on this manager (finite-difference
+                # positions) is exactly what the eager path would hold.
+                # Same values as the eager path either way.
+                if self._record is None:
+                    self._record = RewardReadRecord()
+                stacked = self._compute_stacked(RecordingEnvView(self.env, self._record))
+                self._combine(stacked, reward_buffer)
+                self._recorded_active |= active_names
+                self._view = RewardEnvView(self.env, self._record)
+                if self._compiled_chain is None:
+                    self._compiled_chain = torch.compile(self._chain, fullgraph=True, dynamic=False)
+            else:
+                self._view.refresh()
+                stacked = self._compiled_chain(self._view, self._weights(), active, reward_buffer)
 
         for i, name in enumerate(self.reward_terms):
             reward_buffer_per_type[name] = stacked[i]

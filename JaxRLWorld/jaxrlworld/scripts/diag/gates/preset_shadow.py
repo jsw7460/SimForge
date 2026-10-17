@@ -71,6 +71,8 @@ class _RewardShadow:
     def __init__(self, mgr):
         self._mgr = mgr
         self._original = mgr.set_rewards
+        self._record = RewardReadRecord()
+        self._recorded_active: frozenset[str] = frozenset()
         self._view = None
         self._compiled = None
         self.worst = 0.0
@@ -88,15 +90,21 @@ class _RewardShadow:
         if self.error is None and mgr.reward_terms:
             state = TermState(mgr)
             try:
-                if self._view is None:
-                    record = RewardReadRecord()
-                    mgr._compute_stacked(RecordingEnvView(mgr.env, record))
+                # Same rule as RewardManager.set_rewards: a term running for
+                # the first time (weight raised from zero) is recorded on
+                # that step and the view rebuilt over the grown record.
+                active = mgr._active()
+                active_names = frozenset(name for name, on in zip(mgr.reward_terms, active) if on)
+                if self._view is None or not active_names <= self._recorded_active:
+                    mgr._compute_stacked(RecordingEnvView(mgr.env, self._record))
                     state.restore()
-                    self._view = RewardEnvView(mgr.env, record)
-                    self._compiled = torch.compile(mgr._chain, fullgraph=True, dynamic=False)
+                    self._recorded_active |= active_names
+                    self._view = RewardEnvView(mgr.env, self._record)
+                    if self._compiled is None:
+                        self._compiled = torch.compile(mgr._chain, fullgraph=True, dynamic=False)
                 self._view.refresh()
                 total = reward_buffer.clone()
-                stacked = self._compiled(self._view, mgr._weights(), mgr._active(), total)
+                stacked = self._compiled(self._view, mgr._weights(), active, total)
             except Exception as exc:  # noqa: BLE001 — reported per cell, see the class docstring
                 self.error = f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}"
                 stacked = None
