@@ -28,7 +28,11 @@ inputs.
    snapshot, re-indexed by ``order=``, and matches eager;
 6. a term reading sites (``site_pos_w_by_ids`` / ``site_lin_vel_w_by_ids``,
    the mujoco feet of go2) is composed on the snapshot from the body
-   arrays exactly as ``SiteReaderMixin`` composes it on the engine.
+   arrays exactly as ``SiteReaderMixin`` composes it on the engine;
+7. ``processed_action_rate_l2_scaled`` (the go2 SAC smoothness term) finds
+   its per-joint scale on the reward manager from inside the compiled
+   chain — a cache keyed by ``id(env)`` missed on the snapshot view and
+   put a tensor ``if`` into the traced graph.
 
 Run::
 
@@ -47,7 +51,7 @@ from jaxrlworld.rl.configs.rewards import LinearSchedule, RewardTermConfig
 from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
 from jaxrlworld.rl.envs.managers.common.reward import RewardManager
 from jaxrlworld.rl.envs.managers.common.reward_view import RecordingEnvView
-from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import _fd_foot_velocity
+from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import _fd_foot_velocity, processed_action_rate_l2_scaled
 from jaxrlworld.rl.envs.site_frames import SiteFrame, SiteReaderMixin
 
 NUM_ENVS, NUM_JOINTS = 4, 3
@@ -89,6 +93,13 @@ def site_term(env):
     pos = rd.site_pos_w_by_ids(SITE_IDS)
     vel = rd.site_lin_vel_w_by_ids(SITE_IDS)
     return pos.norm(dim=-1).sum(-1) + vel[..., 0].sum(-1)
+
+
+ACTION_SCALE = {"j[01]": 0.25, "j2": 0.5}
+
+
+def act_rate_term(env):
+    return processed_action_rate_l2_scaled(env, ACTION_SCALE)
 
 
 class _Robot(SiteReaderMixin):
@@ -154,6 +165,7 @@ class Rewards(RewardConfig):
     sched = RewardTermConfig(func=quat_term, weight=LinearSchedule(-0.1, 0.1, STEPS))
     hist = RewardTermConfig(func=history_term, weight=1.0)
     site = RewardTermConfig(func=site_term, weight=1.0)
+    act_rate = RewardTermConfig(func=act_rate_term, weight=1.0)
 
 
 def make_env(compile_terms: bool):
@@ -168,7 +180,11 @@ def make_env(compile_terms: bool):
         episode_length_buf=torch.full((NUM_ENVS,), 5, dtype=torch.long),
         scene_manager=SimpleNamespace(),
         command_manager=SimpleNamespace(),
-        act_manager=SimpleNamespace(),
+        act_manager=SimpleNamespace(
+            actuated_joint_names=[f"j{i}" for i in range(NUM_JOINTS)],
+            processed_actions=torch.zeros(NUM_ENVS, NUM_JOINTS),
+            prev_processed_actions=torch.zeros(NUM_ENVS, NUM_JOINTS),
+        ),
         get_robot_data=lambda name=None: robot,
         get_entity_data=lambda name=None: robot,
     )
@@ -189,6 +205,8 @@ def fill(env, robot, step: int) -> None:
     robot._body_ang_vel.copy_(torch.randn(NUM_ENVS, 2, 3, generator=g))
     robot.root_quat_w.copy_(torch.randn(NUM_ENVS, 4, generator=g))
     env.contact_manager.history.copy_(torch.randn(NUM_ENVS, 2, 4, 3, generator=g))
+    env.act_manager.processed_actions.copy_(torch.randn(NUM_ENVS, NUM_JOINTS, generator=g))
+    env.act_manager.prev_processed_actions.copy_(torch.randn(NUM_ENVS, NUM_JOINTS, generator=g))
 
 
 def main() -> int:
@@ -204,11 +222,17 @@ def main() -> int:
     mgr_c, mgr_e = env_c.reward_manager, env_e.reward_manager
 
     eager_steps: list[int] = []
+    # Every recording view is kept alive: the manager drops it right
+    # before building the snapshot view, which then often lands on the
+    # same address — a term cache keyed by ``id(env)`` would hit by that
+    # accident here and miss on a real env (item 7).
+    recording_views: list[RecordingEnvView] = []
     original = RewardManager._compute_stacked
 
     def counting(self, env):
         if isinstance(env, RecordingEnvView):
             eager_steps.append(self.env._env_step_counter)
+            recording_views.append(env)
         return original(self, env)
 
     RewardManager._compute_stacked = counting
@@ -264,6 +288,15 @@ def main() -> int:
     print("\n=== compiled vs eager, every step ===")
     chk("per-term values match eager on every step", worst_term <= TOL, f"max |d| {worst_term:.3g} (tol {TOL:g})")
     chk("totals match eager on every step", worst_total <= TOL, f"max |d| {worst_total:.3g} (tol {TOL:g})")
+    act = env_c.act_manager
+    # Per-term values carry weight * control_dt, as the manager stores them.
+    delta = (act.processed_actions - act.prev_processed_actions) / torch.tensor([0.25, 0.25, 0.5])
+    expected = -(delta**2).sum(-1) * CONTROL_DT
+    chk(
+        "action-rate term equals the hand-computed scaled L2 on the last step",
+        float((per_c["act_rate"] - expected).abs().max()) <= TOL,
+        f"max |d| {float((per_c['act_rate'] - expected).abs().max()):.3g}",
+    )
     chk(
         "eager recording steps are exactly the first call and the switch-on step",
         eager_steps == [0, SWITCH_STEP],

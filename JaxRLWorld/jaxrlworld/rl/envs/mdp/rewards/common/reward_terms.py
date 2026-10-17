@@ -274,12 +274,6 @@ def raw_action_rate_l2(env: World) -> torch.Tensor:
     )
 
 
-# Per-env cache of the resolved per-joint scale tensor, keyed by env id.
-# Built once on first call (the scale dict and joint order are fixed for
-# an env's lifetime) so the regex resolution is not repeated every step.
-_PROCESSED_ACTION_SCALE_CACHE: dict[int, torch.Tensor] = {}
-
-
 def processed_action_rate_l2_scaled(env: World, action_scale: dict[str, float]) -> torch.Tensor:
     """Penalize the processed-action (joint-target) rate, normalized by a
     per-joint scale.
@@ -312,17 +306,25 @@ def processed_action_rate_l2_scaled(env: World, action_scale: dict[str, float]) 
         Tensor of shape ``(num_envs,)`` — negative scaled L2-squared
         difference.
     """
-    scale = _PROCESSED_ACTION_SCALE_CACHE.get(id(env))
+    # The resolved per-joint scale lives on the reward manager, keyed by
+    # the scale dict's items: the joint order and the dict are fixed for
+    # the env's lifetime, and the manager is the one object shared by
+    # the env and the compiled chain's views (a registry keyed by
+    # ``id(env)`` missed on the view and put a tensor ``if`` into the
+    # traced graph). Validation runs on the Python values, outside any
+    # tensor branch.
+    store = env.reward_manager._processed_action_scale
+    key = tuple(sorted(action_scale.items()))
+    scale = store.get(key)
     if scale is None:
         names = list(env.act_manager.actuated_joint_names)
-        idx, _, vals = string_utils.resolve_matching_names_values(action_scale, names)
+        idx, matched, vals = string_utils.resolve_matching_names_values(action_scale, names)
+        bad = [(n, v) for n, v in zip(matched, vals) if v <= 0]
+        if bad:
+            raise ValueError(f"processed_action_rate_l2_scaled: non-positive scale for joints {bad}")
         scale = torch.ones(len(names), device=env.device, dtype=torch.float32)
         scale[idx] = torch.tensor(vals, device=env.device, dtype=torch.float32)
-        if (scale <= 0).any():
-            raise ValueError(
-                f"processed_action_rate_l2_scaled: non-positive scale for joints {names}: {scale.tolist()}"
-            )
-        _PROCESSED_ACTION_SCALE_CACHE[id(env)] = scale
+        store[key] = scale
 
     delta = (env.act_manager.processed_actions - env.act_manager.prev_processed_actions) / scale
     return -torch.sum(torch.square(delta), dim=1)

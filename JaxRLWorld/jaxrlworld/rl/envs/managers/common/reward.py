@@ -58,6 +58,9 @@ class RewardManager(BaseManager):
         # terms (``rewards.common.reward_terms._fd_foot_velocity``),
         # keyed by term key; plain tensor state the terms update in place.
         self._fd_prev_foot_pos: dict[str, torch.Tensor] = {}
+        # Per-joint scale of ``processed_action_rate_l2_scaled``, keyed by
+        # the term's scale dict; resolved once, on the first (eager) call.
+        self._processed_action_scale: dict[tuple[tuple[str, float], ...], torch.Tensor] = {}
         # The compiled chain (``config.compile_terms``). Built after the
         # first call, which runs eagerly through the recorders of
         # ``reward_view`` to learn what the terms read. ``_record`` only
