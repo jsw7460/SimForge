@@ -91,12 +91,20 @@ class SolverMuJoCoCfg(BaseConfig):
     # Mode flags
     use_mujoco_contacts: bool = True
     use_mujoco_cpu: bool = False
-    enable_multiccd: bool = False
+    # Contact manifolds (up to four points) for convex-convex pairs:
+    # cylinder, box and mesh against each other, which is every
+    # self-collision pair on a robot built from those primitives. MuJoCo
+    # and MuJoCo Warp have this on by default, so mjlab's tasks and the
+    # mujoco backend here run with it; Newton's own SolverMuJoCo default
+    # (and IsaacLab's) is off. On, so the two mjwarp backends narrowphase
+    # the same pair with the same algorithm. Plane and heightfield contacts
+    # and the sphere / capsule primitives are unaffected either way.
+    enable_multiccd: bool = True
     disable_contacts: bool = False
 
-    # MuJoCo option disable bits by lowercase name (e.g. "nativeccd"),
-    # mirroring mjlab's ``MujocoCfg.disableflags`` so a preset can pin
-    # the same collision pipeline on both mjwarp backends.
+    # MuJoCo option disable bits by lowercase name, mirroring mjlab's
+    # ``MujocoCfg.disableflags`` and ``MujocoSceneConfig.disableflags``.
+    # Empty keeps MuJoCo's defaults on both mjwarp backends.
     disableflags: tuple[str, ...] = ()
 
     # MuJoCo Warp prints from its kernels when a world overflows a buffer

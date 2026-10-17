@@ -88,6 +88,16 @@ class MujocoSceneConfig(BaseConfig):
     impratio: float | None = None
     cone: Literal["pyramidal", "elliptic"] | None = None
     contact_sensor_maxmatch: int = 64
+    # MuJoCo option disable bits by lowercase name, as mjlab's
+    # ``MujocoCfg.disableflags``. Empty keeps MuJoCo's defaults, which is
+    # what mjlab's own tasks run and what ``SolverMuJoCoCfg`` pins on the
+    # Newton backend: nativeccd on (MuJoCo Warp ignores the bit except to
+    # route box-box pairs to its analytic collider when it is OFF) and
+    # multiccd on (contact manifolds for convex-convex pairs). The scene
+    # manager used to disable nativeccd on every build because MuJoCo Warp
+    # rejects a box-box pair with a non-zero margin under it; no asset here
+    # authors a margin any more.
+    disableflags: tuple[str, ...] = ()
     # MuJoCo Warp prints from its kernels when a world overflows a buffer
     # or exhausts a solver / line-search iteration budget. The print sits
     # inside the captured CUDA graph, so a budget hit by most worlds every

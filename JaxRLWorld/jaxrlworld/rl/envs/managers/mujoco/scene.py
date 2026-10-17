@@ -241,6 +241,8 @@ class MujocoSceneManagerConfig:
     impratio: float | None = None
     cone: Literal["pyramidal", "elliptic"] | None = None
     contact_sensor_maxmatch: int = 64
+    # MuJoCo option disable bits; see ``MujocoSceneConfig.disableflags``.
+    disableflags: tuple[str, ...] = ()
     # MuJoCo Warp's in-kernel overflow / solver-budget warning print; see
     # ``MujocoSceneConfig.warn_overflow``.
     warn_overflow: bool = False
@@ -502,7 +504,7 @@ class MujocoSceneManager(BaseManager):
                     ccd_iterations=self.config.ccd_iterations,
                     impratio=self.config.impratio,
                     cone=self.config.cone,
-                    disableflags=("nativeccd",),
+                    disableflags=self.config.disableflags,
                 ),
                 contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
                 warn_overflow=self.config.warn_overflow,

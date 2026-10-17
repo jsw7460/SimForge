@@ -237,6 +237,7 @@ class MujocoEnv(World):
                 impratio=self.scene_cfg.impratio,
                 cone=self.scene_cfg.cone,
                 contact_sensor_maxmatch=self.scene_cfg.contact_sensor_maxmatch,
+                disableflags=self.scene_cfg.disableflags,
                 warn_overflow=self.scene_cfg.warn_overflow,
                 # Legacy — declared on the dataclass like everything else.
                 mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,

@@ -212,14 +212,6 @@ def build_scene(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> NewtonSceneConfig
             # broadphase culls those for free.
             nconmax=300,
             use_mujoco_contacts=True,
-            # Same CCD pipeline as the mjlab cell: the mujoco scene
-            # manager disables nativeccd on every mjlab build (and
-            # mjwarp keeps multiccd on), while Newton's defaults are
-            # the mirror image — multiccd off, nativeccd on — so the
-            # convex-convex (self-collision) pairs were narrowphased
-            # by different algorithms on the two mjwarp backends.
-            enable_multiccd=True,
-            disableflags=("nativeccd",),
         ),
         terrain_cfg=cfg.make_terrain_cfg(),
         entities={

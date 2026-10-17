@@ -50,10 +50,8 @@ class G1FlatMjlabSpeedParityConfig(G1FlatConfig):
 
         cfgs = super().build()
         sc = cfgs.scene
-        # Verbatim Mjlab-Velocity-Flat-Unitree-G1 SimulationCfg. Passing it
-        # whole (scene manager uses it as-is) also removes the
-        # disableflags=("nativeccd",) our scene manager otherwise sets —
-        # mjlab's train runs with native CCD enabled.
+        # Verbatim Mjlab-Velocity-Flat-Unitree-G1 SimulationCfg, used by the
+        # scene manager as-is.
         sc.mjlab_sim_cfg = SimulationCfg(
             nconmax=None,
             njmax=300,
