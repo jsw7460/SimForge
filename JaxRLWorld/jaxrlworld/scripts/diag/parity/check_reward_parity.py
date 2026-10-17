@@ -22,6 +22,8 @@ Usage:
     python -m jaxrlworld.scripts.diag.parity.check_reward_parity --preset go2_gait
     python -m jaxrlworld.scripts.diag.parity.check_reward_parity --sim newton       # one sim
     python -m jaxrlworld.scripts.diag.parity.check_reward_parity --steps 50 --terms feet_slip,angular_momentum_penalty
+    python -m jaxrlworld.scripts.diag.parity.check_reward_parity --mujoco-forward both   # mujoco with and without
+                                                                                  # MujocoSceneConfig.forward_after_physics
 """
 
 from __future__ import annotations
@@ -61,7 +63,7 @@ _PER_SIM_PRESETS: dict[str, dict[str, tuple[str, str]]] = {
 _SIMS = ("genesis", "newton", "mujoco")
 
 
-def _build_env(preset: str, sim: str, num_envs: int, genesis_performance_mode: bool = False):
+def _build_env(preset: str, sim: str, num_envs: int, genesis_performance_mode: bool, mujoco_forward: bool):
     import importlib
 
     from jaxrlworld.rl.runners import BaseRunner
@@ -79,6 +81,8 @@ def _build_env(preset: str, sim: str, num_envs: int, genesis_performance_mode: b
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     if sim == "genesis" and genesis_performance_mode:
         cfgs.env.performance_mode = True
+    if sim == "mujoco":
+        cfgs.scene.forward_after_physics = mujoco_forward
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
 
@@ -154,23 +158,40 @@ def main() -> int:
         "gs.init runs once per process, and the sims build genesis-first, "
         "so the flag takes effect for the genesis columns.",
     )
+    ap.add_argument(
+        "--mujoco-forward",
+        choices=("off", "on", "both"),
+        default="off",
+        help="MujocoSceneConfig.forward_after_physics for the mujoco column. 'both' runs mujoco twice "
+        "and adds a 'mujoco+fwd' column.",
+    )
     args = ap.parse_args()
 
     term_filter = set(t.strip() for t in args.terms.split(",")) if args.terms else None
 
     sims = list(_SIMS) if args.sim == "all" else [args.sim]
-    # sim -> step -> {term -> per-env values}
+    # (column label, simulator, forward_after_physics)
+    runs: list[tuple[str, str, bool]] = []
+    for sim in sims:
+        if sim != "mujoco":
+            runs.append((sim, sim, False))
+        elif args.mujoco_forward == "both":
+            runs += [("mujoco", sim, False), ("mujoco+fwd", sim, True)]
+        else:
+            label = "mujoco+fwd" if args.mujoco_forward == "on" else "mujoco"
+            runs.append((label, sim, args.mujoco_forward == "on"))
+    # column label -> step -> {term -> per-env values}
     results: dict[str, dict[int, dict[str, np.ndarray]]] = {}
 
-    for sim in sims:
-        print(f"\n{'=' * 70}\nBuilding [{sim}] {args.preset!r} (num_envs={args.num_envs}) ...")
-        env = _build_env(args.preset, sim, args.num_envs, args.genesis_performance_mode)
+    for label, sim, mujoco_forward in runs:
+        print(f"\n{'=' * 70}\nBuilding [{label}] {args.preset!r} (num_envs={args.num_envs}) ...")
+        env = _build_env(args.preset, sim, args.num_envs, args.genesis_performance_mode, mujoco_forward)
         torch.manual_seed(args.seed)
         env.reset()
         zero = torch.zeros(env.num_envs, env.num_actions, device=env.device)
-        results[sim] = {}
+        results[label] = {}
         for step in range(args.steps):
-            results[sim][step] = _capture_step(env, zero)
+            results[label][step] = _capture_step(env, zero)
         # Free the env so we don't blow GPU memory before the next sim.
         del env
         if torch.cuda.is_available():
