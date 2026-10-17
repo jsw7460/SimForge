@@ -779,9 +779,13 @@ class MujocoSceneManager(BaseManager):
         for canonical_i, _sim_i in enumerate(sim_indices):
             sim_to_canonical[canonical_i] = canonical_i  # identity: RobotData indexes via sim_indices.
 
-        soft_limits = entity.data.soft_joint_pos_limits
-        lower = soft_limits[0, sim_indices, 0]
-        upper = soft_limits[0, sim_indices, 1]
+        # The hard (model) range, as Newton and Genesis report it. Consumers
+        # derive the soft band themselves (ActionManager.soft_joint_limits_of
+        # applies ``joint_limit_soft_factor``), so mjlab's
+        # ``soft_joint_pos_limits`` here would apply a soft factor twice.
+        hard_limits = entity.data.joint_pos_limits
+        lower = hard_limits[0, sim_indices, 0]
+        upper = hard_limits[0, sim_indices, 1]
 
         return ArticulationIndexing(
             joint_names=tuple(matched_names),

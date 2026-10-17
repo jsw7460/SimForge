@@ -64,10 +64,12 @@ class ArticulationIndexing:
 
     # -- Joint limits (canonical order) ---------------------------------------
     joint_limits_lower: Tensor
-    """Lower joint position limits in canonical order.  Shape ``(num_joints,)``."""
+    """Lower hard (model) joint position limits in canonical order, with no
+    soft factor applied.  Shape ``(num_joints,)``."""
 
     joint_limits_upper: Tensor
-    """Upper joint position limits in canonical order.  Shape ``(num_joints,)``."""
+    """Upper hard (model) joint position limits in canonical order, with no
+    soft factor applied.  Shape ``(num_joints,)``."""
 
     # -- Newton-specific (optional) -------------------------------------------
     newton_q_indices: Tensor | None = None
