@@ -82,6 +82,12 @@ class BaseContactManager(BaseManager, ABC):
         self._groups: dict[str, ContactGroup] = {}
         # Every group's timing state side by side — see ``_all_groups``.
         self._all: ContactGroup | None = None
+        # Reindex tensors for the ``order`` parameter, keyed by (group,
+        # order). Per instance: the permutation depends on this manager's
+        # tracked order, and a second manager in the process (another
+        # backend's env, a held-out eval env) may track the same group
+        # name in another order.
+        self._reindex_cache: dict[tuple[str, tuple[str, ...]], torch.Tensor] = {}
 
     _TIMING_FIELDS = (
         "current_air_time",
@@ -207,8 +213,6 @@ class BaseContactManager(BaseManager, ABC):
         return self._groups[name]
 
     # -- reindex cache for order parameter --
-
-    _reindex_cache: dict[tuple[str, tuple[str, ...]], torch.Tensor] = {}
 
     def _get_reindex(self, group_name: str, order: list[str]) -> torch.Tensor:
         """Get (or compute+cache) reindex tensor for requested order."""

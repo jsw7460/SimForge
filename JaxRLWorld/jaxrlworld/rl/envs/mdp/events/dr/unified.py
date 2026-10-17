@@ -457,6 +457,11 @@ def randomize_body_mass(
     """
     if len(env_ids) == 0:
         return
+    if shared_random and env.sim_type != "mujoco":
+        raise NotImplementedError(
+            f"randomize_body_mass: shared_random=True (one draw per env) is implemented on the mujoco backend only; "
+            f"the {env.sim_type} backend draws every selected element independently."
+        )
 
     if env.sim_type == "genesis":
         _genesis_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution)
@@ -543,6 +548,7 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
         env_ids=env_ids,
         ranges=mass_range,
         asset_cfg=mjlab_cfg,
+        distribution=distribution,
         operation=operation,
         shared_random=shared_random,
     )
@@ -576,6 +582,11 @@ def randomize_body_com_offset(
     """
     if len(env_ids) == 0:
         return
+    if env.sim_type != "mujoco" and (shared_random or axes is not None):
+        raise NotImplementedError(
+            f"randomize_body_com_offset: shared_random and axes are implemented on the mujoco backend only; "
+            f"the {env.sim_type} backend draws every axis in ``ranges`` independently per body."
+        )
 
     if env.sim_type == "genesis":
         _genesis_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation)
@@ -1004,6 +1015,11 @@ def randomize_joint_armature(
     """
     if len(env_ids) == 0:
         return
+    if shared_random and env.sim_type != "mujoco":
+        raise NotImplementedError(
+            f"randomize_joint_armature: shared_random=True (one draw per env) is implemented on the mujoco backend only; "
+            f"the {env.sim_type} backend draws every selected element independently."
+        )
 
     if env.sim_type == "genesis":
         _genesis_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution)
@@ -1061,6 +1077,7 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
         env_ids=env_ids,
         ranges=armature_range,
         asset_cfg=mjlab_cfg,
+        distribution=distribution,
         operation=operation,
         shared_random=shared_random,
     )
@@ -1091,6 +1108,11 @@ def randomize_joint_friction(
     """
     if len(env_ids) == 0:
         return
+    if shared_random and env.sim_type != "mujoco":
+        raise NotImplementedError(
+            f"randomize_joint_friction: shared_random=True (one draw per env) is implemented on the mujoco backend only; "
+            f"the {env.sim_type} backend draws every selected element independently."
+        )
 
     if env.sim_type == "genesis":
         _genesis_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution)
@@ -1149,6 +1171,7 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
         env_ids=env_ids,
         ranges=friction_range,
         asset_cfg=mjlab_cfg,
+        distribution=distribution,
         operation=operation,
         shared_random=shared_random,
     )
@@ -1185,6 +1208,11 @@ def randomize_joint_damping(
     """
     if len(env_ids) == 0:
         return
+    if shared_random and env.sim_type != "mujoco":
+        raise NotImplementedError(
+            f"randomize_joint_damping: shared_random=True (one draw per env) is implemented on the mujoco backend only; "
+            f"the {env.sim_type} backend draws every selected element independently."
+        )
 
     if env.sim_type == "genesis":
         _genesis_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution)
@@ -1221,9 +1249,6 @@ def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
     model = env.scene_manager.model
     cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
     damping = wp.to_torch(view.get_attribute("joint_damping", model))
-    # abs replaces the value outright, so no baseline is needed (newton's DR
-    # baseline snapshot does not capture joint_damping); only the scale/add
-    # paths dereference it.
     vals2d = _newton_dof_view(damping)
     sampled = sample((len(env_ids), len(cols)), *damping_range, env.device, distribution)
     if operation == "abs":
@@ -1245,6 +1270,7 @@ def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
         env_ids=env_ids,
         ranges=damping_range,
         asset_cfg=mjlab_cfg,
+        distribution=distribution,
         operation=operation,
         shared_random=shared_random,
     )

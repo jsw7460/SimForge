@@ -446,6 +446,10 @@ class PPO(OnPolicyAlgorithm):
             "critic": self.critic_lr,
             "std": self.actor_lr,
         }
+        # A fixed std is a parameter leaf like any other; it used to sit in
+        # the "std" group and drift under the optimizer (1.0 -> 0.999 after
+        # one update). Frozen here, and detached in the model.
+        self._frozen_labels = frozenset({"std"}) if model.std_type == "fixed" else frozenset()
 
         optimizer, self._param_labels = create_optimizer_with_labels(
             model=model,
@@ -453,6 +457,7 @@ class PPO(OnPolicyAlgorithm):
             lr_config=lr_config,
             max_grad_norm=self.max_grad_norm,
             optimizer_class=self.optimizer_class,
+            frozen_labels=self._frozen_labels,
         )
 
         return optimizer
@@ -918,6 +923,8 @@ class PPO(OnPolicyAlgorithm):
         # so element 1 is the multi_transform state: one inner state per label.
         inner_states = self.train_state.opt_state[1].inner_states
         for label in labels:
+            if label in self._frozen_labels:
+                continue  # set_to_zero carries no rate
             hyperparams = inner_states[label].inner_state.hyperparams
             hyperparams["learning_rate"] = jnp.asarray(lr, dtype=jnp.float32)
 

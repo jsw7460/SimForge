@@ -293,7 +293,9 @@ class PPOActorCritic(BaseActorCritic):
                 return jnp.broadcast_to(std, (observations.shape[0],) + std.shape)
             return std
         elif self.std_type == "fixed":
-            std = self.std_module.std
+            # Fixed means fixed: no gradient reaches it, so it neither moves
+            # nor counts toward the global gradient norm the clip measures.
+            std = jax.lax.stop_gradient(self.std_module.std)
             if observations is not None:
                 return jnp.broadcast_to(std, (observations.shape[0],) + std.shape)
             return std

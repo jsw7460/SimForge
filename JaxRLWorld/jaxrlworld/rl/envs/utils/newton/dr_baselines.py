@@ -45,6 +45,7 @@ class NewtonDRBaselines:
     * ``body_com``                        — ``(num_envs, bodies_per_env, 3)``
     * ``joint_armature``                  — ``(num_envs, n_dof_per_env)``
     * ``joint_friction``                  — ``(num_envs, n_dof_per_env)``
+    * ``joint_damping``                   — ``(num_envs, n_dof_per_env)``
     * ``joint_target_ke``                 — ``(num_envs, n_dof_per_env)``
     * ``joint_target_kd``                 — ``(num_envs, n_dof_per_env)``
     * ``shape_material_mu`` (axis 0)      — ``(num_envs, 1, n_shapes_per_env)``
@@ -59,6 +60,7 @@ class NewtonDRBaselines:
     body_com: torch.Tensor
     joint_armature: torch.Tensor
     joint_friction: torch.Tensor
+    joint_damping: torch.Tensor
     joint_target_ke: torch.Tensor
     joint_target_kd: torch.Tensor
     shape_material_mu: torch.Tensor
@@ -86,6 +88,7 @@ def snapshot_newton_dr_baselines(env: NewtonEnv) -> NewtonDRBaselines:
         body_com=wp.to_torch(model.body_com).reshape(n_envs, bodies_per_env, 3).clone(),
         joint_armature=wp.to_torch(view.get_attribute("joint_armature", model)).clone(),
         joint_friction=wp.to_torch(view.get_attribute("joint_friction", model)).clone(),
+        joint_damping=wp.to_torch(view.get_attribute("joint_damping", model)).clone(),
         joint_target_ke=wp.to_torch(view.get_attribute("joint_target_ke", model)).clone(),
         joint_target_kd=wp.to_torch(view.get_attribute("joint_target_kd", model)).clone(),
         shape_material_mu=wp.to_torch(view.get_attribute("shape_material_mu", model)).clone(),

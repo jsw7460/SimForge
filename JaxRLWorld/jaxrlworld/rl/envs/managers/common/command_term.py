@@ -179,13 +179,15 @@ class CommandTerm(ABC):
         ``dt`` is a scalar or a per-env ``(num_envs,)`` tensor (zero for
         the envs reset this step, whose timers ``reset`` just refilled).
 
-        Locked entries (``_externally_controlled``) are protected
-        across the post-processing step via a clone-and-restore around
-        it. The clone is skipped when no env has any locked column, so
-        the training-time fast path is bit-identical to the
-        pre-refactor code.
+        Locked entries (``_externally_controlled``) are protected across
+        both the resample and the post-processing step: their values are
+        captured before either runs and written back after, so neither
+        an expiring timer nor e.g. heading P-control overwrites a locked
+        column. The capture is skipped when no env has any locked
+        column, so the training-time fast path is unchanged.
         """
         self.time_left -= dt
+        locked_snapshot = self._command[self._externally_controlled] if self._any_locked else None
         resample_ids = (self.time_left <= 0.0).nonzero(as_tuple=False).flatten()
         if len(resample_ids) > 0:
             self.time_left[resample_ids] = torch.empty(len(resample_ids), device=self.device).uniform_(
@@ -193,15 +195,9 @@ class CommandTerm(ABC):
             )
             self._resample_command(resample_ids)
 
-        if self._any_locked:
-            # Capture the user-driven values; restore after the
-            # subclass's post-processing so e.g. heading P-control
-            # never overwrites a locked column.
-            locked_snapshot = self._command[self._externally_controlled]
-            self._update_command()
+        self._update_command()
+        if locked_snapshot is not None:
             self._command[self._externally_controlled] = locked_snapshot
-        else:
-            self._update_command()
 
     # ── External control ──────────────────────────────────────────
 

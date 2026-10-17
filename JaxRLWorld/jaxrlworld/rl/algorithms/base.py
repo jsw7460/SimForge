@@ -26,6 +26,7 @@ def create_optimizer_with_labels(
     lr_config: Dict[str, float],
     max_grad_norm: float = 1.0,
     optimizer_class: Callable = optax.adamw,
+    frozen_labels: frozenset[str] = frozenset(),
 ) -> tuple[optax.GradientTransformation, Any]:
     """
     Create optimizer with separate learning rates for different parameter groups.
@@ -36,6 +37,9 @@ def create_optimizer_with_labels(
         lr_config: Dict mapping label -> learning rate
         max_grad_norm: Maximum gradient norm for clipping
         optimizer_class: Optax optimizer class (default: adamw)
+        frozen_labels: Labels whose parameters never change: their
+            transform is ``set_to_zero``, so no step and no weight decay
+            reaches them whatever ``optimizer_class`` is.
 
     Returns:
         Tuple of (optimizer, param_labels)
@@ -57,7 +61,12 @@ def create_optimizer_with_labels(
     # optimizer from scratch each time, most often early in training when
     # the KL swings hardest and the rate changes most. rsl_rl assigns to
     # ``param_group["lr"]`` for the same reason; this is the equivalent.
-    transforms = {label: optax.inject_hyperparams(optimizer_class)(learning_rate=lr) for label, lr in lr_config.items()}
+    transforms = {
+        label: optax.set_to_zero()
+        if label in frozen_labels
+        else optax.inject_hyperparams(optimizer_class)(learning_rate=lr)
+        for label, lr in lr_config.items()
+    }
 
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_grad_norm),
