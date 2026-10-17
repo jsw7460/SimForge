@@ -104,7 +104,7 @@ class MujocoSceneConfig(BaseConfig):
     # the other two backends; it also re-solves the contacts at that state,
     # so the instantaneous contact sensor reads move with it. The substep
     # history rings are filled inside the loop and are unaffected.
-    forward_after_physics: bool = False
+    forward_after_physics: bool = True
 
     # Preset info for auto-resolving non-serializable mjlab objects at eval time
     preset_class_name: str | None = None
