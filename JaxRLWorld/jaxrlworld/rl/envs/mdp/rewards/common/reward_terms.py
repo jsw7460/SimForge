@@ -19,12 +19,25 @@ import torch
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.utils import string as string_utils
+from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.world import World
 
 
 _DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
+
+# World-frame gravity direction, one ``(1, 3)`` tensor per device, so a term
+# that rotates it into a body frame does not upload the constant every step.
+_GRAVITY_DIR_W: dict[torch.device, torch.Tensor] = {}
+
+
+def _gravity_dir_w(device: torch.device) -> torch.Tensor:
+    cached = _GRAVITY_DIR_W.get(device)
+    if cached is None:
+        cached = torch.tensor([[0.0, 0.0, -1.0]], device=device)
+        _GRAVITY_DIR_W[device] = cached
+    return cached
 
 
 # ── Quadruped leg geometry helpers ───────────────────────────────────────
@@ -101,8 +114,22 @@ def flat_orientation(
     std: float | None = None,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> torch.Tensor:
-    """Penalty for non-flat orientation (roll/pitch deviation from upright)."""
-    gravity_b = env.get_entity_data(asset_cfg.name).projected_gravity_b
+    """Penalty for non-flat orientation (roll/pitch deviation from upright).
+
+    Reads the root link unless ``asset_cfg`` names a body, in which case the
+    first named body's orientation is used (mjlab G1 scores the torso, whose
+    tilt differs from the pelvis by the waist joints).
+    """
+    data = env.get_entity_data(asset_cfg.name)
+    if asset_cfg.body_ids is None:
+        gravity_b = data.projected_gravity_b
+    else:
+        # Gather by the id tensor and take the first row rather than index by
+        # ``body_ids[0]``: a 0-d tensor index is data-dependent for the
+        # compiled reward chain.
+        body_quat_w = data.body_quat_w_all[:, asset_cfg.body_ids, :][:, 0, :]
+        gravity_w = _gravity_dir_w(body_quat_w.device).expand(body_quat_w.shape[0], 3)
+        gravity_b = quat_rotate_inverse_wxyz(body_quat_w, gravity_w)
     xy_squared = torch.sum(torch.square(gravity_b[:, :2]), dim=1)
     if std is not None:
         return torch.exp(-xy_squared / (std**2))

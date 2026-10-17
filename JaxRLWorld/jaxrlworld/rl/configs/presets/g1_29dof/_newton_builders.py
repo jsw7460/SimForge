@@ -407,11 +407,12 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             params={"std": 0.707, "penalize_xy": True},
         )
 
-        # Orientation (common -- uses RobotData interface)
+        # Orientation of the torso, as the mujoco builder and mjlab's G1
+        # ``upright`` term score it; the pelvis differs by the waist joints.
         flat_orientation = RewardTermConfig(
             func=rf_common.flat_orientation,
             weight=1.0,
-            params={"std": 0.447},
+            params={"std": 0.447, "asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",))},
         )
 
         # Posture (stateful class)
