@@ -51,7 +51,6 @@ from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from jaxrlworld.rl.configs.presets.k1_velocity.base import K1VelocityConfig
 from jaxrlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
-from jaxrlworld.rl.envs.managers.newton.contact import NewtonContactManager
 from jaxrlworld.rl.runners import BaseRunner
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax_many
 
@@ -677,9 +676,14 @@ def _probe_newton_reset_forward(env, timer: _Timer, env_ids: torch.Tensor, repea
     manager replays its own: an eager ``fwd_position`` allocates the
     narrowphase scratch on every call, which is a cost the real path never
     pays.
+
+    Only called for a Newton env (``env.sim_type``), so the Newton contact
+    manager's attributes are read directly: importing its class here would
+    load the ``newton`` package into a mujoco or genesis process and trip
+    the single-backend guard before the env is even built.
     """
     cm = env.contact_manager
-    if not isinstance(cm, NewtonContactManager) or not cm._group_sensors:
+    if not cm._group_sensors:
         return
     sm = env.scene_manager
     if not sm._use_mujoco_contacts:
