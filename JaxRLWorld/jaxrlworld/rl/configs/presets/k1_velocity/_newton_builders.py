@@ -91,6 +91,16 @@ def build_scene(cfg: K1VelocityConfig, timing: Dict[str, Any]) -> NewtonSceneCon
         dt=timing["dt"],
         substeps=timing["substeps"],
         gravity=(0.0, 0.0, -9.81),
+        # Detect contact where mjlab does. Newton's builder gives every
+        # shape a 0.1 m gap by default and the MJCF declares none, so
+        # pairs up to 0.2 m apart were enumerated as force-free contact
+        # rows: ~105 per world standing against mjlab's ~5 on the same
+        # collision model, and 8192 envs spent 6.2 ms per mjwarp substep
+        # against 2.4 with the gap at zero (mjwarp_step_split,
+        # collect_breakdown, 10-17). The rows carried no constraint, so
+        # the dynamics do not move; nconmax below was sized against them
+        # and is now oversized, not undersized.
+        rigid_gap=0.0,
         solver_type="mujoco",
         robot_cfg=r,
         solver_cfg=SolverMuJoCoCfg(
