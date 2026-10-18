@@ -43,23 +43,20 @@ from jaxrlworld.rl.runners import BaseRunner
 
 _PRESETS = {"go2": Go2FlatConfig, "g1_29dof": G1FlatConfig, "k1_velocity": K1VelocityConfig}
 
-_GEOM_NAMES = {int(v): mujoco.mjtGeom(v).name.removeprefix("mjGEOM_").lower() for v in mujoco.mjtGeom}
-_CONE_NAMES = {int(v): mujoco.mjtCone(v).name.removeprefix("mjCONE_").lower() for v in mujoco.mjtCone}
+
+def _enum_names(enum, prefix: str) -> dict[int, str]:
+    """pybind11 enums are not iterable; ``__members__`` is the roster."""
+    return {int(v): n.removeprefix(prefix).lower() for n, v in enum.__members__.items() if n.startswith(prefix)}
 
 
-def _disable_names(flags: int) -> str:
-    names = [
-        mujoco.mjtDisableBit(bit).name.removeprefix("mjDSBL_").lower()
-        for bit in mujoco.mjtDisableBit
-        if flags & int(bit)
-    ]
-    return "+".join(names) if names else "none"
+_GEOM_NAMES = _enum_names(mujoco.mjtGeom, "mjGEOM_")
+_CONE_NAMES = _enum_names(mujoco.mjtCone, "mjCONE_")
+_DISABLE_BITS = _enum_names(mujoco.mjtDisableBit, "mjDSBL_")
+_ENABLE_BITS = _enum_names(mujoco.mjtEnableBit, "mjENBL_")
 
 
-def _enable_names(flags: int) -> str:
-    names = [
-        mujoco.mjtEnableBit(bit).name.removeprefix("mjENBL_").lower() for bit in mujoco.mjtEnableBit if flags & int(bit)
-    ]
+def _bit_names(flags: int, bits: dict[int, str]) -> str:
+    names = [name for bit, name in bits.items() if flags & bit]
     return "+".join(names) if names else "none"
 
 
@@ -144,8 +141,8 @@ def _print_model_facts(m, d) -> None:
         ("opt.cone", _CONE_NAMES[int(opt.cone)]),
         ("opt.impratio_invsqrt", _scalar(opt.impratio_invsqrt)),
         ("opt.ccd_iterations", _scalar(opt.ccd_iterations)),
-        ("opt.disableflags", _disable_names(int(opt.disableflags))),
-        ("opt.enableflags", _enable_names(int(opt.enableflags))),
+        ("opt.disableflags", _bit_names(int(opt.disableflags), _DISABLE_BITS)),
+        ("opt.enableflags", _bit_names(int(opt.enableflags), _ENABLE_BITS)),
         ("opt.broadphase / broadphase_filter", f"{opt.broadphase!s} / {opt.broadphase_filter!s}"),
         ("opt.run_collision_detection", opt.run_collision_detection),
         ("opt.warn_overflow", opt.warn_overflow),
