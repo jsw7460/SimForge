@@ -35,6 +35,7 @@ and the profile points at the messenger.
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import statistics
 import time
@@ -115,6 +116,15 @@ def main() -> int:
         action="store_true",
         help="Genesis only: gs.init(performance_mode=True) — static FIELD kernel backend.",
     )
+    ap.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="Override a built config field for an A/B, e.g. "
+        "scene.solver_cfg.enable_multiccd=False or scene.disableflags=('multiccd',). "
+        "VALUE is a Python literal; the field must already exist.",
+    )
     args = ap.parse_args()
 
     if args.performance_mode and args.sim != "genesis":
@@ -143,6 +153,15 @@ def main() -> int:
         cfgs = _PRESETS[args.preset](sim_type=args.sim, num_envs=args.num_envs).build()
     if args.performance_mode:
         cfgs.env.performance_mode = True
+    for item in args.set:
+        path, value = item.split("=", 1)
+        *parents, leaf = path.split(".")
+        target = cfgs
+        for name in parents:
+            target = getattr(target, name)
+        getattr(target, leaf)  # the field must exist: a typo must not silently add an attribute
+        setattr(target, leaf, ast.literal_eval(value))
+        print(f"  override {path} = {getattr(target, leaf)!r}")
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env
 
