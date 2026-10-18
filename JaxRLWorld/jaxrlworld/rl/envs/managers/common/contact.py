@@ -73,13 +73,30 @@ class BaseContactManager(BaseManager, ABC):
     (1e-6 N, matching IsaacLab Newton). Genesis and mjlab override
     ``_compute_group_is_contact`` to read their native ``found > 0`` binary
     directly; only Newton uses the base force-threshold path.
+
+    ``compile_timing`` runs the per-substep timing arithmetic of
+    :meth:`advance` (:meth:`_apply_contact_frame`) through ``torch.compile``:
+    eager it is a dozen tiny elementwise launches per substep, fused it
+    is a couple. The contact booleans are still read from the engine
+    eagerly; only tensor math is traced. Boolean logic, ``where`` and
+    ``+ dt`` fuse bit-identically. The mjlab and Newton managers take the
+    flag from ``env_cfg.compile_contact_kernels``; Genesis runs its own
+    fused substep (``GenesisContactBatch``) and leaves this off.
     """
 
-    def __init__(self, env: World):
+    def __init__(self, env: World, compile_timing: bool = False):
         super().__init__(env=env)
         self.num_envs = env.num_envs
         self.dt = env.control_dt
         self._groups: dict[str, ContactGroup] = {}
+        # The per-substep timing update ``advance`` runs: the static frame
+        # arithmetic, compiled or not. Compiling the staticmethod is lazy,
+        # so this costs nothing until the first substep.
+        self._frame = (
+            torch.compile(BaseContactManager._apply_contact_frame, fullgraph=True, dynamic=False)
+            if compile_timing
+            else BaseContactManager._apply_contact_frame
+        )
         # Every group's timing state side by side — see ``_all_groups``.
         self._all: ContactGroup | None = None
         # Reindex tensors for the ``order`` parameter, keyed by (group,
@@ -357,10 +374,14 @@ class BaseContactManager(BaseManager, ABC):
         ``isaaclab/envs/manager_based_rl_env.py`` and
         ``mjlab/envs/manager_based_rl_env.py`` which both
         ``scene.update(physics_dt)`` per substep.
+
+        The contact booleans are read eagerly (``_compute_all_is_contact``
+        touches the engine); the arithmetic on them is ``self._frame``,
+        the compiled or eager :meth:`_apply_contact_frame`.
         """
         if not self._groups:
             return
-        self._apply_contact_frame(self._all_groups(), self._compute_all_is_contact(), dt)
+        self._frame(self._all_groups(), self._compute_all_is_contact(), dt)
 
     def _compute_all_is_contact(self) -> torch.Tensor:
         """``(num_envs, total_tracked)`` bool, groups side by side in registration order."""

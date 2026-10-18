@@ -19,7 +19,7 @@ class MujocoContactManager(BaseContactManager):
     """
 
     def __init__(self, env: World):
-        super().__init__(env)
+        super().__init__(env, compile_timing=env.env_cfg.compile_contact_kernels)
         self._group_sensors: dict[str, ContactSensor] = {}
 
     # -- sensor registration --

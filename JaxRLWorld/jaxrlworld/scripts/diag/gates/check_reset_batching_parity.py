@@ -114,12 +114,19 @@ def check_contact_frame(seeds: int = 10, num_envs: int = 2048, n: int = 4, subst
     print(f"  contact frame: {seeds} seeds x {substeps} substeps bit-identical, buffers never rebound")
 
 
-def check_stacked_timing(seeds: int = 10, num_envs: int = 2048, substeps: int = 64, widths=(2, 1, 4)) -> None:
+def check_stacked_timing(
+    seeds: int = 10, num_envs: int = 2048, substeps: int = 64, widths=(2, 1, 4), compile_timing: bool = False
+) -> None:
     """``BaseContactManager.advance`` runs the frame arithmetic ONCE over
     every group's buffers stacked side by side, each group's own buffers
     being column views of that stack. Per column that is the same
     elementwise arithmetic the old per-group loop ran; this checks it,
-    through resets, against that loop on independent tensors."""
+    through resets, against that loop on independent tensors.
+
+    With ``compile_timing`` the manager runs that arithmetic through
+    ``torch.compile`` (what mjlab / Newton do under
+    ``compile_contact_kernels``); boolean logic, ``where`` and ``+ dt``
+    must come out bit-identical to the eager loop."""
     from types import SimpleNamespace
 
     from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
@@ -137,7 +144,10 @@ def check_stacked_timing(seeds: int = 10, num_envs: int = 2048, substeps: int = 
     fields = BaseContactManager._TIMING_FIELDS
     for seed in range(seeds):
         g = torch.Generator().manual_seed(seed)
-        m = _Manager(SimpleNamespace(num_envs=num_envs, control_dt=0.02, device="cpu", _env_step_counter=0))
+        m = _Manager(
+            SimpleNamespace(num_envs=num_envs, control_dt=0.02, device="cpu", _env_step_counter=0),
+            compile_timing=compile_timing,
+        )
         for i, w in enumerate(widths):
             m._register_group(f"g{i}", [f"b{i}{j}" for j in range(w)], ("found",))
         refs = {
@@ -163,7 +173,8 @@ def check_stacked_timing(seeds: int = 10, num_envs: int = 2048, substeps: int = 
                 assert torch.equal(getattr(ref, f), getattr(grp, f)), f"seed {seed}: {name}.{f} differs"
             # The accessors must hand out the live column views, not copies.
             assert m.current_air_time(name).data_ptr() == grp.current_air_time.data_ptr()
-    print(f"  stacked contact timing: {seeds} seeds x {substeps} substeps x {len(widths)} groups bit-identical")
+    how = "compiled" if compile_timing else "eager"
+    print(f"  stacked contact timing ({how}): {seeds} seeds x {substeps} substeps x {len(widths)} groups bit-identical")
 
 
 def check_peak_height_update(seeds: int = 10, num_envs: int = 2048, n: int = 2) -> None:
@@ -190,6 +201,7 @@ def main() -> None:
     check_termination_reset()
     check_contact_frame()
     check_stacked_timing()
+    check_stacked_timing(compile_timing=True)
     check_peak_height_update()
     print("  PASS")
     print("=" * 78)

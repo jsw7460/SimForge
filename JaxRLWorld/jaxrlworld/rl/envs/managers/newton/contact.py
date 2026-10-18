@@ -25,7 +25,7 @@ class NewtonContactManager(BaseContactManager):
     """
 
     def __init__(self, env: World):
-        super().__init__(env)
+        super().__init__(env, compile_timing=env.env_cfg.compile_contact_kernels)
         # group name -> NewtonContactSensor
         self._group_sensors: dict[str, NewtonContactSensor] = {}
         # Per-step force memoization, keyed by ``env._cache_generation``

@@ -38,6 +38,14 @@ class MujocoEnvConfig(BaseConfig):
     episode_length_s: float = 20.0
     decimation: int = 10
     terminations: Any = None  # TerminationsConfig instance, set by preset
+    # Run the per-substep contact-timing update (air / contact time
+    # accumulation in ``BaseContactManager.advance``) through
+    # ``torch.compile``. The contact booleans are read from the engine
+    # eagerly; only the elementwise arithmetic on them is traced, and it
+    # is bit-identical to the eager path (boolean logic, ``where``,
+    # ``+ dt``). Same switch as the Genesis ``EnvConfig`` field of this
+    # name, which there also covers the contact-frame extraction.
+    compile_contact_kernels: bool = True
 
 
 @dataclass

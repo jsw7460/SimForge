@@ -138,14 +138,15 @@ def _apply_mode(cfgs, mode: str, sim: str) -> None:
     the side). ``compiled``: every compiled path on, so the mode exercises
     them whether or not a preset configures them (go2, g1_29dof and
     k1_velocity configure the reward chain on since 10-18; the rest do
-    not).
+    not). ``compile_contact_kernels`` exists on every backend's env
+    config: the Genesis fused contact substep, and the contact-timing
+    update on mjlab / Newton.
     ``baseline``: untouched."""
     if mode == "baseline":
         return
     on = mode == "compiled"
     cfgs.reward.compile_terms = on
-    if sim == "genesis":
-        cfgs.env.compile_contact_kernels = on
+    cfgs.env.compile_contact_kernels = on
     for entity in cfgs.scene.entities.values():
         for act in entity.articulation.actuators:
             if isinstance(act, IdealPDActuatorCfg):

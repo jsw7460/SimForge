@@ -153,6 +153,29 @@ class _ContactShadow:
         return eager
 
 
+class _TimingShadow:
+    """Stands in for ``BaseContactManager._frame`` on mjlab / Newton: the
+    eager timing update, buffers rewound, the compiled update on the same
+    contact booleans, the five timing fields compared, eager results kept."""
+
+    def __init__(self, manager: BaseContactManager):
+        self._fields = BaseContactManager._TIMING_FIELDS
+        self._compiled = torch.compile(BaseContactManager._apply_contact_frame, fullgraph=True, dynamic=False)
+        self.worst = 0.0
+        manager._frame = self
+
+    def __call__(self, timing, is_contact, dt):
+        before = {f: getattr(timing, f).clone() for f in self._fields}
+        BaseContactManager._apply_contact_frame(timing, is_contact, dt)
+        after = {f: getattr(timing, f).clone() for f in self._fields}
+        for f in self._fields:
+            getattr(timing, f).copy_(before[f])
+        self._compiled(timing, is_contact, dt)
+        for f in self._fields:
+            self.worst = max(self.worst, _rel(after[f], getattr(timing, f)))
+            getattr(timing, f).copy_(after[f])
+
+
 def install_shadows(env, sim: str, no_reward_shadow: str | None = None) -> dict:
     """``no_reward_shadow``: why this preset's reward stack cannot be
     evaluated twice in one step (reported as unsupported, not compared)."""
@@ -162,8 +185,11 @@ def install_shadows(env, sim: str, no_reward_shadow: str | None = None) -> dict:
         ],
         "reward": no_reward_shadow if no_reward_shadow else _RewardShadow(env.reward_manager),
     }
-    if sim == "genesis" and env.contact_manager._sensors:
-        shadows["contact"] = _ContactShadow(env.contact_manager._get_batch())
+    if sim == "genesis":
+        if env.contact_manager._sensors:
+            shadows["contact"] = _ContactShadow(env.contact_manager._get_batch())
+    elif env.contact_manager._groups:
+        shadows["contact"] = _TimingShadow(env.contact_manager)
     return shadows
 
 
