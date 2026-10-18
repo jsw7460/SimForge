@@ -407,7 +407,10 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
             },
         )
 
-    return _RewardsCfg()
+    # The terms above run as one compiled graph: shadow gate PASS on every
+    # backend, and the collect step is 0.4-1.5 ms shorter at 8192 envs
+    # (collect_breakdown, 10-18).
+    return _RewardsCfg(compile_terms=True)
 
 
 def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:

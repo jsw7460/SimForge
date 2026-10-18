@@ -422,7 +422,10 @@ def build_reward(cfg: Go2FlatConfig) -> RewardConfig:
             weight=0.1,
         )
 
-    return _RewardsCfg()
+    # The terms above run as one compiled graph: shadow gate PASS on every
+    # backend, and the collect step is 0.4-1.5 ms shorter at 8192 envs
+    # (collect_breakdown, 10-18).
+    return _RewardsCfg(compile_terms=True)
 
 
 def customize_reset_root_params(cfg: Go2FlatConfig, params: Dict[str, Any]) -> None:

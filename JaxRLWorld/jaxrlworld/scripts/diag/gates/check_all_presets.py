@@ -136,8 +136,9 @@ def _load(loader: str, sim: str, num_envs: int):
 def _apply_mode(cfgs, mode: str, sim: str) -> None:
     """``eager`` / ``shadow``: every compiled path off (shadow compiles on
     the side). ``compiled``: every compiled path on, so the mode exercises
-    them whether or not a preset configures them (no preset turns the
-    reward chain on, so "as configured" never compiled it).
+    them whether or not a preset configures them (go2, g1_29dof and
+    k1_velocity configure the reward chain on since 10-18; the rest do
+    not).
     ``baseline``: untouched."""
     if mode == "baseline":
         return
