@@ -26,6 +26,7 @@ Usage (GPU box, from the SimForge root):
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import statistics
 import time
@@ -163,6 +164,13 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=24, help="env steps with random actions before timing")
     ap.add_argument("--launches", type=int, default=100, help="substeps per timing sample")
     ap.add_argument("--repeats", type=int, default=7)
+    ap.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="Override a built config field for an A/B, e.g. scene.rigid_gap=0.0 (same as collect_breakdown).",
+    )
     args = ap.parse_args()
 
     if ":" in args.preset:
@@ -171,6 +179,15 @@ def main() -> int:
     else:
         cfg_cls = _PRESETS[args.preset]
     cfgs = cfg_cls(sim_type=args.sim, num_envs=args.num_envs).build()
+    for item in args.set:
+        path, value = item.split("=", 1)
+        *parents, leaf = path.split(".")
+        target = cfgs
+        for name in parents:
+            target = getattr(target, name)
+        getattr(target, leaf)  # the field must exist: a typo must not silently add an attribute
+        setattr(target, leaf, ast.literal_eval(value))
+        print(f"  override {path} = {getattr(target, leaf)!r}")
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env
 
