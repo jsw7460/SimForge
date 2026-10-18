@@ -189,6 +189,11 @@ def main() -> int:
     _print_model_facts(m, d)
 
     device = d.qpos.device
+    # mjwarp's convex narrowphase allocates its multiccd scratch
+    # (naccdmax x polygon vertices) on every call outside a graph; hand
+    # torch's cached blocks back first so that allocation has room next to
+    # the backend's own graph.
+    torch.cuda.empty_cache()
     raw = _time_graph(lambda: mujoco_warp.step(m, d), device, args.launches, args.repeats)
     wrapped = _time_calls(env.scene_manager.step, args.launches, args.repeats)
     print()
