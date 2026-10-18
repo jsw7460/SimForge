@@ -481,18 +481,18 @@ class PPO(OnPolicyAlgorithm):
         """
         model = self.train_state.model
 
-        key = self.train_state.key
-        key, subkey = jax.random.split(key)
-        self.train_state = self.train_state._replace(key=key)
-
+        # The key advances inside the jitted forward (its first split half
+        # comes back as the key to store), so the act is one dispatch
+        # instead of a split dispatched eagerly before it.
         if deterministic:
-            env_actions, raw_actions, mean, std, log_prob, values, _ = forward_policy_and_value_deterministic(
-                model, obs.actor_obs, obs.critic_obs, subkey
+            env_actions, raw_actions, mean, std, log_prob, values, _, key = forward_policy_and_value_deterministic(
+                model, obs.actor_obs, obs.critic_obs, self.train_state.key
             )
         else:
-            env_actions, raw_actions, mean, std, log_prob, values, _ = forward_policy_and_value(
-                model, obs.actor_obs, obs.critic_obs, subkey
+            env_actions, raw_actions, mean, std, log_prob, values, _, key = forward_policy_and_value(
+                model, obs.actor_obs, obs.critic_obs, self.train_state.key
             )
+        self.train_state = self.train_state._replace(key=key)
 
         # Hook 1 (value normalization, opt-in): the critic outputs in
         # normalized return space; convert back to raw before storing

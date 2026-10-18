@@ -61,14 +61,21 @@ def forward_policy_and_value(
     actor_obs: jax.Array,
     critic_obs: jax.Array,
     key: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict, jax.Array]:
     """Combined forward pass for actor and critic (stochastic).
+
+    ``key`` is the algorithm's RNG key as stored; the split that advances
+    it happens in here, so the act is one dispatch. The first half of
+    that split is returned as ``next_key`` for the caller to store, the
+    second half seeds this call -- the same two halves the caller used
+    to produce eagerly, so the samples are bit for bit what they were.
 
     Returns:
         env_actions: Actions to send to environment (squashed if applicable)
         raw_actions: Actions to store for PPO update (pre-tanh if squashed)
-        mean, std, log_prob, values, aux
+        mean, std, log_prob, values, aux, next_key
     """
+    next_key, key = jax.random.split(key)
     key, subkey = jax.random.split(key)
     dist, actor_aux = model.get_distribution(actor_obs, key=subkey)
 
@@ -86,7 +93,7 @@ def forward_policy_and_value(
     values = values.squeeze(-1)
 
     aux = {**actor_aux, **critic_aux}
-    return env_actions, raw_actions, dist.mean, dist.std, log_prob, values, aux
+    return env_actions, raw_actions, dist.mean, dist.std, log_prob, values, aux, next_key
 
 
 @eqx.filter_jit
@@ -95,8 +102,13 @@ def forward_policy_and_value_deterministic(
     actor_obs: jax.Array,
     critic_obs: jax.Array,
     key: jax.Array,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict]:
-    """Combined forward pass for actor and critic (deterministic)."""
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, dict, jax.Array]:
+    """Combined forward pass for actor and critic (deterministic).
+
+    Same key contract as :func:`forward_policy_and_value`: the stored key
+    comes in, its first split half goes back out as ``next_key``.
+    """
+    next_key, key = jax.random.split(key)
     dist, actor_aux = model.get_distribution(actor_obs, key=key)
 
     if dist.is_squashed:
@@ -112,7 +124,7 @@ def forward_policy_and_value_deterministic(
     values = values.squeeze(-1)
 
     aux = {**actor_aux, **critic_aux}
-    return env_actions, raw_actions, dist.mean, dist.std, log_prob, values, aux
+    return env_actions, raw_actions, dist.mean, dist.std, log_prob, values, aux, next_key
 
 
 @eqx.filter_jit
