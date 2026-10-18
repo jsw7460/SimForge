@@ -42,13 +42,16 @@ import time
 from collections import defaultdict
 
 import jax.numpy as jnp
+import mujoco_warp
 import torch
+import warp as wp
 
 from jaxrlworld.rl.algorithms.base import ActInput
 from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from jaxrlworld.rl.configs.presets.k1_velocity.base import K1VelocityConfig
 from jaxrlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
+from jaxrlworld.rl.envs.managers.newton.contact import NewtonContactManager
 from jaxrlworld.rl.runners import BaseRunner
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax_many
 
@@ -647,7 +650,92 @@ def _probe_done_branch(env, timer: _Timer) -> None:
     _time_probes(timer, probes, repeats)
 
     _probe_reset_managers(env, timer, env_ids, repeats)
+    if env.sim_type == "newton":
+        _probe_newton_reset_forward(env, timer, env_ids, repeats)
     _probe_reset_events(env, timer, env_ids, repeats)
+
+
+def _probe_newton_reset_forward(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> None:
+    """Split Newton's ``refresh_after_reset`` into the launches it replays.
+
+    It is the one piece of ``_reset_idx`` whose cost scales with the batch
+    (K1 8192: 2.3 of 3.6 ms), and it runs on nearly every training step
+    because staggered episodes end on nearly every step. Its graph is a
+    sync of the Newton state into mjwarp followed by ``mujoco_warp.forward``
+    over EVERY world, then the native sensor kernels; the per-env part is
+    the ring write for the reset envs.
+
+    The forward is also split at the seam mjwarp exposes as ``step1`` /
+    ``step2``: the position stage (kinematics, collision, constraint
+    assembly, factorization) reads qpos only, so a substep that follows
+    the refresh from the same qpos could reuse it; the force stage
+    (velocity, actuation, acceleration, solve) reads ctrl, which the
+    policy rewrites before that substep, and cannot. The two rows say
+    what such a reuse could save.
+
+    Each piece is captured into its own CUDA graph and replayed, as the
+    manager replays its own: an eager ``fwd_position`` allocates the
+    narrowphase scratch on every call, which is a cost the real path never
+    pays.
+    """
+    cm = env.contact_manager
+    if not isinstance(cm, NewtonContactManager) or not cm._group_sensors:
+        return
+    sm = env.scene_manager
+    if not sm._use_mujoco_contacts:
+        return
+    solver = sm.solver
+    m, d = solver.mjw_model, solver.mjw_data
+    device = sm.model.device
+    launches = 20
+
+    print()
+    print("=" * 78)
+    print(f"contact.refresh_after_reset, LAUNCH BY LAUNCH  (graph replay, all {d.nworld} worlds)")
+    print("=" * 78)
+    torch.cuda.empty_cache()
+
+    def graph_ms(fn) -> tuple[float, float]:
+        with wp.ScopedDevice(device):
+            with wp.ScopedCapture() as capture:
+                fn()
+            graph = capture.graph
+            samples = []
+            for _ in range(repeats):
+                wp.synchronize_device(device)
+                t0 = time.perf_counter()
+                for _ in range(launches):
+                    wp.capture_launch(graph)
+                wp.synchronize_device(device)
+                samples.append((time.perf_counter() - t0) * 1e3 / launches)
+        return statistics.mean(samples), statistics.median(samples)
+
+    def force_stage():
+        mujoco_warp.fwd_velocity(m, d)
+        mujoco_warp.fwd_actuation(m, d)
+        mujoco_warp.fwd_acceleration(m, d, factorize=False)
+        mujoco_warp.solve(m, d)
+
+    graphed = {
+        "sync Newton state -> mjwarp": lambda: solver._update_mjc_data(d, sm.model, sm.state_0),
+        "mujoco_warp.forward": lambda: mujoco_warp.forward(m, d),
+        "  position stage (fwd_position + factorize)": lambda: mujoco_warp.fwd_position(m, d, factorize=True),
+        "  force stage (vel, act, acc, solve)": force_stage,
+        "sensor kernels (_update_sensors_native)": sm._update_sensors_native,
+    }
+    for name, fn in graphed.items():
+        mean, median = graph_ms(fn)
+        print(f"  {name:<46}{mean:8.3f} ms   median {median:8.3f}")
+    print("-" * 78)
+
+    def overwrite_latest():
+        for sensor in cm._group_sensors.values():
+            sensor.overwrite_latest(env_ids)
+
+    eager = {"ring write for the reset envs (torch)": overwrite_latest}
+    for name, writer in env._robot_state_writer_cache.items():
+        eager[f"writer.eval_fk ({name}, reset envs)"] = lambda writer=writer: writer.eval_fk(env_ids)
+    _time_probes(timer, eager, repeats)
 
 
 def _probe_reset_events(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> None:
