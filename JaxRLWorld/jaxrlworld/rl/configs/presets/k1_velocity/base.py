@@ -619,13 +619,16 @@ class K1VelocityConfig:
 
         # The source does not floor the summed reward.
         #
-        # The terms above run as one compiled graph. The substep force
-        # history the self-collision and soft-landing terms read is part of
-        # the chain's snapshot, and Newton's air-time term selects its feet
-        # by name, so every term compiles (shadow gate PASS on all three
-        # backends; collect step 0.4-1.5 ms shorter at 8192 envs,
-        # collect_breakdown 10-18).
-        return _RewardsCfg(compile_terms=True)
+        # The terms above compile (shadow gate PASS on all three backends;
+        # collect step 0.4-1.5 ms shorter at 8192 envs), but the compiled
+        # chain is not trusted for this preset: training with it on,
+        # seven runs over the three backends on two GPU stacks each lost
+        # the policy to a NaN after 60-8700 iterations, every time from
+        # one env-step on which upper_body_posture alone came out -inf
+        # while its inputs and every other term were finite. The eager
+        # chain has never done this. The compiled path stays off here
+        # until that is understood (scripts/diag/k1/regime_blend_compile_diag).
+        return _RewardsCfg(compile_terms=False)
 
     # ── Commands ─────────────────────────────────────────────────────
 
