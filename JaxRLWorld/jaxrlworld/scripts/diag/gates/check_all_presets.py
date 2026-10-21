@@ -26,7 +26,19 @@ Four modes pin down what a change did:
                numerical verdict on the compiled paths: exact, per
                component, no chaos — a trajectory comparison cannot
                separate a fused kernel's last-bit rounding from a wrong
-               computation once physics has amplified it.
+               computation once physics has amplified it. A cell whose
+               compiled reward chain could not be run on the side is
+               ``UNSUPPORTED`` when the preset trains with the chain off
+               (informational; ``--strict`` fails it) and ``UNVERIFIED``
+               (failed) when the preset trains with it on: the sweep then
+               has not checked what training runs.
+
+The shadow compares at ``--num-envs``. An inductor fault that depends on
+the kernel tiling shows at one batch size and not another (the K1 regime
+blend went -inf at 8192 envs and was clean at 512), so a preset that
+trains with the compiled chain is verified at its training env count::
+
+    jaxpy -m jaxrlworld.scripts.diag.gates.check_all_presets --mode shadow --out runs/shadow_k1 --only k1_velocity --num-envs 8192
 
 The mjwarp-based backends (Newton's SolverMuJoCo, mjlab) are not
 bitwise reproducible from one process to the next (parallel reductions,
@@ -181,6 +193,10 @@ def run_cell(
 ) -> dict:
     t_build = time.perf_counter()
     cfgs = _load(loader, sim, num_envs)
+    # What the preset itself trains with, before the mode overrides it: a
+    # shadow cell that could not compare the compiled reward chain is a
+    # pass of nothing for a preset whose training runs that chain.
+    compile_terms_configured = bool(cfgs.reward.compile_terms)
     _apply_mode(cfgs, mode, sim)
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env
@@ -223,6 +239,7 @@ def run_cell(
     return {
         "build_s": build_s,
         "ms_per_step": times[len(times) // 2],
+        "compile_terms_configured": compile_terms_configured,
         "fingerprint": fp,
         "shadow": importlib.import_module("jaxrlworld.scripts.diag.gates.preset_shadow").shadow_report(shadows)
         if shadows is not None
@@ -504,10 +521,18 @@ def main() -> int:
                         verdict = "no reference"
                 elif args.mode == "shadow":
                     verdict = _shadow_verdict(data)
-                # A shadow cell whose compiled chain could not run is not
-                # a pass of the compiled path; it is named as such in the
-                # table and fails the sweep under --strict.
-                status = "UNSUPPORTED" if "UNSUPPORTED" in verdict else "PASS"
+                # A shadow cell whose compiled reward chain could not run
+                # compared nothing. For a preset that trains with the
+                # chain off that is informational (UNSUPPORTED; fails only
+                # under --strict); for one that trains with it on the
+                # sweep has not verified what training runs, and the cell
+                # fails (UNVERIFIED).
+                if "UNSUPPORTED" not in verdict:
+                    status = "PASS"
+                elif data["compile_terms_configured"]:
+                    status = "UNVERIFIED"
+                else:
+                    status = "UNSUPPORTED"
                 rows.append((cell, status, data["ms_per_step"], verdict))
                 print(f"{status}  {data['ms_per_step']:6.2f} ms/step  {verdict}  ({wall:.0f}s)")
             else:
@@ -533,13 +558,20 @@ def main() -> int:
     failed = 0
     differs = 0
     unsupported = 0
+    unverified = 0
     for cell, status, ms, verdict in rows:
         print(f"  {cell:<34}{status:<12}{ms:8.2f} ms/step   {verdict}")
         failed += status not in ("PASS", "UNSUPPORTED")
         differs += "DIFFERS" in verdict
         unsupported += status == "UNSUPPORTED"
+        unverified += status == "UNVERIFIED"
     print("=" * 100)
-    tail = f", {unsupported} reward-compile unsupported" if args.mode == "shadow" else ""
+    tail = (
+        f", {unsupported} reward-compile unsupported (preset trains eager)"
+        f", {unverified} UNVERIFIED (preset trains the compiled chain; counted as failed)"
+        if args.mode == "shadow"
+        else ""
+    )
     print(
         f"  {len(rows)} cells: {len(rows) - failed - unsupported} pass, {failed} fail, {differs} differ from reference{tail}"
     )
