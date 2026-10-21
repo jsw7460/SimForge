@@ -48,11 +48,12 @@ def act_deterministic(
 @eqx.filter_jit
 def get_value(
     model: SACActorCritic,
+    actor_obs: jax.Array,
     critic_obs: jax.Array,
     key: jax.Array,
 ) -> jax.Array:
-    """JIT-compiled value estimation."""
-    return model.evaluate(critic_obs, key=key)
+    """JIT-compiled value estimation: ``min(Q1, Q2)`` at the deterministic action."""
+    return model.evaluate(actor_obs, critic_obs, key=key)
 
 
 def metric_scalars(

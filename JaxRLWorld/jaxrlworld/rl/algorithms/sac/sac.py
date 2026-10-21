@@ -557,12 +557,12 @@ class SAC(OffPolicyAlgorithm):
             total_updates=self.total_it,
         )
 
-    def get_value(self, critic_obs: jax.Array) -> jax.Array:
-        """Get value estimate for observations."""
+    def get_value(self, actor_obs: jax.Array, critic_obs: jax.Array) -> jax.Array:
+        """``min(Q1, Q2)`` at the deterministic action, shape ``(N, 1)``."""
         key = self.train_state.key
         key, subkey = jax.random.split(key)
         self.train_state = self.train_state._replace(key=key)
-        return get_value(self.train_state.model, critic_obs, subkey)
+        return get_value(self.train_state.model, actor_obs, critic_obs, subkey)
 
     def save_train_state(self, checkpoint_dir: str) -> Dict[str, Any]:
         """Save SAC training state."""
