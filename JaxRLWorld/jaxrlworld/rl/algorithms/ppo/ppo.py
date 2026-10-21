@@ -13,6 +13,8 @@ from jaxrlworld.rl.algorithms.base import (
     ActInput,
     OnPolicyAlgorithm,
     create_optimizer_with_labels,
+    load_optimizer_state,
+    save_optimizer_state,
 )
 from jaxrlworld.rl.algorithms.metrics import BatchMetrics
 from jaxrlworld.rl.algorithms.ppo.metrics import (
@@ -154,9 +156,6 @@ def _optimizer_factory(name: str, betas: tuple, eps: float, weight_decay: float)
     if weight_decay != 0.0:
         raise ValueError(f"weight_decay={weight_decay} has no meaning for {name!r}; use adamw or lion")
     return factory
-
-
-_OPTIMIZER_STATE_FILE = "optimizer_state.eqx"
 
 
 class PPOTrainState(NamedTuple):
@@ -944,11 +943,7 @@ class PPO(OnPolicyAlgorithm):
         """
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         eqx.tree_serialise_leaves(model_path, self.train_state.model)
-        # The optimizer state: Adam moments and step counts per parameter
-        # group, and the injected learning rates. A resumed run that starts
-        # from a fresh init takes its first steps with zero moments and the
-        # bias-correction of step 1, which is not the run it continues.
-        eqx.tree_serialise_leaves(os.path.join(checkpoint_dir, _OPTIMIZER_STATE_FILE), self.train_state.opt_state)
+        save_optimizer_state(checkpoint_dir, self.train_state.opt_state)
         # The value-target normalizer lives outside the model; the critic's
         # outputs are only meaningful against its statistics.
         if self.value_normalizer is not None:
@@ -979,25 +974,7 @@ class PPO(OnPolicyAlgorithm):
             eqx.is_inexact_array,
             is_leaf=lambda x: isinstance(x, EmpiricalNormalization),
         )
-        # ``init`` gives the tree the saved leaves are read into: same
-        # optimizer, same parameter groups, so the structures match leaf for
-        # leaf. A checkpoint written before the optimizer state was saved
-        # has no file and no flag, and starts from zero moments, said out
-        # loud; a checkpoint whose flag promises the file must have it.
-        new_opt_state = self.optimizer.init(new_params)
-        opt_path = os.path.join(checkpoint_dir, _OPTIMIZER_STATE_FILE)
-        if metadata.get("optimizer_state", False):
-            if not os.path.isfile(opt_path):
-                raise FileNotFoundError(
-                    f"{opt_path} is missing: train_state.yaml says this checkpoint saved its optimizer state."
-                )
-            new_opt_state = eqx.tree_deserialise_leaves(opt_path, new_opt_state)
-            print(f"  Optimizer state restored from {_OPTIMIZER_STATE_FILE}")
-        else:
-            print(
-                f"  No optimizer state in this checkpoint (written before {_OPTIMIZER_STATE_FILE} was saved): "
-                "Adam moments start from zero"
-            )
+        new_opt_state = load_optimizer_state(checkpoint_dir, self.optimizer.init(new_params), metadata)
 
         self.train_state = PPOTrainState(
             model=new_model,

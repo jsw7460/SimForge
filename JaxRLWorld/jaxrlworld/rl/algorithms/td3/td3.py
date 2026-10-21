@@ -12,6 +12,8 @@ from jaxrlworld.rl.algorithms.base import (
     ActInput,
     OffPolicyAlgorithm,
     copy_params,
+    load_optimizer_state,
+    save_optimizer_state,
 )
 from jaxrlworld.rl.algorithms.metrics import host_scalars
 from jaxrlworld.rl.algorithms.td3.metrics import (
@@ -470,6 +472,7 @@ class TD3(OffPolicyAlgorithm):
             "critic2": self.train_state.target_critic2_params,
         }
         eqx.tree_serialise_leaves(target_path, target_networks)
+        save_optimizer_state(checkpoint_dir, (self.train_state.actor_opt_state, self.train_state.critic_opt_state))
 
         return {
             "alg_class": self.__class__.__name__,
@@ -477,6 +480,7 @@ class TD3(OffPolicyAlgorithm):
             "actor_lr": self.actor_lr,
             "critic_lr": self.critic_lr,
             "total_it": self.total_it,
+            "optimizer_state": True,
         }
 
     def load_train_state(self, checkpoint_dir: str, metadata: Dict[str, Any]) -> None:
@@ -497,9 +501,14 @@ class TD3(OffPolicyAlgorithm):
         new_critic1_params, new_critic1_static = eqx.partition(new_model.critic1, eqx.is_inexact_array)
         new_critic2_params, new_critic2_static = eqx.partition(new_model.critic2, eqx.is_inexact_array)
 
-        # Re-initialize optimizer states
-        actor_opt_state = self.actor_optimizer.init(new_actor_params)
-        critic_opt_state = self.critic_optimizer.init((new_critic1_params, new_critic2_params))
+        actor_opt_state, critic_opt_state = load_optimizer_state(
+            checkpoint_dir,
+            (
+                self.actor_optimizer.init(new_actor_params),
+                self.critic_optimizer.init((new_critic1_params, new_critic2_params)),
+            ),
+            metadata,
+        )
 
         self.train_state = TD3TrainState(
             model=new_model,

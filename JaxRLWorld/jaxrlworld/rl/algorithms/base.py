@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
 from typing import Any, Callable, Dict
@@ -24,6 +25,46 @@ class ActInput:
 # look like parameters to ``eqx.is_inexact_array``. Their transform is
 # ``set_to_zero``, so neither a step nor weight decay reaches them.
 FROZEN_LABEL = "frozen"
+
+OPTIMIZER_STATE_FILE = "optimizer_state.eqx"
+"""Where an algorithm's optimizer state lives in a checkpoint directory.
+
+The Adam moments and step counts per parameter group, and the injected
+learning rates. A resumed run that starts from a fresh ``init`` takes its
+first steps with zero moments and the bias correction of step 1, which is
+not the run it continues. Every algorithm saves its optimizer states
+(as one tree) through :func:`save_optimizer_state` and reads them back
+through :func:`load_optimizer_state`.
+"""
+
+
+def save_optimizer_state(checkpoint_dir: str, opt_state: Any) -> None:
+    """Serialise ``opt_state`` (one tree of every optimizer state) next to the model."""
+    eqx.tree_serialise_leaves(os.path.join(checkpoint_dir, OPTIMIZER_STATE_FILE), opt_state)
+
+
+def load_optimizer_state(checkpoint_dir: str, template: Any, metadata: Dict[str, Any]) -> Any:
+    """The saved optimizer state read into ``template``, a fresh ``init``.
+
+    ``init`` gives the tree the saved leaves are read into: same optimizer,
+    same parameter groups, so the structures match leaf for leaf. A
+    checkpoint written before the optimizer state was saved has no file
+    and no flag, and starts from zero moments, said out loud; a checkpoint
+    whose flag promises the file must have it.
+    """
+    path = os.path.join(checkpoint_dir, OPTIMIZER_STATE_FILE)
+    if metadata.get("optimizer_state", False):
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"{path} is missing: train_state.yaml says this checkpoint saved its optimizer state."
+            )
+        print(f"  Optimizer state restored from {OPTIMIZER_STATE_FILE}")
+        return eqx.tree_deserialise_leaves(path, template)
+    print(
+        f"  No optimizer state in this checkpoint (written before {OPTIMIZER_STATE_FILE} was saved): "
+        "Adam moments start from zero"
+    )
+    return template
 
 
 def _resolve_path(tree: Any, path: tuple) -> Any:

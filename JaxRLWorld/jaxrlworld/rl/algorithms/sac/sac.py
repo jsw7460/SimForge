@@ -12,6 +12,8 @@ from jaxrlworld.rl.algorithms.base import (
     ActInput,
     OffPolicyAlgorithm,
     copy_params,
+    load_optimizer_state,
+    save_optimizer_state,
 )
 from jaxrlworld.rl.algorithms.metrics import ActorMetrics, host_scalars
 from jaxrlworld.rl.algorithms.sac.metrics import (
@@ -575,6 +577,10 @@ class SAC(OffPolicyAlgorithm):
             "critic2": self.train_state.target_critic2_params,
         }
         eqx.tree_serialise_leaves(target_path, target_critics)
+        save_optimizer_state(
+            checkpoint_dir,
+            (self.train_state.actor_opt_state, self.train_state.critic_opt_state, self.train_state.alpha_opt_state),
+        )
 
         return {
             "alg_class": self.__class__.__name__,
@@ -585,6 +591,7 @@ class SAC(OffPolicyAlgorithm):
             "actor_lr": self.actor_lr,
             "critic_lr": self.critic_lr,
             "total_it": self.total_it,
+            "optimizer_state": True,
         }
 
     def load_train_state(self, checkpoint_dir: str, metadata: Dict[str, Any]) -> None:
@@ -614,6 +621,9 @@ class SAC(OffPolicyAlgorithm):
         alpha_opt_state = None
         if self.auto_entropy and log_ent_coef is not None:
             alpha_opt_state = self.alpha_optimizer.init(log_ent_coef)
+        actor_opt_state, critic_opt_state, alpha_opt_state = load_optimizer_state(
+            checkpoint_dir, (actor_opt_state, critic_opt_state, alpha_opt_state), metadata
+        )
 
         self.train_state = SACTrainState(
             model=new_model,

@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict, NamedTuple
 
 import equinox as eqx
@@ -10,6 +11,8 @@ from jaxrlworld.rl.algorithms.base import (
     ActInput,
     OffPolicyAlgorithm,
     copy_params,
+    load_optimizer_state,
+    save_optimizer_state,
 )
 from jaxrlworld.rl.algorithms.metrics import BatchMetrics
 from jaxrlworld.rl.algorithms.tdmpc2.math import make_two_hot_config
@@ -547,13 +550,12 @@ class TDMPC2(OffPolicyAlgorithm):
 
     def save_train_state(self, checkpoint_dir: str) -> Dict[str, Any]:
         """Save TD-MPC2 training state."""
-        import os
-
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         eqx.tree_serialise_leaves(model_path, self.train_state.model)
 
         target_path = os.path.join(checkpoint_dir, "target_q.eqx")
         eqx.tree_serialise_leaves(target_path, self.train_state.target_q_params)
+        save_optimizer_state(checkpoint_dir, (self.train_state.wm_opt_state, self.train_state.pi_opt_state))
 
         return {
             "alg_class": self.__class__.__name__,
@@ -563,24 +565,22 @@ class TDMPC2(OffPolicyAlgorithm):
             "total_it": self.total_it,
             "scale_value": self.scale.value,
             "prev_mean": self._prev_mean.tolist(),
+            "optimizer_state": True,
         }
 
     def load_train_state(self, checkpoint_dir: str, metadata: Dict[str, Any]) -> None:
         """Load TD-MPC2 training state."""
-        import os
-
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         new_model = eqx.tree_deserialise_leaves(model_path, self.train_state.model)
 
         target_path = os.path.join(checkpoint_dir, "target_q.eqx")
         new_target_q = eqx.tree_deserialise_leaves(target_path, self.train_state.target_q_params)
 
-        # Re-initialize optimizer states
         wm_params, _ = eqx.partition(new_model, eqx.is_inexact_array)
-        wm_opt_state = self.wm_optimizer.init(wm_params)
-
         pi_params, _ = eqx.partition(new_model.policy, eqx.is_inexact_array)
-        pi_opt_state = self.pi_optimizer.init(pi_params)
+        wm_opt_state, pi_opt_state = load_optimizer_state(
+            checkpoint_dir, (self.wm_optimizer.init(wm_params), self.pi_optimizer.init(pi_params)), metadata
+        )
 
         self.train_state = TDMPC2TrainState(
             model=new_model,
