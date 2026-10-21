@@ -24,8 +24,8 @@ Three phases, each independent of the others:
    speed straddles the thresholds 0.05 / 1.0 / 1.5 by -ULPS..+ULPS in
    several compositions (x only, w only, x and y at a random heading, x
    plus w). Compiled vs eager, all-mask-zero rows counted. The same
-   sweep also runs a complement-mask variant of the blend (``walking = 1
-   - standing - running``) to see whether it closes the hole.
+   sweep also runs the ``where``-chain form of the blend (the fix) to
+   see whether it closes the hole.
 2. ``inject``: the live K1 env with the compiled chain, the velocity
    command tensor overwritten with the same sweep right before each
    reward call, every term compared against the eager chain on the same
@@ -127,7 +127,7 @@ def _speed(cmd: torch.Tensor) -> torch.Tensor:
 
 
 def _blend_masked_sum(speed, standing, walking, running, wt, rt):
-    """``k1_velocity._regime_blend`` verbatim."""
+    """``k1_velocity._regime_blend`` as it was before the ``where`` chain."""
     standing_mask = (speed < wt).float()
     walking_mask = ((speed >= wt) & (speed < rt)).float()
     running_mask = (speed >= rt).float()
@@ -138,16 +138,14 @@ def _blend_masked_sum(speed, standing, walking, running, wt, rt):
     return standing * standing_mask + walking * walking_mask + running * running_mask
 
 
-def _blend_complement(speed, standing, walking, running, wt, rt):
-    """Candidate: the walking mask as the complement of the other two."""
-    standing_mask = (speed < wt).float()
-    running_mask = (speed >= rt).float()
-    walking_mask = 1.0 - standing_mask - running_mask
+def _blend_where(speed, standing, walking, running, wt, rt):
+    """The fix: a ``where`` chain always selects one of the three values."""
+    standing_mask = speed < wt
+    running_mask = speed >= rt
     if isinstance(standing, torch.Tensor) and standing.dim() == 1:
         standing_mask = standing_mask.unsqueeze(1)
-        walking_mask = walking_mask.unsqueeze(1)
         running_mask = running_mask.unsqueeze(1)
-    return standing * standing_mask + walking * walking_mask + running * running_mask
+    return torch.where(standing_mask, standing, torch.where(running_mask, running, walking))
 
 
 def _make_chain(blend):
@@ -176,7 +174,7 @@ def phase_standalone(args, device) -> int:
     stds = tuple(torch.tensor(t, device=device) for t in (_STD_STANDING, _STD_WALKING, _STD_RUNNING))
     eager = _make_chain(_blend_masked_sum)
     compiled = torch.compile(_make_chain(_blend_masked_sum), fullgraph=True, dynamic=False)
-    compiled_fix = torch.compile(_make_chain(_blend_complement), fullgraph=True, dynamic=False)
+    compiled_fix = torch.compile(_make_chain(_blend_where), fullgraph=True, dynamic=False)
 
     sweep = sweep_commands(args.ulps, args.headings, device, gen)
     n_sweep = sweep.shape[0]
@@ -224,7 +222,7 @@ def phase_standalone(args, device) -> int:
     print(f"  compiled rows with a non-finite term     {nonfinite}")
     print(f"  compiled rows with mask sum != 1          {mask_holes}")
     print(f"  compiled rows off eager by > {args.tol:g} rel   {bad_rows}   (worst {worst_rel:.3e})")
-    print(f"  complement-mask compiled rows off eager   {bad_fix_rows}")
+    print(f"  where-chain compiled rows off eager       {bad_fix_rows}")
     for line in examples:
         print(line)
     if nonfinite or mask_holes or bad_rows:
