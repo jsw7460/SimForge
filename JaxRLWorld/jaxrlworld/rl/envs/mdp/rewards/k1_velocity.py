@@ -61,18 +61,24 @@ def _regime_blend(
 ) -> torch.Tensor:
     """Select one of three per-regime std values by commanded speed.
 
-    Written as a masked sum rather than a branch so it stays a single fused
-    expression under the compiled reward chain.
+    Nested ``torch.where`` rather than a masked sum of three regime masks.
+    The masks are exhaustive in eager mode, but the compiled reward chain
+    recomputes ``speed`` (a norm plus an absolute value) inside each fused
+    kernel, and two recomputations can land on opposite sides of a
+    threshold: at a commanded speed of exactly 1.0, ``speed < 1.0`` and
+    ``speed >= 1.0`` were both false, the masked sum gave a std of zero,
+    and ``upper_body_posture_penalty`` divided by it (-inf, then a NaN
+    policy; seen at 8192 envs on every backend). A ``where`` chain always
+    selects one of the three values, however the comparisons are
+    evaluated, and equals the masked sum for every finite speed.
     """
-    standing_mask = (speed < walking_threshold).float()
-    walking_mask = ((speed >= walking_threshold) & (speed < running_threshold)).float()
-    running_mask = (speed >= running_threshold).float()
+    standing_mask = speed < walking_threshold
+    running_mask = speed >= running_threshold
     if isinstance(standing, torch.Tensor) and standing.dim() == 1:
         # Per-joint std vectors: broadcast the masks over the joint axis.
         standing_mask = standing_mask.unsqueeze(1)
-        walking_mask = walking_mask.unsqueeze(1)
         running_mask = running_mask.unsqueeze(1)
-    return standing * standing_mask + walking * walking_mask + running * running_mask
+    return torch.where(standing_mask, standing, torch.where(running_mask, running, walking))
 
 
 def track_lin_vel_relative_std(
