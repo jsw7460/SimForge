@@ -820,6 +820,10 @@ class RunnerConfig(BaseConfig):
     eval_num_envs: int = 32
     eval_num_episodes: int = 10
     eval_deterministic: bool = True
+    # The two switches of ``eval_mode.apply_eval_mode``: observation noise
+    # off, and every randomizing or disturbing event term removed (the
+    # ``interval``, ``interval_dr`` and ``reset_dr`` modes; ``reset`` and
+    # ``startup`` terms stay). Same definition as the offline evaluator's.
     eval_disable_noise: bool = True
     eval_disable_interval_events: bool = True
     # Optional held-out eval sets, keyed by label, e.g.

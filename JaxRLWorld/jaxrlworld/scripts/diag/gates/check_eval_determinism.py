@@ -3,8 +3,9 @@
 The training-side determinism check (``check_determinism``) drives
 the env via the training builder (``BaseRunner.create_with_env``).
 This diag instead exercises the *evaluation* path used by
-:class:`PolicyEvaluator` — same sim initializer, same eval-mode
-defaults (obs noise disabled, interval / reset_dr events removed) —
+:class:`PolicyEvaluator` — same sim initializer, same evaluation mode
+(``apply_eval_mode``: obs noise disabled, interval / interval_dr /
+reset_dr events removed) —
 and checks that two back-to-back invocations produce byte-identical
 state trajectories.
 
@@ -78,15 +79,13 @@ def _build_eval_env(sim: str, preset: str, num_envs: int, seed: int):
       2. Pin ``cfgs.env.seed`` so ``set_seed`` / ``wp.rand_init`` /
          ``gs.init(seed=...)`` (whichever the sim env triggers) see
          the same input.
-      3. Apply eval-mode transforms — disable observation noise on
-         every group, drop ``interval`` and ``reset_dr`` event terms
-         (these would otherwise sample DR every reset and inject
-         training-only stochasticity).
+      3. Apply evaluation mode (``apply_eval_mode``: observation noise
+         off, ``interval`` / ``interval_dr`` / ``reset_dr`` event terms
+         removed; they would otherwise inject training-only
+         stochasticity).
       4. Build env via ``sim_initializer.init_environment``.
     """
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.common_config_classes import disable_corruption
-    from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+    from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
     from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
     mod_path, cls_name = _PRESETS[preset]
@@ -96,13 +95,8 @@ def _build_eval_env(sim: str, preset: str, num_envs: int, seed: int):
     # Pin the seed so the env's set_seed/wp.rand_init/gs.init see it.
     cfgs.env.seed = seed
 
-    # Eval-mode defaults (matches PolicyEvaluator._apply_eval_defaults).
-    if hasattr(cfgs, "observation"):
-        disable_corruption(cfgs.observation)
-    if hasattr(cfgs, "event"):
-        for name, term in iter_terms(cfgs.event, EventTermConfig).items():
-            if term.mode in ("interval", "reset_dr"):
-                setattr(cfgs.event, name, None)
+    # The evaluator's evaluation mode (PolicyEvaluator._apply_eval_defaults).
+    apply_eval_mode(cfgs)
 
     init = get_initializer(_INIT_NAME[sim])
     env = init.init_environment(cfgs, seed=seed)

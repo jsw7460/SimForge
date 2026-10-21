@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector
 from jaxrlworld.rl.evals.policy_wrappers import PolicyWrapper
 from jaxrlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer, resolve_cross_sim_config
@@ -206,28 +207,11 @@ class PolicyEvaluator:
         - Seeds the env with the evaluator's ``seed`` (the physics envs read
           ``env_cfg.seed``; the evaluator reports this seed, so it is the one
           the env must use)
-        - Disables observation noise on every group via disable_corruption()
-        - Removes interval, interval_dr and reset_dr events
+        - Puts the config into evaluation mode (:func:`apply_eval_mode`:
+          observation noise off, randomizing and disturbing events removed)
         """
         self.eval_cfgs.env.seed = self.seed
-
-        # Disable observation noise on every group
-        if hasattr(self.eval_cfgs, "observation"):
-            from jaxrlworld.rl.configs.common_config_classes import disable_corruption
-
-            disable_corruption(self.eval_cfgs.observation)
-
-        # Disable interval events and domain randomization in both of its
-        # modes (per-reset and on the global interval timer); "reset" and
-        # "startup" terms stay, they place the robot.
-        if hasattr(self.eval_cfgs, "event"):
-            from jaxrlworld.rl.configs.base_config import iter_terms
-            from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
-
-            event_cfg = self.eval_cfgs.event
-            for name, term in iter_terms(event_cfg, EventTermConfig).items():
-                if term.mode in ("interval", "interval_dr", "reset_dr"):
-                    setattr(event_cfg, name, None)
+        apply_eval_mode(self.eval_cfgs)
 
     @staticmethod
     def _detect_sim_type_from_cfgs(cfgs) -> str:

@@ -15,6 +15,7 @@ import torch
 
 from jaxrlworld.rl.algorithms.base import ActInput, RLAlgorithm
 from jaxrlworld.rl.configs import ConfigsForRun
+from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector, World
 from jaxrlworld.rl.envs.utils.lazy_import_check import assert_single_sim_loaded
 from jaxrlworld.rl.runners.iteration_data import EpisodeStats, IterationData
@@ -459,21 +460,14 @@ class BaseRunner(ABC):
         # Use fewer envs for evaluation
         eval_cfgs.env.num_envs = self.runner_cfg.eval_num_envs
 
-        # Disable observation noise on every group
-        if self.runner_cfg.eval_disable_noise:
-            from jaxrlworld.rl.configs.common_config_classes import disable_corruption
-
-            disable_corruption(eval_cfgs.observation)
-
-        # Disable interval events (external forces, disturbances) and the
-        # interval-timer domain randomization by setting them to None.
-        if self.runner_cfg.eval_disable_interval_events and hasattr(eval_cfgs, "event"):
-            from jaxrlworld.rl.configs.base_config import iter_terms
-            from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
-
-            for name, term in iter_terms(eval_cfgs.event, EventTermConfig).items():
-                if term.mode in ("interval", "interval_dr"):
-                    setattr(eval_cfgs.event, name, None)
+        # The same evaluation mode as the offline evaluator, behind the two
+        # runner flags: observation noise off, and every randomizing or
+        # disturbing event term (interval, interval_dr, reset_dr) removed.
+        apply_eval_mode(
+            eval_cfgs,
+            disable_noise=self.runner_cfg.eval_disable_noise,
+            disable_events=self.runner_cfg.eval_disable_interval_events,
+        )
 
         # Disable viewer
         eval_cfgs.visualization.show_viewer = False
