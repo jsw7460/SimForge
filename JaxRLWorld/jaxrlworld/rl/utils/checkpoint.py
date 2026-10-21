@@ -55,9 +55,33 @@ def restore_saved_config(cfgs: "ConfigsForRun", saved: dict) -> None:
     since training) raises: the saved run never ran with it, and a restore
     that let it through would evaluate a different MDP without a word.
     """
-    from jaxrlworld.rl.configs.base_config import diff_config_dicts, flatten_leaf_paths, missing_from_saved
+    from jaxrlworld.rl.configs.base_config import diff_config_dicts, flatten_leaf_paths
 
-    current = cfgs.recursive_to_dict()
+    diff = _saved_diff(saved, cfgs.recursive_to_dict())
+    if not diff:
+        return
+    cfgs.apply_overrides(**diff)
+    residual = diff_config_dicts(saved, cfgs.recursive_to_dict())
+    if residual:
+        raise ValueError(
+            "Saved config could not be restored onto the rebuilt preset; still differing after the "
+            f"override pass: {flatten_leaf_paths(residual)}"
+        )
+    paths = flatten_leaf_paths(diff)
+    shown = ", ".join(paths[:20]) + (f", ... ({len(paths) - 20} more)" if len(paths) > 20 else "")
+    print(f"[checkpoint] restored {len(paths)} config value(s) that differ from the rebuilt preset: {shown}")
+
+
+def _saved_diff(saved: dict, current: dict) -> dict:
+    """The nested overrides that turn ``current`` into ``saved``.
+
+    Both are ``recursive_to_dict()`` outputs; ``current`` is a fresh build
+    of the saved run's preset. Config ``current`` has and ``saved`` does
+    not (added since training) raises, and so does a difference in the
+    top-level scalars that identify the preset itself.
+    """
+    from jaxrlworld.rl.configs.base_config import diff_config_dicts, missing_from_saved
+
     added = missing_from_saved(saved, current)
     if added:
         raise ValueError(
@@ -72,18 +96,55 @@ def restore_saved_config(cfgs: "ConfigsForRun", saved: dict) -> None:
             f"Saved config differs from the rebuilt preset in top-level fields {sorted(scalar_drift)}; "
             "these identify the preset itself and cannot be overridden"
         )
-    if not diff:
-        return
-    cfgs.apply_overrides(**diff)
-    residual = diff_config_dicts(saved, cfgs.recursive_to_dict())
-    if residual:
-        raise ValueError(
-            "Saved config could not be restored onto the rebuilt preset; still differing after the "
-            f"override pass: {flatten_leaf_paths(residual)}"
-        )
-    paths = flatten_leaf_paths(diff)
-    shown = ", ".join(paths[:20]) + (f", ... ({len(paths) - 20} more)" if len(paths) > 20 else "")
-    print(f"[checkpoint] restored {len(paths)} config value(s) that differ from the rebuilt preset: {shown}")
+    return diff
+
+
+# Sections of a saved config that cross-sim evaluation does not replay.
+# The scene, observation and action sections are spelled in the training
+# simulator's terms, so the target preset's own are kept (the evaluator
+# checks the observation layout and the action mapping against the saved
+# ones) and a saved difference there is reported as not carried over.
+# Algorithm and nn are copied whole from the checkpoint by the evaluator
+# and the visualization is the evaluator's own, so differences there are
+# neither replayed nor reported.
+SIM_BOUND_SECTIONS: frozenset[str] = frozenset({"scene", "observation", "action"})
+EVALUATOR_OWNED_SECTIONS: frozenset[str] = frozenset({"algorithm", "nn", "visualization"})
+
+
+def training_overrides(saved: dict) -> dict:
+    """The values a saved run differs in from a fresh build of its preset.
+
+    The preset named in ``saved`` is rebuilt for the simulator it was
+    trained on, and the result is the nested override dict (the shape
+    ``apply_overrides`` takes) of every leaf the saved config changed:
+    command-line and programmatic overrides applied after ``build()``, and
+    preset defaults that have moved since.
+    """
+    return _saved_diff(saved, _rebuild_preset(saved).recursive_to_dict())
+
+
+def replay_training_overrides(cfgs: "ConfigsForRun", saved: dict) -> tuple[list[str], list[str]]:
+    """Apply a saved run's simulator-independent overrides to ``cfgs``.
+
+    ``cfgs`` is a config built for a simulator other than the one the run
+    trained on, so the saved config cannot be restored onto it whole:
+    the sections in :data:`SIM_BOUND_SECTIONS` and
+    :data:`EVALUATOR_OWNED_SECTIONS` are left as ``cfgs`` has them and
+    every other difference (reward weights, command ranges, event,
+    termination, curriculum and env settings, runner options) is written
+    on through ``apply_overrides``, which raises on a path ``cfgs`` does
+    not have. Returns the dotted paths applied and the dotted paths of
+    the simulator-bound differences left alone, for the caller to report.
+    """
+    from jaxrlworld.rl.configs.base_config import flatten_leaf_paths
+
+    diff = training_overrides(saved)
+    left_alone = SIM_BOUND_SECTIONS | EVALUATOR_OWNED_SECTIONS
+    replay = {section: values for section, values in diff.items() if section not in left_alone}
+    skipped = {section: values for section, values in diff.items() if section in SIM_BOUND_SECTIONS}
+    if replay:
+        cfgs.apply_overrides(**replay)
+    return flatten_leaf_paths(replay), flatten_leaf_paths(skipped)
 
 
 def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":

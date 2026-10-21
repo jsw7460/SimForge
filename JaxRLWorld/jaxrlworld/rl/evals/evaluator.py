@@ -13,7 +13,7 @@ from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector
 from jaxrlworld.rl.evals.policy_wrappers import PolicyWrapper
 from jaxrlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer, resolve_cross_sim_config
-from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_runner
+from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_runner, replay_training_overrides
 from jaxrlworld.rl.utils.console import (
     Colors,
     print_error,
@@ -239,13 +239,19 @@ class PolicyEvaluator:
     ):
         """Prepare configs for cross-simulator evaluation.
 
-        Uses the target sim's env/scene/reward/etc. config, but copies
-        algorithm and nn config from the checkpoint so the model
-        architecture matches the saved weights, and requires the target's
-        observation layout to match the checkpoint's: the observation
-        functions are simulator-specific, so they are not copied, and a
-        same-width layout with other terms, scales or history would feed
-        the policy scrambled input that no dimension check catches.
+        Starts from the target simulator's preset build, copies algorithm
+        and nn config from the checkpoint so the model architecture matches
+        the saved weights, requires the target's observation layout and
+        action mapping to match the checkpoint's (the functions are
+        simulator-specific, so they are not copied, and a same-width layout
+        with other terms, scales or history would feed the policy scrambled
+        input that no dimension check catches), then replays the training
+        run's simulator-independent overrides onto the target
+        (:func:`replay_training_overrides`): a reward weight, command range
+        or disabled event term changed on the training command line is
+        part of the task the policy learned, and the target preset's
+        defaults are not. Scene overrides are bound to the training
+        simulator and are reported, not carried over.
         """
         from copy import deepcopy
 
@@ -267,6 +273,16 @@ class PolicyEvaluator:
         # and the action mapping must be the training one too.
         _check_observation_parity(train_config["observation"], cfgs.observation.recursive_to_dict())
         _check_action_parity(train_config["action"], cfgs.action.recursive_to_dict())
+
+        # The training run's overrides of the simulator-independent config.
+        applied, skipped = replay_training_overrides(cfgs, train_config)
+        if applied:
+            print_info(f"Cross-sim eval: replayed {len(applied)} training override(s): {', '.join(applied)}")
+        if skipped:
+            print_warning(
+                f"Cross-sim eval: {len(skipped)} training override(s) are bound to the training simulator and "
+                f"were NOT carried over; the target preset's values are used: {', '.join(skipped)}"
+            )
 
         # Apply user overrides
         if extra_overrides is not None:
