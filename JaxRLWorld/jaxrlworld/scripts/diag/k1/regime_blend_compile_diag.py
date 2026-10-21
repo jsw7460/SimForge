@@ -331,10 +331,14 @@ def phase_inject(args, device) -> int:
     print(f"  env-steps off eager (> {args.tol:g} rel or non-finite): {stats['bad']}  non-finite: {stats['nonfinite']}")
     for line in examples:
         print(line)
-    if stats["bad"]:
-        print("\nREPRODUCED on the live env")
+    # The verdict is the non-finite count. Finite differences at the
+    # threshold commands are expected: there the compiled and the eager
+    # speed can fall on opposite sides of a regime or gate boundary, and
+    # either side's value is a valid evaluation of the term.
+    if stats["nonfinite"]:
+        print("\nREPRODUCED on the live env: the compiled chain is non-finite where the eager chain is finite")
         return 1
-    print("\nNOT REPRODUCED on the live env with injected threshold commands")
+    print("\nNOT REPRODUCED on the live env: no non-finite term with injected threshold commands")
     return 0
 
 
