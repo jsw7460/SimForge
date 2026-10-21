@@ -60,11 +60,15 @@ def two_hot(x: jax.Array, cfg: TwoHotConfig) -> jax.Array:
     x_squeezed = x.squeeze(-1) if x.ndim > 1 else x
     x_clamped = jnp.clip(symlog(x_squeezed), cfg.vmin, cfg.vmax)
 
-    bin_idx = jnp.floor((x_clamped - cfg.vmin) / cfg.bin_size).astype(jnp.int32)
-    bin_offset = (x_clamped - cfg.vmin) / cfg.bin_size - bin_idx.astype(jnp.float32)
-
-    # Clamp bin_idx to valid range
-    bin_idx = jnp.clip(bin_idx, 0, cfg.num_bins - 2)
+    # The lower bin is clipped to num_bins - 2 so the upper bin exists,
+    # and the offset is measured from the clipped index: at the upper
+    # bound the position is num_bins - 1, the lower bin num_bins - 2 and
+    # the offset 1, so the whole mass lands on the last bin. Measuring
+    # the offset from the unclipped index put it on the second-to-last
+    # bin for every target at or above vmax.
+    position = (x_clamped - cfg.vmin) / cfg.bin_size
+    bin_idx = jnp.clip(jnp.floor(position).astype(jnp.int32), 0, cfg.num_bins - 2)
+    bin_offset = position - bin_idx.astype(jnp.float32)
 
     batch_size = x_clamped.shape[0]
     soft_two_hot = jnp.zeros((batch_size, cfg.num_bins), dtype=x.dtype)
