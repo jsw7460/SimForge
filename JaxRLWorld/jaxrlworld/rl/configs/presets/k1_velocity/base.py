@@ -619,16 +619,14 @@ class K1VelocityConfig:
 
         # The source does not floor the summed reward.
         #
-        # The terms above compile (shadow gate PASS on all three backends;
-        # collect step 0.4-1.5 ms shorter at 8192 envs), but the compiled
-        # chain is not trusted for this preset: training with it on,
-        # seven runs over the three backends on two GPU stacks each lost
-        # the policy to a NaN after 60-8700 iterations, every time from
-        # one env-step on which upper_body_posture alone came out -inf
-        # while its inputs and every other term were finite. The eager
-        # chain has never done this. The compiled path stays off here
-        # until that is understood (scripts/diag/k1/regime_blend_compile_diag).
-        return _RewardsCfg(compile_terms=False)
+        # The terms above run as one compiled graph (shadow gate PASS on
+        # all three backends; collect step 0.4-1.5 ms shorter at 8192
+        # envs). The compiled chain once produced a -inf in
+        # upper_body_posture at a commanded speed exactly on a regime
+        # threshold (the masked-sum std selection in _regime_blend; a
+        # where chain since, verified by regime_blend_compile_diag's
+        # inject phase at 8192 envs on all three backends).
+        return _RewardsCfg(compile_terms=True)
 
     # ── Commands ─────────────────────────────────────────────────────
 
