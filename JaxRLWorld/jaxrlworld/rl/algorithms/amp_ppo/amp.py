@@ -213,6 +213,11 @@ class AdversarialMotionPrior:
                 raise ValueError(f"joint position block {(ps, pe)} and velocity block {(vs, ve)} do not match")
         if cfg.num_amp_obs_steps < 1:
             raise ValueError(f"num_amp_obs_steps must be >= 1, got {cfg.num_amp_obs_steps}")
+        if fd_blocks is not None and cfg.num_amp_obs_steps < 2:
+            raise ValueError(
+                "joint_velocity_from_positions differences consecutive frames and needs num_amp_obs_steps >= 2, "
+                f"got {cfg.num_amp_obs_steps}"
+            )
         if not 0.0 <= cfg.style_reward_weight <= 1.0:
             raise ValueError(f"style_reward_weight must lie in [0, 1], got {cfg.style_reward_weight}")
         if cfg.replay_insert_size < 1 or cfg.replay_buffer_size < 1:

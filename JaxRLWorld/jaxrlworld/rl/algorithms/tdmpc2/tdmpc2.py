@@ -152,6 +152,11 @@ class TDMPC2(OffPolicyAlgorithm):
     ):
         if key is None:
             key = jax.random.PRNGKey(0)
+        # The VICReg covariance in the world-model loss divides by
+        # batch_size - 1 and is computed whatever its coefficient, so a
+        # batch of one is NaN in the total loss even at vicreg_coef=0.
+        if batch_size < 2:
+            raise ValueError(f"TD-MPC2 needs batch_size >= 2, got {batch_size}")
 
         super().__init__(
             actor_critic=world_model,

@@ -36,8 +36,17 @@ class TwoHotConfig(NamedTuple):
 
 
 def make_two_hot_config(num_bins: int, vmin: float, vmax: float) -> TwoHotConfig:
-    """Create two-hot configuration."""
-    bin_size = (vmax - vmin) / (num_bins - 1) if num_bins > 1 else 1.0
+    """Create two-hot configuration.
+
+    Discrete regression needs at least two bins: with one, ``soft_ce`` is
+    the log-softmax of a single logit, identically zero, so the reward
+    and value heads would receive no gradient at all.
+    """
+    if num_bins < 2:
+        raise ValueError(f"two-hot regression needs num_bins >= 2, got {num_bins}")
+    if not vmax > vmin:
+        raise ValueError(f"two-hot regression needs vmax > vmin, got vmin={vmin}, vmax={vmax}")
+    bin_size = (vmax - vmin) / (num_bins - 1)
     return TwoHotConfig(num_bins=num_bins, vmin=vmin, vmax=vmax, bin_size=bin_size)
 
 
@@ -52,11 +61,6 @@ def two_hot(x: jax.Array, cfg: TwoHotConfig) -> jax.Array:
     Returns:
         Soft two-hot encoded targets [batch_size, num_bins]
     """
-    if cfg.num_bins == 0:
-        return x
-    if cfg.num_bins == 1:
-        return symlog(x)
-
     x_squeezed = x.squeeze(-1) if x.ndim > 1 else x
     x_clamped = jnp.clip(symlog(x_squeezed), cfg.vmin, cfg.vmax)
 
@@ -92,11 +96,6 @@ def two_hot_inv(x: jax.Array, cfg: TwoHotConfig) -> jax.Array:
     Returns:
         Scalar values [batch_size, 1] or [num_q, batch_size, 1]
     """
-    if cfg.num_bins == 0:
-        return x
-    if cfg.num_bins == 1:
-        return symexp(x)
-
     dreg_bins = jnp.linspace(cfg.vmin, cfg.vmax, cfg.num_bins, dtype=x.dtype)
     probs = jax.nn.softmax(x, axis=-1)
     val = jnp.sum(probs * dreg_bins, axis=-1, keepdims=True)

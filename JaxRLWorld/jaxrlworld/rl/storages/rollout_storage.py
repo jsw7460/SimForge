@@ -48,15 +48,27 @@ compiled program's signature.
 """
 
 
+SCALAR_FIELDS: frozenset[str] = frozenset({"reward", "terminated", "truncated", "bootstrap_mask", "trunc_no_reset"})
+"""Fields that are one number per env and come back as ``(num_envs,)``.
+Every other field is a vector, ``(num_envs, width)`` even at width 1: an
+observation of one feature is still a batch of one-vectors, and the
+policy's matmul needs that axis."""
+
+
 def layout_column(packed: jax.Array, layout: StepLayout, name: str) -> jax.Array | None:
     """The named field of a packed step, or ``None`` if the step lacks it.
 
-    Width-1 fields come back as ``(num_envs,)``. Inside ``jit`` these
-    slices are free; outside they would each be a dispatch.
+    Scalar fields (:data:`SCALAR_FIELDS`) come back as ``(num_envs,)``,
+    vector fields as ``(num_envs, width)``. Inside ``jit`` these slices
+    are free; outside they would each be a dispatch.
     """
     for field, start, width in layout:
         if field == name:
-            return packed[:, start] if width == 1 else packed[:, start : start + width]
+            if name in SCALAR_FIELDS:
+                if width != 1:
+                    raise ValueError(f"packed field {name!r} is a scalar per env but has width {width}")
+                return packed[:, start]
+            return packed[:, start : start + width]
     return None
 
 
