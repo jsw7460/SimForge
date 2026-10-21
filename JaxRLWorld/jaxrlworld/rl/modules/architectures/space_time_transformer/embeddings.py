@@ -192,13 +192,13 @@ class GraphRelationalEmbedding(eqx.Module):
     Computes static graph features (Laplacian, shortest-path distance,
     personalized PageRank) once at init, then projects them per-head
     with a learnable ``Linear`` whose output is added to spatial
-    attention scores. The features themselves are non-trainable buffers
-    (registered as inexact arrays but they hold integer-derived values
-    that should not be optimized).
+    attention scores. The features themselves are constants of the
+    kinematic tree: declared frozen so the optimizer never touches them
+    (base.create_optimizer_with_labels) and read through stop_gradient.
     """
 
     # Stacked features of shape (N, N, num_features). Frozen at init.
-    features: jax.Array
+    features: jax.Array = eqx.field(metadata={"frozen": True})
     projection: eqx.nn.Linear
     num_bodies: int = eqx.field(static=True)
     num_heads: int = eqx.field(static=True)
@@ -293,6 +293,6 @@ class GraphRelationalEmbedding(eqx.Module):
     def __call__(self) -> jax.Array:
         """Return ``(num_heads, N, N)`` attention bias."""
         # features: (N, N, F) → projection over last dim → (N, N, H)
-        bias = jax.vmap(jax.vmap(self.projection))(self.features)
+        bias = jax.vmap(jax.vmap(self.projection))(jax.lax.stop_gradient(self.features))
         # Move heads to leading axis: (H, N, N)
         return jnp.transpose(bias, (2, 0, 1))

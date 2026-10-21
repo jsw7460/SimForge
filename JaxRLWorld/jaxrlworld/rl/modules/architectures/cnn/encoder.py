@@ -67,8 +67,11 @@ class SpatialSoftmax(eqx.Module):
     it in place of flattening or global pooling.
     """
 
-    pos_h: jax.Array
-    pos_w: jax.Array
+    # The coordinate grid is a constant, not a parameter: declared frozen
+    # so the optimizer never touches it (base.create_optimizer_with_labels)
+    # and read through stop_gradient so no gradient reaches it.
+    pos_h: jax.Array = eqx.field(metadata={"frozen": True})
+    pos_w: jax.Array = eqx.field(metadata={"frozen": True})
     temperature: float = eqx.field(static=True)
 
     def __init__(self, height: int, width: int, temperature: float = 1.0):
@@ -86,8 +89,8 @@ class SpatialSoftmax(eqx.Module):
         channels = x.shape[0]
         features = x.reshape(channels, -1)
         weights = jax.nn.softmax(features / self.temperature, axis=-1)
-        expected_h = (weights * self.pos_h).sum(axis=-1)
-        expected_w = (weights * self.pos_w).sum(axis=-1)
+        expected_h = (weights * jax.lax.stop_gradient(self.pos_h)).sum(axis=-1)
+        expected_w = (weights * jax.lax.stop_gradient(self.pos_w)).sum(axis=-1)
         return jnp.stack([expected_h, expected_w], axis=-1).reshape(channels * 2)
 
 

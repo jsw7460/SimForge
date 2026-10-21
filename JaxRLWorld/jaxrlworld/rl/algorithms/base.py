@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Callable, Dict
 
 import equinox as eqx
@@ -18,6 +18,45 @@ class ActInput:
 
 
 # ==================== Optimizer Utilities ====================
+
+# Label of the leaves a module declared ``eqx.field(metadata={"frozen": True})``:
+# constants that are arrays (a coordinate grid, graph features) and so
+# look like parameters to ``eqx.is_inexact_array``. Their transform is
+# ``set_to_zero``, so neither a step nor weight decay reaches them.
+FROZEN_LABEL = "frozen"
+
+
+def _resolve_path(tree: Any, path: tuple) -> Any:
+    node = tree
+    for key in path:
+        if isinstance(key, jax.tree_util.GetAttrKey):
+            node = getattr(node, key.name)
+        elif isinstance(key, jax.tree_util.SequenceKey):
+            node = node[key.idx]
+        elif isinstance(key, jax.tree_util.DictKey):
+            node = node[key.key]
+        else:
+            raise TypeError(f"Cannot resolve {key!r} in a parameter path; expected attribute, sequence or dict keys.")
+    return node
+
+
+def is_frozen_leaf(model: eqx.Module, path: tuple) -> bool:
+    """Is the leaf at ``path`` a field its module declared frozen?
+
+    ``path`` is a key path from ``jax.tree_util.tree_flatten_with_path``
+    over ``model`` (or over its parameter partition, which flattens with
+    the same keys). The leaf is frozen when it is an attribute of an
+    ``eqx.Module`` whose dataclass field carries ``metadata={"frozen": True}``.
+    """
+    if not path or not isinstance(path[-1], jax.tree_util.GetAttrKey):
+        return False
+    parent = _resolve_path(model, path[:-1])
+    if not isinstance(parent, eqx.Module):
+        return False
+    for f in fields(parent):
+        if f.name == path[-1].name:
+            return bool(f.metadata.get("frozen", False))
+    return False
 
 
 def create_optimizer_with_labels(
@@ -39,7 +78,10 @@ def create_optimizer_with_labels(
         optimizer_class: Optax optimizer class (default: adamw)
         frozen_labels: Labels whose parameters never change: their
             transform is ``set_to_zero``, so no step and no weight decay
-            reaches them whatever ``optimizer_class`` is.
+            reaches them whatever ``optimizer_class`` is. Leaves a module
+            declared ``eqx.field(metadata={"frozen": True})`` get
+            :data:`FROZEN_LABEL` ahead of ``label_fn`` and are treated
+            the same way.
 
     Returns:
         Tuple of (optimizer, param_labels)
@@ -48,10 +90,11 @@ def create_optimizer_with_labels(
 
     def get_labels(tree):
         flat, treedef = jax.tree_util.tree_flatten_with_path(tree)
-        labels = [label_fn(path) for path, _ in flat]
+        labels = [FROZEN_LABEL if is_frozen_leaf(model, path) else label_fn(path) for path, _ in flat]
         return jax.tree_util.tree_unflatten(treedef, labels)
 
     param_labels = get_labels(params)
+    has_frozen_leaves = any(label == FROZEN_LABEL for label in jax.tree_util.tree_leaves(param_labels))
 
     # ``inject_hyperparams`` puts the learning rate INSIDE the optimizer
     # state instead of baking it into the transformation. Changing it then
@@ -67,10 +110,15 @@ def create_optimizer_with_labels(
         else optax.inject_hyperparams(optimizer_class)(learning_rate=lr)
         for label, lr in lr_config.items()
     }
+    if has_frozen_leaves:
+        transforms[FROZEN_LABEL] = optax.set_to_zero()
 
+    # The label tree has the model's structure, and an eqx.Module with a
+    # ``__call__`` is callable, which multi_transform would take for a
+    # label *function* and call with the parameters. Hand it a function.
     optimizer = optax.chain(
         optax.clip_by_global_norm(max_grad_norm),
-        optax.multi_transform(transforms, param_labels),
+        optax.multi_transform(transforms, lambda _params: param_labels),
     )
 
     return optimizer, param_labels
