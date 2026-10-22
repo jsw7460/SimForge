@@ -6,7 +6,7 @@ import mujoco_warp
 import torch
 import warp as wp
 
-from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
+from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup, primary_patterns
 from jaxrlworld.rl.envs.managers.newton.contact_sensor import NewtonContactSensor
 
 if TYPE_CHECKING:
@@ -48,9 +48,15 @@ class NewtonContactManager(BaseContactManager):
             if not isinstance(sensor, NewtonContactSensor):
                 continue
             # ContactSensorCfg path — tracking names already resolved
-            # (world-0 leaf names) by the wrapper.
+            # (world-0 leaf names, in the native sensor's model order) by
+            # the wrapper; the base class puts them in declared order.
             self._group_sensors[sensor_name] = sensor
-            self._register_group(sensor_name, list(sensor.tracked_names), tuple(sensor.cfg.fields))
+            self._register_group(
+                sensor_name,
+                list(sensor.tracked_names),
+                tuple(sensor.cfg.fields),
+                patterns=primary_patterns(sensor.cfg),
+            )
 
     # -- abstract impl --
 

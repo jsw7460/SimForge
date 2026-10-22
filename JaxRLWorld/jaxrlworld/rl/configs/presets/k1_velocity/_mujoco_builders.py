@@ -120,11 +120,13 @@ def build_env(cfg: K1VelocityConfig, timing: Dict[str, Any]) -> MujocoEnvConfig:
 def build_scene(cfg: K1VelocityConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
     r = cfg.robot
     history = timing["decimation"]
-    foot_pattern = r"^(left_foot_link|right_foot_link)$"
 
+    # The feet are declared as a tuple, not one regex, so the group's
+    # columns are in ``foot_names`` order on every backend (a regex
+    # expands in model order).
     feet_ground = ContactSensorCfg(
         name="feet_ground_contact",
-        primary=ContactMatch(mode="subtree", pattern=foot_pattern, entity="robot"),
+        primary=ContactMatch(mode="subtree", pattern=tuple(r.foot_names), entity="robot"),
         secondary=ContactMatch(mode="body", pattern="terrain"),
         fields=("found", "force"),
         reduce="netforce",

@@ -31,10 +31,18 @@ the real reward functions on a stub robot.
 5. bodies (Newton / Genesis) still reorder by the resolved body names and
    an explicit ``contact_order`` still wins, so the other backends'
    rewards are unchanged;
-6. a site with no, several or a shared match raises instead of guessing;
+6. a site with no, several or a shared match raises instead of guessing,
+   and the match is by whole ``_`` tokens (``foot_1`` does not claim
+   ``foot_10_collision``);
 7. every caller passes the env and group so no path can reach the
    natural order again, and the go2 builder still declares the selector
-   this gate reproduces.
+   this gate reproduces;
+8. the manager itself exposes the columns in DECLARED order: registered
+   with the builder's patterns, the same model-order sensor comes out as
+   ``(FR, FL, RR, RL)``, every read (contact, timing, ``order=``) is
+   permuted, a regex declaration keeps the model order, a declaration
+   that does not cover the sensor raises, and a duplicated ``order``
+   raises.
 
 Run::
 
@@ -82,9 +90,12 @@ CALLERS = (
 class StubContactManager(BaseContactManager):
     """The real reorder path over a contact state this gate sets by hand."""
 
-    def __init__(self, env, tracked: list[str]) -> None:
+    def __init__(self, env, tracked: list[str], patterns: tuple[str, ...] | None = None) -> None:
         super().__init__(env)
-        self._register_group(GROUP, list(tracked), ("found", "force"))
+        # ``tracked`` is the order the (stub) sensor produces; without
+        # ``patterns`` the group exposes it as is, which is what every
+        # backend did before the manager learned the declared order.
+        self._register_group(GROUP, list(tracked), ("found", "force"), patterns=patterns)
         self.state = torch.zeros((env.num_envs, len(tracked)), dtype=torch.bool)
 
     def _compute_group_contact_force(self, group: ContactGroup) -> torch.Tensor | None:
@@ -94,9 +105,9 @@ class StubContactManager(BaseContactManager):
         return self.state
 
     def set_contacts(self, by_name: dict[str, bool]) -> None:
-        """Contact per tracked name, written into the group's MODEL-order columns."""
-        tracked = self.tracked_names(GROUP)
-        self.state = torch.tensor([[by_name[name] for name in tracked]] * self.num_envs, dtype=torch.bool)
+        """Contact per name, written into the sensor's NATIVE (model-order) columns."""
+        native = self._get_group(GROUP).native_names
+        self.state = torch.tensor([[by_name[name] for name in native]] * self.num_envs, dtype=torch.bool)
 
     def set_landed(self, by_name: dict[str, bool]) -> None:
         """Mark feet as having touched down this step (``compute_first_contact``)."""
@@ -136,7 +147,7 @@ def model_order_geoms() -> list[str]:
     return matched
 
 
-def make_env(tracked: list[str], num_frames: int):
+def make_env(tracked: list[str], num_frames: int, patterns: tuple[str, ...] | None = None):
     env = SimpleNamespace(
         num_envs=NUM_ENVS,
         device="cpu",
@@ -153,7 +164,7 @@ def make_env(tracked: list[str], num_frames: int):
         ),
         _env_step_counter=0,
     )
-    env.contact_manager = StubContactManager(env, tracked)
+    env.contact_manager = StubContactManager(env, tracked, patterns)
     env.robot = StubRobotData(num_frames)
     env.get_entity_data = lambda name: env.robot
     return env
@@ -332,11 +343,18 @@ def main() -> int:
 
     msg = raises(lambda: _feet_contact_order(env, GROUP, sites("FR", "FL", "RR", "XX"), None))
     chk("unmatched site raises", msg is not None and "'XX'" in msg, msg)
-    msg = raises(lambda: _feet_contact_order(env, GROUP, sites("F", "RR", "RL", "FL"), None))
-    chk("ambiguous site raises", msg is not None and "candidates" in msg, msg)
+    msg = raises(lambda: _feet_contact_order(env, GROUP, sites("foot", "RR", "RL", "FL"), None))
+    chk("ambiguous site (a token every foot carries) raises", msg is not None and "candidates" in msg, msg)
     shared_env = make_env(["FL_foot_collision", "hip"], 4)
     msg = raises(lambda: _feet_contact_order(shared_env, GROUP, sites("FL", "foot"), None))
     chk("two sites on one contact name raise", msg is not None and "same contact names" in msg, msg)
+    numbered_env = make_env(["foot_10_collision", "foot_2_collision"], 4)
+    msg = raises(lambda: _feet_contact_order(numbered_env, GROUP, sites("foot_1", "foot_2"), None))
+    chk("tokens, not substrings: foot_1 does not claim foot_10", msg is not None and "'foot_1'" in msg, msg)
+    chk(
+        "a multi-token site still finds its geom (FR_foot -> FR_foot_collision)",
+        _feet_contact_order(env, GROUP, sites("FR_foot", "FL_foot", "RR_foot", "RL_foot"), None) == list(GEOM_PATTERNS),
+    )
     nameless = ResolvedEntity(
         name="robot",
         joint_ids=None,
@@ -361,6 +379,67 @@ def main() -> int:
         "go2 mujoco builder still declares the selector this gate reproduces",
         'site_names = ("FR", "FL", "RR", "RL")' in builder and 'f"{name}_foot_collision"' in builder,
     )
+
+    print("\n-- 8. the manager exposes the DECLARED order --")
+    declared_env = make_env(tracked, num_sites, patterns=GEOM_PATTERNS)
+    group = declared_env.contact_manager._get_group(GROUP)
+    chk("native names are the sensor's model order", group.native_names == tracked, str(group.native_names))
+    chk(
+        "tracked names are the declared order (FR, FL, RR, RL)",
+        group.tracked_names == list(GEOM_PATTERNS),
+        str(group.tracked_names),
+    )
+    chk("the permutation is the lateral swap", group.native_perm.tolist() == [1, 0, 3, 2], str(group.native_perm))
+    declared_resolved = resolve_go2_sites(declared_env)
+    set_trot_frame(declared_env, declared_resolved)
+    contact = declared_env.contact_manager.is_contact(GROUP)
+    chk(
+        "is_contact comes out in declared order (FL, RL standing -> columns 1, 3)",
+        torch.equal(contact[0], torch.tensor([False, True, False, True])),
+        str(contact[0].tolist()),
+    )
+    declared_env.contact_manager.advance(DT)
+    ct = declared_env.contact_manager.current_contact_time(GROUP)[0]
+    chk(
+        "timing buffers accumulate on the declared columns",
+        torch.equal(ct > 0, torch.tensor([False, True, False, True])),
+        str(ct.tolist()),
+    )
+    chk(
+        "_feet_contact_order is the identity on a declared-order group",
+        _feet_contact_order(declared_env, GROUP, declared_resolved, None) == group.tracked_names,
+    )
+    slip_declared = penalize_feet_slip(declared_env, GROUP, command_threshold=0.05, asset_cfg=declared_resolved)
+    chk(
+        "feet_slip gives the same penalty as on the native-order group",
+        torch.allclose(slip_declared, torch.full((NUM_ENVS,), expected)),
+        f"{slip_declared[0].item():.6f}",
+    )
+    by_native = declared_env.contact_manager.is_contact(GROUP, order=tracked)
+    chk(
+        "order= still reorders by name (asking for model order undoes the permutation)",
+        torch.equal(by_native[0], torch.tensor([True, False, True, False])),
+        str(by_native[0].tolist()),
+    )
+    regex_env = make_env(tracked, num_sites, patterns=(".*_foot_collision",))
+    regex_group = regex_env.contact_manager._get_group(GROUP)
+    chk(
+        "a regex declaration keeps the model order and skips the gather",
+        regex_group.tracked_names == tracked and regex_group.native_perm is None,
+        str(regex_group.tracked_names),
+    )
+    msg = raises(lambda: make_env(tracked, num_sites, patterns=("FR_foot_collision", "FL_foot_collision")))
+    chk("a declaration that does not cover the sensor raises", msg is not None and "unclaimed" in msg, msg)
+    msg = raises(
+        lambda: make_env(
+            tracked,
+            num_sites,
+            patterns=("FR_foot_collision", "FL_foot_collision", "RR_foot_collision", "RL_foot_collision", "hip"),
+        )
+    )
+    chk("a declaration the sensor does not match raises", msg is not None and "Not all regular expressions" in msg, msg)
+    msg = raises(lambda: declared_env.contact_manager.is_contact(GROUP, order=["FR_foot_collision"] * 4))
+    chk("a duplicated order raises", msg is not None and "more than once" in msg, msg)
 
     print("=" * 78)
     print("=== RESULT: ALL OK ===" if not failures else f"=== RESULT: {len(failures)} FAILED ===")

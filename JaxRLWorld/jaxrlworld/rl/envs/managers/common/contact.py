@@ -9,6 +9,24 @@ Public API is method-based with a ``group_name`` parameter::
     env.contact_manager.is_contact("feet_ground_contact")       # (B, N) bool
     env.contact_manager.contact_force("feet_ground_contact")    # (B, N, 3)
     env.contact_manager.current_air_time("feet_ground_contact") # (B, N)
+
+Column order
+------------
+
+Column ``i`` of every per-contact tensor is the ``i``-th name of the
+group's ``tracked_names``, and that list is in **declared order**: the
+``ContactSensorCfg.primary.pattern`` entries in the order the config
+lists them, each regex expanded in the backend's model order. The
+backends resolve the same declaration in different native orders (mjlab
+and Newton list the matches in model order, Genesis in pattern order), so
+a tuple ``("FR_foot", "FL_foot", "RR_foot", "RL_foot")`` used to give
+``FL, FR, RL, RR`` columns on two backends and ``FR, FL, RR, RL`` on the
+third. :meth:`BaseContactManager._register_group` takes the native
+names and the declared patterns, stores the permutation between them,
+and every read goes through it, so the config is the only source of
+column order on every backend. A reader that pairs these columns with
+another per-element tensor still passes ``order=`` (the names it wants)
+rather than trusting positions.
 """
 
 from __future__ import annotations
@@ -19,6 +37,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from jaxrlworld.rl.configs.sensors import ContactSensorCfg
 from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.utils import string as string_utils
 
@@ -36,6 +55,12 @@ if TYPE_CHECKING:
 # push a sub-N threshold off — keeping ``current_contact_time`` /
 # ``feet_air_time`` reward magnitudes aligned across the three sims.
 _IS_CONTACT_FORCE_EPS: float = 1e-6
+
+
+def primary_patterns(cfg: ContactSensorCfg) -> tuple[str, ...]:
+    """The sensor's declared primary patterns as a tuple, one entry per declared column group."""
+    pattern = cfg.primary.pattern
+    return (pattern,) if isinstance(pattern, str) else tuple(pattern)
 
 
 @dataclass
@@ -61,6 +86,15 @@ class ContactGroup:
     last_air_time: torch.Tensor = field(repr=False)
     last_contact_time: torch.Tensor = field(repr=False)
     _prev_is_contact: torch.Tensor = field(repr=False)
+
+    native_names: list[str] = field(default_factory=list)
+    """The names in the order the backend's sensor produces its columns."""
+    declared_patterns: tuple[str, ...] | None = None
+    """``ContactSensorCfg.primary.pattern`` as declared; ``None`` for a group
+    registered without a declaration (``tracked_names`` is then the native order)."""
+    native_perm: torch.Tensor | None = field(default=None, repr=False)
+    """``tracked_names[i] == native_names[native_perm[i]]``; ``None`` when the
+    two orders coincide, so reads skip the gather."""
 
 
 class BaseContactManager(BaseManager, ABC):
@@ -118,8 +152,52 @@ class BaseContactManager(BaseManager, ABC):
     # Group registration (called by subclasses)
     # ------------------------------------------------------------------
 
-    def _register_group(self, name: str, tracked_names: list[str], fields: tuple[str, ...]) -> None:
-        """Create a named contact group with allocated buffers."""
+    @staticmethod
+    def declared_order(patterns: tuple[str, ...], native_names: list[str]) -> list[str]:
+        """``native_names`` reordered as the declaration lists them.
+
+        Pattern by pattern in declared order, each regex's matches in the
+        native (model) order. Every native name must be claimed by exactly
+        one pattern and every pattern must claim at least one name: the
+        backend already resolved the same patterns, so anything else means
+        the two resolutions disagree, which is an error, not a preference.
+        """
+        _, ordered = string_utils.resolve_matching_names(list(patterns), native_names, preserve_order=True)
+        if len(ordered) != len(native_names):
+            unclaimed = [n for n in native_names if n not in ordered]
+            raise ValueError(
+                f"Declared patterns {list(patterns)} do not cover the backend's tracked names "
+                f"{native_names}: unclaimed {unclaimed}."
+            )
+        return ordered
+
+    def _register_group(
+        self,
+        name: str,
+        native_names: list[str],
+        fields: tuple[str, ...],
+        patterns: tuple[str, ...] | None = None,
+    ) -> None:
+        """Create a named contact group with allocated buffers.
+
+        ``native_names`` is the order the backend's sensor produces its
+        columns in; ``patterns`` is the config's declaration (see
+        :func:`primary_patterns`). The group's ``tracked_names`` is the
+        declared order, and every read is permuted into it. ``None``
+        patterns (a group built outside a ``ContactSensorCfg``, such as a
+        diag stub) keep the native order.
+        """
+        if patterns is None:
+            tracked_names = list(native_names)
+            perm = None
+        else:
+            tracked_names = self.declared_order(patterns, list(native_names))
+            if tracked_names == list(native_names):
+                perm = None
+            else:
+                perm = torch.tensor(
+                    [native_names.index(n) for n in tracked_names], dtype=torch.long, device=self.device
+                )
         n = len(tracked_names)
         shape = (self.num_envs, n)
         group = ContactGroup(
@@ -132,9 +210,19 @@ class BaseContactManager(BaseManager, ABC):
             last_air_time=torch.zeros(shape, device=self.device),
             last_contact_time=torch.zeros(shape, device=self.device),
             _prev_is_contact=torch.zeros(shape, dtype=torch.bool, device=self.device),
+            native_names=list(native_names),
+            declared_patterns=None if patterns is None else tuple(patterns),
+            native_perm=perm,
         )
         self._groups[name] = group
         self._all = None
+
+    @staticmethod
+    def _to_declared(tensor: torch.Tensor, group: ContactGroup) -> torch.Tensor:
+        """Permute a backend read's contact axis (dim 1) into ``tracked_names`` order."""
+        if group.native_perm is None:
+            return tensor
+        return tensor[:, group.native_perm]
 
     def _all_groups(self) -> ContactGroup:
         """Every group's timing state as ONE ``(num_envs, total_tracked)``
@@ -244,6 +332,9 @@ class BaseContactManager(BaseManager, ABC):
             missing = set(order) - set(tracked)
             if missing:
                 raise ValueError(f"order contains names not in group '{group_name}': {missing}. Available: {tracked}")
+            if len(set(order)) != len(order):
+                duplicates = sorted({n for n in order if order.count(n) > 1})
+                raise ValueError(f"order for group '{group_name}' names {duplicates} more than once: {list(order)}")
             self._reindex_cache[key] = torch.tensor(
                 [tracked.index(name) for name in order],
                 dtype=torch.long,
@@ -270,7 +361,7 @@ class BaseContactManager(BaseManager, ABC):
     def is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         """Bool contact state. Shape: ``(num_envs, N)``."""
         group = self._get_group(group_name)
-        result = self._compute_group_is_contact(group)
+        result = self._to_declared(self._compute_group_is_contact(group), group)
         return self._apply_order(result, group_name, order)
 
     def prev_is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
@@ -285,7 +376,7 @@ class BaseContactManager(BaseManager, ABC):
         force = self._compute_group_contact_force(group)
         if force is None:
             force = torch.zeros(self.num_envs, group.num_tracked, 3, device=self.device)
-        return self._apply_order_3d(force, group_name, order)
+        return self._apply_order_3d(self._to_declared(force, group), group_name, order)
 
     def contact_force_history(self, group_name: str, order: list[str] | None = None) -> torch.Tensor | None:
         """Contact force history across substeps. Shape: ``(num_envs, N, H, 3)``.
@@ -300,6 +391,7 @@ class BaseContactManager(BaseManager, ABC):
         history = self._compute_group_contact_force_history(group)
         if history is None:
             return None
+        history = self._to_declared(history, group)
         if order is not None:
             reindex = self._get_reindex(group_name, order)
             history = history[:, reindex, :, :]
@@ -387,8 +479,8 @@ class BaseContactManager(BaseManager, ABC):
         """``(num_envs, total_tracked)`` bool, groups side by side in registration order."""
         groups = list(self._groups.values())
         if len(groups) == 1:
-            return self._compute_group_is_contact(groups[0])
-        return torch.cat([self._compute_group_is_contact(g) for g in groups], dim=1)
+            return self._to_declared(self._compute_group_is_contact(groups[0]), groups[0])
+        return torch.cat([self._to_declared(self._compute_group_is_contact(g), g) for g in groups], dim=1)
 
     @staticmethod
     def _apply_contact_frame(g: ContactGroup, is_contact: torch.Tensor, dt: float) -> None:

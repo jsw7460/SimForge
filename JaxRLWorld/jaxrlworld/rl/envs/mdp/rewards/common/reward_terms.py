@@ -422,7 +422,10 @@ def _feet_contact_order(
     Genesis) reorder by the resolved body names, which are the names the
     contact group tracks. Sites (MuJoCo) are not contact names — the
     group tracks geoms — so each site name is matched to the unique
-    tracked name that contains it (``"FR"`` -> ``"FR_foot_collision"``).
+    tracked name that carries every ``_``-separated token of the site
+    name (``"FR"`` -> ``"FR_foot_collision"``, ``"FR_foot"`` too). Whole
+    tokens, not substrings: ``"foot_1"`` does not claim
+    ``"foot_10_collision"``.
 
     The site case used to return ``None`` and trust the group's natural
     order. That held while site ids came from the backend's resolver,
@@ -443,9 +446,11 @@ def _feet_contact_order(
     if asset_cfg.site_names is None:
         raise ValueError(f"Feet selector for {asset_cfg.name!r} resolved site_ids without site_names.")
     tracked = list(env.contact_manager.tracked_names(contact_group))
+    tracked_tokens = {name: set(name.split("_")) for name in tracked}
     order: list[str] = []
     for site in asset_cfg.site_names:
-        candidates = [name for name in tracked if site in name]
+        site_tokens = set(site.split("_"))
+        candidates = [name for name in tracked if site_tokens <= tracked_tokens[name]]
         if len(candidates) != 1:
             raise ValueError(
                 f"Cannot map foot site {site!r} to contact group {contact_group!r}: "

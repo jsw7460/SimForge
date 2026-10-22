@@ -114,12 +114,14 @@ def build_scene(cfg: G1FlatConfig, timing: Dict[str, Any]) -> MujocoSceneConfig:
     physics_dt = timing["dt"]
     substeps = timing.get("substeps", 1)
 
-    # Contact sensor for feet-ground contact
+    # Contact sensor for feet-ground contact. The feet are declared as a
+    # tuple, not one regex, so the group's columns are in ``foot_names``
+    # order on every backend (a regex expands in model order).
     feet_ground_cfg = ContactSensorCfg(
         name="feet_ground_contact",
         primary=ContactMatch(
             mode="subtree",
-            pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
+            pattern=tuple(r.foot_names),
             entity="robot",
         ),
         secondary=ContactMatch(mode="body", pattern="terrain"),

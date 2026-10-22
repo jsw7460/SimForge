@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
+from jaxrlworld.rl.configs.sensors import ContactSensorCfg
+from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup, primary_patterns
 
 if TYPE_CHECKING:
     from mjlab.sensor.contact_sensor import ContactSensor
@@ -16,6 +17,10 @@ class MujocoContactManager(BaseContactManager):
     """Named-group contact manager for MuJoCo/mjlab environments.
 
     Each mjlab ``ContactSensor`` becomes a named group (sensor cfg name = group name).
+    mjlab lists the primaries in model order (``find_geoms`` / ``find_bodies``
+    without ``preserve_order``); the group is registered with the
+    ``ContactSensorCfg`` the scene was built from so the base class puts the
+    columns in declared order.
     """
 
     def __init__(self, env: World):
@@ -27,11 +32,17 @@ class MujocoContactManager(BaseContactManager):
     def register_sensors(self) -> None:
         from mjlab.sensor.contact_sensor import ContactSensor
 
+        declared = {cfg.name: cfg for cfg in self.env.scene_manager.config.sensors if isinstance(cfg, ContactSensorCfg)}
         for sensor_name, sensor in self.env.scene_manager.sensors.items():
             if isinstance(sensor, ContactSensor):
                 self._group_sensors[sensor_name] = sensor
                 primary_names = list(dict.fromkeys(slot.primary_name for slot in sensor._slots))
-                self._register_group(sensor_name, primary_names, tuple(sensor.cfg.fields))
+                self._register_group(
+                    sensor_name,
+                    primary_names,
+                    tuple(sensor.cfg.fields),
+                    patterns=primary_patterns(declared[sensor_name]),
+                )
 
     # -- abstract impl --
 

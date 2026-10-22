@@ -6,7 +6,7 @@ import torch
 from genesis.utils.misc import qd_to_torch
 
 from jaxrlworld.rl.configs.sensors import ContactSensorCfg
-from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
+from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup, primary_patterns
 from jaxrlworld.rl.envs.managers.genesis.contact_sensor import (
     GenesisContactBatch,
     GenesisContactListReader,
@@ -41,7 +41,7 @@ class ContactManager(BaseContactManager):
         """Register a contact sensor config as a named group."""
         sensor = GenesisContactSensor(self.env, cfg, reader=self._list_reader)
         self._sensors[cfg.name] = sensor
-        self._register_group(cfg.name, sensor.tracked_names, cfg.fields)
+        self._register_group(cfg.name, sensor.tracked_names, cfg.fields, patterns=primary_patterns(cfg))
         self._batch = None
 
     def _get_batch(self) -> GenesisContactBatch:
@@ -52,6 +52,18 @@ class ContactManager(BaseContactManager):
             if list(self._sensors) != list(self._groups):
                 raise RuntimeError(
                     f"Genesis contact sensors {list(self._sensors)} and groups {list(self._groups)} are out of order."
+                )
+            # The batch writes each sensor's frame straight into the group's
+            # columns, bypassing the base class's declared-order permutation.
+            # That is only right because the Genesis sensor resolves its
+            # links in pattern order (``find_links(..., preserve_order=True)``),
+            # so native and declared order coincide; refuse to run otherwise.
+            permuted = [g.name for g in self._groups.values() if g.native_perm is not None]
+            if permuted:
+                raise RuntimeError(
+                    f"Genesis contact groups {permuted} resolved their links in an order other than the "
+                    "declared pattern order; GenesisContactBatch writes native-order frames and cannot "
+                    "apply the permutation."
                 )
             self._batch = GenesisContactBatch(
                 self.env,
