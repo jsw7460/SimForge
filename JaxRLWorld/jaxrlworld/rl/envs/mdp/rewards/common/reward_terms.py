@@ -627,10 +627,14 @@ def penalize_feet_slip_fd(
 
     Same contact filter and command gating; only the velocity source
     changes — see :func:`_fd_foot_velocity` for why the instantaneous
-    read cannot be compared across backends.
+    read cannot be compared across backends. The previous positions are
+    keyed by the resolved selector object (one per term, resolved once at
+    manager init), like ``penalize_feet_clearance_fd``: keyed by the
+    contact group, two slip terms on the same group shared one buffer and
+    the second always read a zero velocity.
     """
     foot_pos, _ = _foot_pos_vel(env, asset_cfg)
-    foot_vel = _fd_foot_velocity(env, f"feet_slip_fd:{contact_group}", foot_pos)
+    foot_vel = _fd_foot_velocity(env, f"feet_slip_fd:{id(asset_cfg)}", foot_pos)
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
 
     is_contact = env.contact_manager.is_contact(

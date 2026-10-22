@@ -42,7 +42,10 @@ the real reward functions on a stub robot.
    ``(FR, FL, RR, RL)``, every read (contact, timing, ``order=``) is
    permuted, a regex declaration keeps the model order, a declaration
    that does not cover the sensor raises, and a duplicated ``order``
-   raises.
+   raises;
+9. two finite-difference slip terms on one contact group keep separate
+   previous positions (the state is keyed by the resolved selector, not
+   the group).
 
 Run::
 
@@ -440,6 +443,31 @@ def main() -> int:
     chk("a declaration the sensor does not match raises", msg is not None and "Not all regular expressions" in msg, msg)
     msg = raises(lambda: declared_env.contact_manager.is_contact(GROUP, order=["FR_foot_collision"] * 4))
     chk("a duplicated order raises", msg is not None and "more than once" in msg, msg)
+
+    print("\n-- 9. finite-difference state is per term, not per group --")
+    fd_env = make_env(tracked, num_sites, patterns=GEOM_PATTERNS)
+    first_cfg = resolve_go2_sites(fd_env)
+    second_cfg = resolve_go2_sites(fd_env)
+    chk("two terms on one group hold distinct resolved selectors", first_cfg is not second_cfg)
+    fd_env.contact_manager.set_contacts({g: True for g in tracked})
+    fd_env.robot.pos.zero_()
+    penalize_feet_slip_fd(fd_env, GROUP, command_threshold=0.05, asset_cfg=first_cfg)
+    penalize_feet_slip_fd(fd_env, GROUP, command_threshold=0.05, asset_cfg=second_cfg)
+    fd_env.robot.pos[:, :, 0] = STANCE_SPEED * DT
+    first = penalize_feet_slip_fd(fd_env, GROUP, command_threshold=0.05, asset_cfg=first_cfg)
+    second = penalize_feet_slip_fd(fd_env, GROUP, command_threshold=0.05, asset_cfg=second_cfg)
+    expected_fd = -4 * STANCE_SPEED**2
+    chk(
+        "both terms see the step's travel (the second used to read zero)",
+        torch.allclose(first, torch.full((NUM_ENVS,), expected_fd), atol=1e-7)
+        and torch.allclose(second, torch.full((NUM_ENVS,), expected_fd), atol=1e-7),
+        f"first {first[0].item():.6f}, second {second[0].item():.6f} (expected {expected_fd:.6f})",
+    )
+    chk(
+        "the store holds one buffer per term",
+        len([k for k in fd_env.reward_manager._fd_prev_foot_pos if k.startswith("feet_slip_fd:")]) == 2,
+        str(list(fd_env.reward_manager._fd_prev_foot_pos)),
+    )
 
     print("=" * 78)
     print("=== RESULT: ALL OK ===" if not failures else f"=== RESULT: {len(failures)} FAILED ===")
