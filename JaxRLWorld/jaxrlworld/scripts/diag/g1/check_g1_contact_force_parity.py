@@ -1351,7 +1351,8 @@ def _capture_sim(
         fs_vel_xy_sq = (foot_v[..., :2] ** 2).sum(dim=-1)
         fs_is_contact = (
             env.contact_manager.is_contact(
-                "feet_ground_contact", order=_feet_contact_order(feet_selector, contact_order)
+                "feet_ground_contact",
+                order=_feet_contact_order(env, "feet_ground_contact", feet_selector, contact_order),
             )
             .detach()
             .cpu()

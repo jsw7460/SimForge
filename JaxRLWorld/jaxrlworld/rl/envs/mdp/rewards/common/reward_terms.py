@@ -366,11 +366,11 @@ def penalize_body_ang_vel_xy(
 # These take an ``asset_cfg: ResolvedEntity`` and use the pre-resolved
 # ``body_ids`` (Newton / Genesis) or ``site_ids`` (MuJoCo) — exactly one
 # of which the selector must populate (``SceneEntitySelector(name="robot",
-# body_names=(...))`` or ``site_names=(...)``).  The matched-name list
-# (``asset_cfg.body_names``) drives the default ``contact_order`` so the
-# contact tensor columns line up with the foot tensor columns; pass a
-# ``preserve_order=True`` selector when that ordering matters (it does
-# for the feet contact groups).
+# body_names=(...))`` or ``site_names=(...)``).  Terms that gate a per-foot
+# quantity by that foot's contact reorder the contact tensor to the
+# selector's column order through ``_feet_contact_order`` — by the matched
+# body names for bodies, by site-name-to-tracked-name matching for sites —
+# so column ``i`` of both tensors is the same foot on every backend.
 
 
 def _command_active(env: World, command_threshold: float) -> torch.Tensor:
@@ -410,17 +410,54 @@ def _foot_pos_vel(env: World, asset_cfg: ResolvedEntity) -> tuple[torch.Tensor, 
     return rd.site_pos_w_by_ids(ids), rd.site_lin_vel_w_by_ids(ids)
 
 
-def _feet_contact_order(asset_cfg: ResolvedEntity, contact_order: list[str] | None) -> list[str] | None:
-    """Default the contact reorder list to the resolved body-name list.
+def _feet_contact_order(
+    env: World, contact_group: str, asset_cfg: ResolvedEntity, contact_order: list[str] | None
+) -> list[str]:
+    """Contact-group column order that matches the foot columns of ``asset_cfg``.
 
-    For sites (MuJoCo) the caller relies on the contact group's natural
-    order, so ``None`` is left as-is.
+    The slip and swing-height terms multiply a per-foot position or
+    velocity column by a per-foot contact column, so column ``i`` of the
+    contact tensor has to be the same foot as column ``i`` of the
+    selector. An explicit ``contact_order`` wins. Bodies (Newton /
+    Genesis) reorder by the resolved body names, which are the names the
+    contact group tracks. Sites (MuJoCo) are not contact names — the
+    group tracks geoms — so each site name is matched to the unique
+    tracked name that contains it (``"FR"`` -> ``"FR_foot_collision"``).
+
+    The site case used to return ``None`` and trust the group's natural
+    order. That held while site ids came from the backend's resolver,
+    which orders by its model table like the contact sensor does; since
+    ``resolve_sites`` returns ids in SELECTOR order, a go2 selector
+    ``("FR", "FL", "RR", "RL")`` against a sensor listing
+    ``(FL, FR, RL, RR)`` paired every foot's velocity with the opposite
+    foot's contact, and in a trot that counts the swing foot's speed as
+    slip — a 30x penalty on identical physics. A site with no or several
+    candidates, or two sites hitting the same tracked name, raises.
     """
     if contact_order is not None:
         return list(contact_order)
-    if asset_cfg.body_ids is not None and asset_cfg.body_names is not None:
+    if asset_cfg.body_ids is not None:
+        if asset_cfg.body_names is None:
+            raise ValueError(f"Feet selector for {asset_cfg.name!r} resolved body_ids without body_names.")
         return list(asset_cfg.body_names)
-    return None
+    if asset_cfg.site_names is None:
+        raise ValueError(f"Feet selector for {asset_cfg.name!r} resolved site_ids without site_names.")
+    tracked = list(env.contact_manager.tracked_names(contact_group))
+    order: list[str] = []
+    for site in asset_cfg.site_names:
+        candidates = [name for name in tracked if site in name]
+        if len(candidates) != 1:
+            raise ValueError(
+                f"Cannot map foot site {site!r} to contact group {contact_group!r}: "
+                f"candidates {candidates}, tracked {tracked}. Pass contact_order explicitly."
+            )
+        order.append(candidates[0])
+    if len(set(order)) != len(order):
+        raise ValueError(
+            f"Foot sites {list(asset_cfg.site_names)} map onto the same contact names {order} "
+            f"in group {contact_group!r}. Pass contact_order explicitly."
+        )
+    return order
 
 
 # Previous-step foot positions for the finite-difference slip terms,
@@ -551,11 +588,9 @@ def penalize_feet_slip(
 ) -> torch.Tensor:
     """Penalize foot xy speed while in contact with the ground.
 
-    Matches mjlab's ``feet_slip`` reward exactly. The contact tensor and
-    foot velocity tensor are aligned column-wise via ``contact_order``;
-    if not given it defaults to the resolved body-name list (Newton /
-    Genesis). For sites (MuJoCo) the caller relies on the contact group's
-    natural order matching the resolved sites.
+    Matches mjlab's ``feet_slip`` reward exactly. The contact tensor is
+    reordered to the foot columns of ``asset_cfg`` (see
+    :func:`_feet_contact_order`); ``contact_order`` overrides that.
 
     Args:
         env: Any environment with a RobotData + contact_manager.
@@ -568,7 +603,9 @@ def penalize_feet_slip(
     _, foot_vel = _foot_pos_vel(env, asset_cfg)
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
 
-    is_contact = env.contact_manager.is_contact(contact_group, order=_feet_contact_order(asset_cfg, contact_order))
+    is_contact = env.contact_manager.is_contact(
+        contact_group, order=_feet_contact_order(env, contact_group, asset_cfg, contact_order)
+    )
 
     cost = torch.sum(vel_xy_norm_sq * is_contact.float(), dim=1)
     return -cost * _command_active(env, command_threshold)
@@ -591,7 +628,9 @@ def penalize_feet_slip_fd(
     foot_vel = _fd_foot_velocity(env, f"feet_slip_fd:{contact_group}", foot_pos)
     vel_xy_norm_sq = torch.sum(torch.square(foot_vel[..., :2]), dim=-1)
 
-    is_contact = env.contact_manager.is_contact(contact_group, order=_feet_contact_order(asset_cfg, contact_order))
+    is_contact = env.contact_manager.is_contact(
+        contact_group, order=_feet_contact_order(env, contact_group, asset_cfg, contact_order)
+    )
 
     cost = torch.sum(vel_xy_norm_sq * is_contact.float(), dim=1)
     return -cost * _command_active(env, command_threshold)
@@ -709,7 +748,7 @@ class FeetSwingHeightTracker:
         asset_cfg: Selector identifying the feet — ``body_names`` for
             Newton / Genesis, ``site_names`` for MuJoCo (exactly one).
         contact_order: Optional explicit contact reorder list. Defaults
-            to the resolved body-name list when bodies are used.
+            to the order matching ``asset_cfg`` (``_feet_contact_order``).
         use_squared_error: ``True`` for ``error**2`` (mjlab); ``False``
             for ``abs(error)`` (older WTW variant).
         reset_mode: Per-env reset behavior. ``"zero"`` (mjlab's reference
@@ -746,7 +785,7 @@ class FeetSwingHeightTracker:
             raise ValueError(f"reset_mode must be one of 'zero', 'current_foot_height', 'none' (got {reset_mode!r})")
         self._reset_mode = reset_mode
 
-        self._contact_order = _feet_contact_order(asset_cfg, contact_order)
+        self._contact_order = _feet_contact_order(env, contact_group, asset_cfg, contact_order)
 
         num_feet = len(ids)
         self.peak_heights = torch.zeros((env.num_envs, num_feet), device=env.device, dtype=torch.float32)

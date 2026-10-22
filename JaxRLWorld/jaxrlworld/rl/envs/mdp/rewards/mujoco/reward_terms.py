@@ -301,7 +301,8 @@ def feet_slip(
     ``contact_order`` (optional) reorders the contact tensor columns when
     the contact-tracked names differ from the position selector — e.g.
     position from ``left_foot_frame`` but contacts from
-    ``left_ankle_roll_link``. ``None`` keeps the natural group order.
+    ``left_ankle_roll_link``. ``None`` matches the contact columns to the
+    selector's feet by name (``common._feet_contact_order``).
     """
     return penalize_feet_slip(
         env,
@@ -422,8 +423,9 @@ class feet_swing_height:
     heights are cleared for the envs being reset. The original MuJoCo class
     had no ``reset`` method, so a peak left by the previous episode (a fall
     that flung a foot to 0.5 m) was charged to the first landing of the
-    next one, on this backend only. ``contact_order=None`` because legacy
-    MuJoCo relies on the natural contact-group order matching site order.
+    next one, on this backend only. ``contact_order=None`` matches the
+    contact columns to the selector's sites by name
+    (``common._feet_contact_order``).
     """
 
     __name__ = "feet_swing_height"
