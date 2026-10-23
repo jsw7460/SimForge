@@ -242,7 +242,7 @@ def main() -> None:
         f"num_hidden={num_hidden} squashed={squashed} has_norm={mean is not None}"
     )
     print(f"[export] max|act_inference - torch| = {max_abs:.3e} (tol {args.tol:.0e})")
-    if max_abs > args.tol:
+    if not np.isfinite(max_abs) or max_abs > args.tol:
         raise SystemExit(f"[export] VALIDATION FAILED: {max_abs:.3e} > {args.tol:.0e}")
 
     scripted = torch.jit.script(torch_mod)
