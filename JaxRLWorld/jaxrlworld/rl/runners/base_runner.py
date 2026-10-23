@@ -841,9 +841,17 @@ class BaseRunner(ABC):
             **alg_metadata,
         }
 
-        # Save the training joint order for cross-sim eval.
+        # Save the training joint order for cross-sim eval, and the resolved
+        # action mapping in that order: the action config spells its
+        # per-joint constants in the training simulator's joint vocabulary,
+        # so a cross-sim eval can only compare the values after resolution.
         if hasattr(self.env, "act_manager"):
-            train_state["canonical_joint_names"] = list(self.env.act_manager.actuated_joint_names)
+            act_manager = self.env.act_manager
+            train_state["canonical_joint_names"] = list(act_manager.actuated_joint_names)
+            train_state["action_scale"] = act_manager.scale.detach().cpu().tolist()
+            train_state["action_offset"] = act_manager.offset[0].detach().cpu().tolist()
+            train_state["action_clip_low"] = act_manager.clip_low.detach().cpu().tolist()
+            train_state["action_clip_high"] = act_manager.clip_high.detach().cpu().tolist()
 
         dump_yaml(
             os.path.join(checkpoint_dir, "train_state.yaml"),

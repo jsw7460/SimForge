@@ -484,6 +484,21 @@ class ActionManagerBase(BaseManager):
         return self._offset
 
     @property
+    def scale(self) -> torch.Tensor:
+        """Resolved per-action scale, shape ``(total_action_dim,)``."""
+        return self._scale
+
+    @property
+    def clip_low(self) -> torch.Tensor:
+        """Resolved per-action lower clip bound, shape ``(total_action_dim,)``."""
+        return self._clip_low
+
+    @property
+    def clip_high(self) -> torch.Tensor:
+        """Resolved per-action upper clip bound, shape ``(total_action_dim,)``."""
+        return self._clip_high
+
+    @property
     def applied_torque(self) -> torch.Tensor:
         """Torques computed by explicit actuator models in the last step.
 

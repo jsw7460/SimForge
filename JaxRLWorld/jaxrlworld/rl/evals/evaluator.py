@@ -171,6 +171,7 @@ class PolicyEvaluator:
         # Validate dims BEFORE loading weights (fail fast on mismatch)
         if self._cross_sim:
             self._validate_dims(metadata)
+            _check_resolved_action_parity(metadata, self.env.act_manager, self._train_sim_type, self.sim_type)
 
         # Load runner and build policy wrapper
         self.runner = load_runner(
@@ -770,10 +771,12 @@ def _check_action_parity(train_action: dict, eval_action: dict) -> None:
     ``"joint_limit_center"``) must be the same string on both sides, and
     a numeric mapping must be numeric on both (its per-joint constants
     are spelled in each simulator's own joint vocabulary, so their values
-    are not compared here). The clip bounds and the soft-limit factor must
-    agree exactly: the clip bounds are also the env's action range, which
-    the squashed-policy runner rescales the policy output to, so a wider
-    clip on the eval side multiplies every action by that ratio.
+    are compared once the eval env exists, resolved per joint, by
+    :func:`_check_resolved_action_parity`). The clip bounds and the
+    soft-limit factor must agree exactly: the clip bounds are also the
+    env's action range, which the squashed-policy runner rescales the
+    policy output to, so a wider clip on the eval side multiplies every
+    action by that ratio.
     """
 
     def kind(value):
@@ -795,6 +798,76 @@ def _check_action_parity(train_action: dict, eval_action: dict) -> None:
             "joint targets it never commanded in training:\n  " + "\n  ".join(problems) + "\n"
             "The eval preset's action builder must produce the training mapping (every per-simulator builder of a "
             "preset has to honour the same preset flags)."
+        )
+
+
+_RESOLVED_ACTION_KEYS = ("action_scale", "action_offset", "action_clip_low", "action_clip_high")
+
+
+def _check_resolved_action_parity(metadata: dict, act_manager, train_sim_type: str, eval_sim_type: str) -> None:
+    """Require the eval env's resolved action mapping to be the checkpoint's.
+
+    :func:`_check_action_parity` compares the action configs, whose
+    per-joint constants are spelled in each simulator's joint vocabulary,
+    so it can only match the kind of ``scale`` and ``offset``. The
+    training env's action manager resolved them to one value per joint,
+    and ``train_state.yaml`` holds those vectors (``action_scale``,
+    ``action_offset``, ``action_clip_low``, ``action_clip_high``) in
+    ``canonical_joint_names`` order. This compares them, joint by joint,
+    to the eval env's resolved vectors, permuted to the canonical order
+    by joint name. A checkpoint written before these vectors were saved
+    is reported, not rejected: its config kinds were checked, its values
+    were not.
+    """
+    canonical = metadata.get("canonical_joint_names")
+    missing = [key for key in _RESOLVED_ACTION_KEYS if key not in metadata]
+    if canonical is None or missing:
+        print_warning(
+            "Checkpoint train_state.yaml has no resolved action mapping (canonical_joint_names and "
+            f"{', '.join(_RESOLVED_ACTION_KEYS)}); the per-joint action scale/offset/clip values of the eval env "
+            "were NOT verified against the training env's. Checkpoints written since the mapping is saved are."
+        )
+        return
+
+    def _bare(name: str) -> str:
+        return name.rsplit("/", 1)[-1]
+
+    canonical_bare = [_bare(n) for n in canonical]
+    eval_bare = [_bare(n) for n in act_manager.actuated_joint_names]
+    if sorted(canonical_bare) != sorted(eval_bare):
+        raise ValueError(
+            f"Cross-sim eval joint set differs from the checkpoint's:\n"
+            f"  checkpoint ({train_sim_type}): {canonical_bare}\n"
+            f"  eval ({eval_sim_type}): {eval_bare}"
+        )
+    order = [eval_bare.index(n) for n in canonical_bare]
+
+    eval_vectors = {
+        "action_scale": act_manager.scale,
+        "action_offset": act_manager.offset[0],
+        "action_clip_low": act_manager.clip_low,
+        "action_clip_high": act_manager.clip_high,
+    }
+    problems: list[str] = []
+    for key in _RESOLVED_ACTION_KEYS:
+        saved = np.asarray(metadata[key], dtype=np.float64)
+        got = eval_vectors[key].detach().cpu().numpy().astype(np.float64)[order]
+        if saved.shape != got.shape:
+            problems.append(f"{key}: checkpoint holds {saved.shape[0]} values, eval env resolves {got.shape[0]}")
+            continue
+        mismatch = ~np.isclose(saved, got, rtol=1e-4, atol=1e-6)
+        if mismatch.any():
+            worst = int(np.argmax(np.where(mismatch, np.abs(saved - got), -np.inf)))
+            problems.append(
+                f"{key}: {int(mismatch.sum())} of {len(saved)} joints differ, worst {canonical_bare[worst]}: "
+                f"checkpoint {saved[worst]:.6g} vs eval {got[worst]:.6g}"
+            )
+    if problems:
+        raise ValueError(
+            f"Cross-sim eval action mapping differs from the checkpoint's (trained on {train_sim_type}, evaluating "
+            f"on {eval_sim_type}); the policy's output would be mapped to joint targets it never commanded in "
+            "training:\n  " + "\n  ".join(problems) + "\n"
+            "The eval preset's action builder must resolve to the training mapping, joint for joint."
         )
 
 
