@@ -22,11 +22,18 @@ exposes. Per cell it checks that
    tuple — column ``i`` IS declared name ``i``;
 3. ``is_contact`` has one column per tracked name.
 
-``--compare`` then takes the per-backend dumps and checks that a
-literal-tuple group exposes the same names in the same order on every
-backend it exists on, and that a regex group has the same column count
-(its within-regex order is the model order, which the gate prints for
-reading but cannot assert across differently named geoms and bodies).
+``--compare`` then takes the per-backend dumps and checks, per group,
+the cross-backend ORDER:
+
+- the same literal tuple on every backend → identical columns;
+- a literal tuple spelled per backend (geom names on mjlab, body names
+  elsewhere, as go2's feet) → column ``i`` names the same part on every
+  backend, by the ``_``-token rule ``_feet_contact_order`` uses;
+- a regex on some backend → the names every backend exposes appear in
+  the same relative order. The backends legitimately expose different
+  sets (mjlab's single subtree column for ``self_collision``, frame
+  bodies Newton's importer drops, mjlab's mocap wrapper body), so the
+  extras are printed as ``[INFO]``, not failed.
 
 Run (one backend per process; the parent spawns one child per cell)::
 
@@ -103,6 +110,25 @@ def _print_cell(result: dict) -> None:
         print(f"    FAIL {f}")
 
 
+def _tokens(name: str) -> set[str]:
+    return set(name.split("_"))
+
+
+def _token_compatible(a: str, b: str) -> bool:
+    """Same rule as ``_feet_contact_order``: one name's ``_`` tokens contain the other's."""
+    ta, tb = _tokens(a), _tokens(b)
+    return ta <= tb or tb <= ta
+
+
+def _common_order(cells: list[dict], name: str) -> tuple[list[str], dict[str, list[str]]]:
+    """Names every backend exposes, in the first backend's column order, plus the per-backend extras."""
+    tracked = {c["sim"]: c["groups"][name]["tracked"] for c in cells}
+    common = set.intersection(*(set(t) for t in tracked.values()))
+    ordered = [n for n in tracked[cells[0]["sim"]] if n in common]
+    extras = {sim: [n for n in t if n not in common] for sim, t in tracked.items()}
+    return ordered, extras
+
+
 def compare(out: Path) -> int:
     results = [json.loads(p.read_text()) for p in sorted(out.glob("*__*.json"))]
     by_label: dict[str, list[dict]] = {}
@@ -124,24 +150,49 @@ def compare(out: Path) -> int:
             present = [c for c in cells if name in c["groups"]]
             if len(present) < 2:
                 continue
-            first = present[0]["groups"][name]
-            if first["literal"]:
-                same = all(c["groups"][name]["tracked"] == first["tracked"] for c in present)
-                status = "OK" if same else "FAIL"
-                print(f"  [{status}] {name}: literal columns identical on {[c['sim'] for c in present]}")
+            groups = {c["sim"]: c["groups"][name] for c in present}
+            declarations = {tuple(g["declared_patterns"]) for g in groups.values()}
+            all_literal = all(g["literal"] for g in groups.values())
+            if all_literal and len(declarations) == 1:
+                # Same literal tuple everywhere: column i must be the same name on every backend.
+                first = present[0]["groups"][name]["tracked"]
+                same = all(g["tracked"] == first for g in groups.values())
+                failures += 0 if same else 1
+                print(f"  [{'OK' if same else 'FAIL'}] {name}: literal columns identical on {list(groups)}")
                 if not same:
-                    failures += 1
-                    for c in present:
-                        print(f"         {c['sim']:8s} {c['groups'][name]['tracked']}")
+                    for sim, g in groups.items():
+                        print(f"         {sim:8s} {g['tracked']}")
+            elif all_literal:
+                # Literal on every backend but spelled per backend (geom names on one, body
+                # names on another): column i must name the same part on every backend.
+                lengths = {len(g["tracked"]) for g in groups.values()}
+                same = len(lengths) == 1 and all(
+                    _token_compatible(a, b)
+                    for g in groups.values()
+                    for a, b in zip(present[0]["groups"][name]["tracked"], g["tracked"])
+                )
+                failures += 0 if same else 1
+                print(
+                    f"  [{'OK' if same else 'FAIL'}] {name}: literal columns token-compatible per position on {list(groups)}"
+                )
+                for sim, g in groups.items():
+                    print(f"         {sim:8s} {g['tracked']}")
             else:
-                counts = {c["sim"]: len(c["groups"][name]["tracked"]) for c in present}
-                same = len(set(counts.values())) == 1
-                status = "OK" if same else "FAIL"
-                print(f"  [{status}] {name}: regex group, {counts} columns (model order within the regex)")
-                if not same:
-                    failures += 1
-                for c in present:
-                    print(f"         {c['sim']:8s} {c['groups'][name]['tracked']}")
+                # A regex somewhere: the backends may expose different bodies (a subtree sensor,
+                # frame bodies one importer drops, a mocap wrapper). The ORDER of the names they
+                # share is what this gate asserts; the extras are printed for reading.
+                ordered, extras = _common_order(present, name)
+                same = all([n for n in g["tracked"] if n in ordered] == ordered for g in groups.values())
+                failures += 0 if same else 1
+                counts = {sim: len(g["tracked"]) for sim, g in groups.items()}
+                print(
+                    f"  [{'OK' if same else 'FAIL'}] {name}: {len(ordered)} shared columns in the same order on {list(groups)}; columns {counts}"
+                )
+                for sim, g in groups.items():
+                    print(f"         {sim:8s} {g['tracked']}")
+                for sim, extra in extras.items():
+                    if extra:
+                        print(f"         [INFO] only on {sim}: {extra}")
     print("\n" + "=" * 78)
     print("=== RESULT: ALL OK ===" if failures == 0 else f"=== RESULT: {failures} FAILED ===")
     return 1 if failures else 0
