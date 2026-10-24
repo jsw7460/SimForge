@@ -32,7 +32,13 @@ inputs.
 7. ``processed_action_rate_l2_scaled`` (the go2 SAC smoothness term) finds
    its per-joint scale on the reward manager from inside the compiled
    chain — a cache keyed by ``id(env)`` missed on the snapshot view and
-   put a tensor ``if`` into the traced graph.
+   put a tensor ``if`` into the traced graph;
+8. the contact group is declared in the opposite order to the sensor's
+   native columns (``lf, rf`` native, ``rf, lf`` declared), and a term
+   reading one named column of ``is_contact``, ``contact_force`` and the
+   history gets the same column compiled as eager, and the column the
+   name denotes. The snapshot used to serve the native columns to an
+   ``order=`` re-index computed against the declared names.
 
 Run::
 
@@ -83,6 +89,24 @@ def quat_term(env):
 def history_term(env):
     history = env.contact_manager.contact_force_history("feet", order=["rf", "lf"])
     return history.norm(dim=-1).sum(dim=(1, 2))
+
+
+def contact_term(env):
+    """Column ``rf`` of every contact read — one named column, not a sum
+    over feet, so a snapshot that hands out the wrong column shows."""
+    cm = env.contact_manager
+    contact = cm.is_contact("feet", order=["rf", "lf"])[:, 0].float()
+    force = cm.contact_force("feet", order=["rf", "lf"])[:, 0].norm(dim=-1)
+    history = cm.contact_force_history("feet", order=["rf", "lf"])[:, 0].norm(dim=-1).sum(-1)
+    return contact + force + history
+
+
+def expected_contact_term(env) -> torch.Tensor:
+    """``contact_term`` by hand from the fixture: ``rf`` is the sensor's
+    native column 1 (the group is registered ``lf, rf``)."""
+    rf = env.contact_manager.history[:, 1]  # (num_envs, H, 3)
+    force = rf[:, 0].norm(dim=-1)
+    return (force > 1e-6).float() + force + rf.norm(dim=-1).sum(-1)
 
 
 SITE_IDS = torch.tensor([1, 0])
@@ -148,7 +172,9 @@ class _Contacts(BaseContactManager):
 
     def __init__(self, env):
         super().__init__(env)
-        self._register_group("feet", ["lf", "rf"], ("force",))
+        # Native columns lf, rf; declared rf, lf — a permuted group, like
+        # go2's feet on mjlab and Newton.
+        self._register_group("feet", ["lf", "rf"], ("force",), patterns=("rf", "lf"))
         self.history = torch.zeros(NUM_ENVS, 2, 4, 3)
 
     def _compute_group_contact_force(self, group):
@@ -164,6 +190,7 @@ class Rewards(RewardConfig):
     fd = RewardTermConfig(func=fd_term, weight=0.0)  # switched on at SWITCH_STEP
     sched = RewardTermConfig(func=quat_term, weight=LinearSchedule(-0.1, 0.1, STEPS))
     hist = RewardTermConfig(func=history_term, weight=1.0)
+    contact = RewardTermConfig(func=contact_term, weight=1.0)
     site = RewardTermConfig(func=site_term, weight=1.0)
     act_rate = RewardTermConfig(func=act_rate_term, weight=1.0)
 
@@ -268,6 +295,16 @@ def main() -> int:
                     f"robot attrs {sorted(rec.robot_attrs)}",
                 )
                 chk("contact_force_history read is recorded", rec.contact_force_history == {"feet"})
+                chk(
+                    "is_contact and contact_force reads are recorded",
+                    rec.contact_is_contact == {"feet"} and rec.contact_force == {"feet"},
+                )
+                group = env_c.contact_manager._get_group("feet")
+                chk(
+                    "the fixture's contact group is permuted (native lf, rf; declared rf, lf)",
+                    group.tracked_names == ["rf", "lf"] and group.native_perm.tolist() == [1, 0],
+                    f"tracked {group.tracked_names}, perm {group.native_perm}",
+                )
             if step == SWITCH_STEP:
                 rec = mgr_c._record
                 chk(
@@ -296,6 +333,13 @@ def main() -> int:
         "action-rate term equals the hand-computed scaled L2 on the last step",
         float((per_c["act_rate"] - expected).abs().max()) <= TOL,
         f"max |d| {float((per_c['act_rate'] - expected).abs().max()):.3g}",
+    )
+    want = expected_contact_term(env_e) * CONTROL_DT
+    chk(
+        "contact term's named column is the sensor's rf column, compiled and eager",
+        float((per_c["contact"] - want).abs().max()) <= TOL and float((per_e["contact"] - want).abs().max()) <= TOL,
+        f"max |d| compiled {float((per_c['contact'] - want).abs().max()):.3g}, "
+        f"eager {float((per_e['contact'] - want).abs().max()):.3g}",
     )
     chk(
         "eager recording steps are exactly the first call and the switch-on step",

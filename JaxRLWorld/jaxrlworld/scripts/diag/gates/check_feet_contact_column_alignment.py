@@ -45,7 +45,14 @@ the real reward functions on a stub robot.
    raises;
 9. two finite-difference slip terms on one contact group keep separate
    previous positions (the state is keyed by the resolved selector, not
-   the group).
+   the group);
+10. the compiled reward chain's snapshot (``RewardEnvView``) serves the
+    same declared-order columns as the manager: ``is_contact``,
+    ``contact_force`` and the force history, and ``feet_slip`` /
+    ``soft_landing`` evaluated through it equal the eager values. The
+    snapshot used to read the backend hooks directly, so on a permuted
+    group (go2's feet on mjlab and Newton) the compiled chain paired every
+    foot with its lateral neighbour again — 1100x on this trot frame.
 
 Run::
 
@@ -64,11 +71,13 @@ import torch
 import jaxrlworld
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup
+from jaxrlworld.rl.envs.managers.common.reward_view import RewardEnvView, RewardReadRecord
 from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import (
     FeetSwingHeightTracker,
     _feet_contact_order,
     penalize_feet_slip,
     penalize_feet_slip_fd,
+    penalize_soft_landing,
 )
 from jaxrlworld.rl.envs.site_frames import resolve_sites
 from jaxrlworld.rl.utils.string import resolve_matching_names
@@ -166,10 +175,12 @@ def make_env(tracked: list[str], num_frames: int, patterns: tuple[str, ...] | No
             config=SimpleNamespace(entities={"robot": SimpleNamespace(mjcf_path=str(GO2_XML))}, rigid_objects={})
         ),
         _env_step_counter=0,
+        robot_entity_name="robot",
     )
     env.contact_manager = StubContactManager(env, tracked, patterns)
     env.robot = StubRobotData(num_frames)
     env.get_entity_data = lambda name: env.robot
+    env.get_robot_data = lambda name=None: env.robot
     return env
 
 
@@ -467,6 +478,64 @@ def main() -> int:
         "the store holds one buffer per term",
         len([k for k in fd_env.reward_manager._fd_prev_foot_pos if k.startswith("feet_slip_fd:")]) == 2,
         str(list(fd_env.reward_manager._fd_prev_foot_pos)),
+    )
+
+    print("\n-- 10. the compiled reward chain's snapshot serves the declared order --")
+    view_env = make_env(tracked, num_sites, patterns=GEOM_PATTERNS)
+    view_resolved = resolve_go2_sites(view_env)
+    set_trot_frame(view_env, view_resolved)
+    real = view_env.contact_manager
+    declared_names = real.tracked_names(GROUP)
+    # The stance feet carry 100 N, written in the sensor's NATIVE columns.
+    native_force = torch.zeros(NUM_ENVS, len(tracked), 3)
+    for i, name in enumerate(tracked):
+        if name.startswith(("FL", "RL")):
+            native_force[:, i, 2] = 100.0
+    real._compute_group_contact_force = lambda group: native_force
+    real._compute_group_contact_force_history = lambda group: native_force.unsqueeze(2).expand(-1, -1, 4, -1)
+    record = RewardReadRecord()
+    record.contact_is_contact.add(GROUP)
+    record.contact_force.add(GROUP)
+    record.contact_force_history.add(GROUP)
+    view = RewardEnvView(view_env, record)
+    view.refresh()
+    snap = view.contact_manager
+    order = _feet_contact_order(view_env, GROUP, view_resolved, None)
+    chk(
+        "snapshot is_contact equals the manager's for the selector's order",
+        torch.equal(snap.is_contact(GROUP, order=order), real.is_contact(GROUP, order=order)),
+        f"snapshot {snap.is_contact(GROUP, order=order)[0].tolist()}, manager {real.is_contact(GROUP, order=order)[0].tolist()}",
+    )
+    chk(
+        "snapshot contact_force equals the manager's",
+        torch.equal(snap.contact_force(GROUP, order=order), real.contact_force(GROUP, order=order)),
+    )
+    chk(
+        "snapshot force history equals the manager's",
+        torch.equal(snap.contact_force_history(GROUP, order=order), real.contact_force_history(GROUP, order=order)),
+    )
+    fl_declared = declared_names.index("FL_foot_collision")
+    fl_native = tracked.index("FL_foot_collision")
+    chk(
+        "the snapshot's FL column is the sensor's FL column (100 N), not its neighbour's",
+        fl_declared != fl_native and torch.equal(snap.contact_force(GROUP)[:, fl_declared], native_force[:, fl_native]),
+        f"declared index {fl_declared}, native index {fl_native}, force {snap.contact_force(GROUP)[0, fl_declared].tolist()}",
+    )
+    through_view = SimpleNamespace(**vars(view_env))
+    through_view.contact_manager = snap
+    slip_view = penalize_feet_slip(through_view, GROUP, command_threshold=0.05, asset_cfg=view_resolved)
+    chk(
+        "feet_slip through the snapshot charges the stance feet only",
+        torch.allclose(slip_view, torch.full((NUM_ENVS,), expected)),
+        f"{slip_view[0].item():.6f} (expected {expected:.6f}; the native columns gave {wrong:.6f})",
+    )
+    real.set_landed({n: n.startswith(("FR", "RR")) for n in declared_names})
+    landing_eager = penalize_soft_landing(view_env, GROUP, command_threshold=0.05)
+    landing_view = penalize_soft_landing(through_view, GROUP, command_threshold=0.05)
+    chk(
+        "soft_landing through the snapshot charges the landing feet's own 0 N, not the stance feet's 100 N",
+        torch.equal(landing_eager, torch.zeros(NUM_ENVS)) and torch.equal(landing_view, torch.zeros(NUM_ENVS)),
+        f"eager {landing_eager[0].item():.1f}, snapshot {landing_view[0].item():.1f}",
     )
 
     print("=" * 78)

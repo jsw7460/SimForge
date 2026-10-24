@@ -446,20 +446,19 @@ class RewardEnvView:
                 holder[name] = _plain(getattr(data, name))
         for name in self._record.sensors:
             self.scene_manager._sensors[name].__dict__["data"] = _plain(env.scene_manager.get_sensor(name).data)
+        # Declared-order reads, the same the public API serves: the view's
+        # ``order=`` re-index is computed against the declared names, so
+        # the columns it re-indexes must be in that order. Reading the
+        # ``_compute_group_*`` hooks directly here handed it the sensor's
+        # native columns, which on a permuted group is a different foot
+        # per column.
         cm = env.contact_manager
         for name in self._record.contact_is_contact:
-            self.contact_manager._is_contact[name] = cm._compute_group_is_contact(cm._get_group(name))
+            self.contact_manager._is_contact[name] = cm._read_is_contact(cm._get_group(name))
         for name in self._record.contact_force:
-            group = cm._get_group(name)
-            cm._require_force(group)
-            force = cm._compute_group_contact_force(group)
-            if force is None:
-                force = torch.zeros(cm.num_envs, group.num_tracked, 3, device=cm.device)
-            self.contact_manager._force[name] = force
+            self.contact_manager._force[name] = cm._read_contact_force(cm._get_group(name))
         for name in self._record.contact_force_history:
-            group = cm._get_group(name)
-            cm._require_force(group)
-            self.contact_manager._force_history[name] = cm._compute_group_contact_force_history(group)
+            self.contact_manager._force_history[name] = cm._read_contact_force_history(cm._get_group(name))
 
     def get_robot_data(self, entity_name: str | None = None):
         name = entity_name or self._env.robot_entity_name

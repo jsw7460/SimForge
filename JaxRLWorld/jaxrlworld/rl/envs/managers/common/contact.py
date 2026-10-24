@@ -224,6 +224,49 @@ class BaseContactManager(BaseManager, ABC):
             return tensor
         return tensor[:, group.native_perm]
 
+    # ------------------------------------------------------------------
+    # Engine reads in declared order
+    #
+    # The ONLY way a contact tensor leaves the backend: the three
+    # ``_compute_group_*`` hooks return the sensor's native columns and
+    # these permute them into ``tracked_names`` order. The public API and
+    # the compiled reward chain's snapshot (``reward_view.RewardEnvView.
+    # refresh``) both read through here, so a column that ``order=``
+    # later re-indexes by name is the column that name denotes on every
+    # path. The snapshot used to call the hooks directly and hand the
+    # native columns to an ``order=`` re-index computed against the
+    # declared names: on a group whose two orders differ (go2's feet on
+    # mjlab and Newton, model order FL, FR, RL, RR against the declared
+    # FR, FL, RR, RL) every compiled contact read was the lateral
+    # neighbour's, and feet_slip charged the swing foot's speed again,
+    # 30x, on the two backends the declared-order change was meant to fix.
+    # ------------------------------------------------------------------
+
+    def _read_is_contact(self, group: ContactGroup) -> torch.Tensor:
+        """This substep's contact booleans ``(num_envs, N)`` in declared order."""
+        return self._to_declared(self._compute_group_is_contact(group), group)
+
+    def _read_contact_force(self, group: ContactGroup) -> torch.Tensor:
+        """This substep's net contact force ``(num_envs, N, 3)`` in declared order.
+
+        Refuses a group not declared with ``"force"``; a backend that has
+        no force for the group yields zeros, as the public read always did.
+        """
+        self._require_force(group)
+        force = self._compute_group_contact_force(group)
+        if force is None:
+            force = torch.zeros(self.num_envs, group.num_tracked, 3, device=self.device)
+        return self._to_declared(force, group)
+
+    def _read_contact_force_history(self, group: ContactGroup) -> torch.Tensor | None:
+        """The substep force ring ``(num_envs, N, H, 3)`` in declared order, or
+        ``None`` from a backend without substep capture."""
+        self._require_force(group)
+        history = self._compute_group_contact_force_history(group)
+        if history is None:
+            return None
+        return self._to_declared(history, group)
+
     def _all_groups(self) -> ContactGroup:
         """Every group's timing state as ONE ``(num_envs, total_tracked)``
         tensor per field, groups side by side in registration order.
@@ -360,8 +403,7 @@ class BaseContactManager(BaseManager, ABC):
 
     def is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         """Bool contact state. Shape: ``(num_envs, N)``."""
-        group = self._get_group(group_name)
-        result = self._to_declared(self._compute_group_is_contact(group), group)
+        result = self._read_is_contact(self._get_group(group_name))
         return self._apply_order(result, group_name, order)
 
     def prev_is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
@@ -371,12 +413,8 @@ class BaseContactManager(BaseManager, ABC):
 
     def contact_force(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
         """Contact force vectors. Shape: ``(num_envs, N, 3)``."""
-        group = self._get_group(group_name)
-        self._require_force(group)
-        force = self._compute_group_contact_force(group)
-        if force is None:
-            force = torch.zeros(self.num_envs, group.num_tracked, 3, device=self.device)
-        return self._apply_order_3d(self._to_declared(force, group), group_name, order)
+        force = self._read_contact_force(self._get_group(group_name))
+        return self._apply_order_3d(force, group_name, order)
 
     def contact_force_history(self, group_name: str, order: list[str] | None = None) -> torch.Tensor | None:
         """Contact force history across substeps. Shape: ``(num_envs, N, H, 3)``.
@@ -386,12 +424,9 @@ class BaseContactManager(BaseManager, ABC):
         refuse a ``history_length`` below the decimation). ``None`` only
         comes from a backend that has not implemented substep capture.
         """
-        group = self._get_group(group_name)
-        self._require_force(group)
-        history = self._compute_group_contact_force_history(group)
+        history = self._read_contact_force_history(self._get_group(group_name))
         if history is None:
             return None
-        history = self._to_declared(history, group)
         if order is not None:
             reindex = self._get_reindex(group_name, order)
             history = history[:, reindex, :, :]
@@ -479,8 +514,8 @@ class BaseContactManager(BaseManager, ABC):
         """``(num_envs, total_tracked)`` bool, groups side by side in registration order."""
         groups = list(self._groups.values())
         if len(groups) == 1:
-            return self._to_declared(self._compute_group_is_contact(groups[0]), groups[0])
-        return torch.cat([self._to_declared(self._compute_group_is_contact(g), g) for g in groups], dim=1)
+            return self._read_is_contact(groups[0])
+        return torch.cat([self._read_is_contact(g) for g in groups], dim=1)
 
     @staticmethod
     def _apply_contact_frame(g: ContactGroup, is_contact: torch.Tensor, dt: float) -> None:
