@@ -58,6 +58,7 @@ class Go2SACNewtonConfig(Go2FlatConfig):
     algorithm_name: str = "SAC"
     use_joint_limit_action: bool = True
     terminate_on_body_contact: bool = True
+    num_envs: int = 2048
 
     def _build_reward_config(self):
         """Inherit the flat reward set, but replace the action-smoothness
