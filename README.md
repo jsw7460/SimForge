@@ -155,6 +155,15 @@ cd SimForge
 # or, if already cloned: git submodule update --init
 ```
 
+To bring an existing clone up to date, pull and then move the submodules
+to the commits the new revision pins (the second command is a no-op when
+no pin changed):
+
+```bash
+git pull --ff-only
+git submodule update --init --recursive
+```
+
 ### 2. Create a conda env
 
 Python >= 3.11 is required.
