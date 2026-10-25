@@ -21,12 +21,35 @@ Examples:
     # Straight from a W&B run (downloads/caches the latest checkpoint)
     python -m jaxrlworld.scripts.evaluation.eval_cross_sim \
         --wandb_run_path <entity>/<project>/<run_id> --eval_sim newton
+
+    # Per-clip motion tracking protocol: one env per clip, each played once
+    # from frame 0 (``clip_per_env``), startup randomization pinned, one row
+    # per clip with the return normalized by the task's max step reward
+    python -m jaxrlworld.scripts.evaluation.eval_cross_sim \
+        --policy_path outputs/models/.../checkpoint_latest/ --eval_sim newton \
+        --eval --num_envs 40 --per_env --max_step_reward 0.1 \
+        command.terms.motion.sampling_mode=clip_per_env \
+        event.foot_friction.params.friction_range=[1.0,1.0] event.randomize_body_com=null
+
+Any ``section.path=value`` argument is a config override applied after the
+checkpoint's config is restored (``null`` switches a term off), the same
+syntax the training entry points take.
 """
 
 import argparse
 
+from jaxrlworld.rl.configs.base_config import parse_override_args
 from jaxrlworld.rl.evals import PolicyEvaluator
 from jaxrlworld.rl.vis.viser import get_look, list_looks
+
+
+def _merge_into(target: dict, source: dict) -> None:
+    """Deep-merge ``source`` into ``target``; a leaf in ``source`` wins."""
+    for key, value in source.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _merge_into(target[key], value)
+        else:
+            target[key] = value
 
 
 def main():
@@ -47,6 +70,17 @@ def main():
     parser.add_argument("--num_evals", type=int, default=10)
     parser.add_argument("--record_video", action="store_true")
     parser.add_argument("--eval", action="store_true", help="Run batch evaluation instead of interactive viewer")
+    parser.add_argument(
+        "--per_env",
+        action="store_true",
+        help="Batch eval: print one row per environment (return, length, how the episode ended)",
+    )
+    parser.add_argument(
+        "--max_step_reward",
+        type=float,
+        default=None,
+        help="Batch eval: the task's largest per-step reward; adds return / (length * this) to the per-env rows",
+    )
     parser.add_argument("--port", type=int, default=2026, help="Viser viewer port")
     parser.add_argument(
         "--look",
@@ -56,7 +90,10 @@ def main():
         help="Viser scene 'look' (robot material / ground / lighting). See jaxrlworld/rl/vis/viser/looks.py. "
         "Omit to use the preset's default (near-black metallic robot, earthy ground, outdoor sun).",
     )
-    args = parser.parse_args()
+    args, rest = parser.parse_known_args()
+    unknown = [arg for arg in rest if "=" not in arg]
+    if unknown:
+        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
 
     if (args.policy_path is None) == (args.wandb_run_path is None):
         parser.error("pass exactly one of --policy_path / --wandb_run_path")
@@ -67,6 +104,9 @@ def main():
             "episode_length_s": 10e9,
         },
     }
+    # ``section.path=value`` arguments, applied on top of the defaults above.
+    for section, values in parse_override_args().items():
+        _merge_into(overrides.setdefault(section, {}), values)
 
     # Eval mode: env's built-in viser viewer runs during batch eval.
     # Play mode: no env viewer; PlayViewer creates its own.
@@ -87,6 +127,8 @@ def main():
         num_evals=args.num_evals,
         record_video=args.record_video,
         extra_overrides=overrides,
+        per_env_report=args.per_env,
+        max_step_reward=args.max_step_reward,
     )
 
     if args.eval:

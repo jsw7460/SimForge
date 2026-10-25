@@ -16,6 +16,7 @@ is the single source of initial state.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -194,6 +195,12 @@ class MotionCommand(CommandTerm):
         ]
         self._n_motions = len(self.motions)
         self._is_multi_motion = self._n_motions > 1
+        if cfg.sampling_mode == "clip_per_env":
+            stems = [os.path.splitext(os.path.basename(p))[0] for p in cfg.motion_files]
+            print(
+                f"[motion] clip_per_env: env i tracks clip i % {self._n_motions} from frame 0; "
+                f"clips in order: {', '.join(stems)}"
+            )
         # Alias retained so single-motion code paths (adaptive sampling,
         # command-buffer sizing, external readers of ``motion.fps``) keep
         # working unchanged. In multi-motion mode adaptive sampling is
@@ -784,6 +791,10 @@ class MotionCommand(CommandTerm):
         mode = self.cfg.sampling_mode
         if mode == "adaptive":
             self._adaptive_sampling(env_ids, keep_motion_id=keep_motion_id)
+        elif mode == "clip_per_env":
+            if not keep_motion_id:
+                self.motion_ids[env_ids] = env_ids.to(self.motion_ids.dtype) % self._n_motions
+            self.time_steps[env_ids] = 0
         else:
             if self._is_multi_motion and not keep_motion_id:
                 self.motion_ids[env_ids] = torch.multinomial(
@@ -1037,12 +1048,15 @@ class MotionCommandCfg(CommandTermCfg):
 
     adaptive_alpha: float = 0.001
 
-    sampling_mode: Literal["adaptive", "uniform", "start"] = "adaptive"
+    sampling_mode: Literal["adaptive", "uniform", "start", "clip_per_env"] = "adaptive"
     """Motion-frame sampling strategy on reset / rollover:
 
     - ``"adaptive"``: failure-weighted curriculum (default for training)
     - ``"uniform"``: uniform over ``[0, motion_length)``
     - ``"start"``: always frame 0 (for deterministic playback / eval)
+    - ``"clip_per_env"``: env ``i`` tracks ``motion_files[i % len(motion_files)]``
+      from frame 0, so with one env per clip every clip is played once
+      from its start (the per-clip evaluation protocol)
     """
 
     rollover_teleport: bool = True

@@ -69,8 +69,17 @@ class PolicyEvaluator:
         video_dir: str | None = None,
         extra_overrides: dict = None,
         use_rich_display: bool = True,
+        per_env_report: bool = False,
+        max_step_reward: float | None = None,
     ):
+        """``per_env_report`` prints one row per environment (return,
+        length, how the episode ended) after the summary; with
+        ``max_step_reward``, the task's largest per-step reward, each row
+        also carries the normalized return ``return / (length *
+        max_step_reward)``."""
         super().__init__()
+        self.per_env_report = per_env_report
+        self.max_step_reward = max_step_reward
 
         # Resolve policy_path from wandb if needed
         if wandb_run_path is not None:
@@ -533,6 +542,12 @@ class PolicyEvaluator:
         """
         current_step = 0
         eval_dones = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
+        # Per-environment record of the one episode each env completes.
+        running_return = torch.zeros(self.env.num_envs, device=self.device)
+        running_length = torch.zeros(self.env.num_envs, dtype=torch.long, device=self.device)
+        env_return = torch.zeros(self.env.num_envs, device=self.device)
+        env_length = torch.zeros(self.env.num_envs, dtype=torch.long, device=self.device)
+        env_terminated = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
 
         if track_success:
             episode_success = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
@@ -549,6 +564,13 @@ class PolicyEvaluator:
             new_dones = reset_idx & ~eval_dones
 
             self.episode_tracker.update(reward_info, new_dones)
+            running_return += rewards
+            running_length += 1
+            env_return = torch.where(new_dones, running_return, env_return)
+            env_length = torch.where(new_dones, running_length, env_length)
+            env_terminated |= new_dones & terminated
+            running_return = torch.where(reset_idx, torch.zeros_like(running_return), running_return)
+            running_length = torch.where(reset_idx, torch.zeros_like(running_length), running_length)
 
             if new_dones.any():
                 if track_success and "success" in infos:
@@ -569,6 +591,9 @@ class PolicyEvaluator:
 
         print()  # New line after progress bar
         eval_stats = self._extract_evaluation_stats()
+        eval_stats["per_env_returns"] = env_return.cpu().tolist()
+        eval_stats["per_env_lengths"] = env_length.cpu().tolist()
+        eval_stats["per_env_terminated"] = env_terminated.cpu().tolist()
 
         if track_success:
             success_list = episode_success.cpu().tolist()
@@ -694,6 +719,36 @@ class PolicyEvaluator:
                     f"{Colors.DIM}{type_stats['min']:>10.2f} {type_stats['max']:>10.2f}{Colors.RESET}"
                 )
 
+        if self.per_env_report:
+            self._print_per_env_table(stats)
+
+    def _print_per_env_table(self, stats: dict[str, Any]) -> None:
+        """One row per environment: its episode's return, length, how it
+        ended (``terminated`` = a termination term fired, ``truncated`` =
+        time-out or clip end) and, given ``max_step_reward``, the
+        normalized return."""
+        returns = stats["per_env_returns"]
+        lengths = stats["per_env_lengths"]
+        terminated = stats["per_env_terminated"]
+        scale = self.max_step_reward
+        print(f"\n  {Colors.BOLD}Per Environment{Colors.RESET}")
+        header = f"    {'Env':>4} {'Return':>10} {'Length':>8} {'Ended by':>10}"
+        if scale is not None:
+            header += f" {'Normalized':>11}"
+        print(header)
+        print(f"    {'-' * (len(header) - 4)}")
+        for i, (ret, length, term) in enumerate(zip(returns, lengths, terminated)):
+            row = f"    {i:>4} {ret:>10.3f} {length:>8d} {'terminated' if term else 'truncated':>10}"
+            if scale is not None:
+                row += f" {ret / (length * scale):>11.4f}"
+            print(row)
+        n_term = sum(terminated)
+        summary = f"    terminated {n_term}/{len(terminated)}"
+        if scale is not None:
+            normalized = [r / (n * scale) for r, n in zip(returns, lengths)]
+            summary += f"   mean normalized return {float(np.mean(normalized)):.4f}"
+        print(summary)
+
     def _save_evaluation_results(self, stats: dict[str, Any]) -> None:
         """Save evaluation results to file."""
         if self.eval_results_dir is None:
@@ -744,6 +799,9 @@ class PolicyEvaluator:
             "episode_discounted_returns": stats.get("discounted_returns"),
             "episode_lengths": stats["lengths"],
             "episode_successes": stats.get("successes"),
+            "per_env_returns": stats["per_env_returns"],
+            "per_env_lengths": stats["per_env_lengths"],
+            "per_env_terminated": stats["per_env_terminated"],
             "metadata": {
                 "policy_path": os.path.abspath(self.policy_path),
                 "timestamp": datetime.now().isoformat(),

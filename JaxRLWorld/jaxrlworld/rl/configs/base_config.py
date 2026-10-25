@@ -30,10 +30,14 @@ def parse_override_args() -> Dict[str, Any]:
             category = parts[0]
 
             # Parse the value. A JSON list or object (``hidden_dims=[512,256]``,
-            # ``optimizer_betas=[0.9,0.95]``) comes through as that value.
+            # ``optimizer_betas=[0.9,0.95]``) comes through as that value;
+            # ``null`` is ``None`` (``event.foot_friction=null`` switches a
+            # term off, the way the saved-config diff does).
             try:
                 if value.lower() in ("true", "false"):
                     typed_value = value.lower() == "true"
+                elif value == "null":
+                    typed_value = None
                 elif value[:1] in ("[", "{"):
                     typed_value = json.loads(value)
                 elif "." in value or "e" in value.lower():
