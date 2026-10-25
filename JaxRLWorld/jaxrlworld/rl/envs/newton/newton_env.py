@@ -181,7 +181,7 @@ class NewtonEnv(World):
         )
 
     def _build_scene(self) -> None:
-        """Create Newton scene and visualization manager."""
+        """Create the Newton scene."""
         SceneCls = ManagerRegistry.get_class(self.sim_type, "scene")
         SceneCfgCls = ManagerRegistry.get_config_class(self.sim_type, "scene")
 
@@ -208,40 +208,6 @@ class NewtonEnv(World):
         )
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
-
-        # Visualization Manager (after scene build)
-        # viewer_type="viser" → always use ViserVisualizationManager (matches Genesis pattern)
-        if self.visualization_cfg.viewer_type == "viser":
-            from jaxrlworld.rl.vis.viser import ViserVisualizationManager
-            from jaxrlworld.rl.vis.viser.bridges import NewtonBridge
-            from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
-
-            bridge = NewtonBridge(self.scene_manager)
-            viser_cfg = ViserViewerConfig(
-                port=self.visualization_cfg.viser_port,
-                share=self.visualization_cfg.viser_share,
-                enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
-                enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
-                scene=self.visualization_cfg.viser_scene,
-            )
-            self.vis_manager = ViserVisualizationManager(env=self, bridge=bridge, config=viser_cfg)
-        elif self.visualization_cfg.show_viewer or self.visualization_cfg.record_video:
-            # Non-viser viewer (GL, rerun, usd, file) — only when actively viewing or recording
-            vis_manager_cfg = NewtonVisualizationManagerConfig(
-                show_viewer=self.visualization_cfg.show_viewer,
-                record_video=self.visualization_cfg.record_video,
-                video_dir=self.visualization_cfg.video_dir,
-                video_fps=self.visualization_cfg.video_fps or 60,
-                viewer_type=self.visualization_cfg.viewer_type,
-                viser_port=self.visualization_cfg.viser_port,
-                viser_share=self.visualization_cfg.viser_share,
-                rerun_web_port=self.visualization_cfg.rerun_web_port,
-            )
-            self.vis_manager = NewtonVisualizationManager(env=self, config=vis_manager_cfg)
-            self.vis_manager.setup()
-        else:
-            # Headless — no visualization overhead
-            self.vis_manager = None
 
     def _build_sim_managers(self) -> None:
         """Create Newton-specific managers via ManagerRegistry."""
@@ -312,15 +278,53 @@ class NewtonEnv(World):
             )
 
     def _post_setup(self) -> None:
-        """Snapshot DR baselines, then capture CUDA graph.
+        """Build the viewer, snapshot DR baselines, then capture CUDA graph.
 
-        ``_dr_baselines`` must be filled BEFORE ``capture()`` so the
-        cached CUDA graph never replays a warp write into the cloned
-        baseline tensors, and BEFORE any DR term fires so the snapshot
-        reflects the URDF/MJCF defaults.
+        The viewer comes first here, not in ``_build_scene``: its overlays
+        read the contact, reward and termination managers, which exist
+        only after phase 2. ``_dr_baselines`` must be filled BEFORE
+        ``capture()`` so the cached CUDA graph never replays a warp write
+        into the cloned baseline tensors, and BEFORE any DR term fires so
+        the snapshot reflects the URDF/MJCF defaults.
         """
+        self._build_visualization()
         self._dr_baselines = snapshot_newton_dr_baselines(self)
         self.scene_manager.capture()
+
+    def _build_visualization(self) -> None:
+        """Create the visualization manager for the configured viewer type."""
+        # viewer_type="viser" → always use ViserVisualizationManager (matches Genesis pattern)
+        if self.visualization_cfg.viewer_type == "viser":
+            from jaxrlworld.rl.vis.viser import ViserVisualizationManager
+            from jaxrlworld.rl.vis.viser.bridges import NewtonBridge
+            from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
+
+            bridge = NewtonBridge(self.scene_manager)
+            viser_cfg = ViserViewerConfig(
+                port=self.visualization_cfg.viser_port,
+                share=self.visualization_cfg.viser_share,
+                enable_reward_plots=self.visualization_cfg.viser_enable_reward_plots,
+                enable_debug_viz=self.visualization_cfg.viser_enable_debug_viz,
+                scene=self.visualization_cfg.viser_scene,
+            )
+            self.vis_manager = ViserVisualizationManager(env=self, bridge=bridge, config=viser_cfg)
+        elif self.visualization_cfg.show_viewer or self.visualization_cfg.record_video:
+            # Non-viser viewer (GL, rerun, usd, file) — only when actively viewing or recording
+            vis_manager_cfg = NewtonVisualizationManagerConfig(
+                show_viewer=self.visualization_cfg.show_viewer,
+                record_video=self.visualization_cfg.record_video,
+                video_dir=self.visualization_cfg.video_dir,
+                video_fps=self.visualization_cfg.video_fps or 60,
+                viewer_type=self.visualization_cfg.viewer_type,
+                viser_port=self.visualization_cfg.viser_port,
+                viser_share=self.visualization_cfg.viser_share,
+                rerun_web_port=self.visualization_cfg.rerun_web_port,
+            )
+            self.vis_manager = NewtonVisualizationManager(env=self, config=vis_manager_cfg)
+            self.vis_manager.setup()
+        else:
+            # Headless — no visualization overhead
+            self.vis_manager = None
 
     def _reset_scene(self, env_ids: torch.Tensor) -> None:
         """Clear solver-internal state for the environments being reset.

@@ -220,7 +220,13 @@ class GenesisEnv(World):
         self.scene_manager.register_entities()
         self.scene_manager.build_scene()
 
-        # Replace with unified Viser viewer after scene is built.
+    def _post_setup(self) -> None:
+        """Swap in the Viser viewer once the managers exist.
+
+        Its overlays read the contact, reward and termination managers,
+        which are built after the scene; the default manager above stays
+        in ``_build_scene`` because ``register_entities`` references it.
+        """
         if self.visualization_cfg.viewer_type == "viser":
             from jaxrlworld.rl.vis.viser import ViserVisualizationManager
             from jaxrlworld.rl.vis.viser.bridges import GenesisBridge

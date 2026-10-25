@@ -104,10 +104,6 @@ def main():
             "episode_length_s": 10e9,
         },
     }
-    # ``section.path=value`` arguments, applied on top of the defaults above.
-    for section, values in parse_override_args().items():
-        _merge_into(overrides.setdefault(section, {}), values)
-
     # Eval mode: env's built-in viser viewer runs during batch eval.
     # Play mode: no env viewer; PlayViewer creates its own.
     if args.eval:
@@ -119,6 +115,10 @@ def main():
         # Flows through to both the eval-mode env viewer and the play-mode
         # PlayViewer (both read VisualizationConfig.viser_scene).
         overrides.setdefault("visualization", {})["viser_scene"] = get_look(args.look)
+
+    # ``section.path=value`` arguments win over every default above.
+    for section, values in parse_override_args().items():
+        _merge_into(overrides.setdefault(section, {}), values)
 
     evaluator = PolicyEvaluator(
         policy_path=args.policy_path,
