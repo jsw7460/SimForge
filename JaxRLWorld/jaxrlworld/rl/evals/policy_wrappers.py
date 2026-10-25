@@ -19,7 +19,8 @@ class PolicyWrapper(ABC):
     Base inference wrapper for evaluation.
 
     Subclasses implement get_action for different algorithm families:
-    - ModelPolicyWrapper: PPO / SAC / FastTD3 (JIT-compiled model inference)
+    - ModelPolicyWrapper: the algorithm's compiled ``inference_fn``
+      (PPO / SAC / FastTD3 and any other direct policy)
     - MPCPolicyWrapper:   TD-MPC2 (MPPI planning)
 
     Use PolicyWrapper.from_runner() factory to create the appropriate subclass.
@@ -88,7 +89,7 @@ class PolicyWrapper(ABC):
 
 
 class ModelPolicyWrapper(PolicyWrapper):
-    """JIT-compiled batched inference for PPO / SAC / FastTD3."""
+    """Batched deterministic inference through ``RLAlgorithm.inference_fn``."""
 
     def __init__(
         self,
@@ -97,19 +98,12 @@ class ModelPolicyWrapper(PolicyWrapper):
         joint_perm: "JointPermutation | None" = None,
     ):
         super().__init__(runner, device, joint_perm=joint_perm)
-        model = runner.alg.train_state.model
-        self._key = jax.random.PRNGKey(0)
-
-        def _single(obs, key):
-            action, _ = model.act_inference(obs, key=key)
-            return action
-
-        self._inference_fn = jax.jit(jax.vmap(_single, in_axes=(0, None)))
+        self._inference_fn = runner.alg.inference_fn()
 
     def get_action(self, env_obs, robot_states, deterministic=True):
         env_obs = self._permute_obs_to_canonical(env_obs)
         actor_obs = self._runner_pack_obs(env_obs, "actor")
-        action_jax = self._inference_fn(actor_obs, self._key)
+        action_jax = self._inference_fn(actor_obs)
         actions = jax_to_torch(self._process_action(action_jax), self.device)
         return self._permute_actions_to_sim(actions)
 

@@ -827,6 +827,7 @@ class BaseRunner(ABC):
         # 3. Train state → YAML (scalars + metadata only)
         train_state = {
             "runner_class": self.__class__.__name__,
+            "runner_module": self.__class__.__module__,
             "algorithm_name": self.algorithm_name,
             "sim_type": self.cfgs.sim_type,
             "iteration": iteration,

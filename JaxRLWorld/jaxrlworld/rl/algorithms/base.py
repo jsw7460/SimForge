@@ -275,6 +275,23 @@ class RLAlgorithm(ABC):
         """Get current model."""
         return self.train_state.model
 
+    def inference_fn(self) -> Callable[[jax.Array], jax.Array]:
+        """The deterministic batched actor the evaluator runs.
+
+        Maps a batch of actor observations ``(N, ...)`` to actions ``(N, A)``
+        in one compiled call. The default is the actor-critic's
+        ``act_inference`` over the batch; an algorithm whose policy is not
+        held in ``train_state.model`` overrides it.
+        """
+        model = self.train_state.model
+        key = jax.random.PRNGKey(0)
+
+        def _single(obs: jax.Array) -> jax.Array:
+            action, _ = model.act_inference(obs, key=key)
+            return action
+
+        return jax.jit(jax.vmap(_single))
+
     @abstractmethod
     def _create_optimizers(self, model: eqx.Module) -> optax.GradientTransformation:
         """Create optimizer for the algorithm."""

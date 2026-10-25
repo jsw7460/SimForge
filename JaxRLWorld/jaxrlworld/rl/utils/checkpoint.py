@@ -1,3 +1,4 @@
+import importlib
 import os
 from typing import TYPE_CHECKING, Optional
 
@@ -174,8 +175,6 @@ def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":
     Raises ``AttributeError`` only when none of the three paths can
     rebuild the config.
     """
-    import importlib
-
     preset_module_path = config_dict.get("preset_module")
 
     if preset_module_path is None:
@@ -248,15 +247,21 @@ def load_runner(
     if runner_class_name is None:
         raise ValueError("Checkpoint missing 'runner_class' in train_state.yaml.")
 
-    from jaxrlworld.rl import runners
+    # The runner is imported from the module the checkpoint names, so a
+    # runner defined outside this package loads too. Checkpoints saved
+    # before the module was recorded name one of the runners exported here.
+    runner_module = metadata.get("runner_module")
+    if runner_module is not None:
+        runner_class = getattr(importlib.import_module(runner_module), runner_class_name)
+    else:
+        from jaxrlworld.rl import runners
 
-    if not hasattr(runners, runner_class_name):
-        raise ValueError(
-            f"Unknown runner class: {runner_class_name}. "
-            f"Available: {[name for name in dir(runners) if 'Runner' in name]}"
-        )
-
-    runner_class = getattr(runners, runner_class_name)
+        if not hasattr(runners, runner_class_name):
+            raise ValueError(
+                f"Unknown runner class: {runner_class_name}. "
+                f"Available: {[name for name in dir(runners) if 'Runner' in name]}"
+            )
+        runner_class = getattr(runners, runner_class_name)
 
     if cfgs is None:
         cfgs = load_config_from_checkpoint(metadata)
