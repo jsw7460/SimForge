@@ -85,11 +85,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         self._read_cache: dict[str, tuple[int, Tensor]] = {}
         self._gravity_vec: Tensor | None = None
         self._default_joint_pos = default_joint_pos
-        # Per-body CoM offset *in the body frame* (model.body_com), shape
-        # (bodies_per_env, 3) — constant; lazily fetched once. Same per-world
-        # layout as state.body_q / body_qd (parallel Model/State arrays), so it
-        # broadcasts against _body_q_view() / _body_qd_view().
-        self._body_com_local: Tensor | None = None
         # Index of THIS entity's root body within that per-world layout; see
         # :attr:`_root_body_index`. Lazily resolved once.
         self._root_body_idx: int | None = None
@@ -220,8 +215,8 @@ class NewtonRigidObjectData(SiteReaderMixin):
         v_com = self.root_lin_vel_w(state)  # (W, 3) — at CoM
         omega = self.root_ang_vel_w(state)  # (W, 3) — world frame
         quat_wxyz = self.root_quat_wxyz(state)  # (W, 4)
-        c = self._body_com_local_view()[self._root_body_index]  # (3,) — CoM offset, body frame
-        r_world = quat_rotate_wxyz(quat_wxyz, c.expand_as(v_com))  # R @ c, world
+        c = self._body_com_local_view()[:, self._root_body_index]  # (W, 3) — CoM offset, body frame
+        r_world = quat_rotate_wxyz(quat_wxyz, c)  # R @ c, world
         return v_com - torch.cross(omega, r_world, dim=-1)
 
     @property
@@ -250,9 +245,9 @@ class NewtonRigidObjectData(SiteReaderMixin):
     def root_com_pos_w(self) -> Tensor:
         # r_C = r_O + R @ c
         quat_wxyz = self.root_quat_wxyz(self._state)
-        c = self._body_com_local_view()[self._root_body_index]  # (3,)
+        c = self._body_com_local_view()[:, self._root_body_index]  # (W, 3)
         link_pos = self.root_link_pos_w  # (W, 3) — link frame origin
-        return link_pos + quat_rotate_wxyz(quat_wxyz, c.expand_as(link_pos))
+        return link_pos + quat_rotate_wxyz(quat_wxyz, c)
 
     @property
     @_per_step_read
@@ -392,22 +387,24 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
 
     def _body_com_local_view(self) -> Tensor:
-        """``model.body_com`` for one world: (bodies_per_env, 3) — each body's CoM
-        offset *expressed in that body's link frame*. Constant; fetched once.
+        """``model.body_com`` reshaped to (num_envs, bodies_per_env, 3) — each
+        body's CoM offset *expressed in that body's link frame*, per world.
 
         ``model.body_com`` is a parallel array to ``state.body_q`` (same
-        per-world layout), so taking the first ``bodies_per_env`` rows yields
-        world 0's bodies in the same order ``_body_q_view`` / ``_body_qd_view``
-        use. Row 0 is the first entity's root body, which is this entity's root
-        only for the robot — use :attr:`_root_body_index` for the root row.
+        per-world layout), so this is the same shape as ``_body_q_view()[..., :3]``
+        and indexes with the same body rows; row 0 is the first entity's root
+        body, which is this entity's root only for the robot — use
+        :attr:`_root_body_index` for the root row. It is a zero-copy view of
+        the live model array, not a snapshot: the COM randomization writes
+        per-world values into ``model.body_com`` (startup or reset), and a
+        velocity transferred with another world's or a stale offset is off by
+        ``omega x (R @ dc)``.
         """
-        if self._body_com_local is None:
-            from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
+        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
 
-            cache = get_cache(self._env)
-            model = self._env.scene_manager.model
-            self._body_com_local = wp.to_torch(model.body_com)[: cache.bodies_per_env].contiguous()
-        return self._body_com_local
+        cache = get_cache(self._env)
+        model = self._env.scene_manager.model
+        return wp.to_torch(model.body_com).view(self._env.num_envs, cache.bodies_per_env, 3)
 
     @property
     @_per_step_read
@@ -443,8 +440,8 @@ class NewtonRigidObjectData(SiteReaderMixin):
         qd = self._body_qd_view()
         v_com = qd[:, :, 0:3]  # (W, B, 3) — at CoM
         omega = qd[:, :, 3:6]  # (W, B, 3) — world frame
-        c = self._body_com_local_view()  # (B, 3) — CoM offset, body frame
-        r_world = quat_rotate_wxyz(self.body_quat_w_all, c.expand_as(v_com))  # R @ c, world
+        c = self._body_com_local_view()  # (W, B, 3) — CoM offset, body frame
+        r_world = quat_rotate_wxyz(self.body_quat_w_all, c)  # R @ c, world
         return v_com - torch.cross(omega, r_world, dim=-1)
 
     @property
@@ -461,8 +458,8 @@ class NewtonRigidObjectData(SiteReaderMixin):
         r_C = r_O + R @ c, where r_O = link frame origin (``state.body_q[:, 0:3]``).
         """
         link_pos = self._body_q_view()[:, :, 0:3]  # (W, B, 3)
-        c = self._body_com_local_view()  # (B, 3)
-        return link_pos + quat_rotate_wxyz(self.body_quat_w_all, c.expand_as(link_pos))
+        c = self._body_com_local_view()  # (W, B, 3)
+        return link_pos + quat_rotate_wxyz(self.body_quat_w_all, c)
 
     @property
     @_per_step_read

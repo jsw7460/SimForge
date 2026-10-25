@@ -204,9 +204,9 @@ class NewtonRobotStateWriter:
             )
         rows = env_ids if env_ids is not None else slice(None)
         rd = self._env.get_robot_data(self._entity_name)
-        c = rd._body_com_local_view()[rd._root_body_index]
+        c = rd._body_com_local_view()[rows, rd._root_body_index]  # (n, 3), this world's offset
         quat_wxyz = self._root_pose[rows, 3:7][..., [3, 0, 1, 2]]
-        r_world = quat_rotate_wxyz(quat_wxyz, c.expand_as(lin_vel))
+        r_world = quat_rotate_wxyz(quat_wxyz, c)
         self._root_vel[rows, 0:3] = lin_vel + torch.cross(ang_vel, r_world, dim=-1)
         self._root_vel[rows, 3:6] = ang_vel
 
@@ -340,9 +340,9 @@ class NewtonRigidObjectStateWriter:
             )
         rows = env_ids if env_ids is not None else slice(None)
         rd = self._data
-        c = rd._body_com_local_view()[rd._root_body_index]
+        c = rd._body_com_local_view()[rows, rd._root_body_index]  # (n, 3), this world's offset
         quat_wxyz = rd.root_quat_wxyz(self._env.scene_manager.state)[rows]
-        r_world = quat_rotate_wxyz(quat_wxyz, c.expand_as(lin_vel))
+        r_world = quat_rotate_wxyz(quat_wxyz, c)
         lin_vel = lin_vel + torch.cross(ang_vel, r_world, dim=-1)
         velocities = self._staged(env_ids, torch.cat([lin_vel, ang_vel], dim=-1), 6)
         state = self._env.scene_manager.state
