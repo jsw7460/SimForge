@@ -2,7 +2,14 @@
 
 Takes an interpolated motion + MJCF file and produces per-frame per-body
 world-frame state (position, wxyz quaternion, linear velocity, angular
-velocity) by writing qpos / qvel and calling ``mj_forward`` frame by frame.
+velocity) by writing qpos / qvel and running the kinematic stages of the
+pipeline frame by frame: ``mj_kinematics`` (body poses), ``mj_comPos``
+(subtree COMs the velocity transforms need) and ``mj_comVel`` (per-body
+spatial velocities). These produce exactly the ``xpos`` / ``xquat`` /
+``cvel`` that a full ``mj_forward`` would, without the collision,
+constraint and solver stages that a replayed reference pose does not
+need (and that crashed in-process on MuJoCo 3.15 for interpenetrating
+LAFAN1 poses).
 
 Uses only the ``mujoco`` Python package — no mjlab, no Genesis, no Newton.
 The resulting arrays are sim-agnostic and can be consumed by MotionCommand
@@ -121,7 +128,7 @@ def replay_motion(
             ``data.qpos`` / ``data.qvel``. If ``None``, every 1-DoF
             non-free joint in MJCF XML order is used.
         timestep: Override the MJCF's ``opt.timestep``. Defaults to
-            ``1 / motion.fps`` so ``mj_forward`` sees a consistent dt.
+            ``1 / motion.fps`` so the model carries the motion's dt.
 
     Returns:
         Dict with arrays consumable by
@@ -172,7 +179,7 @@ def replay_motion(
 
     for t in range(T):
         # Clear state, write free-joint pose + dof_pos + free-joint vel + dof_vel,
-        # then mj_forward to refresh data.xpos / xquat / cvel.
+        # then refresh data.xpos / xquat / cvel.
         data.qpos[:] = 0.0
         data.qvel[:] = 0.0
         data.qpos[free_qpos_adr : free_qpos_adr + 3] = motion.base_pos[t]
@@ -191,7 +198,9 @@ def replay_motion(
         data.qvel[free_qvel_adr + 3 : free_qvel_adr + 6] = ang_local
         data.qvel[joint_qvel_adr] = motion.dof_vel[t]
 
-        mujoco.mj_forward(model, data)
+        mujoco.mj_kinematics(model, data)
+        mujoco.mj_comPos(model, data)
+        mujoco.mj_comVel(model, data)
 
         out_joint_pos[t] = motion.dof_pos[t]
         out_joint_vel[t] = motion.dof_vel[t]
