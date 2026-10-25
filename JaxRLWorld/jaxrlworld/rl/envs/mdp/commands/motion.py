@@ -769,12 +769,13 @@ class MotionCommand(CommandTerm):
         self._writer.set_root_velocity(root_lin_vel, root_ang_vel, env_ids=env_ids)
         self._writer.eval_fk(env_ids=env_ids)
 
-    def _resample_command(
-        self,
-        env_ids: torch.Tensor,
-        *,
-        keep_motion_id: bool = False,
-    ) -> None:
+    def _sample_frames(self, env_ids: torch.Tensor, *, keep_motion_id: bool = False) -> None:
+        """Write ``motion_ids`` / ``time_steps`` for ``env_ids`` per ``cfg.sampling_mode``.
+
+        The frame choice is the one part of a resample a subclass may
+        replace; the reference-state write that follows in
+        :meth:`_resample_command` is shared.
+        """
         # Mode-specific dispatch. Adaptive owns both ``motion_id`` and
         # ``time_step`` (jointly factored — motion-level then bin-level)
         # so it has to be the one to write ``motion_ids[env_ids]``. The
@@ -806,6 +807,14 @@ class MotionCommand(CommandTerm):
                     self._uniform_sampling(env_ids)
             else:
                 raise ValueError(f"Unknown sampling_mode: {mode!r}")
+
+    def _resample_command(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        keep_motion_id: bool = False,
+    ) -> None:
+        self._sample_frames(env_ids, keep_motion_id=keep_motion_id)
 
         # 2. Reference root state at sampled frame. The root follows
         # the body_names[0] convention used by mjlab: the first listed
