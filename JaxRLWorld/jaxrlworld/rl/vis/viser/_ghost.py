@@ -74,14 +74,18 @@ class MotionGhost:
 
     # ── Public API ──────────────────────────────────────────────────
 
-    def update(self, env_idx: int) -> None:
+    def update(self, env_idx: int, scene_offset: np.ndarray) -> None:
         """Pull the re-anchored reference body transforms for ``env_idx``
         from the MotionCommand and write them onto the viser handles.
-        Cheap — only sets ``position`` / ``wxyz`` per handle."""
+        ``scene_offset`` is the camera-tracking shift the scene applies to
+        every body so the tracked one stays at the origin; the ghost must
+        move with it or it drifts away from the robot as the robot walks
+        off the world origin. Cheap — only sets ``position`` / ``wxyz``
+        per handle."""
         cmd = self._motion_command()
         if cmd is None or not self._handles:
             return
-        body_pos = cmd.body_pos_relative_w[env_idx].detach().cpu().numpy()
+        body_pos = cmd.body_pos_relative_w[env_idx].detach().cpu().numpy() + scene_offset
         body_quat = cmd.body_quat_relative_w[env_idx].detach().cpu().numpy()
         for i, name in enumerate(cmd.cfg.body_names):
             handle = self._handles.get(name)

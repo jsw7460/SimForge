@@ -552,7 +552,7 @@ class ViserPlayViewer(PlayViewerBase):
                         self._mjv_contacts.update(self._play_scene.env_idx, self._play_scene.scene_offset)
                         self._gs_contacts.update(self._play_scene.env_idx, self._play_scene.scene_offset)
                         if self._motion_ghost is not None:
-                            self._motion_ghost.update(self._play_scene.env_idx)
+                            self._motion_ghost.update(self._play_scene.env_idx, self._play_scene.scene_offset)
                         self._server.flush()
             except Exception:
                 import traceback
