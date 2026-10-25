@@ -394,6 +394,23 @@ class ViserPlayViewer(PlayViewerBase):
                         if self._motion_ghost is not None:
                             self._motion_ghost.set_visible(event.target.value)
 
+                    anchor_cb = self._server.gui.add_checkbox(
+                        "Anchor to robot",
+                        initial_value=True,
+                        hint=(
+                            "On: the reference is placed at the robot's xy and "
+                            "heading, as the body tracking terms compare it, so "
+                            "pose, height and tilt errors show. Off: the reference "
+                            "stays on the clip's own world trajectory, so the "
+                            "robot's world drift (the anchor terms) shows."
+                        ),
+                    )
+
+                    @anchor_cb.on_update
+                    def _on_anchor_ghost(event) -> None:
+                        if self._motion_ghost is not None:
+                            self._motion_ghost.set_anchor_to_robot(event.target.value)
+
                     ghost_op = self._server.gui.add_slider(
                         "Opacity",
                         min=0.0,
