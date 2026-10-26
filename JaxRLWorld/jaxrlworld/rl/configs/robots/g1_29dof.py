@@ -61,6 +61,16 @@ EFFORT_4010 = 5.0
 EFFORT_WAIST = EFFORT_5020 * 2  # = 50.0
 EFFORT_ANKLE = EFFORT_5020 * 2  # = 50.0
 
+# Motor no-load speeds  [rad/s]  (mjlab ``g1_constants.py`` ``velocity_limit``).
+# The waist / ankle linkages pair two motors on one joint; the pair doubles
+# the torque, not the speed.
+VELOCITY_LIMIT_5020 = 37.0
+VELOCITY_LIMIT_7520_14 = 32.0
+VELOCITY_LIMIT_7520_22 = 20.0
+VELOCITY_LIMIT_4010 = 22.0
+VELOCITY_LIMIT_WAIST = VELOCITY_LIMIT_5020
+VELOCITY_LIMIT_ANKLE = VELOCITY_LIMIT_5020
+
 # Action scale: 0.25 * effort / stiffness  [rad — target deviation that saturates motor at quarter-effort]
 ACTION_SCALE_5020 = 0.25 * EFFORT_5020 / STIFFNESS_5020  # ≈ 0.4386 rad (≈ 25.1°)
 ACTION_SCALE_7520_14 = 0.25 * EFFORT_7520_14 / STIFFNESS_7520_14  # ≈ 0.5475 rad (≈ 31.4°)
@@ -210,6 +220,32 @@ class G1MujocoConfig(RobotConfig):
             ".*_wrist_roll_joint": EFFORT_5020,
             ".*_wrist_pitch_joint": EFFORT_4010,
             ".*_wrist_yaw_joint": EFFORT_4010,
+        }
+    )
+
+    # Per-motor no-load speeds, keyed like ``effort_limits``. The motor spec
+    # only: no builder here feeds it to the actuators, so the presets in this
+    # package keep their unbounded joint speed. A preset that wants the
+    # torque-speed curve passes this as the actuator's ``velocity_limit``
+    # together with a ``knee_point_velocity``.
+    velocity_limits: Dict[str, float] = field(
+        default_factory=lambda: {
+            ".*_hip_pitch_joint": VELOCITY_LIMIT_7520_14,
+            ".*_hip_yaw_joint": VELOCITY_LIMIT_7520_14,
+            ".*waist_yaw_joint": VELOCITY_LIMIT_7520_14,
+            ".*_hip_roll_joint": VELOCITY_LIMIT_7520_22,
+            ".*_knee_joint": VELOCITY_LIMIT_7520_22,
+            ".*waist_pitch_joint": VELOCITY_LIMIT_WAIST,
+            ".*waist_roll_joint": VELOCITY_LIMIT_WAIST,
+            ".*_ankle_pitch_joint": VELOCITY_LIMIT_ANKLE,
+            ".*_ankle_roll_joint": VELOCITY_LIMIT_ANKLE,
+            ".*_shoulder_pitch_joint": VELOCITY_LIMIT_5020,
+            ".*_shoulder_roll_joint": VELOCITY_LIMIT_5020,
+            ".*_shoulder_yaw_joint": VELOCITY_LIMIT_5020,
+            ".*_elbow_joint": VELOCITY_LIMIT_5020,
+            ".*_wrist_roll_joint": VELOCITY_LIMIT_5020,
+            ".*_wrist_pitch_joint": VELOCITY_LIMIT_4010,
+            ".*_wrist_yaw_joint": VELOCITY_LIMIT_4010,
         }
     )
 
