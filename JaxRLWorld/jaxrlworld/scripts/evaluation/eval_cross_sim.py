@@ -18,9 +18,11 @@ Examples:
         --policy_path outputs/models/.../checkpoint_latest/ \
         --eval_sim genesis --eval
 
-    # Straight from a W&B run (downloads/caches the latest checkpoint)
+    # Straight from a W&B run (downloads/caches the latest checkpoint;
+    # --wandb_checkpoint_iter picks one of the run's checkpoint-iterN artifacts)
     python -m jaxrlworld.scripts.evaluation.eval_cross_sim \
-        --wandb_run_path <entity>/<project>/<run_id> --eval_sim newton
+        --wandb_run_path <entity>/<project>/<run_id> --eval_sim newton \
+        --wandb_checkpoint_iter 4000
 
     # Per-clip motion tracking protocol: one env per clip, each played once
     # from frame 0 (``clip_per_env``), startup randomization pinned, one row
@@ -56,6 +58,12 @@ def main():
     parser = argparse.ArgumentParser(description="Cross-simulator evaluation")
     parser.add_argument("--policy_path", type=str, default=None, help="Checkpoint path")
     parser.add_argument("--wandb_run_path", type=str, default=None, help="W&B run path")
+    parser.add_argument(
+        "--wandb_checkpoint_iter",
+        type=int,
+        default=None,
+        help="Iteration of the W&B checkpoint artifact to evaluate (default: the latest)",
+    )
     parser.add_argument("--eval_sim", type=str, required=True, choices=["genesis", "newton", "mujoco"])
     parser.add_argument(
         "--num_envs",
@@ -124,6 +132,7 @@ def main():
         policy_path=args.policy_path,
         eval_target=args.eval_sim,
         wandb_run_path=args.wandb_run_path,
+        wandb_checkpoint_iter=args.wandb_checkpoint_iter,
         num_evals=args.num_evals,
         record_video=args.record_video,
         extra_overrides=overrides,
