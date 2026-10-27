@@ -9,19 +9,22 @@ entry points the runner / ActorCritic code should call — they
 translate a typed cfg into the actor/critic-class constructor
 arguments without any string lookup.
 
-External packages can extend the registry by importing
-``ACTOR_CLASS_BY_CFG`` / ``CRITIC_CLASS_BY_CFG`` and assigning a
-new ``(cfg_type, network_class)`` pair.
+External packages extend the registry with :func:`register_actor`:
+one call binds a cfg dataclass to an actor class and to the builder
+that turns the cfg into constructor arguments, and makes the cfg
+hydratable from a saved config (its ``_type`` tag) so checkpoints of
+such a policy reload.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 import jax
 
 from jaxrlworld.rl.configs.common_config_classes import (
+    _ACTOR_CFG_CLASSES,
     ActorCfg,
     CriticCfg,
     DefaultInit,
@@ -64,6 +67,32 @@ CRITIC_CLASS_BY_CFG: dict[type, type] = {
 }
 
 
+# Builders registered from outside this module. A builder receives the
+# cfg and the same keyword arguments ``build_actor`` takes (num_obs,
+# num_actions, key, kinematic_tree, actuated_joint_names) and returns the
+# actor instance.
+ActorBuilder = Callable[..., BaseActor]
+_EXTERNAL_ACTOR_BUILDERS: dict[type, ActorBuilder] = {}
+
+
+def register_actor(cfg_cls: type, actor_cls: type, builder: ActorBuilder) -> None:
+    """Make ``cfg_cls`` a recognised actor config.
+
+    After this, a policy config holding a ``cfg_cls`` instance builds an
+    ``actor_cls`` through ``builder``, and a saved config carrying
+    ``_type: cfg_cls.__name__`` hydrates back into ``cfg_cls``. Registering
+    the same cfg class twice with the same bindings is a no-op; rebinding
+    it to something else is refused, since a config's meaning must not
+    depend on import order.
+    """
+    bound = ACTOR_CLASS_BY_CFG.get(cfg_cls)
+    if bound is not None and (bound is not actor_cls or _EXTERNAL_ACTOR_BUILDERS.get(cfg_cls) is not builder):
+        raise ValueError(f"{cfg_cls.__name__} is already registered for {bound.__name__}")
+    ACTOR_CLASS_BY_CFG[cfg_cls] = actor_cls
+    _EXTERNAL_ACTOR_BUILDERS[cfg_cls] = builder
+    _ACTOR_CFG_CLASSES[cfg_cls.__name__] = cfg_cls
+
+
 # ── Build helpers ───────────────────────────────────────────────────
 
 
@@ -100,6 +129,17 @@ def build_actor(
     trunk by the encoders' latent width.
     """
     ActorClass = ACTOR_CLASS_BY_CFG[type(actor_cfg)]
+
+    external = _EXTERNAL_ACTOR_BUILDERS.get(type(actor_cfg))
+    if external is not None:
+        return external(
+            actor_cfg,
+            num_obs=num_obs,
+            num_actions=num_actions,
+            key=key,
+            kinematic_tree=kinematic_tree,
+            actuated_joint_names=actuated_joint_names,
+        )
 
     if isinstance(actor_cfg, VisionActorCfg):
         if obs_shapes is None or vector_group is None:

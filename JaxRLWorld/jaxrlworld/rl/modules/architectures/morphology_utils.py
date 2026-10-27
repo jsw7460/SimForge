@@ -99,11 +99,18 @@ class ParentLinkToJointActionDecoder(eqx.Module):
         activation: str,
         action_hidden_dim: int | None = None,
         ortho_init: bool = True,
-        output_gain: float = 0.1,
+        output_gain: float | None = 0.1,
         actuated_joint_names: "list[str] | tuple[str, ...] | None" = None,
         *,
         key: jax.Array,
     ):
+        """``ortho_init`` gives every head's hidden layer an orthogonal
+        weight (gain sqrt(2)) and zero bias. ``output_gain`` does the same
+        for the output layer with that gain; ``None`` leaves the output
+        layer at the Linear default (uniform in +-1/sqrt(fan_in) for
+        weight and bias, the PyTorch default), which is what the heads
+        used before they were given an orthogonal output layer.
+        """
         self.hidden_dim = hidden_dim
 
         if action_hidden_dim is None:
@@ -145,9 +152,10 @@ class ParentLinkToJointActionDecoder(eqx.Module):
             )
             if ortho_init:
                 new_l1 = _orthogonal_init_linear(head.linear1, gain, k1)
-                new_l2 = _orthogonal_init_linear(head.linear2, output_gain, k2)
                 head = eqx.tree_at(lambda h: h.linear1, head, new_l1)
-                head = eqx.tree_at(lambda h: h.linear2, head, new_l2)
+                if output_gain is not None:
+                    new_l2 = _orthogonal_init_linear(head.linear2, output_gain, k2)
+                    head = eqx.tree_at(lambda h: h.linear2, head, new_l2)
             return head
 
         self.stacked_heads = make_head(jax.random.split(key, self.num_actions))
