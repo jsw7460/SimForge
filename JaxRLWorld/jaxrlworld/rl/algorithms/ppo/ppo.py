@@ -25,6 +25,7 @@ from jaxrlworld.rl.algorithms.ppo.metrics import (
 )
 from jaxrlworld.rl.algorithms.ppo.update import (
     ScanOutput,
+    apply_auxiliary_step,
     forward_policy_and_value,
     forward_policy_and_value_deterministic,
     get_value,
@@ -708,6 +709,11 @@ class PPO(OnPolicyAlgorithm):
             subkey,
         )
 
+        last_minibatch_obs = jax.tree.map(lambda x: x[batch_indices[-1]], flat_batch.actor_observations)
+        new_params, new_opt_state, auxiliary_loss = self._auxiliary_step(
+            new_params, static, new_opt_state, last_minibatch_obs
+        )
+
         new_model = eqx.combine(new_params, static)
 
         self.train_state = PPOTrainState(
@@ -718,6 +724,7 @@ class PPO(OnPolicyAlgorithm):
 
         # Compute metrics
         metrics = self._compute_metrics(outputs, flat_batch, batch_indices)
+        metrics.actor.auxiliary_loss = auxiliary_loss
 
         # Adaptive learning rate based on KL divergence.
         # Use the analytical KL averaged over actually-applied minibatches —
@@ -792,16 +799,21 @@ class PPO(OnPolicyAlgorithm):
             subkey,
         )
 
+        T, N = self.storage.rewards.shape
+        batch_size = T * N
+        flat_actor_obs = self.storage.actor_obs.reshape((batch_size,) + self.storage.actor_obs.shape[2:])
+        new_params, new_opt_state, auxiliary_loss = self._auxiliary_step(
+            new_params, static, new_opt_state, flat_actor_obs
+        )
+
         new_model = eqx.combine(new_params, static)
         self.train_state = PPOTrainState(model=new_model, opt_state=new_opt_state, key=new_key)
 
         # Metrics: same reducer as the scan path, fed a minimal flat batch
         # (only actions / returns / actor obs are read) and one index row
         # covering the whole batch.
-        T, N = self.storage.rewards.shape
-        batch_size = T * N
         flat_batch = RolloutBatch(
-            actor_observations=self.storage.actor_obs.reshape((batch_size,) + self.storage.actor_obs.shape[2:]),
+            actor_observations=flat_actor_obs,
             critic_observations=self.storage.critic_obs.reshape((batch_size,) + self.storage.critic_obs.shape[2:]),
             actions=self.storage.actions.reshape((batch_size,) + self.storage.actions.shape[2:]),
             values=self.storage.values.reshape(batch_size),
@@ -813,6 +825,7 @@ class PPO(OnPolicyAlgorithm):
         )
         batch_indices = jnp.arange(batch_size)[None, :]
         metrics = self._compute_metrics(outputs, flat_batch, batch_indices)
+        metrics.actor.auxiliary_loss = auxiliary_loss
 
         if self.schedule == "adaptive" and self.desired_kl is not None:
             self._adaptive_learning_rate(self._last_analytical_kl_mean)
@@ -824,6 +837,31 @@ class PPO(OnPolicyAlgorithm):
 
         self.storage.clear()
         return metrics
+
+    def _auxiliary_step(self, params, static, opt_state, actor_obs) -> tuple[Any, Any, float]:
+        """The actor's auxiliary-loss step and per-update hook, after the
+        policy update (see :class:`BaseActor`). Order as in the reference
+        implementation: the extra optimizer step first, then the schedule
+        hook. An actor without an auxiliary loss still gets the hook;
+        the loss reported is 0.0.
+        """
+        model = eqx.combine(params, static)
+        auxiliary_loss = 0.0
+        if model.actor.has_auxiliary_loss:
+            params, opt_state, loss = apply_auxiliary_step(
+                params, static, opt_state, self.optimizer, self._param_labels, actor_obs
+            )
+            auxiliary_loss = float(loss)
+            model = eqx.combine(params, static)
+        stepped_actor = model.actor.post_update_step()
+        if stepped_actor is not model.actor:
+            model = eqx.tree_at(lambda m: m.actor, model, stepped_actor)
+            params, _ = eqx.partition(
+                model,
+                eqx.is_inexact_array,
+                is_leaf=lambda x: isinstance(x, EmpiricalNormalization),
+            )
+        return params, opt_state, auxiliary_loss
 
     def _compute_metrics(self, outputs: ScanOutput, flat_batch, batch_indices) -> PPOMetrics:
         """Compute metrics from update outputs.

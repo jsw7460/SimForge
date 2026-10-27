@@ -411,11 +411,6 @@ class PPOActorCritic(BaseActorCritic):
 
         return actions_mean, aux
 
-    def post_update_step(self, *args, **kwargs):
-        """Placeholder for compatibility."""
-        if hasattr(self.actor, "post_update_step"):
-            self.actor.post_update_step(*args, **kwargs)
-
     @property
     def extra_to_log(self) -> dict:
         """Extra metrics to log."""

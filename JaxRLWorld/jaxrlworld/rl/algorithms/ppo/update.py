@@ -398,6 +398,80 @@ def update_all_batches(
     return final_carry.params, final_carry.opt_state, outputs, final_carry.key
 
 
+# ==================== Actor auxiliary step ====================
+
+
+def _param_key_paths(tree: Any) -> list[tuple]:
+    return [path for path, _ in jax.tree_util.tree_flatten_with_path(tree)[0]]
+
+
+@eqx.filter_jit
+def apply_auxiliary_step(
+    params: Any,
+    static: Any,
+    opt_state: optax.OptState,
+    optimizer: optax.GradientTransformation,
+    param_labels: Any,
+    actor_obs: Any,
+) -> tuple[Any, optax.OptState, jax.Array]:
+    """One optimizer step on the actor's own auxiliary loss.
+
+    Runs once per PPO update, after the policy update, on the actor
+    observations of one minibatch: the loss is
+    ``actor.compute_auxiliary_loss`` averaged over the rows, the step is
+    the shared optimizer's (same learning rate, clipping and Adam moments
+    as the policy loss uses for the actor). Parameters the loss does not
+    reach are left exactly as they were, moments included: the critic and
+    the std head by their optimizer label, and any actor leaf whose
+    gradient is identically zero (the decoder, when the loss lives in the
+    encoder). An optimizer that steps a parameter whose gradient was never
+    computed would otherwise move it along its stale momentum. The other
+    groups' step counters are restored with their moments; the actor
+    group's counter does advance by one, since the step is real for it.
+
+    Returns the new params, the new optimizer state and the loss.
+    """
+
+    def loss_fn(p):
+        model = eqx.combine(p, static)
+        obs = model._actor_vector(model._normalize_actor_obs(actor_obs))
+        return jax.vmap(model.actor.compute_auxiliary_loss)(obs).mean()
+
+    loss, grads = jax.value_and_grad(loss_fn)(params)
+    updates, stepped_opt_state = optimizer.update(grads, opt_state, params)
+    stepped_params = optax.apply_updates(params, updates)
+
+    touched = jax.tree.map(
+        lambda label, g: jnp.logical_and(label == "actor", jnp.any(g != 0)),
+        param_labels,
+        grads,
+    )
+    new_params = jax.tree.map(lambda t, new, old: jnp.where(t, new, old), touched, stepped_params, params)
+
+    # Optimizer moments mirror the parameter tree under each transform's
+    # state (``mu``/``nu``/... then the parameter's own key path), so a
+    # state leaf belongs to the parameter whose key path ends it. The
+    # remaining leaves are per-group scalars (step counters, injected
+    # hyperparameters) under the group's label; those of the groups the
+    # loss cannot reach are kept as they were.
+    touched_by_path = dict(zip(_param_key_paths(params), jax.tree_util.tree_leaves(touched)))
+    other_groups = {label for label in jax.tree_util.tree_leaves(param_labels) if label != "actor"}
+    old_leaves, treedef = jax.tree_util.tree_flatten_with_path(opt_state)
+    new_leaves = jax.tree_util.tree_leaves(stepped_opt_state)
+    restored = []
+    for (path, old_leaf), new_leaf in zip(old_leaves, new_leaves):
+        owner = next((touched_by_path[path[k:]] for k in range(len(path)) if path[k:] in touched_by_path), None)
+        if owner is not None:
+            restored.append(jnp.where(owner, new_leaf, old_leaf))
+        elif any(isinstance(k, jax.tree_util.DictKey) and k.key in other_groups for k in path):
+            restored.append(old_leaf)
+        else:
+            restored.append(new_leaf)
+    new_opt_state = jax.tree_util.tree_unflatten(treedef, restored)
+
+    return new_params, new_opt_state, loss
+
+
 # ==================== Full-batch update with per-epoch GAE ====================
 
 
