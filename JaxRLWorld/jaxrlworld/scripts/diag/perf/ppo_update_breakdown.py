@@ -12,8 +12,14 @@ learn phase's pieces separately, each fully drained:
 Collection runs once through the real runner to fill the storage with
 real shapes; the update pieces then repeat on the same data.
 
+  5. the actor alone: the rollout's act over one step's observations,
+     fwd+bwd over one minibatch, and the auxiliary step when the actor
+     declares one -- the rows that separate an actor architecture's
+     cost from the rest of the update.
+
 Usage:
     jaxpy -m jaxrlworld.scripts.diag.perf.ppo_update_breakdown --preset g1_29dof --sim mujoco --num-envs 16384
+    jaxpy -m jaxrlworld.scripts.diag.perf.ppo_update_breakdown --preset <module>:<ConfigClass> --sim mujoco --num-envs 2048
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ import statistics
 import time
 
 import jax
+import jax.numpy as jnp
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
@@ -194,6 +201,39 @@ def main() -> int:
 
     t_old_scan = _timed(old_scan, args.reps)
 
+    # ---- piece 7: the actor alone. One rollout step's act (what every
+    # env step pays), the actor's fwd+bwd over one minibatch (what every
+    # grad step pays on top of the critic), and the auxiliary step the
+    # update runs once when the actor declares one.
+    model = alg.train_state.model
+    step_obs = jax.tree.map(lambda x: x[: args.num_envs], flat_batch.actor_observations)
+    minibatch_obs = jax.tree.map(lambda x: x[batch_indices[-1]], flat_batch.actor_observations)
+
+    @eqx.filter_jit
+    def act_step(m, obs, key):
+        return m.act(obs, key)[0]
+
+    t_act = _timed(lambda: act_step(model, step_obs, jax.random.PRNGKey(2)), args.reps)
+
+    def actor_loss(params, static, obs, key):
+        m = eqx.combine(params, static)
+        keys = jax.random.split(key, jax.tree.leaves(obs)[0].shape[0])
+        mean, _ = jax.vmap(m.actor)(m._normalize_actor_obs(obs), key=keys)
+        return jnp.mean(jnp.square(mean))
+
+    actor_grad = eqx.filter_jit(eqx.filter_grad(actor_loss))
+    params, static = eqx.partition(model, eqx.is_inexact_array, is_leaf=lambda x: isinstance(x, EmpiricalNormalization))
+    t_actor_grad = _timed(lambda: actor_grad(params, static, minibatch_obs, jax.random.PRNGKey(3)), args.reps)
+
+    t_aux = None
+    if model.actor.has_auxiliary_loss:
+
+        def aux():
+            opt_state = alg.optimizer.init(params)
+            return alg._auxiliary_step(params, static, opt_state, minibatch_obs)[0]
+
+        t_aux = _timed(aux, args.reps)
+
     def rep(name, samples):
         print(
             f"  {name:<28} mean {statistics.mean(samples):8.2f} ms   "
@@ -210,6 +250,12 @@ def main() -> int:
     rep(label, t_scan)
     rep("pre-gather (all minibatches)", t_pregather)
     rep("old scan (no in-scan gather)", t_old_scan)
+    rep("actor act (one env step)", t_act)
+    rep("actor fwd+bwd (one minibatch)", t_actor_grad)
+    if t_aux is not None:
+        rep("auxiliary step (per update)", t_aux)
+    else:
+        print("  auxiliary step               (actor declares none)")
     print("  (metrics cost = full - metrics-off; scan cost ~= metrics-off - returns pieces)")
     return 0
 
