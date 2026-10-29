@@ -87,7 +87,7 @@ class ParentLinkToJointActionDecoder(eqx.Module):
     """
 
     stacked_heads: ActionHead
-    parent_indices: jax.Array = eqx.field(static=True)
+    parent_indices: tuple[int, ...] = eqx.field(static=True)
     hidden_dim: int = eqx.field(static=True)
     action_hidden_dim: int = eqx.field(static=True)
     num_actions: int = eqx.field(static=True)
@@ -137,7 +137,7 @@ class ParentLinkToJointActionDecoder(eqx.Module):
             parent_indices = [kinematic_tree.joints[tree_idx_by_name[n]]["parent_link"] for n in actuated_joint_names]
 
         self.num_actions = len(parent_indices)
-        self.parent_indices = jnp.array(parent_indices, dtype=jnp.int32)
+        self.parent_indices = tuple(int(i) for i in parent_indices)
 
         gain = float(jnp.sqrt(2.0))
 
@@ -168,7 +168,7 @@ class ParentLinkToJointActionDecoder(eqx.Module):
         Returns:
             actions: (num_actions,)
         """
-        parent_features = link_features[self.parent_indices]
+        parent_features = link_features[jnp.asarray(self.parent_indices, dtype=jnp.int32)]
         # Apply each stacked head to its joint's parent feature in one batched op.
         actions = jax.vmap(lambda head, x: head(x))(
             self.stacked_heads,
