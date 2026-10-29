@@ -32,6 +32,8 @@ import time
 import jax
 import jax.numpy as jnp
 
+from jaxrlworld.rl.algorithms.ppo.metrics import PPOMetrics
+
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
     "go2": ("jaxrlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
@@ -118,7 +120,7 @@ def main() -> int:
     t_update_full = _timed(lambda: (alg.update(), alg.train_state.opt_state)[1], args.reps)
 
     orig_metrics = alg._compute_metrics
-    alg._compute_metrics = lambda *a, **k: {}
+    alg._compute_metrics = lambda *a, **k: PPOMetrics()
     t_update_nometrics = _timed(lambda: (alg.update(), alg.train_state.opt_state)[1], args.reps)
     alg._compute_metrics = orig_metrics
 
