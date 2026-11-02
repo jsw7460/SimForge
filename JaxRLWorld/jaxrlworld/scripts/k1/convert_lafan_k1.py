@@ -31,51 +31,12 @@ import tyro
 from huggingface_hub import HfApi, hf_hub_download
 
 from jaxrlworld.rl.configs.robots.k1 import K1Config
-from jaxrlworld.tools.motion.motion_loader import InterpolatedMotion, _lerp, _slerp, _so3_derivative
+from jaxrlworld.tools.motion.motion_loader import resample_pose_trajectory
 from jaxrlworld.tools.motion.mujoco_replayer import replay_motion
 
 DATASET_ID = "whirlwind-ams/lafan_locomotion_k1"
 _PARQUET_IN_REPO = "data/motions.parquet"
 _DEFAULT_OUT = str(Path(__file__).resolve().parents[2] / "assets" / "motions" / "lafan1_k1")
-
-
-def resample_pose_trajectory(
-    base_pos: np.ndarray,
-    base_quat_wxyz: np.ndarray,
-    dof_pos: np.ndarray,
-    input_fps: float,
-    output_fps: float,
-) -> InterpolatedMotion:
-    """LERP/SLERP resample of a pose trajectory plus central-difference velocities.
-
-    The interpolation and velocity passes of ``CsvMotionLoader`` on arrays
-    instead of a CSV: frame ``i`` of the input sits at ``i / input_fps``, the
-    output grid is ``arange(0, duration, 1 / output_fps)``.
-    """
-    input_dt = 1.0 / float(input_fps)
-    output_dt = 1.0 / float(output_fps)
-    n_in = base_pos.shape[0]
-    duration = (n_in - 1) * input_dt
-
-    times = np.arange(0.0, duration, output_dt, dtype=np.float32)
-    phase = times / duration
-    idx_0 = np.floor(phase * (n_in - 1)).astype(np.int64)
-    idx_1 = np.minimum(idx_0 + 1, n_in - 1)
-    blend = (phase * (n_in - 1) - idx_0)[:, None]
-
-    base_pos_o = _lerp(base_pos[idx_0], base_pos[idx_1], blend).astype(np.float32)
-    base_quat_o = _slerp(base_quat_wxyz[idx_0], base_quat_wxyz[idx_1], blend).astype(np.float32)
-    dof_pos_o = _lerp(dof_pos[idx_0], dof_pos[idx_1], blend).astype(np.float32)
-
-    return InterpolatedMotion(
-        base_pos=base_pos_o,
-        base_quat_wxyz=base_quat_o,
-        base_lin_vel=np.gradient(base_pos_o, output_dt, axis=0).astype(np.float32),
-        base_ang_vel=_so3_derivative(base_quat_o, output_dt).astype(np.float32),
-        dof_pos=dof_pos_o,
-        dof_vel=np.gradient(dof_pos_o, output_dt, axis=0).astype(np.float32),
-        fps=float(output_fps),
-    )
 
 
 def _resolve_source(source: str) -> tuple[Path, dict]:
