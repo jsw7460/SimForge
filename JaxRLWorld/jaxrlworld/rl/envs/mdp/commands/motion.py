@@ -34,6 +34,7 @@ from jaxrlworld.rl.utils.quat_utils import (
     subtract_frame_transforms_wxyz,
     yaw_quat_wxyz,
 )
+from jaxrlworld.tools.motion.pack import iter_ranges, open_arrays, read_clip_list, read_manifest
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
@@ -149,6 +150,98 @@ class MotionLoader:
         self.fps = float(np.asarray(data["fps"]).item()) if "fps" in data.files else 0.0
 
 
+_PACK_CHUNK_FRAMES = 1_000_000
+
+
+def _load_files(
+    motion_files: tuple[str, ...],
+    body_names: tuple[str, ...],
+    joint_names: tuple[str, ...],
+    device: str | torch.device,
+) -> tuple[dict[str, torch.Tensor], list[str], list[int], float]:
+    """One :class:`MotionLoader` per file, concatenated along time. The
+    per-file loaders are dropped on return, so the set is held once."""
+    motions = [MotionLoader(p, body_names, joint_names_cfg=joint_names, device=device) for p in motion_files]
+    # All clips must agree on DoF count (J) and tracked-body count (B)
+    # because policy / reward tensors are sized for them at build time.
+    J = motions[0].joint_pos.shape[1]
+    B = motions[0].body_pos_w.shape[1]
+    for i, m in enumerate(motions[1:], start=1):
+        if m.joint_pos.shape[1] != J:
+            raise ValueError(
+                f"motion_files[{i}] has {m.joint_pos.shape[1]} DoFs but "
+                f"motion_files[0] has {J}; all clips must share actuator layout."
+            )
+        if m.body_pos_w.shape[1] != B:
+            raise ValueError(
+                f"motion_files[{i}] has {m.body_pos_w.shape[1]} bodies but "
+                f"motion_files[0] has {B}; all clips must share tracked-body set."
+            )
+    arrays = {
+        "joint_pos": torch.cat([m.joint_pos for m in motions], dim=0),
+        "joint_vel": torch.cat([m.joint_vel for m in motions], dim=0),
+        "body_pos_w": torch.cat([m.body_pos_w for m in motions], dim=0),
+        "body_quat_w": torch.cat([m.body_quat_w for m in motions], dim=0),
+        "body_lin_vel_w": torch.cat([m.body_lin_vel_w for m in motions], dim=0),
+        "body_ang_vel_w": torch.cat([m.body_ang_vel_w for m in motions], dim=0),
+    }
+    names = [os.path.splitext(os.path.basename(p))[0] for p in motion_files]
+    lengths = [m.time_step_total for m in motions]
+    return arrays, names, lengths, motions[0].fps
+
+
+def _load_pack(
+    pack_dir: str,
+    clip_list: str | None,
+    body_names: tuple[str, ...],
+    joint_names: tuple[str, ...],
+    device: str | torch.device,
+) -> tuple[dict[str, torch.Tensor], list[str], list[int], float]:
+    """The selected clips of a motion pack (``jaxrlworld.tools.motion.pack``)
+    straight into device tensors, bodies reordered to ``body_names`` and
+    joints to ``joint_names`` exactly as :class:`MotionLoader` does. The
+    frames stream from the memory-mapped arrays in blocks, so the host
+    holds at most one block."""
+    manifest = read_manifest(pack_dir)
+    source = open_arrays(pack_dir)
+    if clip_list is None:
+        clip_idx = np.arange(manifest.num_clips)
+    else:
+        clip_idx = manifest.indices_of(read_clip_list(clip_list))
+    missing = [n for n in body_names if n not in manifest.body_names]
+    if missing:
+        raise ValueError(f"Motion pack {pack_dir!r} is missing body names {missing}. Pack has {manifest.body_names}.")
+    missing = [n for n in joint_names if n not in manifest.joint_names]
+    if missing:
+        raise ValueError(f"Motion pack {pack_dir!r} is missing joints {missing}. Pack has {manifest.joint_names}.")
+    body_idx = [manifest.body_names.index(n) for n in body_names]
+    joint_perm = [manifest.joint_names.index(n) for n in joint_names]
+    names = [manifest.clip_names[i] for i in clip_idx]
+    lengths = [manifest.clip_lengths[i] for i in clip_idx]
+    n = int(sum(lengths))
+    j, b = len(joint_perm), len(body_idx)
+    arrays = {
+        "joint_pos": torch.empty((n, j), dtype=torch.float32, device=device),
+        "joint_vel": torch.empty((n, j), dtype=torch.float32, device=device),
+        "body_pos_w": torch.empty((n, b, 3), dtype=torch.float32, device=device),
+        "body_quat_w": torch.empty((n, b, 4), dtype=torch.float32, device=device),
+        "body_lin_vel_w": torch.empty((n, b, 3), dtype=torch.float32, device=device),
+        "body_ang_vel_w": torch.empty((n, b, 3), dtype=torch.float32, device=device),
+    }
+    column = {"joint_pos": joint_perm, "joint_vel": joint_perm}
+    cursor = 0
+    for start, end in iter_ranges(manifest, clip_idx):
+        for cs in range(start, end, _PACK_CHUNK_FRAMES):
+            ce = min(cs + _PACK_CHUNK_FRAMES, end)
+            for name, out in arrays.items():
+                block = np.asarray(source[name][cs:ce])[:, column.get(name, body_idx)]
+                out[cursor : cursor + (ce - cs)].copy_(torch.from_numpy(np.ascontiguousarray(block)))
+            cursor += ce - cs
+    if cursor != n:
+        raise RuntimeError(f"motion pack load wrote {cursor} frames, expected {n}")
+    return arrays, names, lengths, manifest.fps
+
+
 class MotionCommand(CommandTerm):
     """Reference-motion tracking command. Sim-agnostic (writes via writer protocol)."""
 
@@ -174,95 +267,17 @@ class MotionCommand(CommandTerm):
         # with the NPZ's bare-name joint list from ``mujoco_replayer``.
         joint_names = tuple(env.act_manager.actuated_joint_names)
 
-        # Load one or more motion clips. Single- and multi-motion paths
-        # share the same downstream code via pre-concatenated buffers
-        # indexed by per-env ``(motion_id, time_step)`` pairs. A length-1
-        # ``motion_files`` tuple is the single-clip case; length >= 2
-        # triggers multi-motion behaviour in ``_resample_command``.
-        if not cfg.motion_files:
-            raise ValueError(
-                "MotionCommandCfg.motion_files is empty — provide at least "
-                "one NPZ path (length-1 tuple for single-clip tracking)."
-            )
-        self.motions: list[MotionLoader] = [
-            MotionLoader(
-                p,
-                cfg.body_names,
-                joint_names_cfg=joint_names,
-                device=self.device,
-            )
-            for p in cfg.motion_files
-        ]
-        self._n_motions = len(self.motions)
-        self._is_multi_motion = self._n_motions > 1
+        # Load the clips into pre-concatenated per-frame buffers indexed by
+        # per-env ``(motion_id, time_step)`` pairs; a single clip is the
+        # length-1 case of the same layout, >= 2 clips enables the
+        # multi-motion behaviour in ``_resample_command``.
+        self._load_motions(cfg, joint_names)
         if cfg.sampling_mode == "clip_per_env":
-            stems = [os.path.splitext(os.path.basename(p))[0] for p in cfg.motion_files]
+            shown = ", ".join(self.motion_names[:8]) + (", ..." if self._n_motions > 8 else "")
             print(
-                f"[motion] clip_per_env: env i tracks clip i % {self._n_motions} from frame 0; "
-                f"clips in order: {', '.join(stems)}"
+                f"[motion] clip_per_env: env i tracks clip (i + {cfg.clip_per_env_offset}) % "
+                f"{self._n_motions} from frame 0; clips in order: {shown}"
             )
-        # Alias retained so single-motion code paths (adaptive sampling,
-        # command-buffer sizing, external readers of ``motion.fps``) keep
-        # working unchanged. In multi-motion mode adaptive sampling is
-        # disallowed, so the alias is only read where it is still correct.
-        self.motion = self.motions[0]
-
-        # All clips must agree on DoF count (J) and tracked-body count (B)
-        # because policy / reward tensors are sized for them at build time.
-        J = self.motions[0].joint_pos.shape[1]
-        B = self.motions[0].body_pos_w.shape[1]
-        for i, m in enumerate(self.motions[1:], start=1):
-            if m.joint_pos.shape[1] != J:
-                raise ValueError(
-                    f"motion_files[{i}] has {m.joint_pos.shape[1]} DoFs but "
-                    f"motion_files[0] has {J}; all clips must share actuator layout."
-                )
-            if m.body_pos_w.shape[1] != B:
-                raise ValueError(
-                    f"motion_files[{i}] has {m.body_pos_w.shape[1]} bodies but "
-                    f"motion_files[0] has {B}; all clips must share tracked-body set."
-                )
-
-        # Pre-concat per-frame buffers across motions so property access
-        # reduces to a single advanced-indexing op. Global index for env e
-        # is ``_motion_offsets[motion_ids[e]] + time_steps[e]``.
-        self._concat_joint_pos = torch.cat(
-            [m.joint_pos for m in self.motions],
-            dim=0,
-        )
-        self._concat_joint_vel = torch.cat(
-            [m.joint_vel for m in self.motions],
-            dim=0,
-        )
-        self._concat_body_pos_w = torch.cat(
-            [m.body_pos_w for m in self.motions],
-            dim=0,
-        )
-        self._concat_body_quat_w = torch.cat(
-            [m.body_quat_w for m in self.motions],
-            dim=0,
-        )
-        self._concat_body_lin_vel_w = torch.cat(
-            [m.body_lin_vel_w for m in self.motions],
-            dim=0,
-        )
-        self._concat_body_ang_vel_w = torch.cat(
-            [m.body_ang_vel_w for m in self.motions],
-            dim=0,
-        )
-        self._motion_lengths = torch.tensor(
-            [m.time_step_total for m in self.motions],
-            dtype=torch.long,
-            device=self.device,
-        )
-        # Cumulative offsets: offsets[0]=0, offsets[i]=sum(lengths[:i]).
-        self._motion_offsets = torch.cat(
-            [
-                torch.zeros(1, dtype=torch.long, device=self.device),
-                torch.cumsum(self._motion_lengths[:-1], dim=0),
-            ],
-            dim=0,
-        )
         # Sampling weights over clips (uniform by default, auto-normalised).
         if cfg.motion_weights is None:
             w = torch.ones(
@@ -316,7 +331,7 @@ class MotionCommand(CommandTerm):
         # layout is padded ``(num_motions, B_max)`` so the multi-motion
         # case is the same code path as single-motion (``M = 1``).
         steps_per_second = 1.0 / env.control_dt
-        bins_per_motion = [int(int(m.time_step_total) // steps_per_second) + 1 for m in self.motions]
+        bins_per_motion = [int(n // steps_per_second) + 1 for n in self._motion_lengths.tolist()]
         self._B_per_motion = torch.tensor(bins_per_motion, dtype=torch.long, device=self.device)
         self.bin_count = int(self._B_per_motion.max().item())  # B_max — bin axis size
         self._bin_valid = torch.zeros(
@@ -377,6 +392,44 @@ class MotionCommand(CommandTerm):
     @property
     def command(self) -> torch.Tensor:
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
+
+    def _load_motions(self, cfg: MotionCommandCfg, joint_names: tuple[str, ...]) -> None:
+        """Fill the concatenated per-frame buffers and the clip bookkeeping
+        from ``cfg.motion_files`` or ``cfg.motion_pack``."""
+        if cfg.motion_pack is not None:
+            if cfg.motion_files:
+                raise ValueError("MotionCommandCfg: give motion_files or motion_pack, not both")
+            arrays, names, lengths, fps = _load_pack(
+                cfg.motion_pack, cfg.motion_pack_clips, cfg.body_names, joint_names, self.device
+            )
+        else:
+            if not cfg.motion_files:
+                raise ValueError(
+                    "MotionCommandCfg.motion_files is empty — provide at least "
+                    "one NPZ path (length-1 tuple for single-clip tracking) or a motion_pack."
+                )
+            if cfg.motion_pack_clips is not None:
+                raise ValueError("MotionCommandCfg.motion_pack_clips needs motion_pack")
+            arrays, names, lengths, fps = _load_files(cfg.motion_files, cfg.body_names, joint_names, self.device)
+        self._concat_joint_pos = arrays["joint_pos"]
+        self._concat_joint_vel = arrays["joint_vel"]
+        self._concat_body_pos_w = arrays["body_pos_w"]
+        self._concat_body_quat_w = arrays["body_quat_w"]
+        self._concat_body_lin_vel_w = arrays["body_lin_vel_w"]
+        self._concat_body_ang_vel_w = arrays["body_ang_vel_w"]
+        self.motion_names: tuple[str, ...] = tuple(names)
+        self.fps = float(fps)
+        self._n_motions = len(names)
+        self._is_multi_motion = self._n_motions > 1
+        self._motion_lengths = torch.tensor(lengths, dtype=torch.long, device=self.device)
+        # Cumulative offsets: offsets[0]=0, offsets[i]=sum(lengths[:i]).
+        self._motion_offsets = torch.cat(
+            [
+                torch.zeros(1, dtype=torch.long, device=self.device),
+                torch.cumsum(self._motion_lengths[:-1], dim=0),
+            ],
+            dim=0,
+        )
 
     def set_command(self, env_ids, values):
         raise NotImplementedError("MotionCommand is time-indexed; external set_command is not supported.")
@@ -647,7 +700,7 @@ class MotionCommand(CommandTerm):
     def _uniform_sampling(self, env_ids: torch.Tensor) -> None:
         self.time_steps[env_ids] = torch.randint(
             0,
-            self.motion.time_step_total,
+            int(self._motion_lengths[0]),
             (len(env_ids),),
             device=self.device,
         )
@@ -793,7 +846,9 @@ class MotionCommand(CommandTerm):
             self._adaptive_sampling(env_ids, keep_motion_id=keep_motion_id)
         elif mode == "clip_per_env":
             if not keep_motion_id:
-                self.motion_ids[env_ids] = env_ids.to(self.motion_ids.dtype) % self._n_motions
+                self.motion_ids[env_ids] = (
+                    env_ids.to(self.motion_ids.dtype) + self.cfg.clip_per_env_offset
+                ) % self._n_motions
             self.time_steps[env_ids] = 0
         else:
             if self._is_multi_motion and not keep_motion_id:
@@ -991,14 +1046,29 @@ class MotionCommand(CommandTerm):
 class MotionCommandCfg(CommandTermCfg):
     """Configuration for :class:`MotionCommand`."""
 
-    motion_files: tuple[str, ...]
+    motion_files: tuple[str, ...] = ()
     """NPZ paths to track (produced by ``jaxrlworld.tools.motion.csv_to_npz``
     or ``booster_to_npz``). Length-1 tuple for single-clip tracking; length
     >= 2 for multi-clip. All clips must share DoF count and tracked-body
     set. Each episode reset samples one clip per env (per
     ``motion_weights``, uniform by default); the sampled clip stays fixed
     for the rest of the episode — motion-end rollover mid-episode rewinds
-    the cursor but keeps the clip."""
+    the cursor but keeps the clip. Empty when ``motion_pack`` is given."""
+
+    motion_pack: str | None = None
+    """A motion pack directory (``jaxrlworld.tools.motion.pack``) instead of
+    ``motion_files``: every clip of the pack, or those named in
+    ``motion_pack_clips``, in that order. Same per-clip behaviour as
+    ``motion_files``."""
+
+    motion_pack_clips: str | None = None
+    """Clip list (one clip name per line) selecting a subset of
+    ``motion_pack``; ``None`` loads the whole pack."""
+
+    clip_per_env_offset: int = 0
+    """Under ``sampling_mode="clip_per_env"``, env ``i`` tracks clip
+    ``(i + clip_per_env_offset) % num_clips``, so a set larger than
+    ``num_envs`` is evaluated in rounds by stepping the offset."""
 
     motion_weights: tuple[float, ...] | None = None
     """Per-clip sampling weights over ``motion_files`` (auto-normalised).
@@ -1054,9 +1124,9 @@ class MotionCommandCfg(CommandTermCfg):
     - ``"adaptive"``: failure-weighted curriculum (default for training)
     - ``"uniform"``: uniform over ``[0, motion_length)``
     - ``"start"``: always frame 0 (for deterministic playback / eval)
-    - ``"clip_per_env"``: env ``i`` tracks ``motion_files[i % len(motion_files)]``
-      from frame 0, so with one env per clip every clip is played once
-      from its start (the per-clip evaluation protocol)
+    - ``"clip_per_env"``: env ``i`` tracks clip ``(i + clip_per_env_offset) %
+      num_clips`` from frame 0, so with one env per clip every clip is
+      played once from its start (the per-clip evaluation protocol)
     """
 
     rollover_teleport: bool = True
