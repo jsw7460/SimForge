@@ -6,8 +6,9 @@ Genesis, Newton and MuJoCo should produce the same raw draws for the
 same term wherever the coordinates mean the same thing (per-env draws,
 per-canonical-joint draws), and a 1024-env run should draw for envs
 0..1023 what an 8192-env run draws for them. This diag records the
-draws a real reset makes and checks that, on the GPU, through the real
-presets. One simulator per process (the backends do not share one):
+draws a real reset and the first step(s) make and checks that, on the GPU,
+through the real presets. The recorded values are the raw uniforms in
+``[0, 1)`` each draw started from. One simulator per process (the backends do not share one):
 
     jaxpy -m jaxrlworld.scripts.diag.dr.keyed_dr_cross_sim --preset go2 --sim newton --num-envs 1024 --out parity_out/keyed_dr
     jaxpy -m jaxrlworld.scripts.diag.dr.keyed_dr_cross_sim --preset go2 --sim mujoco --num-envs 1024 --out parity_out/keyed_dr
@@ -64,19 +65,28 @@ def record(args) -> int:
     mgr = env.event_manager
     names_by_id = {term_id(n): n for n in mgr._all_terms}
     draws: list[tuple[str, str, int, torch.Tensor]] = []
-    original = TermSampler.draw
+    original = TermSampler.uniforms
 
-    def recording_draw(self, lo, hi, env_ids, coords=(), distribution="uniform", stream=0):
-        out = original(self, lo, hi, env_ids, coords, distribution, stream)
+    # Every draw (draw, draw_shaped, draw_int, bernoulli, the gaussian pair,
+    # the direct ``uniforms`` of the pose / push terms) funnels through
+    # ``uniforms``, so this sees them all, as raw [0, 1) values.
+    def recording_uniforms(self, env_ids, coords=(), stream=0):
+        out = original(self, env_ids, coords, stream)
         name = names_by_id.get(self.term_id, f"id{self.term_id}")
         draws.append((name, _STAGE_NAMES.get(self.stage, str(self.stage)), int(stream), out.detach().clone()))
         return out
 
-    TermSampler.draw = recording_draw
+    TermSampler.uniforms = recording_uniforms
     try:
         env.reset()
+        # Interval and interval_dr terms draw on a step, not on the reset;
+        # the global interval_dr timer starts at zero, so one zero-action
+        # step fires every DR term the preset routes through it.
+        zero = torch.zeros(env.num_envs, env.act_manager.num_actions, device=env.device)
+        for _ in range(args.steps):
+            env.step(zero)
     finally:
-        TermSampler.draw = original
+        TermSampler.uniforms = original
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -104,8 +114,8 @@ def record(args) -> int:
     for name, count in per_term_count.items():
         rows = [d for d in index if d["term"] == name]
         shapes = [d["shape"] for d in rows]
-        spans = [f"[{arrays[d['key']].min():.4g}, {arrays[d['key']].max():.4g}]" for d in rows]
-        print(f"  {name:<32} {count} draw(s)  shapes {shapes}  ranges {spans}")
+        stages = sorted({d["stage"] for d in rows})
+        print(f"  {name:<32} {count} draw(s)  stages {stages}  shapes {shapes}")
     return 0
 
 
@@ -205,6 +215,9 @@ def main() -> int:
     ap.add_argument("--out", default="parity_out/keyed_dr", help="record: directory for the dump")
     ap.add_argument(
         "--tag", default="", help="record: suffix for the dump name (two runs of one sim: --tag a / --tag b)"
+    )
+    ap.add_argument(
+        "--steps", type=int, default=1, help="record: zero-action steps after the reset (fires interval DR)"
     )
     ap.add_argument("--compare", default=None, help="compare the dumps in this directory instead of recording")
     ap.add_argument("--bench", action="store_true", help="time a keyed draw against torch.rand and exit")
