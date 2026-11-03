@@ -260,6 +260,25 @@ class OffPolicyRunner(BaseRunner):
         critic_obs = torch_to_jax(obs["critic"])
         return ActInput(actor_obs, critic_obs)
 
+    def _random_warmup_active(self) -> bool:
+        """Whether this step acts with uniform random actions instead of the policy.
+
+        The default off-policy recipe explores at random until
+        ``learning_starts`` transitions are stored; an algorithm whose
+        policy explores from its first step overrides this.
+        """
+        return self.total_timesteps < self.cfgs.algorithm.learning_starts
+
+    def _ready_to_update(self) -> bool:
+        """Whether the buffer holds enough to run this iteration's updates.
+
+        ``learning_starts`` counts transitions over every env, so with
+        thousands of envs it is met after one step; an n-step window
+        needs n_steps rows per env before any sample is a real one.
+        """
+        buffer = self.alg.replay_buffer
+        return buffer.size >= self.cfgs.algorithm.learning_starts and buffer.filled_size >= buffer.n_steps
+
     def _collect_experience(
         self,
         obs: ActInput,
@@ -283,7 +302,7 @@ class OffPolicyRunner(BaseRunner):
 
         for step in range(total_steps):
             # ========== Warmup: use random actions ==========
-            if self.total_timesteps < self.cfgs.algorithm.learning_starts:
+            if self._random_warmup_active():
                 # Uniform action in [-r, r]; r defaults to 1.0 (full range)
                 # but presets can shrink it via ``warmup_action_range`` to
                 # keep warmup exploration gentle (getattr keeps configs
@@ -419,11 +438,7 @@ class OffPolicyRunner(BaseRunner):
         batch_size = self.cfgs.algorithm.batch_size
         logging_now = iteration % self.runner_cfg.log_interval == 0
 
-        # ``learning_starts`` counts transitions over every env, so with
-        # thousands of envs it is met after one step; an n-step window
-        # needs n_steps rows per env before any sample is a real one.
-        buffer = self.alg.replay_buffer
-        if buffer.size >= self.cfgs.algorithm.learning_starts and buffer.filled_size >= buffer.n_steps:
+        if self._ready_to_update():
             training_start_time = time.time()
 
             # The algorithm owns the loop: with a device-resident buffer it
