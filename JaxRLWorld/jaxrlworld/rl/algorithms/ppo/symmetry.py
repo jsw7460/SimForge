@@ -69,6 +69,10 @@ _FIXED_TERM_RULES: dict[str, tuple[list[int], list[float]]] = {
     "velocity_command": ([0, 1, 2], [1.0, -1.0, -1.0]),
     # base height (z): scalar, invariant under a left-right mirror.
     "base_height": ([0], [1.0]),
+    # base quaternion [w, x, y, z]: a rotation mirrored across the x-z
+    # plane keeps its pitch and reverses roll and yaw, i.e. the x and z
+    # components flip while w and y keep their sign.
+    "base_quat": ([0, 1, 2, 3], [1.0, -1.0, 1.0, -1.0]),
     # per-foot [left, right] scalars: swap the two feet.
     "feet_contact": ([1, 0], [1.0, 1.0]),
     "feet_air_time": ([1, 0], [1.0, 1.0]),
@@ -89,6 +93,12 @@ _JOINT_TERMS = frozenset(
     {
         "dof_pos_nominal_difference",
         "dof_pos_nominal_difference_biased",
+        # Absolute joint positions mirror like the nominal differences as
+        # long as the default pose is itself left-right symmetric (roll and
+        # yaw defaults antisymmetric, pitch defaults equal), which every
+        # humanoid preset here satisfies.
+        "dof_pos",
+        "dof_pos_biased",
         "dof_vel",
         "raw_actions",
         "applied_torque",
