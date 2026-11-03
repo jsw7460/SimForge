@@ -489,6 +489,11 @@ class ActionManagerBase(BaseManager):
         return self._scale
 
     @property
+    def joint_limits(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Lower and upper joint position limits of the actuated joints, action order."""
+        return self._get_joint_limits()
+
+    @property
     def clip_low(self) -> torch.Tensor:
         """Resolved per-action lower clip bound, shape ``(total_action_dim,)``."""
         return self._clip_low
