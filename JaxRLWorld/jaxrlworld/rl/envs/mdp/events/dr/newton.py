@@ -21,7 +21,8 @@ import torch
 import warp as wp
 from newton import ModelFlags
 
-from ._utils import sample
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler
+
 from .unified import _newton_notify
 
 if TYPE_CHECKING:
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
 def set_joint_friction(
     env: NewtonEnv,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     value: float,
     dr_scale: tuple[float, float] | None = None,
 ) -> None:
@@ -70,12 +72,7 @@ def set_joint_friction(
     if dr_scale is None:
         friction[env_ids] = float(value)
     else:
-        scale = sample(
-            friction[env_ids].shape,
-            *dr_scale,
-            env.device,
-            "uniform",
-        )
+        scale = sampler.draw_shaped(*dr_scale, env_ids, friction[env_ids].shape)
         friction[env_ids] = float(value) * scale
     view.set_attribute("joint_friction", model, friction)
     _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
@@ -84,6 +81,7 @@ def set_joint_friction(
 def set_foot_friction(
     env: NewtonEnv,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     value: float,
     foot_label_pattern: str = r".*foot_collision$",
     dr_scale: tuple[float, float] | None = None,
@@ -119,7 +117,7 @@ def set_foot_friction(
     if dr_scale is None:
         mu_val = torch.tensor(float(value), dtype=torch.float32, device=env.device)
     else:
-        scale = sample((len(env_ids),), *dr_scale, env.device, "uniform")
+        scale = sampler.draw(*dr_scale, env_ids)
         mu_val = float(value) * scale
 
     shapes_per_env = model.shape_count // env.num_envs
@@ -174,6 +172,7 @@ def _resolve_joint_dof_indices(view, joint_patterns: tuple[str, ...]) -> list[in
 def set_joint_friction_per_dim(
     env: NewtonEnv,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     values: list[float],
     joint_patterns: tuple[str, ...] = (r".*_joint$",),
     dr_scale: tuple[float, float] | None = None,
@@ -213,12 +212,7 @@ def set_joint_friction_per_dim(
     if dr_scale is None:
         attrib_flat[env_ids.unsqueeze(1), dof_idx_t] = vals_t
     else:
-        scale = sample(
-            (len(env_ids), len(dof_indices)),
-            *dr_scale,
-            env.device,
-            "uniform",
-        )
+        scale = sampler.draw(*dr_scale, env_ids, (dof_idx_t[None, :],))
         attrib_flat[env_ids.unsqueeze(1), dof_idx_t] = vals_t * scale
 
     view.set_attribute("joint_friction", model, attrib)
@@ -228,6 +222,7 @@ def set_joint_friction_per_dim(
 def set_foot_friction_per_foot(
     env: NewtonEnv,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     values: list[float],
     foot_label_pattern: str = r".*foot_collision$",
     dr_scale: tuple[float, float] | None = None,
@@ -274,7 +269,7 @@ def set_foot_friction_per_foot(
                 device=env.device,
             )
         else:
-            scale = sample((len(env_ids),), *dr_scale, env.device, "uniform")
+            scale = sampler.draw(*dr_scale, env_ids, stream=i)
             mu_val = float(values[i]) * scale
         shape_mu[env_ids, si] = mu_val
 

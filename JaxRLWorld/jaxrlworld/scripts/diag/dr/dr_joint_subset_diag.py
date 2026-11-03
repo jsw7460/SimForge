@@ -176,13 +176,16 @@ def main() -> int:
     results: dict[str, bool] = {}
     asset = SceneEntitySelector(name="robot", joint_names=SUBSET)
     env_ids = torch.tensor([DR_ENV], device=env.device)
+    sampler = env.event_manager.sampler_for("dr_joint_subset_diag", "reset_dr")
 
     if not args.implicit:
         checks.append(
             (
                 "pd_kp(explicit)",
                 read_explicit_kp,
-                lambda: randomize_pd_gains(env, env_ids, asset_cfg=asset, kp_range=(0.5, 1.5), operation="scale"),
+                lambda: randomize_pd_gains(
+                    env, env_ids, sampler, asset_cfg=asset, kp_range=(0.5, 1.5), operation="scale"
+                ),
             )
         )
     elif args.sim == "genesis":
@@ -190,7 +193,9 @@ def main() -> int:
             (
                 "pd_kp(genesis-implicit)",
                 lambda: read_genesis(entity.get_dofs_kp),
-                lambda: randomize_pd_gains(env, env_ids, asset_cfg=asset, kp_range=(0.5, 1.5), operation="scale"),
+                lambda: randomize_pd_gains(
+                    env, env_ids, sampler, asset_cfg=asset, kp_range=(0.5, 1.5), operation="scale"
+                ),
             )
         )
     elif args.sim == "newton":
@@ -198,7 +203,9 @@ def main() -> int:
             (
                 "pd_kp(newton-implicit)",
                 lambda: read_newton("joint_target_ke"),
-                lambda: randomize_pd_gains(env, env_ids, asset_cfg=asset, kp_range=(0.5, 1.5), operation="scale"),
+                lambda: randomize_pd_gains(
+                    env, env_ids, sampler, asset_cfg=asset, kp_range=(0.5, 1.5), operation="scale"
+                ),
             )
         )
     else:
@@ -207,7 +214,7 @@ def main() -> int:
         # LOUDLY (previously they silently randomized all joints).
         try:
             randomize_pd_gains(
-                env, env_ids, asset_cfg=asset, kp_range=(0.5, 1.5), kd_range=(0.5, 1.5), operation="scale"
+                env, env_ids, sampler, asset_cfg=asset, kp_range=(0.5, 1.5), kd_range=(0.5, 1.5), operation="scale"
             )
             print("[pd_kp(mjlab-implicit)] no error raised — silent full-set randomization!")
             results["pd_kp(mjlab-implicit rejects subset)"] = False
@@ -221,7 +228,7 @@ def main() -> int:
                 "armature(sim)",
                 lambda: read_genesis(entity.get_dofs_armature),
                 lambda: randomize_joint_armature(
-                    env, env_ids, asset_cfg=asset, armature_range=(0.5, 1.5), operation="scale"
+                    env, env_ids, sampler, asset_cfg=asset, armature_range=(0.5, 1.5), operation="scale"
                 ),
             )
         )
@@ -230,7 +237,7 @@ def main() -> int:
                 "joint_friction(sim)",
                 lambda: read_genesis(entity.get_dofs_frictionloss),
                 lambda: randomize_joint_friction(
-                    env, env_ids, asset_cfg=asset, friction_range=(0.02, 0.05), operation="abs"
+                    env, env_ids, sampler, asset_cfg=asset, friction_range=(0.02, 0.05), operation="abs"
                 ),
             )
         )
@@ -240,7 +247,7 @@ def main() -> int:
                 "armature(sim)",
                 lambda: read_newton("joint_armature"),
                 lambda: randomize_joint_armature(
-                    env, env_ids, asset_cfg=asset, armature_range=(0.5, 1.5), operation="scale"
+                    env, env_ids, sampler, asset_cfg=asset, armature_range=(0.5, 1.5), operation="scale"
                 ),
             )
         )
@@ -249,7 +256,7 @@ def main() -> int:
                 "joint_friction(sim)",
                 lambda: read_newton("joint_friction"),
                 lambda: randomize_joint_friction(
-                    env, env_ids, asset_cfg=asset, friction_range=(0.02, 0.05), operation="abs"
+                    env, env_ids, sampler, asset_cfg=asset, friction_range=(0.02, 0.05), operation="abs"
                 ),
             )
         )
@@ -259,7 +266,7 @@ def main() -> int:
                 "armature(mjlab)",
                 lambda: read_mujoco("dof_armature"),
                 lambda: randomize_joint_armature(
-                    env, env_ids, asset_cfg=asset, armature_range=(0.5, 1.5), operation="scale"
+                    env, env_ids, sampler, asset_cfg=asset, armature_range=(0.5, 1.5), operation="scale"
                 ),
             )
         )
@@ -268,7 +275,7 @@ def main() -> int:
                 "joint_friction(mjlab)",
                 lambda: read_mujoco("dof_frictionloss"),
                 lambda: randomize_joint_friction(
-                    env, env_ids, asset_cfg=asset, friction_range=(0.02, 0.05), operation="abs"
+                    env, env_ids, sampler, asset_cfg=asset, friction_range=(0.02, 0.05), operation="abs"
                 ),
             )
         )

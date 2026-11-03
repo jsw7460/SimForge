@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from ._utils import sample
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.mujoco.mjlab_env import MjlabEnv
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 def set_joint_friction(
     env: MjlabEnv,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     value: float,
     dr_scale: tuple[float, float] | None = None,
 ) -> None:
@@ -54,18 +55,14 @@ def set_joint_friction(
     if dr_scale is None:
         friction[env_ids] = float(value)
     else:
-        scale = sample(
-            friction[env_ids].shape,
-            *dr_scale,
-            env.device,
-            "uniform",
-        )
+        scale = sampler.draw_shaped(*dr_scale, env_ids, friction[env_ids].shape)
         friction[env_ids] = float(value) * scale
 
 
 def set_foot_friction(
     env: MjlabEnv,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     value: float,
     foot_geom_names: tuple[str, ...] = (
         "FR_foot_collision",
@@ -114,10 +111,5 @@ def set_foot_friction(
     if dr_scale is None:
         friction[env_ids[:, None], all_geom_ids[None, :], 0] = float(value)
     else:
-        scale = sample(
-            (len(env_ids), len(all_geom_ids)),
-            *dr_scale,
-            env.device,
-            "uniform",
-        )
+        scale = sampler.draw(*dr_scale, env_ids, (all_geom_ids[None, :],))
         friction[env_ids[:, None], all_geom_ids[None, :], 0] = float(value) * scale

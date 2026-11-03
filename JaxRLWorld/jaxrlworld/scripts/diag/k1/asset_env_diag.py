@@ -369,7 +369,7 @@ def section_a_asset(env, cfg, chk: Checker) -> None:
     chk(
         "joint set == MJCF hinge joints",
         set(joints) == set(ref_limits),
-        f"only-env {sorted(set(joints) - set(ref_limits))} " f"only-mjcf {sorted(set(ref_limits) - set(joints))}",
+        f"only-env {sorted(set(joints) - set(ref_limits))} only-mjcf {sorted(set(ref_limits) - set(joints))}",
     )
 
     rd = env.get_entity_data("robot")
@@ -387,8 +387,7 @@ def section_a_asset(env, cfg, chk: Checker) -> None:
     chk(
         "soft limits == MJCF range narrowed by the configured factor",
         torch.allclose(got_lo, want_lo, atol=1e-5) and torch.allclose(got_hi, want_hi, atol=1e-5),
-        f"max|dlo|={float((got_lo - want_lo).abs().max()):.2e} "
-        f"max|dhi|={float((got_hi - want_hi).abs().max()):.2e}",
+        f"max|dlo|={float((got_lo - want_lo).abs().max()):.2e} max|dhi|={float((got_hi - want_hi).abs().max()):.2e}",
     )
 
     act = env.act_manager
@@ -420,9 +419,7 @@ def section_a_asset(env, cfg, chk: Checker) -> None:
             detail = f"max|d|={float((got - want).abs().max()):.3e}"
         source_note = ""
         if label == "kd":
-            source_note = (
-                f" (arm departs from the source's " f"{REF_KD['Elbow_Pitch']} -> {KD_DEPARTURES['Elbow_Pitch']})"
-            )
+            source_note = f" (arm departs from the source's {REF_KD['Elbow_Pitch']} -> {KD_DEPARTURES['Elbow_Pitch']})"
         chk(f"{label} == source motor table{source_note}", ok, detail)
 
     # Armature is written into the simulator's model, not held on the actuator.
@@ -496,7 +493,7 @@ def section_a_asset(env, cfg, chk: Checker) -> None:
     margins = explicit_damping_margins(mjcf, home_angles, kd_table, dt)
     tightest = sorted(margins.items(), key=lambda kv: kv[1][1])[:3]
     for name, (inertia, margin) in tightest:
-        print(f"        {name:22s} J={inertia:8.5f}  kd={kd_table[suffix(name)]:.2f}  " f"margin={margin:5.2f}x")
+        print(f"        {name:22s} J={inertia:8.5f}  kd={kd_table[suffix(name)]:.2f}  margin={margin:5.2f}x")
     worst_name, (worst_inertia, worst_margin) = tightest[0]
     chk(
         f"every joint clears the explicit-damping limit by {MIN_DAMPING_MARGIN:g}x",
@@ -622,7 +619,7 @@ def section_b_mdp(env, cfg, chk: Checker) -> None:
         lo, hi = extrema[name]
         want = REWARD_SIGNS.get(name)
         kind = "" if want is None else ("reward" if want > 0 else "penalty")
-        print(f"     {name:24s} {lo:13.6f} {hi:13.6f}  {kind:8s} " f"{first_seen.get(name, 'NEVER')}")
+        print(f"     {name:24s} {lo:13.6f} {hi:13.6f}  {kind:8s} {first_seen.get(name, 'NEVER')}")
     chk("no term violates its sign", not wrong_sign, str(wrong_sign))
     dead = sorted(set(REWARD_SIGNS) - seen_nonzero)
     chk(
@@ -755,7 +752,7 @@ def section_d_terminations(env, cfg, chk: Checker) -> None:
     chk(
         "stochastic form fires at its configured rate",
         abs(rate - probability) <= band,
-        f"measured {rate:.5f} ({total}/{draws}) vs configured {probability}, " f"4 standard errors = {band:.5f}",
+        f"measured {rate:.5f} ({total}/{draws}) vs configured {probability}, 4 standard errors = {band:.5f}",
     )
 
 
@@ -857,7 +854,9 @@ def section_f_push(env, built, chk: Checker) -> None:
     lin_before = rd.root_link_lin_vel_w.clone()
     ang_before = rd.root_link_ang_vel_w.clone()
     env_ids = torch.arange(env.num_envs, device=env.device)
-    ev.push_by_setting_velocity(env, env_ids, velocity_range=kick)
+    ev.push_by_setting_velocity(
+        env, env_ids, env.event_manager.sampler_for("asset_env_diag_kick", "interval"), velocity_range=kick
+    )
     # What World.step does right after applying interval events: bump the
     # read-cache generation. Newton memoizes derived root reads per
     # generation, and root_link_lin_vel_w is a fresh tensor (CoM -> origin

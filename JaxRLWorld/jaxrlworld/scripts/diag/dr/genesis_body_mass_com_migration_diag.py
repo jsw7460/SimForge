@@ -175,8 +175,8 @@ def _section_b_mass(rep: _Report, env) -> None:
     base = entity.get_links_mass(links_idx_local=links_idx).clone()
     rep.log(f"  build mass {_stats(base)}  n_links={len(links_idx)}")
 
-    torch.manual_seed(201)
-    randomize_body_mass(env, env_ids, asset_cfg=resolved, mass_range=(0.8, 1.2), operation="scale")
+    sampler = env.event_manager.sampler_for("genesis_mass_com_diag_201", "reset_dr")
+    randomize_body_mass(env, env_ids, sampler, asset_cfg=resolved, mass_range=(0.8, 1.2), operation="scale")
     back1 = entity.get_links_mass(links_idx_local=links_idx)
     ratio1 = back1 / base
     in_range1 = bool((ratio1 >= 0.8 - 1e-4).all() and (ratio1 <= 1.2 + 1e-4).all())
@@ -188,8 +188,8 @@ def _section_b_mass(rep: _Report, env) -> None:
 
     # Fire again with a different seed; a current-value (compounding) implementation
     # would push the ratio outside mass_range, a baseline implementation stays inside.
-    torch.manual_seed(202)
-    randomize_body_mass(env, env_ids, asset_cfg=resolved, mass_range=(0.8, 1.2), operation="scale")
+    sampler = env.event_manager.sampler_for("genesis_mass_com_diag_202", "reset_dr")
+    randomize_body_mass(env, env_ids, sampler, asset_cfg=resolved, mass_range=(0.8, 1.2), operation="scale")
     back2 = entity.get_links_mass(links_idx_local=links_idx)
     ratio2 = back2 / base
     in_range2 = bool((ratio2 >= 0.8 - 1e-4).all() and (ratio2 <= 1.2 + 1e-4).all())
@@ -207,8 +207,8 @@ def _section_b_com(rep: _Report, env) -> None:
     base = entity.get_links_COM(links_idx_local=links_idx).clone()
     rep.log(f"  build COM {_stats(base)}  links={links_idx}")
 
-    torch.manual_seed(203)
-    randomize_body_com_offset(env, env_ids, ranges=ranges, asset_cfg=resolved, operation="add")
+    sampler = env.event_manager.sampler_for("genesis_mass_com_diag_203", "reset_dr")
+    randomize_body_com_offset(env, env_ids, sampler, ranges=ranges, asset_cfg=resolved, operation="add")
     back = entity.get_links_COM(links_idx_local=links_idx)
     delta = back - base
     ok = True
@@ -221,12 +221,12 @@ def _section_b_com(rep: _Report, env) -> None:
     rep.check("B3 per-axis COM offset within ranges", ok, "; ".join(detail))
 
     # B4: read-modify-write must not clobber an axis a prior term already set.
-    torch.manual_seed(204)
-    randomize_body_com_offset(env, env_ids, ranges={0: (-0.025, 0.025)}, asset_cfg=resolved, operation="add")
+    sampler = env.event_manager.sampler_for("genesis_mass_com_diag_204", "reset_dr")
+    randomize_body_com_offset(env, env_ids, sampler, ranges={0: (-0.025, 0.025)}, asset_cfg=resolved, operation="add")
     com_a = entity.get_links_COM(links_idx_local=links_idx).clone()
     axis0_first = com_a[..., 0].clone()
-    torch.manual_seed(205)
-    randomize_body_com_offset(env, env_ids, ranges={2: (-0.03, 0.03)}, asset_cfg=resolved, operation="add")
+    sampler = env.event_manager.sampler_for("genesis_mass_com_diag_205", "reset_dr")
+    randomize_body_com_offset(env, env_ids, sampler, ranges={2: (-0.03, 0.03)}, asset_cfg=resolved, operation="add")
     com_b = entity.get_links_COM(links_idx_local=links_idx)
     clobber_err = (com_b[..., 0] - axis0_first).abs().max().item()
     axis2_moved = (com_b[..., 2] - com_a[..., 2]).abs().max().item()

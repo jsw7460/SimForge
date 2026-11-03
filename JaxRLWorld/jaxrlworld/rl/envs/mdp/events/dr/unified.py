@@ -32,10 +32,11 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler, keyed_field_sampler
 from jaxrlworld.rl.envs.mdp.events.mujoco import _MujocoEnvAdapter
 
 from ._model_fields import RecomputeLevel, requires_model_fields
-from ._utils import apply_operation, sample
+from ._utils import apply_operation
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.world import World
@@ -116,6 +117,7 @@ _NEWTON_FRICTION_AXIS_ATTR = {
 def randomize_friction(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     friction_range: tuple[float, float] = (0.3, 1.2),
     operation: Literal["abs", "scale", "add"] = "scale",
@@ -170,6 +172,7 @@ def randomize_friction(
         _genesis_friction_backend(
             env,
             env_ids,
+            sampler,
             asset_cfg,
             friction_range,
             operation,
@@ -181,6 +184,7 @@ def randomize_friction(
         _newton_friction_backend(
             env,
             env_ids,
+            sampler,
             asset_cfg,
             friction_range,
             operation,
@@ -192,6 +196,7 @@ def randomize_friction(
         _mujoco_friction_backend(
             env,
             env_ids,
+            sampler,
             asset_cfg,
             friction_range,
             operation,
@@ -211,6 +216,7 @@ def randomize_friction(
 def _genesis_friction_backend(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     resolved: ResolvedEntity,
     friction_range: tuple[float, float],
     operation: str,
@@ -240,12 +246,12 @@ def _genesis_friction_backend(
 
     if shared_random:
         ratios = (
-            sample((len(env_ids), 1), *friction_range, env.device, distribution)
+            sampler.draw(*friction_range, env_ids, distribution=distribution)[:, None]
             .expand(len(env_ids), n_target)
             .contiguous()
         )
     else:
-        ratios = sample((len(env_ids), n_target), *friction_range, env.device, distribution)
+        ratios = sampler.draw(*friction_range, env_ids, _index_coords(n_target, env.device), distribution)
     entity.set_friction_ratio(friction_ratio=ratios, links_idx_local=links_idx, envs_idx=env_ids)
 
 
@@ -257,6 +263,7 @@ def _genesis_friction_backend(
 def _newton_friction_backend(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     resolved: ResolvedEntity,
     friction_range: tuple[float, float],
     operation: str,
@@ -301,24 +308,17 @@ def _newton_friction_backend(
         n_axes_inner = values.shape[1]
         n_shapes_per_env = values.shape[-1]
         n_target = n_shapes_per_env if shape_indices is None else len(shape_indices)
-
+        # Stream = friction axis; a shared draw keys on the env alone so it
+        # equals the Genesis / MuJoCo shared draw of the same axis.
         if shared_random:
             sampled = (
-                sample(
-                    (len(env_ids), n_axes_inner, 1),
-                    *friction_range,
-                    env.device,
-                    distribution,
-                )
+                sampler.draw(*friction_range, env_ids, distribution=distribution, stream=axis)[:, None, None]
                 .expand(len(env_ids), n_axes_inner, n_target)
                 .contiguous()
             )
         else:
-            sampled = sample(
-                (len(env_ids), n_axes_inner, n_target),
-                *friction_range,
-                env.device,
-                distribution,
+            sampled = sampler.draw_shaped(
+                *friction_range, env_ids, (len(env_ids), n_axes_inner, n_target), distribution, stream=axis
             )
 
         if shape_indices is None:
@@ -351,6 +351,7 @@ def _newton_friction_backend(
 def _mujoco_friction_backend(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: ResolvedEntity,
     friction_range: tuple[float, float],
     operation: str,
@@ -383,7 +384,7 @@ def _mujoco_friction_backend(
         operation=operation,
         axes=axes,
         shared_random=shared_random,
-        distribution=distribution,
+        distribution=_keyed_mjlab_distribution(sampler, env_ids, distribution, stream=min(axes)),
     )
 
 
@@ -444,6 +445,7 @@ def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scen
 def randomize_body_mass(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     mass_range: tuple[float, float] = (0.85, 1.15),
     operation: Literal["abs", "scale", "add"] = "scale",
@@ -464,16 +466,16 @@ def randomize_body_mass(
         )
 
     if env.sim_type == "genesis":
-        _genesis_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution)
+        _genesis_body_mass_backend(env, env_ids, sampler, asset_cfg, mass_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution)
+        _newton_body_mass_backend(env, env_ids, sampler, asset_cfg, mass_range, operation, distribution)
     elif env.sim_type == "mujoco":
-        _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution, shared_random)
+        _mujoco_body_mass_backend(env, env_ids, sampler, asset_cfg, mass_range, operation, distribution, shared_random)
     else:
         raise NotImplementedError(f"randomize_body_mass has no backend for sim_type={env.sim_type!r}")
 
 
-def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, distribution):
+def _genesis_body_mass_backend(env, env_ids, sampler, resolved, mass_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(
             f"Genesis body mass DR only supports operation='scale' (got {operation!r}); "
@@ -485,7 +487,7 @@ def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, di
     _genesis_require_batched_links_info(entity, "randomize_body_mass")
     links_idx = resolved.body_ids.tolist()
     n_envs, n_links = len(env_ids), len(links_idx)
-    ratios = sample((n_envs, n_links), *mass_range, env.device, distribution)
+    ratios = sampler.draw(*mass_range, env_ids, _index_coords(n_links, env.device), distribution)
     # Baseline = URDF default link mass, snapshotted before any DR touches it.
     # ``set_links_mass`` writes the absolute mass into ``dyn_info`` (it survives
     # ``scene.reset()``), so scaling the CURRENT mass would compound ratios into
@@ -506,7 +508,7 @@ def _genesis_body_mass_backend(env, env_ids, resolved, mass_range, operation, di
     entity.set_links_mass(mass=new_mass, links_idx_local=links_idx, envs_idx=env_ids)
 
 
-def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, distribution):
+def _newton_body_mass_backend(env, env_ids, sampler, resolved, mass_range, operation, distribution):
     import warp as wp
     from newton import ModelFlags
 
@@ -529,7 +531,7 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
 
     mass = wp.to_torch(model.body_mass).reshape(env.num_envs, cache.bodies_per_env)
     n_bodies = len(body_indices)
-    sampled = sample((len(env_ids), n_bodies), *mass_range, env.device, distribution)
+    sampled = sampler.draw(*mass_range, env_ids, _index_coords(n_bodies, env.device), distribution)
     defaults = env._dr_baselines.body_mass
     mass[env_ids.unsqueeze(1), body_indices] = apply_operation(
         defaults[env_ids.unsqueeze(1), body_indices], sampled, operation
@@ -538,7 +540,7 @@ def _newton_body_mass_backend(env, env_ids, resolved, mass_range, operation, dis
     _newton_notify(env, ModelFlags.BODY_INERTIAL_PROPERTIES)
 
 
-def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, distribution, shared_random):
+def _mujoco_body_mass_backend(env, env_ids, sampler, asset_cfg, mass_range, operation, distribution, shared_random):
     from mjlab.envs.mdp.dr import body_mass as _mjlab_body_mass
 
     adapter = _MujocoEnvAdapter(env)
@@ -548,7 +550,7 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
         env_ids=env_ids,
         ranges=mass_range,
         asset_cfg=mjlab_cfg,
-        distribution=distribution,
+        distribution=_keyed_mjlab_distribution(sampler, env_ids, distribution),
         operation=operation,
         shared_random=shared_random,
     )
@@ -567,6 +569,7 @@ def _mujoco_body_mass_backend(env, env_ids, asset_cfg, mass_range, operation, di
 def randomize_body_com_offset(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     ranges: dict[int, tuple[float, float]],
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     operation: Literal["abs", "scale", "add"] = "add",
@@ -589,16 +592,16 @@ def randomize_body_com_offset(
         )
 
     if env.sim_type == "genesis":
-        _genesis_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation)
+        _genesis_body_com_offset_backend(env, env_ids, sampler, asset_cfg, ranges, operation)
     elif env.sim_type == "newton":
-        _newton_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation)
+        _newton_body_com_offset_backend(env, env_ids, sampler, asset_cfg, ranges, operation)
     elif env.sim_type == "mujoco":
-        _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, axes, shared_random)
+        _mujoco_body_com_offset_backend(env, env_ids, sampler, asset_cfg, ranges, operation, axes, shared_random)
     else:
         raise NotImplementedError(f"randomize_body_com_offset has no backend for sim_type={env.sim_type!r}")
 
 
-def _genesis_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
+def _genesis_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, operation):
     if operation != "add":
         raise NotImplementedError(
             f"Genesis body COM offset DR only supports operation='add' "
@@ -623,13 +626,14 @@ def _genesis_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
     # per-subset snapshot corrupts a second term that shares the key.
     base = _genesis_dr_baseline(env, resolved.name, "links_COM", entity.get_links_COM)[:, links_idx, :]
     com = entity.get_links_COM(links_idx_local=links_idx, envs_idx=env_ids)
+    link_coords = _index_coords(n_links, env.device)
     for axis, (lo, hi) in ranges.items():
-        offset = torch.empty(n_envs, n_links, device=env.device).uniform_(lo, hi)
+        offset = sampler.draw(lo, hi, env_ids, link_coords, stream=axis)
         com[:, :, axis] = base[env_ids, :, axis] + offset
     entity.set_links_COM(com=com, links_idx_local=links_idx, envs_idx=env_ids)
 
 
-def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
+def _newton_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, operation):
     import warp as wp
     from newton import ModelFlags
 
@@ -659,18 +663,21 @@ def _newton_body_com_offset_backend(env, env_ids, resolved, ranges, operation):
     # non-target axes back to ``original`` and clobber a prior EventTerm that randomized a
     # different axis of the same field within the same reset.
     env_grid = env_ids.unsqueeze(1)
+    body_coords = _index_coords(n_bodies, env.device)
     for axis, (lo, hi) in ranges.items():
-        sampled = torch.empty(n_envs, n_bodies, device=env.device).uniform_(lo, hi)
+        sampled = sampler.draw(lo, hi, env_ids, body_coords, stream=axis)
         body_com[env_grid, body_indices, axis] = original[..., axis] + sampled
     wp.copy(model.body_com, wp.from_torch(body_com.reshape(-1, 3).contiguous(), dtype=wp.vec3))
     _newton_notify(env, ModelFlags.BODY_INERTIAL_PROPERTIES)
 
 
-def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, axes, shared_random):
+def _mujoco_body_com_offset_backend(env, env_ids, sampler, asset_cfg, ranges, operation, axes, shared_random):
     from mjlab.envs.mdp.dr import body_com_offset as _mjlab_body_com_offset
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
+    # mjlab samples the axes in ascending order; start the stream at the
+    # first one so axis k is stream k, as on the other backends.
     _mjlab_body_com_offset(
         env=adapter,
         env_ids=env_ids,
@@ -679,6 +686,7 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
         operation=operation,
         axes=axes,
         shared_random=shared_random,
+        distribution=_keyed_mjlab_distribution(sampler, env_ids, "uniform", stream=min(ranges)),
     )
     _mujoco_recompute(env, adapter.sim, randomize_body_com_offset.recompute)
 
@@ -692,6 +700,7 @@ def _mujoco_body_com_offset_backend(env, env_ids, asset_cfg, ranges, operation, 
 def randomize_pd_gains(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     kp_range: tuple[float, float] | None = None,
     kd_range: tuple[float, float] | None = None,
@@ -728,15 +737,15 @@ def randomize_pd_gains(
         return
 
     if env.act_manager.has_explicit_actuators:
-        _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
+        _explicit_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution)
         return
 
     if env.sim_type == "genesis":
-        _genesis_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
+        _genesis_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
+        _newton_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution)
     elif env.sim_type == "mujoco":
-        _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution)
+        _mujoco_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution)
     else:
         raise NotImplementedError(f"randomize_pd_gains has no backend for sim_type={env.sim_type!r}")
 
@@ -760,6 +769,33 @@ def _selected_joint_ids(env, asset_cfg) -> torch.Tensor | None:
     if asset_cfg.source_selector.joint_names is None:
         return None
     return asset_cfg.joint_ids
+
+
+def _joint_coords(env, asset_cfg, n_sel: int) -> tuple[torch.Tensor]:
+    """The sampler coordinate of a per-joint draw: the CANONICAL actuated-joint
+    index of each selected column, so Genesis and Newton draw the same value
+    for the same joint whatever their internal dof order."""
+    selected = _selected_joint_ids(env, asset_cfg)
+    if selected is None:
+        selected = torch.arange(n_sel, device=env.device)
+    return (selected.to(device=env.device, dtype=torch.long)[None, :],)
+
+
+def _index_coords(n: int, device) -> tuple[torch.Tensor]:
+    """The sampler coordinate of a per-entity draw indexed by position (bodies,
+    links, shapes): backend-specific orders, so these draws match across
+    backends only where the orders do."""
+    return (torch.arange(n, device=device)[None, :],)
+
+
+def _keyed_mjlab_distribution(sampler: TermSampler, env_ids: torch.Tensor, distribution: str, stream: int = 0):
+    """An mjlab ``Distribution`` whose draws come from ``sampler`` (mjlab's
+    engines sample a field axis by axis through ``Distribution.sample``)."""
+    from mjlab.envs.mdp.dr import Distribution
+
+    return Distribution(
+        name=f"keyed:{distribution}", sample=keyed_field_sampler(sampler, env_ids, distribution, stream)
+    )
 
 
 def _slice_dofs(values: torch.Tensor, sel: torch.Tensor) -> torch.Tensor:
@@ -862,7 +898,7 @@ def _genesis_sel_dofs(env, resolved):
     return sel_dofs, sel_np
 
 
-def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operation, distribution):
+def _genesis_pd_gains_backend(env, env_ids, sampler, resolved, kp_range, kd_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(
             f"Genesis pd_gains DR only supports operation='scale' "
@@ -876,19 +912,20 @@ def _genesis_pd_gains_backend(env, env_ids, resolved, kp_range, kd_range, operat
     # Values are passed as device tensors: Genesis's setters run them
     # through ``torch.as_tensor(..., device=gs.device)``, so a numpy
     # detour costs a D2H sync plus an H2D upload for nothing.
+    joint_coords = _joint_coords(env, resolved, n_sel)
     if kp_range is not None:
         base_kp = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "kp", entity.get_dofs_kp), sel_dofs)
-        ratios = sample((len(env_ids), n_sel), *kp_range, env.device, distribution)
+        ratios = sampler.draw(*kp_range, env_ids, joint_coords, distribution, stream=0)
         kp_new = (base_kp * ratios) if base_kp.dim() == 1 else (base_kp[env_ids] * ratios)
         entity.set_dofs_kp(kp=kp_new, dofs_idx_local=sel_np, envs_idx=env_ids)
     if kd_range is not None:
         base_kv = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "kv", entity.get_dofs_kv), sel_dofs)
-        ratios = sample((len(env_ids), n_sel), *kd_range, env.device, distribution)
+        ratios = sampler.draw(*kd_range, env_ids, joint_coords, distribution, stream=1)
         kv_new = (base_kv * ratios) if base_kv.dim() == 1 else (base_kv[env_ids] * ratios)
         entity.set_dofs_kv(kv=kv_new, dofs_idx_local=sel_np, envs_idx=env_ids)
 
 
-def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
+def _newton_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution):
     # Implicit actuators only (the explicit case is handled sim-agnostically in
     # randomize_pd_gains via _explicit_pd_gains_backend): Newton's internal PD
     # consumes joint_target_ke/kd, so randomize the solver store.
@@ -900,15 +937,16 @@ def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
     # Canonical joint subset -> per-env dof columns of the view attributes
     # (same mapping RobotData uses; the actuated columns when no subset).
     cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
+    joint_coords = _joint_coords(env, asset_cfg, len(cols))
     notify = False
-    for attr_name, value_range in (("joint_target_ke", kp_range), ("joint_target_kd", kd_range)):
+    for stream, (attr_name, value_range) in enumerate((("joint_target_ke", kp_range), ("joint_target_kd", kd_range))):
         if value_range is None:
             continue
         values = wp.to_torch(view.get_attribute(attr_name, model))
         defaults = getattr(env._dr_baselines, attr_name)
         vals2d = _newton_dof_view(values)
         defs2d = _newton_dof_view(defaults)
-        sampled = sample((len(env_ids), len(cols)), *value_range, env.device, distribution)
+        sampled = sampler.draw(*value_range, env_ids, joint_coords, distribution, stream=stream)
         if operation == "abs":
             vals2d[env_ids[:, None], cols[None, :]] = sampled
         else:
@@ -919,7 +957,7 @@ def _newton_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
         _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
-def _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
+def _explicit_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution):
     """Randomize the per-env stiffness/damping of the EXPLICIT actuators — the
     gains that actually produce torque in ``actuator_pd.compute`` (the sim-side
     PD store is zeroed/unused in direct-torque mode). Sim-agnostic: the gains
@@ -943,16 +981,20 @@ def _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, oper
         if not hasattr(actuator, "_dr_base_stiffness"):
             actuator._dr_base_stiffness = actuator.stiffness.clone()
             actuator._dr_base_damping = actuator.damping.clone()
-        for attr, base_attr, value_range in (
-            ("stiffness", "_dr_base_stiffness", kp_range),
-            ("damping", "_dr_base_damping", kd_range),
+        # Coordinate = the canonical joint each column drives, so the draw is
+        # the same however the joints are grouped into actuators.
+        group_joint_coords = ((joint_idx if cols is None else joint_idx[cols]).to(env.device, torch.long)[None, :],)
+        for stream, (attr, base_attr, value_range) in enumerate(
+            (
+                ("stiffness", "_dr_base_stiffness", kp_range),
+                ("damping", "_dr_base_damping", kd_range),
+            )
         ):
             if value_range is None:
                 continue
             gains = getattr(actuator, attr)  # [num_envs, n_actuated_joints]
             base = getattr(actuator, base_attr)
-            n_cols = gains.shape[1] if cols is None else cols.numel()
-            sampled = sample((len(env_ids), n_cols), *value_range, env.device, distribution)
+            sampled = sampler.draw(*value_range, env_ids, group_joint_coords, distribution, stream=stream)
             if cols is None:
                 gains[env_ids] = sampled if operation == "abs" else apply_operation(base[env_ids], sampled, operation)
             else:
@@ -960,7 +1002,7 @@ def _explicit_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, oper
                 gains[env_ids[:, None], cols[None, :]] = new
 
 
-def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operation, distribution):
+def _mujoco_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution):
     from mjlab.envs.mdp.dr import pd_gains as _mjlab_pd_gains
 
     if kp_range is None or kd_range is None:
@@ -987,7 +1029,7 @@ def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
         kp_range=kp_range,
         kd_range=kd_range,
         asset_cfg=mjlab_cfg,
-        distribution=distribution,
+        distribution=_keyed_mjlab_distribution(sampler, env_ids, distribution),
         operation=operation,
     )
 
@@ -1001,6 +1043,7 @@ def _mujoco_pd_gains_backend(env, env_ids, asset_cfg, kp_range, kd_range, operat
 def randomize_joint_armature(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     armature_range: tuple[float, float] = (0.9, 1.1),
     operation: Literal["abs", "scale", "add"] = "scale",
@@ -1022,23 +1065,25 @@ def randomize_joint_armature(
         )
 
     if env.sim_type == "genesis":
-        _genesis_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution)
+        _genesis_armature_backend(env, env_ids, sampler, asset_cfg, armature_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution)
+        _newton_armature_backend(env, env_ids, sampler, asset_cfg, armature_range, operation, distribution)
     elif env.sim_type == "mujoco":
-        _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution, shared_random)
+        _mujoco_armature_backend(
+            env, env_ids, sampler, asset_cfg, armature_range, operation, distribution, shared_random
+        )
     else:
         raise NotImplementedError(f"randomize_joint_armature has no backend for sim_type={env.sim_type!r}")
 
 
-def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation, distribution):
+def _genesis_armature_backend(env, env_ids, sampler, resolved, armature_range, operation, distribution):
     if operation != "scale":
         raise NotImplementedError(f"Genesis joint_armature DR only supports operation='scale' (got {operation!r}).")
     entity = env.scene_manager[resolved.name]
     sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
     n_sel = len(sel_dofs)
     base = _slice_dofs(_genesis_dr_baseline(env, resolved.name, "armature", entity.get_dofs_armature), sel_dofs)
-    ratios = sample((len(env_ids), n_sel), *armature_range, env.device, distribution)
+    ratios = sampler.draw(*armature_range, env_ids, _joint_coords(env, resolved, n_sel), distribution)
     arm_new = (base * ratios) if base.dim() == 1 else (base[env_ids] * ratios)
     entity.set_dofs_armature(
         armature=arm_new,
@@ -1047,7 +1092,7 @@ def _genesis_armature_backend(env, env_ids, resolved, armature_range, operation,
     )
 
 
-def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution):
+def _newton_armature_backend(env, env_ids, sampler, asset_cfg, armature_range, operation, distribution):
     import warp as wp
     from newton import ModelFlags
 
@@ -1058,7 +1103,7 @@ def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
     defaults = env._dr_baselines.joint_armature
     vals2d = _newton_dof_view(armature)
     defs2d = _newton_dof_view(defaults)
-    sampled = sample((len(env_ids), len(cols)), *armature_range, env.device, distribution)
+    sampled = sampler.draw(*armature_range, env_ids, _joint_coords(env, asset_cfg, len(cols)), distribution)
     if operation == "abs":
         vals2d[env_ids[:, None], cols[None, :]] = sampled
     else:
@@ -1067,7 +1112,7 @@ def _newton_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
     _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
-def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation, distribution, shared_random):
+def _mujoco_armature_backend(env, env_ids, sampler, asset_cfg, armature_range, operation, distribution, shared_random):
     from mjlab.envs.mdp.dr import joint_armature as _mjlab_joint_armature
 
     adapter = _MujocoEnvAdapter(env)
@@ -1077,7 +1122,7 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
         env_ids=env_ids,
         ranges=armature_range,
         asset_cfg=mjlab_cfg,
-        distribution=distribution,
+        distribution=_keyed_mjlab_distribution(sampler, env_ids, distribution),
         operation=operation,
         shared_random=shared_random,
     )
@@ -1093,6 +1138,7 @@ def _mujoco_armature_backend(env, env_ids, asset_cfg, armature_range, operation,
 def randomize_joint_friction(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     friction_range: tuple[float, float] = (0.0, 0.05),
     operation: Literal["abs", "scale", "add"] = "abs",
@@ -1115,16 +1161,18 @@ def randomize_joint_friction(
         )
 
     if env.sim_type == "genesis":
-        _genesis_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution)
+        _genesis_joint_friction_backend(env, env_ids, sampler, asset_cfg, friction_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution)
+        _newton_joint_friction_backend(env, env_ids, sampler, asset_cfg, friction_range, operation, distribution)
     elif env.sim_type == "mujoco":
-        _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution, shared_random)
+        _mujoco_joint_friction_backend(
+            env, env_ids, sampler, asset_cfg, friction_range, operation, distribution, shared_random
+        )
     else:
         raise NotImplementedError(f"randomize_joint_friction has no backend for sim_type={env.sim_type!r}")
 
 
-def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, operation, distribution):
+def _genesis_joint_friction_backend(env, env_ids, sampler, resolved, friction_range, operation, distribution):
     if operation != "abs":
         raise NotImplementedError(
             f"Genesis joint_friction DR only supports operation='abs' "
@@ -1133,7 +1181,7 @@ def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, oper
     entity = env.scene_manager[resolved.name]
     sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
     n_sel = len(sel_dofs)
-    values = sample((len(env_ids), n_sel), *friction_range, env.device, distribution)
+    values = sampler.draw(*friction_range, env_ids, _joint_coords(env, resolved, n_sel), distribution)
     entity.set_dofs_frictionloss(
         frictionloss=values,
         dofs_idx_local=sel_np,
@@ -1141,7 +1189,7 @@ def _genesis_joint_friction_backend(env, env_ids, resolved, friction_range, oper
     )
 
 
-def _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution):
+def _newton_joint_friction_backend(env, env_ids, sampler, asset_cfg, friction_range, operation, distribution):
     import warp as wp
     from newton import ModelFlags
 
@@ -1152,7 +1200,7 @@ def _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
     defaults = env._dr_baselines.joint_friction
     vals2d = _newton_dof_view(friction)
     defs2d = _newton_dof_view(defaults)
-    sampled = sample((len(env_ids), len(cols)), *friction_range, env.device, distribution)
+    sampled = sampler.draw(*friction_range, env_ids, _joint_coords(env, asset_cfg, len(cols)), distribution)
     if operation == "abs":
         vals2d[env_ids[:, None], cols[None, :]] = sampled
     else:
@@ -1161,7 +1209,9 @@ def _newton_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
     _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
-def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, operation, distribution, shared_random):
+def _mujoco_joint_friction_backend(
+    env, env_ids, sampler, asset_cfg, friction_range, operation, distribution, shared_random
+):
     from mjlab.envs.mdp.dr import joint_friction as _mjlab_joint_friction
 
     adapter = _MujocoEnvAdapter(env)
@@ -1171,7 +1221,7 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
         env_ids=env_ids,
         ranges=friction_range,
         asset_cfg=mjlab_cfg,
-        distribution=distribution,
+        distribution=_keyed_mjlab_distribution(sampler, env_ids, distribution),
         operation=operation,
         shared_random=shared_random,
     )
@@ -1186,6 +1236,7 @@ def _mujoco_joint_friction_backend(env, env_ids, asset_cfg, friction_range, oper
 def randomize_joint_damping(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     damping_range: tuple[float, float] = (0.0, 1.0),
     operation: Literal["abs", "scale", "add"] = "abs",
@@ -1215,16 +1266,18 @@ def randomize_joint_damping(
         )
 
     if env.sim_type == "genesis":
-        _genesis_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution)
+        _genesis_joint_damping_backend(env, env_ids, sampler, asset_cfg, damping_range, operation, distribution)
     elif env.sim_type == "newton":
-        _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution)
+        _newton_joint_damping_backend(env, env_ids, sampler, asset_cfg, damping_range, operation, distribution)
     elif env.sim_type == "mujoco":
-        _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution, shared_random)
+        _mujoco_joint_damping_backend(
+            env, env_ids, sampler, asset_cfg, damping_range, operation, distribution, shared_random
+        )
     else:
         raise NotImplementedError(f"randomize_joint_damping has no backend for sim_type={env.sim_type!r}")
 
 
-def _genesis_joint_damping_backend(env, env_ids, resolved, damping_range, operation, distribution):
+def _genesis_joint_damping_backend(env, env_ids, sampler, resolved, damping_range, operation, distribution):
     if operation != "abs":
         raise NotImplementedError(
             f"Genesis joint_damping DR only supports operation='abs' "
@@ -1233,7 +1286,7 @@ def _genesis_joint_damping_backend(env, env_ids, resolved, damping_range, operat
     entity = env.scene_manager[resolved.name]
     sel_dofs, sel_np = _genesis_sel_dofs(env, resolved)
     n_sel = len(sel_dofs)
-    values = sample((len(env_ids), n_sel), *damping_range, env.device, distribution)
+    values = sampler.draw(*damping_range, env_ids, _joint_coords(env, resolved, n_sel), distribution)
     entity.set_dofs_damping(
         damping=values,
         dofs_idx_local=sel_np,
@@ -1241,7 +1294,7 @@ def _genesis_joint_damping_backend(env, env_ids, resolved, damping_range, operat
     )
 
 
-def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution):
+def _newton_joint_damping_backend(env, env_ids, sampler, asset_cfg, damping_range, operation, distribution):
     import warp as wp
     from newton import ModelFlags
 
@@ -1250,7 +1303,7 @@ def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
     cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
     damping = wp.to_torch(view.get_attribute("joint_damping", model))
     vals2d = _newton_dof_view(damping)
-    sampled = sample((len(env_ids), len(cols)), *damping_range, env.device, distribution)
+    sampled = sampler.draw(*damping_range, env_ids, _joint_coords(env, asset_cfg, len(cols)), distribution)
     if operation == "abs":
         vals2d[env_ids[:, None], cols[None, :]] = sampled
     else:
@@ -1260,7 +1313,9 @@ def _newton_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
     _newton_notify(env, ModelFlags.JOINT_DOF_PROPERTIES)
 
 
-def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operation, distribution, shared_random):
+def _mujoco_joint_damping_backend(
+    env, env_ids, sampler, asset_cfg, damping_range, operation, distribution, shared_random
+):
     from mjlab.envs.mdp.dr import joint_damping as _mjlab_joint_damping
 
     adapter = _MujocoEnvAdapter(env)
@@ -1270,7 +1325,7 @@ def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
         env_ids=env_ids,
         ranges=damping_range,
         asset_cfg=mjlab_cfg,
-        distribution=distribution,
+        distribution=_keyed_mjlab_distribution(sampler, env_ids, distribution),
         operation=operation,
         shared_random=shared_random,
     )
@@ -1285,6 +1340,7 @@ def _mujoco_joint_damping_backend(env, env_ids, asset_cfg, damping_range, operat
 def randomize_tau_scale(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
     tau_scale_range: tuple[float, float] = (0.5, 1.0),
     operation: Literal["abs", "scale", "add"] = "scale",
@@ -1320,8 +1376,8 @@ def randomize_tau_scale(
             actuator._dr_base_tau_scale = actuator.tau_scale.clone()
         kap = actuator.tau_scale  # [num_envs, n_actuated_joints]
         base = actuator._dr_base_tau_scale
-        n_cols = kap.shape[1] if cols is None else cols.numel()
-        sampled = sample((len(env_ids), n_cols), *tau_scale_range, env.device, distribution)
+        group_joint_coords = ((joint_idx if cols is None else joint_idx[cols]).to(env.device, torch.long)[None, :],)
+        sampled = sampler.draw(*tau_scale_range, env_ids, group_joint_coords, distribution)
         if cols is None:
             kap[env_ids] = sampled if operation == "abs" else apply_operation(base[env_ids], sampled, operation)
         else:
@@ -1338,6 +1394,7 @@ def randomize_tau_scale(
 def randomize_encoder_bias(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     bias_range: tuple[float, float],
     asset_cfg: SceneEntitySelector = SceneEntitySelector(name="robot"),
 ) -> None:
@@ -1362,8 +1419,7 @@ def randomize_encoder_bias(
     if len(env_ids) == 0:
         return
 
-    n_envs = len(env_ids)
     n_joints = env.act_manager.encoder_bias_of(asset_cfg.name).shape[1]
     lo, hi = bias_range
-    bias_samples = torch.empty(n_envs, n_joints, device=env.device).uniform_(lo, hi)
+    bias_samples = sampler.draw(lo, hi, env_ids, _index_coords(n_joints, env.device))
     env.act_manager.set_encoder_bias(bias_samples, env_ids=env_ids, entity_name=asset_cfg.name)

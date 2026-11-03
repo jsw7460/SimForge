@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import genesis as gs
 import torch
 
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler
 from jaxrlworld.rl.utils import entity_utils as eu
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 def apply_external_force_torque(
     env: GenesisEnv,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     force_range: dict[str, tuple[float, float]],
     torque_range: dict[str, tuple[float, float]] | None = None,
     body_name: str = "base",
@@ -45,12 +47,14 @@ def apply_external_force_torque(
     # Get global link index
     link_ids_global, _ = eu.find_links(robot, [body_name], global_ids=True)
 
-    # Sample random forces: (n, 3)
+    # Sample random forces: (n, 3), axis index as the coordinate (stream 0)
     n = len(env_ids)
+    axes = (torch.arange(3, device=env.device)[None, :],)
+    force_u = sampler.uniforms(env_ids, axes, stream=0)
     forces = torch.zeros(n, 3, device=env.device)
     for i, key in enumerate(["x", "y", "z"]):
         lo, hi = force_range.get(key, (0.0, 0.0))
-        forces[:, i] = torch.empty(n, device=env.device).uniform_(lo, hi)
+        forces[:, i] = (hi - lo) * force_u[:, i] + lo
 
     rigid_solver.apply_links_external_force(
         force=forces,
@@ -62,10 +66,11 @@ def apply_external_force_torque(
 
     # Apply torque if specified
     if torque_range is not None:
+        torque_u = sampler.uniforms(env_ids, axes, stream=1)
         torques = torch.zeros(n, 3, device=env.device)
         for i, key in enumerate(["x", "y", "z"]):
             lo, hi = torque_range.get(key, (0.0, 0.0))
-            torques[:, i] = torch.empty(n, device=env.device).uniform_(lo, hi)
+            torques[:, i] = (hi - lo) * torque_u[:, i] + lo
 
         rigid_solver.apply_links_external_torque(
             torque=torques,

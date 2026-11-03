@@ -17,6 +17,15 @@ Subset convention
 -----------------
 All writer calls use subset-shaped tensors + ``env_ids``, matching the
 ``RobotStateWriterProtocol`` contract.
+
+Randomness
+----------
+Every term draws through the ``sampler`` the event manager binds to it
+(see ``keyed_sampler``): a value is a function of (seed, term, stage,
+env, episode, coordinate), so it does not depend on the number of
+environments or on which others reset in the same call. Per-axis and
+per-joint draws use the axis / canonical joint index as the coordinate;
+independent quantities of one term use distinct ``stream`` numbers.
 """
 
 from __future__ import annotations
@@ -27,6 +36,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler
 from jaxrlworld.rl.utils.quat_utils import quat_from_euler_zyx_wxyz, quat_mul_wxyz
 
 if TYPE_CHECKING:
@@ -38,13 +48,21 @@ _DEFAULT_SELECTOR = SceneEntitySelector(name="robot")
 # ── Sampling utility ─────────────────────────────────────────────────
 
 
-def _sample_uniform(
+def _axis_coords(n: int, device: torch.device) -> tuple[torch.Tensor]:
+    """The coordinate for a per-env ``[E, n]`` draw indexed by axis / joint."""
+    return (torch.arange(n, device=device)[None, :],)
+
+
+def _sample_uniform_axes(
+    sampler: TermSampler,
+    env_ids: torch.Tensor,
     lower: torch.Tensor,
     upper: torch.Tensor,
-    shape: tuple,
-    device: torch.device,
+    stream: int,
 ) -> torch.Tensor:
-    return (upper - lower) * torch.rand(shape, device=device) + lower
+    """``[E, len(lower)]`` uniforms with per-axis bounds, axis index as the coordinate."""
+    u = sampler.uniforms(env_ids, _axis_coords(lower.numel(), env_ids.device), stream)
+    return (upper - lower) * u + lower
 
 
 @cache
@@ -83,6 +101,7 @@ def _is_zero_range(ranges: dict[str, tuple[float, float]], keys: tuple[str, ...]
 def push_by_setting_velocity(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     velocity_range: dict[str, tuple[float, float]],
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
@@ -99,18 +118,19 @@ def push_by_setting_velocity(
 
     rd = env.get_entity_data(asset_cfg.name)
     writer = env.get_robot_state_writer(asset_cfg.name)
-    device = env.device
-    n = len(env_ids)
 
     lin_vel = rd.root_link_lin_vel_w[env_ids].clone()
     ang_vel = rd.root_link_ang_vel_w[env_ids].clone()
 
     keys = ["x", "y", "z", "roll", "pitch", "yaw"]
+    # One [E, 6] draw, axis index as the coordinate: axis i gets the same
+    # value whether or not the other axes have a range.
+    deltas = sampler.uniforms(env_ids, _axis_coords(6, env_ids.device))
     for i, key in enumerate(keys):
         lo, hi = velocity_range.get(key, (0.0, 0.0))
         if lo == 0.0 and hi == 0.0:
             continue
-        delta = torch.empty(n, device=device).uniform_(lo, hi)
+        delta = (hi - lo) * deltas[:, i] + lo
         if i < 3:
             lin_vel[:, i] += delta
         else:
@@ -122,6 +142,7 @@ def push_by_setting_velocity(
 def push_by_planar_impulse(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     magnitude_range: tuple[float, float],
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
@@ -141,14 +162,12 @@ def push_by_planar_impulse(
 
     rd = env.get_entity_data(asset_cfg.name)
     writer = env.get_robot_state_writer(asset_cfg.name)
-    device = env.device
-    n = len(env_ids)
 
     lin_vel = rd.root_link_lin_vel_w[env_ids].clone()
     ang_vel = rd.root_link_ang_vel_w[env_ids].clone()
 
-    theta = torch.empty(n, device=device).uniform_(0.0, 2.0 * torch.pi)
-    magnitude = torch.empty(n, device=device).uniform_(*magnitude_range)
+    theta = sampler.draw(0.0, 2.0 * torch.pi, env_ids, stream=0)
+    magnitude = sampler.draw(*magnitude_range, env_ids, stream=1)
     lin_vel[:, 0] += magnitude * torch.cos(theta)
     lin_vel[:, 1] += magnitude * torch.sin(theta)
 
@@ -161,6 +180,7 @@ def push_by_planar_impulse(
 def reset_root_state_uniform(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     pose_range: dict[str, tuple[float, float]],
     velocity_range: dict[str, tuple[float, float]] | None = None,
     default_pos: tuple[float, ...] = (0.0, 0.0, 0.34),
@@ -207,11 +227,9 @@ def reset_root_state_uniform(
     keys = ["x", "y", "z", "roll", "pitch", "yaw"]
     device_str = str(device)
     ranges = _constant(tuple(tuple(pose_range.get(key, (0.0, 0.0))) for key in keys), device_str)
-    # Drawn even where the range is degenerate. The samples are then
-    # exactly zero and the arithmetic below can be skipped, but the draw
-    # itself must stay: removing it would shift the global RNG stream and
-    # silently change every trajectory that follows.
-    pose_samples = _sample_uniform(ranges[:, 0], ranges[:, 1], (n, 6), device)
+    # Drawn for all six axes at once (axis index is the coordinate); a
+    # degenerate range yields exactly zero and the arithmetic is skipped.
+    pose_samples = _sample_uniform_axes(sampler, env_ids, ranges[:, 0], ranges[:, 1], stream=0)
 
     # ── Position: default + perturbation ──────────────────────────
     default_pos_t = _constant(tuple(default_pos), device_str)
@@ -251,7 +269,7 @@ def reset_root_state_uniform(
     ang_vel = torch.zeros((n, 3), device=device)
     if velocity_range:
         vel_ranges = _constant(tuple(tuple(velocity_range.get(key, (0.0, 0.0))) for key in keys), device_str)
-        vel_samples = _sample_uniform(vel_ranges[:, 0], vel_ranges[:, 1], (n, 6), device)
+        vel_samples = _sample_uniform_axes(sampler, env_ids, vel_ranges[:, 0], vel_ranges[:, 1], stream=1)
         lin_vel = vel_samples[:, 0:3]
         ang_vel = vel_samples[:, 3:6]
 
@@ -273,6 +291,7 @@ def reset_root_state_uniform(
 def reset_joints_by_offset(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     position_range: tuple[float, float],
     velocity_range: tuple[float, float] = (0.0, 0.0),
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
@@ -308,22 +327,17 @@ def reset_joints_by_offset(
     num_joints = home.shape[-1]
     default_pos = home.unsqueeze(0).repeat(n, 1)
 
-    # Add position noise
+    # Add position noise (joint index is the coordinate)
+    joint_coords = _axis_coords(num_joints, device)
     if position_range != (0.0, 0.0):
-        noise = torch.empty(n, num_joints, device=device).uniform_(
-            position_range[0],
-            position_range[1],
-        )
+        noise = sampler.draw(position_range[0], position_range[1], env_ids, joint_coords, stream=0)
         default_pos = default_pos + noise
 
     # Joint velocities
     if velocity_range == (0.0, 0.0):
         joint_vel = torch.zeros(n, num_joints, device=device)
     else:
-        joint_vel = torch.empty(n, num_joints, device=device).uniform_(
-            velocity_range[0],
-            velocity_range[1],
-        )
+        joint_vel = sampler.draw(velocity_range[0], velocity_range[1], env_ids, joint_coords, stream=1)
 
     # Clamp to the soft limits, as the docstring has always claimed and as
     # IsaacLab's own ``reset_joints_by_offset`` does. Without it a single
@@ -341,6 +355,7 @@ def reset_joints_by_offset(
 def reset_joints_by_scale(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     position_range: tuple[float, float],
     velocity_range: tuple[float, float] = (0.0, 0.0),
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
@@ -367,13 +382,14 @@ def reset_joints_by_scale(
         joint_pos = joint_pos.unsqueeze(0)
     num_joints = joint_pos.shape[-1]
 
-    scale = torch.empty(n, num_joints, device=device).uniform_(*position_range)
+    joint_coords = _axis_coords(num_joints, device)
+    scale = sampler.draw(*position_range, env_ids, joint_coords, stream=0)
     joint_pos = joint_pos * scale
 
     if velocity_range == (0.0, 0.0):
         joint_vel = torch.zeros(n, num_joints, device=device)
     else:
-        joint_vel = torch.empty(n, num_joints, device=device).uniform_(*velocity_range)
+        joint_vel = sampler.draw(*velocity_range, env_ids, joint_coords, stream=1)
 
     writer.set_dof_state(joint_pos, joint_vel, env_ids=env_ids)
     writer.eval_fk(env_ids=env_ids)
@@ -385,6 +401,7 @@ def reset_joints_by_scale(
 def randomize_encoder_bias(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     bias_range: tuple[float, float] = (-0.015, 0.015),
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
@@ -401,28 +418,27 @@ def randomize_encoder_bias(
     """
     if len(env_ids) == 0:
         return
-    device = env.device
-    n = len(env_ids)
     # The entity's joint count, not the action dim: with several action
     # terms the action dim is their sum and matches no robot's joints.
     num_joints = env.act_manager.encoder_bias_of(asset_cfg.name).shape[-1]
     lo, hi = bias_range
-    bias = torch.empty((n, num_joints), device=device).uniform_(lo, hi)
+    bias = sampler.draw(lo, hi, env_ids, _axis_coords(num_joints, env.device))
     env.act_manager.set_encoder_bias(bias, env_ids=env_ids, entity_name=asset_cfg.name)
 
 
 # ── Getup: mixed fallen / standing reset ────────────────────────────
 
 
-def _sample_uniform_quaternion_wxyz(n: int, device: torch.device) -> torch.Tensor:
+def _sample_uniform_quaternion_wxyz(sampler: TermSampler, env_ids: torch.Tensor, stream: int) -> torch.Tensor:
     """Uniformly sample unit quaternions on the 3-sphere (Shoemake 1992).
 
     Returns a ``(n, 4)`` tensor in **wxyz** convention (scalar first).
-    This is the standard uniform distribution over ``SO(3)``.
+    This is the standard uniform distribution over ``SO(3)``. Uses streams
+    ``stream``, ``stream + 1`` and ``stream + 2``.
     """
-    u1 = torch.rand(n, device=device)
-    u2 = torch.rand(n, device=device)
-    u3 = torch.rand(n, device=device)
+    u1 = sampler.uniforms(env_ids, stream=stream)
+    u2 = sampler.uniforms(env_ids, stream=stream + 1)
+    u3 = sampler.uniforms(env_ids, stream=stream + 2)
     two_pi = 2.0 * torch.pi
     s1 = torch.sqrt(1.0 - u1)
     s2 = torch.sqrt(u1)
@@ -436,6 +452,7 @@ def _sample_uniform_quaternion_wxyz(n: int, device: torch.device) -> torch.Tenso
 def reset_fallen_or_standing(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     fallen_prob: float = 0.6,
     fall_height: float = 0.8,
     fall_velocity_range: tuple[float, float] = (-0.5, 0.5),
@@ -518,8 +535,9 @@ def reset_fallen_or_standing(
     # Unified per-env origins (see ``reset_root_state_uniform``).
     env_origins = env.scene_manager.env_origins
 
-    # Per-env branch mask.
-    is_fallen = torch.rand(n, device=device) < fallen_prob
+    # Per-env branch mask (stream 0; the quaternion takes 1-3, the
+    # velocities 4-5, the joints 6-7).
+    is_fallen = sampler.bernoulli(fallen_prob, env_ids, stream=0)
     is_fallen_3 = is_fallen.unsqueeze(-1)  # for broadcasting to (n, 3)
 
     # ── Root pose ─────────────────────────────────────────────────
@@ -534,13 +552,14 @@ def reset_fallen_or_standing(
     pos = pos + env_origins[env_ids]
 
     default_quat_t = torch.tensor(default_quat_wxyz, device=device, dtype=torch.float32).unsqueeze(0).expand(n, -1)
-    random_quat = _sample_uniform_quaternion_wxyz(n, device)
+    random_quat = _sample_uniform_quaternion_wxyz(sampler, env_ids, stream=1)
     quat_wxyz = torch.where(is_fallen.unsqueeze(-1), random_quat, default_quat_t)
 
     # ── Root velocity ─────────────────────────────────────────────
     lo, hi = fall_velocity_range
-    fallen_lin_vel = torch.empty((n, 3), device=device).uniform_(lo, hi)
-    fallen_ang_vel = torch.empty((n, 3), device=device).uniform_(lo, hi)
+    xyz = _axis_coords(3, device)
+    fallen_lin_vel = sampler.draw(lo, hi, env_ids, xyz, stream=4)
+    fallen_ang_vel = sampler.draw(lo, hi, env_ids, xyz, stream=5)
     zero_vel = torch.zeros((n, 3), device=device)
     lin_vel = torch.where(is_fallen_3, fallen_lin_vel, zero_vel)
     ang_vel = torch.where(is_fallen_3, fallen_ang_vel, zero_vel)
@@ -567,20 +586,20 @@ def reset_fallen_or_standing(
         # ``rd.soft_joint_pos_limits`` (all 3 sims implement it).
         rd = env.get_entity_data(asset_cfg.name)
         jp_lo, jp_hi = rd.soft_joint_pos_limits
-        u = torch.rand((n, num_joints), device=device)
+        u = sampler.uniforms(env_ids, _axis_coords(num_joints, device), stream=6)
         fallen_joint_pos = jp_lo + u * (jp_hi - jp_lo)
     else:
         # Additive-noise path (simpler fallback, keeps fallen pose
         # close to the default — useful for robots whose soft limits
         # haven't been validated).
         jn_lo, jn_hi = fall_joint_noise_range
-        joint_noise = torch.empty((n, num_joints), device=device).uniform_(jn_lo, jn_hi)
+        joint_noise = sampler.draw(jn_lo, jn_hi, env_ids, _axis_coords(num_joints, device), stream=6)
         fallen_joint_pos = default_joint_pos + joint_noise
 
     is_fallen_j = is_fallen.unsqueeze(-1).expand(-1, num_joints)
     joint_pos = torch.where(is_fallen_j, fallen_joint_pos, default_joint_pos)
 
-    fallen_joint_vel = torch.empty((n, num_joints), device=device).uniform_(lo, hi)
+    fallen_joint_vel = sampler.draw(lo, hi, env_ids, _axis_coords(num_joints, device), stream=7)
     zero_joint_vel = torch.zeros((n, num_joints), device=device)
     joint_vel = torch.where(is_fallen_j, fallen_joint_vel, zero_joint_vel)
 

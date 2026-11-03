@@ -71,7 +71,7 @@ def main() -> int:
             if term.mode != mode:
                 continue
             fn_name = getattr(term.func, "__name__", str(term.func))
-            env.event_manager._call_event_fn(name, term, env_ids=all_ids)
+            env.event_manager.run_term(name, all_ids)
             _sync()
             _stage(f"[{mode}] term '{name}' ({fn_name}) done")
 

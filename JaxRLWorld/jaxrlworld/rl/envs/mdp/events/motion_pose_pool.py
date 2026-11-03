@@ -39,6 +39,7 @@ import torch
 from jaxrlworld.rl.algorithms.amp_ppo.expert_motion import ClipState, clip_variants, load_clip
 from jaxrlworld.rl.algorithms.ppo.symmetry import joint_mirror_perm_sign
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.world import World
@@ -331,6 +332,7 @@ def _device_pool(
 def reset_from_motion_pose_pool(
     env: World,
     env_ids: torch.Tensor,
+    sampler: TermSampler,
     spec: MotionPosePoolSpec,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
@@ -343,7 +345,7 @@ def reset_from_motion_pose_pool(
         )
     device = env.device
     pool = _device_pool(spec, tuple(env.act_manager.actuated_joint_names), device)
-    idx = torch.randint(pool["root_pos"].shape[0], (len(env_ids),), device=device)
+    idx = sampler.draw_int(0, pool["root_pos"].shape[0], env_ids)
     writer = env.get_robot_state_writer(asset_cfg.name)
     writer.set_root_pose(
         pool["root_pos"][idx] + env.scene_manager.env_origins[env_ids], pool["root_quat"][idx], env_ids=env_ids

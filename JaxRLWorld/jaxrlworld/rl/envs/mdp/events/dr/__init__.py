@@ -28,7 +28,7 @@ Usage in preset configs::
 """
 
 from . import unified
-from ._utils import apply_operation, resolve_patterns, sample
+from ._utils import apply_operation, resolve_patterns
 
 # NOTE: the ``newton`` submodule (``set_joint_friction`` / ``set_foot_friction``)
 # is *not* re-exported here -- it does ``import warp`` / ``from newton...`` at
@@ -40,5 +40,4 @@ __all__ = [
     "unified",
     "apply_operation",
     "resolve_patterns",
-    "sample",
 ]

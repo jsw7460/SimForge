@@ -47,6 +47,7 @@ from jaxrlworld.rl.envs.managers.common.command import CommandManager, CommandMa
 from jaxrlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
 from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
 from jaxrlworld.rl.envs.mdp.events.dr import unified
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler
 from jaxrlworld.rl.envs.utils.newton import dr_baselines
 from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 
@@ -251,6 +252,9 @@ def check_dr_forwarding(chk) -> None:
         return fn
 
     fake_dr = types.ModuleType("mjlab.envs.mdp.dr")
+    # The backends wrap the keyed sampler in mjlab's Distribution; the fake
+    # module only needs its (name, sample) shape.
+    fake_dr.Distribution = lambda name, sample: SimpleNamespace(name=name, sample=sample)
     for name in (
         "body_mass",
         "joint_armature",
@@ -278,10 +282,11 @@ def check_dr_forwarding(chk) -> None:
         env = SimpleNamespace(sim_type="mujoco")
         ids = torch.tensor([0, 1])
         sel = SceneEntitySelector(name="robot")
-        unified.randomize_body_mass(env, ids, sel, (0.9, 1.1), "scale", "log_uniform", False)
-        unified.randomize_joint_armature(env, ids, sel, (0.9, 1.1), "scale", "log_uniform", False)
-        unified.randomize_joint_friction(env, ids, sel, (0.0, 0.05), "abs", "log_uniform", True)
-        unified.randomize_joint_damping(env, ids, sel, (0.0, 1.0), "abs", "gaussian", False)
+        sampler = TermSampler.bind(base_seed=0, term_name="contract", stage=3, counter=torch.zeros(2, dtype=torch.long))
+        unified.randomize_body_mass(env, ids, sampler, sel, (0.9, 1.1), "scale", "log_uniform", False)
+        unified.randomize_joint_armature(env, ids, sampler, sel, (0.9, 1.1), "scale", "log_uniform", False)
+        unified.randomize_joint_friction(env, ids, sampler, sel, (0.0, 0.05), "abs", "log_uniform", True)
+        unified.randomize_joint_damping(env, ids, sampler, sel, (0.0, 1.0), "abs", "gaussian", False)
         for name, dist in (
             ("body_mass", "log_uniform"),
             ("joint_armature", "log_uniform"),
@@ -289,16 +294,16 @@ def check_dr_forwarding(chk) -> None:
             ("joint_damping", "gaussian"),
         ):
             got = recorded.get(name, {}).get("distribution")
-            chk(f"mujoco {name} forwards distribution", got == dist, f"got {got!r}")
+            chk(f"mujoco {name} forwards distribution", getattr(got, "name", None) == f"keyed:{dist}", f"got {got!r}")
         chk("mujoco joint_friction forwards shared_random", recorded["joint_friction"].get("shared_random") is True)
 
         for sim in ("genesis", "newton"):
             env = SimpleNamespace(sim_type=sim)
             for fn, args in (
-                (unified.randomize_body_mass, (env, ids, sel, (0.9, 1.1), "scale", "uniform", True)),
-                (unified.randomize_joint_armature, (env, ids, sel, (0.9, 1.1), "scale", "uniform", True)),
-                (unified.randomize_joint_friction, (env, ids, sel, (0.0, 0.05), "abs", "uniform", True)),
-                (unified.randomize_joint_damping, (env, ids, sel, (0.0, 1.0), "abs", "uniform", True)),
+                (unified.randomize_body_mass, (env, ids, sampler, sel, (0.9, 1.1), "scale", "uniform", True)),
+                (unified.randomize_joint_armature, (env, ids, sampler, sel, (0.9, 1.1), "scale", "uniform", True)),
+                (unified.randomize_joint_friction, (env, ids, sampler, sel, (0.0, 0.05), "abs", "uniform", True)),
+                (unified.randomize_joint_damping, (env, ids, sampler, sel, (0.0, 1.0), "abs", "uniform", True)),
             ):
                 try:
                     fn(*args)
@@ -306,7 +311,7 @@ def check_dr_forwarding(chk) -> None:
                 except NotImplementedError as e:
                     chk(f"{sim} {fn.__name__} shared_random=True refused", "mujoco backend only" in str(e))
             try:
-                unified.randomize_body_com_offset(env, ids, {0: (-0.01, 0.01)}, sel, "add", [0], False)
+                unified.randomize_body_com_offset(env, ids, sampler, {0: (-0.01, 0.01)}, sel, "add", [0], False)
                 chk(f"{sim} randomize_body_com_offset axes refused", False, "ran")
             except NotImplementedError as e:
                 chk(f"{sim} randomize_body_com_offset axes refused", "mujoco backend only" in str(e))
@@ -354,8 +359,9 @@ def check_newton_damping_baseline(chk) -> None:
     unified._selected_joint_ids = lambda env, cfg: None
     try:
         ids = torch.tensor([1])
+        sampler = TermSampler.bind(base_seed=0, term_name="damping", stage=3, counter=torch.zeros(3, dtype=torch.long))
         unified._newton_joint_damping_backend(
-            env, ids, SceneEntitySelector(name="robot"), (2.0, 2.0), "scale", "uniform"
+            env, ids, sampler, SceneEntitySelector(name="robot"), (2.0, 2.0), "scale", "uniform"
         )
     finally:
         unified._selected_joint_ids = saved_sel

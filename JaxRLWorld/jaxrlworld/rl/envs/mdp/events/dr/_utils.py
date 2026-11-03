@@ -1,7 +1,6 @@
 """Shared utilities for domain randomization terms.
 
 Provides:
-- ``sample`` — unified sampling with pluggable distributions.
 - ``apply_operation`` — combine cached defaults with sampled values.
 - ``resolve_patterns`` — regex-based name-to-index resolution.
 
@@ -12,43 +11,10 @@ mjlab uses ``env.sim.get_default_field``).
 
 from __future__ import annotations
 
-import math
 import re
 from typing import Sequence
 
 import torch
-
-
-def sample(
-    shape: tuple[int, ...],
-    lo: float,
-    hi: float,
-    device: torch.device,
-    distribution: str = "uniform",
-) -> torch.Tensor:
-    """Sample a tensor of the given *shape* from *distribution*.
-
-    Args:
-        shape: Output shape.
-        lo: Lower bound (or lower parameter for gaussian).
-        hi: Upper bound (or upper parameter for gaussian).
-        device: Torch device.
-        distribution: One of ``"uniform"``, ``"log_uniform"``, ``"gaussian"``.
-
-    Returns:
-        Sampled tensor on *device*.
-    """
-    if distribution == "uniform":
-        return torch.empty(shape, device=device).uniform_(lo, hi)
-    elif distribution == "log_uniform":
-        log_lo = math.log(max(lo, 1e-8))
-        log_hi = math.log(max(hi, 1e-8))
-        return torch.empty(shape, device=device).uniform_(log_lo, log_hi).exp()
-    elif distribution == "gaussian":
-        mean = (lo + hi) / 2.0
-        std = (hi - lo) / 4.0  # 95% within [lo, hi]
-        return torch.empty(shape, device=device).normal_(mean, std).clamp_(lo, hi)
-    raise ValueError(f"Unknown distribution {distribution!r}. Choose from 'uniform', 'log_uniform', 'gaussian'.")
 
 
 def apply_operation(

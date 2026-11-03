@@ -1050,6 +1050,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         common_ef.reset_root_state_uniform(
             env=env,
             env_ids=all_ids,
+            sampler=env.event_manager.sampler_for("rigid_object_smoke_table", "reset"),
             pose_range={},
             velocity_range={},
             default_pos=target,

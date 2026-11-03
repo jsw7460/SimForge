@@ -68,7 +68,8 @@ def main() -> int:
     for name, kp, kd in base:
         print(f"[base]   {name:<18} kp/env={kp.tolist()}  kd/env={kd.tolist()}")
 
-    randomize_pd_gains(env, dr_ids, kp_range=KP_RANGE, kd_range=KD_RANGE, operation="scale")
+    sampler = env.event_manager.sampler_for("pd_gains_dr_smoke_1", "reset_dr")
+    randomize_pd_gains(env, dr_ids, sampler, kp_range=KP_RANGE, kd_range=KD_RANGE, operation="scale")
     after1 = gain_snapshot(env)
     changed = untouched = True
     for (name, kp0, kd0), (_, kp1, kd1) in zip(base, after1):
@@ -78,7 +79,8 @@ def main() -> int:
     results["dr_envs_changed"] = changed
     results["other_envs_untouched"] = untouched
 
-    randomize_pd_gains(env, dr_ids, kp_range=KP_RANGE, kd_range=KD_RANGE, operation="scale")
+    sampler = env.event_manager.sampler_for("pd_gains_dr_smoke_2", "reset_dr")
+    randomize_pd_gains(env, dr_ids, sampler, kp_range=KP_RANGE, kd_range=KD_RANGE, operation="scale")
     after2 = gain_snapshot(env)
     in_band = True
     for (name, kp0, _), (_, kp2, _) in zip(base, after2):

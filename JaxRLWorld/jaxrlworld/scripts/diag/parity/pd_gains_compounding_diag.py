@@ -108,15 +108,16 @@ def main() -> int:
             )
         return escaped
 
+    sampler = env.event_manager.sampler_for("pd_gains_compounding_diag", "reset_dr")
     kp_escaped = track(
         "kp",
         entity.get_dofs_kp,
-        lambda: randomize_pd_gains(env, env_ids, kp_range=KP_RANGE, kd_range=None, operation="scale"),
+        lambda: randomize_pd_gains(env, env_ids, sampler, kp_range=KP_RANGE, kd_range=None, operation="scale"),
     )
     arm_escaped = track(
         "armature",
         entity.get_dofs_armature,
-        lambda: randomize_joint_armature(env, env_ids, armature_range=KP_RANGE, operation="scale"),
+        lambda: randomize_joint_armature(env, env_ids, sampler, armature_range=KP_RANGE, operation="scale"),
     )
 
     print("-" * 74)

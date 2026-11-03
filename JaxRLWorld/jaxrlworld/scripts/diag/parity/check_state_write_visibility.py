@@ -41,7 +41,8 @@ def check_push(env, resolved) -> None:
     rd = env.get_entity_data("robot")
     env_ids = torch.arange(env.num_envs, device=env.device)
     before = rd.root_link_lin_vel_w.clone()
-    common_ef.push_by_setting_velocity(env, env_ids, {"x": (_PUSH_X, _PUSH_X)}, asset_cfg=resolved)
+    sampler = env.event_manager.sampler_for("check_state_write_visibility", "interval")
+    common_ef.push_by_setting_velocity(env, env_ids, sampler, {"x": (_PUSH_X, _PUSH_X)}, asset_cfg=resolved)
     env._invalidate_cache()
     after_write = rd.root_link_lin_vel_w.clone()
     # What World.step does after a writer ran: forward only if the writer

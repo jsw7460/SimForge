@@ -757,10 +757,7 @@ def _probe_reset_events(env, timer: _Timer, env_ids: torch.Tensor, repeats: int)
     print("=" * 78)
     print(f'event.apply("reset"), TERM BY TERM  ({len(env_ids)} environments)')
     print("=" * 78)
-    probes = {
-        name: (lambda name=name, term=term: env.event_manager._call_event_fn(name, term, env_ids=env_ids))
-        for name, term in reset_terms
-    }
+    probes = {name: (lambda name=name: env.event_manager.run_term(name, env_ids)) for name, _term in reset_terms}
     _time_probes(timer, probes, repeats)
     _probe_reset_dr(env, timer, env_ids, repeats)
 
@@ -792,7 +789,7 @@ def _probe_reset_dr(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> 
     is_newton = env.sim_type == "newton"
     is_mujoco = env.sim_type == "mujoco"
 
-    def call_without_flush(name, term):
+    def call_without_flush(name):
         # The prologue _run_dr_batch performs: the backends write their
         # pending recompute level or notify flags into these, and raise
         # without them.
@@ -800,7 +797,7 @@ def _probe_reset_dr(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> 
             env._dr_pending_notify_flags = 0
         if is_mujoco:
             env._dr_pending_recompute_level = None
-        env.event_manager._call_event_fn(name, term, env_ids=env_ids)
+        env.event_manager.run_term(name, env_ids)
         level = env._dr_pending_recompute_level if is_mujoco else None
         flags = env._dr_pending_notify_flags if is_newton else None
         if is_newton:
@@ -809,15 +806,15 @@ def _probe_reset_dr(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> 
             del env._dr_pending_recompute_level
         return level, flags
 
-    probes = {name: (lambda name=name, term=term: call_without_flush(name, term)) for name, term in dr_terms}
+    probes = {name: (lambda name=name: call_without_flush(name)) for name, _term in dr_terms}
     _time_probes(timer, probes, repeats)
 
     # What the terms between them ask the model to redo, then the cost of
     # doing it once.
     level = None
     flags = 0
-    for name, term in dr_terms:
-        term_level, term_flags = call_without_flush(name, term)
+    for name, _term in dr_terms:
+        term_level, term_flags = call_without_flush(name)
         if term_level is not None and (level is None or term_level > level):
             level = term_level
         if term_flags:
