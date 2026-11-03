@@ -15,7 +15,9 @@ presets. One simulator per process (the backends do not share one):
     jaxpy -m jaxrlworld.scripts.diag.dr.keyed_dr_cross_sim --preset go2 --sim newton --num-envs 4096 --out parity_out/keyed_dr
     jaxpy -m jaxrlworld.scripts.diag.dr.keyed_dr_cross_sim --compare parity_out/keyed_dr
 
-``--compare`` reads every dump in the directory and, per term and draw,
+Two dumps of one simulator (``--tag a`` / ``--tag b``) check that two
+processes draw the same values. ``--compare`` reads every dump in the
+directory and, per term and draw,
 reports whether the simulators agree (bitwise) and whether the smaller
 run is a prefix of the larger. A draw whose shape differs between
 backends (a backend's own shape or dof order, e.g. Newton's per-shape
@@ -78,7 +80,7 @@ def record(args) -> int:
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{args.sim}_n{args.num_envs}"
+    stem = f"{args.sim}_n{args.num_envs}" + (f"_{args.tag}" if args.tag else "")
     arrays = {}
     index = []
     per_term_count: dict[str, int] = {}
@@ -100,8 +102,10 @@ def record(args) -> int:
     (out_dir / f"{stem}.json").write_text(json.dumps(meta, indent=1))
     print(f"recorded {len(draws)} draws of {len(per_term_count)} terms -> {out_dir / stem}.npz")
     for name, count in per_term_count.items():
-        shapes = [d["shape"] for d in index if d["term"] == name]
-        print(f"  {name:<32} {count} draw(s)  shapes {shapes}")
+        rows = [d for d in index if d["term"] == name]
+        shapes = [d["shape"] for d in rows]
+        spans = [f"[{arrays[d['key']].min():.4g}, {arrays[d['key']].max():.4g}]" for d in rows]
+        print(f"  {name:<32} {count} draw(s)  shapes {shapes}  ranges {spans}")
     return 0
 
 
@@ -199,6 +203,9 @@ def main() -> int:
     ap.add_argument("--sim", default="newton", choices=("genesis", "newton", "mujoco"))
     ap.add_argument("--num-envs", type=int, default=1024)
     ap.add_argument("--out", default="parity_out/keyed_dr", help="record: directory for the dump")
+    ap.add_argument(
+        "--tag", default="", help="record: suffix for the dump name (two runs of one sim: --tag a / --tag b)"
+    )
     ap.add_argument("--compare", default=None, help="compare the dumps in this directory instead of recording")
     ap.add_argument("--bench", action="store_true", help="time a keyed draw against torch.rand and exit")
     args = ap.parse_args()
