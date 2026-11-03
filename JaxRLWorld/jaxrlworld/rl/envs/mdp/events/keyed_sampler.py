@@ -99,6 +99,55 @@ def _fold_int(h: int, c: int) -> int:
     return _splitmix64_int(h ^ ((c * _COORD_MUL) & _MASK64))
 
 
+def _split_coords(coords: tuple, device: torch.device) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    """Fold the leading Python ints on the host; return that seed as a device
+    scalar plus the remaining coords as int64 tensors (a trailing int becomes
+    a 0-d tensor so it folds in place)."""
+    h_int = 0
+    i = 0
+    while i < len(coords) and not isinstance(coords[i], torch.Tensor):
+        h_int = _fold_int(h_int, int(coords[i]) & _MASK64)
+        i += 1
+    h0 = torch.tensor(_as_int64(h_int), dtype=torch.int64, device=device)
+    tensors = []
+    for c in coords[i:]:
+        if isinstance(c, torch.Tensor):
+            tensors.append(c.to(device=device, dtype=torch.int64))
+        else:
+            tensors.append(torch.tensor(_as_int64(int(c)), dtype=torch.int64, device=device))
+    return h0, tensors
+
+
+def _fold_tensors(h: torch.Tensor, *coords: torch.Tensor) -> torch.Tensor:
+    for c in coords:
+        h = _splitmix64(h ^ (c * _as_int64(_COORD_MUL)))
+    return h
+
+
+def _fold_uniform(h: torch.Tensor, *coords: torch.Tensor) -> torch.Tensor:
+    bits = _lsr(_fold_tensors(h, *coords), 11)
+    return (bits.to(torch.float64) / _TWO_POW_53).to(torch.float32)
+
+
+# The fold is ~15 elementwise int64 ops per coordinate; eager torch launches
+# each as its own kernel, which on a GPU costs more than the arithmetic
+# (0.45 ms for an 8192-env draw, launch-bound). Compiled, one draw is one
+# fused kernel. One program per coordinate count, with symbolic shapes so a
+# resetting subset of any size reuses it. CPU stays eager (the gates run
+# there without a compiler toolchain); the results are identical.
+_COMPILED_FOLD_UNIFORM: dict[int, object] = {}
+
+
+def _fold_uniform_on(device: torch.device, n_coords: int):
+    if device.type != "cuda":
+        return _fold_uniform
+    fn = _COMPILED_FOLD_UNIFORM.get(n_coords)
+    if fn is None:
+        fn = torch.compile(_fold_uniform, dynamic=True, fullgraph=True)
+        _COMPILED_FOLD_UNIFORM[n_coords] = fn
+    return fn
+
+
 def keyed_bits(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
     """Fold integer ``coords`` into one int64 hash per broadcast element.
 
@@ -106,27 +155,25 @@ def keyed_bits(*coords: int | torch.Tensor, device: torch.device) -> torch.Tenso
     The fold is sequential, so the same coordinates in a different order
     are a different key. Leading Python ints are folded on the host, so
     a draw whose only tensor coords are the env axis launches no
-    per-scalar device copies.
+    per-scalar device copies. Eager on every device (the reference path
+    the gate checks against NumPy).
     """
-    h_int = 0
-    i = 0
-    while i < len(coords) and not isinstance(coords[i], torch.Tensor):
-        h_int = _fold_int(h_int, int(coords[i]) & _MASK64)
-        i += 1
-    h = torch.tensor(_as_int64(h_int), dtype=torch.int64, device=device)
-    for c in coords[i:]:
-        if isinstance(c, torch.Tensor):
-            c = c.to(device=device, dtype=torch.int64)
-        else:
-            c = torch.tensor(_as_int64(int(c)), dtype=torch.int64, device=device)
-        h = _splitmix64(h ^ (c * _as_int64(_COORD_MUL)))
-    return h
+    h0, tensors = _split_coords(coords, device)
+    return _fold_tensors(h0, *tensors)
 
 
 def keyed_uniform(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
-    """Uniforms in ``[0, 1)`` from the top 53 bits of :func:`keyed_bits`, as float32."""
-    bits = _lsr(keyed_bits(*coords, device=device), 11)
-    return (bits.to(torch.float64) / _TWO_POW_53).to(torch.float32)
+    """Uniforms in ``[0, 1)`` from the top 53 bits of :func:`keyed_bits`, as float32.
+
+    On CUDA the fold and the conversion run as one compiled kernel."""
+    h0, tensors = _split_coords(coords, device)
+    return _fold_uniform_on(device, len(tensors))(h0, *tensors)
+
+
+def keyed_uniform_eager(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
+    """:func:`keyed_uniform` without the compiled path (for checking it)."""
+    h0, tensors = _split_coords(coords, device)
+    return _fold_uniform(h0, *tensors)
 
 
 def term_id(name: str) -> int:
