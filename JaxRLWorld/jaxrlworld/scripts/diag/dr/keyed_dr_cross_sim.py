@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from jaxrlworld.rl.envs.mdp.events.keyed_sampler import STAGE_IDS, TermSampler, keyed_uniform_eager, term_id
+from jaxrlworld.rl.envs.mdp.events.keyed_sampler import STAGE_IDS, TermSampler, term_id
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "go2": ("jaxrlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
@@ -189,12 +189,6 @@ def bench(args) -> int:
             torch.cuda.synchronize()
         return (time.perf_counter() - t0) / reps * 1e3
 
-    if device.type == "cuda":
-        eager = keyed_uniform_eager(
-            1, sampler.term_id, 3, 0, ids[:, None], sampler.counter[ids][:, None], coords[0], device=device
-        )
-        fused = sampler.uniforms(ids, coords)
-        print(f"compiled fold == eager fold: {torch.equal(eager, fused)}")
     keyed = timed(lambda: sampler.draw(0.5, 1.5, ids, coords))
     keyed_shared = timed(lambda: sampler.draw(0.5, 1.5, ids))
     keyed_gauss = timed(lambda: sampler.draw(0.5, 1.5, ids, coords, "gaussian"))

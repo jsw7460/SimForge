@@ -129,25 +129,6 @@ def _fold_uniform(h: torch.Tensor, *coords: torch.Tensor) -> torch.Tensor:
     return (bits.to(torch.float64) / _TWO_POW_53).to(torch.float32)
 
 
-# The fold is ~15 elementwise int64 ops per coordinate; eager torch launches
-# each as its own kernel, which on a GPU costs more than the arithmetic
-# (0.45 ms for an 8192-env draw, launch-bound). Compiled, one draw is one
-# fused kernel. One program per coordinate count, with symbolic shapes so a
-# resetting subset of any size reuses it. CPU stays eager (the gates run
-# there without a compiler toolchain); the results are identical.
-_COMPILED_FOLD_UNIFORM: dict[int, object] = {}
-
-
-def _fold_uniform_on(device: torch.device, n_coords: int):
-    if device.type != "cuda":
-        return _fold_uniform
-    fn = _COMPILED_FOLD_UNIFORM.get(n_coords)
-    if fn is None:
-        fn = torch.compile(_fold_uniform, dynamic=True, fullgraph=True)
-        _COMPILED_FOLD_UNIFORM[n_coords] = fn
-    return fn
-
-
 def keyed_bits(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
     """Fold integer ``coords`` into one int64 hash per broadcast element.
 
@@ -155,23 +136,14 @@ def keyed_bits(*coords: int | torch.Tensor, device: torch.device) -> torch.Tenso
     The fold is sequential, so the same coordinates in a different order
     are a different key. Leading Python ints are folded on the host, so
     a draw whose only tensor coords are the env axis launches no
-    per-scalar device copies. Eager on every device (the reference path
-    the gate checks against NumPy).
+    per-scalar device copies.
     """
     h0, tensors = _split_coords(coords, device)
     return _fold_tensors(h0, *tensors)
 
 
 def keyed_uniform(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
-    """Uniforms in ``[0, 1)`` from the top 53 bits of :func:`keyed_bits`, as float32.
-
-    On CUDA the fold and the conversion run as one compiled kernel."""
-    h0, tensors = _split_coords(coords, device)
-    return _fold_uniform_on(device, len(tensors))(h0, *tensors)
-
-
-def keyed_uniform_eager(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
-    """:func:`keyed_uniform` without the compiled path (for checking it)."""
+    """Uniforms in ``[0, 1)`` from the top 53 bits of :func:`keyed_bits`, as float32."""
     h0, tensors = _split_coords(coords, device)
     return _fold_uniform(h0, *tensors)
 
