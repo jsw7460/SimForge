@@ -328,9 +328,7 @@ class ViserPlayViewer(PlayViewerBase):
         # at runtime via the "Lock motion" checkbox below.
         self._set_motion_lock(True)
 
-        from pathlib import Path
-
-        clip_names = [Path(p).stem for p in motion_cmd.cfg.motion_files]
+        clip_names = list(motion_cmd.motion_names)
         n_clips = motion_cmd._n_motions
         # Reflect whichever clip env 0 is currently tracking so the
         # dropdown's initial value matches sim state.
