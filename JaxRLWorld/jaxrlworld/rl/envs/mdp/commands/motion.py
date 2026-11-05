@@ -152,6 +152,19 @@ class MotionLoader:
 
 _PACK_CHUNK_FRAMES = 1_000_000
 
+# Loaded sets, shared by every command term of one process that asks for the
+# same clips on the same device (a training env and an evaluation env of the
+# same run); the buffers are read-only once loaded, and a large set (a
+# motion pack of a hundred hours) must not be held twice.
+_LOADED: dict[tuple, tuple[dict[str, torch.Tensor], list[str], list[int], float]] = {}
+
+
+def _load_shared(key: tuple, load) -> tuple[dict[str, torch.Tensor], list[str], list[int], float]:
+    if key not in _LOADED:
+        _LOADED[key] = load()
+    arrays, names, lengths, fps = _LOADED[key]
+    return dict(arrays), list(names), list(lengths), fps
+
 
 def _load_files(
     motion_files: tuple[str, ...],
@@ -396,11 +409,14 @@ class MotionCommand(CommandTerm):
     def _load_motions(self, cfg: MotionCommandCfg, joint_names: tuple[str, ...]) -> None:
         """Fill the concatenated per-frame buffers and the clip bookkeeping
         from ``cfg.motion_files`` or ``cfg.motion_pack``."""
+        device = str(torch.device(self.device))
         if cfg.motion_pack is not None:
             if cfg.motion_files:
                 raise ValueError("MotionCommandCfg: give motion_files or motion_pack, not both")
-            arrays, names, lengths, fps = _load_pack(
-                cfg.motion_pack, cfg.motion_pack_clips, cfg.body_names, joint_names, self.device
+            key = ("pack", cfg.motion_pack, cfg.motion_pack_clips, tuple(cfg.body_names), tuple(joint_names), device)
+            arrays, names, lengths, fps = _load_shared(
+                key,
+                lambda: _load_pack(cfg.motion_pack, cfg.motion_pack_clips, cfg.body_names, joint_names, self.device),
             )
         else:
             if not cfg.motion_files:
@@ -410,7 +426,10 @@ class MotionCommand(CommandTerm):
                 )
             if cfg.motion_pack_clips is not None:
                 raise ValueError("MotionCommandCfg.motion_pack_clips needs motion_pack")
-            arrays, names, lengths, fps = _load_files(cfg.motion_files, cfg.body_names, joint_names, self.device)
+            key = ("files", tuple(cfg.motion_files), tuple(cfg.body_names), tuple(joint_names), device)
+            arrays, names, lengths, fps = _load_shared(
+                key, lambda: _load_files(cfg.motion_files, cfg.body_names, joint_names, self.device)
+            )
         self._concat_joint_pos = arrays["joint_pos"]
         self._concat_joint_vel = arrays["joint_vel"]
         self._concat_body_pos_w = arrays["body_pos_w"]
@@ -1028,8 +1047,31 @@ class MotionCommand(CommandTerm):
         """
         if motion_id < 0 or motion_id >= self._n_motions:
             raise IndexError(f"motion_id {motion_id} out of range for {self._n_motions} loaded motion(s).")
-        self.motion_ids[env_ids] = int(motion_id)
-        self.time_steps[env_ids] = int(frame)
+        self.reset_to_frames(
+            env_ids,
+            torch.full_like(env_ids, int(motion_id)),
+            torch.full_like(env_ids, int(frame)),
+        )
+
+    def reset_to_frames(
+        self,
+        env_ids: torch.Tensor,
+        motion_ids: torch.Tensor,
+        frames: torch.Tensor,
+    ) -> None:
+        """:meth:`reset_to_frame` with one ``(motion, frame)`` pair per env.
+
+        ``motion_ids`` and ``frames`` are ``(len(env_ids),)`` integer
+        tensors; every frame must lie inside its clip.
+        """
+        motion_ids = motion_ids.to(self.motion_ids.dtype)
+        frames = frames.to(self.time_steps.dtype)
+        if bool((motion_ids < 0).any()) or bool((motion_ids >= self._n_motions).any()):
+            raise IndexError(f"motion ids out of range for {self._n_motions} loaded motion(s)")
+        if bool((frames < 0).any()) or bool((frames >= self._motion_lengths[motion_ids]).any()):
+            raise IndexError("frames out of range of their clips")
+        self.motion_ids[env_ids] = motion_ids
+        self.time_steps[env_ids] = frames
         self._write_reference_state_to_sim(
             env_ids,
             self.body_pos_w[env_ids, 0],
