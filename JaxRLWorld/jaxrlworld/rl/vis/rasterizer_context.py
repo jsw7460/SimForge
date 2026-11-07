@@ -69,9 +69,13 @@ class RLWorldRasterizerContext(RasterizerContext):
             config = settings.command_arrow_config or CommandArrowConfig()
             self._overlays_3d["command_arrow"] = CommandArrowOverlay(context=self, config=config)
 
-    def update(self, force_render: bool = False):
-        """Update context and render 3D overlays."""
-        super().update(force_render)
+    def update(self, force_render: bool = False, solvers=None):
+        """Update context and render 3D overlays.
+
+        ``solvers`` narrows the node sync to the solvers whose state changed, as
+        Genesis's own ``update`` does; the visualizer passes it by keyword.
+        """
+        super().update(force_render, solvers)
 
         # Collect state from environment
         if self._env is not None:
@@ -213,8 +217,17 @@ def inject_into_scene(
     new_context.static_nodes = old_context.static_nodes
     new_context.dynamic_nodes = old_context.dynamic_nodes
     new_context.external_nodes = old_context.external_nodes
+    new_context.vverts_nodes = old_context.vverts_nodes
     new_context.seg_node_map = old_context.seg_node_map
     new_context.seg_color_map = old_context.seg_color_map
+    # Per-link AABB sizes, computed by ``on_rigid()`` inside ``build()`` and read when contacts are drawn.
+    new_context.links_init_AABB_size = old_context.links_init_AABB_size
+    # ``build()`` also records which node updater belongs to which solvers, as bound methods of the context
+    # that ran it. Rebind the same table onto the new context so its own overrides are the ones called.
+    new_context._updates_solvers = tuple(
+        (getattr(new_context, update.__name__), update_solvers)
+        for update, update_solvers in old_context._updates_solvers
+    )
 
     # Copy rendering state (buffer management moved to JIT renderer in Genesis v0.4.6).
     # ``rendered_envs_mask`` is derived from ``rendered_envs_idx`` inside ``build()``, which the
