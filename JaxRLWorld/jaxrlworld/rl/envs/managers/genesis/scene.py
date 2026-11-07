@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import genesis as gs
-import mujoco
 import torch
 import trimesh
 
@@ -402,6 +401,15 @@ class SceneManager(BaseManager):
         still diverging -- and a gripper closing on a tool is exactly that
         pair.
 
+        Every entity qualifies because Genesis keeps the masks an MJCF
+        authors: ``<contact><exclude>`` pairs travel in
+        ``RigidLinkDescription.contact_exclusions`` and the collider drops
+        them next to weld filtering (Genesis #3704), so the bits read here
+        are the author's in every file, exclusions or not. Earlier Genesis
+        folded exclusions into a fresh z3 bit assignment that was only
+        valid within one entity, and this used to guard against it per
+        asset.
+
         THE INVARIANT THIS ASSUMES, for whoever adds the next asset: within
         one scene, a non-default contype / conaffinity BIT means the same
         thing in every asset. K1 spends bit 4 on "foot shell"; a second
@@ -430,68 +438,7 @@ class SceneManager(BaseManager):
                     "collision masks; find its replacement rather than letting the "
                     "assignment below quietly create a field nothing reads."
                 )
-            source = self._entity_mjcf_path(name)
-            if source is None or self._authored_masks_survive_import(entity, source):
-                setattr(entity, self.LOCAL_COLLISION_MASK_FLAG, False)
-
-    @staticmethod
-    def _authored_masks_survive_import(entity, mjcf_path: str) -> bool:
-        """Are this asset's contype / conaffinity still the ones its author wrote?
-
-        Only then may they be compared against another entity's.
-
-        MuJoCo forbids a pair two ways -- the masks, and a separate
-        ``<contact><exclude>`` list it keeps as ``exclude_signature``.
-        Genesis's collider has only the masks, so when an MJCF carries
-        exclusions it folds both into one field: it collects every
-        forbidden pair and hands them to a z3 solve for a fresh, minimal
-        bit assignment, overwriting what the author wrote
-        (``genesis/utils/mjcf.py``, guarded by ``if mj.nexclude:``, and
-        ``genesis/utils/collision.py:solve_contype_conaffinity``).
-
-        That assignment is exactly right for the pairs it was given, and
-        those are this entity's geoms alone. Nothing in the solve mentions
-        the ground or a prop, so the bits it hands out have no relationship
-        to theirs. T1 measured: its trunk came back 2/0 against a 1/1
-        ground, `(2 & 1) | (1 & 0) == 0`, and the trunk stopped touching
-        the floor -- while the feet drew 3/3 and were fine. Not a rule,
-        a coincidence per geom.
-
-        So the predicate here is the one Genesis itself branches on. An
-        asset with no exclusions keeps the masks its author wrote and can
-        be read across entities; an asset with exclusions cannot, and
-        keeps Genesis's own guard.
-
-        Unless Genesis has been taught to keep exclusions in a list of
-        their own, in which case it never rewrites and every asset
-        qualifies. That is what the attribute probe below asks.
-
-        What that costs: an asset that uses BOTH exclusions AND masks
-        meant to reach another entity gets the guard, and the second
-        intent is silently dropped. No asset here does -- K1 is the only
-        one spending non-default bits and it declares no exclusions -- and
-        ``scripts/diag/contact_pair_parity_diag.py`` is what would catch a
-        new one, since the three backends would stop agreeing about which
-        geoms touch. The real fix is upstream: give Genesis a pair-exclude
-        list of its own, as MuJoCo and Newton both have, and the masks
-        never need to carry two meanings at once.
-        """
-        # A Genesis that carries exclusions in their own list never rewrote
-        # the masks, whatever the file declares. Probed rather than assumed
-        # so this holds against a stock Genesis too: there the attribute is
-        # absent and the exclusion count decides, as it must.
-        if hasattr(entity, "_excluded_link_names"):
-            return True
-        return not mujoco.MjSpec.from_file(mjcf_path).excludes
-
-    def _entity_mjcf_path(self, name: str) -> str | None:
-        """The MJCF this entity came from, or None if it came from a URDF.
-
-        A URDF has no exclusion list to fold in, so Genesis leaves its
-        masks alone and they may be compared across entities.
-        """
-        cfg = self.config.entities.get(name)
-        return None if cfg is None else cfg.mjcf_path
+            setattr(entity, self.LOCAL_COLLISION_MASK_FLAG, False)
 
     def build_scene(self):
         # Before build: the collider reads the flag when it assembles its
