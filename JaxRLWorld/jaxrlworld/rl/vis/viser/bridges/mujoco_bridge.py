@@ -69,6 +69,51 @@ def _geom_to_trimesh(model: mujoco.MjModel, geom_id: int) -> trimesh.Trimesh | N
     return None  # HFIELD / SDF / other — skip
 
 
+def mjmodel_body_mesh_groups(m: mujoco.MjModel) -> list[BodyMeshGroup]:
+    """Per-body visual meshes of a compiled ``MjModel``, one group per MuJoCo body id.
+
+    Visible, non-collision geoms of every non-world body, each geom's local
+    pose (``geom_pos`` / ``geom_quat``, wxyz) baked into its vertices so a
+    body's own pose is all a frame update needs.
+    """
+    groups: dict[int, BodyMeshGroup] = {}
+    for gid in range(m.ngeom):
+        if float(m.geom_rgba[gid, 3]) == 0.0:
+            continue  # invisible
+        if int(m.geom_group[gid]) == _COLLISION_GROUP:
+            continue  # collision geometry
+        bid = int(m.geom_bodyid[gid])
+        if bid == 0:
+            continue  # world-body decoration (ground/skybox) — ViserScene owns the ground
+        mesh = _geom_to_trimesh(m, gid)
+        if mesh is None:
+            continue
+        mesh = mesh.copy()
+        rgba8 = np.clip(np.asarray(m.geom_rgba[gid]) * 255.0, 0, 255).astype(np.uint8)
+        mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, face_colors=np.tile(rgba8, (len(mesh.faces), 1)))
+        # Bake the geom's local pose into vertices so the body's frame
+        # is the only thing that needs per-frame updating.
+        local_pos = np.asarray(m.geom_pos[gid], dtype=np.float64)
+        local_quat_wxyz = np.asarray(m.geom_quat[gid], dtype=np.float64)
+        if not (np.allclose(local_pos, 0.0) and np.allclose(local_quat_wxyz, _IDENTITY_QUAT_WXYZ)):
+            w, x, y, z = local_quat_wxyz
+            rot = Rotation.from_quat([x, y, z, w]).as_matrix()
+            mesh.vertices = (rot @ np.asarray(mesh.vertices).T).T + local_pos
+        grp = groups.get(bid)
+        if grp is None:
+            name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid) or f"body_{bid}"
+            grp = BodyMeshGroup(
+                body_id=bid,
+                body_name=name,
+                is_fixed=False,
+                meshes=[],
+            )
+            groups[bid] = grp
+        grp.meshes.append(mesh)
+
+    return list(groups.values())
+
+
 class MujocoBridge(SimulatorBridge):
     """Bridge between mjlab's MuJoCo backend and ViserScene."""
 
@@ -107,42 +152,7 @@ class MujocoBridge(SimulatorBridge):
         take the cheap ``handle.position = body_pos`` branch.
         """
         m = self._model
-        groups: dict[int, BodyMeshGroup] = {}
-        for gid in range(m.ngeom):
-            if float(m.geom_rgba[gid, 3]) == 0.0:
-                continue  # invisible
-            if int(m.geom_group[gid]) == _COLLISION_GROUP:
-                continue  # collision geometry
-            bid = int(m.geom_bodyid[gid])
-            if bid == 0:
-                continue  # world-body decoration (ground/skybox) — ViserScene owns the ground
-            mesh = _geom_to_trimesh(m, gid)
-            if mesh is None:
-                continue
-            mesh = mesh.copy()
-            rgba8 = np.clip(np.asarray(m.geom_rgba[gid]) * 255.0, 0, 255).astype(np.uint8)
-            mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, face_colors=np.tile(rgba8, (len(mesh.faces), 1)))
-            # Bake the geom's local pose into vertices so the body's frame
-            # is the only thing that needs per-frame updating.
-            local_pos = np.asarray(m.geom_pos[gid], dtype=np.float64)
-            local_quat_wxyz = np.asarray(m.geom_quat[gid], dtype=np.float64)
-            if not (np.allclose(local_pos, 0.0) and np.allclose(local_quat_wxyz, _IDENTITY_QUAT_WXYZ)):
-                w, x, y, z = local_quat_wxyz
-                rot = Rotation.from_quat([x, y, z, w]).as_matrix()
-                mesh.vertices = (rot @ np.asarray(mesh.vertices).T).T + local_pos
-            grp = groups.get(bid)
-            if grp is None:
-                name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, bid) or f"body_{bid}"
-                grp = BodyMeshGroup(
-                    body_id=bid,
-                    body_name=name,
-                    is_fixed=False,
-                    meshes=[],
-                )
-                groups[bid] = grp
-            grp.meshes.append(mesh)
-
-        mesh_groups = list(groups.values())
+        mesh_groups = mjmodel_body_mesh_groups(m)
 
         # Generated terrain is an ``<hfield>`` geom, which ``_geom_to_trimesh``
         # skips (MuJoCo hfields aren't a renderable vertex mesh). Render the

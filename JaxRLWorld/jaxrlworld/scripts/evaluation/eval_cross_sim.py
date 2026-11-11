@@ -64,7 +64,12 @@ def main():
         default=None,
         help="Iteration of the W&B checkpoint artifact to evaluate (default: the latest)",
     )
-    parser.add_argument("--eval_sim", type=str, required=True, choices=["genesis", "newton", "mujoco"])
+    parser.add_argument(
+        "--eval_sim",
+        type=str,
+        required=True,
+        help="genesis, newton, mujoco, or the sim_type of a backend another package registers",
+    )
     parser.add_argument(
         "--num_envs",
         type=int,
