@@ -204,7 +204,11 @@ def bench(args) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--preset", default="go2", help="table key or module:Class")
-    ap.add_argument("--sim", default="newton", choices=("genesis", "newton", "mujoco"))
+    ap.add_argument(
+        "--sim",
+        default="newton",
+        help="genesis, newton, mujoco, or the sim_type of a backend another package registers",
+    )
     ap.add_argument("--num-envs", type=int, default=1024)
     ap.add_argument("--out", default="parity_out/keyed_dr", help="record: directory for the dump")
     ap.add_argument(
