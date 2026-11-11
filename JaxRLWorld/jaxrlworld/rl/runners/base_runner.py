@@ -2,7 +2,6 @@ import os
 import shutil
 import time
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Callable, Dict
 
 if TYPE_CHECKING:
@@ -15,10 +14,11 @@ import torch
 
 from jaxrlworld.rl.algorithms.base import ActInput, RLAlgorithm
 from jaxrlworld.rl.configs import ConfigsForRun
-from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
+from jaxrlworld.rl.configs.eval_mode import in_training_eval_configs
 from jaxrlworld.rl.envs import EpisodeStatsCollector, World
 from jaxrlworld.rl.envs.backends import resolve_env_class
 from jaxrlworld.rl.envs.utils.lazy_import_check import assert_single_sim_loaded
+from jaxrlworld.rl.runners.eval_worker import EvalWorker, eval_worker_dir
 from jaxrlworld.rl.runners.iteration_data import EpisodeStats, IterationData
 from jaxrlworld.rl.utils import setup_log_dir
 from jaxrlworld.rl.utils.console import GREEN, RESET
@@ -267,6 +267,9 @@ class BaseRunner(ABC):
 
         # Last eval stats (persisted across iterations for console display)
         self._last_eval_stats: Dict[str, Any] | None = None
+        # Evaluation worker processes, started on first use by a backend
+        # that allows one env per process (see ``_run_evaluation_in_workers``).
+        self._eval_workers: Dict[str, EvalWorker] | None = None
 
         # Initialize environment
         self.reward_statistics = EpisodeStatsCollector(
@@ -407,6 +410,9 @@ class BaseRunner(ABC):
         """Clean up resources."""
         if self.wandb_logger:
             self.wandb_logger.close()
+        if self._eval_workers is not None:
+            for worker in self._eval_workers.values():
+                worker.close()
 
     @abstractmethod
     def _init_storage(self):
@@ -455,26 +461,14 @@ class BaseRunner(ABC):
     # ==================== In-Training Evaluation ====================
 
     def _create_eval_configs(self) -> ConfigsForRun:
-        """Create evaluation config by modifying a copy of training config."""
-        eval_cfgs = deepcopy(self.cfgs)
+        """Create evaluation config by modifying a copy of training config.
 
-        # Use fewer envs for evaluation
-        eval_cfgs.env.num_envs = self.runner_cfg.eval_num_envs
-
-        # The same evaluation mode as the offline evaluator, behind the two
-        # runner flags: observation noise off, and every randomizing or
-        # disturbing event term (interval, interval_dr, reset_dr) removed.
-        apply_eval_mode(
-            eval_cfgs,
-            disable_noise=self.runner_cfg.eval_disable_noise,
-            disable_events=self.runner_cfg.eval_disable_interval_events,
-        )
-
-        # Disable viewer
-        eval_cfgs.visualization.show_viewer = False
-        eval_cfgs.visualization.record_video = False
-
-        return eval_cfgs
+        Fewer envs, the offline evaluator's evaluation mode behind the two
+        runner flags (observation noise off; interval, interval_dr and
+        reset_dr event terms removed), viewer off — see
+        :func:`~jaxrlworld.rl.configs.eval_mode.in_training_eval_configs`.
+        """
+        return in_training_eval_configs(self.cfgs)
 
     def _get_or_create_eval_env(self) -> World:
         """Lazily create eval environment on first use.
@@ -679,18 +673,49 @@ class BaseRunner(ABC):
             return self._heldout_eval_envs
 
         self._heldout_eval_envs: Dict[str, World] = {}
-        extra = self.runner_cfg.eval_extra_motion_files
-        for label, files in extra.items():
-            if not files:
-                continue
-            cfgs = self._create_eval_configs()
-            motion = cfgs.command.terms.get("motion")
-            if motion is None:
-                continue  # non-tracking preset: nothing to swap
-            motion.motion_files = tuple(files)
-            motion.sampling_mode = "uniform"
+        for label, cfgs in self._heldout_eval_configs().items():
             self._heldout_eval_envs[label] = self._create_env_from_config(cfgs)
         return self._heldout_eval_envs
+
+    def _heldout_eval_configs(self) -> Dict[str, ConfigsForRun]:
+        """label -> eval config for each configured held-out motion set; a
+        preset with no "motion" command term has nothing to swap and gets none."""
+        out: Dict[str, ConfigsForRun] = {}
+        for label, files in self.runner_cfg.eval_extra_motion_files.items():
+            if not files:
+                continue
+            cfgs = in_training_eval_configs(self.cfgs, heldout_motion_files=tuple(files))
+            if cfgs is not None:
+                out[label] = cfgs
+        return out
+
+    def _run_evaluation_in_workers(self, it: int) -> None:
+        """The in-training evaluation for a backend that allows one env per
+        process: the default and every held-out evaluation run in their own
+        worker process on a checkpoint of the current policy (see
+        ``runners/eval_worker.py``), logged exactly as the in-process ones."""
+        checkpoint_dir = os.path.join(self.model_log_dir, "eval_checkpoint")
+        if os.path.exists(checkpoint_dir):
+            shutil.rmtree(checkpoint_dir)
+        self._save_checkpoint_to(checkpoint_dir, it)
+        workers = self._get_or_create_eval_workers()
+        clock = self.env.env_step_counter
+        self._log_eval_stats(workers["default"].evaluate(checkpoint_dir, clock), it=it)
+        for label in self._heldout_eval_configs():
+            self._log_heldout_eval_stats(workers[f"heldout_{label}"].evaluate(checkpoint_dir, clock), label, it)
+
+    def _get_or_create_eval_workers(self) -> Dict[str, EvalWorker]:
+        """name -> worker: ``default`` plus ``heldout_<label>`` per held-out set."""
+        if self._eval_workers is None:
+            heldout = {
+                f"heldout_{label}": tuple(self.runner_cfg.eval_extra_motion_files[label])
+                for label in self._heldout_eval_configs()
+            }
+            self._eval_workers = {
+                name: EvalWorker(files, eval_worker_dir(self.model_log_dir, name), name)
+                for name, files in {"default": None, **heldout}.items()
+            }
+        return self._eval_workers
 
     def _log_heldout_eval_stats(self, eval_stats: Dict[str, Any], label: str, it: int) -> None:
         """Console + wandb logging for one held-out set, under the
@@ -928,11 +953,14 @@ class BaseRunner(ABC):
         # In-training evaluation
         eval_interval = self.runner_cfg.eval_interval
         if eval_interval > 0 and it > 0 and it % eval_interval == 0:
-            eval_stats = self._run_evaluation()
-            self._log_eval_stats(eval_stats, it=it)
-            # Held-out (generalization) eval on any configured motion sets.
-            for label, hold_env in self._get_or_create_heldout_eval_envs().items():
-                self._log_heldout_eval_stats(self._evaluate_env(hold_env), label, it)
+            if self.env.one_instance_per_process:
+                self._run_evaluation_in_workers(it)
+            else:
+                eval_stats = self._run_evaluation()
+                self._log_eval_stats(eval_stats, it=it)
+                # Held-out (generalization) eval on any configured motion sets.
+                for label, hold_env in self._get_or_create_heldout_eval_envs().items():
+                    self._log_heldout_eval_stats(self._evaluate_env(hold_env), label, it)
 
         if it % self.runner_cfg.save_interval == 0:
             self.checkpoint(it)

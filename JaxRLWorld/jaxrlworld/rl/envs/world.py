@@ -43,6 +43,12 @@ class World(ABC):
     arguments). True for the physics-simulator backends; wrappers around
     an externally owned task (ManiSkill, Gymnasium) keep False."""
 
+    one_instance_per_process: bool = False
+    """Whether the backend allows only one env per process (a simulator
+    context that is a process singleton). The runner then evaluates in
+    worker processes (``runners/eval_worker.py``) instead of building its
+    evaluation env next to the training env."""
+
     # Required attributes (set in subclass __init__)
     num_envs: int
     device: torch.device

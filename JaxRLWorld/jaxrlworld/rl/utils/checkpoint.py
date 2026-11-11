@@ -234,15 +234,8 @@ def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":
         ) from e
 
 
-def load_runner(
-    env: "World",
-    checkpoint_path: str,
-    cfgs: Optional["ConfigsForRun"] = None,
-    use_wandb: bool = False,
-) -> "BaseRunner":
-    """Load a runner from checkpoint, automatically detecting the runner class."""
-    metadata = load_checkpoint_metadata(checkpoint_path)
-
+def runner_class_from_metadata(metadata: dict) -> type:
+    """The runner class a checkpoint was trained with."""
     runner_class_name = metadata.get("runner_class")
     if runner_class_name is None:
         raise ValueError("Checkpoint missing 'runner_class' in train_state.yaml.")
@@ -252,16 +245,26 @@ def load_runner(
     # before the module was recorded name one of the runners exported here.
     runner_module = metadata.get("runner_module")
     if runner_module is not None:
-        runner_class = getattr(importlib.import_module(runner_module), runner_class_name)
-    else:
-        from jaxrlworld.rl import runners
+        return getattr(importlib.import_module(runner_module), runner_class_name)
+    from jaxrlworld.rl import runners
 
-        if not hasattr(runners, runner_class_name):
-            raise ValueError(
-                f"Unknown runner class: {runner_class_name}. "
-                f"Available: {[name for name in dir(runners) if 'Runner' in name]}"
-            )
-        runner_class = getattr(runners, runner_class_name)
+    if not hasattr(runners, runner_class_name):
+        raise ValueError(
+            f"Unknown runner class: {runner_class_name}. "
+            f"Available: {[name for name in dir(runners) if 'Runner' in name]}"
+        )
+    return getattr(runners, runner_class_name)
+
+
+def load_runner(
+    env: "World",
+    checkpoint_path: str,
+    cfgs: Optional["ConfigsForRun"] = None,
+    use_wandb: bool = False,
+) -> "BaseRunner":
+    """Load a runner from checkpoint, automatically detecting the runner class."""
+    metadata = load_checkpoint_metadata(checkpoint_path)
+    runner_class = runner_class_from_metadata(metadata)
 
     if cfgs is None:
         cfgs = load_config_from_checkpoint(metadata)
