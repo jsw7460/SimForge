@@ -54,6 +54,7 @@ class MujocoEnv(World):
     """
 
     sim_name: str = "Mujoco"
+    builds_from_manager_configs: bool = True
     sim_type: str = "mujoco"
 
     def __init__(

@@ -33,6 +33,7 @@ _NAN_TRIPWIRE = os.environ.get("JAXRLWORLD_NAN_TRIPWIRE", "0") == "1"
 
 class NewtonEnv(World):
     sim_name: str = "Newton"
+    builds_from_manager_configs: bool = True
     sim_type: str = "newton"
 
     def __init__(

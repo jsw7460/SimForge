@@ -37,6 +37,12 @@ class World(ABC):
     sim_name: str = "World"
     sim_type: str = "world"  # lowercase key for ManagerRegistry ("genesis", "newton", "mujoco")
 
+    builds_from_manager_configs: bool = False
+    """Whether the runner constructs this env from the ConfigsForRun
+    sections (``env_cfg``, ``scene_cfg``, ``obs_cfg``, ... keyword
+    arguments). True for the physics-simulator backends; wrappers around
+    an externally owned task (ManiSkill, Gymnasium) keep False."""
+
     # Required attributes (set in subclass __init__)
     num_envs: int
     device: torch.device

@@ -26,6 +26,7 @@ from jaxrlworld.rl.utils import entity_utils as _eu, set_seed
 
 class GenesisEnv(World):
     sim_name: str = "Genesis"
+    builds_from_manager_configs: bool = True
     sim_type: str = "genesis"
 
     def __init__(

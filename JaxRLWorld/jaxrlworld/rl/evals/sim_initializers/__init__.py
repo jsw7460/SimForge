@@ -5,6 +5,8 @@ from typing import Any
 
 import torch
 
+from jaxrlworld.rl.envs.backends import find_backend, find_backend_by_eval_key
+
 
 class SimInitializer(ABC):
     """ABC for simulator-specific initialization during evaluation."""
@@ -252,6 +254,10 @@ def detect_sim_type(metadata: dict) -> str:
     elif sim_type in ("mujoco", "mjlab"):
         return "MujocoEnv"
 
+    backend = find_backend(sim_type)
+    if backend is not None:
+        return backend.eval_key
+
     return "Unknown"
 
 
@@ -277,5 +283,7 @@ def get_initializer(sim_type: str) -> SimInitializer:
         from .gymnasium import GymnasiumInitializer
 
         return GymnasiumInitializer()
-    else:
+    backend = find_backend_by_eval_key(sim_type)
+    if backend is None:
         raise ValueError(f"Unknown sim_type: {sim_type}")
+    return backend.make_initializer()

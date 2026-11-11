@@ -17,6 +17,7 @@ from jaxrlworld.rl.algorithms.base import ActInput, RLAlgorithm
 from jaxrlworld.rl.configs import ConfigsForRun
 from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector, World
+from jaxrlworld.rl.envs.backends import resolve_env_class
 from jaxrlworld.rl.envs.utils.lazy_import_check import assert_single_sim_loaded
 from jaxrlworld.rl.runners.iteration_data import EpisodeStats, IterationData
 from jaxrlworld.rl.utils import setup_log_dir
@@ -39,8 +40,9 @@ class BaseRunner(ABC):
     ) -> World:
         """Create environment from config.
 
-        Dispatches on ``env_class.sim_name`` (resolved from
-        ``cfgs.env.env_name`` via ``jaxrlworld.rl.envs``).  ``cfgs.sim_type``
+        Dispatches on the env class (resolved from ``cfgs.env.env_name`` by
+        :func:`~jaxrlworld.rl.envs.backends.resolve_env_class`): its
+        ``builds_from_manager_configs`` flag, else its ``sim_name``.  ``cfgs.sim_type``
         is intentionally not consulted here: it labels the *config family*
         (a ``GenesisConfigsForRun`` keeps ``sim_type="genesis"`` even when
         ``env_name="GymnasiumEnv"``), so dispatching on it would route a
@@ -55,20 +57,19 @@ class BaseRunner(ABC):
         :class:`jaxrlworld.rl.envs.gymnasium.make_dmc_env_factory` for the
         DMC reproduction pattern.
         """
-        from jaxrlworld.rl import envs
+        # A plain name resolves through ``envs.__getattr__``, which lazily
+        # imports the matching sim package only when the class is actually
+        # requested — no other simulator gets dragged in. A
+        # ``"package.module:ClassName"`` name imports a backend from another
+        # package (see ``jaxrlworld.rl.envs.backends``).
+        env_class = resolve_env_class(cfgs.env.env_name)
 
-        env_class_name = cfgs.env.env_name
-        # ``envs.__getattr__`` lazily imports the matching sim package only
-        # when the class is actually requested — no other simulator gets
-        # dragged in.
-        env_class = getattr(envs, env_class_name)
-
-        # Dispatch on the env class's own ``sim_name`` only — ``cfgs.sim_type``
-        # tracks the *config family* (a ``GenesisConfigsForRun`` keeps
+        # Dispatch on the env class itself only — ``cfgs.sim_type`` tracks
+        # the *config family* (a ``GenesisConfigsForRun`` keeps
         # ``sim_type="genesis"`` even when ``env_name="GymnasiumEnv"``), so
         # using it here would force the Genesis sim kwargs onto a Gymnasium
         # env and raise ``TypeError: unexpected keyword argument 'num_envs'``.
-        if env_class.sim_name in ("Genesis", "Newton", "Mujoco"):
+        if env_class.builds_from_manager_configs:
             kwargs = dict(
                 num_envs=cfgs.env.num_envs,
                 env_cfg=cfgs.env,
@@ -154,7 +155,7 @@ class BaseRunner(ABC):
             )
 
         else:
-            raise NotImplementedError(f"{env_class_name} is not implemented.")
+            raise NotImplementedError(f"{cfgs.env.env_name} is not implemented.")
 
         return env
 

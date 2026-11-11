@@ -5,15 +5,17 @@ create managers via ``ManagerRegistry.create(sim_type, role, ...)``.
 
 Lazy-imported backends (Newton, MuJoCo) are registered through deferred
 callables so that heavy dependencies (warp, mjlab) are not imported until
-actually needed.
+actually needed. A backend from another package registers its managers
+through :class:`~jaxrlworld.rl.envs.backends.BackendSpec`.
 """
 
 from __future__ import annotations
 
+from jaxrlworld.rl.envs.backends import BUILTIN_SIM_TYPES, get_backend
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 
 
-def _register_common() -> None:
+def _register_common(*extra_sim_types: str) -> None:
     """Register simulator-agnostic managers shared by all backends."""
     from jaxrlworld.rl.envs.managers.common import (
         CommandManager,
@@ -26,7 +28,7 @@ def _register_common() -> None:
         TerminationManager,
     )
 
-    for sim_type in ("genesis", "newton", "mujoco"):
+    for sim_type in (*BUILTIN_SIM_TYPES, *extra_sim_types):
         ManagerRegistry.register(sim_type, "command", CommandManager, CommandManagerConfig)
         ManagerRegistry.register(sim_type, "reward", RewardManager, RewardManagerConfig)
         ManagerRegistry.register(sim_type, "termination", TerminationManager, TerminationConfig)
@@ -105,10 +107,10 @@ def register_all_for(sim_type: str) -> None:
     """Register all managers for a given sim_type.
 
     Called lazily when a backend is first used, avoiding heavy imports
-    until they are actually needed.
+    until they are actually needed. A sim_type that is not built in is
+    looked up among the external backends (:func:`get_backend`, which
+    raises ``ValueError`` for an unknown one).
     """
-    _register_common()
-
     registrars = {
         "genesis": _register_genesis,
         "newton": _register_newton,
@@ -117,5 +119,9 @@ def register_all_for(sim_type: str) -> None:
 
     registrar = registrars.get(sim_type)
     if registrar is None:
-        raise ValueError(f"Unknown sim_type={sim_type!r}. Available: {list(registrars.keys())}")
+        backend = get_backend(sim_type)
+        _register_common(sim_type)
+        backend.register_managers()
+        return
+    _register_common()
     registrar()

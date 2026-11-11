@@ -18,6 +18,11 @@ Currently exposed:
 * :func:`randomize_joint_friction`   — joint Coulomb friction
 * :func:`randomize_encoder_bias`     — joint encoder bias (sim-agnostic, obs-side)
 
+A backend from another package supplies its implementation of a term
+with :func:`jaxrlworld.rl.envs.backends.register_dr_backend`; the term's
+backend-independent checks run first, then the registered function gets
+the term's keyword arguments.
+
 These are the sole DR entry points presets should target.  Newton
 keeps a couple of *non-randomised* fixed-value setters in
 ``events/dr/newton.py`` (``set_joint_friction`` / ``set_foot_friction``)
@@ -32,6 +37,7 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.backends import get_dr_backend
 from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler, keyed_field_sampler
 from jaxrlworld.rl.envs.mdp.events.mujoco import _MujocoEnvAdapter
 
@@ -205,7 +211,17 @@ def randomize_friction(
             resolved_axes,
         )
     else:
-        raise NotImplementedError(f"randomize_friction has no backend for sim_type={env.sim_type!r}")
+        get_dr_backend("randomize_friction", env.sim_type)(
+            env,
+            env_ids,
+            sampler,
+            asset_cfg=asset_cfg,
+            friction_range=friction_range,
+            operation=operation,
+            distribution=distribution,
+            shared_random=shared_random,
+            axes=resolved_axes,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -472,7 +488,15 @@ def randomize_body_mass(
     elif env.sim_type == "mujoco":
         _mujoco_body_mass_backend(env, env_ids, sampler, asset_cfg, mass_range, operation, distribution, shared_random)
     else:
-        raise NotImplementedError(f"randomize_body_mass has no backend for sim_type={env.sim_type!r}")
+        get_dr_backend("randomize_body_mass", env.sim_type)(
+            env,
+            env_ids,
+            sampler,
+            asset_cfg=asset_cfg,
+            mass_range=mass_range,
+            operation=operation,
+            distribution=distribution,
+        )
 
 
 def _genesis_body_mass_backend(env, env_ids, sampler, resolved, mass_range, operation, distribution):
@@ -598,7 +622,9 @@ def randomize_body_com_offset(
     elif env.sim_type == "mujoco":
         _mujoco_body_com_offset_backend(env, env_ids, sampler, asset_cfg, ranges, operation, axes, shared_random)
     else:
-        raise NotImplementedError(f"randomize_body_com_offset has no backend for sim_type={env.sim_type!r}")
+        get_dr_backend("randomize_body_com_offset", env.sim_type)(
+            env, env_ids, sampler, asset_cfg=asset_cfg, ranges=ranges, operation=operation
+        )
 
 
 def _genesis_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, operation):
@@ -747,7 +773,16 @@ def randomize_pd_gains(
     elif env.sim_type == "mujoco":
         _mujoco_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution)
     else:
-        raise NotImplementedError(f"randomize_pd_gains has no backend for sim_type={env.sim_type!r}")
+        get_dr_backend("randomize_pd_gains", env.sim_type)(
+            env,
+            env_ids,
+            sampler,
+            asset_cfg=asset_cfg,
+            kp_range=kp_range,
+            kd_range=kd_range,
+            operation=operation,
+            distribution=distribution,
+        )
 
 
 def _selected_joint_ids(env, asset_cfg) -> torch.Tensor | None:
@@ -1073,7 +1108,15 @@ def randomize_joint_armature(
             env, env_ids, sampler, asset_cfg, armature_range, operation, distribution, shared_random
         )
     else:
-        raise NotImplementedError(f"randomize_joint_armature has no backend for sim_type={env.sim_type!r}")
+        get_dr_backend("randomize_joint_armature", env.sim_type)(
+            env,
+            env_ids,
+            sampler,
+            asset_cfg=asset_cfg,
+            armature_range=armature_range,
+            operation=operation,
+            distribution=distribution,
+        )
 
 
 def _genesis_armature_backend(env, env_ids, sampler, resolved, armature_range, operation, distribution):
@@ -1169,7 +1212,15 @@ def randomize_joint_friction(
             env, env_ids, sampler, asset_cfg, friction_range, operation, distribution, shared_random
         )
     else:
-        raise NotImplementedError(f"randomize_joint_friction has no backend for sim_type={env.sim_type!r}")
+        get_dr_backend("randomize_joint_friction", env.sim_type)(
+            env,
+            env_ids,
+            sampler,
+            asset_cfg=asset_cfg,
+            friction_range=friction_range,
+            operation=operation,
+            distribution=distribution,
+        )
 
 
 def _genesis_joint_friction_backend(env, env_ids, sampler, resolved, friction_range, operation, distribution):
@@ -1274,7 +1325,15 @@ def randomize_joint_damping(
             env, env_ids, sampler, asset_cfg, damping_range, operation, distribution, shared_random
         )
     else:
-        raise NotImplementedError(f"randomize_joint_damping has no backend for sim_type={env.sim_type!r}")
+        get_dr_backend("randomize_joint_damping", env.sim_type)(
+            env,
+            env_ids,
+            sampler,
+            asset_cfg=asset_cfg,
+            damping_range=damping_range,
+            operation=operation,
+            distribution=distribution,
+        )
 
 
 def _genesis_joint_damping_backend(env, env_ids, sampler, resolved, damping_range, operation, distribution):

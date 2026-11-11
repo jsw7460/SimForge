@@ -11,6 +11,7 @@ import torch
 
 from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector
+from jaxrlworld.rl.envs.backends import find_backend
 from jaxrlworld.rl.evals.policy_wrappers import PolicyWrapper
 from jaxrlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer, resolve_cross_sim_config
 from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_runner, replay_training_overrides
@@ -233,10 +234,13 @@ class PolicyEvaluator:
             return "Newton"
         elif sim_type == "mujoco":
             return "MujocoEnv"
+        backend = find_backend(sim_type)
+        if backend is not None:
+            return backend.eval_key
         raise ValueError(
             f"Cannot detect sim_type from eval_cfgs (sim_type={sim_type!r}). "
             f"eval_cfgs must be a GenesisConfigsForRun, NewtonConfigsForRun, "
-            f"or MujocoConfigsForRun."
+            f"MujocoConfigsForRun, or the ConfigsForRun of a registered external backend."
         )
 
     def _prepare_cross_sim_configs(
