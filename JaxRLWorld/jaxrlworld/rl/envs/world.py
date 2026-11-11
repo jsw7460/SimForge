@@ -946,6 +946,16 @@ class World(ABC):
         """
         pass
 
+    def _post_full_reset(self) -> None:
+        """Backend work that only a full :meth:`reset` runs, after the
+        per-env resets and :meth:`_post_reset_forward`.
+
+        A step's resets do not call it. IsaacLab's ``ManagerBasedEnv.reset``
+        runs ``scene.write_data_to_sim()`` and ``sim.forward()`` here while
+        its ``step`` runs neither; a backend on IsaacLab overrides this.
+        """
+        pass
+
     def _mark_kinematics_stale(self) -> None:
         """A state writer wrote qpos/qvel-level state whose derived kinematics
         the backend only refreshes on an explicit forward pass."""
@@ -1029,6 +1039,7 @@ class World(ABC):
         all_env_ids = torch.arange(self.num_envs, device=self.device)
         self._reset_idx(all_env_ids)
         self._post_reset_forward()
+        self._post_full_reset()
         self.command_manager.compute(dt=0.0)
         self._forward_if_kinematics_stale()
         self._invalidate_cache()
