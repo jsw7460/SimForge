@@ -19,12 +19,12 @@
 
 * NEVER: Add functionality not present in the original behavior. Refactoring must preserve behavior.
 * MUST: Before removing dead code, grep for all callers exhaustively (including legacy presets).
-* When unsure about simulator behavior, explore the `vendor/Genesis/`, `vendor/Newton/`, or `vendor/Mjlab/` directories directly to understand the source before implementing.
+* When unsure about simulator behavior, explore the `vendor/Genesis/`, `vendor/Newton/`, `vendor/Mjlab/`, or `vendor/IsaacLab/` directories directly to understand the source before implementing.
 
 ## Git / Workflow
 
 * Write descriptive commit messages useful for future reference.
-* MonoRepo: `JaxRLWorld/` lives inside `SimForge/` (git tracked); the simulators are git submodules under `vendor/` (`vendor/Genesis/`, `vendor/Newton/`, `vendor/Mjlab/`), pinned by gitlink. Move or rename a submodule only with `git mv`, which also rewrites `.gitmodules` and the submodule's worktree pointer.
+* MonoRepo: `JaxRLWorld/` lives inside `SimForge/` (git tracked); the simulators are git submodules under `vendor/` (`vendor/Genesis/`, `vendor/Newton/`, `vendor/Mjlab/`, `vendor/IsaacLab/`), pinned by gitlink. Move or rename a submodule only with `git mv`, which also rewrites `.gitmodules` and the submodule's worktree pointer.
 * In `.gitignore`, other root-level directories must be root-relative (`/IsaacLab/`, `/third_party/`) to avoid macOS case-insensitivity issues.
 * Keep commits focused and atomic — one logical change per commit.
 * Reference related issues in commit messages when applicable.

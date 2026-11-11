@@ -10,3 +10,7 @@
 	path = vendor/Genesis
 	url = https://github.com/jsw7460/Genesis.git
 	branch = feature/mjcf-contact-exclude-pair-list
+[submodule "IsaacLab"]
+	path = vendor/IsaacLab
+	url = https://github.com/jsw7460/IsaacLab.git
+	branch = main
