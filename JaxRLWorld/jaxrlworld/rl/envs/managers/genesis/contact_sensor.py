@@ -104,7 +104,10 @@ class GenesisContactListReader:
         the zero-copy path and must be masked).
         """
         solver = self._env.scene_manager.scene.sim.rigid_solver
-        cd = solver.collider.get_contacts(as_tensor=True, to_torch=True)
+        # ``is_padded``: the fixed-capacity buffers, untrimmed. Trimming to the
+        # live maximum costs Genesis a device->host read of that maximum every
+        # substep; the rows past each env's counter are masked out below anyway.
+        cd = solver.collider.get_contacts(as_tensor=True, to_torch=True, is_padded=True)
         n_live = qd_to_torch(solver.collider.collider_state.n_contacts, copy=False)
         return cd["link_a"], cd["link_b"], cd["force"], n_live
 
