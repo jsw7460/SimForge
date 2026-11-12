@@ -63,10 +63,14 @@ class GenesisRobotStateWriter:
         self._entity = entity
         self._dofs = dofs
         self._num_envs = env.num_envs
-        # The solver's reference configuration of this entity, (num_envs, n_qs), as a live view: a joint's
-        # configuration is this plus its DOF position (see the module docstring).
+        # The solver's reference configuration of the selected DOFs, (num_envs, n_sel), as a live view when the
+        # selection is a range: a joint's configuration is this plus its DOF position (see the module docstring).
         qpos0 = qd_to_torch(entity.solver.rigid_info.qpos0, transpose=True, copy=False)
-        self._qpos0 = qpos0[:, entity.q_start : entity.q_start + entity.n_qs]
+        qs = dofs.qs
+        if isinstance(qs, range):
+            self._qpos0 = qpos0[:, entity.q_start + qs.start : entity.q_start + qs.stop]
+        else:
+            self._qpos0 = qpos0[:, entity.q_start + qs]
 
     # ------------------------------------------------------------------
     # Env selection
@@ -75,9 +79,9 @@ class GenesisRobotStateWriter:
     def _mask(self, env_ids: Tensor | None) -> Tensor | None:
         if env_ids is None:
             return None
-        mask = torch.zeros(self._num_envs, dtype=torch.bool, device=env_ids.device)
-        mask[env_ids] = True
-        return mask
+        # index_fill_ takes the value as a kernel scalar; ``mask[env_ids] = True`` would first copy a host scalar
+        # to the device, which synchronises.
+        return torch.zeros(self._num_envs, dtype=torch.bool, device=env_ids.device).index_fill_(0, env_ids, True)
 
     def _rows(self, env_ids: Tensor | None, values: Tensor) -> Tensor:
         """``values`` (one row per entry of ``env_ids``) scattered into a buffer with one row per env."""
@@ -109,10 +113,7 @@ class GenesisRobotStateWriter:
         """
         rows = self._rows(env_ids, self._dofs.to_sim_order(values))
         self._entity.set_qpos(
-            rows + self._qpos0[:, self._dofs.qs],
-            qs_idx_local=self._dofs.qs,
-            envs_idx=self._mask(env_ids),
-            zero_velocity=False,
+            rows + self._qpos0, qs_idx_local=self._dofs.qs, envs_idx=self._mask(env_ids), zero_velocity=False
         )
 
     def set_dof_velocities(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
@@ -140,12 +141,7 @@ class GenesisRobotStateWriter:
             skip_forward=True,
         )
         rows = self._rows(env_ids, self._dofs.to_sim_order(positions))
-        self._entity.set_qpos(
-            rows + self._qpos0[:, self._dofs.qs],
-            qs_idx_local=self._dofs.qs,
-            envs_idx=mask,
-            zero_velocity=False,
-        )
+        self._entity.set_qpos(rows + self._qpos0, qs_idx_local=self._dofs.qs, envs_idx=mask, zero_velocity=False)
 
     # ------------------------------------------------------------------
     # Root writes
