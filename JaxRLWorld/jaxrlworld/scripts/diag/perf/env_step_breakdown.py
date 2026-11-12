@@ -23,7 +23,16 @@ to more than the un-instrumented step, which is measured first and
 printed beside the sum: the inflation is the overlap the instrumented
 numbers cannot see.
 
+``--sync-debug`` adds a census of host synchronisations: with
+``torch.cuda.set_sync_debug_mode("warn")`` on during un-instrumented
+steps, every synchronising CUDA call is attributed to the innermost
+``jaxrlworld`` frame that led to it and the innermost frame below that
+(the simulator's), and the per-step counts are printed. A sync inside
+a setter is the whole cost of that setter when the GPU is otherwise
+idle, so this is the list of places where the step waits for the GPU.
+
     jaxpy -m jaxrlworld.scripts.diag.perf.env_step_breakdown --sim genesis --num-envs 4096
+    jaxpy -m jaxrlworld.scripts.diag.perf.env_step_breakdown --sim genesis --sync-debug
     jaxpy -m jaxrlworld.scripts.diag.perf.env_step_breakdown --sim mujoco \\
         --config jaxrlworld.rl.configs.presets.go2.base:Go2FlatConfig
 """
@@ -31,9 +40,12 @@ numbers cannot see.
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import time
-from collections import defaultdict
+import traceback
+import warnings
+from collections import Counter, defaultdict
 from collections.abc import Callable
 
 import torch
@@ -92,10 +104,19 @@ class SectionTimer:
         return "\n".join(lines)
 
 
-def build_env(config: str, sim: str, num_envs: int):
+def build_env(config: str, sim: str, num_envs: int, overrides: list[str]):
     mod_path, cls_name = config.split(":", 1)
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs, seed=0).build()
+    for item in overrides:
+        path, value = item.split("=", 1)
+        *parents, leaf = path.split(".")
+        target = cfgs
+        for name in parents:
+            target = getattr(target, name)
+        getattr(target, leaf)  # the field must exist: a typo must not silently add an attribute
+        setattr(target, leaf, ast.literal_eval(value))
+        print(f"[breakdown] override {path} = {getattr(target, leaf)!r}")
     return get_initializer(_SIM_NAMES[sim]).init_environment(cfgs)
 
 
@@ -145,6 +166,40 @@ def time_plain_steps(env, actions: torch.Tensor, steps: int) -> float:
     return (time.perf_counter() - t0) / steps * 1e3
 
 
+def _frame_label(frame: traceback.FrameSummary) -> str:
+    return f"{frame.filename.rsplit('/', 1)[-1]}:{frame.lineno} {frame.name}"
+
+
+def count_syncs(env, actions: torch.Tensor, steps: int) -> Counter:
+    """Per-step count of synchronising CUDA calls, keyed by the frames that issued them."""
+    counts: Counter = Counter()
+
+    def record(message, category, filename, lineno, file=None, line=None) -> None:
+        stack = traceback.extract_stack()[:-1]
+        ours = [
+            i for i, f in enumerate(stack) if "/jaxrlworld/" in f.filename and "env_step_breakdown" not in f.filename
+        ]
+        if not ours:
+            return  # the census loop's own synchronize
+        below = stack[ours[-1] + 1 :]
+        callee = next((f for f in below if "/torch/" not in f.filename), None)
+        key = _frame_label(stack[ours[-1]]) + ("  ->  " + _frame_label(callee) if callee else "")
+        counts[key] += 1
+
+    torch.cuda.synchronize()
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = record
+        torch.cuda.set_sync_debug_mode("warn")
+        try:
+            for _ in range(steps):
+                env.step(actions)
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+    torch.cuda.synchronize()
+    return counts
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default="jaxrlworld.rl.configs.presets.g1_29dof.base:G1FlatConfig")
@@ -153,10 +208,19 @@ def main() -> None:
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--no-stagger", action="store_true", help="start every episode together (no resets in the window)")
+    ap.add_argument("--sync-debug", action="store_true", help="also count the host synchronisations per step")
+    ap.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="override a built config field for an A/B, e.g. scene.rigid_options.enable_multi_contact=False; "
+        "VALUE is a Python literal and the field must already exist",
+    )
     args = ap.parse_args()
 
     t_build = time.perf_counter()
-    env = build_env(args.config, args.sim, args.num_envs)
+    env = build_env(args.config, args.sim, args.num_envs, args.set)
     env.reset()
     if not args.no_stagger:
         env.termination_manager.episode_length_buf = torch.randint_like(
@@ -171,6 +235,12 @@ def main() -> None:
     )
 
     plain_ms = time_plain_steps(env, actions, args.steps)
+
+    if args.sync_debug:
+        counts = count_syncs(env, actions, args.steps)
+        print(f"[breakdown] host syncs: {sum(counts.values()) / args.steps:.1f} per step")
+        for key, n in counts.most_common():
+            print(f"{n / args.steps:10.2f}  {key}")
 
     timer = SectionTimer()
     instrument(env, timer)
