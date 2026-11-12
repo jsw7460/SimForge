@@ -507,6 +507,14 @@ class ViserPlayViewer(PlayViewerBase):
         self._pause_button.icon = viser.Icon.PLAYER_PLAY if self._is_paused else viser.Icon.PLAYER_PAUSE
         self._update_status_display()
 
+    def _execute_step(self) -> bool:
+        """Step under ``_sim_lock``, the lock the scene update holds on its
+        worker thread, so the update never reads the simulator mid-step
+        (OvPhysX refuses tensor reads while a step runs: "TensorAPI read
+        failed")."""
+        with self._sim_lock:
+            return super()._execute_step()
+
     def reset_environment(self) -> None:
         with self._sim_lock:
             super().reset_environment()
