@@ -23,6 +23,14 @@ to more than the un-instrumented step, which is measured first and
 printed beside the sum: the inflation is the overlap the instrumented
 numbers cannot see.
 
+``--host-only`` times the sections without synchronising around them:
+each section's time is then the host's own (its Python, its kernel
+launches, and whatever waits for the device it contains), with the GPU
+running behind as in the real step. The sections then add up to about
+the un-instrumented step, and the table says where the host spends it;
+a step whose host sum fills its wall time is bound by the host, however
+busy or idle the GPU is.
+
 ``--sync-debug`` adds a census of host synchronisations: with
 ``torch.cuda.set_sync_debug_mode("warn")`` on during un-instrumented
 steps, every synchronising CUDA call is attributed to the innermost
@@ -58,12 +66,15 @@ _SIM_NAMES = {"genesis": "Genesis", "newton": "Newton", "mujoco": "MujocoEnv"}
 class SectionTimer:
     """Wraps bound methods on live objects and accumulates their synchronised wall time."""
 
-    def __init__(self) -> None:
+    def __init__(self, synchronise: bool = True) -> None:
         self.totals: dict[str, float] = defaultdict(float)
         self.calls: dict[str, int] = defaultdict(int)
         self.order: list[str] = []
         self.recording = False
         self._stack: list[str] = []
+        # Without synchronisation a section's time is the host's alone: its Python, its kernel launches and
+        # whatever device waits it contains, with the GPU running behind as in the real step.
+        self._sync = torch.cuda.synchronize if synchronise else (lambda: None)
 
     def wrap(self, owner: object, method: str, label: str, mode_label: bool = False) -> None:
         original: Callable = getattr(owner, method)
@@ -75,12 +86,12 @@ class SectionTimer:
             if name not in timer.order:
                 timer.order.append(name)
             timer._stack.append(name.rsplit("/", 1)[-1])
-            torch.cuda.synchronize()
+            timer._sync()
             t0 = time.perf_counter()
             try:
                 return original(*args, **kwargs)
             finally:
-                torch.cuda.synchronize()
+                timer._sync()
                 timer._stack.pop()
                 if timer.recording:
                     timer.totals[name] += time.perf_counter() - t0
@@ -90,10 +101,11 @@ class SectionTimer:
 
     def report(self, steps: int, plain_ms: float) -> str:
         top_level_ms = sum(self.totals[name] for name in self.order if "/" not in name) / steps * 1e3
+        how = "synchronised" if self._sync is torch.cuda.synchronize else "host time, no synchronisation"
         lines = [
             f"{'ms/ctrl-step':>13}  {'calls/step':>10}  section",
             f"{plain_ms:13.3f}  {'':>10}  env.step, un-instrumented",
-            f"{top_level_ms:13.3f}  {'':>10}  sum of top-level sections (synchronised)",
+            f"{top_level_ms:13.3f}  {'':>10}  sum of top-level sections ({how})",
         ]
         for name in self.order:
             depth = name.count("/")
@@ -210,6 +222,11 @@ def main() -> None:
     ap.add_argument("--no-stagger", action="store_true", help="start every episode together (no resets in the window)")
     ap.add_argument("--sync-debug", action="store_true", help="also count the host synchronisations per step")
     ap.add_argument(
+        "--host-only",
+        action="store_true",
+        help="time the sections without synchronising: each section's host time (Python, launches, its own waits)",
+    )
+    ap.add_argument(
         "--set",
         action="append",
         default=[],
@@ -242,7 +259,7 @@ def main() -> None:
         for key, n in counts.most_common():
             print(f"{n / args.steps:10.2f}  {key}")
 
-    timer = SectionTimer()
+    timer = SectionTimer(synchronise=not args.host_only)
     instrument(env, timer)
     for _ in range(args.warmup):
         env.step(actions)

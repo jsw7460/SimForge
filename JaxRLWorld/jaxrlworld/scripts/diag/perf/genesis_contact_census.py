@@ -34,6 +34,7 @@ _OPTION_FIELDS = (
     "max_collision_pairs",
     "enable_collision",
     "enable_self_collision",
+    "enable_joint_limit",
     "enable_multi_contact",
     "enable_mujoco_compatibility",
     "use_gjk_collision",
