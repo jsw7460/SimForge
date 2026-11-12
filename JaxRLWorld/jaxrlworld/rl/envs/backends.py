@@ -62,6 +62,13 @@ class BackendSpec:
     make_initializer: Callable[[], SimInitializer]
     """Returns a fresh :class:`SimInitializer` for offline evaluation."""
 
+    preset_package: str | None = None
+    """Package laid out like ``jaxrlworld.rl.configs.presets`` holding this
+    backend's simulator-specific preset modules
+    (``<package>.<robot>.<sim_type>.<task>``), so cross-simulator evaluation
+    finds the counterpart of ``jaxrlworld.rl.configs.presets.go2.newton.<task>``
+    and back. ``None`` when the backend has none."""
+
 
 _BACKENDS: dict[str, BackendSpec] = {}
 _DR_BACKENDS: dict[tuple[str, str], Callable[..., None]] = {}
@@ -122,6 +129,12 @@ def find_backend_by_eval_key(eval_key: str) -> BackendSpec | None:
         if spec.eval_key == eval_key:
             return spec
     return None
+
+
+def registered_backends() -> list[BackendSpec]:
+    """Every external backend the entry points register."""
+    load_plugins()
+    return list(_BACKENDS.values())
 
 
 def find_backend(sim_type: str) -> BackendSpec | None:

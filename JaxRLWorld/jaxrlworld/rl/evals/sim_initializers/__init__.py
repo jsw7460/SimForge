@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 
-from jaxrlworld.rl.envs.backends import find_backend, find_backend_by_eval_key
+from jaxrlworld.rl.envs.backends import find_backend, find_backend_by_eval_key, registered_backends
 
 
 class SimInitializer(ABC):
@@ -134,7 +134,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
 
     Args:
         metadata: Checkpoint metadata dict.
-        target_sim: Target simulator name ("genesis", "newton", "mujoco").
+        target_sim: Target simulator name ("genesis", "newton", "mujoco", or an external backend's sim_type).
 
     Returns:
         A ConfigsForRun object for the target simulator and robot.
@@ -146,7 +146,13 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     if sim_key in ("mjlabenv", "mjlab"):
         sim_key = "mujoco"
 
-    _SIM_NAMES = {"genesis", "newton", "mujoco"}
+    # Simulator-specific presets live under the public presets package and,
+    # for an external backend, under the package it registers; the module
+    # path below the package is the same for every simulator.
+    public_presets = "jaxrlworld.rl.configs.presets"
+    external = [spec for spec in registered_backends() if spec.preset_package is not None]
+    _SIM_NAMES = {"genesis", "newton", "mujoco"} | {spec.sim_type for spec in registered_backends()}
+    preset_roots = {public_presets: None} | {spec.preset_package: spec.sim_type for spec in external}
 
     config_dict = metadata.get("config", {})
     preset_module_path = config_dict.get("preset_module")
@@ -168,11 +174,25 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
 
     # --- Strategy 1: path substitution (sim-specific subclass) ---
     if preset_module_path is not None:
-        parts = preset_module_path.split(".")
+        root = max(
+            (r for r in preset_roots if preset_module_path == r or preset_module_path.startswith(r + ".")),
+            key=len,
+            default="",
+        )
+        parts = preset_module_path[len(root) :].lstrip(".").split(".") if root else preset_module_path.split(".")
         sim_idx = next((i for i, p in enumerate(parts) if p in _SIM_NAMES), None)
         if sim_idx is not None:
             parts[sim_idx] = sim_key
-            target_module_path = ".".join(parts)
+            if root:
+                target_backend = find_backend(sim_key)
+                target_root = (
+                    target_backend.preset_package
+                    if target_backend is not None and target_backend.preset_package is not None
+                    else public_presets
+                )
+                target_module_path = ".".join([target_root, *parts])
+            else:
+                target_module_path = ".".join(parts)
             try:
                 mod = importlib.import_module(target_module_path)
             except ModuleNotFoundError:
