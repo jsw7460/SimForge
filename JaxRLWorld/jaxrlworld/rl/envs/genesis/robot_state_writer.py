@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from torch import Tensor
 
+from jaxrlworld.rl.envs.genesis.dof_selection import GenesisDofSelection
 from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 
 if TYPE_CHECKING:
@@ -39,11 +40,13 @@ class GenesisRobotStateWriter:
         self,
         env: GenesisEnv,
         entity: RigidEntity,
-        actuated_dof_ids: Tensor | list[int],
+        dofs: GenesisDofSelection,
     ) -> None:
         self._env = env
         self._entity = entity
-        self._actuated_dof_ids = actuated_dof_ids
+        # The actuated DOFs in the index forms Genesis is handed (the range
+        # form takes the zero-copy path); values arrive in canonical order.
+        self._dofs = dofs
 
     # ------------------------------------------------------------------
     # Joint writes
@@ -66,8 +69,8 @@ class GenesisRobotStateWriter:
         explicitly by the events.
         """
         self._entity.set_dofs_position(
-            position=values,
-            dofs_idx_local=self._actuated_dof_ids,
+            position=self._dofs.to_sim_order(values),
+            dofs_idx_local=self._dofs.dofs,
             envs_idx=env_ids,
             zero_velocity=False,
         )
@@ -75,8 +78,8 @@ class GenesisRobotStateWriter:
     def set_dof_velocities(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
         """Write actuated joint velocities."""
         self._entity.set_dofs_velocity(
-            velocity=values,
-            dofs_idx_local=self._actuated_dof_ids,
+            velocity=self._dofs.to_sim_order(values),
+            dofs_idx_local=self._dofs.dofs,
             envs_idx=env_ids,
         )
 
@@ -90,14 +93,14 @@ class GenesisRobotStateWriter:
         :meth:`set_dof_positions`.
         """
         self._entity.set_dofs_velocity(
-            velocity=velocities,
-            dofs_idx_local=self._actuated_dof_ids,
+            velocity=self._dofs.to_sim_order(velocities),
+            dofs_idx_local=self._dofs.dofs,
             envs_idx=env_ids,
             skip_forward=True,
         )
         self._entity.set_dofs_position(
-            position=positions,
-            dofs_idx_local=self._actuated_dof_ids,
+            position=self._dofs.to_sim_order(positions),
+            dofs_idx_local=self._dofs.dofs,
             envs_idx=env_ids,
             zero_velocity=False,
         )

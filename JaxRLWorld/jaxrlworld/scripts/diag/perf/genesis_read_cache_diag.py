@@ -72,7 +72,7 @@ def main() -> int:
     rd = env.get_robot_data()
     entity = rd._entity
     solver = entity._solver
-    dof_ids = rd._actuated_dof_ids
+    dof_ids = rd._dofs.sim_ids
     link_ids = rd._global_link_ids
 
     # ── getter call counting (inside env.step only) ──────────────────

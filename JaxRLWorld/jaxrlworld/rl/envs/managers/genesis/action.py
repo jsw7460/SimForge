@@ -22,8 +22,10 @@ class ActionManagerConfig(ActionManagerBaseConfig):
 class ActionManager(ActionManagerBase):
     """Genesis action manager.
 
-    Uses ArticulationIndexing.sim_indices as DOF indices for
-    Genesis control_dofs_position / control_dofs_force.
+    Hands Genesis the entity's :class:`GenesisDofSelection`: the control
+    targets go in simulator DOF order through the ``range`` form, which
+    takes Genesis's zero-copy path (an index tensor would cost a host
+    synchronisation per call, every substep).
     """
 
     def __init__(self, env: GenesisEnv, config: ActionManagerConfig):
@@ -32,11 +34,13 @@ class ActionManager(ActionManagerBase):
 
     def _apply_position(self, targets, entity_name):
         entity = self._genesis_env.scene_manager.entities[entity_name]
-        entity.control_dofs_position(targets, self.env.entity_indexing(entity_name).sim_indices)
+        dofs = self._genesis_env.dof_selection(entity_name)
+        entity.control_dofs_position(dofs.to_sim_order(targets), dofs.dofs)
 
     def _apply_force(self, torques, entity_name):
         entity = self._genesis_env.scene_manager.entities[entity_name]
-        entity.control_dofs_force(torques, self.env.entity_indexing(entity_name).sim_indices)
+        dofs = self._genesis_env.dof_selection(entity_name)
+        entity.control_dofs_force(dofs.to_sim_order(torques), dofs.dofs)
 
     @property
     def actuated_dof_ids(self):

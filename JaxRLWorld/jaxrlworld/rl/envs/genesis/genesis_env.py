@@ -14,6 +14,7 @@ from jaxrlworld.rl.configs import (
     VisualizationConfig,
 )
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
+from jaxrlworld.rl.envs.genesis.dof_selection import build_dof_selection
 from jaxrlworld.rl.envs.managers import (
     VisualizationManager,
     VisualizationManagerConfig,
@@ -102,6 +103,10 @@ class GenesisEnv(World):
 
     def get_robot_data(self, entity_name: str = "robot"):
         return self._robot_data_cache[entity_name]
+
+    def dof_selection(self, entity_name: str = "robot"):
+        """The :class:`GenesisDofSelection` of one entity's actuated DOFs (canonical order)."""
+        return self._dof_selection_cache[entity_name]
 
     def get_robot_state_writer(self, entity_name: str = "robot"):
         """Return the write-API companion to ``get_robot_data``.
@@ -285,14 +290,17 @@ class GenesisEnv(World):
 
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
+        self._dof_selection_cache = {}
         # One indexing and one home pose PER entity. Handing every entity the
         # driven robot's indexing made a second robot's joint reads and
         # writes address the first robot's DOFs, silently.
         for name, entity in self.scene_manager.entities.items():
             indexing = self.entity_indexing(name)
+            dofs = build_dof_selection(entity, indexing.sim_indices, self.device)
+            self._dof_selection_cache[name] = dofs
             self._robot_data_cache[name] = GenesisRobotData(
                 entity=entity,
-                actuated_dof_ids=indexing.sim_indices,
+                dofs=dofs,
                 num_envs=self.num_envs,
                 device=self.device,
                 env=self,
@@ -300,19 +308,16 @@ class GenesisEnv(World):
                 default_joint_pos=self._resolve_default_joint_pos(name),
                 soft_joint_pos_limit_factor=self.scene_cfg.entities[name].articulation.soft_joint_pos_limit_factor,
             )
-            self._robot_state_writer_cache[name] = GenesisRobotStateWriter(
-                env=self,
-                entity=entity,
-                actuated_dof_ids=indexing.sim_indices,
-            )
+            self._robot_state_writer_cache[name] = GenesisRobotStateWriter(env=self, entity=entity, dofs=dofs)
 
         # Passive rigid objects (config.rigid_objects) — read via
         # get_rigid_object_data(name) -> RigidObjectData (root + body, no
-        # joints). No actuated DOFs, so actuated_dof_ids is empty.
+        # joints). No actuated DOFs, so the selection is empty.
         for name, entity in self.scene_manager.rigid_objects.items():
+            dofs = build_dof_selection(entity, [], self.device)
             self._rigid_object_data_cache[name] = GenesisRigidObjectData(
                 entity=entity,
-                actuated_dof_ids=[],
+                dofs=dofs,
                 num_envs=self.num_envs,
                 device=self.device,
                 env=self,
@@ -321,12 +326,8 @@ class GenesisEnv(World):
             )
             # Genesis root writes go through the per-entity RigidEntity (set_pos /
             # set_quat), so the robot writer is per-entity-correct for a rigid
-            # object; the empty actuated_dof_ids make the joint writes no-ops.
-            self._rigid_object_state_writer_cache[name] = GenesisRobotStateWriter(
-                env=self,
-                entity=entity,
-                actuated_dof_ids=[],
-            )
+            # object; the empty selection makes the joint writes no-ops.
+            self._rigid_object_state_writer_cache[name] = GenesisRobotStateWriter(env=self, entity=entity, dofs=dofs)
 
     def _post_reset_forward(self) -> None:
         """Make a state written without stepping visible to the readers.

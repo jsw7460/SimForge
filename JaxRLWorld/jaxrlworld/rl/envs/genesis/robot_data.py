@@ -15,6 +15,7 @@ import torch
 from genesis.utils.misc import qd_to_torch
 from torch import Tensor
 
+from jaxrlworld.rl.envs.genesis.dof_selection import GenesisDofSelection
 from jaxrlworld.rl.envs.site_frames import SiteReaderMixin
 from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_rotate_wxyz, quat_to_euler_wxyz
 
@@ -65,7 +66,7 @@ class GenesisRigidObjectData(SiteReaderMixin):
     def __init__(
         self,
         entity: RigidEntity,
-        actuated_dof_ids: Tensor | list[int],
+        dofs: GenesisDofSelection,
         num_envs: int,
         device: torch.device,
         env,
@@ -77,7 +78,10 @@ class GenesisRigidObjectData(SiteReaderMixin):
         self._entity_name = entity_name
         # Per-step read memoization — see :func:`_per_step_read`.
         self._read_cache: dict[str, tuple[int, Tensor]] = {}
-        self._actuated_dof_ids = actuated_dof_ids
+        # The actuated DOFs in the index forms Genesis is handed: the range
+        # form reads a slice of the solver buffer (zero-copy), the index
+        # tensor form would re-upload and bounds-check the indices per call.
+        self._dofs = dofs
         self._gravity_vec: Tensor | None = None
         self._num_envs = num_envs
         self._device = device
@@ -341,12 +345,12 @@ class GenesisRobotData(GenesisRigidObjectData):
     @property
     @_per_step_read
     def joint_pos(self) -> Tensor:
-        return self._entity.get_dofs_position(self._actuated_dof_ids)
+        return self._dofs.to_canonical_order(self._entity.get_dofs_position(self._dofs.dofs))
 
     @property
     @_per_step_read
     def joint_vel(self) -> Tensor:
-        return self._entity.get_dofs_velocity(self._actuated_dof_ids)
+        return self._dofs.to_canonical_order(self._entity.get_dofs_velocity(self._dofs.dofs))
 
     @property
     @_per_step_read
@@ -361,7 +365,7 @@ class GenesisRobotData(GenesisRigidObjectData):
         ``get_dofs_force``, which returns the net joint-space force
         including passive damping and gravity bias.
         """
-        return self._entity.get_dofs_control_force(dofs_idx_local=self._actuated_dof_ids)
+        return self._dofs.to_canonical_order(self._entity.get_dofs_control_force(dofs_idx_local=self._dofs.dofs))
 
     @property
     @_per_step_read
@@ -379,7 +383,7 @@ class GenesisRobotData(GenesisRigidObjectData):
         Returns:
             ``(lower, upper)``, each shape ``(num_actuated_joints,)``.
         """
-        lower, upper = self._entity.get_dofs_limit(dofs_idx_local=self._actuated_dof_ids)
+        lower, upper = self._entity.get_dofs_limit(dofs_idx_local=self._dofs.sim_ids)
         if lower.ndim == 2:
             lower = lower[0]
             upper = upper[0]
