@@ -84,6 +84,7 @@ from jaxrlworld.rl.configs.curriculums import CurriculumManagerConfig, Curriculu
 from jaxrlworld.rl.configs.events import EventTermConfig
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from jaxrlworld.rl.configs.presets._sim_builder_registry import get_sim_builders
 from jaxrlworld.rl.configs.rewards import RewardTermConfig
 from jaxrlworld.rl.configs.robots.k1 import K1Config
 from jaxrlworld.rl.configs.scene import SceneEntitySelector
@@ -135,12 +136,35 @@ _STEPS_PER_ROLLOUT = 24
 
 
 def _get_sim_builders(sim_type: str):
+    if sim_type not in _SIM_TIMINGS:
+        return get_sim_builders("k1_velocity", sim_type, tuple(_SIM_TIMINGS)).load()
     module = {
         "mujoco": "_mujoco_builders",
         "newton": "_newton_builders",
         "genesis": "_genesis_builders",
     }[sim_type]
     return importlib.import_module(f"{__package__}.{module}")
+
+
+def _sim_timing(sim_type: str) -> Dict[str, Any]:
+    if sim_type in _SIM_TIMINGS:
+        return _SIM_TIMINGS[sim_type]
+    return get_sim_builders("k1_velocity", sim_type, tuple(_SIM_TIMINGS)).timing
+
+
+def _sim_default_run_name(sim_type: str) -> str:
+    if sim_type in _SIM_DEFAULT_RUN_NAMES:
+        return _SIM_DEFAULT_RUN_NAMES[sim_type]
+    return get_sim_builders("k1_velocity", sim_type, tuple(_SIM_TIMINGS)).default_run_name
+
+
+def _reward_style(sim_type: str) -> str:
+    """The built-in simulator whose reward modules and parameter shapes the
+    reward table uses: the simulator itself, or for a backend from another
+    package its builder module's ``REWARD_STYLE``."""
+    if sim_type in _SIM_TIMINGS:
+        return sim_type
+    return _get_sim_builders(sim_type).REWARD_STYLE
 
 
 @dataclass
@@ -308,7 +332,7 @@ class K1VelocityConfig:
             # it on selects AMP_PPO unless another PPO variant was named.
             self.algorithm_name = "AMP_PPO"
         builders = _get_sim_builders(self.sim_type)
-        timing = _SIM_TIMINGS[self.sim_type]
+        timing = _sim_timing(self.sim_type)
 
         cfgs = builders.CONFIGS_FOR_RUN_CLS(
             env=builders.build_env(self, timing),
@@ -455,7 +479,7 @@ class K1VelocityConfig:
 
     def _build_reward_config(self) -> RewardConfig:
         r = self.robot
-        sim = self.sim_type
+        sim = _reward_style(self.sim_type)
         is_mujoco = sim == "mujoco"
         rf = importlib.import_module(
             "jaxrlworld.rl.envs.mdp.rewards.mujoco.reward_terms"
@@ -878,7 +902,7 @@ class K1VelocityConfig:
         motion_files = tuple(sorted(str(p) for p in Path(self.amp_motion_dir).glob("*.npz")))
         if not motion_files:
             raise FileNotFoundError(
-                f"no reference clips under {self.amp_motion_dir}; run " "jaxrlworld.scripts.k1.convert_lafan_k1"
+                f"no reference clips under {self.amp_motion_dir}; run jaxrlworld.scripts.k1.convert_lafan_k1"
             )
         return motion_files
 
@@ -964,7 +988,7 @@ class K1VelocityConfig:
             init_at_random_ep_len=False,
             resume=False,
             resume_path=None,
-            run_name=self.run_name or _SIM_DEFAULT_RUN_NAMES[self.sim_type],
+            run_name=self.run_name or _sim_default_run_name(self.sim_type),
             logger="wandb",
             wandb_project="K1_Booster_Velocity",
             save_interval=2000,
