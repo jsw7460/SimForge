@@ -76,12 +76,20 @@ class SectionTimer:
         # whatever device waits it contains, with the GPU running behind as in the real step.
         self._sync = torch.cuda.synchronize if synchronise else (lambda: None)
 
-    def wrap(self, owner: object, method: str, label: str, mode_label: bool = False) -> None:
+    def wrap(
+        self, owner: object, method: str, label: str, mode_label: bool = False, name_arg: int | None = None
+    ) -> None:
+        """Time ``owner.method``; ``mode_label`` suffixes the ``mode`` keyword, ``name_arg`` the positional arg."""
         original: Callable = getattr(owner, method)
         timer = self
 
         def timed(*args, **kwargs):
-            name = f"{label}[{kwargs['mode']}]" if mode_label else label
+            if mode_label:
+                name = f"{label}[{kwargs['mode']}]"
+            elif name_arg is not None:
+                name = f"{label}[{args[name_arg]}]"
+            else:
+                name = label
             name = "/".join([*timer._stack, name])
             if name not in timer.order:
                 timer.order.append(name)
@@ -146,6 +154,10 @@ def instrument(env, timer: SectionTimer) -> None:
     timer.wrap(env.obs_manager, "process_observations", "obs_manager.process_observations (terminal obs)")
     timer.wrap(env.obs_manager, "rollback_last_history_append", "obs_manager.rollback_last_history_append")
     timer.wrap(env.event_manager, "apply", "event_manager.apply", mode_label=True)
+    timer.wrap(env.event_manager, "_call_event_fn", "event term", name_arg=0)
+    writer = env.get_robot_state_writer("robot")
+    for method in ("set_root_pose", "set_root_velocity", "set_dof_state"):
+        timer.wrap(writer, method, f"writer.{method}")
     timer.wrap(env, "_reset_idx", "_reset_idx")
     timer.wrap(env.curriculum_manager, "compute", "curriculum_manager.compute")
     timer.wrap(env, "_reset_scene", "_reset_scene")
@@ -156,6 +168,11 @@ def instrument(env, timer: SectionTimer) -> None:
     timer.wrap(env.obs_manager, "reset", "obs_manager.reset")
     timer.wrap(env.contact_manager, "reset", "contact_manager.reset")
     timer.wrap(env.contact_manager, "refresh_after_reset", "contact_manager.refresh_after_reset")
+    if env.sim_type == "genesis":
+        collider = env.scene_manager.scene.rigid_solver.collider
+        timer.wrap(collider, "detection", "collider.detection")
+        timer.wrap(collider, "clear", "collider.clear")
+        timer.wrap(collider, "get_contacts", "collider.get_contacts")
     timer.wrap(env.reward_manager, "reset", "reward_manager.reset")
     timer.wrap(env.curriculum_manager, "reset", "curriculum_manager.reset")
     timer.wrap(env, "_post_reset_forward", "_post_reset_forward")
