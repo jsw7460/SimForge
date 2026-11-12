@@ -113,7 +113,6 @@ def main() -> None:
 
     targets = q_default[:, 6:].clone()
     joint_rows = q_default[ids, 6:].clone()
-    joint_rows_all = q_default[:, 6:].clone()
     zeros_rows = torch.zeros(args.reset_envs, len(joint_dofs), device=dev)
     zeros_rows_all = torch.zeros(n_envs, len(joint_dofs), device=dev)
     root_vel_rows = torch.zeros(args.reset_envs, 6, device=dev)
@@ -163,8 +162,8 @@ def main() -> None:
         args.calls,
     )
     measure(
-        "set_dofs_position, env MASK (every row), dofs RANGE, zero_velocity=False",
-        lambda: robot.set_dofs_position(joint_rows_all, joint_dofs_range, mask, zero_velocity=False),
+        "set_dofs_position, env MASK (selected rows), dofs RANGE, zero_velocity=False",
+        lambda: robot.set_dofs_position(joint_rows, joint_dofs_range, mask, zero_velocity=False),
         args.calls,
     )
 
