@@ -49,6 +49,7 @@ from jaxrlworld.rl.configs.common_config_classes import (
     StdType,
 )
 from jaxrlworld.rl.configs.curriculums import CurriculumManagerConfig
+from jaxrlworld.rl.configs.presets._sim_builder_registry import get_sim_builders
 from jaxrlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 from jaxrlworld.rl.envs.mdp.commands import MotionCommandCfg
 
@@ -73,8 +74,20 @@ def _get_sim_builders(sim_type: str):
     elif sim_type == "mujoco":
         from . import _mujoco_builders as mod
     else:
-        raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
+        mod = get_sim_builders("g1_tracking", sim_type, tuple(_SIM_TIMINGS)).load()
     return mod
+
+
+def _sim_timing(sim_type: str) -> Dict[str, Any]:
+    if sim_type in _SIM_TIMINGS:
+        return _SIM_TIMINGS[sim_type]
+    return get_sim_builders("g1_tracking", sim_type, tuple(_SIM_TIMINGS)).timing
+
+
+def _sim_default_run_name(sim_type: str) -> str:
+    if sim_type in _SIM_DEFAULT_RUN_NAMES:
+        return _SIM_DEFAULT_RUN_NAMES[sim_type]
+    return get_sim_builders("g1_tracking", sim_type, tuple(_SIM_TIMINGS)).default_run_name
 
 
 @dataclass
@@ -223,7 +236,7 @@ class G1TrackingConfig:
                 "subclass before calling build()."
             )
         builders = _get_sim_builders(self.sim_type)
-        timing = _SIM_TIMINGS[self.sim_type]
+        timing = _sim_timing(self.sim_type)
 
         kwargs: Dict[str, Any] = dict(
             env=builders.build_env(self, timing),
@@ -348,7 +361,7 @@ class G1TrackingConfig:
         )
 
     def _build_runner_config(self) -> RunnerConfig:
-        run_name = self.run_name or _SIM_DEFAULT_RUN_NAMES[self.sim_type]
+        run_name = self.run_name or _sim_default_run_name(self.sim_type)
         return RunnerConfig(
             checkpoint=-1,
             log_interval=1,

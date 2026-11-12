@@ -43,6 +43,10 @@ class SimBuilders:
     default_run_name: str = ""
     """The preset's ``_SIM_DEFAULT_RUN_NAMES`` entry for this simulator."""
 
+    runner_overrides: dict[str, Any] = field(default_factory=dict)
+    """The preset's ``_SIM_RUNNER_OVERRIDES`` entry for this simulator, for
+    presets that have that table (G1 29-DOF)."""
+
     def load(self) -> ModuleType:
         return importlib.import_module(self.module)
 
