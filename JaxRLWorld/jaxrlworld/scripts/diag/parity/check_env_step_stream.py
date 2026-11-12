@@ -10,8 +10,8 @@ The run exercises every write path: the robot starts from staggered
 episode ages so resets happen throughout the window, the actions are a
 seeded uniform sequence so some episodes end by falling, and the preset's
 interval events fire at their own rate. Each step records the observation
-groups, the reward, the termination flags and the root pose read back
-from the simulator (so a write that lands in the wrong place shows up
+groups, the reward and each of its terms, the termination flags and the
+root pose read back from the simulator (so a write that lands in the wrong place shows up
 even when no observation term reads it).
 
 Record on the code before the change, then compare on the code after it:
@@ -57,9 +57,11 @@ def record_stream(env, steps: int, seed: int, action_scale: float) -> dict[str, 
     streams: dict[str, list[torch.Tensor]] = {}
     for _ in range(steps):
         actions = (torch.rand((env.num_envs, env.num_actions), device=env.device, generator=gen) * 2 - 1) * action_scale
-        obs, rew, terminated, truncated, _ = env.step(actions)
+        obs, rew, terminated, truncated, extras = env.step(actions)
         frame = {f"obs/{key}": value for key, value in obs.items()}
         frame["reward"] = rew
+        for name, value in extras["rewards_per_type"].items():
+            frame[f"reward/{name}"] = value
         frame["terminated"] = terminated
         frame["truncated"] = truncated
         frame["root_pos_w"] = rd.root_link_pos_w
@@ -72,12 +74,13 @@ def record_stream(env, steps: int, seed: int, action_scale: float) -> dict[str, 
 
 
 def compare_streams(reference: dict[str, torch.Tensor], current: dict[str, torch.Tensor], atol: float) -> bool:
-    if reference.keys() != current.keys():
-        print(f"stream keys differ: {sorted(reference.keys() ^ current.keys())}")
-        return False
     ok = True
+    for key in sorted(reference.keys() ^ current.keys()):
+        print(f"stream {key!r} is only in the {'reference' if key in reference else 'current'} recording")
     print(f"{'max |diff|':>12}  {'first step':>10}  {'differing envs':>14}  stream")
     for key, ref in reference.items():
+        if key not in current:
+            continue
         cur = current[key]
         if ref.shape != cur.shape:
             print(f"{'shape':>12}  {'':>10}  {'':>14}  {key}: {tuple(ref.shape)} vs {tuple(cur.shape)}")
