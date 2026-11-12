@@ -89,7 +89,7 @@ _RESET_EVERY = 50
 
 # G1 MJCF shared by every backend (jaxrlworld/assets/g1/g1.xml — resolved from
 # this file's location so the raw cells need no JaxRLWorld import).
-_G1_XML = Path(__file__).resolve().parents[2] / "assets" / "g1" / "g1.xml"
+_G1_XML = Path(__file__).resolve().parents[3] / "assets" / "g1" / "g1.xml"
 _SPAWN_Z = 0.8
 
 
