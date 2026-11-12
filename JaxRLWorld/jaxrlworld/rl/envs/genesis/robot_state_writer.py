@@ -2,17 +2,31 @@
 
 Implements :class:`RobotStateWriterProtocol` against Genesis's native
 ``entity.set_*`` mutation methods. Genesis hides simulation state
-inside ``gs.Scene`` and uses ``envs_idx`` (a torch tensor of integer
-env indices) to scope per-env writes — much closer to the unified
-protocol shape than Newton's masked warp arrays.
+inside ``gs.Scene`` and scopes per-env writes with ``envs_idx``.
+
+How the writes address Genesis matters as much as what they write.
+Genesis takes an env selection either as an index tensor, which it
+bounds-checks and de-duplicates on the host (a synchronisation per
+call, five in ``set_dofs_position``), or as a boolean mask over every
+env with a value row per env, which it applies on the device with a
+masked copy and masked kernels (forward kinematics, collider clear).
+The protocol hands this writer env id tensors; it scatters them into a
+mask and every-row buffers (device-side, no synchronisation) and takes
+the masked path for every free-base write. DOFs are selected the same
+way, with the :class:`GenesisDofSelection` range forms.
 
 Genesis-specific quirks the writer hides from callers:
 
+- Joint positions are written as configuration (``set_qpos``) rather
+  than through ``set_dofs_position``, which has no masked path. For
+  the hinge and slide joints the selection covers, the configuration
+  of a DOF is its reference ``qpos0`` plus its position, exactly the
+  sum ``set_dofs_position``'s kernel forms, so the two writes land the
+  same bits.
 - Root velocity is not a separate API call — Genesis treats the base
   6 DOFs (x, y, z, roll, pitch, yaw) as plain DOFs that you write
-  through ``set_dofs_velocity`` with ``dofs_idx_local=list(range(6))``.
-  ``set_root_velocity`` packs the linear + angular vectors into a
-  single 6-vec and forwards.
+  through ``set_dofs_velocity`` on ``range(6)``. ``set_root_velocity``
+  packs the linear + angular vectors into a single 6-vec and forwards.
 - ``eval_fk`` is a no-op: Genesis re-evaluates kinematics inside its
   next ``scene.step()``.
 """
@@ -21,16 +35,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import torch
+from genesis.utils.misc import qd_to_torch
 from torch import Tensor
 
 from jaxrlworld.rl.envs.genesis.dof_selection import GenesisDofSelection
 from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 
 if TYPE_CHECKING:
-    import torch
     from genesis.engine.entities import RigidEntity
 
     from jaxrlworld.rl.envs.genesis.genesis_env import GenesisEnv
+
+_ROOT_DOFS = range(6)
 
 
 class GenesisRobotStateWriter:
@@ -44,9 +61,31 @@ class GenesisRobotStateWriter:
     ) -> None:
         self._env = env
         self._entity = entity
-        # The actuated DOFs in the index forms Genesis is handed (the range
-        # form takes the zero-copy path); values arrive in canonical order.
         self._dofs = dofs
+        self._num_envs = env.num_envs
+        # The solver's reference configuration of this entity, (num_envs, n_qs), as a live view: a joint's
+        # configuration is this plus its DOF position (see the module docstring).
+        qpos0 = qd_to_torch(entity.solver.rigid_info.qpos0, transpose=True, copy=False)
+        self._qpos0 = qpos0[:, entity.q_start : entity.q_start + entity.n_qs]
+
+    # ------------------------------------------------------------------
+    # Env selection
+    # ------------------------------------------------------------------
+
+    def _mask(self, env_ids: Tensor | None) -> Tensor | None:
+        if env_ids is None:
+            return None
+        mask = torch.zeros(self._num_envs, dtype=torch.bool, device=env_ids.device)
+        mask[env_ids] = True
+        return mask
+
+    def _rows(self, env_ids: Tensor | None, values: Tensor) -> Tensor:
+        """``values`` (one row per entry of ``env_ids``) scattered into a buffer with one row per env."""
+        if env_ids is None:
+            return values
+        rows = torch.zeros((self._num_envs, values.shape[-1]), dtype=values.dtype, device=values.device)
+        rows[env_ids] = values
+        return rows
 
     # ------------------------------------------------------------------
     # Joint writes
@@ -57,9 +96,9 @@ class GenesisRobotStateWriter:
 
         ``zero_velocity=False`` is load-bearing on EVERY Genesis position
         write in this class: Genesis's ``set_pos`` / ``set_quat`` /
-        ``set_dofs_position`` default to ``zero_velocity=True``, which
-        zeroes ALL of the entity's dof velocities as a teleport safety
-        measure. Under the reset event order (``reset_root`` writes the
+        ``set_qpos`` default to ``zero_velocity=True``, which zeroes ALL
+        of the entity's dof velocities as a teleport safety measure.
+        Under the reset event order (``reset_root`` writes the
         randomized root velocity, then ``reset_joints`` writes joint
         positions) that default silently wiped the root velocity — every
         Genesis episode started from perfect rest while Newton/mjlab
@@ -68,19 +107,20 @@ class GenesisRobotStateWriter:
         only write what it was asked to; velocities are written
         explicitly by the events.
         """
-        self._entity.set_dofs_position(
-            position=self._dofs.to_sim_order(values),
-            dofs_idx_local=self._dofs.dofs,
-            envs_idx=env_ids,
+        rows = self._rows(env_ids, self._dofs.to_sim_order(values))
+        self._entity.set_qpos(
+            rows + self._qpos0[:, self._dofs.qs],
+            qs_idx_local=self._dofs.qs,
+            envs_idx=self._mask(env_ids),
             zero_velocity=False,
         )
 
     def set_dof_velocities(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
         """Write actuated joint velocities."""
         self._entity.set_dofs_velocity(
-            velocity=self._dofs.to_sim_order(values),
+            velocity=self._rows(env_ids, self._dofs.to_sim_order(values)),
             dofs_idx_local=self._dofs.dofs,
-            envs_idx=env_ids,
+            envs_idx=self._mask(env_ids),
         )
 
     def set_dof_state(self, positions: Tensor, velocities: Tensor, env_ids: torch.Tensor | None = None) -> None:
@@ -92,16 +132,18 @@ class GenesisRobotStateWriter:
         instead of two. ``zero_velocity=False``: see
         :meth:`set_dof_positions`.
         """
+        mask = self._mask(env_ids)
         self._entity.set_dofs_velocity(
-            velocity=self._dofs.to_sim_order(velocities),
+            velocity=self._rows(env_ids, self._dofs.to_sim_order(velocities)),
             dofs_idx_local=self._dofs.dofs,
-            envs_idx=env_ids,
+            envs_idx=mask,
             skip_forward=True,
         )
-        self._entity.set_dofs_position(
-            position=self._dofs.to_sim_order(positions),
-            dofs_idx_local=self._dofs.dofs,
-            envs_idx=env_ids,
+        rows = self._rows(env_ids, self._dofs.to_sim_order(positions))
+        self._entity.set_qpos(
+            rows + self._qpos0[:, self._dofs.qs],
+            qs_idx_local=self._dofs.qs,
+            envs_idx=mask,
             zero_velocity=False,
         )
 
@@ -145,6 +187,9 @@ class GenesisRobotStateWriter:
         buffers are per-environment. That is what lets a table or tank be
         placed per env by a reset event — the same capability mjlab provides
         through its mocap base and Newton through its fixed-root mocap bodies.
+        A welded entity is addressed with the env ids as given, so Genesis's
+        own check that a fixed link's geometry is batched before it takes a
+        per-env pose still runs.
 
         ``zero_velocity=False``: see :meth:`set_dof_positions`.
 
@@ -156,8 +201,13 @@ class GenesisRobotStateWriter:
         and standalone velocity writes (pushes) rely on fresh link
         buffers for the very next observation.
         """
-        self._entity.set_pos(pos, envs_idx=env_ids, zero_velocity=False, skip_forward=True)
-        self._entity.set_quat(quat_wxyz, envs_idx=env_ids, zero_velocity=False)
+        if self._entity.base_link.is_fixed:
+            self._entity.set_pos(pos, envs_idx=env_ids, zero_velocity=False, skip_forward=True)
+            self._entity.set_quat(quat_wxyz, envs_idx=env_ids, zero_velocity=False)
+            return
+        mask = self._mask(env_ids)
+        self._entity.set_pos(self._rows(env_ids, pos), envs_idx=mask, zero_velocity=False, skip_forward=True)
+        self._entity.set_quat(self._rows(env_ids, quat_wxyz), envs_idx=mask, zero_velocity=False)
 
     def set_root_velocity(
         self,
@@ -177,17 +227,19 @@ class GenesisRobotStateWriter:
         joint. Rotate the world angular velocity into the link frame
         before writing; the pose write precedes this call in the reset
         protocol, so ``get_quat`` already reflects the new orientation.
+        The quaternion is read for every env (one zero-copy read) and
+        the rows of ``env_ids`` picked on the device.
         """
-        import torch
-
         self._reject_velocity_if_fixed_base()
-        quat_wxyz = self._entity.get_quat(envs_idx=env_ids)
+        quat_wxyz = self._entity.get_quat()
+        if env_ids is not None:
+            quat_wxyz = quat_wxyz[env_ids]
         ang_local = quat_rotate_inverse_wxyz(quat_wxyz, ang_vel)
         combined = torch.cat([lin_vel, ang_local], dim=-1)
         self._entity.set_dofs_velocity(
-            velocity=combined,
-            dofs_idx_local=list(range(6)),
-            envs_idx=env_ids,
+            velocity=self._rows(env_ids, combined),
+            dofs_idx_local=_ROOT_DOFS,
+            envs_idx=self._mask(env_ids),
         )
 
     # ------------------------------------------------------------------
