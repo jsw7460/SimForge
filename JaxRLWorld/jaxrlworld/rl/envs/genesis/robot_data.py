@@ -342,15 +342,19 @@ class GenesisRobotData(GenesisRigidObjectData):
     def default_joint_pos(self) -> Tensor:
         return self._default_joint_pos
 
+    # A range read is a column view of the solver's row copy; ``contiguous``
+    # gives the terms the same dense layout the index read gave them, so
+    # their reductions run the same kernels and round the same way.
+
     @property
     @_per_step_read
     def joint_pos(self) -> Tensor:
-        return self._dofs.to_canonical_order(self._entity.get_dofs_position(self._dofs.dofs))
+        return self._dofs.to_canonical_order(self._entity.get_dofs_position(self._dofs.dofs)).contiguous()
 
     @property
     @_per_step_read
     def joint_vel(self) -> Tensor:
-        return self._dofs.to_canonical_order(self._entity.get_dofs_velocity(self._dofs.dofs))
+        return self._dofs.to_canonical_order(self._entity.get_dofs_velocity(self._dofs.dofs)).contiguous()
 
     @property
     @_per_step_read
@@ -365,7 +369,8 @@ class GenesisRobotData(GenesisRigidObjectData):
         ``get_dofs_force``, which returns the net joint-space force
         including passive damping and gravity bias.
         """
-        return self._dofs.to_canonical_order(self._entity.get_dofs_control_force(dofs_idx_local=self._dofs.dofs))
+        force = self._entity.get_dofs_control_force(dofs_idx_local=self._dofs.dofs)
+        return self._dofs.to_canonical_order(force).contiguous()
 
     @property
     @_per_step_read
