@@ -18,7 +18,7 @@ from jaxrlworld.rl.envs.managers.newton import (
 )
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 from jaxrlworld.rl.envs.site_frames import resolve_sites
-from jaxrlworld.rl.envs.utils.contact_overflow import ContactOverflowGuard
+from jaxrlworld.rl.envs.utils.mjwarp_overflow import MjwarpOverflowGuard
 from jaxrlworld.rl.envs.utils.newton.dr_baselines import snapshot_newton_dr_baselines
 from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from jaxrlworld.rl.envs.world import World
@@ -292,13 +292,16 @@ class NewtonEnv(World):
         self._build_visualization()
         self._dr_baselines = snapshot_newton_dr_baselines(self)
         self.scene_manager.capture()
-        # mujoco-warp drops the contacts past ``nconmax`` without an error;
-        # the guard raises instead (see ``ContactOverflowGuard``). SolverXPBD
-        # has no contact pool and the CPU MuJoCo path has MuJoCo's own
-        # bookkeeping, so neither is guarded.
-        self._contact_overflow = None
-        if self.scene_cfg.solver_type == "mujoco" and not self.scene_manager.solver.use_mujoco_cpu:
-            self._contact_overflow = ContactOverflowGuard(lambda: self.scene_manager.solver.mjw_data, "nconmax")
+        # mujoco-warp drops what overflows its buffers without an error; the
+        # guard raises on the per-world bitmask Newton collects instead (see
+        # ``MjwarpOverflowGuard``). SolverXPBD and the CPU MuJoCo path publish
+        # no bitmask, so neither is guarded.
+        self._overflow_guard = None
+        observables = self.scene_manager.overflow_observables
+        if observables is not None:
+            self._overflow_guard = MjwarpOverflowGuard(
+                lambda: observables.overflow, extra_flags=type(self.scene_manager.solver).OverflowBits
+            )
 
     def _build_visualization(self) -> None:
         """Create the visualization manager for the configured viewer type."""
@@ -422,8 +425,8 @@ class NewtonEnv(World):
             # is behind the tripwire flag.
             if _NAN_TRIPWIRE:
                 self._nan_tripwire_check(substep=substep)
-        if self._contact_overflow is not None:
-            self._contact_overflow.check()
+        if self._overflow_guard is not None:
+            self._overflow_guard.check()
 
     def _render_sensors(self) -> None:
         """Raytrace the cameras against the state the observation reports."""

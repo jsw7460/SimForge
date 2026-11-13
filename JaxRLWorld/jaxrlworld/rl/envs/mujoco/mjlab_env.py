@@ -21,7 +21,7 @@ from jaxrlworld.rl.configs.mujoco_config_classes import (
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 from jaxrlworld.rl.envs.site_frames import resolve_sites
-from jaxrlworld.rl.envs.utils.contact_overflow import ContactOverflowGuard
+from jaxrlworld.rl.envs.utils.mjwarp_overflow import MjwarpOverflowGuard
 from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from jaxrlworld.rl.envs.world import World
 from jaxrlworld.rl.utils import set_seed
@@ -407,10 +407,11 @@ class MujocoEnv(World):
             )
 
     def _post_setup(self) -> None:
-        # mujoco-warp drops the contacts past ``nconmax`` without an error;
-        # the guard raises instead (see ``ContactOverflowGuard``). The Data
-        # is fetched per check: ``_pre_manager_setup`` may have replaced it.
-        self._contact_overflow = ContactOverflowGuard(lambda: self.scene_manager.data, "nconmax")
+        # mujoco-warp drops what overflows its buffers without an error; the
+        # guard raises on its per-world bitmask instead (see
+        # ``MjwarpOverflowGuard``). The Data is fetched per check:
+        # ``_pre_manager_setup`` may have replaced it.
+        self._overflow_guard = MjwarpOverflowGuard(lambda: self.scene_manager.wp_data.overflow)
 
     def _step_physics(self) -> None:
         for _ in range(self.decimation):
@@ -421,7 +422,7 @@ class MujocoEnv(World):
             self.scene_manager.step()
             self.scene_manager.update(dt=self.physics_dt)
             self.contact_manager.advance(dt=self.physics_dt)
-        self._contact_overflow.check()
+        self._overflow_guard.check()
 
         # See MujocoSceneConfig.forward_after_physics.
         if self.scene_cfg.forward_after_physics:

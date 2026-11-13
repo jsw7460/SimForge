@@ -550,6 +550,11 @@ class NewtonSceneManager(BaseManager):
         # Newton objects
         self.model: newton.Model | None = None
         self.solver: Any = None
+        # The per-world capacity-overflow bitmask SolverMuJoCo collects on
+        # every step (mujoco-warp's bits plus the Newton collision pipeline's);
+        # ``NewtonEnv`` raises on it. None for SolverXPBD and the CPU MuJoCo
+        # path, which publish none.
+        self.overflow_observables: Any = None
         self.state_0: newton.State | None = None
         self.state_1: newton.State | None = None
         self.control: newton.Control | None = None
@@ -1311,6 +1316,8 @@ class NewtonSceneManager(BaseManager):
             # Same timing for the overflow print: mjwarp bakes the flag into
             # the kernels it builds at the first step.
             self.solver.mjw_model.opt.warn_overflow = int(mujoco_warp.OverflowType.ALL) if scfg.warn_overflow else 0
+            if not scfg.use_mujoco_cpu:
+                self.overflow_observables = self.solver.observables({self.solver.ObservableKind.OVERFLOW})
             # SolverMuJoCo is a reduced-coordinate solver: the authoritative
             # state lives in its own ``mjw_data`` (qpos/qvel) and the Newton
             # ``State`` is only an in/out sync surface, so passing the same
@@ -1886,7 +1893,14 @@ class NewtonSceneManager(BaseManager):
             #    ``_update_newton_state`` never writes it back, so the single
             #    write is exactly the intended constant force over the step.
             for _ in range(self.config.substeps):
-                self.solver.step(self.state_0, self.state_0, self.control, self.contacts, self.substep_dt)
+                self.solver.step(
+                    self.state_0,
+                    self.state_0,
+                    self.control,
+                    self.contacts,
+                    self.substep_dt,
+                    observables=self.overflow_observables,
+                )
             return
 
         for i in range(self.config.substeps):
@@ -1902,7 +1916,14 @@ class NewtonSceneManager(BaseManager):
             # has no effect on go2/g1/t1 tasks — body_f simply stays at
             # whatever the enclosing _step_physics wrote (zero for
             # legacy tasks, the propeller wrench for drone tasks).
-            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.substep_dt)
+            self.solver.step(
+                self.state_0,
+                self.state_1,
+                self.control,
+                self.contacts,
+                self.substep_dt,
+                observables=self.overflow_observables,
+            )
 
             if need_state_copy and i == last_idx:
                 # Copy state_1 → state_0 so the final result lives in

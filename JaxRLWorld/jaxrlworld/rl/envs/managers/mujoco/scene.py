@@ -321,10 +321,17 @@ class MujocoSceneManager(BaseManager):
 
     @property
     def data(self):
-        """The mujoco-warp Data."""
+        """The mujoco-warp Data, through mjlab's torch bridge."""
         if self._sim is None:
             return None
         return self._sim.data
+
+    @property
+    def wp_data(self):
+        """The mujoco-warp Data itself, warp arrays and all."""
+        if self._sim is None:
+            return None
+        return self._sim.wp_data
 
     @property
     def mj_model(self):
