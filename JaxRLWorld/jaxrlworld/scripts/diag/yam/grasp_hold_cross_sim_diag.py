@@ -49,7 +49,7 @@ from jaxrlworld.rl.configs.presets.yam_lift.base import CUBE, GRASP_SITE, YamLif
 from jaxrlworld.rl.configs.robots.yam import YAM_ACTION_SCALE, YAM_GRIPPER_JOINT
 from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from jaxrlworld.rl.runners import BaseRunner
-from jaxrlworld.rl.utils.quat_utils import quat_inv_wxyz, quat_rotate_wxyz
+from jaxrlworld.rl.utils.quat_utils import quat_inv_wxyz, quat_mul_wxyz, quat_rotate_wxyz
 
 OUT = Path("outputs/grasp_hold_cross_sim")
 
@@ -115,9 +115,10 @@ def record(args) -> int:
         env._post_reset_forward()
         env._invalidate_cache()
 
-    def cube_in_site_frame() -> torch.Tensor:
+    def cube_in_site_frame() -> tuple[torch.Tensor, torch.Tensor]:
         pos, quat = site_pose()
-        return quat_rotate_wxyz(quat_inv_wxyz(quat), cube.root_link_pos_w - pos)
+        inv = quat_inv_wxyz(quat)
+        return quat_rotate_wxyz(inv, cube.root_link_pos_w - pos), quat_mul_wxyz(inv, cube.root_link_quat_w)
 
     gripper = {YAM_GRIPPER_JOINT: torch.full((n,), GRIPPER_OPEN, device=device)}
     for _ in range(OPEN_STEPS):
@@ -128,7 +129,8 @@ def record(args) -> int:
         pin_cube_at_site()
         env.step(_actions(env, preset, gripper))
 
-    trace, finger_q, ended = [], [], torch.zeros(n, dtype=torch.bool, device=device)
+    trace, rotation, finger_q, finger_force = [], [], [], []
+    ended = torch.zeros(n, dtype=torch.bool, device=device)
     for step in range(HOLD_STEPS + SHAKE_STEPS):
         targets = dict(gripper)
         if step >= HOLD_STEPS:
@@ -137,15 +139,20 @@ def record(args) -> int:
                 targets[joint] = home[joint] + amplitude * math.sin(phase)
         env.step(_actions(env, preset, targets))
         ended |= env.termination_manager.terminated
-        trace.append(cube_in_site_frame().cpu().numpy())
+        pos, quat = cube_in_site_frame()
+        trace.append(pos.cpu().numpy())
+        rotation.append(quat.cpu().numpy())
         finger_q.append(robot.joint_pos[:, finger].cpu().numpy())
+        finger_force.append(robot.applied_torque[:, finger].cpu().numpy())
 
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"{args.sim}.npz"
     np.savez_compressed(
         path,
         cube_in_site=np.stack(trace),
+        cube_quat_in_site=np.stack(rotation),
         finger_q=np.stack(finger_q),
+        finger_force=np.stack(finger_force),
         ended=ended.cpu().numpy(),
         amplitude=amplitude.cpu().numpy(),
         control_dt=env.control_dt,
@@ -160,23 +167,35 @@ def compare(args) -> int:
         print(f"no traces under {OUT}")
         return 1
     print(
-        f"{'backend':<10} {'finger q':>9} {'hold creep mm (median, max)':>28} {'shake max mm':>13} "
-        f"{'lost':>6} {'ended':>6}   per-env shake max mm"
+        f"{'backend':<10} {'finger q':>9} {'squeeze N':>10} {'hold creep mm (median, max)':>28} "
+        f"{'hold rot deg':>13} {'shake max mm':>13} {'shake rot deg':>14} {'lost':>6} {'ended':>6}"
     )
+    per_env = {}
     for path in paths:
         data = np.load(path)
         trace = data["cube_in_site"]  # (T, N, 3)
-        released = trace[0]
-        moved = np.linalg.norm(trace - released, axis=-1) * 1000.0  # (T, N) mm
-        hold = moved[:HOLD_STEPS]
-        shake = moved[HOLD_STEPS:]
+        moved = np.linalg.norm(trace - trace[0], axis=-1) * 1000.0  # (T, N) mm
+        # Rotation since release: angle of q0^-1 * q, from the vector part (stable near zero).
+        quat = data["cube_quat_in_site"]  # (T, N, 4) wxyz
+        w0, v0 = quat[0, :, :1], quat[0, :, 1:]
+        w, v = quat[..., :1], quat[..., 1:]
+        rel_w = w0 * w + (v0 * v).sum(-1, keepdims=True)
+        rel_v = w0 * v - w * v0 - np.cross(v0, v)
+        turned = np.degrees(2.0 * np.arctan2(np.linalg.norm(rel_v, axis=-1), np.abs(rel_w[..., 0])))  # (T, N)
+        hold, shake = moved[:HOLD_STEPS], moved[HOLD_STEPS:]
         lost = (moved.max(axis=0) > args.lost_mm) | data["ended"]
         print(
             f"{path.stem:<10} {float(np.median(data['finger_q'][HOLD_STEPS - 1])):>9.4f} "
+            f"{float(np.median(data['finger_force'][:HOLD_STEPS])):>10.3f} "
             f"{float(np.median(hold[-1])):>18.2f}, {float(hold[-1].max()):>7.2f} "
-            f"{float(np.median(shake.max(axis=0))):>13.2f} {int(lost.sum()):>3}/{lost.size:<2} "
-            f"{int(data['ended'].sum()):>3}/{lost.size:<2}   {np.round(shake.max(axis=0), 1).tolist()}"
+            f"{float(np.median(turned[HOLD_STEPS - 1])):>13.2f} "
+            f"{float(np.median(shake.max(axis=0))):>13.2f} {float(np.median(turned[HOLD_STEPS:].max(axis=0))):>14.2f} "
+            f"{int(lost.sum()):>3}/{lost.size:<2} {int(data['ended'].sum()):>3}/{lost.size:<2}"
         )
+        per_env[path.stem] = (shake.max(axis=0), turned[HOLD_STEPS:].max(axis=0))
+    print("\nper env, shake max displacement mm / rotation deg:")
+    for name, (disp, rot) in per_env.items():
+        print(f"  {name:<10} " + "  ".join(f"{d:6.1f}/{r:5.1f}" for d, r in zip(disp, rot)))
     print(f"\nshake amplitude per env (rad): {np.round(np.load(paths[0])['amplitude'], 2).tolist()}")
     return 0
 
