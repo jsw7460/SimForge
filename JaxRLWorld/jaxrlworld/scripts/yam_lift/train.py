@@ -46,13 +46,12 @@ def main() -> int:
     # Hand the remainder to the config's own override parser.
     sys.argv = [sys.argv[0], *rest]
 
-    suffix = {"newton": "Newton", "genesis": "Genesis", "mujoco": "Mujoco"}[args.sim]
     cfg = YamLiftConfig(
         sim_type=args.sim,
         num_envs=args.num_envs,
         difficulty=args.difficulty,
         end_on_success=not args.run_past_success,
-        run_name=f"YamLift_{suffix}_{args.difficulty}" + ("_runpast" if args.run_past_success else ""),
+        run_name=f"YamLift_{args.sim.capitalize()}_{args.difficulty}" + ("_runpast" if args.run_past_success else ""),
     )
     cfgs_for_run = cfg.build().with_cli_overrides()
 
