@@ -740,6 +740,14 @@ class World(ABC):
         self._step_physics()
         self._invalidate_cache()
 
+        # The envs whose physics state the solver corrupted this step (a
+        # non-finite state, or an error the simulator flagged for them).
+        # They end as absorbing terminations below: their reward is dropped,
+        # their terminal observation zeroed, and the reset writes them a
+        # fresh state. Read right after the physics, before anything else
+        # consumes the state.
+        solver_error = self._solver_error_mask()
+
         # Increment the episode-step counter AFTER physics and BEFORE
         # termination/reward, matching IsaacLab / mjlab which do
         # ``episode_length_buf += 1`` right after the decimation loop and
@@ -761,16 +769,20 @@ class World(ABC):
         # state — not on rewards or the gait phase advanced in
         # _pre_reward_hook — so this ordering preserves behaviour for all
         # existing terms.
-        terminated, truncated = self.termination_manager.check_termination()
+        terminated, truncated = self.termination_manager.check_termination(solver_error=solver_error)
         reset_buf = terminated | truncated
         reset_env_ids = reset_buf.nonzero(as_tuple=False).flatten()
 
         # Pre-reward hook (e.g., gait advance that rewards depend on)
         self._pre_reward_hook()
 
-        # Compute rewards
+        # Compute rewards. Every term reads 0 on the solver-error envs: a
+        # reward computed from a corrupted state is noise, and a NaN in it
+        # would poison the episode sums and the exponential modes' reductions.
         self.rew_buf[:] = 0.0
-        self.reward_manager.set_rewards(reward_buffer=self.rew_buf, reward_buffer_per_type=self.rew_buf_per_type)
+        self.reward_manager.set_rewards(
+            reward_buffer=self.rew_buf, reward_buffer_per_type=self.rew_buf_per_type, valid=~solver_error
+        )
 
         # Handle terminal observations.
         #
@@ -795,7 +807,12 @@ class World(ABC):
             self._render_sensors()
             self.obs_manager.process_observations(update_history=True, groups=groups)
             group_names = self.obs_manager.obs_dict.keys() if groups is None else groups
-            final_observation = {key: self.obs_manager.obs_dict[key].clone() for key in group_names}
+            # The solver-error envs never bootstrap (absorbing), but the
+            # critic still evaluates every row of ``final_observation`` and
+            # ``NaN * 0`` is NaN: their rows are zeroed, not merely masked.
+            final_observation = {
+                key: self._zero_rows(self.obs_manager.obs_dict[key], solver_error) for key in group_names
+            }
             self.obs_manager.rollback_last_history_append(groups=groups)
 
         # Interval events (push_by_setting_velocity, interval_dr) run here:
@@ -884,6 +901,47 @@ class World(ABC):
     def _pre_termination_hook(self) -> None:
         """Override in subclass for pre-termination logic."""
         pass
+
+    def _solver_error_mask(self) -> torch.Tensor:
+        """``(num_envs,) bool``: the envs whose state this step is unusable.
+
+        A non-finite root or joint state catches a diverged solve on every
+        backend; :meth:`_backend_solver_error_mask` adds what the simulator
+        flagged itself. One env's corruption is otherwise fatal to the whole
+        run: Genesis raises for the scene on its next step, and a NaN that
+        reaches the policy spreads to every env through the update.
+        """
+        robot = self.get_robot_data(self.robot_entity_name)
+        state = torch.cat(
+            (
+                robot.root_link_pos_w,
+                robot.root_link_quat_w,
+                robot.root_link_lin_vel_w,
+                robot.root_link_ang_vel_w,
+                robot.joint_pos,
+                robot.joint_vel,
+            ),
+            dim=1,
+        )
+        corrupt = ~torch.isfinite(state).all(dim=1)
+        flagged = self._backend_solver_error_mask()
+        if flagged is not None:
+            corrupt |= flagged
+        return corrupt
+
+    def _backend_solver_error_mask(self) -> torch.Tensor | None:
+        """Per-env errors the simulator raised during this step's physics.
+
+        Override in a backend whose solver flags the envs it could not
+        step; ``None`` when it has no such flags. Must not wait for the
+        device.
+        """
+        return None
+
+    @staticmethod
+    def _zero_rows(values: torch.Tensor, rows: torch.Tensor) -> torch.Tensor:
+        """A copy of ``values`` with the ``rows`` (a ``(num_envs,)`` mask) zeroed."""
+        return torch.where(rows.view(-1, *([1] * (values.ndim - 1))), 0.0, values)
 
     def _reset_scene(self, env_ids: torch.Tensor) -> None:
         """Simulator-side reset for ``env_ids``, before any reset event runs.

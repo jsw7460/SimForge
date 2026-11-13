@@ -1,5 +1,6 @@
 import genesis as gs
 import torch
+from genesis.utils.array_class import ErrorCode
 from genesis.utils.misc import set_random_seed as _gs_set_random_seed
 
 from jaxrlworld.rl.configs import (
@@ -23,6 +24,19 @@ from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 from jaxrlworld.rl.envs.site_frames import resolve_sites
 from jaxrlworld.rl.envs.world import World
 from jaxrlworld.rl.utils import entity_utils as _eu, set_seed
+
+# The errors Genesis flags for an env whose state the solve corrupted, which
+# the env recovers from by resetting it (``World._solver_error_mask``). The
+# other codes (a capacity overflow, an unsupported pair) are configuration
+# errors, left for Genesis to raise with its own message naming the option.
+_GENESIS_STATE_ERROR_BITS = int(
+    ErrorCode.INVALID_CONTACT_NAN
+    | ErrorCode.INVALID_FORCE_NAN
+    | ErrorCode.INVALID_ACC_NAN
+    | ErrorCode.INVALID_GRAD_NAN
+    | ErrorCode.INVALID_VELOCITY_NAN
+    | ErrorCode.INVALID_VERTEX_NAN
+)
 
 
 class GenesisEnv(World):
@@ -233,6 +247,9 @@ class GenesisEnv(World):
         which are built after the scene; the default manager above stays
         in ``_build_scene`` because ``register_entities`` references it.
         """
+        # The envs Genesis flagged during this control step's substeps and
+        # this env took over (see ``_recover_flagged_envs``).
+        self._solver_error = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if self.visualization_cfg.viewer_type == "viser":
             from jaxrlworld.rl.vis.viser import ViserVisualizationManager
             from jaxrlworld.rl.vis.viser.bridges import GenesisBridge
@@ -354,11 +371,13 @@ class GenesisEnv(World):
         For position control without an actuator, re-applying the same
         target each substep is a harmless no-op.
         """
+        self._solver_error.zero_()
         for _ in range(self.decimation):
             self.act_manager.apply_actions(self.act_manager.processed_actions)
             if self._external_wrench is not None:
                 self._write_external_wrench()
             self.scene_manager.step()
+            self._recover_flagged_envs()
             # The physics state just advanced; bump the read-cache generation
             # so per-step-memoized reads (RobotData / contact sensors) can
             # never serve a pre-substep value inside the decimation loop —
@@ -366,6 +385,29 @@ class GenesisEnv(World):
             self._invalidate_cache()
             self.contact_manager.advance(dt=self.physics_dt)
         self.vis_manager.advance()
+
+    def _recover_flagged_envs(self) -> None:
+        """Take over the envs Genesis flagged for a corrupted state.
+
+        Genesis raises for the whole scene at the start of the second step
+        after any env raises a flag (the flags travel to the host through a
+        non-blocking copy), which with decimation falls inside this control
+        step. The flags of a state error are read off the solver and
+        cleared right away, so that raise never comes, and the envs end as
+        solver-error terminations at the end of the step. An env that also
+        carries a configuration error keeps its flags: that one Genesis
+        raises, with the message that names the option. ``_errno_latched``
+        is the solver's per-env bit field; the public mask drops the codes.
+        """
+        latched = self.scene.rigid_solver._errno_latched
+        state_error = (latched & _GENESIS_STATE_ERROR_BITS) != 0
+        config_error = (latched & ~_GENESIS_STATE_ERROR_BITS) != 0
+        recover = state_error & ~config_error
+        self._solver_error |= recover
+        self.scene.clear_errno(recover)
+
+    def _backend_solver_error_mask(self) -> torch.Tensor:
+        return self._solver_error
 
     def _write_external_wrench(self) -> None:
         """Apply the viewer wrench via the rigid solver's per-link force API."""

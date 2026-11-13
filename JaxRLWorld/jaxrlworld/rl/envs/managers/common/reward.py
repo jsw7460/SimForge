@@ -90,8 +90,14 @@ class RewardManager(BaseManager):
         self,
         reward_buffer: torch.Tensor,
         reward_buffer_per_type: dict[str, torch.Tensor],
+        valid: torch.Tensor | None = None,
     ) -> None:
         """Compute every term once and combine them with batched reductions.
+
+        ``valid`` (``(num_envs,) bool``) names the envs whose state this
+        step is usable; every term reads 0 on the others (the envs the
+        solver corrupted, see ``World._solver_error_mask``), before the
+        combination and the per-type readout. ``None`` keeps every env.
 
         The per-term bookkeeping used to launch 2-4 small kernels per term
         per step (accumulator adds, masked ``torch.where`` pairs in the
@@ -109,7 +115,7 @@ class RewardManager(BaseManager):
             return
 
         if not self._compile_terms:
-            stacked = self._compute_stacked(self.env)
+            stacked = self._valid_only(self._compute_stacked(self.env), valid)
             self._combine(stacked, reward_buffer)
         else:
             active = self._active()
@@ -126,7 +132,7 @@ class RewardManager(BaseManager):
                 # Same values as the eager path either way.
                 if self._record is None:
                     self._record = RewardReadRecord()
-                stacked = self._compute_stacked(RecordingEnvView(self.env, self._record))
+                stacked = self._valid_only(self._compute_stacked(RecordingEnvView(self.env, self._record)), valid)
                 self._combine(stacked, reward_buffer)
                 self._recorded_active |= active_names
                 self._view = RewardEnvView(self.env, self._record)
@@ -134,7 +140,7 @@ class RewardManager(BaseManager):
                     self._compiled_chain = torch.compile(self._chain, fullgraph=True, dynamic=False)
             else:
                 self._view.refresh()
-                stacked = self._compiled_chain(self._view, self._weights(), active, reward_buffer)
+                stacked = self._compiled_chain(self._view, self._weights(), active, reward_buffer, valid)
 
         for i, name in enumerate(self.reward_terms):
             reward_buffer_per_type[name] = stacked[i]
@@ -153,9 +159,17 @@ class RewardManager(BaseManager):
             values = [self._weighted_term(name, term, env) for name, term in self.reward_terms.items()]
         return torch.stack(values, dim=0)
 
-    def _chain(self, env, weights: torch.Tensor, active: tuple[bool, ...], reward_buffer: torch.Tensor) -> torch.Tensor:
+    def _chain(
+        self,
+        env,
+        weights: torch.Tensor,
+        active: tuple[bool, ...],
+        reward_buffer: torch.Tensor,
+        valid: torch.Tensor | None,
+    ) -> torch.Tensor:
         """The compiled program: every active term on the snapshot view,
-        the weighting, and the mode combination into ``reward_buffer``.
+        the weighting, the ``valid`` mask and the mode combination into
+        ``reward_buffer``.
 
         ``active`` is the per-term "runs this step" flag (a zero-weight
         pure term is skipped, as the eager path skips it); as a tuple of
@@ -171,9 +185,20 @@ class RewardManager(BaseManager):
                 raws.append(self._instances[name](env))
             else:
                 raws.append(self._resolved_fns[name](env, **term.params))
-        stacked = torch.stack(raws, dim=0) * weights[:, None]
+        stacked = self._valid_only(torch.stack(raws, dim=0) * weights[:, None], valid)
         self._combine(stacked, reward_buffer)
         return stacked
+
+    @staticmethod
+    def _valid_only(stacked: torch.Tensor, valid: torch.Tensor | None) -> torch.Tensor:
+        """``stacked`` with the columns of the envs outside ``valid`` zeroed.
+
+        A select, not a multiply: the value a corrupted env produced may be
+        NaN, and ``NaN * 0`` is NaN.
+        """
+        if valid is None:
+            return stacked
+        return torch.where(valid, stacked, 0.0)
 
     def _weights(self) -> torch.Tensor:
         """``(n_terms,)`` of ``weight * control_dt``, re-uploaded only when a

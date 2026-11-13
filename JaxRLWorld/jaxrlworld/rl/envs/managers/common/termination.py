@@ -16,6 +16,12 @@ if TYPE_CHECKING:
 # Backward-compatible alias
 TerminationConfig = None  # will be cleaned up later
 
+# The built-in absorbing termination of the envs whose physics state the
+# solver corrupted this step (see ``World._solver_error_mask``). Counted like
+# a configured term (``Episode_Termination/solver_error``) and exposed in
+# ``term_dones``; the name is reserved against the configured terms.
+SOLVER_ERROR_TERM = "solver_error"
+
 
 class TerminationManager(BaseManager):
     """Manages termination conditions for the environment.
@@ -39,6 +45,13 @@ class TerminationManager(BaseManager):
 
         # Discover named terms
         self._all_terms: dict[str, TerminationTermConfig] = self._own_terms(iter_terms(config, TerminationTermConfig))
+        if SOLVER_ERROR_TERM in self._all_terms:
+            raise ValueError(
+                f"Termination term name {SOLVER_ERROR_TERM!r} is reserved for the built-in solver-error term."
+            )
+        # The configured terms plus the built-in one: the names every per-term
+        # fire buffer below is laid out over.
+        self._fire_names: tuple[str, ...] = (*self._all_terms, SOLVER_ERROR_TERM)
         self._resolved_fns: dict[str, callable] = {name: term.resolved_func for name, term in self._all_terms.items()}
         # Replace SceneEntitySelector params with their resolved ResolvedEntity.
         for term in self._all_terms.values():
@@ -70,7 +83,7 @@ class TerminationManager(BaseManager):
         # downstream code can read the dict structure before the first
         # ``check_termination`` call.
         self._term_dones: dict[str, torch.Tensor] = {
-            name: torch.zeros(env.num_envs, dtype=torch.bool, device=self.device) for name in self._all_terms
+            name: torch.zeros(env.num_envs, dtype=torch.bool, device=self.device) for name in self._fire_names
         }
         # One (n_terms, num_envs) tensor, and the per-name dict holds VIEWS
         # into its rows. Readers and the per-step ``+=`` see the dict they
@@ -79,10 +92,10 @@ class TerminationManager(BaseManager):
         # of three launches per term. The dict must never be rebound
         # (``self._episode_fires[name] = ...``) or the row stops being one.
         self._episode_fires_all: torch.Tensor = torch.zeros(
-            (len(self._all_terms), env.num_envs), dtype=torch.long, device=self.device
+            (len(self._fire_names), env.num_envs), dtype=torch.long, device=self.device
         )
         self._episode_fires: dict[str, torch.Tensor] = {
-            name: self._episode_fires_all[i] for i, name in enumerate(self._all_terms)
+            name: self._episode_fires_all[i] for i, name in enumerate(self._fire_names)
         }
 
         # Iteration-window accumulators consumed by
@@ -104,10 +117,10 @@ class TerminationManager(BaseManager):
         # Same layout as ``_episode_fires``: a (n_terms,) tensor with 0-d
         # views per name, so the reset-step accumulation is one vector add.
         self._iter_fire_counts_all: torch.Tensor = torch.zeros(
-            len(self._all_terms), dtype=torch.long, device=self.device
+            len(self._fire_names), dtype=torch.long, device=self.device
         )
         self._iter_fire_counts: dict[str, torch.Tensor] = {
-            name: self._iter_fire_counts_all[i] for i, name in enumerate(self._all_terms)
+            name: self._iter_fire_counts_all[i] for i, name in enumerate(self._fire_names)
         }
 
         # Last-step union of non-timeout termination fires; consumed by
@@ -187,7 +200,14 @@ class TerminationManager(BaseManager):
     def advance(self) -> None:
         self.episode_length_buf += 1
 
-    def check_termination(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def check_termination(self, solver_error: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """Evaluate every term; ``(terminated, truncated)`` as ``(num_envs,) bool``.
+
+        ``solver_error`` marks the envs whose physics state the solver
+        corrupted this step (``World._solver_error_mask``). They end as an
+        absorbing termination under the built-in ``solver_error`` term: no
+        bootstrap, since the state the value would be read from is garbage.
+        """
         terminated = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
         truncated = torch.zeros(self.env.num_envs, dtype=torch.bool, device=self.device)
         # Split non-timeout terminations by whether their terminal value should
@@ -217,6 +237,12 @@ class TerminationManager(BaseManager):
 
             if result.extras:
                 self.extras.update(result.extras)
+
+        if solver_error is not None:
+            self._term_dones[SOLVER_ERROR_TERM] = solver_error
+            self._episode_fires[SOLVER_ERROR_TERM] += solver_error.long()
+            terminated |= solver_error
+            absorb_term |= solver_error
 
         self._terminated_mask = terminated
         # Bootstrap iff (timeout OR non-absorbing termination) AND no absorbing
