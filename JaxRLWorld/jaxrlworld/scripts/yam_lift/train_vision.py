@@ -27,7 +27,11 @@ from jaxrlworld.rl.runners import BaseRunner
 
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--sim", default="mujoco", choices=("mujoco", "newton", "genesis"))
+    ap.add_argument(
+        "--sim",
+        default="mujoco",
+        help="mujoco, newton, genesis, or the sim_type of a backend another package registers",
+    )
     ap.add_argument("--difficulty", default="fixed", choices=("fixed", "dynamic"))
     ap.add_argument("--num-envs", type=int, default=4096)
     ap.add_argument("--resolution", type=int, default=32, help="Square camera resolution, pixels.")
