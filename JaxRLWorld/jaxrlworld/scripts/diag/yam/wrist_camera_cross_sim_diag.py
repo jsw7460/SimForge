@@ -639,6 +639,10 @@ def main() -> int:
     print("   low = one of them is holding geometry the other is not)")
     results["the_disagreement_is_confined_to_silhouettes"] = share > 0.9 or disagreeing == 0
 
+    # Section 4 reads the last frame; 2e below reuses the names for the
+    # worst sample, and clears them when every interior pixel agrees.
+    last_a_depth = a_depth
+
     print("\n-- 2e. the worst interior pixels, spelled out --")
     # An aggregate cannot say WHAT is different. These are the actual
     # numbers at the pixels that disagree most while sitting away from
@@ -758,9 +762,9 @@ def main() -> int:
     print("\n-- 4. is the comparison worth anything --")
     # A pair of images that are constant, or a scene the camera never
     # sees into, would pass every check above by being empty.
-    spread = float(diffs.numel() and a_depth.std())
+    spread = float(diffs.numel() and last_a_depth.std())
     print(f"  depth spread within one frame (A): {spread:.5f} m")
-    print(f"  distinct depths in the last frame:     {int(torch.unique(a_depth).numel()):,}")
+    print(f"  distinct depths in the last frame:     {int(torch.unique(last_a_depth).numel()):,}")
     results["the_image_has_structure_to_compare"] = spread > 1e-3
 
     print("\n" + "=" * 78)
