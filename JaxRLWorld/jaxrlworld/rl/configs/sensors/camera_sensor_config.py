@@ -151,16 +151,10 @@ def _read_frame(element: ET.Element) -> tuple[np.ndarray, np.ndarray]:
     return pos, quat
 
 
-def resolve_mjcf_camera(mjcf_path: str, camera_name: str) -> MjcfCameraPlacement:
-    """Find a ``<camera>`` in an MJCF and express it in its body's frame.
-
-    A camera is usually nested a body or two below the link that actually
-    moves — on the YAM arm it hangs off ``link_6`` through a camera
-    housing and a frame body. Those intermediate bodies are welded (they
-    carry no joint), so the chain collapses into one fixed offset from
-    the nearest jointed ancestor, which is what a backend without MJCF
-    cameras needs to be told.
-    """
+def _find_mjcf_camera(mjcf_path: str, camera_name: str) -> tuple[list[ET.Element], ET.Element, int]:
+    """The ``<camera>`` named ``camera_name``, the chain of bodies holding
+    it (outermost first), and the index in that chain of the last jointed
+    body: the link that moves the camera. The bodies after it are welded."""
     root = ET.parse(mjcf_path).getroot()
     worldbody = root.find("worldbody")
     if worldbody is None:
@@ -191,6 +185,33 @@ def resolve_mjcf_camera(mjcf_path: str, camera_name: str) -> MjcfCameraPlacement
     for index, body in enumerate(body_chain):
         if body.find("joint") is not None or body.find("freejoint") is not None:
             anchor_index = index
+    return body_chain, camera, anchor_index
+
+
+def mjcf_camera_mount_bodies(mjcf_path: str, camera_name: str) -> list[str]:
+    """The welded bodies an MJCF camera hangs from below the link that moves
+    it, outermost first: on the YAM wrist, the ``camera_d405`` housing and
+    its ``camera_frame``. ``resolve_mjcf_camera`` composes their frames
+    into the camera's offset; a raytracing backend also keeps their shapes
+    out of the camera's own view (a camera does not see its housing)."""
+    body_chain, _, anchor_index = _find_mjcf_camera(mjcf_path, camera_name)
+    names = [body.get("name") for body in body_chain[anchor_index + 1 :]]
+    if any(name is None for name in names):
+        raise ValueError(f"A body holding camera {camera_name!r} in {mjcf_path} has no name.")
+    return names
+
+
+def resolve_mjcf_camera(mjcf_path: str, camera_name: str) -> MjcfCameraPlacement:
+    """Find a ``<camera>`` in an MJCF and express it in its body's frame.
+
+    A camera is usually nested a body or two below the link that actually
+    moves — on the YAM arm it hangs off ``link_6`` through a camera
+    housing and a frame body. Those intermediate bodies are welded (they
+    carry no joint), so the chain collapses into one fixed offset from
+    the nearest jointed ancestor, which is what a backend without MJCF
+    cameras needs to be told.
+    """
+    body_chain, camera, anchor_index = _find_mjcf_camera(mjcf_path, camera_name)
     anchor = body_chain[anchor_index]
 
     pos = np.zeros(3)

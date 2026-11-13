@@ -28,7 +28,12 @@ import torch
 import warp as wp
 from newton import ShapeFlags
 
-from jaxrlworld.rl.configs.sensors.camera_sensor_config import CameraOffset, CameraSensorCfg, MjcfCameraPlacement
+from jaxrlworld.rl.configs.sensors.camera_sensor_config import (
+    CameraOffset,
+    CameraSensorCfg,
+    MjcfCameraPlacement,
+    mjcf_camera_mount_bodies,
+)
 from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
 from jaxrlworld.rl.utils.quat_utils import quat_mul_wxyz, quat_rotate_wxyz, wxyz_to_xyzw
 
@@ -157,19 +162,30 @@ class NewtonCameraSensor:
         """Show the camera the same shapes mjlab is told to draw.
 
         MuJoCo assets describe a robot twice — visual meshes that cannot
-        collide, and coarse colliders — and Newton renders whatever
-        carries the VISIBLE flag, which after an MJCF import is both.
-        mjlab picks between them by geom group; here the same choice is
-        made on the flag Newton already keeps, so the classification is
-        exact rather than a convention about group numbers.
+        collide, and coarse colliders. mjlab picks between them by geom
+        group, for the camera entity's own geoms, and always keeps group
+        0 (the ground and the props, which come from other files). Here
+        the same choice is made on the flag Newton already keeps, for the
+        camera entity's shapes only, so the classification is exact rather
+        than a convention about group numbers; every other shape keeps the
+        flags the import gave it. Sites never show (MuJoCo does not draw
+        them in a camera image), and neither does the camera's own mount —
+        the welded bodies between it and the link that moves it
+        (``mjcf_camera_mount_bodies``). On the YAM wrist the lens sits
+        exactly on the housing collider's face: mjwarp's ray-box test
+        leaves that face out, Newton's takes a hit at distance zero and the
+        box blinds the camera.
+
+        The ray tracer sees the shapes the shape BVH was built over, and
+        ``ModelBuilder.finalize`` builds it from the flags at that moment,
+        so the BVH is rebuilt after the edit with the settings finalize
+        used (the scene builder keeps ``ModelBuilder.BvhConfig()``).
+        Without the rebuild the flags change and the image does not.
 
         This changes the model, which every camera and viewer shares, so
         two cameras asking for different geometry is refused rather than
         silently resolved in favour of whichever was built last.
         """
-        if visible_geometry == "all":
-            return
-
         model = self._scene.model
         previous = getattr(model, "_rlworld_camera_visibility", None)
         if previous is not None and previous != visible_geometry:
@@ -180,11 +196,44 @@ class NewtonCameraSensor:
             )
         model._rlworld_camera_visibility = visible_geometry
 
+        entity = self._scene.entities[self._entity_name]["config"]
+        prefix = f"{entity.body_label_prefix}/"
+        in_entity = torch.tensor([label.startswith(prefix) for label in model.shape_label], device=self._env.device)
+        if not bool(in_entity.any()):
+            raise RuntimeError(f"Camera {self.cfg.name!r}: no shape is labelled under {prefix!r}")
+        mount = (
+            set(mjcf_camera_mount_bodies(entity.mjcf_path, self.cfg.camera_name))
+            if self.cfg.camera_name is not None
+            else set()
+        )
+        shape_body = model.shape_body.numpy()
+        in_mount = torch.tensor(
+            [
+                bool(in_entity[i]) and body >= 0 and model.body_label[body].split("/")[-1] in mount
+                for i, body in enumerate(shape_body)
+            ],
+            device=self._env.device,
+        )
+        if mount and not bool(in_mount.any()):
+            raise RuntimeError(f"Camera {self.cfg.name!r}: its mount bodies {sorted(mount)} carry no shape")
+
         flags = wp.to_torch(model.shape_flags)
         collides = (flags & int(ShapeFlags.COLLIDE_SHAPES)) != 0
-        should_see = collides if visible_geometry == "collision" else ~collides
-        flags |= int(ShapeFlags.VISIBLE)
-        flags[~should_see] &= ~int(ShapeFlags.VISIBLE)
+        site = (flags & int(ShapeFlags.SITE)) != 0
+        if visible_geometry == "collision":
+            should_see = collides
+        elif visible_geometry == "visual":
+            should_see = ~collides
+        elif visible_geometry == "all":
+            should_see = torch.ones_like(collides)
+        else:
+            raise ValueError(f"visible_geometry must be 'collision', 'visual' or 'all', got {visible_geometry!r}")
+        shown = in_entity & should_see & ~site & ~in_mount
+        flags[shown] |= int(ShapeFlags.VISIBLE)
+        flags[(in_entity & ~shown) | site] &= ~int(ShapeFlags.VISIBLE)
+
+        bvh = newton.ModelBuilder.BvhConfig()
+        model.bvh_build_shapes(self._scene.state_0, bvh_constructor=bvh.shape_constructor, shape_flags=bvh.shape_flags)
 
     def _write_camera_transforms(self) -> None:
         """Place the camera on the link, this frame."""
