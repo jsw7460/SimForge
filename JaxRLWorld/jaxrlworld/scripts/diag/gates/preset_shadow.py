@@ -85,7 +85,7 @@ class _RewardShadow:
         self.error: str | None = None
         mgr.set_rewards = self
 
-    def __call__(self, reward_buffer, reward_buffer_per_type):
+    def __call__(self, reward_buffer, reward_buffer_per_type, valid=None):
         mgr = self._mgr
         if self.error is None and mgr.reward_terms:
             state = TermState(mgr)
@@ -104,14 +104,14 @@ class _RewardShadow:
                         self._compiled = torch.compile(mgr._chain, fullgraph=True, dynamic=False)
                 self._view.refresh()
                 total = reward_buffer.clone()
-                stacked = self._compiled(self._view, mgr._weights(), active, total)
+                stacked = self._compiled(self._view, mgr._weights(), active, total, valid)
             except Exception as exc:  # noqa: BLE001 — reported per cell, see the class docstring
                 self.error = f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}"
                 stacked = None
             state.restore()
         else:
             stacked = None
-        self._original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type)
+        self._original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type, valid=valid)
         if stacked is not None:
             self.compared += 1
             for i, name in enumerate(mgr.reward_terms):

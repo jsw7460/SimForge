@@ -287,17 +287,17 @@ def phase_inject(args, device) -> int:
     worst = {name: 0.0 for name in names}
     examples: list[str] = []
 
-    def checked_set_rewards(reward_buffer, reward_buffer_per_type):
+    def checked_set_rewards(reward_buffer, reward_buffer_per_type, valid=None):
         if mgr._view is None:
-            original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type)
+            original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type, valid=valid)
             return
         pick = torch.randperm(sweep.shape[0], generator=gen, device=device)[:n_sweep]
         cmd = torch.cat([sweep[pick], random_commands(env.num_envs - n_sweep, device, gen)], dim=0)
         cmd_term._command.copy_(cmd)
         state = TermState(mgr)
-        ref = mgr._compute_stacked(mgr.env)
+        ref = mgr._valid_only(mgr._compute_stacked(mgr.env), valid)
         state.restore()
-        original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type)
+        original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type, valid=valid)
         stats["compared"] += 1
         if not torch.isfinite(ref).all():
             raise RuntimeError("eager chain produced a non-finite value on the injected commands")
@@ -356,8 +356,8 @@ def phase_run(args, device) -> int:
     original = mgr.set_rewards
     hit: dict = {}
 
-    def trapped_set_rewards(reward_buffer, reward_buffer_per_type):
-        original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type)
+    def trapped_set_rewards(reward_buffer, reward_buffer_per_type, valid=None):
+        original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type, valid=valid)
         if mgr._view is None or hit:
             return
         stacked = torch.stack([reward_buffer_per_type[n] for n in names], dim=0)

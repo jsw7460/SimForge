@@ -118,17 +118,17 @@ def main() -> int:
     compared = 0
     original = mgr.set_rewards
 
-    def checked_set_rewards(reward_buffer, reward_buffer_per_type):
+    def checked_set_rewards(reward_buffer, reward_buffer_per_type, valid=None):
         nonlocal failures, compared
         if mgr._view is None:
             # The recording (eager) first call: nothing to compare yet.
-            original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type)
+            original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type, valid=valid)
             return
         state = TermState(mgr)
-        ref = mgr._compute_stacked(mgr.env)
+        ref = mgr._valid_only(mgr._compute_stacked(mgr.env), valid)
         ref_total = reward_buffer + ref.sum(dim=0) if mgr.config.reward_mode == "sum" else None
         state.restore()
-        original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type)
+        original(reward_buffer=reward_buffer, reward_buffer_per_type=reward_buffer_per_type, valid=valid)
         compared += 1
         for i, name in enumerate(names):
             scale = ref[i].abs().max().clamp_min(1e-6)
