@@ -27,7 +27,11 @@ from jaxrlworld.rl.runners import BaseRunner
 
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--sim", default="mujoco", choices=("genesis", "newton", "mujoco"))
+    ap.add_argument(
+        "--sim",
+        default="mujoco",
+        help="genesis, newton, mujoco, or the sim_type of a backend another package registers",
+    )
     ap.add_argument("--difficulty", default="fixed", choices=("fixed", "dynamic"))
     ap.add_argument("--num-envs", type=int, default=16_384)
     ap.add_argument(
