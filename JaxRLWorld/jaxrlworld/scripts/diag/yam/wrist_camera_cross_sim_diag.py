@@ -172,6 +172,14 @@ def _impose(env, joint_by_name: dict[str, torch.Tensor], objects: dict, device) 
     # reading back exactly the joint angles that were written.
     env._post_reset_forward()
 
+    # A step invalidates the RobotData read cache after its physics and its
+    # resets; these writes happen outside a step, so it is done here. Newton
+    # caches per generation, and a cached read that is a copy (joint_pos,
+    # body_quat_w_all) keeps the values from before the write while a view
+    # (body_pos_w_all) follows it — the arms then looked identical in
+    # position and wrong in every joint and orientation.
+    env._invalidate_cache()
+
     # The observation is what the policy reads, and it is what carries
     # the rendered image, so go through the same path the env uses.
     env._render_sensors()
