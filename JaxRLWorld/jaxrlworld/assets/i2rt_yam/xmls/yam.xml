@@ -132,7 +132,7 @@
                   </body>
                   <body name="camera_d405" pos="-0.0107 0.079729 0.066021" quat="0.953717 0.3007058 0 0">
                     <geom class="visual" mesh="camera_d405"/>
-                    <geom class="collision" type="box" size=".018 .018 .01" pos="0 0 -0.01" group="4"/>
+                    <geom name="camera_d405_collision" class="collision" type="box" size=".018 .018 .01" pos="0 0 -0.01" group="4"/>
                     <body name="camera_frame" pos="0.009 0 0" quat="0 0 0 1">
                       <camera name="camera_d405" pos="0 0 0" quat="0 1 0 0" resolution="1280 720"
                         sensorsize="0.003896 0.00214" focal="0.00193 0.00193"/>
