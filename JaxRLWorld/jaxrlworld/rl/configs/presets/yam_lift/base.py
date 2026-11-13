@@ -14,7 +14,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import ClassVar, Dict
 
 from jaxrlworld.rl.configs.common_config_classes import (
     CommandConfig,
@@ -25,6 +25,7 @@ from jaxrlworld.rl.configs.common_config_classes import (
 from jaxrlworld.rl.configs.curriculums import CurriculumManagerConfig, CurriculumTermConfig
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from jaxrlworld.rl.configs.presets._sim_builder_registry import get_sim_builders
 from jaxrlworld.rl.configs.presets.yam_arm.base import CUBE_HALF, TABLE_TOP_Z, YamArmConfig
 from jaxrlworld.rl.configs.rewards.reward_term_config import RewardTermConfig
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
@@ -85,13 +86,15 @@ def _get_sim_builders(sim_type: str):
     elif sim_type == "mujoco":
         from . import _mujoco_builders as mod
     else:
-        raise ValueError(f"Unknown sim_type: {sim_type!r}.")
+        mod = get_sim_builders("yam_lift", sim_type, tuple(_SIM_DEFAULT_RUN_NAMES)).load()
     return mod
 
 
 @dataclass
 class YamLiftConfig(YamArmConfig):
     """Bring the cube from the table to a commanded point above it."""
+
+    _BUILDER_PRESET: ClassVar[str] = "yam_lift"
 
     episode_length_s: float = 20.0
     """mjlab's own length for this task. Five seconds was mine, and it is
@@ -406,7 +409,13 @@ class YamLiftConfig(YamArmConfig):
     def _build_runner_config(self):
         runner = super()._build_runner_config()
         if not self.run_name:
-            runner.run_name = _SIM_DEFAULT_RUN_NAMES[self.sim_type]
+            runner.run_name = (
+                _SIM_DEFAULT_RUN_NAMES[self.sim_type]
+                if self.sim_type in _SIM_DEFAULT_RUN_NAMES
+                else get_sim_builders(
+                    self._BUILDER_PRESET, self.sim_type, tuple(_SIM_DEFAULT_RUN_NAMES)
+                ).default_run_name
+            )
         return runner
 
 

@@ -32,7 +32,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, ClassVar, Dict
 
 from jaxrlworld.rl.configs import ConfigsForRun
 from jaxrlworld.rl.configs.algorithms.ppo import PPOConfig
@@ -54,6 +54,7 @@ from jaxrlworld.rl.configs.curriculums import CurriculumManagerConfig
 from jaxrlworld.rl.configs.events import EventTermConfig
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
+from jaxrlworld.rl.configs.presets._sim_builder_registry import get_sim_builders
 from jaxrlworld.rl.configs.robots.yam import YamConfig
 from jaxrlworld.rl.configs.scene import RigidObjectCfg
 from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
@@ -124,13 +125,18 @@ def _get_sim_builders(sim_type: str):
     elif sim_type == "mujoco":
         from . import _mujoco_builders as mod
     else:
-        raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
+        mod = get_sim_builders("yam_arm", sim_type, tuple(_SIM_TIMINGS)).load()
     return mod
 
 
 @dataclass
 class YamArmConfig:
     """Unified base configuration for the YAM fixed-base arm."""
+
+    _BUILDER_PRESET: ClassVar[str] = "yam_arm"
+    """Key of this preset's builders for a simulator from another package
+    (``presets/_sim_builder_registry``); a subclass with its own builders
+    names its own."""
 
     sim_type: str = "newton"
 
@@ -173,9 +179,14 @@ class YamArmConfig:
         """
         return _get_sim_builders(self.sim_type)
 
+    def _sim_timing(self) -> Dict[str, Any]:
+        if self.sim_type in _SIM_TIMINGS:
+            return _SIM_TIMINGS[self.sim_type]
+        return get_sim_builders(self._BUILDER_PRESET, self.sim_type, tuple(_SIM_TIMINGS)).timing
+
     def build(self) -> ConfigsForRun:
         builders = self._sim_builders()
-        timing = _SIM_TIMINGS[self.sim_type]
+        timing = self._sim_timing()
 
         kwargs: Dict[str, Any] = dict(
             env=builders.build_env(self, timing),
@@ -351,7 +362,11 @@ class YamArmConfig:
         )
 
     def _build_runner_config(self) -> RunnerConfig:
-        run_name = self.run_name or _SIM_DEFAULT_RUN_NAMES[self.sim_type]
+        run_name = self.run_name or (
+            _SIM_DEFAULT_RUN_NAMES[self.sim_type]
+            if self.sim_type in _SIM_DEFAULT_RUN_NAMES
+            else get_sim_builders(self._BUILDER_PRESET, self.sim_type, tuple(_SIM_TIMINGS)).default_run_name
+        )
         return RunnerConfig(
             checkpoint=-1,
             log_interval=1,
