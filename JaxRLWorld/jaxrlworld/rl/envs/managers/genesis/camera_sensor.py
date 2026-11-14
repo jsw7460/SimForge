@@ -22,8 +22,10 @@ term reads the same tensor on any backend.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import mujoco
 import numpy as np
 import torch
 
@@ -32,7 +34,84 @@ from jaxrlworld.rl.configs.sensors.camera_sensor_config import CameraOffset, Cam
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
 
-__all__ = ["GenesisCameraSensor", "GenesisCameraData"]
+__all__ = ["GenesisCameraSensor", "GenesisCameraData", "collider_render_mjcf"]
+
+_RENDERED_GROUP = 2
+"""Genesis's MJCF import draws a colliding geom only in groups 0-2, as
+MuJoCo's viewer shows them; non-colliding geoms are always drawn."""
+
+_HIDDEN_GROUP = 3
+
+# What a contact or the dynamics read from the compiled model. The render
+# rewrite below must leave every one of them unchanged.
+_BODY_FIELDS = ("body_mass", "body_inertia", "body_ipos", "body_iquat", "body_pos", "body_quat")
+_COLLIDER_FIELDS = (
+    "geom_type",
+    "geom_size",
+    "geom_pos",
+    "geom_quat",
+    "geom_bodyid",
+    "geom_contype",
+    "geom_conaffinity",
+    "geom_condim",
+    "geom_priority",
+    "geom_friction",
+    "geom_solref",
+    "geom_solimp",
+    "geom_margin",
+    "geom_gap",
+)
+
+
+def _colliding(model: mujoco.MjModel) -> np.ndarray:
+    return (model.geom_contype != 0) | (model.geom_conaffinity != 0)
+
+
+def collider_render_mjcf(mjcf_path: str, visible_geometry: str, mount_bodies: list[str]) -> str:
+    """The entity's MJCF, rewritten in memory so Genesis's camera draws its colliders.
+
+    Genesis renders a camera image from the visual geoms its MJCF import makes: every non-colliding geom, and the
+    colliding geoms of groups 0-2 (MuJoCo's viewer default). Its batch renderer has no collider mode of its own,
+    so an asset whose colliders sit in higher groups (the YAM arm's are in 3 and 4) is seen as its visual meshes
+    whatever ``visible_geometry`` asks. Here the colliders move into a rendered group; with ``"collision"`` the
+    non-colliding geoms are removed as well, and the colliders of the camera's mount (``mount_bodies``) go to a
+    hidden group, as the Newton adapter hides them (a camera does not see its own housing). ``"visual"`` is the
+    import as it is and is not handled here.
+
+    The rewrite only decides what is drawn: both models are compiled and every body's mass, inertia and frame, and
+    every collider's shape, pose and contact parameters, must come out identical, or this raises.
+    """
+    if visible_geometry not in ("collision", "all"):
+        raise ValueError(f"collider_render_mjcf handles 'collision' and 'all', got {visible_geometry!r}")
+    source = Path(mjcf_path).resolve()
+    original = mujoco.MjModel.from_xml_path(str(source))
+
+    spec = mujoco.MjSpec.from_file(str(source))
+    mount = set(mount_bodies)
+    for body in spec.bodies:
+        for geom in list(body.geoms):
+            collides = geom.contype != 0 or geom.conaffinity != 0
+            if not collides:
+                if visible_geometry == "collision":
+                    spec.delete(geom)
+            elif body.name in mount:
+                geom.group = _HIDDEN_GROUP
+            else:
+                geom.group = _RENDERED_GROUP
+    # Inline XML resolves file paths against the working directory; anchor them to the asset's own.
+    spec.meshdir = str(source.parent / spec.meshdir)
+    spec.texturedir = str(source.parent / spec.texturedir)
+    rewritten = spec.compile()
+
+    for field in _BODY_FIELDS:
+        if not np.array_equal(getattr(original, field), getattr(rewritten, field)):
+            raise RuntimeError(f"{source}: rewriting it for the camera changed {field}")
+    before, after = _colliding(original), _colliding(rewritten)
+    for field in _COLLIDER_FIELDS:
+        if not np.array_equal(getattr(original, field)[before], getattr(rewritten, field)[after]):
+            raise RuntimeError(f"{source}: rewriting it for the camera changed the colliders' {field}")
+    return spec.to_xml()
+
 
 _NEAR_PLANE = 0.01
 """Metres. Below anything the observation's own near clip discards, so

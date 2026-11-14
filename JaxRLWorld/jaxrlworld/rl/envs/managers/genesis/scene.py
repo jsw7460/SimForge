@@ -15,11 +15,13 @@ from jaxrlworld.rl.configs.scene.unified_entity_config import (
     GenesisEntityCfg,
 )
 from jaxrlworld.rl.configs.sensors import SensorConfig
+from jaxrlworld.rl.configs.sensors.camera_sensor_config import mjcf_camera_mount_bodies
 from jaxrlworld.rl.envs.indexing import ArticulationIndexing
 from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from jaxrlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from jaxrlworld.rl.envs.managers.common.visual_mesh_transform import apply_local_transform
+from jaxrlworld.rl.envs.managers.genesis.camera_sensor import collider_render_mjcf
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 from jaxrlworld.rl.utils import entity_utils, string as string_utils
 
@@ -254,8 +256,27 @@ class SceneManager(BaseManager):
 
         mjcf_path = getattr(cfg, "mjcf_path", None)
         if mjcf_path:
+            # A camera riding this entity that has to see its colliders gets
+            # the MJCF rewritten for Genesis's renderer (collider_render_mjcf);
+            # the physics it compiles to is checked to be the file's own.
+            entity_cameras = [c for c in self.config.cameras if c.entity_name == name]
+            geometries = {c.visible_geometry for c in entity_cameras}
+            if len(geometries) > 1:
+                raise ValueError(
+                    f"Entity {name!r}: its cameras ask for different visible_geometry {sorted(geometries)}; "
+                    "Genesis draws one set of shapes per entity"
+                )
+            mjcf_source = mjcf_path
+            if geometries & {"collision", "all"}:
+                mount = [
+                    body
+                    for c in entity_cameras
+                    if c.camera_name is not None
+                    for body in mjcf_camera_mount_bodies(mjcf_path, c.camera_name)
+                ]
+                mjcf_source = collider_render_mjcf(mjcf_path, next(iter(geometries)), mount)
             mjcf_kwargs = {
-                "file": mjcf_path,
+                "file": mjcf_source,
                 "convexify": convexify,
                 "batch_fixed_verts": True,
                 "requires_jac_and_IK": False,
