@@ -50,7 +50,7 @@ _GOLDEN = 0x9E3779B97F4A7C15
 _MIX1 = 0xBF58476D1CE4E5B9
 _MIX2 = 0x94D049BB133111EB
 _COORD_MUL = 0xD6E8FEB86659FD93
-_TWO_POW_53 = float(1 << 53)
+_TWO_POW_M24 = 1.0 / float(1 << 24)
 
 STAGE_STARTUP = 1
 STAGE_RESET = 2
@@ -125,8 +125,12 @@ def _fold_tensors(h: torch.Tensor, *coords: torch.Tensor) -> torch.Tensor:
 
 
 def _fold_uniform(h: torch.Tensor, *coords: torch.Tensor) -> torch.Tensor:
-    bits = _lsr(_fold_tensors(h, *coords), 11)
-    return (bits.to(torch.float64) / _TWO_POW_53).to(torch.float32)
+    # The top 24 bits on the float32 grid of step 2**-24: exact, so the
+    # result lies in [0, 1 - 2**-24]. 53 bits scaled in float64 and then
+    # rounded to float32 put the top 2**-25 of the range on 1.0 exactly
+    # (numpy draws its float32 uniforms the same way, from 24 bits).
+    bits = _lsr(_fold_tensors(h, *coords), 40)
+    return bits.to(torch.float32) * _TWO_POW_M24
 
 
 def keyed_bits(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
@@ -143,7 +147,7 @@ def keyed_bits(*coords: int | torch.Tensor, device: torch.device) -> torch.Tenso
 
 
 def keyed_uniform(*coords: int | torch.Tensor, device: torch.device) -> torch.Tensor:
-    """Uniforms in ``[0, 1)`` from the top 53 bits of :func:`keyed_bits`, as float32."""
+    """Uniforms in ``[0, 1)`` from the top 24 bits of :func:`keyed_bits`, as float32."""
     h0, tensors = _split_coords(coords, device)
     return _fold_uniform(h0, *tensors)
 

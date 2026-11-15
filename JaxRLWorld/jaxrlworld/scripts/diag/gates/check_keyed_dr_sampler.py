@@ -27,6 +27,7 @@ for, without a simulator (CPU torch only):
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -156,6 +157,54 @@ def check_distributions(chk) -> None:
     b = s.bernoulli(0.3, ids)
     chk("bernoulli(0.3) rate ~ 0.3", abs(float(b.float().mean()) - 0.3) < 0.005, f"{float(b.float().mean()):.4f}")
     chk("unknown distribution refused", _raises(lambda: s.draw(0.0, 1.0, ids, distribution="cauchy")))
+
+
+def _unsplitmix(y: int) -> int:
+    """The inverse of :func:`_ref_splitmix` (each step is a bijection on uint64)."""
+
+    def unxorshift(v: int, k: int) -> int:
+        x = v
+        for _ in range(64 // k + 1):
+            x = v ^ (x >> k)
+        return x & _MASK
+
+    y = unxorshift(y, 31)
+    y = (y * pow(0x94D049BB133111EB, -1, 1 << 64)) & _MASK
+    y = unxorshift(y, 27)
+    y = (y * pow(0xBF58476D1CE4E5B9, -1, 1 << 64)) & _MASK
+    y = unxorshift(y, 30)
+    return (y - 0x9E3779B97F4A7C15) & _MASK
+
+
+def _seed_hashing_to(target: int, name: str, stage: int) -> int:
+    """The base seed whose draw for env 0, counter 0, stream 0 of ``name``
+    hashes to ``target``: the fold run backwards from the hash."""
+    h = target
+    for c in reversed((term_id(name), stage, 0, 0, 0)):
+        h = _unsplitmix(h) ^ ((int(c) & _MASK) * 0xD6E8FEB86659FD93 & _MASK)
+    seed = (_unsplitmix(h) * pow(0xD6E8FEB86659FD93, -1, 1 << 64)) & _MASK
+    return seed - (1 << 64) if seed >= 1 << 63 else seed
+
+
+def check_endpoints(chk) -> None:
+    """The extreme hashes: all ones must stay below 1.0 in float32 (53 bits
+    rounded to float32 put it on 1.0), all zeros gives exactly 0."""
+    ids = torch.tensor([0])
+    top, bottom = (
+        _sampler(1, seed=_seed_hashing_to(_MASK, "endpoint", 2), name="endpoint", stage=2),
+        _sampler(1, seed=_seed_hashing_to(0, "endpoint", 2), name="endpoint", stage=2),
+    )
+    chk("constructed seeds hit the extreme hashes", _ref_bits(top.base_seed, top.term_id, 2, 0, 0, 0) == _MASK)
+    u_top = float(top.uniforms(ids))
+    chk("all-ones hash: uniform < 1.0", u_top < 1.0, f"{u_top!r}")
+    chk("all-ones hash: uniform == 1 - 2**-24", u_top == 1.0 - 2.0**-24, f"{u_top!r}")
+    chk("all-zeros hash: uniform == 0.0", float(bottom.uniforms(ids)) == 0.0)
+    chk("all-ones hash: bernoulli(1.0) is True", bool(top.bernoulli(1.0, ids)))
+    g_point = float(top.draw(1.0, 1.0, ids, distribution="gaussian"))
+    chk("all-ones hash: gaussian(lo == hi) is the point", g_point == 1.0, f"{g_point!r}")
+    g = float(top.draw(-1.0, 1.0, ids, distribution="gaussian"))
+    chk("all-ones hash: gaussian finite", math.isfinite(g), f"{g!r}")
+    chk("all-ones hash: draw_int in range", int(top.draw_int(0, 3, ids)) == 2)
 
 
 # ── 4. decorrelation ────────────────────────────────────────────────────
@@ -397,6 +446,7 @@ def main() -> int:
         ("1. hash", check_hash),
         ("2. invariances", check_invariances),
         ("3. distributions", check_distributions),
+        ("3b. range endpoints", check_endpoints),
         ("4. decorrelation", check_decorrelation),
         ("5. event manager binding", check_event_manager),
         ("6. field adapter", check_field_adapter),
