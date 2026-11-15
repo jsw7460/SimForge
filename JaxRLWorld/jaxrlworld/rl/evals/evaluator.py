@@ -182,6 +182,7 @@ class PolicyEvaluator:
         if self._cross_sim:
             self._validate_dims(metadata)
             _check_resolved_action_parity(metadata, self.env.act_manager, self._train_sim_type, self.sim_type)
+            _check_term_action_parity(metadata, self.env.act_manager, self._train_sim_type, self.sim_type)
 
         # Load runner and build policy wrapper
         self.runner = load_runner(
@@ -930,6 +931,83 @@ def _check_resolved_action_parity(metadata: dict, act_manager, train_sim_type: s
             f"on {eval_sim_type}); the policy's output would be mapped to joint targets it never commanded in "
             "training:\n  " + "\n  ".join(problems) + "\n"
             "The eval preset's action builder must resolve to the training mapping, joint for joint."
+        )
+
+
+def _check_term_action_parity(metadata: dict, act_manager, train_sim_type: str, eval_sim_type: str) -> None:
+    """Require the eval env's action terms to map the policy output as the checkpoint's did.
+
+    An env with action terms maps each slice of the policy output through
+    its term, not through the manager's single mapping that
+    :func:`_check_resolved_action_parity` compares (on that path those
+    vectors are an unused default). ``train_state.yaml`` holds each term's
+    :meth:`~jaxrlworld.rl.envs.mdp.actions.base.ActionTerm.resolved_mapping`
+    under ``action_terms``. Terms must agree in name and order (the order
+    slices the policy output), and each in every field: type, entity,
+    width and the rest exactly, joints as a set, and the ``per_joint``
+    values joint by joint (matched by bare name, as the joint orders of
+    two simulators may differ).
+    """
+    saved = metadata.get("action_terms")
+    current = act_manager.resolved_term_mappings()
+    if saved is None and current is None:
+        return
+    if saved is None:
+        print_warning(
+            "Checkpoint train_state.yaml has no action_terms; the eval env's action terms "
+            f"({', '.join(current)}) were NOT verified against the training env's. Checkpoints written since the "
+            "term mappings are saved are."
+        )
+        return
+    if current is None:
+        raise ValueError(
+            f"Cross-sim eval: the checkpoint maps its actions through terms {list(saved)}, the eval env through "
+            "the legacy single mapping"
+        )
+
+    def _bare(name: str) -> str:
+        return name.rsplit("/", 1)[-1]
+
+    problems: list[str] = []
+    if list(saved) != list(current):
+        problems.append(f"terms (in policy-output order): checkpoint {list(saved)} vs eval {list(current)}")
+    for name in [n for n in saved if n in current]:
+        s_term, e_term = saved[name], current[name]
+        s_rest = {k: v for k, v in s_term.items() if k not in ("joint_names", "per_joint")}
+        e_rest = {k: v for k, v in e_term.items() if k not in ("joint_names", "per_joint")}
+        for key in sorted(s_rest.keys() | e_rest.keys()):
+            if s_rest.get(key) != e_rest.get(key):
+                problems.append(f"{name}.{key}: checkpoint {s_rest.get(key)!r} vs eval {e_rest.get(key)!r}")
+        if ("joint_names" in s_term) != ("joint_names" in e_term):
+            problems.append(f"{name}: joint terms on one side only")
+            continue
+        if "joint_names" not in s_term:
+            continue
+        s_joints = [_bare(n) for n in s_term["joint_names"]]
+        e_joints = [_bare(n) for n in e_term["joint_names"]]
+        if sorted(s_joints) != sorted(e_joints):
+            problems.append(f"{name}.joint_names: checkpoint {s_joints} vs eval {e_joints}")
+            continue
+        order = [e_joints.index(j) for j in s_joints]
+        s_values, e_values = s_term["per_joint"], e_term["per_joint"]
+        if sorted(s_values) != sorted(e_values):
+            problems.append(f"{name}.per_joint: checkpoint {sorted(s_values)} vs eval {sorted(e_values)}")
+            continue
+        for field in sorted(s_values):
+            want = np.asarray(s_values[field], dtype=np.float64)
+            got = np.asarray(e_values[field], dtype=np.float64)[order]
+            mismatch = ~np.isclose(want, got, rtol=1e-4, atol=1e-6)
+            if mismatch.any():
+                worst = int(np.argmax(np.where(mismatch, np.abs(want - got), -np.inf)))
+                problems.append(
+                    f"{name}.{field}: {int(mismatch.sum())} of {len(want)} joints differ, worst {s_joints[worst]}: "
+                    f"checkpoint {want[worst]:.6g} vs eval {got[worst]:.6g}"
+                )
+    if problems:
+        raise ValueError(
+            f"Cross-sim eval action terms differ from the checkpoint's (trained on {train_sim_type}, evaluating on "
+            f"{eval_sim_type}); the policy's output would be mapped to joint targets it never commanded in "
+            "training:\n  " + "\n  ".join(problems)
         )
 
 

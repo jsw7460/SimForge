@@ -111,6 +111,13 @@ class JointAction(ActionTerm):
         """Names of this term's joints, in the order it drives them."""
         return list(self._joint_names_local)
 
+    def resolved_mapping(self) -> dict:
+        mapping = super().resolved_mapping()
+        mapping["joint_names"] = self.joint_names
+        mapping["clip"] = None if self._cfg.clip is None else [float(v) for v in self._cfg.clip]
+        mapping["per_joint"] = {"scale": self._scale.tolist(), "offset": self._offset.tolist()}
+        return mapping
+
     def _resolve_float_field(
         self,
         value: float | dict[str, float],
@@ -385,6 +392,13 @@ class MotionResidualJointPositionAction(JointAction):
         self._alpha = self._resolve_float_field(cfg.alpha, default=0.5)
         self._tanh_squash = tanh_squash
 
+    def resolved_mapping(self) -> dict:
+        mapping = super().resolved_mapping()
+        mapping["command_name"] = self._cfg.command_name
+        mapping["tanh_squash"] = self._tanh_squash
+        mapping["per_joint"]["alpha"] = self._alpha.tolist()
+        return mapping
+
     def process_actions(self, actions: torch.Tensor) -> None:
         """Clip then store. ``processed_actions = raw`` (no scale/offset)."""
         if self._cfg.clip is not None:
@@ -473,6 +487,12 @@ class JointEffortAction(JointAction):
         else:
             self._effort_limit = self._resolve_float_field(cfg.effort_limit, default=float("inf"))
 
+    def resolved_mapping(self) -> dict:
+        mapping = super().resolved_mapping()
+        if self._effort_limit is not None:
+            mapping["per_joint"]["effort_limit"] = self._effort_limit.tolist()
+        return mapping
+
     def apply_actions(self) -> None:
         torques = self._processed_actions
         if self._effort_limit is not None:
@@ -547,6 +567,13 @@ class JointVelocityAction(JointAction):
             self._effort_limit: torch.Tensor | None = None
         else:
             self._effort_limit = self._resolve_float_field(cfg.effort_limit, default=float("inf"))
+
+    def resolved_mapping(self) -> dict:
+        mapping = super().resolved_mapping()
+        mapping["per_joint"]["kv"] = self._kv.tolist()
+        if self._effort_limit is not None:
+            mapping["per_joint"]["effort_limit"] = self._effort_limit.tolist()
+        return mapping
 
     def apply_actions(self) -> None:
         joint_vel = self._manager._get_joint_vel(self._entity_name)[:, self._joint_ids]

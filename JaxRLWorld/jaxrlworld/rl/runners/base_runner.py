@@ -879,6 +879,11 @@ class BaseRunner(ABC):
             train_state["action_offset"] = act_manager.offset[0].detach().cpu().tolist()
             train_state["action_clip_low"] = act_manager.clip_low.detach().cpu().tolist()
             train_state["action_clip_high"] = act_manager.clip_high.detach().cpu().tolist()
+            # With action terms the vectors above are the unused legacy
+            # mapping; what maps the policy output is each term's own.
+            term_mappings = act_manager.resolved_term_mappings()
+            if term_mappings is not None:
+                train_state["action_terms"] = term_mappings
 
         dump_yaml(
             os.path.join(checkpoint_dir, "train_state.yaml"),

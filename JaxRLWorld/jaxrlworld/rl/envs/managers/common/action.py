@@ -606,6 +606,13 @@ class ActionManagerBase(BaseManager):
         """List of (actuator, joint_indices) tuples for explicit actuators."""
         return self._actuators
 
+    def resolved_term_mappings(self) -> dict[str, dict] | None:
+        """Each action term's :meth:`~jaxrlworld.rl.envs.mdp.actions.base.ActionTerm.resolved_mapping`,
+        in term (= policy output) order; ``None`` on the legacy single-mapping path."""
+        if not self._has_action_terms:
+            return None
+        return {name: term.resolved_mapping() for name, term in self._terms.items()}
+
     @property
     def has_explicit_actuators(self) -> bool:
         """True if any non-implicit actuator is configured."""

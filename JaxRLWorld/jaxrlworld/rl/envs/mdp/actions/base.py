@@ -160,6 +160,15 @@ class ActionTerm(ABC):
         """
         return self._processed_actions
 
+    def resolved_mapping(self) -> dict:
+        """What this term makes of its slice of the policy output, resolved to
+        plain values: saved with a checkpoint and compared by a cross-sim eval
+        (``rl/evals/evaluator.py``), where the term configs, spelled in each
+        simulator's joint vocabulary, cannot be compared. Subclasses add their
+        resolved parameters; ``per_joint`` values follow ``joint_names``.
+        """
+        return {"type": type(self).__name__, "entity": self.entity_name, "action_dim": self.action_dim}
+
     # ── Abstract methods ──────────────────────────────────────────
 
     @abstractmethod
