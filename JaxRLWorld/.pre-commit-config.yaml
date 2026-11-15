@@ -50,4 +50,3 @@ repos:
         language: system
         types: [python]
         files: ^JaxRLWorld/jaxrlworld/
-        exclude: ^JaxRLWorld/jaxrlworld/scripts/
