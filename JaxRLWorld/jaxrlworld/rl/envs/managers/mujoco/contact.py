@@ -35,13 +35,21 @@ class MujocoContactManager(BaseContactManager):
         declared = {cfg.name: cfg for cfg in self.env.scene_manager.config.sensors if isinstance(cfg, ContactSensorCfg)}
         for sensor_name, sensor in self.env.scene_manager.sensors.items():
             if isinstance(sensor, ContactSensor):
+                if sensor.cfg.num_slots != 1:
+                    # mjlab lays the slots out as extra columns of every field;
+                    # the contact manager serves one column per tracked body,
+                    # and no reduction of a body's top-k contacts to that
+                    # column (its net force) is defined.
+                    raise NotImplementedError(
+                        f"MuJoCo contact sensor {sensor_name!r}: num_slots={sensor.cfg.num_slots}; only 1 is supported"
+                    )
                 self._group_sensors[sensor_name] = sensor
                 primary_names = list(dict.fromkeys(slot.primary_name for slot in sensor._slots))
                 self._register_group(
                     sensor_name,
                     primary_names,
                     tuple(sensor.cfg.fields),
-                    patterns=primary_patterns(declared[sensor_name]),
+                    patterns=primary_patterns(declared[sensor_name], primary_names),
                 )
 
     # -- abstract impl --
@@ -68,8 +76,6 @@ class MujocoContactManager(BaseContactManager):
         found = sensor.data.found
         if found is None:
             return super()._compute_group_is_contact(group)
-        if sensor.cfg.num_slots > 1:
-            found = found.view(found.size(0), -1, sensor.cfg.num_slots).any(dim=-1)
         return found > 0
 
     # -- pretty print --

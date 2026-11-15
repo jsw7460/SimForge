@@ -55,7 +55,7 @@ class NewtonContactManager(BaseContactManager):
                 sensor_name,
                 list(sensor.tracked_names),
                 tuple(sensor.cfg.fields),
-                patterns=primary_patterns(sensor.cfg),
+                patterns=primary_patterns(sensor.cfg, sensor.tracked_names),
             )
 
     # -- abstract impl --

@@ -41,7 +41,9 @@ class ContactManager(BaseContactManager):
         """Register a contact sensor config as a named group."""
         sensor = GenesisContactSensor(self.env, cfg, reader=self._list_reader)
         self._sensors[cfg.name] = sensor
-        self._register_group(cfg.name, sensor.tracked_names, cfg.fields, patterns=primary_patterns(cfg))
+        self._register_group(
+            cfg.name, sensor.tracked_names, cfg.fields, patterns=primary_patterns(cfg, sensor.tracked_names)
+        )
         self._batch = None
 
     def _get_batch(self) -> GenesisContactBatch:

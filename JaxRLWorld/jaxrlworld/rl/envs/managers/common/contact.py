@@ -31,7 +31,9 @@ rather than trusting positions.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -57,10 +59,23 @@ if TYPE_CHECKING:
 _IS_CONTACT_FORCE_EPS: float = 1e-6
 
 
-def primary_patterns(cfg: ContactSensorCfg) -> tuple[str, ...]:
-    """The sensor's declared primary patterns as a tuple, one entry per declared column group."""
-    pattern = cfg.primary.pattern
-    return (pattern,) if isinstance(pattern, str) else tuple(pattern)
+def primary_patterns(cfg: ContactSensorCfg, native_names: Sequence[str]) -> tuple[str, ...]:
+    """The sensor's declared primary patterns as a tuple, one entry per declared column group.
+
+    ``native_names`` are the bodies the backend tracks for the sensor. A
+    ``mode="entity"`` primary declares no pattern (``pattern`` is unused):
+    its columns are the whole entity, in the backend's order. A pattern
+    whose every body ``primary.exclude`` removed tracks nothing and has no
+    column group, so it is dropped here; without an ``exclude`` every
+    pattern must still claim a tracked body (:meth:`BaseContactManager.declared_order`).
+    """
+    primary = cfg.primary
+    if primary.mode == "entity":
+        return (".*",)
+    patterns = (primary.pattern,) if isinstance(primary.pattern, str) else tuple(primary.pattern)
+    if not primary.exclude:
+        return patterns
+    return tuple(p for p in patterns if any(re.fullmatch(p, n) for n in native_names))
 
 
 @dataclass
