@@ -666,7 +666,9 @@ class NewtonRobotData(NewtonRigidObjectData):
           manager requests it automatically when ``solver_type ==
           "mujoco"``).
         """
-        if self._env.act_manager.has_explicit_actuators:
+        # The explicit actuator models drive the robot entity alone; any other
+        # entity is simulator-PD driven.
+        if self._env.act_manager.has_explicit_actuators and self._entity_name == self._env.robot_entity_name:
             return self._env.act_manager.applied_torque
         state = self._state
         model = self._env.scene_manager.model

@@ -909,7 +909,11 @@ class ActionManagerBase(BaseManager):
         """
         for name in self._pending_target_entities:
             target = self._entity_joint_target[name]
-            if not self._has_explicit_actuators:
+            # The explicit actuator models belong to the driven entity; any
+            # other entity a term drives is position-driven through the
+            # simulator's PD (an explicit one is refused at build, see
+            # ``_reject_explicit_actuators_off_the_driven_entity``).
+            if not self._has_explicit_actuators or name != self.env.robot_entity_name:
                 self._apply_position(target, name)
                 continue
             torques = self._compute_actuator_torques(target, name)

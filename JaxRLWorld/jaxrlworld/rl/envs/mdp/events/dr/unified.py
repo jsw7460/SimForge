@@ -761,6 +761,13 @@ def randomize_pd_gains(
         return
     if kp_range is None and kd_range is None:
         return
+    if asset_cfg.name != env.robot_entity_name:
+        # Both gain stores are the driven robot's: the explicit actuator
+        # models are built for it alone, and the Newton path writes the robot
+        # view. Another entity's gains would be the robot's.
+        raise NotImplementedError(
+            f"randomize_pd_gains targets the driven robot {env.robot_entity_name!r} only, not {asset_cfg.name!r}"
+        )
 
     if env.act_manager.has_explicit_actuators:
         _explicit_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution)
