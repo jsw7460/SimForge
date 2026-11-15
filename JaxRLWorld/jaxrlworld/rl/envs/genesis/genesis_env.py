@@ -414,7 +414,7 @@ class GenesisEnv(World):
         link_name, force_w, env_idx = self._external_wrench
         robot = self.scene_manager["robot"]
         link_ids_global, _ = _eu.find_links(robot, [link_name.rsplit("/", 1)[-1]], global_ids=True)
-        self.scene.rigid_solver.apply_links_external_force(
+        self.scene.rigid_solver.apply_links_external_wrench(
             force=force_w.view(1, 3),
             links_idx=link_ids_global,
             envs_idx=[int(env_idx)],

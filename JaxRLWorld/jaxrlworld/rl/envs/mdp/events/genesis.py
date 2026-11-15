@@ -56,15 +56,7 @@ def apply_external_force_torque(
         lo, hi = force_range.get(key, (0.0, 0.0))
         forces[:, i] = (hi - lo) * force_u[:, i] + lo
 
-    rigid_solver.apply_links_external_force(
-        force=forces,
-        links_idx=link_ids_global,
-        envs_idx=env_ids.tolist(),
-        ref=gs.link_ref_frame.link_COM,
-        local=False,
-    )
-
-    # Apply torque if specified
+    torques = None
     if torque_range is not None:
         torque_u = sampler.uniforms(env_ids, axes, stream=1)
         torques = torch.zeros(n, 3, device=env.device)
@@ -72,10 +64,12 @@ def apply_external_force_torque(
             lo, hi = torque_range.get(key, (0.0, 0.0))
             torques[:, i] = (hi - lo) * torque_u[:, i] + lo
 
-        rigid_solver.apply_links_external_torque(
-            torque=torques,
-            links_idx=link_ids_global,
-            envs_idx=env_ids.tolist(),
-            ref=gs.link_ref_frame.link_COM,
-            local=False,
-        )
+    # World-frame force at the link's centre of mass, and torque.
+    rigid_solver.apply_links_external_wrench(
+        force=forces,
+        torque=torques,
+        links_idx=link_ids_global,
+        envs_idx=env_ids.tolist(),
+        ref=gs.link_ref_frame.link_COM,
+        local=False,
+    )
