@@ -12,6 +12,7 @@
 
 * NEVER: Import inside functions. The only exception is circular imports.
 * NEVER: Silent fallback. Crash immediately on failure. No `except: pass` or empty fallbacks.
+* An `except` that does not raise is legitimate only as control flow (a retry, a `KeyboardInterrupt` stop, a worker/server forwarding the traceback to its caller, a parse attempt trying the next type) and carries `# except-ok: <reason>` on the `except` line. The pre-commit hook (`JaxRLWorld/tools/check_silent_except.py`) rejects unmarked ones.
 * NEVER: `getattr`/`hasattr` on an attribute the type declares. Read it directly and let `AttributeError` surface the bug. An optional attribute is declared (`None` default, a protocol method); type-dependent paths branch with `isinstance` (manager-built envs: `builds_from_manager_configs`).
 * A genuine by-name lookup (the name is data: `"module:Class"`, dataclass field walks, delegation `__getattr__`, lazy exports) is allowed only with `# dynamic-attr: <reason>` on the call's line. The pre-commit hook (`JaxRLWorld/tools/check_dynamic_attr.py`) rejects unmarked calls.
 * MUST: Before removing a top-level import, grep to check whether it is re-exported.

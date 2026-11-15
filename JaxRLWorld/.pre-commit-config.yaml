@@ -50,3 +50,11 @@ repos:
         language: system
         types: [python]
         files: ^JaxRLWorld/jaxrlworld/
+      # except handlers that do not raise only for legitimate control flow,
+      # each marked `# except-ok: <reason>` (JaxRLWorld/tools/check_silent_except.py).
+      - id: no-unmarked-silent-except
+        name: no unmarked silent except
+        entry: python3 JaxRLWorld/tools/check_silent_except.py
+        language: system
+        types: [python]
+        files: ^JaxRLWorld/jaxrlworld/
