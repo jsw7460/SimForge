@@ -207,7 +207,7 @@ class GenesisEnv(World):
                 entities=self.scene_cfg.entities,
                 rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=self.scene_cfg.sensors,
-                cameras=getattr(self.scene_cfg, "cameras", ()),
+                cameras=self.scene_cfg.cameras,
                 env_spacing=self.scene_cfg.env_spacing,
                 show_viewer=self.visualization_cfg.show_viewer,
                 num_envs=self.num_envs,
@@ -297,7 +297,7 @@ class GenesisEnv(World):
 
         ContactCls = ManagerRegistry.get_class(self.sim_type, "contact")
         self.contact_manager = ContactCls(env=self)
-        contact_sensors = getattr(self.scene_cfg, "contact_sensors", None)
+        contact_sensors = self.scene_cfg.contact_sensors
         if contact_sensors:
             for sensor_cfg in contact_sensors:
                 self.contact_manager.register_sensor(sensor_cfg)

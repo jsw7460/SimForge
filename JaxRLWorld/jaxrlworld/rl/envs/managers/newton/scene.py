@@ -86,7 +86,7 @@ def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | Non
     entities loaded from the same model otherwise contribute the same joint
     names twice and a caller filtering by name cannot tell them apart.
     """
-    body_labels = list(getattr(model, "body_label", []))
+    body_labels = list(model.body_label)
     n_total = len(body_labels)
     bodies_per_world = n_total // num_worlds if num_worlds > 0 else n_total
     if bodies_per_world == 0:
@@ -100,19 +100,11 @@ def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | Non
         in_scope = [lbl == body_prefix or lbl.startswith(f"{body_prefix}/") for lbl in body_labels_w0]
 
     # Reconstruct parent_of(body) from joint_parent + joint_child arrays.
-    joint_labels_all = list(getattr(model, "joint_label", None) or getattr(model, "joint_key", []))
+    joint_labels_all = list(model.joint_label)
     joints_per_world = len(joint_labels_all) // num_worlds if num_worlds > 0 else len(joint_labels_all)
     joint_labels_w0 = joint_labels_all[:joints_per_world]
-    joint_parent_arr = (
-        wp.to_torch(model.joint_parent).cpu().numpy()
-        if hasattr(model.joint_parent, "numpy")
-        else np.asarray(model.joint_parent)
-    )
-    joint_child_arr = (
-        wp.to_torch(model.joint_child).cpu().numpy()
-        if hasattr(model.joint_child, "numpy")
-        else np.asarray(model.joint_child)
-    )
+    joint_parent_arr = wp.to_torch(model.joint_parent).cpu().numpy()
+    joint_child_arr = wp.to_torch(model.joint_child).cpu().numpy()
     joint_parent_w0 = joint_parent_arr[:joints_per_world]
     joint_child_w0 = joint_child_arr[:joints_per_world]
     # A free base is NOT one of an articulation's joints: its state is the
@@ -124,11 +116,7 @@ def _canonical_joint_order_newton(model, num_worlds: int, body_prefix: str | Non
     # explicitly, which filtered the base out downstream — it appears the
     # moment an entity is indexed whole, which is what a passive mechanism
     # with no actuators is.
-    joint_type_arr = (
-        wp.to_torch(model.joint_type).cpu().numpy()
-        if hasattr(model.joint_type, "numpy")
-        else np.asarray(model.joint_type)
-    )
+    joint_type_arr = wp.to_torch(model.joint_type).cpu().numpy()
     joint_type_w0 = joint_type_arr[:joints_per_world]
 
     parent_of: dict[int, int] = {}
@@ -281,47 +269,6 @@ def apply_joint_params_by_pattern(
                 break
 
 
-def _state_assign_full(
-    dst: newton.State,
-    src: newton.State,
-    namespaces: tuple[str, ...] = ("mujoco",),
-) -> None:
-    r"""Assign ``src`` into ``dst`` including attribute-namespace arrays.
-
-    Newton's :meth:`State.assign` iterates ``self.__dict__`` and copies
-    top-level ``wp.array`` attributes, but descendants inside
-    ``AttributeNamespace`` objects (e.g. ``state.mujoco.qfrc_actuator``)
-    are skipped because the namespace itself is not a ``wp.array`` —
-    the outer loop treats it as a non-array and ``continue``\s. This
-    helper performs the standard ``dst.assign(src)`` then manually
-    descends into each listed namespace and copies its ``wp.array``
-    children.
-
-    Callers rely on this when the ``need_state_copy`` branch of a
-    substep loop fires (odd substeps under CUDA graph capture) so
-    consumers reading ``state.mujoco.qfrc_actuator`` via
-    :attr:`NewtonRobotData.applied_torque` don't see stale zeros.
-
-    Status: Newton's own ``State.assign`` now walks every
-    ``Model.AttributeNamespace`` container and copies its arrays, so this
-    helper is redundant with upstream and could be collapsed to a plain
-    ``dst.assign(src)``. It is kept because the only remaining caller is the
-    xpbd substep path, which carries no namespaced attributes either way —
-    there is nothing to gain from churning it.
-    """
-    dst.assign(src)
-    for ns in namespaces:
-        ns_dst = getattr(dst, ns, None)
-        ns_src = getattr(src, ns, None)
-        if ns_dst is None or ns_src is None:
-            continue
-        for attr in vars(ns_src):
-            s = getattr(ns_src, attr, None)
-            d = getattr(ns_dst, attr, None)
-            if isinstance(s, wp.array) and isinstance(d, wp.array):
-                d.assign(s)
-
-
 MUJOCO_DEFAULT_CONTYPE = 1
 MUJOCO_DEFAULT_CONAFFINITY = 1
 """What a geom with no authored mask collides with: everything, bit 1.
@@ -454,6 +401,9 @@ class NewtonSceneManagerConfig:
     """
 
     num_worlds: int
+
+    # The entity the action manager drives (``World.robot_entity_name``).
+    robot_entity_name: str = "robot"
 
     # Entity and sensor configurations
     entities: list[NewtonEntityConfig] | dict[str, EntityCfg | NewtonEntityCfg] = field(default_factory=dict)
@@ -590,6 +540,10 @@ class NewtonSceneManager(BaseManager):
         # CameraSensorCfg-backed cameras (also in ``self.sensors``); kept
         # apart because they are the ones ``render_cameras`` drives.
         self._cameras: dict[str, NewtonCameraSensor] = {}
+        # The geometry the cameras were set to see ("collision" / "all"), or
+        # None before any camera did. Newton keeps the visibility flag per
+        # shape on the one shared model, so every camera has to agree.
+        self.camera_visible_geometry: str | None = None
         # ContactSensorCfg-backed wrappers (subset of ``self.sensors`` —
         # the wrapper objects are also stored under their ``cfg.name`` in
         # ``self.sensors`` so generic sensor iteration sees them).
@@ -677,8 +631,7 @@ class NewtonSceneManager(BaseManager):
             return None
 
         # Get actual prefix from entity's robot config
-        entity_config = self.entities[entity_name]["config"]
-        prefix = getattr(entity_config, "body_label_prefix", None)
+        prefix = self.entities[entity_name]["config"].body_label_prefix
         if prefix is None:
             return names
 
@@ -782,12 +735,13 @@ class NewtonSceneManager(BaseManager):
 
     def _load_urdf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
         """Load URDF entity from unified config."""
-        shape_cfg = getattr(cfg, "shape_cfg", None)
-        if shape_cfg is not None:
-            builder.default_shape_cfg = shape_cfg
+        # Contact material and inertial override are NewtonEntityCfg fields; a
+        # RigidObjectCfg prop loads with the builder defaults.
+        if isinstance(cfg, NewtonEntityCfg) and cfg.shape_cfg is not None:
+            builder.default_shape_cfg = cfg.shape_cfg
 
         xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
-        ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
+        ignore_inertial = isinstance(cfg, NewtonEntityCfg) and cfg.ignore_inertial_definitions
         builder.add_urdf(
             cfg.urdf_path,
             xform=xform,
@@ -818,12 +772,13 @@ class NewtonSceneManager(BaseManager):
         Python) leave every mode at ``NONE`` and produce ``nu=0``;
         use a robot asset that includes ``<actuator>`` instead.
         """
-        shape_cfg = getattr(cfg, "shape_cfg", None)
-        if shape_cfg is not None:
-            builder.default_shape_cfg = shape_cfg
+        # Contact material and inertial override are NewtonEntityCfg fields; a
+        # RigidObjectCfg prop loads with the builder defaults.
+        if isinstance(cfg, NewtonEntityCfg) and cfg.shape_cfg is not None:
+            builder.default_shape_cfg = cfg.shape_cfg
 
         xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
-        ignore_inertial = getattr(cfg, "ignore_inertial_definitions", False)
+        ignore_inertial = isinstance(cfg, NewtonEntityCfg) and cfg.ignore_inertial_definitions
         builder.add_mjcf(
             cfg.mjcf_path,
             xform=xform,
@@ -899,10 +854,12 @@ class NewtonSceneManager(BaseManager):
         # prefix in user config silently breaks one of the two formats —
         # sensor pattern ``"X/*"`` matches zero labels when the actual prefix
         # is ``"Y"``, leaving sensing_bodies=[] and the contact reward at 0.
-        if getattr(cfg, "body_label_prefix", None) is None and builder.body_label:
+        #
+        # Only a NewtonEntityCfg declares the prefix; a rigid object's is
+        # assigned in ``build_scene`` (its own name) before anything reads it.
+        if isinstance(cfg, NewtonEntityCfg) and cfg.body_label_prefix is None and builder.body_label:
             cfg.body_label_prefix = builder.body_label[0].split("/")[0]
 
-        prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
@@ -1023,15 +980,15 @@ class NewtonSceneManager(BaseManager):
         if cfg.mesh_approximation is not None:
             builder.approximate_meshes(cfg.mesh_approximation)
 
-        sites = getattr(cfg, "sites", None)
-        if sites:
-            self._create_sites_from_dict(builder, sites, prefix)
+        if isinstance(cfg, NewtonEntityCfg) and cfg.sites:
+            self._create_sites_from_dict(builder, cfg.sites, cfg.body_label_prefix)
 
     def _load_usd_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
         """Load USD entity from unified config."""
-        shape_cfg = getattr(cfg, "shape_cfg", None)
-        if shape_cfg is not None:
-            builder.default_shape_cfg = shape_cfg
+        # The contact material is a NewtonEntityCfg field; a RigidObjectCfg
+        # prop loads with the builder default.
+        if isinstance(cfg, NewtonEntityCfg) and cfg.shape_cfg is not None:
+            builder.default_shape_cfg = cfg.shape_cfg
 
         xform = wp.transform(wp.vec3(*cfg.init_state.pos), wp.quat(*wxyz_to_xyzw_tuple(cfg.init_state.rot)))
 
@@ -1049,7 +1006,6 @@ class NewtonSceneManager(BaseManager):
         # Apply gains from articulation actuators. Bare patterns only —
         # ``apply_joint_params_by_pattern`` canonicalises candidate
         # joint labels via ``leaf_name()``.
-        prefix = getattr(cfg, "body_label_prefix", None)
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
         armature_map: dict[str, float] = {}
@@ -1080,9 +1036,8 @@ class NewtonSceneManager(BaseManager):
             )
 
         # Sites
-        sites = getattr(cfg, "sites", None)
-        if sites:
-            self._create_sites_from_dict(builder, sites, prefix)
+        if isinstance(cfg, NewtonEntityCfg) and cfg.sites:
+            self._create_sites_from_dict(builder, cfg.sites, cfg.body_label_prefix)
 
     def _create_sites_from_dict(
         self, builder: newton.ModelBuilder, sites: dict[str, str], prefix: str | None = None
@@ -1310,7 +1265,7 @@ class NewtonSceneManager(BaseManager):
             if scfg.disableflags:
                 disable_bits = 0
                 for flag_name in scfg.disableflags:
-                    disable_bits |= int(getattr(mujoco.mjtDisableBit, f"mjDSBL_{flag_name.upper()}"))
+                    disable_bits |= int(mujoco.mjtDisableBit.__members__[f"mjDSBL_{flag_name.upper()}"])
                 self.solver.mj_model.opt.disableflags |= disable_bits
                 self.solver.mjw_model.opt.disableflags |= disable_bits
             # Same timing for the overflow print: mjwarp bakes the flag into
@@ -1542,8 +1497,7 @@ class NewtonSceneManager(BaseManager):
         like ``"root_joint:0"``).
         """
         for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
-            cfg = entity_info["config"]
-            prefix = getattr(cfg, "body_label_prefix", None)
+            prefix = entity_info["config"].body_label_prefix
             # Delimited on "/", matching the rule NewtonLabelIndexing uses:
             # the label either IS the prefix or lies under it. A bare
             # ``f"{prefix}*"`` glob also swallows every sibling whose name
@@ -1570,8 +1524,7 @@ class NewtonSceneManager(BaseManager):
         every sensor construction.
         """
         for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
-            cfg = entity_info["config"]
-            prefix = getattr(cfg, "body_label_prefix", None)
+            prefix = entity_info["config"].body_label_prefix
             self.label_indexing[entity_name] = NewtonLabelIndexing.from_articulation(
                 name=entity_name,
                 model=self.model,
@@ -1619,12 +1572,10 @@ class NewtonSceneManager(BaseManager):
 
         def _resolve(name: str):
             cfg = self.entities[name]["config"]
-            mjcf_path = getattr(cfg, "mjcf_path", None)
-            if mjcf_path:
-                return ("mjcf_path", mjcf_path)
-            urdf_path = getattr(cfg, "urdf_path", None)
-            if urdf_path:
-                return ("urdf", urdf_path)
+            if cfg.mjcf_path:
+                return ("mjcf_path", cfg.mjcf_path)
+            if cfg.urdf_path:
+                return ("urdf", cfg.urdf_path)
             return None
 
         self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
@@ -1744,7 +1695,7 @@ class NewtonSceneManager(BaseManager):
                 "build_articulation_indexing called before _build_robot_view; "
                 "ArticulationView must be created before action-manager init."
             )
-        joint_names_raw = getattr(self.model, "joint_label", None) or getattr(self.model, "joint_key", None)
+        joint_names_raw = self.model.joint_label
         if not joint_names_raw:
             raise ValueError("Newton model has no joint labels")
         num_worlds = self.model.world_count
@@ -1767,7 +1718,7 @@ class NewtonSceneManager(BaseManager):
         canonical_full = _canonical_joint_order_newton(
             self.model,
             num_worlds=num_worlds,
-            body_prefix=getattr(entity_info["config"], "body_label_prefix", None),
+            body_prefix=entity_info["config"].body_label_prefix,
         )
         canonical_actuatable = [n for n in canonical_full if n in set(actuatable_names)]
         matched_names, _ = filter_canonical_to_actuated(canonical_actuatable, actuated_dof_names)
@@ -1928,11 +1879,9 @@ class NewtonSceneManager(BaseManager):
             if need_state_copy and i == last_idx:
                 # Copy state_1 → state_0 so the final result lives in
                 # the same buffer the graph capture started with.
-                # Uses ``_state_assign_full`` (not bare ``assign``) so
-                # extended attributes under namespaces like
-                # ``state.mujoco.qfrc_actuator`` also propagate —
-                # Newton's built-in assign skips them.
-                _state_assign_full(self.state_0, self.state_1)
+                # ``State.assign`` also copies the arrays under attribute
+                # namespaces such as ``state.mujoco.qfrc_actuator``.
+                self.state_0.assign(self.state_1)
             else:
                 # Swap states (reference rebind, no memory copy).
                 self.state_0, self.state_1 = self.state_1, self.state_0
@@ -1952,7 +1901,7 @@ class NewtonSceneManager(BaseManager):
         for sensor in self.sensors.values():
             if isinstance(sensor, NewtonContactSensor):
                 sensor.update_native(self.state_0, self.sensor_contacts)
-            elif hasattr(sensor, "update"):
+            elif isinstance(sensor, newton.sensors.SensorIMU | newton.sensors.SensorFrameTransform):
                 sensor.update(self.state_0)  # IMU takes State
 
     def _update_sensors(self) -> None:

@@ -43,7 +43,7 @@ class NewtonInitializer(SimInitializer):
         from jaxrlworld.rl import envs
 
         env_class_name = eval_cfgs.env.env_name
-        env_class = getattr(envs, env_class_name)
+        env_class = getattr(envs, env_class_name)  # dynamic-attr: env class named by config
 
         kw = dict(
             num_envs=eval_cfgs.env.num_envs,
@@ -57,7 +57,7 @@ class NewtonInitializer(SimInitializer):
             event_cfg=eval_cfgs.event,
             curriculum_cfg=eval_cfgs.curriculum,
         )
-        gait_cfg = getattr(eval_cfgs, "gait", None)
+        gait_cfg = eval_cfgs.gait
         if gait_cfg is not None:
             kw["gait_cfg"] = gait_cfg
         return env_class(**kw)
@@ -66,7 +66,7 @@ class NewtonInitializer(SimInitializer):
         from jaxrlworld.rl.vis.viser.bridges import NewtonBridge
         from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
 
-        scene_cfg = getattr(getattr(env, "visualization_cfg", None), "viser_scene", None)
+        scene_cfg = env.visualization_cfg.viser_scene
         return BridgePlayScene(NewtonBridge(env.scene_manager), scene_config=scene_cfg)
 
     def start_recording(self, env: Any) -> None:
@@ -78,7 +78,7 @@ class NewtonInitializer(SimInitializer):
         print_success("Newton recording saved!")
 
     def cleanup(self, env: Any) -> None:
-        if hasattr(env, "vis_manager"):
+        if env.vis_manager is not None:
             print_info("Closing Newton viewer...")
             try:
                 env.vis_manager.close()

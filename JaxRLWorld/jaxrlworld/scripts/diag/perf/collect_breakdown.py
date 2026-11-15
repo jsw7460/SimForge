@@ -790,20 +790,15 @@ def _probe_reset_dr(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> 
     is_mujoco = env.sim_type == "mujoco"
 
     def call_without_flush(name):
-        # The prologue _run_dr_batch performs: the backends write their
-        # pending recompute level or notify flags into these, and raise
-        # without them.
-        if is_newton:
-            env._dr_pending_notify_flags = 0
-        if is_mujoco:
-            env._dr_pending_recompute_level = None
+        # The prologue and epilogue of _run_dr_batch without its flush: the
+        # backends fold their pending recompute level or notify flags in.
+        env._dr_batch_active = True
         env.event_manager.run_term(name, env_ids)
+        env._dr_batch_active = False
         level = env._dr_pending_recompute_level if is_mujoco else None
         flags = env._dr_pending_notify_flags if is_newton else None
-        if is_newton:
-            del env._dr_pending_notify_flags
-        if is_mujoco:
-            del env._dr_pending_recompute_level
+        env._dr_pending_notify_flags = 0
+        env._dr_pending_recompute_level = None
         return level, flags
 
     probes = {name: (lambda name=name: call_without_flush(name)) for name, _term in dr_terms}

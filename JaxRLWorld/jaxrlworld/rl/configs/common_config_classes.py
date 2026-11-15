@@ -190,8 +190,7 @@ def disable_corruption(observation_cfg) -> None:
     attribute. Replaces the old ``observation.enable_noise = False`` call
     pattern.
     """
-    for attr_name in vars(observation_cfg):
-        val = getattr(observation_cfg, attr_name)
+    for val in vars(observation_cfg).values():
         if isinstance(val, ObservationGroupConfig):
             val.enable_corruption = False
 

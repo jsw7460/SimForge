@@ -188,7 +188,7 @@ def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":
     # Path 1: explicit class + kwargs
     preset_class_name = config_dict.get("preset_class_name")
     if preset_class_name is not None:
-        cls = getattr(preset_mod, preset_class_name, None)
+        cls = getattr(preset_mod, preset_class_name, None)  # dynamic-attr: class named by checkpoint
         if cls is None:
             raise AttributeError(
                 f"Checkpoint references preset class {preset_class_name!r} "
@@ -199,7 +199,7 @@ def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":
         return cls(**preset_kwargs).build()
 
     # Path 2: legacy module-level get_config()
-    if hasattr(preset_mod, "get_config"):
+    if hasattr(preset_mod, "get_config"):  # dynamic-attr: optional legacy module-level preset function
         return preset_mod.get_config()
 
     # Path 3: convention-based fallback for Phase-A-era checkpoints.
@@ -209,8 +209,8 @@ def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":
     for attr_name in dir(preset_mod):
         if attr_name.startswith("_") or not attr_name.endswith("Config"):
             continue
-        obj = getattr(preset_mod, attr_name)
-        if isinstance(obj, type) and hasattr(obj, "build"):
+        obj = getattr(preset_mod, attr_name)  # dynamic-attr: scan of the preset module namespace
+        if isinstance(obj, type) and hasattr(obj, "build"):  # dynamic-attr: duck-typed preset class scan
             candidate_cls = obj
             break
 
@@ -245,15 +245,16 @@ def runner_class_from_metadata(metadata: dict) -> type:
     # before the module was recorded name one of the runners exported here.
     runner_module = metadata.get("runner_module")
     if runner_module is not None:
-        return getattr(importlib.import_module(runner_module), runner_class_name)
+        module = importlib.import_module(runner_module)
+        return getattr(module, runner_class_name)  # dynamic-attr: runner named by checkpoint
     from jaxrlworld.rl import runners
 
-    if not hasattr(runners, runner_class_name):
+    if not hasattr(runners, runner_class_name):  # dynamic-attr: runner named by checkpoint
         raise ValueError(
             f"Unknown runner class: {runner_class_name}. "
             f"Available: {[name for name in dir(runners) if 'Runner' in name]}"
         )
-    return getattr(runners, runner_class_name)
+    return getattr(runners, runner_class_name)  # dynamic-attr: runner named by checkpoint
 
 
 def load_runner(

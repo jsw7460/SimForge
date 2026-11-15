@@ -21,18 +21,7 @@ if TYPE_CHECKING:
 
 
 def projected_gravity(env: NewtonEnv) -> torch.Tensor:
-    quat = base_quat(env)
-    if not hasattr(env, "_gravity_world_cache"):
-        env._gravity_world_cache = (
-            torch.tensor([[0.0, 0.0, -1.0]], device=env.device, dtype=torch.float32)
-            .expand(env.num_envs, -1)
-            .contiguous()
-        )
-
-    gravity_world = env._gravity_world_cache
-
-    result = _quat_rotate_inverse(quat, gravity_world)
-    return result
+    return _quat_rotate_inverse(base_quat(env), env._gravity_dir_w)
 
 
 @joint_indexed

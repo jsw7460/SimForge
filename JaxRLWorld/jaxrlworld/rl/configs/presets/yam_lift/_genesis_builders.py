@@ -61,7 +61,6 @@ def build_scene(cfg: YamLiftConfig, timing: Dict[str, Any]):
         num_slots=1,
         history_length=timing["decimation"],
     )
-    field_name = "sensors" if False else "contact_sensors"
-    existing = tuple(getattr(scene, field_name) or ())
-    setattr(scene, field_name, [*existing, sensor])
+    existing = tuple(scene.contact_sensors or ())
+    scene.contact_sensors = [*existing, sensor]
     return scene

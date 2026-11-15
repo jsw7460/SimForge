@@ -115,7 +115,7 @@ class TerrainImporter:
 
     def _compute_env_origins_curriculum(self, num_envs: int, origins: torch.Tensor) -> torch.Tensor:
         num_rows, num_cols = origins.shape[:2]
-        cfg_cap = getattr(self.cfg, "max_init_terrain_level", None)
+        cfg_cap = self.cfg.max_init_terrain_level
         max_init_level = (num_rows - 1) if cfg_cap is None else min(int(cfg_cap), num_rows - 1)
         self.max_terrain_level = num_rows
         self.terrain_levels = torch.randint(0, max_init_level + 1, (num_envs,), device=self.device)

@@ -157,7 +157,8 @@ class ManiSkillEnv(World):
 
     @property
     def max_episode_length(self) -> int:
-        limit = getattr(self.gym_env.spec, "max_episode_steps", None)
+        spec = self.gym_env.spec  # VectorEnv.spec: EnvSpec | None
+        limit = spec.max_episode_steps if spec is not None else None
         return int(limit) if limit is not None else 1000
 
     # ------------------------------------------------------------------ #

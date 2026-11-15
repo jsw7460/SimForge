@@ -12,6 +12,7 @@ from jaxrlworld.rl.configs.common_config_classes import (
     MLPCriticCfg,
 )
 from jaxrlworld.rl.modules.architectures.actor_registry import build_actor
+from jaxrlworld.rl.modules.architectures.mlp.actor import MLPActor
 from jaxrlworld.rl.modules.distributions import GaussianDistribution, SquashedGaussianDistribution
 from jaxrlworld.rl.modules.normalization import EmpiricalNormalization
 from jaxrlworld.rl.modules.utils import get_activation
@@ -285,7 +286,7 @@ class SACActorCritic(BaseActorCritic):
             # log-std output depends only on the (already log(sigma_0))
             # final bias so the initial std is uniform across states
             # and dimensions.
-            if not hasattr(self.actor, "net"):
+            if not isinstance(self.actor, MLPActor):
                 raise TypeError(
                     f"small_output_init only supports MLP actors with a '.net' MLP; got {type(self.actor).__name__}"
                 )
@@ -539,22 +540,3 @@ class SACActorCritic(BaseActorCritic):
         """Deterministic action for inference."""
         actions, aux = self.act(actor_obs, key=key, deterministic=True)
         return actions, aux
-
-    @property
-    def extra_to_log(self) -> dict:
-        """Extra metrics to log."""
-        extra = {}
-
-        # Gate values (for gated encoders)
-        if hasattr(self.actor, "encoder") and hasattr(self.actor.encoder, "last_gate"):
-            gate = self.actor.encoder.last_gate
-            if gate is not None:
-                gate_mean = gate.mean(axis=0)
-
-                extra["gate/mean"] = float(gate.mean())
-                extra["gate/std"] = float(gate.std())
-
-                for i in range(gate_mean.shape[0]):
-                    extra[f"gate/per_action/action_{i:02d}"] = float(gate_mean[i])
-
-        return extra

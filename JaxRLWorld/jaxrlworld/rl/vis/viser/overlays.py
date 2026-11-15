@@ -11,6 +11,8 @@ from typing import Any, Protocol
 
 import viser
 
+from jaxrlworld.rl.envs.lifecycle import LifecycleEvent
+
 from .term_plotter import ViserTermPlotter
 
 
@@ -28,14 +30,14 @@ class _SceneProtocol(Protocol):
 
 
 def _get_reward_term_names(env: Any) -> list[str]:
-    """Extract reward term names from the reward manager config."""
-    rm = getattr(env, "reward_manager", None)
-    if rm is None:
+    """Extract reward term names from the reward manager config.
+
+    Empty while the env is still building its managers: the MuJoCo and
+    PhysX envs construct their viewer before the reward manager exists.
+    """
+    if not env.lifecycle.was_dispatched(LifecycleEvent.MANAGERS_READY):
         return []
-    terms = getattr(rm, "reward_terms", None)
-    if not terms:
-        return []
-    return list(terms.keys())
+    return list(env.reward_manager.reward_terms.keys())
 
 
 @dataclass
@@ -47,6 +49,8 @@ class ViserTermOverlays:
     scene: _SceneProtocol
     reward_plotter: ViserTermPlotter | None = None
     _initialized: bool = False
+    # Tab group kept for the lazy plotter init when no names were known at setup.
+    _tabs: Any = None
 
     def setup_tabs(self, tabs: Any) -> None:
         """Create rewards tab. Gets names from reward config (not rew_buf_per_type)."""
@@ -85,7 +89,7 @@ class ViserTermOverlays:
             return
 
         # Lazy init if reward names weren't available at setup time.
-        if not self._initialized and hasattr(self, "_tabs"):
+        if not self._initialized and self._tabs is not None:
             names = list(self.env.rew_buf_per_type.keys())
             if names:
                 self._create_plotter(self._tabs, names)
@@ -118,8 +122,6 @@ class ViserDebugOverlays:
     def queue(self) -> None:
         """Queue environment debug visualizers for the current frame."""
         self.scene.clear_debug()
-        if hasattr(self.env, "update_visualizers"):
-            self.env.update_visualizers(self.scene)
 
     def on_env_switch(self) -> None:
         """Reset debug visuals when switching environment."""

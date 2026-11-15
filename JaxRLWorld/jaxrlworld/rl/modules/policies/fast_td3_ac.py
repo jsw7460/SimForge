@@ -492,17 +492,3 @@ class FastTD3ActorCritic(BaseActorCritic):
     def delta_z(self) -> float:
         """Atom spacing."""
         return (self.v_max - self.v_min) / (self.num_atoms - 1)
-
-    @property
-    def extra_to_log(self) -> dict:
-        """Extra metrics to log."""
-        extra = {}
-        if hasattr(self.actor, "encoder") and hasattr(self.actor.encoder, "last_gate"):
-            gate = self.actor.encoder.last_gate
-            if gate is not None:
-                gate_mean = gate.mean(axis=0)
-                extra["gate/mean"] = float(gate.mean())
-                extra["gate/std"] = float(gate.std())
-                for i in range(gate_mean.shape[0]):
-                    extra[f"gate/per_action/action_{i:02d}"] = float(gate_mean[i])
-        return extra

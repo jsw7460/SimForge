@@ -234,7 +234,7 @@ class Go2FlatConfig:
             if f.name == "robot":
                 # Nested dataclass — keep at default; eval rebuilds default.
                 continue
-            value = getattr(self, f.name)
+            value = getattr(self, f.name)  # dynamic-attr: iterating dataclass fields
             if f.default is not MISSING:
                 default = f.default
             elif f.default_factory is not MISSING:  # type: ignore[misc]
@@ -333,7 +333,7 @@ class Go2FlatConfig:
             "velocity_range": {},
             "default_pos": (0.0, 0.0, self.robot.base_init_height),
         }
-        if hasattr(builders, "customize_reset_root_params"):
+        if hasattr(builders, "customize_reset_root_params"):  # dynamic-attr: optional sim-builder hook
             builders.customize_reset_root_params(self, reset_root_params)
 
         return {

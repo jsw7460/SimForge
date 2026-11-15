@@ -17,11 +17,11 @@ def callable_to_string(fn: Callable) -> str:
 
     Raises ``ValueError`` for lambdas or objects without proper module info.
     """
-    if getattr(fn, "__name__", "") == "<lambda>":
+    if getattr(fn, "__name__", "") == "<lambda>":  # dynamic-attr: arbitrary callable, may lack __name__
         raise ValueError(f"Cannot serialize lambda functions. Convert to a named function: {fn}")
 
-    module = getattr(fn, "__module__", None)
-    qualname = getattr(fn, "__qualname__", None)
+    module = getattr(fn, "__module__", None)  # dynamic-attr: arbitrary callable, may lack __module__
+    qualname = getattr(fn, "__qualname__", None)  # dynamic-attr: arbitrary callable, may lack __qualname__
 
     if module is None or qualname is None:
         raise ValueError(
@@ -71,7 +71,7 @@ def resolve_callable(ref: str) -> Callable:
 
     obj = module
     for attr in attr_path.split("."):
-        obj = getattr(obj, attr)
+        obj = getattr(obj, attr)  # dynamic-attr: "module:qualname" resolution
 
     if not callable(obj):
         raise TypeError(f"Resolved {ref!r} to {obj!r}, which is not callable.")

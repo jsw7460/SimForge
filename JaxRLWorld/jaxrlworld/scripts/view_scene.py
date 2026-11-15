@@ -52,7 +52,7 @@ class FixedAction:
 
     Duck-typed rather than a :class:`PolicyWrapper` subclass: that base
     takes a runner, and there is no runner here. The viewer only calls
-    ``get_action``, ``notify_reset`` and — when it exists — ``reset``.
+    ``get_action``, ``notify_reset`` and ``reset``.
     """
 
     def __init__(self, num_envs: int, num_actions: int, device: torch.device) -> None:

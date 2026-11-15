@@ -254,9 +254,8 @@ class VisualizationManager(BaseManager):
         self._text_hud.add_item(DOFPositionItem())
 
         # Add extra items from config
-        if hasattr(self.config, "extra_hud_items"):
-            for item in self.config.extra_hud_items:
-                self._text_hud.add_item(item)
+        for item in self.config.extra_hud_items:
+            self._text_hud.add_item(item)
 
     @property
     def text_hud(self) -> "TextHUDOverlay | None":

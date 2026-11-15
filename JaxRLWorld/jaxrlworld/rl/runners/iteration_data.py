@@ -71,7 +71,7 @@ class IterationData:
         d.update(self.episode_stats.to_wandb_dict())
 
         # Algorithm metrics
-        if self.metrics is not None and hasattr(self.metrics, "to_wandb_dict"):
+        if self.metrics is not None:
             d.update(self.metrics.to_wandb_dict())
 
         # Performance

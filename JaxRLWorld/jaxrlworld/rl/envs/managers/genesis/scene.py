@@ -111,6 +111,8 @@ class SceneManagerConfig:
     show_viewer: bool
     num_envs: int = 1
     device: str = "cpu"
+    # The entity the action manager drives (``World.robot_entity_name``).
+    robot_entity_name: str = "robot"
     # Simulator-agnostic cameras (CameraSensorCfg); each becomes a
     # ``GenesisCameraSensor`` drawn by Madrona's batch renderer.
     cameras: tuple = ()
@@ -254,7 +256,7 @@ class SceneManager(BaseManager):
             surface = None
             visualize = False
 
-        mjcf_path = getattr(cfg, "mjcf_path", None)
+        mjcf_path = cfg.mjcf_path
         if mjcf_path:
             # A camera riding this entity that has to see its colliders gets
             # the MJCF rewritten for Genesis's renderer (collider_render_mjcf);
@@ -386,15 +388,6 @@ class SceneManager(BaseManager):
         """The sim-agnostic cameras, by name."""
         return self._cameras
 
-    LOCAL_COLLISION_MASK_FLAG = "_is_local_collision_mask"
-    """The private field on a Genesis entity that gates cross-entity masks.
-
-    Private, so it is checked before it is written: assigning an attribute
-    Python does not already know simply creates a new one, and a rename
-    upstream would leave this silently doing nothing at all -- which is the
-    failure mode this repo keeps paying for.
-    """
-
     def _share_one_collision_mask_namespace(self) -> None:
         """Let contype / conaffinity mean the same thing across entities.
 
@@ -451,15 +444,13 @@ class SceneManager(BaseManager):
         composable, and would also spend a 32-bit budget a few entities at
         a time and put us somewhere mjlab is not. The reference is mjlab.
         """
-        for name, entity in self.entities.items():
-            if not hasattr(entity, self.LOCAL_COLLISION_MASK_FLAG):
-                raise AttributeError(
-                    f"Genesis entity {name!r} has no {self.LOCAL_COLLISION_MASK_FLAG!r}. "
-                    "Genesis renamed or removed the flag that gates cross-entity "
-                    "collision masks; find its replacement rather than letting the "
-                    "assignment below quietly create a field nothing reads."
-                )
-            setattr(entity, self.LOCAL_COLLISION_MASK_FLAG, False)
+        for entity in self.entities.values():
+            # ``_is_local_collision_mask`` is private and has no setter. It is
+            # read before it is written: assigning an attribute Python does not
+            # already know creates a new one, so a rename upstream would leave
+            # the write doing nothing, where the read raises.
+            if entity._is_local_collision_mask:
+                entity._is_local_collision_mask = False
 
     def build_scene(self):
         # Before build: the collider reads the flag when it assembles its
@@ -506,12 +497,10 @@ class SceneManager(BaseManager):
             cfg = self.config.entities.get(name)
             if cfg is None:
                 return None
-            mjcf_path = getattr(cfg, "mjcf_path", None)
-            if mjcf_path:
-                return ("mjcf_path", mjcf_path)
-            urdf_path = getattr(cfg, "urdf_path", None)
-            if urdf_path:
-                return ("urdf", urdf_path)
+            if cfg.mjcf_path:
+                return ("mjcf_path", cfg.mjcf_path)
+            if cfg.urdf_path:
+                return ("urdf", cfg.urdf_path)
             return None
 
         self.trees = build_kinematic_trees(self.entities.keys(), _resolve)
@@ -684,12 +673,7 @@ class SceneManager(BaseManager):
         # Resolve each matched joint name to its Genesis-local DOF id(s).
         dof_ids: list[int] = []
         for name in matched_names:
-            joint = entity.get_joint(name)
-            ids = joint.dofs_idx_local
-            if hasattr(ids, "__iter__"):
-                dof_ids.extend(int(i) for i in ids)
-            else:
-                dof_ids.append(int(ids))
+            dof_ids.extend(int(i) for i in entity.get_joint(name).dofs_idx_local)
         sim_indices = torch.tensor(dof_ids, device=self.env.device)
 
         # sim_to_canonical: identity since RobotData indexes by sim_indices.

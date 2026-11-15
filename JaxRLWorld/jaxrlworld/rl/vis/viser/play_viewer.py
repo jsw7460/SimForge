@@ -90,6 +90,10 @@ class ViserPlayViewer(PlayViewerBase):
         # only; ``MotionGhost.is_active`` is False otherwise).
         self._motion_ghost: MotionGhost | None = None
         self._camera_panel: ViserCameraPanel | None = None
+        # Inspect-tab widgets, created in :meth:`_build_inspect_tab`. The
+        # plane's slider callbacks are registered before the plane exists.
+        self._inspect_html: viser.GuiHtmlHandle | None = None
+        self._ref_plane: viser.GlbHandle | None = None
 
     # ── Setup ──────────────────────────────────────────────────────
 
@@ -236,7 +240,7 @@ class ViserPlayViewer(PlayViewerBase):
         self._ref_plane.visible = False
 
     def _sync_ref_plane(self) -> None:
-        plane = getattr(self, "_ref_plane", None)
+        plane = self._ref_plane
         if plane is None:
             return
         plane.position = (0.0, 0.0, float(self._ref_height.value))
@@ -260,7 +264,7 @@ class ViserPlayViewer(PlayViewerBase):
         return ids
 
     def _update_inspect_display(self) -> None:
-        html = getattr(self, "_inspect_html", None)
+        html = self._inspect_html
         if html is None:
             return
         mode = self._inspect_mode.value
@@ -442,9 +446,7 @@ class ViserPlayViewer(PlayViewerBase):
         skipped here, and the "Commands" tab is omitted entirely if no
         term has a spec (no empty tab on tracking / getup presets).
         """
-        cmd_manager = getattr(self.env, "command_manager", None)
-        if cmd_manager is None:
-            return
+        cmd_manager = self.env.command_manager
         terms_with_specs: list[tuple[str, Any, Any]] = []
         for name, term in cmd_manager.iter_terms():
             spec = term.get_ui_spec()
@@ -599,14 +601,13 @@ class ViserPlayViewer(PlayViewerBase):
         arrow_origin = tracked.position + tracked.scene_offset
         arrow_origin[2] += _ARROW_Z_OFFSET
 
-        cmd_manager = getattr(self.env, "command_manager", None)
-        if cmd_manager is None:
-            return
+        cmd_manager = self.env.command_manager
+        columns = {col for _, term in cmd_manager.iter_terms() for col in term.column_names}
 
         env_idx = self._play_scene.env_idx
-        cmd_vx = getattr(cmd_manager, "lin_vel_x", None)
-        cmd_vy = getattr(cmd_manager, "lin_vel_y", None)
-        cmd_ang = getattr(cmd_manager, "ang_vel", None)
+        cmd_vx = cmd_manager.lin_vel_x if "lin_vel_x" in columns else None
+        cmd_vy = cmd_manager.lin_vel_y if "lin_vel_y" in columns else None
+        cmd_ang = cmd_manager.ang_vel if "ang_vel" in columns else None
 
         if cmd_vx is not None and cmd_vy is not None:
             self._cmd_arrow_handles = self._draw_velocity_arrow(

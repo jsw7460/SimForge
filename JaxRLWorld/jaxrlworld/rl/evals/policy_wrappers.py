@@ -7,6 +7,7 @@ import jax
 import numpy as np
 import torch
 
+from jaxrlworld.rl.algorithms.tdmpc2 import TDMPC2
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class PolicyWrapper(ABC):
         joint_perm: "JointPermutation | None" = None,
     ) -> "PolicyWrapper":
         """Factory: returns appropriate subclass based on algorithm type."""
-        if hasattr(runner.alg, "act_with_t0"):
+        if isinstance(runner.alg, TDMPC2):
             return MPCPolicyWrapper(runner, device, joint_perm=joint_perm)
         return ModelPolicyWrapper(runner, device, joint_perm=joint_perm)
 
@@ -86,6 +87,10 @@ class PolicyWrapper(ABC):
     def notify_reset(self, reset_mask: np.ndarray) -> None:
         """Called when environments reset. Override in subclasses if needed."""
         pass
+
+    def reset(self) -> None:
+        """Called when the play viewer resets every environment. A trained
+        policy keeps no state across that; nothing to drop."""
 
 
 class ModelPolicyWrapper(PolicyWrapper):

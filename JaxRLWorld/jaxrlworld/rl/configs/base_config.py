@@ -81,7 +81,7 @@ def _print_override_changes(overrides, config):
             return config_obj.get(param)
         if param == "_type":
             return type(config_obj).__name__
-        return getattr(config_obj, param)
+        return getattr(config_obj, param)  # dynamic-attr: field name comes from the command line
 
     def print_nested_changes(params, current_config, prefix=""):
         for param, value in params.items():
@@ -102,7 +102,7 @@ def _print_override_changes(overrides, config):
 
     for category, params in overrides.items():
         print(f"{Fore.GREEN}{category}:{Style.RESET_ALL}")
-        print_nested_changes(params, getattr(config, category))
+        print_nested_changes(params, getattr(config, category))  # dynamic-attr: category comes from the command line
 
     print(f"\n{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}\n")
 
@@ -121,19 +121,22 @@ def iter_terms(cfg: Any, term_type: type) -> dict:
     Terms set to ``None`` are considered disabled and excluded.
     """
     result = {}
+    if cfg is None:
+        # A term group left unset (``EnvConfig.terminations`` defaults to None).
+        return result
     # Class-level attributes (term defaults defined on the class body)
     for cls in type(cfg).__mro__:
         if cls is object:
             continue
-        for name, val in vars(cls).items():
+        for name in vars(cls):
             if name.startswith("_") or name in result:
                 continue
             # Get instance value (may override class default)
-            instance_val = getattr(cfg, name, val)
+            instance_val = getattr(cfg, name)  # dynamic-attr: name iterated from the class __dict__
             if isinstance(instance_val, term_type):
                 result[name] = instance_val
     # Instance-level: check for None overrides (disabling a term)
-    for name, val in getattr(cfg, "__dict__", {}).items():
+    for name, val in vars(cfg).items():
         if name.startswith("_"):
             continue
         if isinstance(val, term_type):
@@ -196,7 +199,7 @@ def _dataclass_to_dict(obj: Any) -> Dict:
     for f in dataclasses.fields(obj):
         if f.name.startswith("_"):
             continue
-        result[f.name] = _convert_value(getattr(obj, f.name))
+        result[f.name] = _convert_value(getattr(obj, f.name))  # dynamic-attr: iterating dataclass fields
     return result
 
 
@@ -205,7 +208,7 @@ def _recursive_to_dict(obj: "BaseConfig") -> Dict:
 
     Walks class-level attributes (for named terms) and instance attributes.
     """
-    exclude = set(getattr(obj, "_EXCLUDE_FROM_SERIALIZATION", ()))
+    exclude = set(obj._EXCLUDE_FROM_SERIALIZATION)
     result = {}
     # Collect class-level attributes first (named terms, class defaults)
     for cls in type(obj).__mro__:
@@ -221,7 +224,7 @@ def _recursive_to_dict(obj: "BaseConfig") -> Dict:
                 # Skip plain methods but keep callable term configs (dataclasses are callable)
                 continue
             # Get actual instance value (may override class default)
-            actual = getattr(obj, k, v)
+            actual = getattr(obj, k)  # dynamic-attr: name iterated from the class __dict__
             if actual is None:
                 continue
             result[k] = _convert_value(actual)
@@ -234,6 +237,9 @@ def _recursive_to_dict(obj: "BaseConfig") -> Dict:
 
 
 # ── Deserialization (dict → object, in-place update) ───────────────────────
+
+# Distinguishes "no such attribute" from an attribute whose value is None.
+_MISSING = object()
 
 
 def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
@@ -254,18 +260,19 @@ def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
                 obj[key] = value
                 continue
             obj_mem = obj[key]
-        elif hasattr(obj, key):
-            obj_mem = getattr(obj, key)
         else:
-            # Skip unknown keys silently (fields removed, _EXCLUDE_FROM_SERIALIZATION, etc.)
-            continue
+            # Unknown keys are skipped (fields removed, _EXCLUDE_FROM_SERIALIZATION, etc.)
+            obj_mem = getattr(obj, key, _MISSING)  # dynamic-attr: key comes from saved data; absent = removed field
+            if obj_mem is _MISSING:
+                continue
 
         # 0) Simulator option object (pydantic model) + mapping → rebuild it
         if isinstance(value, Mapping) and _is_options_model(obj_mem):
             value = _rebuild_options_model(obj_mem, value)
         # 1) Nested mapping → recurse
         elif isinstance(value, Mapping):
-            if obj_mem is not None and (hasattr(obj_mem, "__dict__") or isinstance(obj_mem, dict)):
+            has_attrs = hasattr(obj_mem, "__dict__")  # dynamic-attr: obj_mem is any config value
+            if obj_mem is not None and (has_attrs or isinstance(obj_mem, dict)):
                 update_from_dict(obj_mem, value, _ns=key_ns)
                 continue
             # obj_mem is None → assign the dict directly
@@ -326,7 +333,7 @@ class BaseConfig:
 
     def get(self, key: str, default: Any = None) -> Any:
         """Dict-like get method for attribute access with default."""
-        return getattr(self, key, default)
+        return getattr(self, key, default)  # dynamic-attr: dict-like get; the default is the API contract
 
     def to_dict(self) -> Dict:
         return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
@@ -433,15 +440,19 @@ class BaseConfig:
                 algorithm={'learning_rate': 0.0003}
             )
         """
-        immutable = getattr(self, "IMMUTABLE_SETTINGS", {})
+        # Only GenesisConfigsForRun defines IMMUTABLE_SETTINGS. It is a public
+        # class attribute, so a BaseConfig default would be serialized into
+        # every config and change saved-config diffs.
+        immutable = getattr(self, "IMMUTABLE_SETTINGS", {})  # dynamic-attr: optional per-class table
 
         for config_type, params in kwargs.items():
-            if not hasattr(self, config_type):
+            if not hasattr(self, config_type):  # dynamic-attr: config type comes from the override dict
                 raise ValueError(f"Unknown config type: {config_type}")
             for param_name in params:
                 if config_type in immutable and param_name in immutable[config_type]:
                     raise ValueError(f"Cannot override immutable setting: {config_type}.{param_name}")
-            _apply_override_params(getattr(self, config_type), params, config_type)
+            target = getattr(self, config_type)  # dynamic-attr: config type comes from the override dict
+            _apply_override_params(target, params, config_type)
 
 
 def _is_config_object(obj: Any) -> bool:
@@ -457,7 +468,11 @@ def _is_options_model(obj: Any) -> bool:
     import of its own; the object is an external library's, not one of our
     configs.
     """
-    return hasattr(obj, "model_dump") and hasattr(obj, "model_fields_set") and hasattr(type(obj), "model_fields")
+    return (
+        hasattr(obj, "model_dump")  # dynamic-attr: external pydantic surface
+        and hasattr(obj, "model_fields_set")  # dynamic-attr: external pydantic surface
+        and hasattr(type(obj), "model_fields")  # dynamic-attr: external pydantic surface
+    )
 
 
 def _coerce_option_value(annotation: Any, value: Any) -> Any:
@@ -484,7 +499,7 @@ def _rebuild_options_model(current: Any, patch: Dict[str, Any]) -> Any:
     plant and ``model_fields_set`` still tells which fields were stated.
     """
     cls = type(current)
-    kwargs = {name: getattr(current, name) for name in current.model_fields_set}
+    kwargs = {name: getattr(current, name) for name in current.model_fields_set}  # dynamic-attr: pydantic fields
     for name, value in patch.items():
         if name not in cls.model_fields:
             raise ValueError(f"{cls.__name__} has no field {name!r}")
@@ -529,9 +544,9 @@ def _apply_override_params(config_obj: Any, params: Dict[str, Any], path: str) -
     plain strings (an activation name) the way construction does.
     """
     for param_name, value in params.items():
-        if not hasattr(config_obj, param_name):
+        if not hasattr(config_obj, param_name):  # dynamic-attr: parameter name comes from the override dict
             raise ValueError(f"Unknown parameter: {path}.{param_name}")
-        current = getattr(config_obj, param_name)
+        current = getattr(config_obj, param_name)  # dynamic-attr: parameter name comes from the override dict
         if isinstance(value, dict) and isinstance(current, dict):
             merged = current.copy()
             for key, entry in value.items():
@@ -551,7 +566,7 @@ def _apply_override_params(config_obj: Any, params: Dict[str, Any], path: str) -
             setattr(config_obj, param_name, _rebuild_options_model(current, value))
         else:
             setattr(config_obj, param_name, value)
-    post_init = getattr(type(config_obj), "__post_init__", None)
+    post_init = getattr(type(config_obj), "__post_init__", None)  # dynamic-attr: optional dataclass hook
     if post_init is not None:
         post_init(config_obj)
 

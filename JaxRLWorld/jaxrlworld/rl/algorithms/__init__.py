@@ -65,11 +65,11 @@ def get_runner_class(algorithm_name: str):
 
     module_path, class_name = runner_path.rsplit(".", 1)
     module = __import__(module_path, fromlist=[class_name])
-    return getattr(module, class_name)
+    return getattr(module, class_name)  # dynamic-attr: runner class named by RUNNER_MAP path
 
 
 def get_algorithm_class(algorithm_name: str):
     info = get_algorithm_info(algorithm_name)
     module_path, class_name = info["class"].rsplit(".", 1)
     module = __import__(module_path, fromlist=[class_name])
-    return getattr(module, class_name)
+    return getattr(module, class_name)  # dynamic-attr: algorithm class named by registry path

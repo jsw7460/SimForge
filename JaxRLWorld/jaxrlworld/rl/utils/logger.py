@@ -716,8 +716,7 @@ class WandbLogger:
                 if stat_name in action_dist:
                     values = action_dist[stat_name]
                     for i, v in enumerate(values):
-                        val = v.item() if hasattr(v, "item") else v
-                        log_dict[f"ActionDist/{stat_name}/dim_{i}"] = val
+                        log_dict[f"ActionDist/{stat_name}/dim_{i}"] = v.item()
 
             if "raw" in action_dist:
                 raw_actions = action_dist["raw"]
@@ -780,8 +779,7 @@ class WandbLogger:
                 if stat_name in action_dist:
                     values = action_dist[stat_name]
                     for i, v in enumerate(values):
-                        val = v.item() if hasattr(v, "item") else v
-                        log_dict[f"ActionDist/{stat_name}/dim_{i}"] = val
+                        log_dict[f"ActionDist/{stat_name}/dim_{i}"] = v.item()
 
             # Histograms per dimension
             if "raw" in action_dist:

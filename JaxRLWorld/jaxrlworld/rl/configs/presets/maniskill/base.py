@@ -128,7 +128,7 @@ class ManiSkillStatePPOConfig:
     def _get_preset_kwargs(self) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
-            value = getattr(self, f.name)
+            value = getattr(self, f.name)  # dynamic-attr: iterating dataclass fields
             if f.default is not MISSING:
                 default = f.default
             elif f.default_factory is not MISSING:  # type: ignore[misc]

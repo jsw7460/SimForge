@@ -60,7 +60,7 @@ class LifecycleManager:
             order: Priority — lower values run first. Default 0.
             name: Optional label for debugging / logging.
         """
-        label = name or getattr(callback, "__qualname__", str(callback))
+        label = name or getattr(callback, "__qualname__", str(callback))  # dynamic-attr: any callable (partial)
         self._callbacks[event].append((order, label, callback))
 
     def dispatch(self, event: LifecycleEvent) -> None:

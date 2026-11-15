@@ -27,7 +27,7 @@ class GenesisLocomotionEnv(GenesisEnv):
     Extends GenesisEnv with gait pattern management.
     """
 
-    gait_manager: GaitManager
+    gait_manager: GaitManager | None
 
     def __init__(
         self,
@@ -44,6 +44,7 @@ class GenesisLocomotionEnv(GenesisEnv):
         curriculum_cfg: CurriculumManagerConfig,
     ):
         self._gait_cfg = gait_cfg
+        self.gait_manager = None
         super().__init__(
             num_envs=num_envs,
             env_cfg=env_cfg,
@@ -64,10 +65,10 @@ class GenesisLocomotionEnv(GenesisEnv):
             self.gait_manager = GaitManager(env=self, config=manager_cfg)
 
     def _pre_reward_hook(self):
-        if hasattr(self, "gait_manager"):
+        if self.gait_manager is not None:
             self.gait_manager.advance()
 
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
-        if len(env_ids) > 0 and hasattr(self, "gait_manager"):
+        if len(env_ids) > 0 and self.gait_manager is not None:
             self.gait_manager.reset(env_ids)

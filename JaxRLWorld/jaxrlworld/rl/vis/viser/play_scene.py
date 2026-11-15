@@ -195,9 +195,7 @@ class MujocoPlayScene:
 
     @property
     def scene_offset(self) -> np.ndarray:
-        # Same tolerance as get_tracked_body_data below: mjlab's scene
-        # only grew ``_scene_offset`` in newer versions.
-        return self._mj_scene._scene_offset if hasattr(self._mj_scene, "_scene_offset") else np.zeros(3)
+        return self._mj_scene._scene_offset
 
     def begin_frame(self) -> None:
         # MjlabViserScene reads ``data.xpos`` / ``data.xquat`` / ``data.cvel``
@@ -243,21 +241,20 @@ class MujocoPlayScene:
         xquat = data.xquat.cpu().numpy()  # (num_envs, nbody, 4) wxyz
         pos = xpos[env_idx, tracked_id]
         yaw = _yaw_from_wxyz(xquat[env_idx, tracked_id])
-        scene_offset = self._mj_scene._scene_offset if hasattr(self._mj_scene, "_scene_offset") else np.zeros(3)
-        # Body velocity from cvel if available.
+        scene_offset = self._mj_scene._scene_offset
+        # Body velocity from cvel.
         vel = None
-        if hasattr(data, "cvel"):
-            try:
-                cvel = data.cvel.cpu().numpy()
-                vel_6d = cvel[env_idx, tracked_id]  # (6,) [wx,wy,wz,vx,vy,vz]
-                world_vel = vel_6d[3:6]
-                w, x, y, z = xquat[env_idx, tracked_id]
-                from scipy.spatial.transform import Rotation
+        try:
+            cvel = data.cvel.cpu().numpy()
+            vel_6d = cvel[env_idx, tracked_id]  # (6,) [wx,wy,wz,vx,vy,vz]
+            world_vel = vel_6d[3:6]
+            w, x, y, z = xquat[env_idx, tracked_id]
+            from scipy.spatial.transform import Rotation
 
-                body_vel = Rotation.from_quat([x, y, z, w]).inv().apply(world_vel)
-                vel = body_vel[:2].astype(np.float32)
-            except Exception:
-                pass
+            body_vel = Rotation.from_quat([x, y, z, w]).inv().apply(world_vel)
+            vel = body_vel[:2].astype(np.float32)
+        except Exception:
+            pass
         return TrackedBodyData(
             position=pos.copy(),
             yaw=yaw,

@@ -119,15 +119,7 @@ def flat_orientation_mjlab(
         result = get_bodies_quat(env, body_name)
         body_quat_xyzw = result.data[:, 0, :]  # (num_envs, 4)
 
-        # Cache normalized gravity vector
-        if not hasattr(env, "_gravity_normalized_cache"):
-            env._gravity_normalized_cache = (
-                torch.tensor([[0.0, 0.0, -1.0]], device=env.device, dtype=torch.float32)
-                .expand(env.num_envs, -1)
-                .contiguous()
-            )
-
-        projected_gravity_b = _quat_rotate_inverse(body_quat_xyzw, env._gravity_normalized_cache)
+        projected_gravity_b = _quat_rotate_inverse(body_quat_xyzw, env._gravity_dir_w)
         xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
     else:
         projected_gravity_b = env.robot_data.projected_gravity_b  # (num_envs, 3)

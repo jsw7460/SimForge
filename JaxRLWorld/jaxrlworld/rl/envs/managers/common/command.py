@@ -178,8 +178,8 @@ class CommandManager(BaseManager):
         # 2. Term attribute lookup: "is_standing_env" → VelocityCommandTerm.is_standing_env
         terms = object.__getattribute__(self, "_terms")
         for term in terms.values():
-            if hasattr(term, name):
-                return getattr(term, name)
+            if hasattr(term, name):  # dynamic-attr: forward an unknown name to the first term that has it
+                return getattr(term, name)  # dynamic-attr: forward an unknown name to the term
 
         return object.__getattribute__(self, name)
 

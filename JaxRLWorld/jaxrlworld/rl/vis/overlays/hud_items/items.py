@@ -122,23 +122,22 @@ class CommandVelItem(HUDItem):
         return "command_vel"
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        cmd_manager = getattr(env, "command_manager", None)
-        if cmd_manager is None:
-            return []
+        cmd_manager = env.command_manager
+        columns = {col for _, term in cmd_manager.iter_terms() for col in term.column_names}
 
         lines = []
         precision = self.config.precision
 
         if self.config.show_linear:
             vx = vy = 0.0
-            if hasattr(cmd_manager, "lin_vel_x"):
+            if "lin_vel_x" in columns:
                 vx = float(tensor_to_array(cmd_manager.lin_vel_x)[env_idx])
-            if hasattr(cmd_manager, "lin_vel_y"):
+            if "lin_vel_y" in columns:
                 vy = float(tensor_to_array(cmd_manager.lin_vel_y)[env_idx])
             lines.append(f"Cmd vel: ({vx:.{precision}f}, {vy:.{precision}f})")
 
         if self.config.show_angular:
-            if hasattr(cmd_manager, "ang_vel"):
+            if "ang_vel" in columns:
                 ang = float(tensor_to_array(cmd_manager.ang_vel)[env_idx])
                 lines.append(f"Cmd ang: {ang:.{precision}f}")
 
@@ -251,12 +250,8 @@ class EpisodeInfoItem(HUDItem):
             lines.append(f"Episode: {self._episode_count}")
 
         if self.config.show_step:
-            term_manager = getattr(env, "termination_manager", None)
-            if term_manager is not None:
-                episode_buf = getattr(term_manager, "episode_length_buf", None)
-                if episode_buf is not None:
-                    step = int(tensor_to_array(episode_buf)[env_idx])
-                    lines.append(f"Step: {step}")
+            step = int(tensor_to_array(env.termination_manager.episode_length_buf)[env_idx])
+            lines.append(f"Step: {step}")
 
         return lines
 
@@ -531,7 +526,7 @@ class CustomItem(HUDItem):
         label = self.config.label or self.config.item_name
         precision = self.config.precision
 
-        if isinstance(value, (list, tuple, np.ndarray)):
+        if isinstance(value, list | tuple | np.ndarray):
             lines = []
             for i, v in enumerate(value):
                 lines.append(f"{label}_{i}: {float(v):.{precision}f}")

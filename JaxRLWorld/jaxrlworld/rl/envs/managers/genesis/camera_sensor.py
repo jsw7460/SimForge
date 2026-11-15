@@ -104,11 +104,13 @@ def collider_render_mjcf(mjcf_path: str, visible_geometry: str, mount_bodies: li
     rewritten = spec.compile()
 
     for field in _BODY_FIELDS:
-        if not np.array_equal(getattr(original, field), getattr(rewritten, field)):
+        old, new = getattr(original, field), getattr(rewritten, field)  # dynamic-attr: MjModel field by name
+        if not np.array_equal(old, new):
             raise RuntimeError(f"{source}: rewriting it for the camera changed {field}")
     before, after = _colliding(original), _colliding(rewritten)
     for field in _COLLIDER_FIELDS:
-        if not np.array_equal(getattr(original, field)[before], getattr(rewritten, field)[after]):
+        old, new = getattr(original, field), getattr(rewritten, field)  # dynamic-attr: MjModel field by name
+        if not np.array_equal(old[before], new[after]):
             raise RuntimeError(f"{source}: rewriting it for the camera changed the colliders' {field}")
     return spec.to_xml()
 

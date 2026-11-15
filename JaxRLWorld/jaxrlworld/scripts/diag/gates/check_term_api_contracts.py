@@ -351,6 +351,7 @@ def check_newton_damping_baseline(chk) -> None:
         scene_manager=SimpleNamespace(robot_view=view, model=None, solver=None),
         act_manager=SimpleNamespace(indexing=SimpleNamespace(newton_qd_indices=torch.arange(dofs))),
         _dr_baselines=SimpleNamespace(joint_damping=baseline.clone()),
+        _dr_batch_active=True,
         _dr_pending_notify_flags=0,
     )
     saved_newton = sys.modules.get("newton")

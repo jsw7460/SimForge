@@ -296,18 +296,21 @@ class OffPolicyRunner(BaseRunner):
         # Buffer env-time observations so the obs normalizer is updated
         # exactly once per collection cycle (PPO-style), instead of being
         # repeatedly updated from sampled replay batches inside alg.update().
-        update_normalizers = getattr(self.alg, "obs_normalization", False) and hasattr(self.alg, "update_normalizers")
+        # SAC and TD3 take their normalizer stats from here; FastTD3 updates
+        # its normalizers from the replay batch inside ``update``.
+        update_normalizers = self.alg.obs_normalization and isinstance(self.alg, SAC | TD3)
         norm_actor_buf: List[jax.Array] = [] if update_normalizers else None
         norm_critic_buf: List[jax.Array] = [] if update_normalizers else None
 
         for step in range(total_steps):
             # ========== Warmup: use random actions ==========
             if self._random_warmup_active():
-                # Uniform action in [-r, r]; r defaults to 1.0 (full range)
-                # but presets can shrink it via ``warmup_action_range`` to
-                # keep warmup exploration gentle (getattr keeps configs
-                # without the field on the historical full range).
-                warmup_range = getattr(self.cfgs.algorithm, "warmup_action_range", 1.0)
+                # Uniform action in [-r, r]; r is the full range (1.0) except
+                # for SAC, whose presets can shrink it via
+                # ``warmup_action_range`` to keep warmup exploration gentle.
+                warmup_range = (
+                    self.cfgs.algorithm.warmup_action_range if isinstance(self.cfgs.algorithm, SACConfig) else 1.0
+                )
                 self.key, subkey = jax.random.split(self.key)
                 actions = jax.random.uniform(
                     subkey,

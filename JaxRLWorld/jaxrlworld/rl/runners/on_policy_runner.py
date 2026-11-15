@@ -135,13 +135,11 @@ class OnPolicyRunner(BaseRunner):
     def _init_ppo_actor_critic(self, policy_cfg, key: jax.Array) -> None:
         """Initialize PPO actor-critic."""
 
-        if hasattr(self.env, "scene_manager"):
-            kinematic_tree = self.env.scene_manager.trees.get("robot", None)
-        else:
-            kinematic_tree = None
+        kinematic_tree = self.env.scene_manager.trees.get("robot", None)
 
+        # Gymnasium / ManiSkill wrappers have no action manager.
         actuated_joint_names = (
-            list(self.env.act_manager.actuated_joint_names) if hasattr(self.env, "act_manager") else None
+            list(self.env.act_manager.actuated_joint_names) if self.env.builds_from_manager_configs else None
         )
 
         self.actor_critic = PPOActorCritic(

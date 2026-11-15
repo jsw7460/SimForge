@@ -205,24 +205,20 @@ class EventManager(BaseManager):
         Shared by reset_dr (per-reset, env_ids = the reset envs) and interval_dr
         (global period, env_ids = all envs).
         """
-        is_newton = self.env.sim_type == "newton"
-        is_mujoco = self.env.sim_type == "mujoco"
-        if is_newton:
-            self.env._dr_pending_notify_flags = 0
-        if is_mujoco:
-            self.env._dr_pending_recompute_level = None
+        env = self.env
+        env._dr_batch_active = True
+        env._dr_pending_notify_flags = 0
+        env._dr_pending_recompute_level = None
         for name, term in terms:
             self._call_event_fn(name, term, env_ids, self._sampler(name, stage, counter))
-        if is_newton:
-            flags = self.env._dr_pending_notify_flags
-            del self.env._dr_pending_notify_flags
-            if flags:
-                self.env.scene_manager.solver.notify_model_changed(flags)
-        if is_mujoco:
-            level = self.env._dr_pending_recompute_level
-            del self.env._dr_pending_recompute_level
-            if level:  # None (no recompute term) or none(0) -> skip
-                self.env.scene_manager.sim.recompute_constants(level)
+        env._dr_batch_active = False
+        flags, level = env._dr_pending_notify_flags, env._dr_pending_recompute_level
+        env._dr_pending_notify_flags = 0
+        env._dr_pending_recompute_level = None
+        if flags:  # only Newton's DR backends fold flags in
+            env.scene_manager.solver.notify_model_changed(flags)
+        if level:  # only MuJoCo's; None (no recompute term) or none(0) -> skip
+            env.scene_manager.sim.recompute_constants(level)
 
     def _apply_reset_dr(self, env_ids: torch.Tensor) -> None:
         self._run_dr_batch(self._terms_by_mode["reset_dr"], env_ids, "reset_dr", self._episode_count)
@@ -279,7 +275,7 @@ class EventManager(BaseManager):
 
         rows = []
         for idx, (name, term) in enumerate(self._all_terms.items()):
-            func_name = getattr(self._resolved_fns[name], "__name__", name)
+            func_name = getattr(self._resolved_fns[name], "__name__", name)  # dynamic-attr: callable or instance
             mode_str = term.mode.capitalize()
 
             interval_str = "-"

@@ -54,7 +54,7 @@ def print_model_summary(model: eqx.Module, name: str = "Model", max_depth: int =
 
         parts = []
         for p in path:
-            key = str(p.key) if hasattr(p, "key") else str(p)
+            key = str(p.key) if isinstance(p, jax.tree_util.DictKey | jax.tree_util.FlattenedIndexKey) else str(p)
             key = key.strip(".")
             if key.startswith("[") and key.endswith("]"):
                 key = key[1:-1]

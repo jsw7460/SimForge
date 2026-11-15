@@ -32,7 +32,7 @@ class MujocoInitializer(SimInitializer):
         eval_cfgs.visualization.video_dir = video_dir
 
         # entities field is required — scene manager builds SceneCfg internally
-        if getattr(eval_cfgs.scene, "entities", None) is None:
+        if eval_cfgs.scene.entities is None:
             raise ValueError(
                 "MuJoCo evaluation requires 'entities' in scene config. "
                 "Re-train with unified EntityCfg to embed entity info in checkpoints."
@@ -44,7 +44,7 @@ class MujocoInitializer(SimInitializer):
         from jaxrlworld.rl import envs
 
         env_class_name = eval_cfgs.env.env_name
-        env_class = getattr(envs, env_class_name)
+        env_class = getattr(envs, env_class_name)  # dynamic-attr: env class named by config
 
         kw = dict(
             num_envs=eval_cfgs.env.num_envs,
@@ -58,7 +58,7 @@ class MujocoInitializer(SimInitializer):
             event_cfg=eval_cfgs.event,
             curriculum_cfg=eval_cfgs.curriculum,
         )
-        gait_cfg = getattr(eval_cfgs, "gait", None)
+        gait_cfg = eval_cfgs.gait
         if gait_cfg is not None:
             kw["gait_cfg"] = gait_cfg
         return env_class(**kw)
@@ -69,11 +69,11 @@ class MujocoInitializer(SimInitializer):
         from jaxrlworld.rl.vis.viser.bridges import MujocoBridge
         from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
 
-        scene_cfg = getattr(getattr(env, "visualization_cfg", None), "viser_scene", None)
+        scene_cfg = env.visualization_cfg.viser_scene
         return BridgePlayScene(MujocoBridge(env.scene_manager), scene_config=scene_cfg)
 
     def cleanup(self, env: Any) -> None:
-        if hasattr(env, "visualization_manager"):
+        if env.visualization_manager is not None:
             print_info("Closing Mjlab viewer...")
             try:
                 env.visualization_manager.close()

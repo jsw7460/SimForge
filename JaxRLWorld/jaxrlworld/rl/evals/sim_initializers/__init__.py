@@ -208,7 +208,9 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
                     (
                         obj
                         for obj in vars(mod).values()
-                        if isinstance(obj, type) and is_dataclass(obj) and hasattr(obj, "build")
+                        if isinstance(obj, type)
+                        and is_dataclass(obj)
+                        and hasattr(obj, "build")  # dynamic-attr: duck-typed preset class scan
                     ),
                     None,
                 )
@@ -223,7 +225,8 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     if preset_module_path and preset_class_name:
         try:
             mod = importlib.import_module(preset_module_path)
-            cls = getattr(mod, preset_class_name, None)
+            # A class missing from the module falls through to the ValueError below.
+            cls = getattr(mod, preset_class_name, None)  # dynamic-attr: class named by checkpoint
         except ModuleNotFoundError:
             cls = None
         if cls is not None and is_dataclass(cls):

@@ -69,7 +69,7 @@ class CurriculumManager(BaseManager):
             if isinstance(func, type):
                 inst = func(env=self.env, cfg=term)
                 self._instances[name] = inst
-                if hasattr(inst, "reset") and callable(inst.reset):
+                if hasattr(inst, "reset") and callable(inst.reset):  # dynamic-attr: optional reset() of user term
                     self._stateful_names.append(name)
 
         # Last computed state (for logging).

@@ -155,7 +155,7 @@ def string_to_callable(name: str) -> Callable:
         else:
             mod_name, attr_name = name.split(":")
             mod = importlib.import_module(mod_name)
-            callable_object = getattr(mod, attr_name)
+            callable_object = getattr(mod, attr_name)  # dynamic-attr: "module:attr" resolution
         # check if attribute is callable
         if callable(callable_object):
             return callable_object

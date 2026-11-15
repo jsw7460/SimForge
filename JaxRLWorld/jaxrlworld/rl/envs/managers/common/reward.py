@@ -276,7 +276,7 @@ class RewardManager(BaseManager):
     def reset(self, env_ids: torch.Tensor) -> None:
         """Reset stateful reward terms for specified envs."""
         for instance in self._instances.values():
-            if hasattr(instance, "reset"):
+            if hasattr(instance, "reset"):  # dynamic-attr: optional reset() hook on user term classes
                 instance.reset(env_ids)
 
     def advance(self) -> None:

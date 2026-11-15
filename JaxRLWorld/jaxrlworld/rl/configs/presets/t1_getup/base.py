@@ -232,7 +232,7 @@ class T1GetupConfig:
         for f in fields(self):
             if f.name == "robot":
                 continue
-            value = getattr(self, f.name)
+            value = getattr(self, f.name)  # dynamic-attr: iterating dataclass fields
             if f.default is not MISSING:
                 default = f.default
             elif f.default_factory is not MISSING:  # type: ignore[misc]
@@ -272,7 +272,7 @@ class T1GetupConfig:
             "default_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
             "default_joint_pos_dict": self.robot.default_joint_angles,
         }
-        if hasattr(builders, "customize_reset_root_params"):
+        if hasattr(builders, "customize_reset_root_params"):  # dynamic-attr: optional sim-builder hook
             builders.customize_reset_root_params(self, reset_root_params)
 
         common_terms = {

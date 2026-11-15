@@ -59,9 +59,11 @@ def _read_attribute(env: NewtonEnv, name: str) -> torch.Tensor:
     # randomizes). Report THOSE so the privileged obs reflects the real per-env
     # gains. Implicit actuators (internal PD) genuinely use joint_target_ke/kd, so
     # fall through to the solver field for them.
-    if name in ("joint_target_ke", "joint_target_kd") and getattr(env.act_manager, "has_explicit_actuators", False):
-        attr = "stiffness" if name == "joint_target_ke" else "damping"
-        cols = [getattr(actuator, attr) for actuator, _ in env.act_manager.actuators]
+    if name in ("joint_target_ke", "joint_target_kd") and env.act_manager.has_explicit_actuators:
+        if name == "joint_target_ke":
+            cols = [actuator.stiffness for actuator, _ in env.act_manager.actuators]
+        else:
+            cols = [actuator.damping for actuator, _ in env.act_manager.actuators]
         return torch.cat(cols, dim=-1)  # [n_envs, total_actuated_joints]
     view = env.scene_manager.robot_view
     return wp.to_torch(view.get_attribute(name, model))

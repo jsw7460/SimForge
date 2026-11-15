@@ -72,7 +72,9 @@ def _validate_stages(
             )
     for stage in stages:
         for key in stage:
-            if key not in _RESERVED_KEYS and not hasattr(term_cfg, key):
+            if key in _RESERVED_KEYS:
+                continue
+            if not hasattr(term_cfg, key):  # dynamic-attr: stage keys name term-config fields
                 raise AttributeError(f"Field {key!r} does not exist on the resolved term config for {term_name!r}.")
     for stage in stages:
         unknown = stage.get("params", {}).keys() - term_cfg.params.keys()
@@ -113,7 +115,7 @@ def _apply_stages(
             logged_params.add(key)
     result: dict[str, Any] = {}
     for key in logged_fields:
-        result[key] = getattr(term_cfg, key)
+        result[key] = getattr(term_cfg, key)  # dynamic-attr: stage keys name term-config fields
     for key in logged_params:
         result[key] = term_cfg.params[key]
     return result

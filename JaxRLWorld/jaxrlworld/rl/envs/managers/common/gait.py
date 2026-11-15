@@ -91,9 +91,9 @@ class QuadrupedOffsets:
             self._formulas.append(self._LEG_FORMULAS[matched[0]])
 
     def __call__(self, cmd: CommandManager) -> torch.Tensor:
-        phase = getattr(cmd, self.phase_cmd)
-        offset = getattr(cmd, self.offset_cmd)
-        bound = getattr(cmd, self.bound_cmd)
+        phase = getattr(cmd, self.phase_cmd)  # dynamic-attr: command column named by config
+        offset = getattr(cmd, self.offset_cmd)  # dynamic-attr: command column named by config
+        bound = getattr(cmd, self.bound_cmd)  # dynamic-attr: command column named by config
         return torch.stack([fn(phase, offset, bound) for fn in self._formulas], dim=1)
 
 
@@ -110,7 +110,10 @@ class DirectOffsets:
     command_names: tuple[str, ...] = field(default_factory=tuple)
 
     def __call__(self, cmd: CommandManager) -> torch.Tensor:
-        return torch.stack([getattr(cmd, name) for name in self.command_names], dim=1)
+        return torch.stack(
+            [getattr(cmd, name) for name in self.command_names],  # dynamic-attr: command columns named by config
+            dim=1,
+        )
 
 
 # ─────────────────────────────────────────────────────
@@ -210,7 +213,7 @@ class GaitManager(BaseManager):
             self._foot_offset_provider = config.foot_offset_provider
 
             if (
-                hasattr(self._foot_offset_provider, "foot_names")
+                isinstance(self._foot_offset_provider, QuadrupedOffsets)
                 and tuple(self._foot_offset_provider.foot_names) != self.foot_names
             ):
                 raise ValueError(
@@ -228,6 +231,9 @@ class GaitManager(BaseManager):
 
         # ── Von Mises (Normal CDF) for smooth contact targets ──
         self._smoothing_dist = torch.distributions.Normal(0.0, config.contact_smoothing_sigma)
+
+        # Reindex tensors per requested foot order (see ``_get_reindex``).
+        self._gait_reindex_cache: dict[tuple[str, ...], torch.Tensor] = {}
 
     # ──────────────────────────────────────────────
     # Core update
@@ -262,11 +268,7 @@ class GaitManager(BaseManager):
     # ``self.foot_names`` order — same as reading the attribute
     # directly. The reindex tensor is cached per requested order.
 
-    _gait_reindex_cache: dict[tuple[str, ...], torch.Tensor]
-
     def _get_reindex(self, order: list[str] | tuple[str, ...]) -> torch.Tensor:
-        if not hasattr(self, "_gait_reindex_cache"):
-            self._gait_reindex_cache = {}
         key = tuple(order)
         if key in self._gait_reindex_cache:
             return self._gait_reindex_cache[key]
@@ -389,8 +391,8 @@ class GaitManager(BaseManager):
 
         # offset_mode == "command"
         cmd = self.env.command_manager
-        freq = getattr(cmd, cfg.freq_command)
-        duration = getattr(cmd, cfg.duration_command)
+        freq = getattr(cmd, cfg.freq_command)  # dynamic-attr: command column named by config
+        duration = getattr(cmd, cfg.duration_command)  # dynamic-attr: command column named by config
         foot_offsets = self._foot_offset_provider(cmd)
         return freq, duration, foot_offsets
 

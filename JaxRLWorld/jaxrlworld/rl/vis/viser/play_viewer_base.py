@@ -110,6 +110,10 @@ class PlayViewerBase(ABC):
         # Action queue, drained on main thread each tick.
         self._actions: deque[tuple[ViewerAction, Any | None]] = deque()
 
+        # Termination terms suspended while the motion lock is on:
+        # name -> (cfg, resolved fn), restored when the lock is released.
+        self._suspended_term_cache: dict[str, tuple[Any, Any]] = {}
+
     # Abstract hooks.
 
     @abstractmethod
@@ -158,10 +162,7 @@ class PlayViewerBase(ABC):
         and the motion picker code paths become no-ops without branching
         at every call site.
         """
-        terms = getattr(self.env.command_manager, "_terms", None)
-        if not terms or "motion" not in terms:
-            return None
-        return terms["motion"]
+        return dict(self.env.command_manager.iter_terms()).get("motion")
 
     # Tracking-specific termination terms that interrupt a clip mid-
     # playback. With the motion lock ON these would keep resetting the
@@ -193,17 +194,9 @@ class PlayViewerBase(ABC):
         # Lock ON == suppress rollover teleport.
         motion_cmd.cfg.rollover_teleport = not bool(locked)
 
-        term_mgr = getattr(self.env, "termination_manager", None)
-        if term_mgr is None:
-            return
-        all_terms = getattr(term_mgr, "_all_terms", None)
-        resolved = getattr(term_mgr, "_resolved_fns", None)
-        if all_terms is None or resolved is None:
-            return
-
-        # Lazy per-viewer cache for suspended (cfg, fn) pairs.
-        if not hasattr(self, "_suspended_term_cache"):
-            self._suspended_term_cache: dict = {}
+        term_mgr = self.env.termination_manager
+        all_terms = term_mgr._all_terms
+        resolved = term_mgr._resolved_fns
 
         for name in self._LOCK_SUSPENDED_TERMS:
             if locked:
@@ -319,9 +312,7 @@ class PlayViewerBase(ABC):
 
     def reset_environment(self) -> None:
         self.env.reset()
-        reset_fn = getattr(self.policy, "reset", None)
-        if reset_fn is not None:
-            reset_fn()
+        self.policy.reset()
         self._step_count = 0
         self._sim_budget = 0.0
         self._last_error = None

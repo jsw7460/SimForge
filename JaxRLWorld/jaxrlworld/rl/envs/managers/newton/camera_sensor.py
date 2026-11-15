@@ -187,14 +187,14 @@ class NewtonCameraSensor:
         silently resolved in favour of whichever was built last.
         """
         model = self._scene.model
-        previous = getattr(model, "_rlworld_camera_visibility", None)
+        previous = self._scene.camera_visible_geometry
         if previous is not None and previous != visible_geometry:
             raise ValueError(
                 f"Camera {self.cfg.name!r} wants to see {visible_geometry!r} geometry, but another camera "
                 f"already set the model's shapes to {previous!r}. Newton's visibility flag is per shape, "
                 "not per camera, so the two cannot both be honoured."
             )
-        model._rlworld_camera_visibility = visible_geometry
+        self._scene.camera_visible_geometry = visible_geometry
 
         entity = self._scene.entities[self._entity_name]["config"]
         prefix = f"{entity.body_label_prefix}/"

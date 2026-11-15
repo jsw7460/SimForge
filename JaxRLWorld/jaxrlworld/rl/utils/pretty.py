@@ -228,11 +228,7 @@ def print_env_summary(env: World) -> None:
         ("Control dt", f"{env.control_dt:.4f}s"),
     ]
 
-    if hasattr(env, "decimation"):
-        env_rows.append(("Decimation", str(env.decimation)))
-
-    if hasattr(env, "task_name"):
-        env_rows.append(("Task", env.task_name))
+    env_rows.append(("Decimation", str(env.decimation)))
 
     panel = create_env_panel(
         title=f"{env.sim_name} Environment",
@@ -243,21 +239,18 @@ def print_env_summary(env: World) -> None:
     console.print()
 
     # Print each manager
-    managers = [
-        ("obs_manager", "Observation Manager"),
-        ("act_manager", "Action Manager"),
-        ("reward_manager", "Reward Manager"),
-        ("termination_manager", "Termination Manager"),
-        ("contact_manager", "Contact Manager"),
-        ("command_manager", "Command Manager"),
-        ("event_manager", "Event Manager"),
-    ]
+    managers = (
+        env.obs_manager,
+        env.act_manager,
+        env.reward_manager,
+        env.termination_manager,
+        env.contact_manager,
+        env.command_manager,
+        env.event_manager,
+    )
 
-    for attr_name, display_name in managers:
-        if hasattr(env, attr_name):
-            manager = getattr(env, attr_name)
-            if manager is not None and hasattr(manager, "__str__"):
-                manager_str = str(manager)
-                if manager_str.strip():  # Only print if non-empty
-                    console.print(manager_str)
-                    console.print()
+    for manager in managers:
+        manager_str = str(manager)
+        if manager_str.strip():  # Only print if non-empty
+            console.print(manager_str)
+            console.print()

@@ -50,6 +50,8 @@ class ModelBasedRunner(BaseRunner):
     ):
         self.algorithm_name = cfgs.algorithm.algorithm_name
         super().__init__(env=env, cfgs=cfgs, use_wandb=use_wandb, seed=seed)
+        # Set once the first update has pretrained on the seed data.
+        self._pretrained = False
 
     # ==================== Initialization ====================
 
@@ -310,7 +312,7 @@ class ModelBasedRunner(BaseRunner):
         if buffer.size >= min_buffer_size and buffer.filled_size >= buffer.horizon:
             training_start = time.time()
 
-            if not getattr(self, "_pretrained", False):
+            if not self._pretrained:
                 num_updates = self.cfgs.algorithm.learning_starts // self.env.num_envs
                 print(f"Pretraining agent on seed data ({num_updates} updates)...")
                 self._pretrained = True
@@ -346,7 +348,7 @@ class ModelBasedRunner(BaseRunner):
     ):
         """Main training loop."""
         if init_at_random_ep_len:
-            if hasattr(self.env, "termination_manager"):
+            if self.env.builds_from_manager_configs:
                 self.env.termination_manager.episode_length_buf = torch.randint_like(
                     self.env.episode_length_buf, high=int(self.env.max_episode_length)
                 )

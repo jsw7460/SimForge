@@ -871,16 +871,12 @@ class MujocoSceneManager(BaseManager):
         was used to build the entity in the first place — for the
         standard ``EntityCfg`` path this is e.g.
         ``mujoco.MjSpec.from_file(...)``, which always returns a fresh
-        standalone spec with the full body tree intact. Entities that
-        don't carry a ``spec_fn`` (e.g. terrain primitives built
-        in-place by mjlab) are skipped.
+        standalone spec with the full body tree intact. Entities whose
+        ``spec_fn`` cannot rebuild a standalone spec are skipped.
         """
 
         def _resolve(name: str):
-            entity = self._scene.entities[name]
-            spec_fn = getattr(getattr(entity, "cfg", None), "spec_fn", None)
-            if spec_fn is None:
-                return None
+            spec_fn = self._scene.entities[name].cfg.spec_fn
             try:
                 fresh_spec = spec_fn()
                 xml_content = fresh_spec.to_xml()

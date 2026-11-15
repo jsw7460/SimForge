@@ -65,7 +65,7 @@ def _plain(value: Any) -> Any:
         return value
     if isinstance(value, tuple):
         return tuple(_plain(v) for v in value)
-    if hasattr(value, "__getitem__"):
+    if hasattr(value, "__getitem__"):  # dynamic-attr: mjlab TorchArray proxy, matched without importing mjlab
         return value[...]
     raise TypeError(f"The reward snapshot cannot hold a {type(value).__name__}: {value!r}")
 
@@ -105,7 +105,7 @@ class _RecordingRobotData:
         self._record = record
 
     def __getattr__(self, name: str):
-        value = getattr(self._real, name)
+        value = getattr(self._real, name)  # dynamic-attr: recording proxy __getattr__ forwarding
         if name in _BY_IDS:
             self._record.robot_attrs.add(_BY_IDS[name])
             return value
@@ -138,7 +138,7 @@ class _RecordingAttrs:
 
     def __getattr__(self, name: str):
         self._attrs.add(name)
-        return getattr(self._real, name)
+        return getattr(self._real, name)  # dynamic-attr: delegation proxy __getattr__ forwarding
 
 
 class _RecordingCommandManager:
@@ -155,7 +155,7 @@ class _RecordingCommandManager:
 
     def __getattr__(self, name: str):
         self._record.command_attrs.add(name)
-        return getattr(self._real, name)
+        return getattr(self._real, name)  # dynamic-attr: delegation proxy __getattr__ forwarding
 
 
 class _RecordingEntity:
@@ -168,7 +168,7 @@ class _RecordingEntity:
         return _RecordingAttrs(self._real.data, self._attrs)
 
     def __getattr__(self, name: str):
-        return getattr(self._real, name)
+        return getattr(self._real, name)  # dynamic-attr: delegation proxy __getattr__ forwarding
 
 
 class _RecordingSensor:
@@ -183,7 +183,7 @@ class _RecordingSensor:
         return self._real.data
 
     def __getattr__(self, name: str):
-        return getattr(self._real, name)
+        return getattr(self._real, name)  # dynamic-attr: delegation proxy __getattr__ forwarding
 
 
 class _RecordingScene:
@@ -198,7 +198,7 @@ class _RecordingScene:
         return _RecordingSensor(self._real.get_sensor(name), name, self._record)
 
     def __getattr__(self, name: str):
-        return getattr(self._real, name)
+        return getattr(self._real, name)  # dynamic-attr: delegation proxy __getattr__ forwarding
 
 
 class _RecordingContactManager:
@@ -219,7 +219,7 @@ class _RecordingContactManager:
         return self._real.contact_force_history(group_name, order)
 
     def __getattr__(self, name: str):
-        return getattr(self._real, name)
+        return getattr(self._real, name)  # dynamic-attr: delegation proxy __getattr__ forwarding
 
 
 class RecordingEnvView:
@@ -247,7 +247,7 @@ class RecordingEnvView:
         return self.get_robot_data()
 
     def __getattr__(self, name: str):
-        value = getattr(self._env, name)
+        value = getattr(self._env, name)  # dynamic-attr: recording proxy __getattr__ forwarding
         if isinstance(value, torch.Tensor):
             self._record.env_tensor_attrs.add(name)
         return value
@@ -379,7 +379,7 @@ class _ContactManagerView:
         return history[:, self._real._get_reindex(group_name, order), :, :]
 
     def __getattr__(self, name: str):
-        return getattr(self._real, name)
+        return getattr(self._real, name)  # dynamic-attr: delegation proxy __getattr__ forwarding
 
 
 class RewardEnvView:
@@ -420,30 +420,30 @@ class RewardEnvView:
         """Read everything the terms need out of the engine, as tensors."""
         env = self._env
         for name in self._record.env_tensor_attrs:
-            self._env_tensors[name] = getattr(env, name)
+            self._env_tensors[name] = getattr(env, name)  # dynamic-attr: attribute names recorded on the eager pass
         cmd = env.command_manager
         command = self.command_manager.__dict__
         for name in self._record.command_attrs:
-            command[name] = getattr(cmd, name)
+            command[name] = getattr(cmd, name)  # dynamic-attr: attribute names recorded on the eager pass
         for term_name, attrs in self._record.command_terms.items():
             term = cmd.get_term(term_name)
             holder = self.command_manager._terms[term_name].__dict__
             for name in attrs:
-                holder[name] = getattr(term, name)
+                holder[name] = getattr(term, name)  # dynamic-attr: attribute names recorded on the eager pass
         act = self.act_manager.__dict__
         for name in self._record.action_attrs:
-            act[name] = getattr(env.act_manager, name)
+            act[name] = getattr(env.act_manager, name)  # dynamic-attr: attribute names recorded on the eager pass
         rd = env.get_robot_data(env.robot_entity_name)
         robot = self._robot.__dict__
         for name in self._record.robot_attrs:
-            robot[name] = _plain(getattr(rd, name))
+            robot[name] = _plain(getattr(rd, name))  # dynamic-attr: attribute names recorded on the eager pass
         for sensor_name in self._record.angmom_sensors:
             self._robot._angmom[sensor_name] = _plain(rd.angular_momentum_w(sensor_name=sensor_name))
         for ent_name, attrs in self._record.entity_attrs.items():
             data = env.scene_manager.get_entity(ent_name).data
             holder = self.scene_manager._entities[ent_name].data.__dict__
             for name in attrs:
-                holder[name] = _plain(getattr(data, name))
+                holder[name] = _plain(getattr(data, name))  # dynamic-attr: attribute names recorded on the eager pass
         for name in self._record.sensors:
             self.scene_manager._sensors[name].__dict__["data"] = _plain(env.scene_manager.get_sensor(name).data)
         # Declared-order reads, the same the public API serves: the view's
@@ -477,4 +477,4 @@ class RewardEnvView:
         tensors = self.__dict__["_env_tensors"]
         if name in tensors:
             return tensors[name]
-        return getattr(self.__dict__["_env"], name)
+        return getattr(self.__dict__["_env"], name)  # dynamic-attr: view __getattr__ forwarding

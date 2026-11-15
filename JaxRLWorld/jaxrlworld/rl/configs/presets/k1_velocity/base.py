@@ -360,7 +360,7 @@ class K1VelocityConfig:
         for f in fields(self):
             if f.name == "robot":
                 continue
-            value = getattr(self, f.name)
+            value = getattr(self, f.name)  # dynamic-attr: iterating dataclass fields
             if f.default is not MISSING:
                 default = f.default
             elif f.default_factory is not MISSING:  # type: ignore[misc]

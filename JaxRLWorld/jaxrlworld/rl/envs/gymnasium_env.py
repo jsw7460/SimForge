@@ -4,6 +4,7 @@ import genesis as gs
 import mujoco
 import numpy as np
 import torch
+from gymnasium.envs.mujoco import MujocoEnv as GymMujocoEnv
 
 from jaxrlworld.rl.configs import ActionConfig, CommandConfig, EnvConfig, ObservationConfig, RewardConfig, SceneConfig
 from jaxrlworld.rl.configs.robots.kinematic_tree import KinematicTree
@@ -370,7 +371,7 @@ class GymnasiumEnv(World):
 
     def __init__(
         self,
-        gym_env,  # gym.Env
+        gym_env,  # gymnasium.vector.SyncVectorEnv
         env_cfg: EnvConfig,
         scene_cfg: SceneConfig,
         obs_cfg: ObservationConfig,
@@ -486,23 +487,16 @@ class GymnasiumEnv(World):
             def __init__(self, kinematic_tree):
                 self.trees = {"robot": kinematic_tree}
 
-        if hasattr(gym_env, "envs"):
-            first_env = gym_env.envs[0]
-        else:
-            first_env = gym_env
+        base_env = gym_env.envs[0].unwrapped
 
-        base_env = first_env.unwrapped
-
-        if hasattr(base_env, "physics"):
-            # dm_control env (via shimmy)
-            mj_model = base_env.physics.model._model
-            kinematic_tree = MuJoCoKinematicTree(mj_model)
-        elif hasattr(base_env, "model"):
+        if isinstance(base_env, GymMujocoEnv):
             # Standard MuJoCo gym env
             mj_model = base_env.model
             kinematic_tree = KinematicTree(mjcf_path=base_env.fullpath)
         else:
-            raise ValueError("Cannot extract MuJoCo model from environment.")
+            # dm_control env (via shimmy)
+            mj_model = base_env.physics.model._model
+            kinematic_tree = MuJoCoKinematicTree(mj_model)
 
         self.mj_model = mj_model
         print(f"✓ Extracted kinematic tree: {kinematic_tree}")

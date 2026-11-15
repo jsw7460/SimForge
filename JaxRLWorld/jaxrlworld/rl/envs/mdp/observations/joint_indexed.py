@@ -42,4 +42,4 @@ def joint_indexed_flag(fn: Callable) -> bool | None:
     ``fn`` is an arbitrary callable (plain function, ``EnvStepCache`` wrapper,
     functools.partial, class instance), so the marker is looked up by name.
     """
-    return getattr(fn, _ATTR, None)
+    return getattr(fn, _ATTR, None)  # dynamic-attr: optional marker on an arbitrary callable; None = unmarked

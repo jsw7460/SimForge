@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from jaxrlworld.rl.algorithms.tdmpc2 import TDMPC2
 from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector
 from jaxrlworld.rl.envs.backends import find_backend
@@ -104,6 +105,9 @@ class PolicyEvaluator:
         self.record_video = record_video
         self.use_rich_display = use_rich_display
         self.video_dir = None
+        # Bound once the env is built; ``cleanup`` may run before that
+        # (a signal or an exception during setup).
+        self.env = None
         self.record_steps = record_steps
         self.recording_started = False
 
@@ -228,7 +232,7 @@ class PolicyEvaluator:
     @staticmethod
     def _detect_sim_type_from_cfgs(cfgs) -> str:
         """Detect simulator type from a ConfigsForRun object."""
-        sim_type = getattr(cfgs, "sim_type", None)
+        sim_type = cfgs.sim_type
         if sim_type == "genesis":
             return "Genesis"
         elif sim_type == "newton":
@@ -306,8 +310,7 @@ class PolicyEvaluator:
         # Visualization: native GL viewer always off; viser controlled via overrides.
         cfgs.visualization.show_viewer = False
         cfgs.visualization.record_video = record_video
-        if hasattr(cfgs.visualization, "video_dir"):
-            cfgs.visualization.video_dir = video_dir
+        cfgs.visualization.video_dir = video_dir
 
         print_info(f"Cross-sim eval: checkpoint trained on {self._train_sim_type}, evaluating on {self.sim_type}")
 
@@ -413,7 +416,7 @@ class PolicyEvaluator:
 
     def _resize_mppi_state(self) -> None:
         """Resize MPPI prev_mean to match eval num_envs (may differ from training)."""
-        if not hasattr(self.runner.alg, "_prev_mean"):
+        if not isinstance(self.runner.alg, TDMPC2):
             return
         _, horizon, action_dim = self.runner.alg._prev_mean.shape
         self.runner.alg._prev_mean = np.zeros(
@@ -429,7 +432,7 @@ class PolicyEvaluator:
 
     def cleanup(self):
         """Perform cleanup tasks — delegate to initializer."""
-        if hasattr(self, "env") and hasattr(self, "_init"):
+        if self.env is not None:
             self._init.cleanup(self.env)
 
     def _generate_video_dir(self, policy_path: str, record_video: bool, video_dir: str | None) -> str:
@@ -812,7 +815,7 @@ class PolicyEvaluator:
                 "timestamp": datetime.now().isoformat(),
                 "seed": self.seed,
                 "cross_sim": self._cross_sim,
-                "train_sim": getattr(self, "_train_sim_type", None) if self._cross_sim else None,
+                "train_sim": self._train_sim_type if self._cross_sim else None,
                 "eval_sim": self.sim_type,
             },
         }

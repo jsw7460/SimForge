@@ -36,6 +36,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import torch
 
+from .play_scene import BridgePlayScene
+
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
 
@@ -54,8 +56,7 @@ class ForceDragController:
         drag tool is not wired there (the env-side wrench injection is
         still implemented for all three backends).
         """
-        scene = getattr(play_scene, "_scene", None)
-        return scene is not None and hasattr(scene, "bridge") and hasattr(scene, "camera_tracking_enabled")
+        return isinstance(play_scene, BridgePlayScene) and play_scene._scene is not None
 
     def __init__(self, server: Any, env: World, play_scene: PlayScene) -> None:
         self._server = server

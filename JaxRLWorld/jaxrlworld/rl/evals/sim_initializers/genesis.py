@@ -39,8 +39,8 @@ class GenesisInitializer(SimInitializer):
         from jaxrlworld.rl import envs
 
         env_class_name = eval_cfgs.env.env_name
-        if hasattr(envs, env_class_name):
-            env_class = getattr(envs, env_class_name)
+        if hasattr(envs, env_class_name):  # dynamic-attr: env class named by config
+            env_class = getattr(envs, env_class_name)  # dynamic-attr: env class named by config
             kwargs = dict(
                 num_envs=eval_cfgs.env.num_envs,
                 env_cfg=eval_cfgs.env,
@@ -53,7 +53,7 @@ class GenesisInitializer(SimInitializer):
                 event_cfg=eval_cfgs.event,
                 curriculum_cfg=eval_cfgs.curriculum,
             )
-            gait_cfg = getattr(eval_cfgs, "gait", None)
+            gait_cfg = eval_cfgs.gait
             if gait_cfg is not None:
                 kwargs["gait_cfg"] = gait_cfg
             return env_class(**kwargs)
@@ -63,7 +63,7 @@ class GenesisInitializer(SimInitializer):
         from jaxrlworld.rl.vis.viser.bridges import GenesisBridge
         from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
 
-        scene_cfg = getattr(getattr(env, "visualization_cfg", None), "viser_scene", None)
+        scene_cfg = env.visualization_cfg.viser_scene
         return BridgePlayScene(GenesisBridge(env.scene_manager), scene_config=scene_cfg)
 
     def try_stop_mid_episode_recording(self, env: Any, target_steps: int) -> bool:
@@ -84,10 +84,9 @@ class GenesisInitializer(SimInitializer):
         print_success("Video recording stopped")
 
     def cleanup(self, env: Any) -> None:
-        if hasattr(env, "vis_manager"):
-            print_info("Saving video before exit...")
-            try:
-                env.vis_manager.stop_recording()
-                print_success("Video saved successfully!")
-            except Exception as e:
-                print_error(f"Error saving video: {e}")
+        print_info("Saving video before exit...")
+        try:
+            env.vis_manager.stop_recording()
+            print_success("Video saved successfully!")
+        except Exception as e:
+            print_error(f"Error saving video: {e}")

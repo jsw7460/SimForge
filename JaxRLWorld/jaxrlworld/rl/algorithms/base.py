@@ -71,7 +71,7 @@ def _resolve_path(tree: Any, path: tuple) -> Any:
     node = tree
     for key in path:
         if isinstance(key, jax.tree_util.GetAttrKey):
-            node = getattr(node, key.name)
+            node = getattr(node, key.name)  # dynamic-attr: pytree key path names the field
         elif isinstance(key, jax.tree_util.SequenceKey):
             node = node[key.idx]
         elif isinstance(key, jax.tree_util.DictKey):

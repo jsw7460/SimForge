@@ -292,7 +292,7 @@ class NewtonBridge(SimulatorBridge):
         # Color: the source mesh's own, else the colour Newton assigned the
         # shape (its palette gives adjacent shapes distinguishable colours,
         # which a single default grey does not).
-        color = getattr(geo_src, "color", None)
+        color = geo_src.color if isinstance(geo_src, Mesh) else None
         if color is None:
             color = self._model.shape_color.numpy()[shape_idx]
         if color is not None:

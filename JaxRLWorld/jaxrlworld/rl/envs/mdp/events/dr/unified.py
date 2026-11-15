@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 
+from jaxrlworld.rl.actuators.actuator_pd import IdealPDActuator
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.envs.backends import get_dr_backend
 from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler, keyed_field_sampler
@@ -62,24 +63,18 @@ def _newton_notify(env: World, flag) -> None:
     Each Newton ``solver.notify_model_changed`` triggers a non-trivial GPU
     state refresh; when multiple DR terms fire in the same reset (e.g. body
     inertia + joint friction + foot friction), three sequential notifies
-    add up. The event manager wraps the ``reset_dr`` loop with a deferred-
-    flag attribute (``env._dr_pending_notify_flags``); when present, we OR
-    flags into it instead of notifying, and the manager flushes a single
-    combined notify after the loop. Outside that context the call is
-    unchanged (immediate notify). Newton-only — no behavior change for
-    Genesis / MuJoCo backends, which never reach this helper.
+    add up. Inside a DR batch (``env._dr_batch_active``, set by the event
+    manager around the ``reset_dr`` / ``interval_dr`` loop) we OR the flag
+    into ``env._dr_pending_notify_flags`` instead of notifying, and the
+    manager flushes a single combined notify after the loop. Outside a
+    batch the notify is immediate. Newton-only — Genesis / MuJoCo backends
+    never reach this helper.
     """
-    pending = getattr(env, "_dr_pending_notify_flags", None)
     flag_int = int(flag)
-    if pending is None:
-        env.scene_manager.solver.notify_model_changed(flag_int)
+    if env._dr_batch_active:
+        env._dr_pending_notify_flags |= flag_int
     else:
-        env._dr_pending_notify_flags = pending | flag_int
-
-
-# Sentinel: distinguishes "not inside a reset_dr batch" (immediate recompute)
-# from "inside a batch, no recompute requested yet" (pending is None).
-_MUJOCO_NO_BATCH = object()
+        env.scene_manager.solver.notify_model_changed(flag_int)
 
 
 def _mujoco_recompute(env: World, sim, level) -> None:
@@ -88,16 +83,16 @@ def _mujoco_recompute(env: World, sim, level) -> None:
     ``sim.recompute_constants`` is model-GLOBAL and its most expensive level
     (``set_const``, needed for body_mass) dominates the reset path when several
     DR terms fire per reset — K1 has 2-3 body_mass terms + body_com, each of
-    which would otherwise trigger its own full set_const. During a ``reset_dr``
-    batch the event manager sets ``env._dr_pending_recompute_level``; we then
-    keep only the MAX level (``RecomputeLevel`` is an ordered IntEnum whose
-    higher levels recompute a superset of the lower), and the manager flushes a
-    SINGLE recompute after all terms run. Outside that context the call is
-    immediate, so nothing changes for non-batched callers. Mirrors the deferred
-    pattern in :func:`_newton_notify`.
+    which would otherwise trigger its own full set_const. Inside a DR batch
+    (``env._dr_batch_active``) we keep only the MAX level in
+    ``env._dr_pending_recompute_level`` (``RecomputeLevel`` is an ordered
+    IntEnum whose higher levels recompute a superset of the lower), and the
+    manager flushes a SINGLE recompute after all terms run. Outside a batch
+    the call is immediate. Mirrors the deferred pattern in
+    :func:`_newton_notify`.
     """
-    pending = getattr(env, "_dr_pending_recompute_level", _MUJOCO_NO_BATCH)
-    if pending is _MUJOCO_NO_BATCH:
+    pending = env._dr_pending_recompute_level
+    if not env._dr_batch_active:
         sim.recompute_constants(level)
     elif pending is None:
         env._dr_pending_recompute_level = level
@@ -341,7 +336,7 @@ def _newton_friction_backend(
             if operation == "abs":
                 values[env_ids] = sampled
             else:
-                defaults = getattr(env._dr_baselines, attr)
+                defaults = getattr(env._dr_baselines, attr)  # dynamic-attr: baseline field named by attr
                 values[env_ids] = apply_operation(defaults[env_ids], sampled, operation)
         else:
             env_grid, shape_grid = torch.meshgrid(env_ids, shape_indices, indexing="ij")
@@ -349,7 +344,7 @@ def _newton_friction_backend(
                 for inner in range(n_axes_inner):
                     values[env_grid, inner, shape_grid] = sampled[:, inner, :]
             else:
-                defaults = getattr(env._dr_baselines, attr)
+                defaults = getattr(env._dr_baselines, attr)  # dynamic-attr: baseline field named by attr
                 for inner in range(n_axes_inner):
                     base = defaults[env_grid, inner, shape_grid]
                     values[env_grid, inner, shape_grid] = apply_operation(base, sampled[:, inner, :], operation)
@@ -550,8 +545,6 @@ def _newton_body_mass_backend(env, env_ids, sampler, resolved, mass_range, opera
         view = env.scene_manager.articulation_views[resolved.name]
         names = [view.link_names[i] for i in resolved.body_ids.tolist()]
         body_indices = cache.get_body_indices(names)
-        if hasattr(body_indices, "tolist"):
-            body_indices = torch.tensor(body_indices, device=env.device, dtype=torch.long)
 
     mass = wp.to_torch(model.body_mass).reshape(env.num_envs, cache.bodies_per_env)
     n_bodies = len(body_indices)
@@ -678,8 +671,6 @@ def _newton_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, ope
         view = env.scene_manager.articulation_views[resolved.name]
         names = [view.link_names[i] for i in resolved.body_ids.tolist()]
         body_indices = cache.get_body_indices(names)
-        if hasattr(body_indices, "tolist"):
-            body_indices = torch.tensor(body_indices, device=env.device, dtype=torch.long)
 
     body_com = wp.to_torch(model.body_com).reshape(env.num_envs, cache.bodies_per_env, 3)
     defaults = env._dr_baselines.body_com
@@ -981,11 +972,16 @@ def _newton_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_rang
     cols = _newton_cols(env, _selected_joint_ids(env, asset_cfg))
     joint_coords = _joint_coords(env, asset_cfg, len(cols))
     notify = False
-    for stream, (attr_name, value_range) in enumerate((("joint_target_ke", kp_range), ("joint_target_kd", kd_range))):
+    baselines = env._dr_baselines
+    for stream, (attr_name, defaults, value_range) in enumerate(
+        (
+            ("joint_target_ke", baselines.joint_target_ke, kp_range),
+            ("joint_target_kd", baselines.joint_target_kd, kd_range),
+        )
+    ):
         if value_range is None:
             continue
         values = wp.to_torch(view.get_attribute(attr_name, model))
-        defaults = getattr(env._dr_baselines, attr_name)
         vals2d = _newton_dof_view(values)
         defs2d = _newton_dof_view(defaults)
         sampled = sampler.draw(*value_range, env_ids, joint_coords, distribution, stream=stream)
@@ -1020,22 +1016,21 @@ def _explicit_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_ra
             cols = torch.nonzero(torch.isin(joint_idx, selected), as_tuple=True)[0]
             if cols.numel() == 0:
                 continue
-        if not hasattr(actuator, "_dr_base_stiffness"):
+        if actuator._dr_base_stiffness is None:
             actuator._dr_base_stiffness = actuator.stiffness.clone()
             actuator._dr_base_damping = actuator.damping.clone()
         # Coordinate = the canonical joint each column drives, so the draw is
         # the same however the joints are grouped into actuators.
         group_joint_coords = ((joint_idx if cols is None else joint_idx[cols]).to(env.device, torch.long)[None, :],)
-        for stream, (attr, base_attr, value_range) in enumerate(
+        for stream, (gains, base, value_range) in enumerate(
             (
-                ("stiffness", "_dr_base_stiffness", kp_range),
-                ("damping", "_dr_base_damping", kd_range),
+                (actuator.stiffness, actuator._dr_base_stiffness, kp_range),
+                (actuator.damping, actuator._dr_base_damping, kd_range),
             )
         ):
+            # gains: [num_envs, n_actuated_joints]
             if value_range is None:
                 continue
-            gains = getattr(actuator, attr)  # [num_envs, n_actuated_joints]
-            base = getattr(actuator, base_attr)
             sampled = sampler.draw(*value_range, env_ids, group_joint_coords, distribution, stream=stream)
             if cols is None:
                 gains[env_ids] = sampled if operation == "abs" else apply_operation(base[env_ids], sampled, operation)
@@ -1431,14 +1426,14 @@ def randomize_tau_scale(
         )
     selected = _selected_joint_ids(env, asset_cfg)
     for actuator, joint_idx in env.act_manager.actuators:
-        if not getattr(actuator, "_use_tau_scale", False):
+        if not (isinstance(actuator, IdealPDActuator) and actuator._use_tau_scale):
             continue  # actuator has no tanh saturation configured → nothing to randomize
         cols = None
         if selected is not None:
             cols = torch.nonzero(torch.isin(joint_idx, selected), as_tuple=True)[0]
             if cols.numel() == 0:
                 continue
-        if not hasattr(actuator, "_dr_base_tau_scale"):
+        if actuator._dr_base_tau_scale is None:
             actuator._dr_base_tau_scale = actuator.tau_scale.clone()
         kap = actuator.tau_scale  # [num_envs, n_actuated_joints]
         base = actuator._dr_base_tau_scale

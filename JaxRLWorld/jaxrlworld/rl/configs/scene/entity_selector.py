@@ -162,7 +162,12 @@ class ResolvedEntity:
         # The default dataclass repr would dump every tensor; keep it to a
         # one-liner so it doesn't wreck the env-config console panel that
         # prints reward/event ``params``.
-        resolved = [
-            f for f in ("joint_ids", "body_ids", "geom_ids", "site_ids", "actuator_ids") if getattr(self, f) is not None
-        ]
+        ids = {
+            "joint_ids": self.joint_ids,
+            "body_ids": self.body_ids,
+            "geom_ids": self.geom_ids,
+            "site_ids": self.site_ids,
+            "actuator_ids": self.actuator_ids,
+        }
+        resolved = [name for name, value in ids.items() if value is not None]
         return f"ResolvedEntity(name={self.name!r}, resolved={resolved})"

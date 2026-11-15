@@ -58,12 +58,16 @@ class ActionTermCfg:
         clip: Optional ``(low, high)`` clip applied to the raw
             policy output before ``process_actions`` uses it.
             ``None`` = no clipping (policy output is passed through).
+        num_actions: The term's policy-output width when it is not one
+            value per joint (a thrust per propeller). ``None`` sizes the
+            term by its ``joint_names`` matches.
     """
 
     class_type: type[ActionTerm] | None = None
     asset_name: str = "robot"
     joint_names: list[str] = field(default_factory=lambda: [".*"])
     clip: tuple[float, float] | None = None
+    num_actions: int | None = None
 
 
 class ActionTerm(ABC):

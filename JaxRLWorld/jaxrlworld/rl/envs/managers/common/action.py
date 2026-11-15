@@ -259,14 +259,12 @@ class ActionManagerBase(BaseManager):
            otherwise the buffer sizes will mismatch and the
            coverage sanity check below will trip.
         """
-        explicit = getattr(term_cfg, "num_actions", None)
-        if explicit is not None:
-            return int(explicit)
-        joint_names = getattr(term_cfg, "joint_names", None)
+        if term_cfg.num_actions is not None:
+            return int(term_cfg.num_actions)
+        joint_names = term_cfg.joint_names
         if joint_names is not None:
-            entity_name = getattr(term_cfg, "asset_name", self.env.robot_entity_name)
             matched, _ = string_utils.resolve_matching_names(
-                joint_names, list(self.env.entity_indexing(entity_name).joint_names), preserve_order=True
+                joint_names, list(self.env.entity_indexing(term_cfg.asset_name).joint_names), preserve_order=True
             )
             return len(matched)
         raise ValueError(
@@ -634,13 +632,13 @@ class ActionManagerBase(BaseManager):
         multi-robot scene built so far.
         """
         driven = self.env.robot_entity_name
-        entities = getattr(self.env.scene_manager.config, "entities", None) or {}
+        entities = self.env.scene_manager.config.entities or {}
         for term_name, term in self._terms.items():
             name = term.entity_name
             if name == driven:
                 continue
             cfg = entities.get(name)
-            actuators = getattr(getattr(cfg, "articulation", None), "actuators", ())
+            actuators = cfg.articulation.actuators if cfg is not None else ()
             explicit = [a for a in actuators if not isinstance(a, ImplicitActuatorCfg)]
             if explicit:
                 raise NotImplementedError(
@@ -723,11 +721,10 @@ class ActionManagerBase(BaseManager):
     def _get_entity_cfg(self):
         """Get the unified EntityCfg for the robot from scene manager."""
 
-        entities = getattr(self.env.scene_manager.config, "entities", None)
+        entities = self.env.scene_manager.config.entities
         if not isinstance(entities, dict):
             return None
-        robot_name = getattr(self.env.scene_manager.config, "robot_entity_name", "robot")
-        cfg = entities.get(robot_name)
+        cfg = entities.get(self.env.robot_entity_name)
         return cfg if isinstance(cfg, EntityCfg) else None
 
     def _build_actuator(self, cfg, num_joints: int, joint_names: list[str]):
@@ -1053,7 +1050,7 @@ class ActionManagerBase(BaseManager):
         and which actuator group drives them (with Kp/Kd if applicable).
         Useful for verifying cross-simulator joint ordering consistency.
         """
-        sim_type = getattr(self.env, "sim_type", "unknown")
+        sim_type = self.env.sim_type
         header = f"Joint Mapping [{sim_type}]"
         print(f"\n{'=' * 60}")
         print(f"  {header}")
@@ -1071,8 +1068,9 @@ class ActionManagerBase(BaseManager):
             if idx in actuator_lookup:
                 act, local_i = actuator_lookup[idx]
                 act_type = type(act).__name__
-                kp = act.stiffness[0, local_i].item() if hasattr(act, "stiffness") else "-"
-                kd = act.damping[0, local_i].item() if hasattr(act, "damping") else "-"
+                is_pd = isinstance(act, IdealPDActuator)
+                kp = act.stiffness[0, local_i].item() if is_pd else "-"
+                kd = act.damping[0, local_i].item() if is_pd else "-"
                 kp_str = f"{kp:.2f}" if isinstance(kp, float) else kp
                 kd_str = f"{kd:.2f}" if isinstance(kd, float) else kd
             else:

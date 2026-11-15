@@ -91,14 +91,14 @@ class NewtonVisualizationManager(BaseManager):
             return
 
         if not isinstance(self.viewer, newton.viewer.ViewerUSD):
-            if hasattr(self.viewer, "is_running") and not self.viewer.is_running():
+            if not self.viewer.is_running():
                 return
 
         state = self.env.scene_manager.state_0
         base_pos = state.joint_q.numpy()[:3]
 
         # Camera tracking (GL only)
-        if isinstance(self.viewer, newton.viewer.ViewerGL) and hasattr(self.viewer, "set_camera"):
+        if isinstance(self.viewer, newton.viewer.ViewerGL):
             self.viewer.set_camera(
                 pos=wp.vec3(base_pos[0] + 3.0, base_pos[1] + 3.0, base_pos[2] + 1.0),
                 pitch=-20.0,
@@ -132,8 +132,7 @@ class NewtonVisualizationManager(BaseManager):
     def close(self) -> None:
         """Close viewer."""
         if self.viewer is not None:
-            if hasattr(self.viewer, "close"):
-                self.viewer.close()
+            self.viewer.close()
             self.viewer = None
 
     def reset(self, env_ids=None) -> None:

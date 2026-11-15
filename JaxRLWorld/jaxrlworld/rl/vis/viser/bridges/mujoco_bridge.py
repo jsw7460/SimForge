@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
 
 def _to_np(arr) -> np.ndarray:
-    """``data.*`` arrays may be torch tensors or warp arrays — get numpy either way."""
-    return arr.cpu().numpy() if hasattr(arr, "cpu") else arr.numpy()
+    """``data.*`` fields are torch-backed (mjlab's bridge wraps the warp arrays)."""
+    return arr.cpu().numpy()
 
 
 class MujocoBridge(SimulatorBridge):
@@ -105,7 +105,5 @@ class MujocoBridge(SimulatorBridge):
     def _fetch_tracked_world_velocity(self, env_idx: int) -> np.ndarray | None:
         """World-frame linear velocity at the tracked body from ``data.cvel``."""
         data = self._scene_manager.data
-        if not hasattr(data, "cvel"):
-            return None
         cvel = _to_np(data.cvel[env_idx])  # (nbody, 6) — [ang(3), lin(3)] in world frame at CoM
         return cvel[self._tracked_body_id, 3:6].astype(np.float32)

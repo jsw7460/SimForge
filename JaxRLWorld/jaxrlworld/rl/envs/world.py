@@ -115,6 +115,18 @@ class World(ABC):
         self._env_step_counter = 0
         self.lifecycle = LifecycleManager()
 
+        # Bound by the backend once its action manager is built; an env
+        # without managers (Gymnasium, ManiSkill) keeps None.
+        self.act_manager = None
+
+        # A batch of DR terms (``EventManager._run_dr_batch``) defers the
+        # model refresh its terms ask for to one flush: the Newton notify
+        # flags OR-ed together, the highest MuJoCo recompute level. Outside a
+        # batch a term refreshes at once.
+        self._dr_batch_active = False
+        self._dr_pending_notify_flags = 0
+        self._dr_pending_recompute_level = None
+
         # Which observation groups the terminal-observation pass computes.
         # ``None`` means every group. A runner that consumes only part of
         # ``final_observation`` narrows this (the on-policy runner sets
@@ -374,7 +386,7 @@ class World(ABC):
         Everything that needs to name *an* entity should take the name as
         an argument instead of reaching for this.
         """
-        return getattr(self.scene_manager.config, "robot_entity_name", "robot")
+        return self.scene_manager.config.robot_entity_name
 
     def entity_indexing(self, entity_name: str):
         """The :class:`ArticulationIndexing` for one articulation entity.
@@ -390,9 +402,8 @@ class World(ABC):
         to *be* the action manager's order, not merely match it.
         """
         if entity_name == self.robot_entity_name:
-            act_manager = getattr(self, "act_manager", None)
-            if act_manager is not None:
-                return act_manager.indexing
+            if self.act_manager is not None:
+                return self.act_manager.indexing
             # Called from inside the action manager's own constructor —
             # its terms ask for this before ``env.act_manager`` is bound.
             # Build fresh and do NOT cache: a cached copy would outlive
@@ -496,8 +507,9 @@ class World(ABC):
         all_names = list(self.entity_indexing(name).joint_names)
         base = torch.zeros(len(all_names), device=self.device, dtype=torch.float32)
 
+        # A passive rigid object is not in ``entities``: no joints, no pose.
         cfg = self.scene_manager.config.entities.get(name)
-        joint_pos = getattr(getattr(cfg, "init_state", None), "joint_pos", None)
+        joint_pos = cfg.init_state.joint_pos if cfg is not None else None
         if joint_pos and isinstance(joint_pos, dict):
             matched_idx, _, matched_vals = _su.resolve_matching_names_values(joint_pos, all_names)
             for idx, val in zip(matched_idx, matched_vals):
@@ -627,10 +639,6 @@ class World(ABC):
         from jaxrlworld.rl.utils.pretty import print_env_summary
 
         print_env_summary(self)
-
-        # Print joint mapping for debugging cross-simulator consistency
-        # if hasattr(self, "act_manager") and hasattr(self.act_manager, "print_joint_mapping"):
-        #     self.act_manager.print_joint_mapping()
 
     @abstractmethod
     def _build_scene(self) -> None:
@@ -1149,10 +1157,9 @@ class World(ABC):
             ("Control dt", f"{self.control_dt:.4f}s"),
         ]
 
-        if hasattr(self, "decimation"):
-            env_rows.append(("Decimation", str(self.decimation)))
+        env_rows.append(("Decimation", str(self.decimation)))
 
-        if hasattr(self, "task_name") and self.task_name:
+        if self.task_name:
             env_rows.append(("Task", str(self.task_name)))
 
         panel = create_env_panel(
@@ -1164,25 +1171,20 @@ class World(ABC):
         console.print()
 
         # Print each manager
-        managers = [
-            ("obs_manager", "Observation Manager"),
-            ("act_manager", "Action Manager"),
-            ("reward_manager", "Reward Manager"),
-            ("termination_manager", "Termination Manager"),
-            ("contact_manager", "Contact Manager"),
-            ("command_manager", "Command Manager"),
-            ("event_manager", "Event Manager"),
-        ]
+        managers = (
+            self.obs_manager,
+            self.act_manager,
+            self.reward_manager,
+            self.termination_manager,
+            self.contact_manager,
+            self.command_manager,
+            self.event_manager,
+        )
 
-        for attr_name, _ in managers:
-            if hasattr(self, attr_name):
-                manager = getattr(self, attr_name)
-                if manager is not None:
-                    try:
-                        manager_str = str(manager)
-                        if manager_str.strip():
-                            console.print(manager_str)
-                    except Exception:
-                        pass
+        for manager in managers:
+            if manager is not None:
+                manager_str = str(manager)
+                if manager_str.strip():
+                    console.print(manager_str)
 
         return output.getvalue()

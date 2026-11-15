@@ -302,7 +302,10 @@ class BaseContactManager(BaseManager, ABC):
         """
         if self._all is None:
             groups = list(self._groups.values())
-            stacked = {f: torch.cat([getattr(g, f) for g in groups], dim=1) for f in self._TIMING_FIELDS}
+            stacked = {
+                f: torch.cat([getattr(g, f) for g in groups], dim=1)  # dynamic-attr: ContactGroup timing field names
+                for f in self._TIMING_FIELDS
+            }
             self._all = ContactGroup(
                 name="*",
                 tracked_names=[n for g in groups for n in g.tracked_names],
@@ -315,7 +318,7 @@ class BaseContactManager(BaseManager, ABC):
                 cols = slice(start, start + g.num_tracked)
                 start += g.num_tracked
                 for f in self._TIMING_FIELDS:
-                    setattr(g, f, getattr(self._all, f)[:, cols])
+                    setattr(g, f, getattr(self._all, f)[:, cols])  # dynamic-attr: ContactGroup timing field names
         return self._all
 
     # ------------------------------------------------------------------

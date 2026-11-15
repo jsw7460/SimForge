@@ -163,5 +163,5 @@ def resolve_env_class(env_name: str) -> type:
     """
     if ":" in env_name:
         module_name, _, attr = env_name.partition(":")
-        return getattr(importlib.import_module(module_name), attr)
-    return getattr(_envs, env_name)
+        return getattr(importlib.import_module(module_name), attr)  # dynamic-attr: "module:Class" from config
+    return getattr(_envs, env_name)  # dynamic-attr: env class named by cfgs.env.env_name

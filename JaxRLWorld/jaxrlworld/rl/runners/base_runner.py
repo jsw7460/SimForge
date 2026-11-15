@@ -82,7 +82,7 @@ class BaseRunner(ABC):
                 event_cfg=cfgs.event,
                 curriculum_cfg=cfgs.curriculum,
             )
-            gait_cfg = getattr(cfgs, "gait", None)
+            gait_cfg = cfgs.gait
             if gait_cfg is not None:
                 kwargs["gait_cfg"] = gait_cfg
             env = env_class(**kwargs)
@@ -241,6 +241,11 @@ class BaseRunner(ABC):
         # to a bare ``gym.make(task_name)`` factory (legacy path).
         self.gym_env_factory: Callable[[int], gym.Env] | None = None
 
+        # Evaluation envs, built on first use (see ``_get_or_create_eval_env``
+        # and ``_get_or_create_heldout_eval_envs``).
+        self._eval_env: World | None = None
+        self._heldout_eval_envs: Dict[str, World] | None = None
+
         # Initialize training modules
         self.training_modules: Dict[str, Any] = dict()
         self._init_training_modules()
@@ -370,8 +375,11 @@ class BaseRunner(ABC):
             # terms. Only finite scalar fields are logged — infinite
             # placeholders (``float("inf")`` before the first stage
             # fires) are skipped so wandb plots cleanly.
-            curriculum_manager = getattr(self.env, "curriculum_manager", None)
-            if curriculum_manager is not None and curriculum_manager.state:
+            # Only the manager-built backends carry curriculum and
+            # termination managers; Gymnasium / ManiSkill wrappers do not.
+            has_managers = self.env.builds_from_manager_configs
+            if has_managers and self.env.curriculum_manager.state:
+                curriculum_manager = self.env.curriculum_manager
                 import math as _math
 
                 import wandb as _wandb
@@ -394,9 +402,8 @@ class BaseRunner(ABC):
             # accumulator. ``consume_episode_stats`` returns keys of the
             # form ``Episode_Termination/<name>`` and clears the window
             # so successive iterations report disjoint episodes.
-            term_mgr = getattr(self.env, "termination_manager", None)
-            if term_mgr is not None and hasattr(term_mgr, "consume_episode_stats"):
-                term_log = term_mgr.consume_episode_stats()
+            if has_managers:
+                term_log = self.env.termination_manager.consume_episode_stats()
                 if term_log:
                     import wandb as _wandb
 
@@ -477,7 +484,7 @@ class BaseRunner(ABC):
         by the user script) into ``_create_env_from_config`` so the
         eval env's wrapper chain matches the training env's exactly.
         """
-        if not hasattr(self, "_eval_env") or self._eval_env is None:
+        if self._eval_env is None:
             eval_cfgs = self._create_eval_configs()
             self._eval_env = self._create_env_from_config(
                 eval_cfgs,
@@ -669,10 +676,10 @@ class BaseRunner(ABC):
         since adaptive is single-motion only). Returns ``{}`` when nothing
         is configured or the preset has no "motion" command term.
         """
-        if hasattr(self, "_heldout_eval_envs"):
+        if self._heldout_eval_envs is not None:
             return self._heldout_eval_envs
 
-        self._heldout_eval_envs: Dict[str, World] = {}
+        self._heldout_eval_envs = {}
         for label, cfgs in self._heldout_eval_configs().items():
             self._heldout_eval_envs[label] = self._create_env_from_config(cfgs)
         return self._heldout_eval_envs
@@ -872,7 +879,7 @@ class BaseRunner(ABC):
         # action mapping in that order: the action config spells its
         # per-joint constants in the training simulator's joint vocabulary,
         # so a cross-sim eval can only compare the values after resolution.
-        if hasattr(self.env, "act_manager"):
+        if self.env.builds_from_manager_configs:
             act_manager = self.env.act_manager
             train_state["canonical_joint_names"] = list(act_manager.actuated_joint_names)
             train_state["action_scale"] = act_manager.scale.detach().cpu().tolist()

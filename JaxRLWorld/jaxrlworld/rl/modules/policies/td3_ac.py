@@ -293,22 +293,3 @@ class TD3ActorCritic(BaseActorCritic):
             return jnp.zeros((1,)), {}
         else:
             return jnp.zeros((normalized_obs.shape[0], 1)), {}
-
-    @property
-    def extra_to_log(self) -> dict:
-        """Extra metrics to log."""
-        extra = {}
-
-        # Gate values (for gated encoders)
-        if hasattr(self.actor, "encoder") and hasattr(self.actor.encoder, "last_gate"):
-            gate = self.actor.encoder.last_gate
-            if gate is not None:
-                gate_mean = gate.mean(axis=0)
-
-                extra["gate/mean"] = float(gate.mean())
-                extra["gate/std"] = float(gate.std())
-
-                for i in range(gate_mean.shape[0]):
-                    extra[f"gate/per_action/action_{i:02d}"] = float(gate_mean[i])
-
-        return extra

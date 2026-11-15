@@ -124,8 +124,4 @@ class MotionGhost:
     # ── Internal ────────────────────────────────────────────────────
 
     def _motion_command(self) -> MotionCommand | None:
-        cm = self._env.command_manager
-        terms = getattr(cm, "_terms", None)
-        if not terms or "motion" not in terms:
-            return None
-        return cm.get_term("motion")
+        return dict(self._env.command_manager.iter_terms()).get("motion")

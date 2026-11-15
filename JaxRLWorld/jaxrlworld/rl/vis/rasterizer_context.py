@@ -103,14 +103,14 @@ class RLWorldRasterizerContext(RasterizerContext):
             state["base_quat"] = robot.get_quat()
 
         # Command data
-        cmd_manager = getattr(self._env, "command_manager", None)
-        if cmd_manager is not None:
-            if hasattr(cmd_manager, "lin_vel_x"):
-                state["cmd_lin_vel_x"] = cmd_manager.lin_vel_x
-            if hasattr(cmd_manager, "lin_vel_y"):
-                state["cmd_lin_vel_y"] = cmd_manager.lin_vel_y
-            if hasattr(cmd_manager, "ang_vel"):
-                state["cmd_ang_vel"] = cmd_manager.ang_vel
+        cmd_manager = self._env.command_manager
+        columns = {col for _, term in cmd_manager.iter_terms() for col in term.column_names}
+        if "lin_vel_x" in columns:
+            state["cmd_lin_vel_x"] = cmd_manager.lin_vel_x
+        if "lin_vel_y" in columns:
+            state["cmd_lin_vel_y"] = cmd_manager.lin_vel_y
+        if "ang_vel" in columns:
+            state["cmd_ang_vel"] = cmd_manager.ang_vel
 
         # Actual base velocity (body frame) for tracking visualization
         if robot is not None:
@@ -126,11 +126,7 @@ class RLWorldRasterizerContext(RasterizerContext):
             state["feet_height"] = feet_height
 
         # Episode info
-        term_manager = getattr(self._env, "termination_manager", None)
-        if term_manager is not None:
-            episode_buf = getattr(term_manager, "episode_length_buf", None)
-            if episode_buf is not None:
-                state["episode_step"] = int(episode_buf[0].item())
+        state["episode_step"] = int(self._env.termination_manager.episode_length_buf[0].item())
 
         self._visualization_state = state
 
@@ -225,7 +221,7 @@ def inject_into_scene(
     # ``build()`` also records which node updater belongs to which solvers, as bound methods of the context
     # that ran it. Rebind the same table onto the new context so its own overrides are the ones called.
     new_context._updates_solvers = tuple(
-        (getattr(new_context, update.__name__), update_solvers)
+        (getattr(new_context, update.__name__), update_solvers)  # dynamic-attr: rebind updater by method name
         for update, update_solvers in old_context._updates_solvers
     )
 

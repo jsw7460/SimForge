@@ -50,6 +50,11 @@ class IdealPDActuator(ActuatorBase):
 
         self.stiffness = self._resolve_per_joint_param(cfg.stiffness, default=0.0)
         self.damping = self._resolve_per_joint_param(cfg.damping, default=0.0)
+        # The gains (and kappa) before domain randomization touched them,
+        # captured by the first randomizing write so a "scale" never compounds.
+        self._dr_base_stiffness: torch.Tensor | None = None
+        self._dr_base_damping: torch.Tensor | None = None
+        self._dr_base_tau_scale: torch.Tensor | None = None
 
         # Optional tanh torque-saturation scale kappa. None ⇒ plain hard clip.
         self._use_tau_scale = cfg.tau_scale is not None

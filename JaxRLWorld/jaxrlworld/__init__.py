@@ -40,12 +40,12 @@ def __getattr__(name):
     ):
         from jaxrlworld.rl import algorithms
 
-        return getattr(algorithms, name)
+        return getattr(algorithms, name)  # dynamic-attr: lazy package re-export by name
 
     if name in ("BaseRunner", "OnPolicyRunner", "OffPolicyRunner", "ModelBasedRunner"):
         from jaxrlworld.rl import runners
 
-        return getattr(runners, name)
+        return getattr(runners, name)  # dynamic-attr: lazy package re-export by name
 
     if name in (
         "GenesisConfigsForRun",
@@ -54,7 +54,7 @@ def __getattr__(name):
     ):
         from jaxrlworld.rl import configs
 
-        return getattr(configs, name)
+        return getattr(configs, name)  # dynamic-attr: lazy package re-export by name
 
     if name == "PolicyEvaluator":
         from jaxrlworld.rl.evals import PolicyEvaluator

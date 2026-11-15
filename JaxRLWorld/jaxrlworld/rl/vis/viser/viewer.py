@@ -274,13 +274,11 @@ class ViserVisualizationManager:
         arrow_origin[2] += _ARROW_Z_OFFSET
 
         # Get command data.
-        cmd_manager = getattr(env, "command_manager", None)
-        if cmd_manager is None:
-            return
-
-        cmd_vx = getattr(cmd_manager, "lin_vel_x", None)
-        cmd_vy = getattr(cmd_manager, "lin_vel_y", None)
-        cmd_ang = getattr(cmd_manager, "ang_vel", None)
+        cmd_manager = env.command_manager
+        columns = {col for _, term in cmd_manager.iter_terms() for col in term.column_names}
+        cmd_vx = cmd_manager.lin_vel_x if "lin_vel_x" in columns else None
+        cmd_vy = cmd_manager.lin_vel_y if "lin_vel_y" in columns else None
+        cmd_ang = cmd_manager.ang_vel if "ang_vel" in columns else None
 
         # Command arrow (green).
         if cmd_vx is not None and cmd_vy is not None:

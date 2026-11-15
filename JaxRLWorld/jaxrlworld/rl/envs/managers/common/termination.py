@@ -281,7 +281,7 @@ class TerminationManager(BaseManager):
         # counts steps starts the new episode from zero rather than
         # inheriting the run the previous one ended on.
         for instance in self._instances.values():
-            if hasattr(instance, "reset"):
+            if hasattr(instance, "reset"):  # dynamic-attr: optional reset() hook on user term classes
                 instance.reset(env_ids)
 
         # Fold the just-reset envs into the iteration-window accumulator.
@@ -290,7 +290,7 @@ class TerminationManager(BaseManager):
         # iteration-wide ratio as (total term fires / total resets).
         # Per-env fire tallies are cleared after read so the next
         # episode starts with a fresh counter for this env.
-        n_reset = env_ids.numel() if hasattr(env_ids, "numel") else len(env_ids)
+        n_reset = env_ids.numel()
         if n_reset > 0:
             self._iter_reset_count += n_reset
             # Every term at once. Integer counts, so the result is exactly
@@ -312,7 +312,7 @@ class TerminationManager(BaseManager):
 
         rows = []
         for idx, (name, term) in enumerate(self._all_terms.items()):
-            func_name = getattr(self._resolved_fns[name], "__name__", name)
+            func_name = getattr(self._resolved_fns[name], "__name__", name)  # dynamic-attr: callable or instance
 
             if "timeout" in func_name.lower() or "time_out" in func_name.lower():
                 type_str = "Truncation (timeout)"

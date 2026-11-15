@@ -410,11 +410,3 @@ class PPOActorCritic(BaseActorCritic):
             actions_mean = jnp.tanh(actions_mean)
 
         return actions_mean, aux
-
-    @property
-    def extra_to_log(self) -> dict:
-        """Extra metrics to log."""
-        extra = {}
-        if hasattr(self.actor, "extra_to_log"):
-            extra.update(**self.actor.extra_to_log)
-        return extra

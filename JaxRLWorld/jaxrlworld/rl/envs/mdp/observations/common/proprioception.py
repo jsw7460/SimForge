@@ -93,18 +93,6 @@ def base_euler(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, degree
     return euler
 
 
-def _actuated_joint_ids(env: World) -> torch.Tensor | None:
-    """Return act_manager._joint_ids if it exists (MuJoCo needs reindexing)."""
-    ids = getattr(env.act_manager, "_joint_ids", None)
-    if ids is None:
-        return None
-    # Only return if it's actually a permutation (not identity).
-    n = len(ids)
-    if n > 0 and not torch.equal(ids, torch.arange(n, device=ids.device)):
-        return ids
-    return None
-
-
 @joint_indexed
 @EnvStepCache()
 def dof_pos(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:

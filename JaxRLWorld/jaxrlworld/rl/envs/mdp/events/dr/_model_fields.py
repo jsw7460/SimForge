@@ -177,12 +177,13 @@ def collect_expand_fields(event_cfg: Any) -> tuple[str, ...]:
         if term.mode == "startup" and "field" in term.params:
             fields.append(term.params["field"])
 
-        declared = getattr(func, "model_fields", None)
+        declared = getattr(func, "model_fields", None)  # dynamic-attr: optional @requires_model_fields marker
         if declared is None:
-            module = getattr(func, "__module__", "") or ""
+            module = getattr(func, "__module__", "") or ""  # dynamic-attr: arbitrary callable may lack it
             if module.startswith(_DR_PACKAGE):
+                qualname = getattr(func, "__qualname__", func)  # dynamic-attr: arbitrary callable may lack it
                 raise RuntimeError(
-                    f"Event term {term_name!r} ({module}.{getattr(func, '__qualname__', func)}) "
+                    f"Event term {term_name!r} ({module}.{qualname}) "
                     f"is a domain-randomization term but declares no model fields. Decorate it "
                     f"with @requires_model_fields(...) from "
                     f"jaxrlworld.rl.envs.mdp.events.dr._model_fields, listing the MuJoCo model "

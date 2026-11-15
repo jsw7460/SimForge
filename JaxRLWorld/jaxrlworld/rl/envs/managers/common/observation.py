@@ -47,7 +47,7 @@ class ObservationManager(BaseManager):
         for attr_name in dir(config):
             if attr_name.startswith("_"):
                 continue
-            val = getattr(config, attr_name)
+            val = getattr(config, attr_name)  # dynamic-attr: scan config attributes (dir order) for groups
             if isinstance(val, ObservationGroupConfig):
                 self._groups[attr_name] = val
 
@@ -407,7 +407,7 @@ class ObservationManager(BaseManager):
 
             for idx, (term_name, obs_term) in enumerate(terms.items()):
                 resolved_fn = self._resolved_fns[group_name][term_name]
-                func_name = getattr(resolved_fn, "__name__", term_name)
+                func_name = getattr(resolved_fn, "__name__", term_name)  # dynamic-attr: callable or instance
 
                 try:
                     dummy = resolved_fn(self.env, **obs_term.params)

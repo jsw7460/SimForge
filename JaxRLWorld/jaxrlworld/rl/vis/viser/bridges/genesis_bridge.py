@@ -70,7 +70,7 @@ class GenesisBridge(SimulatorBridge):
         # and the base-pos offset isn't applied to fixed bodies, so rendering
         # the entity directly would misplace it; the canonical grid is in
         # world coords and lines up with the robot).
-        morph = getattr(entity, "morph", None)
+        morph = entity.morph
         if morph is not None:
             morph_cls = type(morph).__name__.lower()
             if "plane" in morph_cls or "terrain" in morph_cls:
@@ -78,7 +78,7 @@ class GenesisBridge(SimulatorBridge):
 
         # Check if morph file references a plane.
         if morph is not None:
-            morph_file = getattr(morph, "file", "") or ""
+            morph_file = getattr(morph, "file", "") or ""  # dynamic-attr: only Genesis FileMorph has `file`
             if "plane" in morph_file.lower():
                 return True
 
@@ -103,24 +103,25 @@ class GenesisBridge(SimulatorBridge):
         and for the same reason. A single-entity scene keeps bare names.
         """
         body_id = 0
+        # Only rigid/kinematic Genesis entities have links (particle, FEM and
+        # hybrid ones do not); the ground plane is skipped because ViserScene
+        # adds its own checkerboard.
         entities = [
-            e for e in self._scene_manager.scene.entities if hasattr(e, "links") and not self._is_ground_entity(e)
+            e
+            for e in self._scene_manager.scene.entities
+            if hasattr(e, "links")  # dynamic-attr: Genesis entity kinds differ; no genesis import here
+            and not self._is_ground_entity(e)
         ]
         qualify = len(entities) > 1
-        for entity in self._scene_manager.scene.entities:
-            if not hasattr(entity, "links"):
-                continue
-            # Skip ground plane — ViserScene adds its own checkerboard.
-            if self._is_ground_entity(entity):
-                continue
+        for entity in entities:
             scene_name = self._scene_name_of(entity)
             prefix = f"{scene_name}/" if (qualify and scene_name) else ""
             start = body_id
             for link in entity.links:
                 self._link_map.append((entity, link, body_id))
-                self._body_names[body_id] = f"{prefix}{getattr(link, 'name', f'link_{body_id}')}"
+                name = link.name
+                self._body_names[body_id] = f"{prefix}{name}"
                 # Track robot base.
-                name = getattr(link, "name", "")
                 if self._tracked_body_id is None and ("base" in name.lower() or "pelvis" in name.lower()):
                     self._tracked_body_id = body_id
                 body_id += 1
@@ -146,7 +147,7 @@ class GenesisBridge(SimulatorBridge):
         mesh_groups: list[BodyMeshGroup] = []
 
         for entity, link, body_id in self._link_map:
-            vgeoms = getattr(link, "vgeoms", [])
+            vgeoms = link.vgeoms
             if not vgeoms:
                 continue
 
@@ -155,14 +156,8 @@ class GenesisBridge(SimulatorBridge):
                 mesh = self._extract_vgeom_mesh(vgeom)
                 if mesh is None:
                     continue
-                init_pos = np.asarray(
-                    getattr(vgeom, "init_pos", np.zeros(3)),
-                    dtype=np.float64,
-                )
-                init_quat_wxyz = np.asarray(
-                    getattr(vgeom, "init_quat", _IDENTITY_QUAT_WXYZ),
-                    dtype=np.float64,
-                )
+                init_pos = np.asarray(vgeom.init_pos, dtype=np.float64)
+                init_quat_wxyz = np.asarray(vgeom.init_quat, dtype=np.float64)
                 if not (np.allclose(init_pos, 0.0) and np.allclose(init_quat_wxyz, _IDENTITY_QUAT_WXYZ)):
                     w, x, y, z = init_quat_wxyz
                     rot = Rotation.from_quat([x, y, z, w]).as_matrix()
@@ -240,7 +235,7 @@ class GenesisBridge(SimulatorBridge):
         here.
         """
         robot = self._scene_manager.entities.get("robot")
-        if robot is None or not hasattr(robot, "get_vel"):
+        if robot is None:
             return None
         return robot.get_vel()[env_idx].cpu().numpy().astype(np.float32)
 
@@ -248,15 +243,13 @@ class GenesisBridge(SimulatorBridge):
     def _extract_vgeom_mesh(vgeom) -> trimesh.Trimesh | None:
         """Extract trimesh from a Genesis RigidVisGeom."""
         # Genesis wraps trimesh internally.
-        vmesh = getattr(vgeom, "vmesh", None)
-        if vmesh is not None and hasattr(vmesh, "trimesh"):
-            mesh = vmesh.trimesh
-            if isinstance(mesh, trimesh.Trimesh):
-                return mesh.copy()
+        mesh = vgeom.vmesh.trimesh
+        if isinstance(mesh, trimesh.Trimesh):
+            return mesh.copy()
 
         # Fallback: build from raw vertex/face data.
-        verts = getattr(vgeom, "init_vverts", None)
-        faces = getattr(vgeom, "init_vfaces", None)
+        verts = vgeom.init_vverts
+        faces = vgeom.init_vfaces
         if verts is not None and faces is not None and len(verts) > 0:
             return trimesh.Trimesh(
                 vertices=np.asarray(verts),

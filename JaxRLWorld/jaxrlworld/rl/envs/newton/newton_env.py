@@ -76,7 +76,7 @@ class NewtonEnv(World):
 
         # Timing
         self.physics_dt = scene_cfg.dt
-        self.decimation = getattr(env_cfg, "decimation", 1)
+        self.decimation = env_cfg.decimation
         self.control_dt = self.physics_dt * self.decimation
 
         # Per-world reset mask consumed by ``_reset_scene`` -> ``solver.reset``.
@@ -87,6 +87,19 @@ class NewtonEnv(World):
         # view aliases the torch buffer, so the data pointer stays stable.
         self._reset_world_mask = torch.zeros(self.num_envs + 1, dtype=torch.bool, device=self.device)
         self._reset_world_mask_wp = wp.from_torch(self._reset_world_mask)
+
+        # The world-frame gravity direction per env, which the Newton
+        # projected-gravity observation and orientation reward rotate into
+        # the body frame.
+        self._gravity_dir_w = (
+            torch.tensor([[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32)
+            .expand(self.num_envs, -1)
+            .contiguous()
+        )
+
+        # NaN-tripwire history ring, allocated on the first tripwire check.
+        self._nan_ring: torch.Tensor | None = None
+        self._nan_ring_n = 0
 
         # Initialize buffers
         self._init_buffers()
@@ -194,8 +207,8 @@ class NewtonEnv(World):
                 entities=self.scene_cfg.entities,
                 rigid_objects=self.scene_cfg.rigid_objects,
                 sensors=self.scene_cfg.sensors,
-                contact_sensors=getattr(self.scene_cfg, "contact_sensors", None),
-                cameras=getattr(self.scene_cfg, "cameras", ()),
+                contact_sensors=self.scene_cfg.contact_sensors,
+                cameras=self.scene_cfg.cameras,
                 terrain_cfg=self.scene_cfg.terrain_cfg,
                 dt=self.scene_cfg.dt,
                 substeps=self.scene_cfg.substeps,
@@ -444,7 +457,7 @@ class NewtonEnv(World):
         model = self.scene_manager.model
         num_worlds = model.world_count
         num_bodies_per_world = model.body_count // num_worlds
-        labels = list(getattr(model, "body_label", []) or getattr(model, "body_key", []))
+        labels = list(model.body_label)
         bare = [bl.rsplit("/", 1)[-1] if "/" in bl else bl for bl in labels[:num_bodies_per_world]]
         key = link_name.rsplit("/", 1)[-1] if "/" in link_name else link_name
         body_idx = bare.index(key)
@@ -485,7 +498,7 @@ class NewtonEnv(World):
         # Ring of (max|joint_vel|, root_z) per env, newest last. Recorded
         # BEFORE the finiteness test so the breaking substep is in it too.
         depth = self._NAN_HISTORY_SUBSTEPS
-        if getattr(self, "_nan_ring", None) is None:
+        if self._nan_ring is None:
             self._nan_ring = torch.zeros(depth, self.num_envs, 3, device=self.device)
             self._nan_ring_n = 0
         row = self._nan_ring_n % depth
