@@ -630,8 +630,7 @@ class NewtonSceneManager(BaseManager):
         if names is None:
             return None
 
-        # Get actual prefix from entity's robot config
-        prefix = self.entities[entity_name]["config"].body_label_prefix
+        prefix = self.entities[entity_name]["body_label_prefix"]
         if prefix is None:
             return names
 
@@ -730,8 +729,31 @@ class NewtonSceneManager(BaseManager):
             "config": cfg,
             "builder": builder,
             "shape_count": len(builder.shape_label),
+            "body_label_prefix": self._loaded_label_prefix(builder, cfg),
         }
         return builder, info
+
+    @staticmethod
+    def _loaded_label_prefix(builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> str | None:
+        """The first label segment of an entity's bodies as loaded, before
+        ``build_scene`` composes the world (which may prefix them again).
+
+        A ``NewtonEntityCfg`` may pin it; otherwise it is read off the loaded
+        labels. URDF body labels start with the robot's ``<robot name="...">``
+        (e.g. ``go2_description/base``) while MJCF labels start with the
+        ``add_mjcf`` ``name`` argument plus the XPath hierarchy (e.g.
+        ``go2/worldbody/trunk``), so a prefix hardcoded in a config silently
+        breaks one of the two formats: a sensor pattern ``"X/*"`` matches no
+        label when the real prefix is ``"Y"``, leaving sensing_bodies=[] and
+        the contact reward at 0. A rigid object has none until ``build_scene``
+        prefixes it with its own name. Kept in the registry, never written
+        back into the config.
+        """
+        if not isinstance(cfg, NewtonEntityCfg):
+            return None
+        if cfg.body_label_prefix is not None:
+            return cfg.body_label_prefix
+        return builder.body_label[0].split("/")[0] if builder.body_label else None
 
     def _load_urdf_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
         """Load URDF entity from unified config."""
@@ -845,20 +867,6 @@ class NewtonSceneManager(BaseManager):
             else:
                 expanded = []
             builder.collapse_fixed_joints(joints_to_keep=expanded)
-
-        # Auto-extract ``body_label_prefix`` from the loaded labels when the
-        # user did not pin it explicitly. URDF body labels start with the
-        # robot's ``<robot name="...">`` (e.g. ``go2_description/base``) while
-        # MJCF labels start with the ``add_mjcf`` ``name`` argument plus the
-        # XPath hierarchy (e.g. ``go2/worldbody/trunk``). Hardcoding a single
-        # prefix in user config silently breaks one of the two formats —
-        # sensor pattern ``"X/*"`` matches zero labels when the actual prefix
-        # is ``"Y"``, leaving sensing_bodies=[] and the contact reward at 0.
-        #
-        # Only a NewtonEntityCfg declares the prefix; a rigid object's is
-        # assigned in ``build_scene`` (its own name) before anything reads it.
-        if isinstance(cfg, NewtonEntityCfg) and cfg.body_label_prefix is None and builder.body_label:
-            cfg.body_label_prefix = builder.body_label[0].split("/")[0]
 
         ke_map: dict[str, float] = {}
         kd_map: dict[str, float] = {}
@@ -981,7 +989,7 @@ class NewtonSceneManager(BaseManager):
             builder.approximate_meshes(cfg.mesh_approximation)
 
         if isinstance(cfg, NewtonEntityCfg) and cfg.sites:
-            self._create_sites_from_dict(builder, cfg.sites, cfg.body_label_prefix)
+            self._create_sites_from_dict(builder, cfg.sites)
 
     def _load_usd_entity(self, builder: newton.ModelBuilder, cfg: EntityCfg | NewtonEntityCfg) -> None:
         """Load USD entity from unified config."""
@@ -1037,18 +1045,15 @@ class NewtonSceneManager(BaseManager):
 
         # Sites
         if isinstance(cfg, NewtonEntityCfg) and cfg.sites:
-            self._create_sites_from_dict(builder, cfg.sites, cfg.body_label_prefix)
+            self._create_sites_from_dict(builder, cfg.sites)
 
-    def _create_sites_from_dict(
-        self, builder: newton.ModelBuilder, sites: dict[str, str], prefix: str | None = None
-    ) -> None:
+    def _create_sites_from_dict(self, builder: newton.ModelBuilder, sites: dict[str, str]) -> None:
         """Create sensor sites from a {site_name: body_name} dict.
 
         ``body_name`` is matched as a regex against the builder's body
-        leaf names (IsaacLab convention). ``prefix`` is unused here —
-        Newton's MJCF XPath labels are canonicalised via
-        :func:`leaf_name` inside :meth:`_find_body_by_name`, so callers
-        pass bare names (``"torso_link"``) or bare regex patterns.
+        leaf names (IsaacLab convention): Newton's MJCF XPath labels are
+        canonicalised via :func:`leaf_name` inside :meth:`_find_body_by_name`,
+        so callers pass bare names (``"torso_link"``) or bare regex patterns.
         """
         for site_name, body_name in sites.items():
             body_idx = self._find_body_by_name(builder, body_name)
@@ -1154,8 +1159,8 @@ class NewtonSceneManager(BaseManager):
         # When the scene has more than one (non-ground) robot, namespace each
         # robot's labels with its entities={...} dict-key name so that
         # per-entity scoping (ArticulationView pattern, NewtonContactSensor
-        # _resolve_indices, _prefix_names, find_body_names — all keyed on
-        # cfg.body_label_prefix) stays unambiguous even when the robots are
+        # _resolve_indices, _prefix_names, find_body_names — all keyed on the
+        # registry's body_label_prefix) stays unambiguous even when the robots are
         # loaded from the same MJCF/URDF (which would otherwise give them an
         # identical model-name prefix). Single-robot scenes are left untouched
         # (prefix stays the auto-extracted model name). The label *leaves* are
@@ -1186,10 +1191,10 @@ class NewtonSceneManager(BaseManager):
             label_prefix = entity_name if n_robot_entities > 1 else None
             world_template.add_builder(entity_builder, label_prefix=label_prefix)
             if label_prefix is not None:
-                self.entities[entity_name]["config"].body_label_prefix = label_prefix
+                self.entities[entity_name]["body_label_prefix"] = label_prefix
         for object_name, object_builder in self._rigid_object_builders.items():
             world_template.add_builder(object_builder, label_prefix=object_name)
-            self.rigid_objects[object_name]["config"].body_label_prefix = object_name
+            self.rigid_objects[object_name]["body_label_prefix"] = object_name
 
         # Before replication: pairs registered on the template are copied
         # with it, so one pass over a single world's shapes covers every
@@ -1497,7 +1502,7 @@ class NewtonSceneManager(BaseManager):
         like ``"root_joint:0"``).
         """
         for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
-            prefix = entity_info["config"].body_label_prefix
+            prefix = entity_info["body_label_prefix"]
             # Delimited on "/", matching the rule NewtonLabelIndexing uses:
             # the label either IS the prefix or lies under it. A bare
             # ``f"{prefix}*"`` glob also swallows every sibling whose name
@@ -1524,7 +1529,7 @@ class NewtonSceneManager(BaseManager):
         every sensor construction.
         """
         for entity_name, entity_info in {**self.entities, **self.rigid_objects}.items():
-            prefix = entity_info["config"].body_label_prefix
+            prefix = entity_info["body_label_prefix"]
             self.label_indexing[entity_name] = NewtonLabelIndexing.from_articulation(
                 name=entity_name,
                 model=self.model,
@@ -1718,7 +1723,7 @@ class NewtonSceneManager(BaseManager):
         canonical_full = _canonical_joint_order_newton(
             self.model,
             num_worlds=num_worlds,
-            body_prefix=entity_info["config"].body_label_prefix,
+            body_prefix=entity_info["body_label_prefix"],
         )
         canonical_actuatable = [n for n in canonical_full if n in set(actuatable_names)]
         matched_names, _ = filter_canonical_to_actuated(canonical_actuatable, actuated_dof_names)

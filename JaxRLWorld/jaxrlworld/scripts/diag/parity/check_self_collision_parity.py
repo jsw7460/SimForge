@@ -125,7 +125,7 @@ class _NewtonProbe:
         self.sm = sm
         self.solver = sm.solver
         labels = sm.model.body_label
-        prefixes = {n: sm.entities[n]["config"].body_label_prefix for n in entity_names}
+        prefixes = {n: sm.entities[n]["body_label_prefix"] for n in entity_names}
         self.body_entity = [next((n for n, p in prefixes.items() if lab.startswith(f"{p}/")), None) for lab in labels]
         self.body_bare = [_bare(lab) for lab in labels]
         self.shape_body = sm.model.shape_body.numpy()

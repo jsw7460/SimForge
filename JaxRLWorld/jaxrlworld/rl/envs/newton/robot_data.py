@@ -338,7 +338,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         entity = self._env.scene_manager.entities.get(self._entity_name)
         if entity is None:
             return None
-        return entity["config"].body_label_prefix
+        return entity["body_label_prefix"]
 
     def body_ang_vel_w(self, body_index: int) -> Tensor:
         """World-frame angular velocity of a single body.

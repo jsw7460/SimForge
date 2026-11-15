@@ -196,8 +196,9 @@ class NewtonCameraSensor:
             )
         self._scene.camera_visible_geometry = visible_geometry
 
-        entity = self._scene.entities[self._entity_name]["config"]
-        prefix = f"{entity.body_label_prefix}/"
+        entity_info = self._scene.entities[self._entity_name]
+        entity = entity_info["config"]
+        prefix = f"{entity_info['body_label_prefix']}/"
         in_entity = torch.tensor([label.startswith(prefix) for label in model.shape_label], device=self._env.device)
         if not bool(in_entity.any()):
             raise RuntimeError(f"Camera {self.cfg.name!r}: no shape is labelled under {prefix!r}")
