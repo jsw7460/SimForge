@@ -349,12 +349,6 @@ class BaseConfig:
         """Pretty print the config object with proper indentation and colors"""
         return self._pretty_repr(self.recursive_to_dict())
 
-    @classmethod
-    def from_dict_with_overrides(cls, config_dict: Dict) -> "BaseConfig":
-        """Create from dict, then apply CLI overrides."""
-        config = cls.from_dict(config_dict)
-        return config.with_cli_overrides()
-
     def with_cli_overrides(self: T) -> T:
         """Apply command-line overrides to this config instance."""
         overrides = parse_override_args()

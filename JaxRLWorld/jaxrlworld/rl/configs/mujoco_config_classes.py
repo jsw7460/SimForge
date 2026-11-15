@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Literal
 
-from .algorithms import AlgorithmConfig, PPOConfig, get_algorithm_config_class
+from .algorithms import AlgorithmConfig, PPOConfig
 from .base_config import BaseConfig
 from .common_config_classes import (
     CommandConfig,
@@ -213,50 +213,3 @@ class MujocoConfigsForRun(BaseConfig):
     algorithm: AlgorithmConfig = field(default_factory=PPOConfig)
     nn: NNConfig = field(default_factory=NNConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)
-
-    @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "MujocoConfigsForRun":
-        def _get_or_convert(key, config_cls, default_factory):
-            val = config_dict.get(key, default_factory())
-            if isinstance(val, dict):
-                return config_cls.from_dict(val)
-            return val
-
-        env = _get_or_convert("env", MujocoEnvConfig, MujocoEnvConfig)
-        scene = _get_or_convert("scene", MujocoSceneConfig, MujocoSceneConfig)
-        observation = _get_or_convert("observation", MujocoObservationConfig, MujocoObservationConfig)
-        action = _get_or_convert("action", MujocoActionConfig, MujocoActionConfig)
-        visualization = _get_or_convert("visualization", VisualizationConfig, VisualizationConfig)
-        reward = _get_or_convert("reward", RewardConfig, RewardConfig)
-        command = _get_or_convert("command", CommandConfig, CommandConfig)
-        event = _get_or_convert("event", EventConfig, EventConfig)
-        gait_val = config_dict.get("gait", None)
-        if isinstance(gait_val, dict):
-            gait = GaitConfig.from_dict(gait_val)
-        else:
-            gait = gait_val
-        nn = _get_or_convert("nn", NNConfig, NNConfig)
-        runner = _get_or_convert("runner", RunnerConfig, RunnerConfig)
-
-        algo_val = config_dict.get("algorithm", {})
-        if isinstance(algo_val, dict):
-            algo_name = algo_val.get("algorithm_name", "PPO")
-            algo_config_cls = get_algorithm_config_class(algo_name)
-            algorithm = algo_config_cls.from_dict(algo_val)
-        else:
-            algorithm = algo_val
-
-        return cls(
-            env=env,
-            scene=scene,
-            observation=observation,
-            action=action,
-            visualization=visualization,
-            reward=reward,
-            command=command,
-            event=event,
-            gait=gait,
-            algorithm=algorithm,
-            nn=nn,
-            runner=runner,
-        )

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, Dict, Literal, Union
 
 import genesis as gs
 
-from .algorithms import AlgorithmConfig, PPOConfig, get_algorithm_config_class
+from .algorithms import AlgorithmConfig, PPOConfig
 from .base_config import BaseConfig
 from .common_config_classes import (
     CommandConfig,
@@ -157,51 +157,3 @@ class GenesisConfigsForRun(BaseConfig):
         "command": ["num_commands"],
         "storage": ["action_shape", "actor_obs_shape", "estimator_obs_shape", "robot_state_shape"],
     }
-
-    @classmethod
-    def from_dict(cls, config_dict: Dict):
-        # Helper function
-        def _get_or_convert(key, config_cls, default_factory):
-            val = config_dict.get(key, default_factory())
-            if isinstance(val, dict):
-                return config_cls.from_dict(val)
-            return val
-
-        env = _get_or_convert("env", EnvConfig, EnvConfig)
-        scene = _get_or_convert("scene", SceneConfig, SceneConfig)
-        observation = _get_or_convert("observation", ObservationConfig, ObservationConfig)
-        visualization = _get_or_convert("visualization", VisualizationConfig, VisualizationConfig)
-        action = _get_or_convert("action", ActionConfig, ActionConfig)
-        reward = _get_or_convert("reward", RewardConfig, RewardConfig)
-        command = _get_or_convert("command", CommandConfig, CommandConfig)
-        event = _get_or_convert("event", EventConfig, EventConfig)
-        gait_val = config_dict.get("gait", None)
-        if isinstance(gait_val, dict):
-            gait = GaitConfig.from_dict(gait_val)
-        else:
-            gait = gait_val
-        nn = _get_or_convert("nn", NNConfig, NNConfig)
-        runner = _get_or_convert("runner", RunnerConfig, RunnerConfig)
-
-        # Algorithm config dispatch
-        algo_val = config_dict.get("algorithm", {})
-        if isinstance(algo_val, dict):
-            algo_name = algo_val.get("algorithm_name", "PPO")
-            algo_config_cls = get_algorithm_config_class(algo_name)
-            algorithm = algo_config_cls.from_dict(algo_val)
-        else:
-            algorithm = algo_val
-        return cls(
-            env=env,
-            scene=scene,
-            visualization=visualization,
-            observation=observation,
-            action=action,
-            reward=reward,
-            event=event,
-            gait=gait,
-            command=command,
-            algorithm=algorithm,
-            nn=nn,
-            runner=runner,
-        )
