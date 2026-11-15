@@ -86,6 +86,10 @@ class ContactGroup:
     last_air_time: torch.Tensor = field(repr=False)
     last_contact_time: torch.Tensor = field(repr=False)
     _prev_is_contact: torch.Tensor = field(repr=False)
+    """The previous SUBSTEP's contact booleans, for the landing/liftoff edges."""
+    _prev_step_is_contact: torch.Tensor = field(repr=False)
+    """The contact booleans at the end of the previous CONTROL step (its last
+    substep), what :meth:`BaseContactManager.prev_is_contact` returns."""
 
     native_names: list[str] = field(default_factory=list)
     """The names in the order the backend's sensor produces its columns."""
@@ -146,6 +150,7 @@ class BaseContactManager(BaseManager, ABC):
         "last_air_time",
         "last_contact_time",
         "_prev_is_contact",
+        "_prev_step_is_contact",
     )
 
     # ------------------------------------------------------------------
@@ -210,6 +215,7 @@ class BaseContactManager(BaseManager, ABC):
             last_air_time=torch.zeros(shape, device=self.device),
             last_contact_time=torch.zeros(shape, device=self.device),
             _prev_is_contact=torch.zeros(shape, dtype=torch.bool, device=self.device),
+            _prev_step_is_contact=torch.zeros(shape, dtype=torch.bool, device=self.device),
             native_names=list(native_names),
             declared_patterns=None if patterns is None else tuple(patterns),
             native_perm=perm,
@@ -407,8 +413,14 @@ class BaseContactManager(BaseManager, ABC):
         return self._apply_order(result, group_name, order)
 
     def prev_is_contact(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
-        """Previous step contact state. Shape: ``(num_envs, N)`` bool."""
-        result = self._get_group(group_name)._prev_is_contact
+        """The contact state at the end of the previous control step. Shape: ``(num_envs, N)`` bool.
+
+        ``False`` on the first step after a reset. Captured by
+        :meth:`begin_step`; the substep-level previous state the timing
+        edges use is overwritten every substep, so by the time a reward
+        reads it it equals :meth:`is_contact`.
+        """
+        result = self._get_group(group_name)._prev_step_is_contact
         return self._apply_order(result, group_name, order)
 
     def contact_force(self, group_name: str, order: list[str] | None = None) -> torch.Tensor:
@@ -490,6 +502,17 @@ class BaseContactManager(BaseManager, ABC):
     # Timing logic (operates on all groups)
     # ------------------------------------------------------------------
 
+    def begin_step(self) -> None:
+        """Mark the start of a control step, before its physics substeps.
+
+        Keeps the contact state the previous control step ended on (its
+        last substep's) for :meth:`prev_is_contact`.
+        """
+        if not self._groups:
+            return
+        g = self._all_groups()
+        g._prev_step_is_contact.copy_(g._prev_is_contact)
+
     def advance(self, dt: float) -> None:
         """Accumulate air/contact timing by ``dt`` for every group.
 
@@ -569,6 +592,7 @@ class BaseContactManager(BaseManager, ABC):
         g.last_air_time[env_ids] = 0.0
         g.last_contact_time[env_ids] = 0.0
         g._prev_is_contact[env_ids] = False
+        g._prev_step_is_contact[env_ids] = False
 
     def refresh_after_reset(self, env_ids: torch.Tensor | None = None) -> None:
         """Recompute contact state for the freshly written reset poses.

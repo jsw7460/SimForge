@@ -733,6 +733,9 @@ class World(ABC):
         # Process and apply actions
         self.act_manager.process_actions(actions)
 
+        # The contact state this step starts from, for ``prev_is_contact``.
+        self.contact_manager.begin_step()
+
         # Step physics (simulator-specific). Backends accumulate contact
         # timing inside their substep loop (``contact_manager.advance(physics_dt)``
         # per substep), matching IsaacLab/mjlab. No policy-step-end
