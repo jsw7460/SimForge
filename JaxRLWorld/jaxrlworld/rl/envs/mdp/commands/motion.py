@@ -393,11 +393,11 @@ class MotionCommand(CommandTerm):
         )
         self.metrics: dict[str, torch.Tensor] = {k: torch.zeros(self.num_envs, device=self.device) for k in metric_keys}
 
-        # env_origins is mjlab-only (multi-env spatial offset baked into
-        # scene). Newton / Genesis handle per-env isolation internally and
-        # don't expose an env_origins tensor — fall back to no offset.
-        scene_obj = getattr(env.scene_manager, "scene", None) or env.scene_manager
-        self._env_origins = getattr(scene_obj, "env_origins", None)
+        # Each env's spawn offset in the world (the terrain grid, or the
+        # flat scene's env spacing), which the reference poses are shifted
+        # by. Every scene manager serves it; all zeros where the envs share
+        # one origin.
+        self._env_origins = env.scene_manager.env_origins
 
     # ------------------------------------------------------------------
     # Command API — command() is derived from time_steps, not set_command.
@@ -459,8 +459,6 @@ class MotionCommand(CommandTerm):
     # motion layouts share the same access path.
     # ------------------------------------------------------------------
     def _add_env_origins(self, pos: torch.Tensor, per_body: bool) -> torch.Tensor:
-        if self._env_origins is None:
-            return pos
         eo = self._env_origins
         return pos + (eo[:, None, :] if per_body else eo)
 
@@ -616,8 +614,7 @@ class MotionCommand(CommandTerm):
             num_bodies,
             4,
         )
-        if self._env_origins is not None:
-            body_pos = body_pos + self._env_origins[:, None, None, :]
+        body_pos = body_pos + self._env_origins[:, None, None, :]
 
         robot_pos = self._rd.body_pos_w_all[:, self.robot_anchor_body_index]
         robot_quat = self._rd.body_quat_w_all[:, self.robot_anchor_body_index]
@@ -743,35 +740,33 @@ class MotionCommand(CommandTerm):
         """
         # 1. Accumulate this step's failures into the (motion, bin)
         # counter so ``_update_command``'s EMA can mix it in.
-        term_manager = getattr(self._env, "termination_manager", None)
-        if term_manager is not None and hasattr(term_manager, "terminated"):
-            episode_failed = term_manager.terminated[env_ids]
-            if torch.any(episode_failed):
-                # Per-env current bin index, scaled by each env's own
-                # motion length / bin count (NOT B_max).
-                T_per_env = self._motion_lengths[self.motion_ids].clamp(min=1)
-                B_per_env = self._B_per_motion[self.motion_ids]
-                cur_bin = torch.clamp(
-                    (self.time_steps * B_per_env) // T_per_env,
-                    torch.zeros_like(B_per_env),
-                    B_per_env - 1,
+        episode_failed = self._env.termination_manager.terminated[env_ids]
+        if torch.any(episode_failed):
+            # Per-env current bin index, scaled by each env's own
+            # motion length / bin count (NOT B_max).
+            T_per_env = self._motion_lengths[self.motion_ids].clamp(min=1)
+            B_per_env = self._B_per_motion[self.motion_ids]
+            cur_bin = torch.clamp(
+                (self.time_steps * B_per_env) // T_per_env,
+                torch.zeros_like(B_per_env),
+                B_per_env - 1,
+            )
+            failed_envs = env_ids[episode_failed]
+            failed_motions = self.motion_ids[failed_envs]
+            failed_bins = cur_bin[failed_envs]
+            self._current_motion_failed[:] = torch.bincount(
+                failed_motions,
+                minlength=self._n_motions,
+            ).float()
+            flat_idx = failed_motions * self.bin_count + failed_bins
+            self._current_bin_failed[:] = (
+                torch.bincount(
+                    flat_idx,
+                    minlength=self._n_motions * self.bin_count,
                 )
-                failed_envs = env_ids[episode_failed]
-                failed_motions = self.motion_ids[failed_envs]
-                failed_bins = cur_bin[failed_envs]
-                self._current_motion_failed[:] = torch.bincount(
-                    failed_motions,
-                    minlength=self._n_motions,
-                ).float()
-                flat_idx = failed_motions * self.bin_count + failed_bins
-                self._current_bin_failed[:] = (
-                    torch.bincount(
-                        flat_idx,
-                        minlength=self._n_motions * self.bin_count,
-                    )
-                    .float()
-                    .view(self._n_motions, self.bin_count)
-                )
+                .float()
+                .view(self._n_motions, self.bin_count)
+            )
 
         # 2. Per-motion bin probabilities. Uniform floor is divided by
         # each motion's own ``B_m`` (not ``B_max``), then masked + conv1d
