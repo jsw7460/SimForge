@@ -5,9 +5,10 @@ they cost very differently. A ``range`` becomes a slice of the solver's
 buffer: the zero-copy path, no host synchronisation. An index tensor
 takes advanced indexing, which Genesis bounds-checks and de-duplicates
 on the host: a synchronisation on every call, several in the position
-setter. The actuated joints of a robot are one contiguous block of its
-DOFs in every asset this repo loads, so the canonical selection is a
-range once its columns are put in simulator order.
+setter. The actuated joints of most robots are one contiguous block of
+their DOFs, so the canonical selection is a range once its columns are
+put in simulator order; a robot with passive joints among its actuated
+ones (the mobile ALOHA base) keeps the index tensor and its cost.
 
 :class:`GenesisDofSelection` carries both forms. Managers hand Genesis
 ``dofs`` (and ``qs`` for configuration writes) and permute the columns

@@ -91,6 +91,25 @@ class GenesisRobotStateWriter:
         rows[env_ids] = values
         return rows
 
+    def _dof_rows(self, env_ids: Tensor | None, values: Tensor) -> tuple[Tensor, Tensor | None]:
+        """``(values, envs_idx)`` for a write to the selected DOFs.
+
+        A ``range`` of DOFs takes the masked path: every-row values and an
+        env mask. Genesis has no masked path for an index tensor of DOFs (a
+        mask on two axes is converted to indices, and the values must then
+        be one row per selected env), so a non-contiguous selection hands
+        it the env ids and one row per env id.
+        """
+        if isinstance(self._dofs.dofs, range):
+            return self._rows(env_ids, values), self._mask(env_ids)
+        return values, env_ids
+
+    def _qpos0_rows(self, env_ids: Tensor | None) -> Tensor:
+        """The selected DOFs' reference configuration, in the row layout of :meth:`_dof_rows`."""
+        if env_ids is None or isinstance(self._dofs.dofs, range):
+            return self._qpos0
+        return self._qpos0[env_ids]
+
     # ------------------------------------------------------------------
     # Joint writes
     # ------------------------------------------------------------------
@@ -111,18 +130,15 @@ class GenesisRobotStateWriter:
         only write what it was asked to; velocities are written
         explicitly by the events.
         """
-        rows = self._rows(env_ids, self._dofs.to_sim_order(values))
+        rows, envs_idx = self._dof_rows(env_ids, self._dofs.to_sim_order(values))
         self._entity.set_qpos(
-            rows + self._qpos0, qs_idx_local=self._dofs.qs, envs_idx=self._mask(env_ids), zero_velocity=False
+            rows + self._qpos0_rows(env_ids), qs_idx_local=self._dofs.qs, envs_idx=envs_idx, zero_velocity=False
         )
 
     def set_dof_velocities(self, values: Tensor, env_ids: torch.Tensor | None = None) -> None:
         """Write actuated joint velocities."""
-        self._entity.set_dofs_velocity(
-            velocity=self._rows(env_ids, self._dofs.to_sim_order(values)),
-            dofs_idx_local=self._dofs.dofs,
-            envs_idx=self._mask(env_ids),
-        )
+        rows, envs_idx = self._dof_rows(env_ids, self._dofs.to_sim_order(values))
+        self._entity.set_dofs_velocity(velocity=rows, dofs_idx_local=self._dofs.dofs, envs_idx=envs_idx)
 
     def set_dof_state(self, positions: Tensor, velocities: Tensor, env_ids: torch.Tensor | None = None) -> None:
         """Write joint positions and velocities with a single forward pass.
@@ -133,15 +149,14 @@ class GenesisRobotStateWriter:
         instead of two. ``zero_velocity=False``: see
         :meth:`set_dof_positions`.
         """
-        mask = self._mask(env_ids)
+        vel_rows, envs_idx = self._dof_rows(env_ids, self._dofs.to_sim_order(velocities))
         self._entity.set_dofs_velocity(
-            velocity=self._rows(env_ids, self._dofs.to_sim_order(velocities)),
-            dofs_idx_local=self._dofs.dofs,
-            envs_idx=mask,
-            skip_forward=True,
+            velocity=vel_rows, dofs_idx_local=self._dofs.dofs, envs_idx=envs_idx, skip_forward=True
         )
-        rows = self._rows(env_ids, self._dofs.to_sim_order(positions))
-        self._entity.set_qpos(rows + self._qpos0, qs_idx_local=self._dofs.qs, envs_idx=mask, zero_velocity=False)
+        rows, _ = self._dof_rows(env_ids, self._dofs.to_sim_order(positions))
+        self._entity.set_qpos(
+            rows + self._qpos0_rows(env_ids), qs_idx_local=self._dofs.qs, envs_idx=envs_idx, zero_velocity=False
+        )
 
     # ------------------------------------------------------------------
     # Root writes
