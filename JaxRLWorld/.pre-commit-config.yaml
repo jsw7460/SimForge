@@ -38,3 +38,16 @@ repos:
       # Safety
       - id: detect-private-key
       - id: debug-statements   # `breakpoint()` / `pdb.set_trace()` left behind
+
+  # ── Project rules ─────────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      # getattr / hasattr only for by-name lookups, each marked
+      # `# dynamic-attr: <reason>` (JaxRLWorld/tools/check_dynamic_attr.py).
+      - id: no-unmarked-dynamic-attr
+        name: no unmarked getattr/hasattr
+        entry: python3 JaxRLWorld/tools/check_dynamic_attr.py
+        language: system
+        types: [python]
+        files: ^JaxRLWorld/jaxrlworld/
+        exclude: ^JaxRLWorld/jaxrlworld/scripts/
