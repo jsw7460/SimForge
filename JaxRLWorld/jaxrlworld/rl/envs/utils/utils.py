@@ -10,7 +10,10 @@ class EnvStepCache:
     _global_cache: dict[int, dict[str, tuple[int, Any]]] = {}
 
     def __call__(self, func: Callable) -> Callable:
-        func_name = func.__name__
+        # Module-qualified: backends define same-named readers (``dof_pos``
+        # in common/ and in each backend's observations), and a bare
+        # ``__name__`` key would hand one of them the other's result.
+        func_name = f"{func.__module__}.{func.__qualname__}"
 
         @wraps(func)
         def wrapper(env, *args, **kwargs):

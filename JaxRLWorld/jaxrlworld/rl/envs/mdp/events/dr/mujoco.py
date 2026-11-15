@@ -22,10 +22,13 @@ import torch
 
 from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler
 
+from ._model_fields import requires_model_fields
+
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.mujoco.mjlab_env import MjlabEnv
 
 
+@requires_model_fields("dof_frictionloss")
 def set_joint_friction(
     env: MjlabEnv,
     env_ids: torch.Tensor,
@@ -59,6 +62,7 @@ def set_joint_friction(
         friction[env_ids] = float(value) * scale
 
 
+@requires_model_fields("geom_friction")
 def set_foot_friction(
     env: MjlabEnv,
     env_ids: torch.Tensor,

@@ -1478,7 +1478,14 @@ def randomize_encoder_bias(
     if len(env_ids) == 0:
         return
 
-    n_joints = env.act_manager.encoder_bias_of(asset_cfg.name).shape[1]
+    bias = env.act_manager.encoder_bias_of(asset_cfg.name)
     lo, hi = bias_range
-    bias_samples = sampler.draw(lo, hi, env_ids, _index_coords(n_joints, env.device))
-    env.act_manager.set_encoder_bias(bias_samples, env_ids=env_ids, entity_name=asset_cfg.name)
+    selected = _selected_joint_ids(env, asset_cfg)
+    if selected is None:
+        bias_samples = sampler.draw(lo, hi, env_ids, _index_coords(bias.shape[1], env.device))
+        env.act_manager.set_encoder_bias(bias_samples, env_ids=env_ids, entity_name=asset_cfg.name)
+        return
+    # Only the selected joints; keyed on their canonical index, so each
+    # draws the value a full-entity draw gives it.
+    cols = selected.to(device=env.device, dtype=torch.long)
+    bias[env_ids[:, None], cols[None, :]] = sampler.draw(lo, hi, env_ids, (cols[None, :],))

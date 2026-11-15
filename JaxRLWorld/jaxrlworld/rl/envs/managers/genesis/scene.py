@@ -585,7 +585,7 @@ class SceneManager(BaseManager):
                         if sub_ids:
                             _, _, vals = string_utils.resolve_matching_names_values(act_cfg.stiffness, sub_names)
                             entity.set_dofs_kp(vals, sub_ids)
-                    elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                    elif act_cfg.stiffness is not None:
                         entity.set_dofs_kp([act_cfg.stiffness] * num_dofs, dof_ids)
 
                     # Damping — float or dict[regex, float]
@@ -596,7 +596,7 @@ class SceneManager(BaseManager):
                         if sub_ids:
                             _, _, vals = string_utils.resolve_matching_names_values(act_cfg.damping, sub_names)
                             entity.set_dofs_kv(vals, sub_ids)
-                    elif act_cfg.damping is not None and act_cfg.damping > 0:
+                    elif act_cfg.damping is not None:
                         entity.set_dofs_kv([act_cfg.damping] * num_dofs, dof_ids)
 
                 # Armature — float or dict[regex, float]
@@ -605,7 +605,7 @@ class SceneManager(BaseManager):
                     if sub_ids:
                         _, _, vals = string_utils.resolve_matching_names_values(act_cfg.armature, sub_names)
                         entity.set_dofs_armature(vals, sub_ids)
-                elif isinstance(act_cfg.armature, int | float) and act_cfg.armature > 0:
+                elif isinstance(act_cfg.armature, int | float):
                     entity.set_dofs_armature([act_cfg.armature] * num_dofs, dof_ids)
 
                 # Effort limit — symmetric force range [-limit, +limit]. Applied

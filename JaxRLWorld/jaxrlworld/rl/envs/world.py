@@ -1095,8 +1095,12 @@ class World(ABC):
         # :meth:`BaseRunner.log_training_data`.
         self.curriculum_manager.reset(env_ids)
 
-    def reset(self, *, seed=None, options=None) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
-        """Reset all environments."""
+    def reset(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
+        """Reset all environments.
+
+        Takes no ``seed``: the env's randomness is keyed on the seed it was
+        built with (``env.seed``), which a reset cannot change.
+        """
         all_env_ids = torch.arange(self.num_envs, device=self.device)
         self._reset_idx(all_env_ids)
         self._post_reset_forward()

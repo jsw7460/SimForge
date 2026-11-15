@@ -931,13 +931,13 @@ class NewtonSceneManager(BaseManager):
             else:
                 if isinstance(act_cfg.stiffness, dict):
                     ke_map.update(act_cfg.stiffness)
-                elif act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                elif act_cfg.stiffness is not None:
                     for pattern in act_cfg.target_names_expr:
                         ke_map[pattern] = act_cfg.stiffness
 
                 if isinstance(act_cfg.damping, dict):
                     kd_map.update(act_cfg.damping)
-                elif act_cfg.damping is not None and act_cfg.damping > 0:
+                elif act_cfg.damping is not None:
                     for pattern in act_cfg.target_names_expr:
                         kd_map[pattern] = act_cfg.damping
 
@@ -948,7 +948,7 @@ class NewtonSceneManager(BaseManager):
 
             if isinstance(act_cfg.armature, dict):
                 armature_map.update(act_cfg.armature)
-            elif isinstance(act_cfg.armature, int | float) and act_cfg.armature > 0:
+            elif isinstance(act_cfg.armature, int | float):
                 for pattern in act_cfg.target_names_expr:
                     armature_map[pattern] = act_cfg.armature
 
@@ -1058,11 +1058,11 @@ class NewtonSceneManager(BaseManager):
 
         for act_cfg in cfg.articulation.actuators:
             for pattern in act_cfg.target_names_expr:
-                if act_cfg.stiffness is not None and act_cfg.stiffness > 0:
+                if act_cfg.stiffness is not None:
                     ke_map[pattern] = act_cfg.stiffness
-                if act_cfg.damping is not None and act_cfg.damping > 0:
+                if act_cfg.damping is not None:
                     kd_map[pattern] = act_cfg.damping
-                if act_cfg.armature > 0:
+                if act_cfg.armature is not None:
                     armature_map[pattern] = act_cfg.armature
                 if isinstance(act_cfg.effort_limit, int | float) and act_cfg.effort_limit > 0:
                     effort_limit_map[pattern] = float(act_cfg.effort_limit)
