@@ -505,12 +505,18 @@ def missing_from_saved(saved: Dict[str, Any], current: Dict[str, Any], path: str
     preset has and the saved run did not is config the checkpoint never saw
     (a reward term added after training, a new knob); restoring the saved
     run onto it must not silently include it.
+
+    A field added since whose current value is ``None`` is not reported:
+    ``None`` is the value a new knob takes to leave the existing behaviour
+    untouched (a term switched off, a simulator default kept), which is
+    exactly the run the checkpoint recorded.
     """
     missing: list[str] = []
     for key, current_value in current.items():
         leaf_path = f"{path}.{key}" if path else key
         if key not in saved:
-            missing.append(leaf_path)
+            if current_value is not None:
+                missing.append(leaf_path)
         elif isinstance(current_value, dict) and isinstance(saved[key], dict) and "_type" not in current_value:
             missing.extend(missing_from_saved(saved[key], current_value, leaf_path))
     return missing
