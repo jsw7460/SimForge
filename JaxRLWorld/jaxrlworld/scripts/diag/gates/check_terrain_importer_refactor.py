@@ -520,7 +520,7 @@ def _check_newton_label_indexing(env, lg: _Logger, combo: str) -> bool:
     # shape-id list (one entry — the singleton ground/heightfield shape).
     try:
         terrain_ids = idx_map["terrain"].find_shapes(patterns=("ground_plane",))
-    except ValueError as e:
+    except ValueError as e:  # except-ok: reported as a failed check
         lg.fail(combo, f"label_indexing['terrain'].find_shapes('ground_plane') raised: {e!r}")
         return False
     lg.w(f"    label_indexing['terrain'].find_shapes('ground_plane') -> {terrain_ids}")
@@ -543,7 +543,7 @@ def _check_newton_label_indexing(env, lg: _Logger, combo: str) -> bool:
         else:
             try:
                 robot_ids = robot_idx.find_shapes(patterns=(".*",))
-            except ValueError as e:
+            except ValueError as e:  # except-ok: reported as a failed check
                 lg.fail(combo, f"label_indexing['robot'].find_shapes('.*') raised: {e!r}")
                 return False
             lg.w(f"    label_indexing['robot'].find_shapes('.*'): {len(robot_ids)} indices")
@@ -668,14 +668,10 @@ def _check_viser_bridge_geometry(env, sim: str, use_rough: bool, lg: _Logger, co
         # The Newton bridge reads terrain from ``model.shape_geo_src`` —
         # nothing in the refactor changed that surface. Skip.
         return True
-    try:
-        if sim == "genesis":
-            from jaxrlworld.rl.vis.viser.bridges import GenesisBridge as Bridge
-        else:
-            from jaxrlworld.rl.vis.viser.bridges import MujocoBridge as Bridge
-    except Exception as e:
-        lg.w(f"    (viser bridge import failed — skipping: {e!r})")
-        return True
+    if sim == "genesis":
+        from jaxrlworld.rl.vis.viser.bridges import GenesisBridge as Bridge
+    else:
+        from jaxrlworld.rl.vis.viser.bridges import MujocoBridge as Bridge
 
     try:
         bridge = Bridge(env.scene_manager)
@@ -687,7 +683,7 @@ def _check_viser_bridge_geometry(env, sim: str, use_rough: bool, lg: _Logger, co
             lg.fail(combo, f"{sim} bridge: rough terrain but no 'terrain' mesh group emitted")
             return False
         lg.ok(combo, f"{sim} bridge.extract_geometry() reads terrain.data path")
-    except Exception as e:
+    except Exception as e:  # except-ok: reported as a failed check
         lg.fail(combo, f"{sim} bridge.extract_geometry() crashed: {e!r}")
         traceback.print_exc()
         return False
@@ -737,7 +733,7 @@ def _run_combo(
         if info["supports_rough"]:
             cfg_kwargs["use_rough_terrain"] = use_rough
         cfg_built = cfg_cls(**cfg_kwargs).build()
-    except Exception as e:
+    except Exception as e:  # except-ok: reported as a failed check
         lg.fail(combo, f"{preset} config build raised: {e!r}")
         traceback.print_exc()
         return False
@@ -757,7 +753,7 @@ def _run_combo(
                 preset=preset,
                 newton_asset=newton_asset,
             )
-        except Exception as e:
+        except Exception as e:  # except-ok: reported as a failed check
             lg.fail(combo, f"env build raised: {e!r}")
             traceback.print_exc()
             return False
@@ -965,7 +961,7 @@ def main() -> int:
                     preset=args.preset,
                     newton_asset=args.newton_asset if sim == "newton" else "mjcf",
                 )
-            except Exception as e:
+            except Exception as e:  # except-ok: reported as a failed check
                 label = f"{sim}/{terrain}"
                 lg.fail(label, f"unhandled exception: {e!r}")
                 traceback.print_exc()
@@ -981,7 +977,7 @@ def main() -> int:
         try:
             if _check_newton_label_indexing_urdf_synthetic(lg):
                 passes += 1
-        except Exception as e:
+        except Exception as e:  # except-ok: reported as a failed check
             lg.fail("unit/urdf-labels", f"unhandled exception: {e!r}")
             traceback.print_exc()
 

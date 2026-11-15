@@ -55,13 +55,7 @@ def _tensor_to_list(t):
 
 
 def _fmt_row(values, prec: int = 5) -> str:
-    out = []
-    for v in values:
-        try:
-            out.append(f"{float(v):+.{prec}f}")
-        except Exception:
-            out.append(f"{str(v)[:10]:>10}")
-    return " ".join(out)
+    return " ".join(f"{float(v):+.{prec}f}" for v in values)
 
 
 def _fmt_maybe_tensor(v, prec: int = 4) -> str:
@@ -85,119 +79,85 @@ def _g0(x):
 
 
 def _to_numpy(x):
-    """Best-effort convert to a numpy array for reflection-based state dump.
+    """Convert a reflected value to a numeric numpy array.
 
-    Returns ``None`` for non-numeric objects (methods, strings, modules,
-    builders) so the caller can skip them instead of formatting garbage.
+    Returns ``None`` for anything that is not a numeric array or scalar
+    (methods, strings, label lists, structs, modules, builders) so the
+    reflection loops below can skip it instead of formatting garbage.
     """
-    if x is None:
-        return None
-    # Skip callables (bound methods, functions) and obvious non-numeric types.
-    array_like = hasattr(x, "__array_interface__") or hasattr(x, "numpy")  # dynamic-attr: x is any reflected value
-    if callable(x) and not array_like:
-        return None
-    if isinstance(x, str | bytes | type | dict | set):
-        return None
-    if hasattr(x, "numpy") and not isinstance(x, np.ndarray):  # dynamic-attr: x is any value reflected off a sim object
-        try:
-            arr = x.numpy()
-            if arr is None or callable(arr):
-                return None
-            arr = np.asarray(arr)
-            if arr.dtype == object:
-                return None
-            return arr
-        except Exception:
-            pass
-    if hasattr(x, "detach"):  # dynamic-attr: x is any value reflected off a sim object
-        try:
-            arr = x.detach().cpu().numpy()
-            if arr.dtype == object:
-                return None
-            return arr
-        except Exception:
-            pass
-    try:
+    if isinstance(x, torch.Tensor):
+        arr = x.detach().cpu().numpy()
+    elif isinstance(x, wp.array):
+        arr = x.numpy()
+    elif isinstance(x, np.ndarray):
+        arr = x
+    elif isinstance(x, bool | int | float | np.number | np.bool_):
         arr = np.asarray(x)
-        # Reject object arrays (typically from np.asarray(method_or_builder)).
-        if arr.dtype == object:
-            return None
-        # Reject 0-d arrays wrapping non-numeric scalars.
-        if arr.ndim == 0:
-            try:
-                float(arr.item())
-            except Exception:
-                return None
-        return arr
-    except Exception:
+    elif isinstance(x, list | tuple) and all(isinstance(e, bool | int | float | np.number | np.bool_) for e in x):
+        arr = np.asarray(x)
+    else:
         return None
+    # Structured (struct-dtype), string and object arrays are not numeric.
+    if arr.dtype.kind not in "biuf":
+        return None
+    return arr
 
 
 def dump_raw_sim_state(env, label: str, max_preview: int = 40) -> None:
-    """Reflection-based dump of the sim backend's raw qpos-like arrays.
+    """Dump the sim backend's raw qpos-like arrays.
 
     We need to see what's actually in ``mjData.qpos`` (MuJoCo) or the
     Newton ``state_0.body_q / joint_q`` tensors at a specific moment
     (reset-immediate vs post-first-step), because the per-env
     ``root_link_pos_w`` reader goes through FK that can mask a raw qpos
     that never got overwritten by ``init_state``.
-
-    Tries a list of candidate attribute paths and dumps whichever exist.
     """
     print(f"\n[RAW SIM STATE — {label}]")
     sm = env.scene_manager
 
-    probes = [
-        # mjlab / MuJoCo backend candidate paths.
-        ("scene_manager._scene.data.qpos", lambda: sm._scene.data.qpos),
-        ("scene_manager._scene.data.qvel", lambda: sm._scene.data.qvel),
-        ("scene_manager._scene.mj_data.qpos", lambda: sm._scene.mj_data.qpos),
-        ("scene_manager.sim.data.qpos", lambda: sm.sim.data.qpos),
-        ("scene_manager.sim._data.qpos", lambda: sm.sim._data.qpos),
-        ("scene_manager._scene.sim.data.qpos", lambda: sm._scene.sim.data.qpos),
-        ("scene_manager.mj_data.qpos", lambda: sm.mj_data.qpos),
-        ("scene_manager.model.qpos0", lambda: sm.model.qpos0),
-        # Newton backend candidate paths.
-        ("scene_manager.state_0.body_q", lambda: sm.state_0.body_q),
-        ("scene_manager.state_0.joint_q", lambda: sm.state_0.joint_q),
-        ("scene_manager.state_0.joint_qd", lambda: sm.state_0.joint_qd),
-        ("scene_manager.state_0.body_qd", lambda: sm.state_0.body_qd),
-        ("scene_manager.robot_view.get_root_pose()", lambda: sm.robot_view.get_root_pose()),
-        ("scene_manager.robot_view.get_root_velocity()", lambda: sm.robot_view.get_root_velocity()),
-    ]
+    if env.sim_type == "mujoco":
+        arrays = [
+            ("scene_manager.wp_data.qpos", sm.wp_data.qpos),
+            ("scene_manager.wp_data.qvel", sm.wp_data.qvel),
+            ("scene_manager.mj_model.qpos0", sm.mj_model.qpos0),
+        ]
+    elif env.sim_type == "newton":
+        arrays = [
+            ("scene_manager.state_0.body_q", sm.state_0.body_q),
+            ("scene_manager.state_0.joint_q", sm.state_0.joint_q),
+            ("scene_manager.state_0.joint_qd", sm.state_0.joint_qd),
+            ("scene_manager.state_0.body_qd", sm.state_0.body_qd),
+            (
+                "scene_manager.robot_view.get_root_transforms(state_0)",
+                sm.robot_view.get_root_transforms(sm.state_0),
+            ),
+            (
+                "scene_manager.robot_view.get_root_velocities(state_0)",
+                sm.robot_view.get_root_velocities(sm.state_0),
+            ),
+        ]
+    elif env.sim_type == "genesis":
+        robot = sm["robot"]
+        arrays = [
+            ("scene_manager['robot'].get_qpos()", robot.get_qpos()),
+            ("scene_manager['robot'].get_dofs_velocity()", robot.get_dofs_velocity()),
+        ]
+    else:
+        raise ValueError(f"unsupported sim_type {env.sim_type!r}")
 
-    hit = 0
-    for name, getter in probes:
-        try:
-            val = getter()
-        except Exception:
-            continue
+    for name, val in arrays:
         arr = _to_numpy(val)
-        if arr is None:
-            continue
-        hit += 1
-        flat = np.asarray(arr).flatten()
-        shape = arr.shape
-        dtype = arr.dtype
+        flat = arr.flatten()
         preview_n = min(max_preview, flat.size)
         preview = flat[:preview_n]
         preview_str = _fmt_row(preview) if preview.size > 0 else "(empty)"
-        print(f"  {name}: shape={shape} dtype={dtype} size={flat.size}")
+        print(f"  {name}: shape={arr.shape} dtype={arr.dtype} size={flat.size}")
         print(f"    first{preview_n:2d} = {preview_str}")
-
-    if hit == 0:
-        attrs = [a for a in dir(sm) if not a.startswith("_")][:30]
-        print(f"  (no probes matched; top-level scene_manager attrs: {attrs})")
 
 
 # ── contact + physics full dump ─────────────────────────────────────
 def _fmt_arr(arr, max_n: int = 40, prec: int = 5) -> str:
-    try:
-        flat = np.asarray(arr).flatten()
-    except Exception:
-        return f"<unformattable {type(arr).__name__}>"
-    if flat.dtype == object:
-        return f"<object-dtype size={flat.size}>"
+    flat = np.asarray(arr).flatten()
     n = min(max_n, flat.size)
     if n == 0:
         return "(empty)"
@@ -449,10 +409,7 @@ def dump_contact_and_physics(env, label: str) -> None:
             for a in dir(control):
                 if a.startswith("_"):
                     continue
-                try:
-                    v = getattr(control, a)  # dynamic-attr: iterates dir(control)
-                except Exception:
-                    continue
+                v = getattr(control, a)  # dynamic-attr: iterates dir(control)
                 arr = _to_numpy(v)
                 if arr is None:
                     continue
@@ -466,10 +423,7 @@ def dump_contact_and_physics(env, label: str) -> None:
             for a in sorted(dir(st)):
                 if a.startswith("_") or a in ("assign", "clear_forces", "requires_grad"):
                     continue
-                try:
-                    v = getattr(st, a)  # dynamic-attr: iterates dir(state)
-                except Exception:
-                    continue
+                v = getattr(st, a)  # dynamic-attr: iterates dir(state)
                 arr = _to_numpy(v)
                 if arr is None:
                     continue
@@ -483,10 +437,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                 for a in sorted(dir(mjns)):
                     if a.startswith("_"):
                         continue
-                    try:
-                        v = getattr(mjns, a)  # dynamic-attr: iterates dir(state.mujoco)
-                    except Exception:
-                        continue
+                    v = getattr(mjns, a)  # dynamic-attr: iterates dir(state.mujoco)
                     arr = _to_numpy(v)
                     if arr is None:
                         continue
@@ -498,17 +449,11 @@ def dump_contact_and_physics(env, label: str) -> None:
             for a in sorted(dir(contacts)):
                 if a.startswith("_"):
                     continue
-                try:
-                    v = getattr(contacts, a)  # dynamic-attr: iterates dir(contacts)
-                except Exception:
-                    continue
+                v = getattr(contacts, a)  # dynamic-attr: iterates dir(contacts)
                 arr = _to_numpy(v)
                 if arr is None:
                     if not callable(v) and not isinstance(v, type | dict):
-                        try:
-                            s = repr(v)[:120]
-                        except Exception:
-                            s = f"<{type(v).__name__}>"
+                        s = repr(v)[:120]
                         print(f"  contacts.{a} = {s}")
                     continue
                 print(f"  contacts.{a}: shape={arr.shape} {_fmt_arr(arr, max_n=60, prec=5)}")
@@ -578,10 +523,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                 for a in sorted(dir(sm_attr)):
                     if a.startswith("_"):
                         continue
-                    try:
-                        v = getattr(sm_attr, a)  # dynamic-attr: iterates dir(shape_materials)
-                    except Exception:
-                        continue
+                    v = getattr(sm_attr, a)  # dynamic-attr: iterates dir(shape_materials)
                     arr = _to_numpy(v)
                     if arr is None:
                         continue
@@ -626,10 +568,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                         continue
                     if not any(k in a.lower() for k in interesting_kw):
                         continue
-                    try:
-                        v = getattr(inner, a)  # dynamic-attr: iterates dir() of the solver's model / data
-                    except Exception:
-                        continue
+                    v = getattr(inner, a)  # dynamic-attr: iterates dir() of the solver's model / data
                     arr = _to_numpy(v)
                     if arr is None:
                         if not callable(v):
@@ -670,15 +609,12 @@ def print_static(env) -> None:
         print(f"{i:<4} {name:<36} {si:<8} {s:>12} {o:>12}")
 
     # Joint limits in canonical order.
-    try:
-        lo = _tensor_to_list(am._indexing.joint_limits_lower)
-        hi = _tensor_to_list(am._indexing.joint_limits_upper)
-        print("\n[JOINT LIMITS (canonical order)]")
-        print(f"{'idx':<4} {'joint_name':<36} {'lower':>11} {'upper':>11}")
-        for i, name in enumerate(am.actuated_joint_names):
-            print(f"{i:<4} {name:<36} {lo[i]:+.5f}   {hi[i]:+.5f}")
-    except Exception as e:
-        print(f"[joint limits dump skipped: {e}]")
+    lo = _tensor_to_list(am._indexing.joint_limits_lower)
+    hi = _tensor_to_list(am._indexing.joint_limits_upper)
+    print("\n[JOINT LIMITS (canonical order)]")
+    print(f"{'idx':<4} {'joint_name':<36} {'lower':>11} {'upper':>11}")
+    for i, name in enumerate(am.actuated_joint_names):
+        print(f"{i:<4} {name:<36} {lo[i]:+.5f}   {hi[i]:+.5f}")
 
     # Per-actuator PD / armature / effort.
     print("\n[ACTUATOR PD GAINS]")

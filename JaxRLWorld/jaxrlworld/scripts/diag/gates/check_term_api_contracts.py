@@ -312,12 +312,12 @@ def check_dr_forwarding(chk) -> None:
                 try:
                     fn(*args)
                     chk(f"{sim} {fn.__name__} shared_random=True refused", False, "ran")
-                except NotImplementedError as e:
+                except NotImplementedError as e:  # except-ok: the refusal under test
                     chk(f"{sim} {fn.__name__} shared_random=True refused", "mujoco backend only" in str(e))
             try:
                 unified.randomize_body_com_offset(env, ids, sampler, {0: (-0.01, 0.01)}, sel, "add", [0], False)
                 chk(f"{sim} randomize_body_com_offset axes refused", False, "ran")
-            except NotImplementedError as e:
+            except NotImplementedError as e:  # except-ok: the refusal under test
                 chk(f"{sim} randomize_body_com_offset axes refused", "mujoco backend only" in str(e))
     finally:
         for k, v in patched.items():

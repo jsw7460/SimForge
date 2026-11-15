@@ -165,13 +165,13 @@ def check_registration(chk) -> None:
     try:
         register_actor(AuxTestActorCfg, AuxTestActor, _build)
         same_ok = True
-    except ValueError:
+    except ValueError:  # except-ok: reported as a failed check
         same_ok = False
     chk("re-registering identical bindings is a no-op", same_ok)
     try:
         register_actor(AuxTestActorCfg, AuxTestActor, lambda *a, **k: None)
         rebound = True
-    except ValueError:
+    except ValueError:  # except-ok: the refusal under test
         rebound = False
     chk("rebinding a registered cfg is refused", not rebound)
 

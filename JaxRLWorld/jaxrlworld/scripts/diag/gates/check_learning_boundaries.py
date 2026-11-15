@@ -44,7 +44,7 @@ N = 4
 def raises(fn, exc_type, needle: str) -> tuple[bool, str]:
     try:
         fn()
-    except exc_type as e:
+    except exc_type as e:  # except-ok: the refusal under test
         return needle in str(e), str(e)[:100]
     return False, "no exception"
 

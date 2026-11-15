@@ -32,7 +32,7 @@ Static (no environment, no GPU):
   C3  CONTROL: an undecorated DR-package function makes ``collect_expand_fields``
       raise. If this passes, C1/C2 prove nothing.
   C4  the derived-field table matches what the installed mujoco-warp actually
-      writes, recovered from ``_src/io.py`` by walking the ``set_const*`` call
+      writes, recovered from ``_src/set_const.py`` by walking the ``set_const*`` call
       graph. Re-run after every mujoco-warp bump.
   C5  ``RecomputeLevel`` member names still resolve on mjlab's enum and on
       mujoco-warp, which is what ``recompute_constants`` dispatches through.
@@ -50,10 +50,13 @@ import argparse
 import pathlib
 import re
 
-# ``stat`` is written by set_const_0 but never needs expansion: its kernel is
-# launched with ``dim=m.stat.meaninertia.shape[0]``, so it sizes itself to
-# whatever the array already is and can never store out of bounds.
-_WRITE_EXEMPT: frozenset[str] = frozenset({"stat"})
+# Fields written per world that never need expansion, because the write
+# sizes itself to whatever the array already is and can never store out of
+# bounds:
+#   * ``stat`` (set_const_0): launched with ``dim=m.stat.meaninertia.shape[0]``;
+#   * ``geom_size``/``geom_aabb``/``geom_rbound`` (set_const_fixed,
+#     ``_compute_geom_bound``): every store indexes ``worldid % out.shape[0]``.
+_WRITE_EXEMPT: frozenset[str] = frozenset({"stat", "geom_size", "geom_aabb", "geom_rbound"})
 
 # Fields the Go2 MuJoCo preset randomizes directly (as opposed to derived
 # constants recomputed from them). C7 requires cross-env variance for these.
@@ -208,7 +211,7 @@ def check_c3() -> bool:
     cfg.undeclared = EventTermConfig(func=u._genesis_friction_backend, mode="reset_dr")
     try:
         fields = collect_expand_fields(cfg)
-    except RuntimeError as exc:
+    except RuntimeError as exc:  # except-ok: C3 is a control that expects the guard to raise
         print(f"  raised RuntimeError as expected:\n    {str(exc)[:200]}...")
         print("\n  C3: PASS\n")
         return True
@@ -223,18 +226,16 @@ def _mujoco_warp_write_sets() -> dict[str, set[str]] | None:
     Walks the call graph so ``set_const`` picks up what its callees write.
     Writes are detected as top-level ``m.<field> =`` assignments plus anything
     named inside a kernel launch's ``outputs=[...]``; reads are ignored because
-    only writes can store out of bounds. Returns ``None`` when the source is
-    unavailable or unparseable, so the caller reports INCONCLUSIVE rather than
+    only writes can store out of bounds. Returns ``None`` when the source
+    layout is not recognised, so the caller reports INCONCLUSIVE rather than
     a spurious failure.
     """
-    try:
-        import mujoco_warp
-    except ImportError:
+    import mujoco_warp
+
+    src_path = pathlib.Path(mujoco_warp.__file__).parent / "_src" / "set_const.py"
+    if not src_path.is_file():
         return None
-    io_path = pathlib.Path(mujoco_warp.__file__).parent / "_src" / "io.py"
-    if not io_path.is_file():
-        return None
-    lines = io_path.read_text().splitlines()
+    lines = src_path.read_text().splitlines()
     defs = [(i, m.group(1)) for i, line in enumerate(lines) if (m := re.match(r"^def (\w+)", line))]
     if not defs:
         return None
@@ -304,32 +305,23 @@ def check_c5() -> bool:
     from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeLevel
 
     _hdr("C5  RecomputeLevel name contract")
+    import mujoco_warp
+    from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
+
     ok = True
-    try:
-        from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
+    theirs = {lvl.name for lvl in MjlabRecomputeLevel}
+    unknown = {lvl.name for lvl in RecomputeLevel} - theirs
+    print(f"  ours   : {sorted(lvl.name for lvl in RecomputeLevel)}")
+    print(f"  mjlab  : {sorted(theirs)}")
+    print(f"  not on mjlab's enum: {sorted(unknown) or '-'}")
+    ok &= not unknown
 
-        theirs = {lvl.name for lvl in MjlabRecomputeLevel}
-        unknown = {lvl.name for lvl in RecomputeLevel} - theirs
-        print(f"  ours   : {sorted(lvl.name for lvl in RecomputeLevel)}")
-        print(f"  mjlab  : {sorted(theirs)}")
-        print(f"  not on mjlab's enum: {sorted(unknown) or '-'}")
-        ok &= not unknown
-    except ImportError as exc:
-        # Printed rather than swallowed: on a training box mjlab is always
-        # importable, so a failure here is itself the finding.
-        print(f"  mjlab half SKIPPED -- import failed: {exc}")
-
-    try:
-        import mujoco_warp
-
-        for level in RecomputeLevel:
-            if level is RecomputeLevel.none:
-                continue  # never dispatched; recompute is skipped at this level
-            resolves = hasattr(mujoco_warp, level.name)  # dynamic-attr: dispatch resolves the level by name
-            ok &= resolves
-            print(f"  getattr(mujoco_warp, {level.name!r}) resolves: {resolves}")
-    except ImportError as exc:
-        print(f"  dispatch half SKIPPED -- mujoco_warp import failed: {exc}")
+    for level in RecomputeLevel:
+        if level is RecomputeLevel.none:
+            continue  # never dispatched; recompute is skipped at this level
+        resolves = hasattr(mujoco_warp, level.name)  # dynamic-attr: dispatch resolves the level by name
+        ok &= resolves
+        print(f"  getattr(mujoco_warp, {level.name!r}) resolves: {resolves}")
     print(f"\n  C5: {'PASS' if ok else 'FAIL'}\n")
     return ok
 

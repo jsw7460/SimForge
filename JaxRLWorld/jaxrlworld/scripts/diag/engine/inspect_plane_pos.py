@@ -11,6 +11,7 @@ from __future__ import annotations
 
 def main() -> None:
     import genesis as gs
+    from genesis.utils.misc import qd_to_torch
 
     gs.init(backend=gs.gpu, logging_level="warning")
     from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
@@ -35,37 +36,17 @@ def main() -> None:
     print(f"plane_geom_idx: {plane_geom_idx}")
 
     # Convert qd arrays via the qd_to_torch FUNCTION (not method)
-    try:
-        from genesis.utils.misc import qd_to_torch  # may or may not exist
-    except Exception:
-        qd_to_torch = None
-
     def _as_list(arr, idx):
-        try:
-            if qd_to_torch is not None:
-                t = qd_to_torch(arr)
-                return t[idx[0], idx[1]].detach().cpu().tolist()
-        except Exception:
-            pass
-        try:
-            import numpy as _np
+        return qd_to_torch(arr)[idx[0], idx[1]].detach().cpu().tolist()
 
-            t = _np.asarray(arr)
-            return t[idx[0], idx[1]].tolist()
-        except Exception as e:
-            return f"<err: {e!r}>"
-
-    print("plane geoms_state.pos[plane,env=0]:", _as_list(rs.geoms_state.pos, (plane_geom_idx, 0)))
-    print("plane geoms_state.quat[plane,env=0]:", _as_list(rs.geoms_state.quat, (plane_geom_idx, 0)))
-    print("plane geoms_state.aabb_min[plane,env=0]:", _as_list(rs.geoms_state.aabb_min, (plane_geom_idx, 0)))
-    print("plane geoms_state.aabb_max[plane,env=0]:", _as_list(rs.geoms_state.aabb_max, (plane_geom_idx, 0)))
+    print("plane geoms_state.pos[plane,env=0]:", _as_list(rs.dyn_state.geoms.pos, (plane_geom_idx, 0)))
+    print("plane geoms_state.quat[plane,env=0]:", _as_list(rs.dyn_state.geoms.quat, (plane_geom_idx, 0)))
+    print("plane geoms_state.aabb_min[plane,env=0]:", _as_list(rs.dyn_state.geoms.aabb_min, (plane_geom_idx, 0)))
+    print("plane geoms_state.aabb_max[plane,env=0]:", _as_list(rs.dyn_state.geoms.aabb_max, (plane_geom_idx, 0)))
 
     # Plane entity direct access
-    try:
-        ent_pos = ground_ent.get_pos()
-        print("ground_ent.get_pos():", ent_pos)
-    except Exception as e:
-        print("ground_ent.get_pos err:", repr(e))
+    ent_pos = ground_ent.get_pos()
+    print("ground_ent.get_pos():", ent_pos)
 
     # Foot capsule positions for reference
     print()
@@ -76,12 +57,9 @@ def main() -> None:
             continue
         for g in link.geoms:
             gi = int(g.idx)
-            try:
-                pos = g.get_pos(envs_idx=None)
-                p0 = pos[0].detach().cpu().tolist()
-                print(f"  geom #{gi} ({link.name}): pos={p0}")
-            except Exception as e:
-                print(f"  err on geom #{gi}:", repr(e))
+            pos = g.get_pos(envs_idx=None)
+            p0 = pos[0].detach().cpu().tolist()
+            print(f"  geom #{gi} ({link.name}): pos={p0}")
 
 
 if __name__ == "__main__":

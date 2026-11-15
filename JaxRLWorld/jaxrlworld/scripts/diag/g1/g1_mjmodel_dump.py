@@ -40,10 +40,7 @@ from jaxrlworld.rl.evals.evaluator import PolicyEvaluator
 def _fmt(x, w: int = 13, prec: int = 6) -> str:
     if x is None:
         return f"{'nan':>{w}}"
-    try:
-        f = float(x)
-    except Exception:
-        return f"{str(x):>{w}}"
+    f = float(x)
     if np.isnan(f):
         return f"{'nan':>{w}}"
     if np.isinf(f):

@@ -168,7 +168,7 @@ def expect_raise(fn, arg, name: str, chk) -> None:
     try:
         fn(arg)
         chk(name, False, "sampled")
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         chk(name, True, str(e)[:60])
 
 

@@ -196,7 +196,7 @@ def main() -> int:
     try:
         _subset_joint_rule(left_only, jperm, jsign)
         chk("left-leg-only subset is refused", False)
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         chk("left-leg-only subset is refused", "not closed" in str(e))
 
     print("\n=== 4. speed variants ===")
@@ -261,7 +261,7 @@ def main() -> int:
     try:
         clip_variants(clip, False, (1.0,), jperm, jsign)
         chk("unit speed factor refused", False)
-    except ValueError:
+    except ValueError:  # except-ok: the refusal under test
         chk("unit speed factor refused", True)
 
     print("\n=== 6. history windows ===")
@@ -318,7 +318,7 @@ def main() -> int:
         try:
             load_expert_motions([path], lay, JOINT_NAMES, default, "Trunk", 0.01)
             chk("clip at the wrong control rate refused", False)
-        except ValueError as e:
+        except ValueError as e:  # except-ok: the refusal under test
             chk("clip at the wrong control rate refused", "control rate" in str(e))
 
     print("\n=== RESULT:", "ALL OK" if not chk.fails else f"{len(chk.fails)} FAIL: {chk.fails}", "===")

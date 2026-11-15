@@ -308,7 +308,7 @@ def run_single(sim: str, num_envs: int) -> dict:
     try:
         table.site_pos_w([SITE])
         outcome = "returned a value"
-    except (ValueError, KeyError, FileNotFoundError) as e:
+    except (ValueError, KeyError, FileNotFoundError) as e:  # except-ok: the refusal under test
         outcome = f"{type(e).__name__}"
     print(f"  table.site_pos_w -> {outcome}")
     results["urdf_entity_refuses_sites"] = outcome != "returned a value"

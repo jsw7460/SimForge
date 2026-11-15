@@ -159,7 +159,7 @@ def part_a() -> None:
     try:
         restore_saved_config(synthetic_build(), stale)
         chk("unknown saved field raises", False, "no exception")
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         chk("unknown saved field raises", "removed_since_training" in str(e), str(e)[:90])
 
     print("\n=== A4. term-level command-line override keeps the term ===")
@@ -200,7 +200,7 @@ def part_a() -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             _print_override_changes(swap, synthetic_build())
         chk("_type swap with a new-type-only field prints without reading the old object", True)
-    except AttributeError as e:
+    except AttributeError as e:  # except-ok: reported as a failed check
         chk("_type swap with a new-type-only field prints without reading the old object", False, str(e)[:80])
 
     print("\n=== A6. cross-sim observation parity ===")
@@ -224,7 +224,7 @@ def part_a() -> None:
     try:
         _check_observation_parity(train_obs, same)
         chk("same layout with simulator-specific functions accepted", True)
-    except ValueError as e:
+    except ValueError as e:  # except-ok: reported as a failed check
         chk("same layout with simulator-specific functions accepted", False, str(e)[:80])
     reordered = {
         "actor": {
@@ -239,7 +239,7 @@ def part_a() -> None:
         try:
             _check_observation_parity(train_obs, bad)
             chk(f"{label} rejected", False, "accepted")
-        except ValueError as e:
+        except ValueError as e:  # except-ok: the refusal under test
             chk(f"{label} rejected", True, str(e).splitlines()[1].strip()[:70])
 
     print("\n=== A7. a term or field the saved run did not have is refused ===")
@@ -253,14 +253,14 @@ def part_a() -> None:
     try:
         restore_saved_config(grown, yaml_round_trip(synthetic_build()))
         chk("added reward term raises", False, "no exception")
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         chk("added reward term raises", "reward.added_later" in str(e), str(e)[:100])
     grown_scalar = synthetic_build()
     grown_scalar.runner.brand_new_knob = 3
     try:
         restore_saved_config(grown_scalar, yaml_round_trip(synthetic_build()))
         chk("added scalar field raises", False, "no exception")
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         chk("added scalar field raises", "runner.brand_new_knob" in str(e), str(e)[:100])
 
     print("\n=== A8. simulator option objects (pydantic-like) round trip ===")

@@ -226,10 +226,7 @@ def main() -> int:
         return 1
     finally:
         for p in tmp:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
+            os.unlink(p)
 
 
 if __name__ == "__main__":

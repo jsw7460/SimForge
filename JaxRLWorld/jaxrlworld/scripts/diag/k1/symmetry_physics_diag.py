@@ -468,16 +468,13 @@ def section_c_dynamic(env, m: Mirror, chk: Checker, home: torch.Tensor, n: int, 
     # there is mirror(obs) - obs, the solver's own asymmetry on a symmetric
     # state. The perturbed twin is seeded with that magnitude and measures
     # how far the scripted rollout amplifies it.
-    try:
-        twin = run_pairing(env, m, home, n, mirror_pairing=False)
-        mir = run_pairing(env, m, home, n, mirror_pairing=True)
-        contact_keys = {f"critic.{k}" for k in contact_blocks(env, "critic")}
-        self_kin = max(d for k, d in mir["settled"].items() if k not in contact_keys)
-        self_con = max(d for k, d in mir["settled"].items() if k in contact_keys)
-        pert = run_pairing(env, m, home, n, mirror_pairing=False, perturb_scale=max(self_kin, CONTINUOUS_FLOOR))
-    except RuntimeError as exc:
-        chk("no env reset during settling or the rollouts", False, str(exc))
-        return
+    # run_pairing raises on any env reset during settling or the rollouts.
+    twin = run_pairing(env, m, home, n, mirror_pairing=False)
+    mir = run_pairing(env, m, home, n, mirror_pairing=True)
+    contact_keys = {f"critic.{k}" for k in contact_blocks(env, "critic")}
+    self_kin = max(d for k, d in mir["settled"].items() if k not in contact_keys)
+    self_con = max(d for k, d in mir["settled"].items() if k in contact_keys)
+    pert = run_pairing(env, m, home, n, mirror_pairing=False, perturb_scale=max(self_kin, CONTINUOUS_FLOOR))
     chk("no env reset during settling or the rollouts", True, f"3 x {SETTLE_STEPS + HORIZON} steps")
 
     print(

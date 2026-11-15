@@ -537,11 +537,8 @@ def main() -> int:
                 print(f"{status}  {data['ms_per_step']:6.2f} ms/step  {verdict}  ({wall:.0f}s)")
             else:
                 proc = type("_rc", (), {"returncode": rc})()
-                tail = ""
-                try:
-                    tail = log_path.read_text().strip().splitlines()[-1][:120]
-                except (OSError, IndexError):
-                    pass
+                log_lines = log_path.read_text().strip().splitlines()
+                tail = log_lines[-1][:120] if log_lines else ""
                 rows.append((cell, f"FAIL rc={proc.returncode}", float("nan"), tail))
                 print(f"FAIL (rc={proc.returncode}, {wall:.0f}s)  {tail}")
 

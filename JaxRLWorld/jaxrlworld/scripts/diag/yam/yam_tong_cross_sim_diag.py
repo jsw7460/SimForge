@@ -431,10 +431,9 @@ class NewtonArm:
         # The arm's base body is welded to the world and may have been
         # folded away by the importer, in which case the world origin is
         # the arm's origin.
-        try:
-            return transforms[self._body_index(ROOT_BODY)][:3]
-        except ValueError:
+        if not any(label.split("/")[-1] == ROOT_BODY for label in self._body_labels):
             return np.zeros(3)
+        return transforms[self._body_index(ROOT_BODY)][:3]
 
     def set_hinge(self, q: float) -> None:
         self._joint_qd[:] = 0.0
@@ -494,10 +493,7 @@ class GenesisArm:
         self._links = {link.name.split("/")[-1]: i for i, link in enumerate(self.entity.links)}
 
     def _has_joint(self, name: str) -> bool:
-        try:
-            return self.entity.get_joint(name) is not None
-        except Exception:
-            return False
+        return any(joint.name == name for joint in self.entity.joints)
 
     def _device(self):
         return self.entity.get_dofs_position(self._hinge).device

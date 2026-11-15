@@ -361,7 +361,7 @@ def section_1_layout(chk, spec, batch):
             batch.returns,
         )
         chk("refuses a spec without the critic operator", False)
-    except ValueError as exc:
+    except ValueError as exc:  # except-ok: the refusal under test
         chk("refuses a spec without the critic operator", True, str(exc)[:60])
 
 

@@ -49,7 +49,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
-import traceback
 from pathlib import Path
 
 # Multi-build in one process — bypass the single-backend import guard.
@@ -205,13 +204,7 @@ def _wp_to_np(arr):
     """Convert a warp array (possibly None) to numpy; return None if not present."""
     if arr is None:
         return None
-    try:
-        return wp.to_torch(arr).detach().cpu().numpy()
-    except Exception:
-        try:
-            return np.asarray(arr)
-        except Exception:
-            return None
+    return wp.to_torch(arr).detach().cpu().numpy()
 
 
 def _stats_line(label: str, a) -> str:
@@ -246,25 +239,20 @@ def _dump_newton_model(env) -> str:
         ("joint_dof_dim", model.joint_dof_dim),
         ("joint_type", model.joint_type),
     ):
-        try:
-            if isinstance(attr, int):
-                lines.append(f"  {name}: {attr}")
-            else:
-                np_v = _wp_to_np(attr)
-                if np_v is None:
-                    lines.append(f"  {name}: <unreadable>")
-                elif np_v.dtype.kind in ("i", "u"):
-                    unique = sorted(set(np_v.flatten().tolist()))
-                    if len(unique) <= 8:
-                        lines.append(f"  {name}: shape={tuple(np_v.shape)} unique={unique}")
-                    else:
-                        lines.append(
-                            f"  {name}: shape={tuple(np_v.shape)} unique_count={len(unique)} " f"sample={unique[:8]}"
-                        )
+        if isinstance(attr, int):
+            lines.append(f"  {name}: {attr}")
+        else:
+            np_v = _wp_to_np(attr)
+            if np_v is None:
+                lines.append(f"  {name}: <not present>")
+            elif np_v.dtype.kind in ("i", "u"):
+                unique = sorted(set(np_v.flatten().tolist()))
+                if len(unique) <= 8:
+                    lines.append(f"  {name}: shape={tuple(np_v.shape)} unique={unique}")
                 else:
-                    lines.append(_stats_line(name, np_v))
-        except Exception as e:
-            lines.append(f"  {name}: <err: {type(e).__name__}: {e}>")
+                    lines.append(f"  {name}: shape={tuple(np_v.shape)} unique_count={len(unique)} sample={unique[:8]}")
+            else:
+                lines.append(_stats_line(name, np_v))
     return "\n".join(lines)
 
 
@@ -293,17 +281,13 @@ def _format_control_buffers(snap: dict, prefix: str = "    ") -> str:
 
 def _read_robot_state(env) -> dict:
     rd = env.get_robot_data()
-    out = {
+    # Body 0 == root for floating-base robots.
+    ids = torch.tensor([0], device=env.device, dtype=torch.long)
+    return {
         "joint_pos": rd.joint_pos[0].detach().cpu().numpy(),
         "joint_vel": rd.joint_vel[0].detach().cpu().numpy(),
+        "base_pos": rd.body_pos_w_by_ids(ids)[0, 0].detach().cpu().numpy(),
     }
-    try:
-        # Body 0 == root for floating-base robots.
-        ids = torch.tensor([0], device=env.device, dtype=torch.long)
-        out["base_pos"] = rd.body_pos_w_by_ids(ids)[0, 0].detach().cpu().numpy()
-    except Exception:
-        out["base_pos"] = None
-    return out
 
 
 def _fmt_state(s: dict) -> str:
@@ -314,11 +298,8 @@ def _fmt_state(s: dict) -> str:
         f"    joint_pos: mean={jp.mean():.4f} min={jp.min():.4f} max={jp.max():.4f} abs_max={np.abs(jp).max():.4f}"
     )
     lines.append(f"    joint_vel: mean={jv.mean():.4f} abs_max={np.abs(jv).max():.4f}")
-    bp = s.get("base_pos")
-    if bp is not None:
-        lines.append(f"    base_pos: x={bp[0]:.4f} y={bp[1]:.4f} z={bp[2]:.4f}")
-    else:
-        lines.append("    base_pos: <unreadable>")
+    bp = s["base_pos"]
+    lines.append(f"    base_pos: x={bp[0]:.4f} y={bp[1]:.4f} z={bp[2]:.4f}")
     return "\n".join(lines)
 
 
@@ -356,12 +337,7 @@ def main() -> int:
         sections.append("─" * 110)
         sections.append(f"VARIANT  [{variant}]")
         sections.append("─" * 110)
-        try:
-            env, act_cfg = _build_env(variant, args.num_envs, args.seed)
-        except Exception as e:
-            sections.append(f"BUILD FAILED: {type(e).__name__}: {e}")
-            sections.append(traceback.format_exc())
-            continue
+        env, act_cfg = _build_env(variant, args.num_envs, args.seed)
 
         sections.append(f"\n[{variant}] actuator cfg passed to scene:")
         sections.append(_dump_actuator_cfg(act_cfg))
@@ -391,12 +367,7 @@ def main() -> int:
         sections.append(f"\n[{variant}] per-step trace:")
         per_step: list[dict] = []
         for step_idx, action in enumerate(actions):
-            try:
-                env.step(action)
-            except Exception as e:
-                sections.append(f"  STEP {step_idx} step() FAILED: {type(e).__name__}: {e}")
-                sections.append(traceback.format_exc())
-                break
+            env.step(action)
             ctrl = _read_control_buffers(env)
             state = _read_robot_state(env)
             per_step.append({"action": action[0].detach().cpu().numpy(), "ctrl": ctrl, "state": state})
@@ -435,11 +406,7 @@ def main() -> int:
             si = i[k]["state"]
             dpos = float(np.abs(si["joint_pos"] - sd["joint_pos"]).max())
             dvel = float(np.abs(si["joint_vel"] - sd["joint_vel"]).max())
-            if sd.get("base_pos") is not None and si.get("base_pos") is not None:
-                dbz = float(si["base_pos"][2] - sd["base_pos"][2])
-                dbz_str = f"{dbz:+.5f}"
-            else:
-                dbz_str = "—"
+            dbz_str = f"{float(si['base_pos'][2] - sd['base_pos'][2]):+.5f}"
             ctrl_d = d[k]["ctrl"]
             ctrl_i = i[k]["ctrl"]
             if ctrl_d["joint_target_q"] is not None and ctrl_i["joint_target_q"] is not None:

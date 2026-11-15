@@ -137,7 +137,7 @@ def main() -> int:
                 rc = subprocess.run(
                     cmd, cwd=root, env=env, stdout=fh, stderr=subprocess.STDOUT, timeout=args.timeout
                 ).returncode
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired:  # except-ok: reported as a failed check
             rc = "timeout"
         secs = time.perf_counter() - t0
         text = log.read_text(errors="replace")

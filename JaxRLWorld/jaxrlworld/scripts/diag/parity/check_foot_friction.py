@@ -38,6 +38,7 @@ import re
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import numpy as np
+import torch
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
@@ -75,7 +76,7 @@ def _read_genesis_friction(env) -> dict[str, tuple[float, float, float]]:
     the user eyeball "is foot-link friction 0.6 or 1.0?" against the
     mjlab/Newton rows.
 
-    Genesis models only sliding friction as a scalar (``_friction``);
+    Genesis models only sliding friction as a scalar (``get_friction()``);
     torsion / roll are not separately stored, so they read as 0.0.
     """
     out: dict[str, tuple[float, float, float]] = {}
@@ -84,11 +85,10 @@ def _read_genesis_friction(env) -> dict[str, tuple[float, float, float]]:
     # Group geoms by parent link so we can label them within their link.
     by_link: dict[str, list] = {}
     for geom in geoms:
-        link_name = geom.link.name if geom.link is not None else "unknown"
-        by_link.setdefault(link_name, []).append(geom)
+        by_link.setdefault(geom.link.name, []).append(geom)
     for link_name, link_geoms in by_link.items():
         for i, geom in enumerate(link_geoms):
-            slide = float(geom.friction)
+            slide = float(geom.get_friction())
             label = f"{link_name}/g{i}"
             out[label] = (slide, 0.0, 0.0)
     return out
@@ -155,20 +155,11 @@ def main() -> int:
     for sim in sims:
         print(f"\n{'=' * 78}\nBuilding [{sim}] {args.preset!r} (num_envs={args.num_envs}) ...")
         env = _build_env(args.preset, sim, args.num_envs)
-        try:
-            results[sim] = _READERS[sim](env)
-            print(f"  read {len(results[sim])} collision geoms")
-        except Exception as e:
-            print(f"  ERROR reading friction: {type(e).__name__}: {e}")
-            results[sim] = {}
+        results[sim] = _READERS[sim](env)
+        print(f"  read {len(results[sim])} collision geoms")
         del env
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     # Union of geom names across sims (alphabetical for stable order).
     all_names = sorted({n for d in results.values() for n in d})

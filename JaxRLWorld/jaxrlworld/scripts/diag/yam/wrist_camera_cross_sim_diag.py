@@ -294,12 +294,8 @@ def _chain_report(a_env, b_env) -> None:
     print("\n-- 1a. where the two arms stop agreeing --")
     print(f"  {'body':<18} {'Δpos (m)':>12} {'Δrot (1-|dot|)':>16}")
     for name in ("arm", "link_1", "link_2", "link_3", "link_4", "link_5", "link_6"):
-        try:
-            a_index = a_bodies.find_body_index(name)
-            b_index = b_bodies.find_body_index(name)
-        except (ValueError, KeyError) as error:
-            print(f"  {name:<18} not resolvable: {error}")
-            continue
+        a_index = a_bodies.find_body_index(name)
+        b_index = b_bodies.find_body_index(name)
         a_pos = a_bodies.body_pos_w_all[:, a_index] - a_origins
         b_pos = (b_bodies.body_pos_w_all[:, b_index] - b_origins).to(a_pos.device)
         a_quat = a_bodies.body_quat_w_all[:, a_index]

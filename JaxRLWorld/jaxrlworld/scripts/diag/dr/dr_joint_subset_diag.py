@@ -211,7 +211,7 @@ def main() -> int:
             )
             print("[pd_kp(mjlab-implicit)] no error raised — silent full-set randomization!")
             results["pd_kp(mjlab-implicit rejects subset)"] = False
-        except NotImplementedError as e:
+        except NotImplementedError as e:  # except-ok: the check expects the subset to be rejected
             print(f"[pd_kp(mjlab-implicit)] raised as expected: {e}")
             results["pd_kp(mjlab-implicit rejects subset)"] = True
 

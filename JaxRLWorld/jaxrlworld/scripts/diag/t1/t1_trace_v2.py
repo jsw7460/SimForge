@@ -77,15 +77,12 @@ def _print_header(env) -> None:
         print(f"{i:<4} {name:<32} {int(sim_ids[i]):<9}  {scales[i]:+.6f}  {offsets[i]:+.6f}")
 
     # Soft joint limits (in canonical order)
-    try:
-        lo = _tensor_to_list(am._indexing.joint_limits_lower)
-        hi = _tensor_to_list(am._indexing.joint_limits_upper)
-        print("\n[joint limits (canonical order)]")
-        print("idx  joint_name                        lower       upper")
-        for i, name in enumerate(am.actuated_joint_names):
-            print(f"{i:<4} {name:<32} {lo[i]:+.5f}   {hi[i]:+.5f}")
-    except Exception as e:
-        print(f"[joint limits dump skipped: {e}]")
+    lo = _tensor_to_list(am._indexing.joint_limits_lower)
+    hi = _tensor_to_list(am._indexing.joint_limits_upper)
+    print("\n[joint limits (canonical order)]")
+    print("idx  joint_name                        lower       upper")
+    for i, name in enumerate(am.actuated_joint_names):
+        print(f"{i:<4} {name:<32} {lo[i]:+.5f}   {hi[i]:+.5f}")
 
     # IdealPD gains if present (look through _actuators list)
     print("\n[actuator PD gains (if IdealPD-style)]")

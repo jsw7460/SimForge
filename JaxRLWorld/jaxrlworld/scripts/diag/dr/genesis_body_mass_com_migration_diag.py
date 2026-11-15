@@ -249,7 +249,7 @@ def _section_c(rep: _Report) -> None:
     raised = False
     try:
         _genesis_require_batched_links_info(_FakeEntity(), "randomize_body_mass")
-    except RuntimeError as exc:
+    except RuntimeError as exc:  # except-ok: C1 is a control that expects the guard to raise
         raised = True
         rep.log(f"  raised: {exc}")
     rep.check("C1 guard raises RuntimeError when unbatched", raised)

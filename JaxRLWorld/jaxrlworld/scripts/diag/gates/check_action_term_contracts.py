@@ -92,7 +92,7 @@ def _metadata(m: _Manager) -> dict:
 def _rejects(fn) -> tuple[bool, str]:
     try:
         fn()
-    except (ValueError, NotImplementedError) as e:
+    except (ValueError, NotImplementedError) as e:  # except-ok: the refusal under test
         return True, str(e).splitlines()[-1].strip()[:110]
     return False, "accepted"
 
@@ -132,7 +132,7 @@ def main() -> int:
     ):
         try:
             m = _manager(**kwargs)
-        except ValueError as e:  # a construction the manager itself refuses
+        except ValueError as e:  # except-ok: a construction the manager refuses, reported as a failed check
             chk(f"{label}: rejected", False, f"could not build: {e}")
             continue
         ok, detail = _rejects(lambda m=m: _check_term_action_parity(saved, m, "train", "eval"))

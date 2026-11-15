@@ -60,7 +60,6 @@ import json
 import os
 import subprocess
 import sys
-import traceback
 from pathlib import Path
 from typing import Any
 
@@ -319,14 +318,15 @@ def _print_compare(per_sim: dict[str, dict], lg) -> None:
     def row(label: str, lookup):
         cells = []
         for s in sims:
-            try:
-                v = lookup(per_sim[s])
-            except Exception:
-                v = "—"
-            cells.append(_fmt(v))
+            cells.append(_fmt(lookup(per_sim[s])))
         col_width = 32
         line = f"  {label:<48s}" + " | ".join(f"{c:<{col_width}s}" for c in cells)
         lg(line)
+
+    def landing_stat(d: dict, key: str):
+        # ``landings_stats`` is written only when the sim recorded at least
+        # one landing event; no landings -> no stat (shown as "—").
+        return d["landings_stats"][key] if "landings_stats" in d else None
 
     def section(title: str):
         lg("")
@@ -358,14 +358,14 @@ def _print_compare(per_sim: dict[str, dict], lg) -> None:
     section("Landing-event aggregate stats")
     row("n_landings", lambda d: d["n_landings"])
     row("cumulative_cost.mean (over all envs)", lambda d: d["cumulative_cost_mean"])
-    row("landings.peak_mean", lambda d: d["landings_stats"]["peak_mean"])
-    row("landings.peak_min", lambda d: d["landings_stats"]["peak_min"])
-    row("landings.peak_max", lambda d: d["landings_stats"]["peak_max"])
-    row("landings.ratio_mean (peak/target)", lambda d: d["landings_stats"]["ratio_mean"])
-    row("landings.ratio_min", lambda d: d["landings_stats"]["ratio_min"])
-    row("landings.ratio_max", lambda d: d["landings_stats"]["ratio_max"])
-    row("landings.err_sq_mean", lambda d: d["landings_stats"]["err_sq_mean"])
-    row("landings.err_sq_sum (= total cost contribution)", lambda d: d["landings_stats"]["err_sq_sum"])
+    row("landings.peak_mean", lambda d: landing_stat(d, "peak_mean"))
+    row("landings.peak_min", lambda d: landing_stat(d, "peak_min"))
+    row("landings.peak_max", lambda d: landing_stat(d, "peak_max"))
+    row("landings.ratio_mean (peak/target)", lambda d: landing_stat(d, "ratio_mean"))
+    row("landings.ratio_min", lambda d: landing_stat(d, "ratio_min"))
+    row("landings.ratio_max", lambda d: landing_stat(d, "ratio_max"))
+    row("landings.err_sq_mean", lambda d: landing_stat(d, "err_sq_mean"))
+    row("landings.err_sq_sum (= total cost contribution)", lambda d: landing_stat(d, "err_sq_sum"))
 
     # ── Per-step time-series alignment ────────────────────────────────
     section("Per-step time series — aggregate (all envs)")
@@ -443,25 +443,18 @@ def _print_compare(per_sim: dict[str, dict], lg) -> None:
                 ("cumulative_cost_mean", "cumulative_cost_mean"),
                 ("n_landings", "n_landings"),
             ):
-                try:
-                    a = per_sim[s][key]
-                    b = per_sim[ref][key]
-                    if isinstance(b, int | float) and b != 0:
-                        lg(f"  ({s}) / ({ref})  {label:<28s} = {a / b:.4g}")
-                except Exception:
-                    pass
-            try:
-                a = per_sim[s]["landings_stats"]["err_sq_sum"]
-                b = per_sim[ref]["landings_stats"]["err_sq_sum"]
-                lg(f"  ({s}) / ({ref})  total_err²_sum            = {a / b if b else 'inf':.4g}")
-            except Exception:
-                pass
-            try:
-                a = per_sim[s]["landings_stats"]["peak_mean"]
-                b = per_sim[ref]["landings_stats"]["peak_mean"]
-                lg(f"  ({s}) / ({ref})  peak_mean                 = {a / b if b else 'inf':.4g}")
-            except Exception:
-                pass
+                a = per_sim[s][key]
+                b = per_sim[ref][key]
+                if b != 0:
+                    lg(f"  ({s}) / ({ref})  {label:<28s} = {a / b:.4g}")
+            if "landings_stats" not in per_sim[s] or "landings_stats" not in per_sim[ref]:
+                continue
+            a = per_sim[s]["landings_stats"]["err_sq_sum"]
+            b = per_sim[ref]["landings_stats"]["err_sq_sum"]
+            lg(f"  ({s}) / ({ref})  total_err²_sum            = {a / b if b else float('inf'):.4g}")
+            a = per_sim[s]["landings_stats"]["peak_mean"]
+            b = per_sim[ref]["landings_stats"]["peak_mean"]
+            lg(f"  ({s}) / ({ref})  peak_mean                 = {a / b if b else float('inf'):.4g}")
 
 
 # ---------------------------------------------------------------------------
@@ -506,19 +499,14 @@ def main() -> int:
         if args.sim is None:
             print("inline mode requires --sim", file=sys.stderr)
             return 2
-        try:
-            data = _capture_sim(
-                args.sim,
-                args.num_envs,
-                args.seed,
-                args.settle_steps,
-                args.capture_steps,
-                args.action_scale,
-            )
-        except Exception as e:
-            traceback.print_exc()
-            print(f"capture failed for {args.sim}: {e!r}", file=sys.stderr)
-            return 1
+        data = _capture_sim(
+            args.sim,
+            args.num_envs,
+            args.seed,
+            args.settle_steps,
+            args.capture_steps,
+            args.action_scale,
+        )
         target = Path(args.out_json) if args.out_json else Path(f"./g1_swing_{args.sim}.json")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(data, indent=2))

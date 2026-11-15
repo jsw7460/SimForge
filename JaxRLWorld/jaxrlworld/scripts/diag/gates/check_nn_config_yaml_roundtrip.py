@@ -326,7 +326,7 @@ def _run_one_case(name: str, nn: NNConfig, tmp_dir: str) -> dict:
 
     try:
         d = nn.recursive_to_dict()
-    except Exception as e:
+    except Exception as e:  # except-ok: reported as a failed check
         result["checks"]["recursive_to_dict"] = f"FAIL: {type(e).__name__}: {e}"
         result["passed"] = False
         return result
@@ -347,7 +347,7 @@ def _run_one_case(name: str, nn: NNConfig, tmp_dir: str) -> dict:
         if not ok:
             result["passed"] = False
             return result
-    except Exception as e:
+    except Exception as e:  # except-ok: reported as a failed check
         result["checks"]["safe_dump_roundtrip"] = f"FAIL: {type(e).__name__}: {e}\n{traceback.format_exc()}"
         result["passed"] = False
         return result
@@ -368,7 +368,7 @@ def _run_one_case(name: str, nn: NNConfig, tmp_dir: str) -> dict:
         if not ok:
             result["passed"] = False
             return result
-    except Exception as e:
+    except Exception as e:  # except-ok: reported as a failed check
         result["checks"]["unsafe_dump_roundtrip"] = f"FAIL: {type(e).__name__}: {e}\n{traceback.format_exc()}"
         result["passed"] = False
         return result
@@ -386,7 +386,7 @@ def _run_one_case(name: str, nn: NNConfig, tmp_dir: str) -> dict:
         if not ok:
             result["passed"] = False
             return result
-    except Exception as e:
+    except Exception as e:  # except-ok: reported as a failed check
         result["checks"]["framework_dump_load"] = f"FAIL: {type(e).__name__}: {e}\n{traceback.format_exc()}"
         result["passed"] = False
         return result

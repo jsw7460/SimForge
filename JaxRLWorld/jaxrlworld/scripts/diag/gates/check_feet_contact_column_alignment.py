@@ -339,7 +339,7 @@ def main() -> int:
     def raises(fn) -> str | None:
         try:
             fn()
-        except ValueError as e:
+        except ValueError as e:  # except-ok: the refusal under test
             return str(e)
         return None
 

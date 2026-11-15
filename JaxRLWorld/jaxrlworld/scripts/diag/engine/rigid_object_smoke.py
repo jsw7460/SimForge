@@ -412,12 +412,12 @@ def _protocol_sweep(env, name: str, results: dict, measured: dict, tag: str) -> 
     try:
         sites = d.site_pos_w([name])
         measured[f"{tag}_site_pos_w"] = f"returned {tuple(sites.shape)}"
-    except Exception as e:  # noqa: BLE001
+    except (ValueError, KeyError, NotImplementedError) as e:  # except-ok: the probe records the error
         measured[f"{tag}_site_pos_w"] = type(e).__name__
     try:
         h = d.angular_momentum_w()
         measured[f"{tag}_angular_momentum_w"] = f"returned {tuple(h.shape)}"
-    except Exception as e:  # noqa: BLE001
+    except (ValueError, NotImplementedError) as e:  # except-ok: the probe records the error
         measured[f"{tag}_angular_momentum_w"] = type(e).__name__
     print(f"[{tag}] site_pos_w -> {measured[f'{tag}_site_pos_w']}")
     print(f"[{tag}] angular_momentum_w -> {measured[f'{tag}_angular_momentum_w']}")
@@ -767,7 +767,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         rjoints = tuple(rd.joint_pos.shape)
         print(f"[robot]  root_link_pos_w = {_fmt3(rpos)}  joint_pos.shape = {rjoints}")
         results["robot_read"] = len(rpos) == 3 and rd.joint_pos.shape[-1] > 0
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[robot]  ERROR: {type(e).__name__}: {e}")
         results["robot_read"] = False
 
@@ -787,7 +787,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
             and _finite(od.root_link_quat_w)
             and _finite(od.root_link_lin_vel_w)
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[cube]   ERROR: {type(e).__name__}: {e}")
         results["object_read"] = False
 
@@ -804,7 +804,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         print(f"[cube]   post-reset pos = {_fmt3(got[0])}  target = {_fmt3(expected[0])}  max_err = {err:.4f}")
         print(f"[cube]   env_origins[0] = {_fmt3(origins[0])}   (max err is over all {env.num_envs} envs)")
         results["object_placed_by_event"] = err < 1e-3
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[cube]   PLACEMENT ERROR: {type(e).__name__}: {e}")
         results["object_placed_by_event"] = False
 
@@ -822,7 +822,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         h_robot = float(obs_common.base_height(env, robot_sel)[0, 0])
         print(f"[mdp]    base_height(robot) = {h_robot:.4f}")
         results["mdp_reads_robot"] = h_robot == h_robot
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[mdp]    base_height(robot) ERROR: {type(e).__name__}: {e}")
         results["mdp_reads_robot"] = False
 
@@ -831,7 +831,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         target_h = CUBE_SPAWN[2] + float(env.scene_manager.env_origins[0, 2])
         print(f"[mdp]    base_height(cube)  = {h_cube:.4f}  (target {target_h:.4f})")
         results["mdp_reads_object"] = abs(h_cube - target_h) < 1e-3
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[mdp]    base_height(cube)  ERROR: {type(e).__name__}: {e}")
         results["mdp_reads_object"] = False
 
@@ -843,10 +843,10 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         obs_common.dof_pos(env, cube_sel)
         print("[mdp]    dof_pos(cube) returned a value (expected AttributeError)")
         results["joint_read_on_object_rejected"] = False
-    except AttributeError as e:
+    except AttributeError as e:  # except-ok: the refusal under test
         print(f"[mdp]    dof_pos(cube) -> AttributeError: {e}")
         results["joint_read_on_object_rejected"] = True
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: a different error, reported as a failed check
         print(f"[mdp]    dof_pos(cube) -> {type(e).__name__} (expected AttributeError): {e}")
         results["joint_read_on_object_rejected"] = False
 
@@ -854,10 +854,10 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         env.get_robot_data("cube")
         print("[mdp]    get_robot_data('cube') SUCCEEDED (expected KeyError)")
         results["robot_accessor_is_strict"] = False
-    except KeyError:
+    except KeyError:  # except-ok: the refusal under test
         print("[mdp]    get_robot_data('cube') -> KeyError (correct: not an articulation)")
         results["robot_accessor_is_strict"] = True
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: a different error, reported as a failed check
         print(f"[mdp]    get_robot_data('cube') -> {type(e).__name__} (expected KeyError): {e}")
         results["robot_accessor_is_strict"] = False
 
@@ -959,7 +959,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         gap = float((by_name[:, 0, :] - bpos[:, table_idx, :]).abs().max())
         print(f"[table]  max|body_pos_w(names) - body_pos_w_all[idx]| = {gap:.3e}")
         results["fixed_named_body_read"] = gap < 1e-6
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[table]  named body read ERROR: {type(e).__name__}: {e}")
         results["fixed_named_body_read"] = False
 
@@ -969,7 +969,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         h_table = float(obs_common.base_height(env, table_sel)[0, 0])
         print(f"[table]  resolve_selector ok; base_height(table) = {h_table:.4f}")
         results["fixed_mdp_reads"] = abs(h_table - actual[2]) < 1e-5
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[table]  selector/MDP ERROR: {type(e).__name__}: {e}")
         results["fixed_mdp_reads"] = False
 
@@ -977,7 +977,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         env.resolve_selector(SceneEntitySelector(name="table", body_names=("table",)))
         print("[table]  resolve_selector(body_names=('table',)) ok")
         results["fixed_selector_body_names"] = True
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[table]  selector body_names ERROR: {type(e).__name__}: {e}")
         results["fixed_selector_body_names"] = False
 
@@ -1069,7 +1069,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
             f"[table]  env_origins[0] = {_fmt3(origins[0])}   max|actual - expected| over {env.num_envs} envs = {err:.3e}"
         )
         results["fixed_reset_places_entity"] = err < 1e-3
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[table]  reset-event write raised {type(e).__name__}: {e}")
         results["fixed_reset_places_entity"] = False
 
@@ -1107,7 +1107,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         body_drift = float((td_held.body_pos_w(["table"])[:, 0, :] - per_env).abs().max())
         print(f"[table]  after 3 steps: max|Δ| root = {drift:.3e}   body = {body_drift:.3e}")
         results["fixed_pose_write_persists"] = drift < 1e-4 and body_drift < 1e-4
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[table]  per-env pose write raised {type(e).__name__}: {e}")
         results["fixed_pose_write_is_per_env"] = False
         results["fixed_pose_write_persists"] = False
@@ -1150,7 +1150,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         else:
             results["fixed_collision_follows_move"] = err_moved < 0.03
             measured["moved_collision_check"] = "measured"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: reported as a failed check
         print(f"[table]  moved-table drop raised {type(e).__name__}: {e}")
         results["fixed_collision_follows_move"] = False
 
@@ -1161,10 +1161,10 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         env.get_root_state_writer("table").set_root_velocity(z3, z3, env_ids=all_ids)
         print("[table]  set_root_velocity SUCCEEDED (expected ValueError)")
         results["fixed_velocity_write_rejected"] = False
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         print(f"[table]  set_root_velocity -> ValueError: {e}")
         results["fixed_velocity_write_rejected"] = True
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: a different error, reported as a failed check
         print(f"[table]  set_root_velocity -> {type(e).__name__} (expected ValueError): {e}")
         results["fixed_velocity_write_rejected"] = False
 
@@ -1450,7 +1450,7 @@ def run_multimatch_probe(sim: str, num_envs: int) -> dict:
         )
         names = env.contact_manager.tracked_names("cube_vs_both_jaws")
         outcome = f"built (tracked={names})"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # except-ok: a build error is the probe outcome, scored below
         outcome = f"{type(e).__name__}: {e}"
 
     expected_to_build = sim != "mujoco"

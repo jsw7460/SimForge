@@ -239,14 +239,14 @@ def main() -> int:
     try:
         replay_training_overrides(copy.deepcopy(target), ghost)
         chk("a saved term the target lacks raises", False, "no exception")
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         chk("a saved term the target lacks raises", "reward.ghost" in str(e), str(e)[:90])
     grown = copy.deepcopy(saved)
     del grown["reward"]["smooth"]
     try:
         replay_training_overrides(copy.deepcopy(target), grown)
         chk("a term the preset gained since training raises", False, "no exception")
-    except ValueError as e:
+    except ValueError as e:  # except-ok: the refusal under test
         chk("a term the preset gained since training raises", "reward.smooth" in str(e), str(e)[:90])
 
     print("=" * 78)

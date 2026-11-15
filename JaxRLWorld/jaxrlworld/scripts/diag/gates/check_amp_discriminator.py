@@ -266,7 +266,7 @@ def main() -> int:
     try:
         expert_frame_probabilities(two_files, (1.0,))
         chk("wrong number of dataset weights refused", False)
-    except ValueError:
+    except ValueError:  # except-ok: the refusal under test
         chk("wrong number of dataset weights refused", True)
 
     obs = [rng.normal(size=(N, D)).astype(np.float32) for _ in range(6)]
@@ -339,7 +339,7 @@ def main() -> int:
     try:
         prior.update_discriminator(1, 8)
         chk("update without new rollout windows refused", False)
-    except RuntimeError:
+    except RuntimeError:  # except-ok: the refusal under test
         chk("update without new rollout windows refused", True)
 
     print("\n=== 6b. joint velocity from positions (same function on both sides) ===")
@@ -396,12 +396,12 @@ def main() -> int:
     try:
         AdversarialMotionPrior(cfg, expert, D, dt, 1e-3, jax.random.PRNGKey(3))
         chk("flag on without blocks refused", False)
-    except ValueError:
+    except ValueError:  # except-ok: the refusal under test
         chk("flag on without blocks refused", True)
     try:
         AdversarialMotionPrior(cfg, expert, D, dt, 1e-3, jax.random.PRNGKey(3), fd_blocks=((0, 3), (3, 5)))
         chk("mismatched block widths refused", False)
-    except ValueError:
+    except ValueError:  # except-ok: the refusal under test
         chk("mismatched block widths refused", True)
 
     print("\n=== 7. training on separable windows, learning-rate rewrite, checkpoint round trip ===")

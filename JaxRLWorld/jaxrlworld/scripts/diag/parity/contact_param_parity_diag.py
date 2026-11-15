@@ -243,10 +243,12 @@ def is_ground_anchor(key: tuple[str, str], field: str, cells: dict[str, str]) ->
     """
     if key[0] != GROUND or not field.startswith("friction"):
         return False
-    try:
-        values = {sim: float(text) for sim, text in cells.items() if text != "-"}
-    except ValueError:
+    present = {sim: text for sim, text in cells.items() if text != "-"}
+    # A backend that gave the ground several values (``cell`` joins them
+    # with commas) has no single number to anchor.
+    if any("," in text for text in present.values()):
         return False
+    values = {sim: float(text) for sim, text in present.items()}
     genesis = values.pop("genesis", None)
     return genesis is not None and bool(values) and genesis < min(values.values())
 

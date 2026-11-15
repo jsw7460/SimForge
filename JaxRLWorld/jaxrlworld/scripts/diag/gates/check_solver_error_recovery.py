@@ -118,7 +118,7 @@ def run_misconfiguration(sim: str, config: str, num_envs: int, thrash_steps: int
         try:
             for _ in range(3):
                 env.step(zeros)
-        except gs.GenesisException as e:
+        except gs.GenesisException as e:  # except-ok: the refusal under test
             raised = str(e)
         check(
             "capacity flag raises Genesis' own message", raised is not None and "max_contacts" in raised, raised or ""
@@ -134,7 +134,7 @@ def run_misconfiguration(sim: str, config: str, num_envs: int, thrash_steps: int
         for step in range(thrash_steps):
             actions = torch.empty(num_envs, env.num_actions, device=env.device).uniform_(-5.0, 5.0)
             env.step(actions)
-    except RuntimeError as e:
+    except RuntimeError as e:  # except-ok: the refusal under test
         raised = str(e)
     check(
         "one-slot nconmax raises the overflow guard",

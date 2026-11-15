@@ -388,16 +388,13 @@ def main():
                 print(f"  >>> EVAL: return={eval_return:.2f}, length={eval_length:.1f}")
                 if USE_WANDB:
                     eval_log = {"eval/return": eval_return, "eval/length": eval_length}
-                    try:
-                        frames = render_with_rollout()
-                        video = wandb.Video(
-                            np.array(frames).transpose(0, 3, 1, 2),
-                            fps=30,
-                            format="gif",
-                        )
-                        eval_log["eval/video"] = video
-                    except Exception as e:
-                        print(f"  Render failed: {e}")
+                    frames = render_with_rollout()
+                    video = wandb.Video(
+                        np.array(frames).transpose(0, 3, 1, 2),
+                        fps=30,
+                        format="gif",
+                    )
+                    eval_log["eval/video"] = video
                     wandb.log(eval_log, step=global_step)
 
     # Final eval

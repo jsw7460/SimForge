@@ -49,7 +49,6 @@ import os
 import re
 import subprocess
 import sys
-import traceback
 from pathlib import Path
 
 # Multi-sim run in one process — bypass the single-backend guard.
@@ -117,21 +116,15 @@ def _capture_state(env) -> list[float]:
     out.extend(rd.joint_pos[0].detach().cpu().numpy().tolist())
     out.extend(rd.joint_vel[0].detach().cpu().numpy().tolist())
     # root body pos / lin vel (body 0 is root for floating-base robots)
-    try:
-        ids = torch.tensor([0], device=env.device, dtype=torch.long)
-        out.extend(rd.body_pos_w_by_ids(ids)[0, 0].detach().cpu().numpy().tolist())
-        out.extend(rd.body_lin_vel_w_by_ids(ids)[0, 0].detach().cpu().numpy().tolist())
-    except Exception:
-        out.extend([0.0] * 6)
+    ids = torch.tensor([0], device=env.device, dtype=torch.long)
+    out.extend(rd.body_pos_w_by_ids(ids)[0, 0].detach().cpu().numpy().tolist())
+    out.extend(rd.body_lin_vel_w_by_ids(ids)[0, 0].detach().cpu().numpy().tolist())
     # Contact-force aggregate over the first contact group, if any.
-    try:
-        groups = list(env.contact_manager._groups.keys())
-        if groups:
-            f = env.contact_manager.contact_force(groups[0])[0].detach().cpu().numpy()
-            out.append(float((f * f).sum()))
-        else:
-            out.append(0.0)
-    except Exception:
+    groups = list(env.contact_manager._groups.keys())
+    if groups:
+        f = env.contact_manager.contact_force(groups[0])[0].detach().cpu().numpy()
+        out.append(float((f * f).sum()))
+    else:
         out.append(0.0)
     return out
 
@@ -158,13 +151,7 @@ def _run_inner(sim: str, preset: str, num_envs: int, seed: int, rollouts: int, s
 
     lines: list[str] = []
     lines.append(f"# sim={sim} preset={preset} num_envs={num_envs} seed={seed} rollouts={rollouts} steps={steps}")
-    try:
-        env = _build_eval_env(sim, preset, num_envs, seed)
-    except Exception as e:
-        lines.append(f"# BUILD_ERROR: {type(e).__name__}: {e}")
-        lines.append(traceback.format_exc())
-        out_path.write_text("\n".join(lines), encoding="utf-8")
-        return 1
+    env = _build_eval_env(sim, preset, num_envs, seed)
 
     # Emit the joint count so the driver can carve rows into sections
     # without re-importing the preset.
@@ -175,29 +162,21 @@ def _run_inner(sim: str, preset: str, num_envs: int, seed: int, rollouts: int, s
 
     global_step = 0
     for rollout_idx in range(rollouts):
-        try:
-            env.reset()
+        env.reset()
+        state = _capture_state(env)
+        lines.append(f"{rollout_idx} {global_step} reset " + " ".join(f"{v:.10f}" for v in state))
+        for step_idx in range(steps):
+            action = action_seq[step_idx]
+            env.step(action)
             state = _capture_state(env)
-            lines.append(f"{rollout_idx} {global_step} reset " + " ".join(f"{v:.10f}" for v in state))
-            for step_idx in range(steps):
-                action = action_seq[step_idx]
-                env.step(action)
-                state = _capture_state(env)
-                lines.append(f"{rollout_idx} {global_step} step{step_idx} " + " ".join(f"{v:.10f}" for v in state))
-                global_step += 1
-        except Exception as e:
-            lines.append(f"# STEP_ERROR rollout={rollout_idx}: {type(e).__name__}: {e}")
-            lines.append(traceback.format_exc())
-            break
+            lines.append(f"{rollout_idx} {global_step} step{step_idx} " + " ".join(f"{v:.10f}" for v in state))
+            global_step += 1
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
     del env
-    try:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return 0
 
@@ -257,10 +236,7 @@ def _parse_trace(path: Path) -> tuple[int, list[tuple[str, list[float]]]]:
         if not m:
             continue
         rollout, _gstep, step_label, payload = m.groups()
-        try:
-            values = [float(x) for x in payload.split()]
-        except ValueError:
-            continue
+        values = [float(x) for x in payload.split()]
         rows.append((f"R{rollout}_{step_label}", values))
     return n_joints, rows
 
@@ -371,7 +347,7 @@ def _format_summary(per_sim: dict, args) -> str:
             continue
         info = per_sim[sim]
         if info.get("error"):
-            lines.append(f"  [{sim:>7s}] BUILD/RUN ERROR — see trace file")
+            lines.append(f"  [{sim:>7s}] BUILD/RUN ERROR — see the subprocess traceback above")
             continue
         n_rows = info["n_aligned"]
         if info["n_diff_rows"] == 0 and n_rows > 0:

@@ -191,7 +191,7 @@ def main() -> int:
             try:
                 build(name, 7).load_train_state(d, meta)
                 chk("flag without file is refused", False, "loaded")
-            except FileNotFoundError as e:
+            except FileNotFoundError as e:  # except-ok: the refusal under test
                 chk("flag without file is refused", True, str(e)[:60])
         print()
 

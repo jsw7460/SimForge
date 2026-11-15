@@ -119,10 +119,7 @@ def main() -> int:
     qd_idx = env.act_manager._indexing.newton_qd_indices
     print(f"newton_qd_indices: {qd_idx.detach().cpu().tolist()}")
     print(f"gravity: {wp.to_torch(model.gravity).detach().cpu().tolist()}")
-    try:
-        print(f"body masses [kg]: {wp.to_torch(model.body_mass).detach().cpu().tolist()}")
-    except Exception as e:  # noqa: BLE001
-        print(f"body masses: n/a ({e})")
+    print(f"body masses [kg]: {wp.to_torch(model.body_mass).detach().cpu().tolist()}")
     # Direct-torque mode marker.
     print(f"model.joint_target_mode: {wp.to_torch(model.joint_target_mode).detach().cpu().tolist()}")
     print()

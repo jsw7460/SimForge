@@ -487,11 +487,8 @@ def run_parent(args) -> int:
     def row(label, getter, fmt="{:+.6f}"):
         cells = []
         for s in sims:
-            try:
-                v = getter(results[s])
-                cells.append(fmt.format(v) if isinstance(v, int | float) and v is not None else str(v))
-            except Exception as e:  # noqa: BLE001 — show the hole
-                cells.append(f"ERR:{type(e).__name__}")
+            v = getter(results[s])
+            cells.append(fmt.format(v) if isinstance(v, int | float) else str(v))
         L.append(f"  {label:<40s}" + "".join(f"{c:<26s}" for c in cells))
 
     for term in _FOCUS:

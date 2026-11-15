@@ -40,13 +40,13 @@ from __future__ import annotations
 import argparse
 import math
 import os
-import traceback
 from pathlib import Path
 
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import numpy as np
+import torch
 
 _PRESET = ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig")
 _SIMS = ("genesis", "newton", "mujoco")
@@ -103,28 +103,23 @@ def _body_idx(env, sim: str, name: str) -> int | None:
         # mjlab: ``entity.data.body_link_pos_w`` is shape
         # (num_envs, n_entity_bodies, 3). The entity's ``find_bodies`` gives
         # the entity-local id, NOT the global ``mj_model`` body id.
-        try:
-            entity = env.scene_manager._scene["robot"]
-            body_ids, _ = entity.find_bodies([name], preserve_order=True)
-            return int(body_ids[0]) if body_ids else None
-        except Exception:
-            return None
+        # ``find_bodies`` raises ValueError for a name the entity lacks.
+        entity = env.scene_manager._scene["robot"]
+        body_ids, _ = entity.find_bodies([name], preserve_order=True)
+        return int(body_ids[0])
     return None
 
 
 def _mujoco_global_body_idx(env, name: str) -> int | None:
     """Global mj_model body id for ``name`` — for cross-check only."""
-    try:
-        import mujoco
+    import mujoco
 
-        mj_model = env.scene_manager.mj_model
-        for i in range(mj_model.nbody):
-            raw = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, i) or ""
-            bare = raw.rsplit("/", 1)[-1] if "/" in raw else raw
-            if bare == name:
-                return i
-    except Exception:
-        pass
+    mj_model = env.scene_manager.mj_model
+    for i in range(mj_model.nbody):
+        raw = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, i) or ""
+        bare = raw.rsplit("/", 1)[-1] if "/" in raw else raw
+        if bare == name:
+            return i
     return None
 
 
@@ -143,15 +138,12 @@ def _format_body_id_block(envs: dict) -> str:
     for name in (*_FEET, *_ANKLES):
         cells = []
         for sim, env in envs.items():
-            try:
-                rd_idx = _body_idx(env, sim, name)
-                if sim == "mujoco":
-                    glob_idx = _mujoco_global_body_idx(env, name)
-                    cells.append(f"rd={rd_idx} glob={glob_idx}")
-                else:
-                    cells.append(f"rd={rd_idx}")
-            except Exception as e:
-                cells.append(f"<err: {type(e).__name__}>")
+            rd_idx = _body_idx(env, sim, name)
+            if sim == "mujoco":
+                glob_idx = _mujoco_global_body_idx(env, name)
+                cells.append(f"rd={rd_idx} glob={glob_idx}")
+            else:
+                cells.append(f"rd={rd_idx}")
         out.append(f"  {name:25s} | " + " | ".join(f"{c:^22s}" for c in cells))
 
     # For mujoco: dump multiple position fields for left_foot_frame so we can
@@ -161,46 +153,34 @@ def _format_body_id_block(envs: dict) -> str:
     out.append("  mujoco extra: alternative pos reads for left_foot_frame (at reset, env 0)")
     if "mujoco" in envs:
         env = envs["mujoco"]
-        try:
-            mj_model = env.scene_manager.mj_model
-            entity = env.scene_manager._scene["robot"]
-            rd = env.get_robot_data()
-            rd_idx = _body_idx(env, "mujoco", "left_foot_frame")
-            glob_idx = _mujoco_global_body_idx(env, "left_foot_frame")
-            import torch
+        mj_model = env.scene_manager.mj_model
+        entity = env.scene_manager._scene["robot"]
+        rd = env.get_robot_data()
+        rd_idx = _body_idx(env, "mujoco", "left_foot_frame")
+        glob_idx = _mujoco_global_body_idx(env, "left_foot_frame")
 
-            # rd-indexed read (the value the diag uses)
-            try:
-                p = rd.body_pos_w_by_ids(torch.tensor([rd_idx], device=env.device))[0, 0].detach().cpu().numpy()
-                out.append(f"    RobotData.body_pos_w_by_ids(rd_idx={rd_idx})           = {p.tolist()}")
-            except Exception as e:
-                out.append(f"    RobotData.body_pos_w_by_ids(rd_idx={rd_idx})           = <err: {e}>")
-            # entity.data direct read at rd_idx
-            try:
-                p = entity.data.body_link_pos_w[0, rd_idx].detach().cpu().numpy()
-                out.append(f"    entity.data.body_link_pos_w[0, rd_idx={rd_idx}]        = {p.tolist()}")
-            except Exception as e:
-                out.append(f"    entity.data.body_link_pos_w[0, rd_idx={rd_idx}]        = <err: {e}>")
-            # entity.data at global_idx (cross-check)
-            if glob_idx is not None and glob_idx != rd_idx:
-                try:
-                    p = entity.data.body_link_pos_w[0, glob_idx].detach().cpu().numpy()
-                    out.append(f"    entity.data.body_link_pos_w[0, glob_idx={glob_idx}] = {p.tolist()}")
-                except Exception as e:
-                    out.append(f"    entity.data.body_link_pos_w[0, glob_idx={glob_idx}] = <err: {e}>")
-            # entity.data.body_link_pos_w shape
-            try:
-                shape = tuple(entity.data.body_link_pos_w.shape)
-                out.append(f"    entity.data.body_link_pos_w shape                     = {shape}")
-            except Exception:
-                pass
-            # mj_model bodies count (excl. world?)
-            try:
-                out.append(f"    mj_model.nbody                                        = {mj_model.nbody}")
-            except Exception:
-                pass
-        except Exception as e:
-            out.append(f"  <mujoco extra block error: {type(e).__name__}: {e}>")
+        # rd-indexed read (the value the diag uses)
+        p = rd.body_pos_w_by_ids(torch.tensor([rd_idx], device=env.device))[0, 0].detach().cpu().numpy()
+        out.append(f"    RobotData.body_pos_w_by_ids(rd_idx={rd_idx})           = {p.tolist()}")
+        # entity.data direct read at rd_idx
+        p = entity.data.body_link_pos_w[0, rd_idx].detach().cpu().numpy()
+        out.append(f"    entity.data.body_link_pos_w[0, rd_idx={rd_idx}]        = {p.tolist()}")
+        # entity.data at global_idx (cross-check); a global id past the
+        # entity's own bodies has no entity-local row to read.
+        n_entity_bodies = entity.data.body_link_pos_w.shape[1]
+        if glob_idx is not None and glob_idx != rd_idx:
+            if glob_idx < n_entity_bodies:
+                p = entity.data.body_link_pos_w[0, glob_idx].detach().cpu().numpy()
+                out.append(f"    entity.data.body_link_pos_w[0, glob_idx={glob_idx}] = {p.tolist()}")
+            else:
+                out.append(
+                    f"    entity.data.body_link_pos_w[0, glob_idx={glob_idx}] = <past the {n_entity_bodies} bodies>"
+                )
+        # entity.data.body_link_pos_w shape
+        shape = tuple(entity.data.body_link_pos_w.shape)
+        out.append(f"    entity.data.body_link_pos_w shape                     = {shape}")
+        # mj_model bodies count (excl. world?)
+        out.append(f"    mj_model.nbody                                        = {mj_model.nbody}")
     return "\n".join(out)
 
 
@@ -213,26 +193,21 @@ def _read_joint_frictionloss_runtime(env, sim: str) -> dict[str, list[float]]:
 
     if sim == "genesis":
         entity = env.scene_manager["robot"]
-        try:
-            fri = entity.get_dofs_frictionloss(dofs_idx_local=indexing.sim_indices)
-            arr = fri[0] if fri.ndim == 2 else fri
-            out["runtime"] = [float(arr[i]) for i in range(arr.shape[0])]
-        except Exception as e:
-            out["runtime_error"] = f"{type(e).__name__}: {e}"
+        fri = entity.get_dofs_frictionloss(dofs_idx_local=indexing.sim_indices)
+        arr = fri[0] if fri.ndim == 2 else fri
+        out["runtime"] = [float(arr[i]) for i in range(arr.shape[0])]
 
     elif sim == "newton":
         import warp as wp
 
         model = env.scene_manager.solver.model
-        try:
-            qd_idx = indexing.newton_qd_indices.detach().cpu().numpy()
-            fri = wp.to_torch(model.joint_friction).detach().cpu().numpy()
-            out["runtime"] = [float(fri[int(q)]) for q in qd_idx]
-        except Exception as e:
-            out["runtime_error"] = f"{type(e).__name__}: {e}"
+        qd_idx = indexing.newton_qd_indices.detach().cpu().numpy()
+        fri = wp.to_torch(model.joint_friction).detach().cpu().numpy()
+        out["runtime"] = [float(fri[int(q)]) for q in qd_idx]
 
     elif sim == "mujoco":
         import mujoco
+        import warp as wp
 
         mj_model = env.scene_manager.mj_model
         entity = env.scene_manager._scene["robot"]
@@ -253,38 +228,15 @@ def _read_joint_frictionloss_runtime(env, sim: str) -> dict[str, list[float]]:
         out["dof_adrs"] = dof_adrs
 
         # Static compile-time mj_model.dof_frictionloss (CPU, shape (n_dof,)).
-        try:
-            cpu = mj_model.dof_frictionloss
-            out["static_cpu"] = [float(cpu[a]) if a is not None and a < len(cpu) else None for a in dof_adrs]
-        except Exception as e:
-            out["static_cpu_error"] = f"{type(e).__name__}: {e}"
+        cpu = mj_model.dof_frictionloss
+        out["static_cpu"] = [float(cpu[a]) if a is not None and a < len(cpu) else None for a in dof_adrs]
 
-        # Runtime mjwarp GPU model — mjlab DR writes here.
-        for path in (
-            ("env.scene_manager._sim.model.dof_frictionloss", lambda: env.scene_manager._sim.model.dof_frictionloss),
-            (
-                "env.scene_manager._sim._wp_model.dof_frictionloss",
-                lambda: env.scene_manager._sim._wp_model.dof_frictionloss,
-            ),
-        ):
-            label, getter = path
-            try:
-                wp_friction = getter()
-            except Exception:
-                continue
-            try:
-                import warp as wp
-
-                arr = wp.to_torch(wp_friction).detach().cpu().numpy()
-                arr0 = arr[0] if arr.ndim == 2 else arr
-                out["runtime"] = [float(arr0[a]) if a is not None and a < len(arr0) else None for a in dof_adrs]
-                out["runtime_source"] = label
-                break
-            except Exception as e:
-                out["runtime_error"] = f"{label}: {type(e).__name__}: {e}"
-        if "runtime" not in out:
-            out["runtime"] = list(out.get("static_cpu", []))
-            out["runtime_source"] = "<falling back to static CPU>"
+        # Runtime mjwarp GPU model — mjlab DR writes here (expanded per
+        # world once a DR term touches the field).
+        arr = wp.to_torch(env.scene_manager._sim.wp_model.dof_frictionloss).detach().cpu().numpy()
+        arr0 = arr[0] if arr.ndim == 2 else arr
+        out["runtime"] = [float(arr0[a]) if a is not None and a < len(arr0) else None for a in dof_adrs]
+        out["runtime_source"] = "env.scene_manager._sim.wp_model.dof_frictionloss"
 
     return out
 
@@ -301,71 +253,57 @@ def _read_foot_geom_friction(env, sim: str) -> dict:
     if sim == "genesis":
         # Genesis loses geom names during MJCF import — group foot collision
         # geoms by their parent link (left/right_ankle_roll_link) instead.
-        try:
-            entity = env.scene_manager["robot"]
-            for link in entity.links:
-                if link.name in _ANKLES:
-                    vals = []
-                    for g in link.geoms:
-                        try:
-                            vals.append(float(g.friction))
-                        except Exception:
-                            pass
-                    if vals:
-                        out["per_link"][link.name] = vals
-                        out["count"] += len(vals)
-        except Exception as e:
-            out["error"] = f"{type(e).__name__}: {e}"
+        entity = env.scene_manager["robot"]
+        for link in entity.links:
+            if link.name in _ANKLES:
+                vals = [float(g.get_friction()) for g in link.geoms]
+                if vals:
+                    out["per_link"][link.name] = vals
+                    out["count"] += len(vals)
 
     elif sim == "newton":
         # Newton: shape_material_mu indexed by global shape id; group by the
         # ankle_roll body so we can compare to the other sims by link.
-        try:
-            import warp as wp
+        import warp as wp
 
-            model = env.scene_manager.solver.model
-            num_worlds = model.world_count
-            body_labels = list(model.body_label)
-            n_bodies = len(body_labels)
-            bodies_per_world = n_bodies // max(num_worlds, 1)
-            # shape_body[i] = body id that owns shape i (per-world replication
-            # means shape ids run over all worlds; restrict to world 0).
-            shape_body = wp.to_torch(model.shape_body).detach().cpu().numpy()
-            mu = wp.to_torch(model.shape_material_mu).detach().cpu().numpy()
-            # Restrict to world 0: shapes whose body is in [0, bodies_per_world).
-            for s in range(len(shape_body)):
-                b = int(shape_body[s])
-                if 0 <= b < bodies_per_world:
-                    bare = body_labels[b].rsplit("/", 1)[-1] if "/" in body_labels[b] else body_labels[b]
-                    if bare in _ANKLES:
-                        out["per_link"].setdefault(bare, []).append(float(mu[s]))
-                        out["count"] += 1
-        except Exception as e:
-            out["error"] = f"{type(e).__name__}: {e}"
+        model = env.scene_manager.solver.model
+        num_worlds = model.world_count
+        body_labels = list(model.body_label)
+        n_bodies = len(body_labels)
+        bodies_per_world = n_bodies // max(num_worlds, 1)
+        # shape_body[i] = body id that owns shape i (per-world replication
+        # means shape ids run over all worlds; restrict to world 0).
+        shape_body = wp.to_torch(model.shape_body).detach().cpu().numpy()
+        mu = wp.to_torch(model.shape_material_mu).detach().cpu().numpy()
+        # Restrict to world 0: shapes whose body is in [0, bodies_per_world).
+        for s in range(len(shape_body)):
+            b = int(shape_body[s])
+            if 0 <= b < bodies_per_world:
+                bare = body_labels[b].rsplit("/", 1)[-1] if "/" in body_labels[b] else body_labels[b]
+                if bare in _ANKLES:
+                    out["per_link"].setdefault(bare, []).append(float(mu[s]))
+                    out["count"] += 1
 
     elif sim == "mujoco":
         # MuJoCo: read mj_model.geom_friction by name for each
         # left/right_foot[1-7]_collision geom.
-        try:
-            import mujoco
+        import mujoco
 
-            mj_model = env.scene_manager.mj_model
-            for side in ("left", "right"):
-                key = f"{side}_ankle_roll_link"
-                vals = []
-                for k in range(1, 8):
-                    target = f"{side}_foot{k}_collision"
-                    for i in range(mj_model.ngeom):
-                        raw = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_GEOM, i) or ""
-                        bare = raw.rsplit("/", 1)[-1] if "/" in raw else raw
-                        if bare == target:
-                            vals.append(float(mj_model.geom_friction[i, 0]))
-                            break
-                if vals:
-                    out["per_link"][key] = vals
-                    out["count"] += len(vals)
-        except Exception as e:
-            out["error"] = f"{type(e).__name__}: {e}"
+        mj_model = env.scene_manager.mj_model
+        for side in ("left", "right"):
+            key = f"{side}_ankle_roll_link"
+            vals = []
+            for k in range(1, 8):
+                target = f"{side}_foot{k}_collision"
+                for i in range(mj_model.ngeom):
+                    raw = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_GEOM, i) or ""
+                    bare = raw.rsplit("/", 1)[-1] if "/" in raw else raw
+                    if bare == target:
+                        vals.append(float(mj_model.geom_friction[i, 0]))
+                        break
+            if vals:
+                out["per_link"][key] = vals
+                out["count"] += len(vals)
     return out
 
 
@@ -382,9 +320,6 @@ def _format_foot_friction_block(sims, foot_fri_data):
         cells = []
         for s in sims:
             d = foot_fri_data.get(s, {})
-            if "error" in d:
-                cells.append(f"<err: {d['error']}>"[:28])
-                continue
             vals = d.get("per_link", {}).get(link, [])
             if not vals:
                 cells.append("<missing>".center(28))
@@ -406,48 +341,39 @@ def _format_foot_friction_block(sims, foot_fri_data):
 def _read_joint_armature_runtime(env, sim: str) -> list[float]:
     indexing = env.act_manager._indexing
     if sim == "genesis":
-        try:
-            entity = env.scene_manager["robot"]
-            arm = entity.get_dofs_armature(dofs_idx_local=indexing.sim_indices)
-            arr = arm[0] if arm.ndim == 2 else arm
-            return [float(arr[i]) for i in range(arr.shape[0])]
-        except Exception:
-            return []
+        entity = env.scene_manager["robot"]
+        arm = entity.get_dofs_armature(dofs_idx_local=indexing.sim_indices)
+        arr = arm[0] if arm.ndim == 2 else arm
+        return [float(arr[i]) for i in range(arr.shape[0])]
     elif sim == "newton":
-        try:
-            import warp as wp
+        import warp as wp
 
-            qd_idx = indexing.newton_qd_indices.detach().cpu().numpy()
-            arr = wp.to_torch(env.scene_manager.solver.model.joint_armature).detach().cpu().numpy()
-            return [float(arr[int(q)]) for q in qd_idx]
-        except Exception:
-            return []
+        qd_idx = indexing.newton_qd_indices.detach().cpu().numpy()
+        arr = wp.to_torch(env.scene_manager.solver.model.joint_armature).detach().cpu().numpy()
+        return [float(arr[int(q)]) for q in qd_idx]
     elif sim == "mujoco":
-        try:
-            import mujoco
+        import mujoco
 
-            mj_model = env.scene_manager.mj_model
-            entity = env.scene_manager._scene["robot"]
-            entity_joint_names = list(entity.joint_names)
-            sim_indices = indexing.sim_indices.detach().cpu().tolist()
-            names = list(env.act_manager.actuated_joint_names)
-            out: list[float] = []
-            for ci in range(len(names)):
-                entity_jidx = int(sim_indices[ci])
-                bare = entity_joint_names[entity_jidx]
-                mj_jid = None
-                for jid in range(mj_model.njnt):
-                    raw = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_JOINT, jid) or ""
-                    if raw.rsplit("/", 1)[-1] == bare:
-                        mj_jid = jid
-                        break
-                if mj_jid is not None:
-                    out.append(float(mj_model.dof_armature[int(mj_model.jnt_dofadr[mj_jid])]))
-                else:
-                    out.append(float("nan"))
-            return out
-        except Exception:
-            return []
+        mj_model = env.scene_manager.mj_model
+        entity = env.scene_manager._scene["robot"]
+        entity_joint_names = list(entity.joint_names)
+        sim_indices = indexing.sim_indices.detach().cpu().tolist()
+        names = list(env.act_manager.actuated_joint_names)
+        out: list[float] = []
+        for ci in range(len(names)):
+            entity_jidx = int(sim_indices[ci])
+            bare = entity_joint_names[entity_jidx]
+            mj_jid = None
+            for jid in range(mj_model.njnt):
+                raw = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_JOINT, jid) or ""
+                if raw.rsplit("/", 1)[-1] == bare:
+                    mj_jid = jid
+                    break
+            if mj_jid is not None:
+                out.append(float(mj_model.dof_armature[int(mj_model.jnt_dofadr[mj_jid])]))
+            else:
+                out.append(float("nan"))
+        return out
     return []
 
 
@@ -458,8 +384,6 @@ def _read_joint_armature_runtime(env, sim: str) -> list[float]:
 
 def _capture_step(env, sim: str, action) -> dict:
     """Step env once and capture every quantity that feeds feet_slip."""
-    import torch
-
     env.step(action)
     rd = env.get_robot_data()
     info: dict = {}
@@ -477,72 +401,44 @@ def _capture_step(env, sim: str, action) -> dict:
     foot_ids_t = torch.tensor([i for i in foot_body_ids if i is not None], device=env.device, dtype=torch.long)
     ankle_ids_t = torch.tensor([i for i in ankle_body_ids if i is not None], device=env.device, dtype=torch.long)
 
-    try:
-        foot_pos = rd.body_pos_w_by_ids(foot_ids_t)[0].detach().cpu().numpy()
-        foot_vel = rd.body_lin_vel_w_by_ids(foot_ids_t)[0].detach().cpu().numpy()
-        info["foot_pos"] = {_FEET[i]: foot_pos[i].tolist() for i in range(len(_FEET))}
-        info["foot_vel"] = {_FEET[i]: foot_vel[i].tolist() for i in range(len(_FEET))}
-    except Exception as e:
-        info["foot_pos_vel_error"] = f"{type(e).__name__}: {e}"
+    foot_pos = rd.body_pos_w_by_ids(foot_ids_t)[0].detach().cpu().numpy()
+    foot_vel = rd.body_lin_vel_w_by_ids(foot_ids_t)[0].detach().cpu().numpy()
+    info["foot_pos"] = {_FEET[i]: foot_pos[i].tolist() for i in range(len(_FEET))}
+    info["foot_vel"] = {_FEET[i]: foot_vel[i].tolist() for i in range(len(_FEET))}
 
-    try:
-        ankle_vel = rd.body_lin_vel_w_by_ids(ankle_ids_t)[0].detach().cpu().numpy()
-        info["ankle_vel"] = {_ANKLES[i]: ankle_vel[i].tolist() for i in range(len(_ANKLES))}
-    except Exception as e:
-        info["ankle_vel_error"] = f"{type(e).__name__}: {e}"
+    ankle_vel = rd.body_lin_vel_w_by_ids(ankle_ids_t)[0].detach().cpu().numpy()
+    info["ankle_vel"] = {_ANKLES[i]: ankle_vel[i].tolist() for i in range(len(_ANKLES))}
 
     # is_contact + contact force, ordered to match _FEET (via foot body names → contact_order)
     contact_order = list(_ANKLES)  # matches what g1_29dof preset's feet_contact_order is
-    try:
-        ic = env.contact_manager.is_contact("feet_ground_contact", order=contact_order)[0].detach().cpu()
-        info["is_contact"] = [bool(ic[i]) for i in range(ic.shape[0])]
-        info["contact_order"] = contact_order
-    except Exception as e:
-        info["is_contact_error"] = f"{type(e).__name__}: {e}"
-        info["is_contact"] = [False] * len(_FEET)
-    try:
-        cf = env.contact_manager.contact_force("feet_ground_contact", order=contact_order)[0].detach().cpu().numpy()
-        info["contact_force_mag"] = [float(np.linalg.norm(cf[i])) for i in range(cf.shape[0])]
-    except Exception as e:
-        info["contact_force_error"] = f"{type(e).__name__}: {e}"
-        info["contact_force_mag"] = [0.0] * len(_FEET)
+    ic = env.contact_manager.is_contact("feet_ground_contact", order=contact_order)[0].detach().cpu()
+    info["is_contact"] = [bool(ic[i]) for i in range(ic.shape[0])]
+    info["contact_order"] = contact_order
+    cf = env.contact_manager.contact_force("feet_ground_contact", order=contact_order)[0].detach().cpu().numpy()
+    info["contact_force_mag"] = [float(np.linalg.norm(cf[i])) for i in range(cf.shape[0])]
 
     # command
-    try:
-        cmd_x = float(env.command_manager.lin_vel_x[0])
-        cmd_y = float(env.command_manager.lin_vel_y[0])
-        cmd_w = float(env.command_manager.ang_vel[0])
-        info["command"] = (cmd_x, cmd_y, cmd_w)
-        lin_norm = math.sqrt(cmd_x * cmd_x + cmd_y * cmd_y)
-        ang_norm = abs(cmd_w)
-        info["command_active"] = (lin_norm + ang_norm) > _COMMAND_THRESHOLD
-    except Exception as e:
-        info["command_error"] = f"{type(e).__name__}: {e}"
-        info["command"] = (0.0, 0.0, 0.0)
-        info["command_active"] = False
+    cmd_x = float(env.command_manager.lin_vel_x[0])
+    cmd_y = float(env.command_manager.lin_vel_y[0])
+    cmd_w = float(env.command_manager.ang_vel[0])
+    info["command"] = (cmd_x, cmd_y, cmd_w)
+    lin_norm = math.sqrt(cmd_x * cmd_x + cmd_y * cmd_y)
+    ang_norm = abs(cmd_w)
+    info["command_active"] = (lin_norm + ang_norm) > _COMMAND_THRESHOLD
 
     # base pos / orientation
-    try:
-        info["base_pos"] = (
-            rd.body_pos_w_by_ids(torch.tensor([0], device=env.device, dtype=torch.long))[0, 0]
-            .detach()
-            .cpu()
-            .numpy()
-            .tolist()
-        )
-    except Exception:
-        info["base_pos"] = None
+    info["base_pos"] = (
+        rd.body_pos_w_by_ids(torch.tensor([0], device=env.device, dtype=torch.long))[0, 0]
+        .detach()
+        .cpu()
+        .numpy()
+        .tolist()
+    )
 
     # computed cost
-    vel_xy_sq: list[float] = []
-    for foot in _FEET:
-        v = info.get("foot_vel", {}).get(foot)
-        if v:
-            vel_xy_sq.append(float(v[0]) ** 2 + float(v[1]) ** 2)
-        else:
-            vel_xy_sq.append(0.0)
+    vel_xy_sq = [float(info["foot_vel"][foot][0]) ** 2 + float(info["foot_vel"][foot][1]) ** 2 for foot in _FEET]
     info["foot_vel_xy_sq"] = vel_xy_sq
-    is_c = info.get("is_contact", [False] * len(_FEET))
+    is_c = info["is_contact"]
     cost_per_foot = [vel_xy_sq[i] * (1.0 if is_c[i] else 0.0) for i in range(len(_FEET))]
     info["cost_per_foot"] = cost_per_foot
     info["total_cost"] = sum(cost_per_foot)
@@ -639,10 +535,7 @@ def _format_step(step_idx, sims, per_sim):
             if isinstance(p, str):
                 cur = cur.get(p, default) if isinstance(cur, dict) else default
             else:
-                try:
-                    cur = cur[p]
-                except (IndexError, TypeError):
-                    return default
+                cur = cur[p]
         return cur
 
     out.append(_row("base_pos_z", [get(s, "base_pos", 2) for s in sims]))
@@ -701,10 +594,7 @@ def _format_summary(sims, all_steps):
             for step in all_steps:
                 d = step.get(s)
                 if d:
-                    try:
-                        vals.append(float(fn(d)))
-                    except Exception:
-                        pass
+                    vals.append(float(fn(d)))
             means[s] = float(np.mean(vals)) if vals else float("nan")
         cells = " | ".join(_fmt_v(means[s], 12) for s in sims)
         finite = [v for v in means.values() if math.isfinite(v) and abs(v) > 1e-9]
@@ -723,8 +613,6 @@ def _format_summary(sims, all_steps):
 
 
 def main() -> int:
-    import torch
-
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--num-envs", type=int, default=1)
     ap.add_argument("--settle", type=int, default=0, help="Zero-action settle steps before capture.")
@@ -752,14 +640,8 @@ def main() -> int:
 
     for sim in _SIMS:
         print(f"\n=== building [{sim}] ===")
-        try:
-            env = _build_env(sim, args.num_envs)
-            envs[sim] = env
-        except Exception as e:
-            print(f"  BUILD ERROR: {type(e).__name__}: {e}")
-            sections.append(f"\n[{sim}] BUILD ERROR: {type(e).__name__}: {e}")
-            sections.append(traceback.format_exc())
-            continue
+        env = _build_env(sim, args.num_envs)
+        envs[sim] = env
         # Reset deterministically.
         torch.manual_seed(args.seed)
         env.reset()
@@ -789,24 +671,16 @@ def main() -> int:
     sections.append(_format_foot_friction_block(list(_SIMS), foot_fri_data))
 
     # Cross-sim friction block.
-    if all(s in friction_data for s in _SIMS):
-        sections.append(_format_friction_block(list(_SIMS), friction_data))
-    else:
-        sections.append("\n(skipping friction block — not all sims built)")
+    sections.append(_format_friction_block(list(_SIMS), friction_data))
 
     # Per-step capture.
     all_steps: list[dict] = []
     for step_idx in range(args.steps):
         per_sim: dict[str, dict] = {}
         for sim in _SIMS:
-            if sim not in envs:
-                continue
-            try:
-                # Move action to env's device per sim.
-                act = action_seq[step_idx].to(envs[sim].device)
-                per_sim[sim] = _capture_step(envs[sim], sim, act)
-            except Exception as e:
-                per_sim[sim] = {"step_error": f"{type(e).__name__}: {e}", "tb": traceback.format_exc()}
+            # Move action to env's device per sim.
+            act = action_seq[step_idx].to(envs[sim].device)
+            per_sim[sim] = _capture_step(envs[sim], sim, act)
         all_steps.append(per_sim)
         sections.append(_format_step(step_idx, [s for s in _SIMS if s in envs], per_sim))
 

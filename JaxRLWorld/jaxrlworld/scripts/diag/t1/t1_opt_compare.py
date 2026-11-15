@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 
+import mujoco
+
 from jaxrlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from jaxrlworld.rl.runners import BaseRunner
 
@@ -38,7 +40,6 @@ OPT_ATTRS = (
     "o_margin",
     "o_solref",
     "o_solimp",
-    "apirate",
     "magnetic",
 )
 
@@ -61,10 +62,7 @@ def main():
 
     print(f"\n=== [{args.sim}] mj_model.opt ===")
     for attr in OPT_ATTRS:
-        try:
-            v = getattr(mj.opt, attr)  # dynamic-attr: option named in OPT_ATTRS; MjOption fields vary by version
-        except AttributeError:
-            v = "N/A"
+        v = getattr(mj.opt, attr)  # dynamic-attr: option named in the OPT_ATTRS table
         print(f"  {attr:<22} = {v}")
 
     # Newton stepping uses mujoco-warp's mjw_model (GPU), not mj_model (CPU).
@@ -75,37 +73,23 @@ def main():
     if args.sim == "newton" and not env.scene_manager.config.solver_cfg.use_mujoco_cpu:
         mjw = env.scene_manager.solver.mjw_model
         print("\n=== [newton] mjw_model.opt (effective, GPU-side) ===")
-        ts = mjw.opt.timestep
-        try:
-            ts_val = ts.numpy()
-        except Exception:
-            ts_val = ts
-        print(f"  timestep (mjw_model)   = {ts_val}")
+        print(f"  timestep (mjw_model)   = {mjw.opt.timestep.numpy()}")
         print(f"  iterations             = {mjw.opt.iterations}")
         print(f"  ls_iterations          = {mjw.opt.ls_iterations}")
         print(f"  impratio               = {mjw.opt.impratio}")
         print(f"  cone                   = {mjw.opt.cone}")
 
     # Enum name lookups for integrator/solver/cone/jacobian (they print as ints)
-    try:
-        import mujoco
-
-        print("\n=== Enum interpretation ===")
-        enums = {
-            "integrator": mujoco.mjtIntegrator,
-            "solver": mujoco.mjtSolver,
-            "cone": mujoco.mjtCone,
-            "jacobian": mujoco.mjtJacobian,
-        }
-        for attr, enum_cls in enums.items():
-            try:
-                v = int(getattr(mj.opt, attr))  # dynamic-attr: enum-valued option named in the table
-                name = enum_cls(v).name
-                print(f"  {attr:<22} = {v} ({name})")
-            except Exception as e:
-                print(f"  {attr:<22} = err: {e}")
-    except ImportError:
-        pass
+    print("\n=== Enum interpretation ===")
+    enums = {
+        "integrator": mujoco.mjtIntegrator,
+        "solver": mujoco.mjtSolver,
+        "cone": mujoco.mjtCone,
+        "jacobian": mujoco.mjtJacobian,
+    }
+    for attr, enum_cls in enums.items():
+        v = int(getattr(mj.opt, attr))  # dynamic-attr: enum-valued option named in the table
+        print(f"  {attr:<22} = {v} ({enum_cls(v).name})")
 
 
 if __name__ == "__main__":

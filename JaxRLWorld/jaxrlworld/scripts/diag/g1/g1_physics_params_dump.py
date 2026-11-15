@@ -39,10 +39,7 @@ _NAN = float("nan")
 def _fmt(x, w: int = 11, prec: int = 6) -> str:
     if x is None:
         return f"{'nan':>{w}}"
-    try:
-        f = float(x)
-    except Exception:
-        return f"{'?':>{w}}"
+    f = float(x)
     if np.isnan(f):
         return f"{'nan':>{w}}"
     if np.isinf(f):

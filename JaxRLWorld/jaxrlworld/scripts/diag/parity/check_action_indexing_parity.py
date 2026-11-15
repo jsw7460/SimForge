@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import traceback
 from pathlib import Path
 
 from jaxrlworld.rl.actuators.actuator_pd import IdealPDActuator
@@ -67,13 +66,6 @@ def _build_env(preset: str, sim: str, num_envs: int = 1):
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
-
-
-def _try(fn, default=None):
-    try:
-        return fn()
-    except Exception:
-        return default
 
 
 def _capture_actuator_gains(env) -> dict[str, dict[str, float]]:
@@ -114,17 +106,14 @@ def _capture_sim_side(env, sim: str) -> dict[str, dict[str, float]]:
     if sim == "genesis":
         entity = env.scene_manager["robot"]
         sim_indices = indexing.sim_indices
-        # Genesis: try get_dofs_armature / get_dofs_frictionloss
-        arm = _try(lambda: entity.get_dofs_armature(dofs_idx_local=sim_indices))
-        fri = _try(lambda: entity.get_dofs_frictionloss(dofs_idx_local=sim_indices))
+        arm = entity.get_dofs_armature(dofs_idx_local=sim_indices)
+        fri = entity.get_dofs_frictionloss(dofs_idx_local=sim_indices)
         for ci, jname in enumerate(names):
             d: dict[str, float] = {}
-            if arm is not None:
-                v = arm[0, ci] if arm.ndim == 2 else arm[ci]
-                d["armature"] = float(v)
-            if fri is not None:
-                v = fri[0, ci] if fri.ndim == 2 else fri[ci]
-                d["frictionloss"] = float(v)
+            v = arm[0, ci] if arm.ndim == 2 else arm[ci]
+            d["armature"] = float(v)
+            v = fri[0, ci] if fri.ndim == 2 else fri[ci]
+            d["frictionloss"] = float(v)
             out[jname] = d
 
     elif sim == "newton":
@@ -132,14 +121,14 @@ def _capture_sim_side(env, sim: str) -> dict[str, dict[str, float]]:
 
         model = env.scene_manager.solver.model
         qd_indices = indexing.newton_qd_indices.detach().cpu().numpy()
-        arm = _try(lambda: wp.to_torch(model.joint_armature).detach().cpu().numpy())
-        fri = _try(lambda: wp.to_torch(model.joint_friction).detach().cpu().numpy())
+        arm = wp.to_torch(model.joint_armature).detach().cpu().numpy()
+        fri = wp.to_torch(model.joint_friction).detach().cpu().numpy()
         for ci, jname in enumerate(names):
             qd = int(qd_indices[ci])
             d: dict[str, float] = {}
-            if arm is not None and qd < len(arm):
+            if qd < len(arm):
                 d["armature"] = float(arm[qd])
-            if fri is not None and qd < len(fri):
+            if qd < len(fri):
                 d["frictionloss"] = float(fri[qd])
             out[jname] = d
 
@@ -178,50 +167,38 @@ def _collect(preset: str, sim: str) -> dict:
     import torch
 
     info: dict = {"preset": preset, "sim": sim}
-    try:
-        env = _build_env(preset, sim, num_envs=1)
-    except Exception as e:
-        info["build_error"] = f"{type(e).__name__}: {e}"
-        info["tb"] = traceback.format_exc()
-        return info
+    env = _build_env(preset, sim, num_envs=1)
 
-    try:
-        torch.manual_seed(0)
-        env.reset()
-        names = list(env.act_manager.actuated_joint_names)
-        info["actuated_joint_names"] = names
+    torch.manual_seed(0)
+    env.reset()
+    names = list(env.act_manager.actuated_joint_names)
+    info["actuated_joint_names"] = names
 
-        # q at reset — already in canonical order via RobotData.joint_pos.
-        rd = env.get_robot_data()
-        q_reset = rd.joint_pos[0].detach().cpu().float().numpy().tolist()
-        info["q_reset_by_name"] = {names[i]: float(q_reset[i]) for i in range(len(names))}
+    # q at reset — already in canonical order via RobotData.joint_pos.
+    rd = env.get_robot_data()
+    q_reset = rd.joint_pos[0].detach().cpu().float().numpy().tolist()
+    info["q_reset_by_name"] = {names[i]: float(q_reset[i]) for i in range(len(names))}
 
-        # Actuator-side kp / kd.
-        act_metrics = _capture_actuator_gains(env)
-        # Sim-side armature / frictionloss.
-        sim_metrics = _capture_sim_side(env, sim)
+    # Actuator-side kp / kd.
+    act_metrics = _capture_actuator_gains(env)
+    # Sim-side armature / frictionloss.
+    sim_metrics = _capture_sim_side(env, sim)
 
-        # Merge into one per-joint dict in canonical order.
-        per_joint: dict[str, dict[str, float]] = {}
-        for n in names:
-            d: dict[str, float] = {}
-            if n in act_metrics:
-                d.update(act_metrics[n])
-            if n in sim_metrics:
-                d.update(sim_metrics[n])
-            d["q_reset"] = float(info["q_reset_by_name"].get(n, float("nan")))
-            per_joint[n] = d
-        info["per_joint"] = per_joint
-    except Exception as e:
-        info["capture_error"] = f"{type(e).__name__}: {e}"
-        info["tb"] = traceback.format_exc()
-    finally:
-        del env
-        try:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
+    # Merge into one per-joint dict in canonical order.
+    per_joint: dict[str, dict[str, float]] = {}
+    for n in names:
+        d: dict[str, float] = {}
+        if n in act_metrics:
+            d.update(act_metrics[n])
+        if n in sim_metrics:
+            d.update(sim_metrics[n])
+        d["q_reset"] = float(info["q_reset_by_name"].get(n, float("nan")))
+        per_joint[n] = d
+    info["per_joint"] = per_joint
+
+    del env
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return info
 
@@ -251,19 +228,11 @@ def _format_preset_section(preset: str, by_sim: dict[str, dict]) -> str:
     # Per-sim build status
     out.append("Build status:")
     for sim, info in by_sim.items():
-        if "build_error" in info:
-            out.append(f"  [{sim}] BUILD ERROR: {info['build_error']}")
-        elif "capture_error" in info:
-            out.append(f"  [{sim}] CAPTURE ERROR: {info['capture_error']}")
-        else:
-            out.append(f"  [{sim}] OK  ({len(info.get('actuated_joint_names', []))} joints)")
+        out.append(f"  [{sim}] OK  ({len(info['actuated_joint_names'])} joints)")
     out.append("")
 
     # Joint name ordering
-    name_lists = {s: info.get("actuated_joint_names", []) for s, info in by_sim.items() if "build_error" not in info}
-    if not name_lists:
-        out.append("All sims failed to build — skipping rest of preset.")
-        return "\n".join(out)
+    name_lists = {s: info["actuated_joint_names"] for s, info in by_sim.items()}
 
     sims = list(name_lists.keys())
     max_n = max(len(v) for v in name_lists.values()) if name_lists else 0
@@ -405,12 +374,7 @@ def main() -> int:
         for sim in sims:
             print(f"  building [{sim}] ...", flush=True)
             by_sim[sim] = _collect(preset, sim)
-            if "build_error" in by_sim[sim]:
-                print(f"    BUILD ERROR: {by_sim[sim]['build_error']}")
-            elif "capture_error" in by_sim[sim]:
-                print(f"    CAPTURE ERROR: {by_sim[sim]['capture_error']}")
-            else:
-                print(f"    OK ({len(by_sim[sim].get('actuated_joint_names', []))} joints)")
+            print(f"    OK ({len(by_sim[sim]['actuated_joint_names'])} joints)")
 
         section, overall_pass, order_mis, mp = _format_preset_section(preset, by_sim)
         sections.append(section)

@@ -122,7 +122,7 @@ def check_invariances(chk) -> None:
 def _raises(fn) -> bool:
     try:
         fn()
-    except ValueError:
+    except ValueError:  # except-ok: the refusal under test
         return True
     return False
 

@@ -215,7 +215,7 @@ def main() -> int:
         try:
             make_ppo(jax.random.PRNGKey(7)).load_train_state(d, meta)
             chk("flag without file is refused", False, "loaded")
-        except FileNotFoundError as e:
+        except FileNotFoundError as e:  # except-ok: the refusal under test
             chk("flag without file is refused", True, str(e)[:60])
 
     print("\n=== 5. AMP discriminator optimizer state ===")
@@ -238,7 +238,7 @@ def main() -> int:
         try:
             make_amp(jax.random.PRNGKey(13)).load(d, optimizer_state=True)
             chk("AMP flag without file is refused", False, "loaded")
-        except FileNotFoundError as e:
+        except FileNotFoundError as e:  # except-ok: the refusal under test
             chk("AMP flag without file is refused", True, str(e)[:60])
 
     print(f"\n=== RESULT: {'ALL OK' if not failures else f'{len(failures)} FAILED: {failures}'} ===")

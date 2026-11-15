@@ -633,11 +633,8 @@ def section_c_contacts(env, cfg, chk: Checker) -> None:
     print("\n=== C. contact groups ===")
     manager = env.contact_manager
     for group in ("feet_ground_contact", "non_foot_ground_contact", "self_collision"):
-        try:
-            force = manager.contact_force(group)
-            chk(f"{group} registered", force is not None, f"shape {tuple(force.shape)}")
-        except Exception as exc:  # noqa: BLE001 - the group name is what is under test
-            chk(f"{group} registered", False, f"{type(exc).__name__}: {exc}")
+        force = manager.contact_force(group)
+        chk(f"{group} registered", force is not None, f"shape {tuple(force.shape)}")
 
     # The exclusion is structural, so check it structurally: the group must
     # carry every robot body but the two feet.

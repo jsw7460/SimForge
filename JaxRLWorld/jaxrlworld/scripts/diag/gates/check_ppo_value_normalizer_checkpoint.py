@@ -102,14 +102,14 @@ def main() -> int:
         try:
             make_ppo(key, use_value_normalization=True).load_train_state(d, meta)
             chk("missing value_normalizer.eqx raises", False, "loaded")
-        except FileNotFoundError as e:
+        except FileNotFoundError as e:  # except-ok: the refusal under test
             chk("missing value_normalizer.eqx raises", True, str(e)[:70])
 
         print("\n=== 3. normalization mismatch is refused ===")
         try:
             make_ppo(key, use_value_normalization=False).load_train_state(d, meta)
             chk("normalizing checkpoint into a non-normalizing PPO raises", False, "loaded")
-        except ValueError as e:
+        except ValueError as e:  # except-ok: the refusal under test
             chk("normalizing checkpoint into a non-normalizing PPO raises", True, str(e)[:70])
 
     print("\n=== 4. no normalization: unchanged path ===")

@@ -94,7 +94,7 @@ def main() -> int:
             bool(np.all(steps[0] == 0) and np.all(steps[horizon] == horizon)),
             f"steps {steps[:, 0]}",
         )
-    except ValueError as e:
+    except ValueError as e:  # except-ok: reported as a failed check
         chk("sampled the only sequence", False, str(e))
 
     print("\n=== 3. wrapped buffer: newest sequence reachable, none straddles the pointer ===")
@@ -124,14 +124,14 @@ def main() -> int:
     try:
         buf.sample_batch(16, key)
         chk("all-terminal buffer raises", False, "returned a batch")
-    except RuntimeError as e:
+    except RuntimeError as e:  # except-ok: the refusal under test
         chk("all-terminal buffer raises", True, str(e)[:80])
     buf = SequenceReplayBuffer(NUM_ENVS, OBS_DIM, ACT_DIM, size_per_env=64, horizon=horizon)
     store_steps(buf, 12, {e: set(range(1, 12, 2)) for e in range(NUM_ENVS)})  # episodes of length 2 < horizon
     try:
         buf.sample_batch(16, key)
         chk("episodes shorter than the horizon raise", False, "returned a batch")
-    except RuntimeError as e:
+    except RuntimeError as e:  # except-ok: the refusal under test
         chk("episodes shorter than the horizon raise", True, str(e)[:80])
 
     print(f"\n=== RESULT: {'ALL OK' if not failures else f'{len(failures)} FAILED: {failures}'} ===")

@@ -169,11 +169,7 @@ def main() -> int:
     print("\n  [2] the copy is real, not elided into a view of torch's buffer")
     src = torch.full((n,), 1.0, device=device, dtype=torch.float32)
     converted = torch_to_jax(src)
-    try:
-        aliased = converted.unsafe_buffer_pointer() == src.data_ptr()
-    except Exception as exc:  # single-device arrays only
-        print(f"      buffer pointer unavailable ({exc.__class__.__name__}); skipped")
-        aliased = False
+    aliased = converted.unsafe_buffer_pointer() == src.data_ptr()
     print(f"      shares torch's buffer: {aliased}")
     if aliased:
         print("  FAIL — jnp.array elided the copy, so waiting for it guarantees nothing.")

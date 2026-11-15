@@ -105,7 +105,7 @@ class _RewardShadow:
                 self._view.refresh()
                 total = reward_buffer.clone()
                 stacked = self._compiled(self._view, mgr._weights(), active, total, valid)
-            except Exception as exc:  # noqa: BLE001 — reported per cell, see the class docstring
+            except Exception as exc:  # except-ok: the compile error is the cell's value (class docstring)
                 self.error = f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}"
                 stacked = None
             state.restore()

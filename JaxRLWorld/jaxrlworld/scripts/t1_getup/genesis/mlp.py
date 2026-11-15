@@ -8,14 +8,14 @@ def _dump_genesis_friction(env) -> None:
     """Print per-geom base friction, DR ratio, and effective friction.
 
     ``env.reset()`` must have run at least once — DR is a reset event,
-    so ``geoms_state.friction_ratio`` is all-1.0 before the first reset.
+    so ``dyn_state.geoms.friction_ratio`` is all-1.0 before the first reset.
     """
     robot_entity = env.scene_manager["robot"]
     solver = robot_entity._solver
 
-    base_friction = solver.geoms_info.friction.to_numpy()  # (n_geoms,)
-    friction_ratio = solver.geoms_state.friction_ratio.to_numpy()  # (n_geoms, n_envs)
-    link_idx = solver.geoms_info.link_idx.to_numpy()  # (n_geoms,)
+    base_friction = solver.dyn_info.geoms.friction.to_numpy()  # (n_geoms,)
+    friction_ratio = solver.dyn_state.geoms.friction_ratio.to_numpy()  # (n_geoms, n_envs)
+    link_idx = solver.dyn_info.geoms.link_idx.to_numpy()  # (n_geoms,)
 
     n_geoms, n_envs = friction_ratio.shape
     ratio_env0 = friction_ratio[:, 0]

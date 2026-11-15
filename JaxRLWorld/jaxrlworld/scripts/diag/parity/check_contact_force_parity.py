@@ -61,24 +61,17 @@ def _build_env(preset: str, sim: str, num_envs: int):
     return runner.env
 
 
-def _capture_groups(env) -> dict[str, np.ndarray | None]:
+def _capture_groups(env) -> dict[str, np.ndarray]:
     """Read contact_force for each configured group; return numpy arrays."""
-    out: dict[str, np.ndarray | None] = {}
+    out: dict[str, np.ndarray] = {}
     for g in _CONTACT_GROUPS:
-        try:
-            f = env.contact_manager.contact_force(g)  # (E, N, 3)
-            out[g] = f.detach().cpu().float().numpy()
-        except Exception as e:
-            out[g] = None
-            print(f"  WARN: contact_force({g!r}) failed: {e}")
+        f = env.contact_manager.contact_force(g)  # (E, N, 3)
+        out[g] = f.detach().cpu().float().numpy()
     return out
 
 
 def _group_names(env, group: str) -> list[str]:
-    try:
-        return list(env.contact_manager.tracked_names(group))
-    except Exception:
-        return []
+    return list(env.contact_manager.tracked_names(group))
 
 
 def _fmt_n(x: float) -> str:
@@ -138,8 +131,7 @@ def main() -> int:
             env.step(zero)
             snap = _capture_groups(env)
             for g, arr in snap.items():
-                if arr is not None:
-                    per_step[g].append(arr)
+                per_step[g].append(arr)
 
         aggregated[sim] = {}
         for g, lst in per_step.items():
