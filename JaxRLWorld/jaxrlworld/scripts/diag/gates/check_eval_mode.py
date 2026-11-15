@@ -12,7 +12,7 @@ They now all call ``eval_mode.apply_eval_mode``.
    keeps ``startup`` and ``reset``, and turns corruption off on every
    group; applying it twice changes nothing more;
 2. the two switches hold back their half (noise kept, events kept);
-3. the three call sites go through the shared function and no site keeps
+3. the call sites go through the shared function and no site keeps
    a mode list of its own.
 
 Run::
@@ -36,10 +36,14 @@ from jaxrlworld.rl.configs.mujoco_config_classes import MujocoConfigsForRun
 from jaxrlworld.rl.utils.resolve import resolve_callable
 
 ROOT = Path(jaxrlworld.__file__).parent
+# Each site and the shared function it goes through: the training runner's
+# in-training eval reaches ``apply_eval_mode`` via ``in_training_eval_configs``
+# (``rl/configs/eval_mode.py``, which the last entry pins).
 CALL_SITES = (
-    "rl/evals/evaluator.py",
-    "rl/runners/base_runner.py",
-    "scripts/diag/gates/check_eval_determinism.py",
+    ("rl/evals/evaluator.py", "apply_eval_mode("),
+    ("rl/runners/base_runner.py", "in_training_eval_configs("),
+    ("scripts/diag/gates/check_eval_determinism.py", "apply_eval_mode("),
+    ("rl/configs/eval_mode.py", "    apply_eval_mode("),  # indented: a call, not the def
 )
 ALL_MODES = ("startup", "reset", "reset_dr", "interval", "interval_dr")
 
@@ -126,9 +130,9 @@ def main() -> int:
 
     print("\n-- 3. call sites --")
     mode_list = re.compile(r"term\.mode in \(")
-    for rel in CALL_SITES:
+    for rel, call in CALL_SITES:
         src = (ROOT / rel).read_text()
-        chk(f"{rel} calls apply_eval_mode", "apply_eval_mode(" in src)
+        chk(f"{rel} calls {call.strip().rstrip('(')}", call in src)
         chk(f"{rel} keeps no mode list of its own", mode_list.search(src) is None)
 
     print("=" * 78)

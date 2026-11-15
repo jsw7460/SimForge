@@ -33,12 +33,13 @@ Run::
 from __future__ import annotations
 
 import sys
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from jaxrlworld.rl.runners.off_policy_runner import OffPolicyRunner
 from jaxrlworld.rl.storages.device_replay_buffer import DeviceReplayBuffer, _gather_batch, _sample_indices
 from jaxrlworld.rl.storages.replay_buffer import ReplayBatch, ReplayBuffer
 
@@ -227,7 +228,6 @@ def main() -> int:
     # The real iteration method on a stand-in runner: 2048 transitions in
     # the buffer satisfy learning_starts=0 after one step of 2048 envs, as
     # the go2 SAC preset does, but one row per env is not an n-step window.
-    from jaxrlworld.rl.runners.off_policy_runner import OffPolicyRunner
 
     def iteration(size: int, filled_size: int, learning_starts: int) -> bool:
         calls: list[int] = []
@@ -244,6 +244,8 @@ def main() -> int:
             num_steps_per_env=1,
             _collect_experience=lambda **k: {"collection_time": 0.0, "last_obs": None},
         )
+        # The real readiness test, bound to the stand-in.
+        runner._ready_to_update = MethodType(OffPolicyRunner._ready_to_update, runner)
         OffPolicyRunner._run_training_iteration(runner, obs=None, iteration=1, ep_infos=[])
         return bool(calls)
 
