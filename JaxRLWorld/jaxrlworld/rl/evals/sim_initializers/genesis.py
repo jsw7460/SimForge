@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
-from jaxrlworld.rl.utils.console import print_error, print_info, print_success
+from jaxrlworld.rl.utils.console import print_info, print_success
 
 
 class GenesisInitializer(SimInitializer):
@@ -85,8 +85,5 @@ class GenesisInitializer(SimInitializer):
 
     def cleanup(self, env: Any) -> None:
         print_info("Saving video before exit...")
-        try:
-            env.vis_manager.stop_recording()
-            print_success("Video saved successfully!")
-        except Exception as e:
-            print_error(f"Error saving video: {e}")
+        env.vis_manager.stop_recording()
+        print_success("Video saved successfully!")

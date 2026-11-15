@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
-from jaxrlworld.rl.utils.console import print_error, print_info, print_success
+from jaxrlworld.rl.utils.console import print_info, print_success
 
 
 class NewtonInitializer(SimInitializer):
@@ -80,8 +80,5 @@ class NewtonInitializer(SimInitializer):
     def cleanup(self, env: Any) -> None:
         if env.vis_manager is not None:
             print_info("Closing Newton viewer...")
-            try:
-                env.vis_manager.close()
-                print_success("Newton viewer closed!")
-            except Exception as e:
-                print_error(f"Error closing viewer: {e}")
+            env.vis_manager.close()
+            print_success("Newton viewer closed!")

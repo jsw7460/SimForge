@@ -2,9 +2,12 @@ import functools
 import os
 import random
 import warnings
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Type
 
 import numpy as np
+import pytz
 import torch
 
 
@@ -50,11 +53,6 @@ def setup_log_dir(output_dir: str | None = None) -> tuple[str, str]:
     Returns:
         Tuple of (models_log_dir, wandb_log_dir)
     """
-    from datetime import datetime
-    from pathlib import Path
-
-    import pytz
-
     # Get current time in Chicago timezone
     kr_tz = pytz.timezone("America/Chicago")
     now = datetime.now(kr_tz)
@@ -84,25 +82,14 @@ def setup_log_dir(output_dir: str | None = None) -> tuple[str, str]:
             candidate = base_models.with_name(base_models.name + suffix)
             try:
                 candidate.mkdir(parents=True, exist_ok=False)
-            except FileExistsError:
+            except FileExistsError:  # except-ok: the name was taken by another run, try the next suffix
                 continue
             wandb_dir = base_wandb.with_name(base_wandb.name + suffix)
             wandb_dir.mkdir(parents=True, exist_ok=True)
             return candidate, wandb_dir
         raise RuntimeError(f"Could not claim a unique log dir near {base_models}")
 
-    # ``EXP_OUTPUT_DIR`` may point at a read-only location (e.g. a
-    # data-transfer directory that is not writable from the run) — fall
-    # back to the current working directory so policy load, which forces
-    # this path on every checkpoint, doesn't abort the run.
-    try:
-        models_log_dir, wandb_log_dir = _claim(models_log_dir, wandb_log_dir)
-    except PermissionError:
-        fallback = Path(".")
-        models_log_dir, wandb_log_dir = _claim(
-            fallback / "outputs" / "models" / date_str / time_str,
-            fallback / "outputs" / "logs" / date_str / time_str,
-        )
+    models_log_dir, wandb_log_dir = _claim(models_log_dir, wandb_log_dir)
 
     return str(models_log_dir), str(wandb_log_dir)
 

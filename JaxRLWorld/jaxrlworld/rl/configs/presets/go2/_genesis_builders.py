@@ -72,7 +72,7 @@ def get_foot_names(robot) -> tuple[str, ...]:
 
 
 def build_visualization(cfg: Go2FlatConfig) -> VisualizationConfig:
-    return VisualizationConfig(show_viewer=False)
+    return VisualizationConfig(show_viewer=False, feet_names=("FL", "FR", "RL", "RR"))
 
 
 def build_env(cfg: Go2FlatConfig, timing: Dict[str, Any]) -> EnvConfig:

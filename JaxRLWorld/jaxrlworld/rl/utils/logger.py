@@ -5,7 +5,6 @@ import os
 import socket
 import statistics
 import sys
-import traceback
 from collections import deque
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -14,6 +13,13 @@ from typing import TYPE_CHECKING, Any, Dict, List, Union
 import torch
 import wandb
 from colorama import Fore, Style, init
+from rich.console import Console, Group
+from rich.live import Live
+from rich.padding import Padding
+from rich.panel import Panel
+from rich.rule import Rule
+from rich.table import Table
+from rich.text import Text
 
 from jaxrlworld.rl.algorithms.metrics import BaseMetrics, MetricType
 
@@ -66,13 +72,6 @@ class ConsoleWriter:
         """Start the rich Live region on first use (TTY only)."""
         if self._live is not None or self._live_disabled:
             return self._live
-        try:
-            from rich.console import Console
-            from rich.live import Live
-        except ImportError:
-            print("[ConsoleWriter] rich not installed — falling back to plain block logging.")
-            self._live_disabled = True
-            return None
         self._console = Console(file=sys.__stdout__)
         self._live = Live(console=self._console, refresh_per_second=4, transient=False)
         self._live.start()
@@ -145,8 +144,6 @@ class ConsoleWriter:
         if self._live is not None:
             # Print above the live dashboard (rich keeps the region at
             # the bottom), so eval blocks leave a persistent record.
-            from rich.text import Text
-
             self._live.console.print(Text.from_ansi(text))
         else:
             print(text)
@@ -179,15 +176,9 @@ class ConsoleWriter:
 
         live = self._ensure_live()
         if live is not None:
-            try:
-                self._roll.append((data.fps, data.collection_time, data.learning_time))
-                live.update(self._build_dashboard(compat, data.metrics, last_eval_stats))
-                return
-            except Exception:
-                print("[ConsoleWriter] rich dashboard failed — falling back to plain block logging.")
-                traceback.print_exc()
-                self._live_disabled = True
-                self._stop_live()
+            self._roll.append((data.fps, data.collection_time, data.learning_time))
+            live.update(self._build_dashboard(compat, data.metrics, last_eval_stats))
+            return
 
         self.write_metrics(
             data=compat,
@@ -205,13 +196,6 @@ class ConsoleWriter:
         and the timing row carries rolling statistics over the last 50
         iterations — information the scrollback used to provide.
         """
-        from rich.console import Group
-        from rich.padding import Padding
-        from rich.panel import Panel
-        from rich.rule import Rule
-        from rich.table import Table
-        from rich.text import Text
-
         rows = []
 
         def section(title: str, style: str) -> None:

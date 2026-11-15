@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-import torch
 from genesis.vis.rasterizer_context import RasterizerContext
 
 from .overlays import (
@@ -20,9 +19,6 @@ class OverlaySettings:
 
     enable_command_arrow: bool = True
     command_arrow_config: CommandArrowConfig | None = None
-
-    # Feet link names for height visualization
-    feet_links: tuple[str, ...] = ("FL_foot", "FR_foot", "RL_foot", "RR_foot")
 
     # Environment indices to render overlays for
     render_env_ids: list[int] = field(default_factory=lambda: [0])
@@ -120,35 +116,10 @@ class RLWorldRasterizerContext(RasterizerContext):
             body_vel = transform_by_quat(world_vel, inv_quat(robot.get_quat()))
             state["actual_lin_vel"] = body_vel
 
-        # Feet heights
-        feet_height = self._get_feet_height()
-        if feet_height is not None:
-            state["feet_height"] = feet_height
-
         # Episode info
         state["episode_step"] = int(self._env.termination_manager.episode_length_buf[0].item())
 
         self._visualization_state = state
-
-    def _get_feet_height(self) -> torch.Tensor | None:
-        """Get feet z-positions."""
-        if self._env is None:
-            return None
-
-        robot = self._env.scene_manager.entities.get("robot")
-        if robot is None:
-            return None
-
-        feet_links = list(self._overlay_settings.feet_links)
-
-        try:
-            from jaxrlworld.rl.utils import entity_utils as eu
-
-            links_idx, _ = eu.find_links(robot, feet_links, global_ids=False, preserve_order=True)
-            feet_pos = robot.get_links_pos(links_idx_local=links_idx)
-            return feet_pos[..., 2]
-        except Exception:
-            return None
 
     def get_visualization_state(self) -> dict[str, Any]:
         """Get current state for 2D overlays."""

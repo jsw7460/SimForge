@@ -409,15 +409,12 @@ class ObservationManager(BaseManager):
                 resolved_fn = self._resolved_fns[group_name][term_name]
                 func_name = getattr(resolved_fn, "__name__", term_name)  # dynamic-attr: callable or instance
 
-                try:
-                    dummy = resolved_fn(self.env, **obs_term.params)
-                    # A term with more than one feature axis (an image) has
-                    # no single width; show the whole per-env shape rather
-                    # than its last axis, which would read as a dimension
-                    # count it does not have.
-                    base_dim = dummy.shape[-1] if dummy.dim() == 2 else tuple(dummy.shape[1:])
-                except Exception:
-                    base_dim = "?"
+                dummy = resolved_fn(self.env, **obs_term.params)
+                # A term with more than one feature axis (an image) has
+                # no single width; show the whole per-env shape rather
+                # than its last axis, which would read as a dimension
+                # count it does not have.
+                base_dim = dummy.shape[-1] if dummy.dim() == 2 else tuple(dummy.shape[1:])
 
                 history_str = "-"
                 display_dim = base_dim

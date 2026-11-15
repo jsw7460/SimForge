@@ -1,6 +1,8 @@
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING
 
+import mujoco
+
 if TYPE_CHECKING:
     import jax.numpy as jnp
 
@@ -10,17 +12,25 @@ __all__ = ["KinematicTree"]
 
 class KinematicTree:
     """
-    Extract kinematic tree from URDF or MJCF file.
+    Extract kinematic tree from a URDF file, an MJCF file, or an ``MjSpec``.
     """
 
-    def __init__(self, urdf_path: str = None, mjcf_path: str = None, exclude_links: list[str] | None = None):
+    def __init__(
+        self,
+        urdf_path: str = None,
+        mjcf_path: str = None,
+        exclude_links: list[str] | None = None,
+        mjcf_spec: mujoco.MjSpec | None = None,
+    ):
         """
         Args:
             urdf_path: Path to URDF file
             mjcf_path: Path to MJCF file
+            mjcf_spec: A standalone ``MjSpec`` (mjlab entities, whose XML
+                references assets relative to the file it was loaded from)
         """
-        if urdf_path is None and mjcf_path is None:
-            raise ValueError("Either urdf_path or mjcf_path must be provided")
+        if sum(src is not None for src in (urdf_path, mjcf_path, mjcf_spec)) != 1:
+            raise ValueError("Exactly one of urdf_path, mjcf_path or mjcf_spec must be provided")
 
         self.urdf_path = urdf_path
         self.mjcf_path = mjcf_path
@@ -39,14 +49,17 @@ class KinematicTree:
 
         if urdf_path is not None:
             self._parse_urdf()
+        elif mjcf_path is not None:
+            self._parse_mjcf(ET.parse(mjcf_path).getroot(), mujoco.MjModel.from_xml_path(mjcf_path))
         else:
-            self._parse_mjcf()
+            self._parse_mjcf(ET.fromstring(mjcf_spec.to_xml()), mjcf_spec.compile())
 
-    def _parse_mjcf(self):
-        """Parse MJCF file and build kinematic tree"""
-        tree = ET.parse(self.mjcf_path)
-        root = tree.getroot()
+    def _parse_mjcf(self, root: ET.Element, mj_model: mujoco.MjModel):
+        """Build the kinematic tree from the MJCF body hierarchy.
 
+        Masses come from the compiled model, which resolves inertia
+        inferred from geoms, defaults and includes.
+        """
         model_elem = root if root.tag == "mujoco" else root.find("mujoco")
         if model_elem is not None:
             self.name = model_elem.get("model", "mjcf_robot")
@@ -54,15 +67,6 @@ class KinematicTree:
         worldbody = root.find(".//worldbody")
         if worldbody is None:
             raise ValueError("MJCF file has no worldbody")
-
-        # Try MuJoCo first, fallback to XML parsing
-        mj_model = None
-        try:
-            import mujoco
-
-            mj_model = mujoco.MjModel.from_xml_path(self.mjcf_path)
-        except (ValueError, Exception):
-            pass
 
         # Collect all bodies
         bodies = []
@@ -81,13 +85,8 @@ class KinematicTree:
         for idx, body in enumerate(bodies):
             body_name = body["name"]
 
-            if mj_model is not None:
-                import mujoco
-
-                mj_body_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
-                mass = mj_model.body_mass[mj_body_id] if mj_body_id >= 0 else 1.0
-            else:
-                mass = self._get_body_mass(body["elem"])
+            mj_body_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            mass = mj_model.body_mass[mj_body_id] if mj_body_id >= 0 else 1.0
 
             self.links.append({"index": idx, "name": body_name, "mass": mass})
 
@@ -116,22 +115,6 @@ class KinematicTree:
                         "type": joint_type,
                     }
                 )
-
-    def _get_body_mass(self, body_elem) -> float:
-        """Extract mass from body element"""
-        inertial = body_elem.find("inertial")
-        if inertial is not None:
-            mass = inertial.get("mass")
-            if mass is not None:
-                return float(mass)
-
-        total_mass = 0.0
-        for geom in body_elem.findall("geom"):
-            mass = geom.get("mass")
-            if mass is not None:
-                total_mass += float(mass)
-
-        return total_mass if total_mass > 0 else 1.0
 
     def _parse_urdf(self):
         """Parse URDF file and build kinematic tree"""

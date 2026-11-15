@@ -1,6 +1,7 @@
 import os
 import shutil
 import time
+import traceback
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict
 
@@ -828,19 +829,25 @@ class BaseRunner(ABC):
         return checkpoint_dir
 
     def _upload_checkpoint(self, checkpoint_dir: str, iteration: int) -> None:
-        """Upload checkpoint to wandb as an artifact. Never interrupts training on failure."""
+        """Upload checkpoint to wandb as an artifact.
+
+        A failed upload does not interrupt training: the traceback is
+        printed and the local checkpoint is kept.
+        """
         try:
             self.wandb_logger.upload_checkpoint_artifact(
                 checkpoint_dir=checkpoint_dir,
                 iteration=iteration,
                 metadata={"iteration": iteration, "total_timesteps": self.total_timesteps},
             )
-            print(f"Uploaded checkpoint to wandb (iteration {iteration})")
-            if self.runner_cfg.delete_local_after_upload:
-                shutil.rmtree(checkpoint_dir)
-                print(f"Deleted local checkpoint: {checkpoint_dir}")
-        except Exception as e:
-            print(f"WARNING: Failed to upload checkpoint to wandb: {e}")
+        except Exception:  # except-ok: a failed upload must not kill a long run; traceback printed
+            print(f"WARNING: Failed to upload checkpoint to wandb (iteration {iteration}); keeping {checkpoint_dir}")
+            traceback.print_exc()
+            return
+        print(f"Uploaded checkpoint to wandb (iteration {iteration})")
+        if self.runner_cfg.delete_local_after_upload:
+            shutil.rmtree(checkpoint_dir)
+            print(f"Deleted local checkpoint: {checkpoint_dir}")
 
     def _save_checkpoint_to(self, checkpoint_dir: str, iteration: int) -> None:
         """Save checkpoint to specified directory."""

@@ -72,11 +72,7 @@ class BaseManager:
 
         # Case 2: function-default selectors not supplied by the preset.
         target = func.__init__ if isinstance(func, type) else func
-        try:
-            sig = inspect.signature(target)
-        except (TypeError, ValueError):
-            return
-        for param_name, param in sig.parameters.items():
+        for param_name, param in inspect.signature(target).parameters.items():
             if param_name in params:
                 continue
             if isinstance(param.default, SceneEntitySelector):

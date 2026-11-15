@@ -19,52 +19,46 @@ def parse_override_args() -> Dict[str, Any]:
     override_args = [arg for arg in sys.argv[1:] if "=" in arg]
 
     for arg in override_args:
-        try:
-            path, value = arg.split("=", 1)
-            parts = path.split(".")
+        path, value = arg.split("=", 1)
+        parts = path.split(".")
 
-            if len(parts) < 2:
-                print(f"Warning: Skipping invalid override format: {arg}. Use format: category.parameter=value")
-                continue
+        if len(parts) < 2:
+            print(f"Warning: Skipping invalid override format: {arg}. Use format: category.parameter=value")
+            continue
 
-            category = parts[0]
+        category = parts[0]
 
-            # Parse the value. A JSON list or object (``hidden_dims=[512,256]``,
-            # ``optimizer_betas=[0.9,0.95]``) comes through as that value;
-            # ``null`` is ``None`` (``event.foot_friction=null`` switches a
-            # term off, the way the saved-config diff does).
+        # Parse the value. A JSON list or object (``hidden_dims=[512,256]``,
+        # ``optimizer_betas=[0.9,0.95]``) comes through as that value;
+        # ``null`` is ``None`` (``event.foot_friction=null`` switches a
+        # term off, the way the saved-config diff does).
+        if value.lower() in ("true", "false"):
+            typed_value = value.lower() == "true"
+        elif value == "null":
+            typed_value = None
+        elif value[:1] in ("[", "{"):
+            typed_value = json.loads(value)
+        else:
             try:
-                if value.lower() in ("true", "false"):
-                    typed_value = value.lower() == "true"
-                elif value == "null":
-                    typed_value = None
-                elif value[:1] in ("[", "{"):
-                    typed_value = json.loads(value)
-                elif "." in value or "e" in value.lower():
-                    typed_value = float(value)
-                else:
-                    typed_value = int(value)
-            except ValueError:
+                typed_value = float(value) if "." in value or "e" in value.lower() else int(value)
+            except ValueError:  # except-ok: not a number, so the override is a string
                 typed_value = value
 
-            if len(parts) == 2:
-                if category not in override_dict:
-                    override_dict[category] = {}
-                override_dict[category][parts[1]] = typed_value
-            else:
-                if category not in override_dict:
-                    override_dict[category] = {}
+        if len(parts) == 2:
+            if category not in override_dict:
+                override_dict[category] = {}
+            override_dict[category][parts[1]] = typed_value
+        else:
+            if category not in override_dict:
+                override_dict[category] = {}
 
-                current = override_dict[category]
-                for i in range(1, len(parts) - 1):
-                    if parts[i] not in current:
-                        current[parts[i]] = {}
-                    current = current[parts[i]]
+            current = override_dict[category]
+            for i in range(1, len(parts) - 1):
+                if parts[i] not in current:
+                    current[parts[i]] = {}
+                current = current[parts[i]]
 
-                current[parts[-1]] = typed_value
-
-        except Exception as e:
-            print(f"Warning: Failed to parse override argument: {arg}. Error: {e}")
+            current[parts[-1]] = typed_value
 
     return override_dict
 
@@ -423,12 +417,8 @@ class BaseConfig:
                 return list(o)
             return str(o)
 
-        try:
-            formatted = json.dumps(obj, indent=indent, default=json_serializer)
-            return colorize_json(formatted)
-        except (TypeError, ValueError):
-            # Fallback to standard representation if JSON serialization fails
-            return str(obj)
+        formatted = json.dumps(obj, indent=indent, default=json_serializer)
+        return colorize_json(formatted)
 
     def apply_overrides(self, **kwargs):
         """

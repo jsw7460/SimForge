@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
-from jaxrlworld.rl.utils.console import print_error, print_info, print_success
+from jaxrlworld.rl.utils.console import print_info, print_success
 
 
 class MujocoInitializer(SimInitializer):
@@ -75,8 +75,5 @@ class MujocoInitializer(SimInitializer):
     def cleanup(self, env: Any) -> None:
         if env.visualization_manager is not None:
             print_info("Closing Mjlab viewer...")
-            try:
-                env.visualization_manager.close()
-                print_success("Mjlab viewer closed!")
-            except Exception as e:
-                print_error(f"Error closing viewer: {e}")
+            env.visualization_manager.close()
+            print_success("Mjlab viewer closed!")

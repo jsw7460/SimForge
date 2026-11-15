@@ -165,7 +165,7 @@ class CommandManager(BaseManager):
 
         try:
             column_map = object.__getattribute__(self, "_column_map")
-        except AttributeError:
+        except AttributeError:  # except-ok: __init__ not finished yet, resolve the name normally
             # __init__ not finished yet — _column_map doesn't exist.
             return object.__getattribute__(self, name)
 

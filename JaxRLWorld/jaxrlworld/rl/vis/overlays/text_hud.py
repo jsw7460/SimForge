@@ -2,19 +2,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from .base import Base2DOverlay, Overlay2DConfig
 from .hud_items import HUDItem
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import GenesisEnv
-
-try:
-    from PIL import Image, ImageDraw, ImageFont
-
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
 
 
 @dataclass
@@ -60,9 +54,6 @@ class TextHUDOverlay(Base2DOverlay):
     """
 
     def __init__(self, config: TextHUDConfig | None = None):
-        if not HAS_PIL:
-            raise ImportError("Pillow (PIL) is required for TextHUDOverlay")
-
         config = config or TextHUDConfig()
         super().__init__(config)
         self.config: TextHUDConfig = config
@@ -75,14 +66,11 @@ class TextHUDOverlay(Base2DOverlay):
         self._small_font = self._load_font(size_ratio=0.8)
 
     def _load_font(self, size_ratio: float = 1.0) -> ImageFont.FreeTypeFont:
-        """Load font with fallback to default."""
+        """Load the configured font, else the first monospace font found, else PIL's default."""
         size = int(self.config.font_size * size_ratio)
 
         if self.config.font_path:
-            try:
-                return ImageFont.truetype(self.config.font_path, size)
-            except OSError:
-                pass
+            return ImageFont.truetype(self.config.font_path, size)
 
         # Try common monospace fonts
         mono_fonts = [
@@ -98,7 +86,7 @@ class TextHUDOverlay(Base2DOverlay):
         for font_path in mono_fonts:
             try:
                 return ImageFont.truetype(font_path, size)
-            except OSError:
+            except OSError:  # except-ok: this font is not installed here, try the next candidate
                 continue
 
         # Fallback to default

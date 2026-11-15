@@ -98,12 +98,7 @@ class ViserTermOverlays:
             return
 
         env_idx = self.scene.env_idx
-        terms = {}
-        for name, tensor in self.env.rew_buf_per_type.items():
-            try:
-                terms[name] = float(tensor[env_idx])
-            except (IndexError, TypeError):
-                continue
+        terms = {name: float(tensor[env_idx]) for name, tensor in self.env.rew_buf_per_type.items()}
 
         self.reward_plotter.update(terms)
 

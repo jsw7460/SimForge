@@ -462,17 +462,12 @@ class ViserScene:
         cfg = self.scene_config
         if cfg.env_map is None:
             return
-        try:
-            self.server.scene.configure_environment_map(
-                hdri=cfg.env_map,
-                background=bool(cfg.env_map_as_background),
-                background_blurriness=float(cfg.env_map_blurriness),
-                environment_intensity=float(cfg.env_map_intensity),
-            )
-        except (TypeError, ValueError):
-            # API drift / unsupported HDRI preset — fall back to the explicit
-            # light rig + procedural sky (still gives a reasonable look).
-            pass
+        self.server.scene.configure_environment_map(
+            hdri=cfg.env_map,
+            background=bool(cfg.env_map_as_background),
+            background_blurriness=float(cfg.env_map_blurriness),
+            environment_intensity=float(cfg.env_map_intensity),
+        )
 
     def _setup_lighting(self) -> None:
         """Explicit light rig: ambient floor + hemisphere + a shadow-casting sun.
@@ -485,10 +480,7 @@ class ViserScene:
         if not cfg.lighting:
             return
         scene = self.server.scene
-        try:
-            scene.enable_default_lights(False)
-        except TypeError:
-            pass  # API drift — our lights add on top of the defaults instead
+        scene.configure_default_lights(False)
         scene.add_light_ambient("/lights/ambient", intensity=float(cfg.ambient_intensity))
         # Hemisphere light's "up" is its local +Y; rotate +Y → world +Z (Z-up scene).
         scene.add_light_hemisphere(

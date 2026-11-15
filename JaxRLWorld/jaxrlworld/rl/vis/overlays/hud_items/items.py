@@ -1,19 +1,14 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
 from genesis.utils.misc import tensor_to_array
 
+from jaxrlworld.rl.utils import entity_utils as eu
+
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import GenesisEnv
-
-try:
-    import cv2  # noqa: F401  # optional dep — gated by HAS_CV2 at use sites
-
-    HAS_CV2 = True
-except ImportError:
-    HAS_CV2 = False
 
 
 @dataclass
@@ -91,9 +86,7 @@ class BaseHeightItem(HUDItem):
         return "base_height"
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        robot = env.scene_manager.entities.get("robot")
-        if robot is None:
-            return []
+        robot = env.scene_manager.entities[env.robot_entity_name]
 
         base_pos = tensor_to_array(robot.get_pos())
         height = float(base_pos[env_idx, 2])
@@ -148,7 +141,7 @@ class CommandVelItem(HUDItem):
 class FeetHeightItemConfig(HUDItemConfig):
     """Config for feet height display."""
 
-    feet_names: tuple[str, ...] = ("FL", "FR", "RL", "RR")
+    feet_names: tuple[str, ...] = field(kw_only=True)  # the robot's feet
     feet_links: tuple[str, ...] | None = None  # Auto-generate if None
     bar_width: int = 60
     bar_height: int = 12
@@ -160,8 +153,8 @@ class FeetHeightItemConfig(HUDItemConfig):
 class FeetHeightItem(HUDItem):
     """Displays feet heights with optional bar graphs."""
 
-    def __init__(self, config: FeetHeightItemConfig | None = None):
-        super().__init__(config or FeetHeightItemConfig())
+    def __init__(self, config: FeetHeightItemConfig):
+        super().__init__(config)
         self.config: FeetHeightItemConfig = self.config
         self._links_idx: list[int] | None = None
 
@@ -176,34 +169,21 @@ class FeetHeightItem(HUDItem):
         return tuple(f"{name}_foot" if not name.endswith("_foot") else name for name in self.config.feet_names)
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        robot = env.scene_manager.entities.get("robot")
-        if robot is None:
-            return []
+        robot = env.scene_manager.entities[env.robot_entity_name]
 
         # Get feet link indices (cached)
         if self._links_idx is None:
-            try:
-                from jaxrlworld.rl.utils import entity_utils as eu
-
-                feet_links = list(self._get_feet_links())
-                self._links_idx, _ = eu.find_links(robot, feet_links, global_ids=False, preserve_order=True)
-            except Exception:
-                return []
+            feet_links = list(self._get_feet_links())
+            self._links_idx, _ = eu.find_links(robot, feet_links, global_ids=False, preserve_order=True)
 
         # Get feet positions
-        try:
-            feet_pos = robot.get_links_pos(links_idx_local=self._links_idx)
-            feet_h = tensor_to_array(feet_pos[env_idx, :, 2])
-        except Exception:
-            return []
+        feet_pos = robot.get_links_pos(links_idx_local=self._links_idx)
+        feet_h = tensor_to_array(feet_pos[env_idx, :, 2])
 
         lines: list[str | dict] = []
         precision = self.config.precision
 
         for i, name in enumerate(self.config.feet_names):
-            if i >= len(feet_h):
-                break
-
             value = float(feet_h[i])
 
             if self.config.show_bars:
@@ -287,9 +267,7 @@ class DOFPositionItem(HUDItem):
         return "joint_position"
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        robot = env.scene_manager.entities.get("robot")
-        if robot is None:
-            return []
+        robot = env.scene_manager.entities[env.robot_entity_name]
 
         dof_pos = tensor_to_array(robot.get_dofs_position())[env_idx]
         joints = robot.joints
@@ -350,9 +328,7 @@ class DOFVelocityItem(HUDItem):
         return "dof_velocity"
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        robot = env.scene_manager.entities.get("robot")
-        if robot is None:
-            return []
+        robot = env.scene_manager.entities[env.robot_entity_name]
 
         dof_vel = tensor_to_array(robot.get_dofs_velocity())
         dof_names = [dof.name for dof in robot.dofs]
@@ -397,9 +373,7 @@ class BaseVelocityItem(HUDItem):
         return "base_velocity"
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        robot = env.scene_manager.entities.get("robot")
-        if robot is None:
-            return []
+        robot = env.scene_manager.entities[env.robot_entity_name]
 
         lines = []
         precision = self.config.precision
@@ -444,29 +418,21 @@ class LinkPositionItem(HUDItem):
         return "link_position"
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        robot = env.scene_manager.entities.get("robot")
-        if robot is None or not self.config.link_patterns:
+        if not self.config.link_patterns:
             return []
+        robot = env.scene_manager.entities[env.robot_entity_name]
 
         # Cache link indices on first call
         if self._link_ids is None:
-            try:
-                from jaxrlworld.rl.utils import entity_utils as eu
-
-                self._link_ids, self._link_names = eu.find_links(
-                    robot,
-                    list(self.config.link_patterns),
-                    global_ids=False,
-                    preserve_order=self.config.preserve_order,
-                )
-            except ValueError:
-                return []
+            self._link_ids, self._link_names = eu.find_links(
+                robot,
+                list(self.config.link_patterns),
+                global_ids=False,
+                preserve_order=self.config.preserve_order,
+            )
 
         # Get link positions
-        try:
-            link_pos = tensor_to_array(robot.get_links_pos(links_idx_local=self._link_ids))[env_idx]
-        except Exception:
-            return []
+        link_pos = tensor_to_array(robot.get_links_pos(links_idx_local=self._link_ids))[env_idx]
 
         lines: list[str | dict] = []
         precision = self.config.precision
@@ -518,10 +484,7 @@ class CustomItem(HUDItem):
         return self.config.item_name
 
     def build_lines(self, env: "GenesisEnv", env_idx: int) -> list[str | dict]:
-        try:
-            value = self._fetch_fn(env, env_idx)
-        except Exception:
-            return []
+        value = self._fetch_fn(env, env_idx)
 
         label = self.config.label or self.config.item_name
         precision = self.config.precision

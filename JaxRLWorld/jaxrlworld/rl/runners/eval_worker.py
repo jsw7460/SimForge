@@ -138,7 +138,7 @@ def _worker_main(conn, heldout_motion_files: tuple[str, ...] | None, output_dir:
                     stats = runner._run_evaluation()
                 else:
                     stats = runner._evaluate_env(runner.env)
-            except Exception:
+            except Exception:  # except-ok: the worker sends the traceback to the parent, which raises it
                 conn.send(("error", traceback.format_exc()))
                 return
             conn.send(("ok", stats))

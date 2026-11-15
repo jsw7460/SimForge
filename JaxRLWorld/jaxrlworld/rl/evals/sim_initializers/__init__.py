@@ -195,7 +195,13 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
                 target_module_path = ".".join(parts)
             try:
                 mod = importlib.import_module(target_module_path)
-            except ModuleNotFoundError:
+            except ModuleNotFoundError as exc:
+                # Only the target module itself (or a package on its path)
+                # may be missing — this preset has no module for the target
+                # simulator and strategy 2 takes over. A module that exists
+                # but fails to import one of ITS dependencies raises.
+                if not (target_module_path == exc.name or target_module_path.startswith(f"{exc.name}.")):
+                    raise
                 mod = None
             if mod is not None:
                 preset_kwargs = config_dict.get("preset_kwargs") or {}
@@ -223,12 +229,9 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
 
     # --- Strategy 2: unified-config reinstantiation ---
     if preset_module_path and preset_class_name:
-        try:
-            mod = importlib.import_module(preset_module_path)
-            # A class missing from the module falls through to the ValueError below.
-            cls = getattr(mod, preset_class_name, None)  # dynamic-attr: class named by checkpoint
-        except ModuleNotFoundError:
-            cls = None
+        mod = importlib.import_module(preset_module_path)
+        # A class missing from the module falls through to the ValueError below.
+        cls = getattr(mod, preset_class_name, None)  # dynamic-attr: class named by checkpoint
         if cls is not None and is_dataclass(cls):
             field_names = {f.name for f in fields(cls)}
             if "sim_type" in field_names:

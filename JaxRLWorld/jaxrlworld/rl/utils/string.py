@@ -101,7 +101,7 @@ def is_lambda_expression(name: str) -> bool:
     try:
         ast.parse(name)
         return isinstance(ast.parse(name).body[0], ast.Expr) and isinstance(ast.parse(name).body[0].value, ast.Lambda)
-    except SyntaxError:
+    except SyntaxError:  # except-ok: a string that does not parse is not a lambda expression
         return False
 
 

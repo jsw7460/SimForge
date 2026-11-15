@@ -32,8 +32,8 @@ dependencies = [
     "colorama>=0.4",
     "pytz",
     "pyyaml>=6.0",
-    # Live training dashboard (ConsoleWriter falls back to plain block
-    # logging when rich is missing or stdout is not a terminal).
+    # Live training dashboard (ConsoleWriter uses plain block logging when
+    # stdout is not a terminal or JAXRLWORLD_PLAIN_LOG=1).
     "rich>=13.0",
 ]
 

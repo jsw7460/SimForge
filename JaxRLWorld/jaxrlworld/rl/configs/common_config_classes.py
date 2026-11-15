@@ -861,7 +861,9 @@ class VisualizationConfig(BaseConfig):
     show_command_vel: bool = True
     show_feet_height: bool = True
     show_episode_info: bool = True
-    feet_names: tuple[str, ...] = ("FL", "FR", "RL", "RR")
+    # Feet whose height the Genesis HUD shows (link names, "_foot" appended
+    # when missing); None shows no feet row. Each preset names its robot's.
+    feet_names: tuple[str, ...] | None = None
     extra_hud_items: "list[HUDItem]" = field(default_factory=list)
 
     # Viewer type

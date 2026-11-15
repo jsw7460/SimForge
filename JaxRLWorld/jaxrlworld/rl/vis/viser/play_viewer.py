@@ -8,12 +8,14 @@ ViserMujocoScene for MuJoCo).
 
 from __future__ import annotations
 
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, auto
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import torch
 import trimesh
 import trimesh.visual
 import viser
@@ -255,13 +257,8 @@ class ViserPlayViewer(PlayViewerBase):
             "left_foot",
             "right_foot",
         )
-        ids: dict[str, int] = {}
-        for name in candidates:
-            try:
-                ids[name] = int(rd.find_body_index(name))
-            except Exception:  # noqa: BLE001 — body simply absent on this robot
-                pass
-        return ids
+        bodies = set(self.env.scene_manager.find_body_names([".*"]))
+        return {name: int(rd.find_body_index(name)) for name in candidates if name in bodies}
 
     def _update_inspect_display(self) -> None:
         html = self._inspect_html
@@ -278,40 +275,35 @@ class ViserPlayViewer(PlayViewerBase):
                 'font-family:monospace;">' + inner + "</div>"
             )
 
-        try:
-            import torch
+        env_idx = int(self._play_scene.env_idx)
+        rd = self.env.get_robot_data("robot")
 
-            env_idx = int(self._play_scene.env_idx)
-            rd = self.env.get_robot_data("robot")
+        if mode == "Foot height":
+            if self._foot_ids is None:
+                self._foot_ids = self._resolve_foot_ids(rd)
+            if not self._foot_ids:
+                html.content = _wrap("<i>no foot bodies found on this robot</i>")
+                return
+            rows = []
+            for name, bid in self._foot_ids.items():
+                ids_t = torch.tensor([bid], device=self.env.device)
+                z = float(rd.body_pos_w_by_ids(ids_t)[env_idx, 0, 2])
+                peak = max(self._foot_peak.get(bid, z), z)
+                self._foot_peak[bid] = peak
+                rows.append(f"{name:22s} z={z:6.3f}  peak={peak:6.3f}")
+            note = "<span style='color:#888'>link-origin z (== reward height); sole ≈ z − 0.038</span>"
+            html.content = _wrap("<br/>".join(rows) + "<br/>" + note)
 
-            if mode == "Foot height":
-                if self._foot_ids is None:
-                    self._foot_ids = self._resolve_foot_ids(rd)
-                if not self._foot_ids:
-                    html.content = _wrap("<i>no foot bodies found on this robot</i>")
-                    return
-                rows = []
-                for name, bid in self._foot_ids.items():
-                    ids_t = torch.tensor([bid], device=self.env.device)
-                    z = float(rd.body_pos_w_by_ids(ids_t)[env_idx, 0, 2])
-                    peak = max(self._foot_peak.get(bid, z), z)
-                    self._foot_peak[bid] = peak
-                    rows.append(f"{name:22s} z={z:6.3f}  peak={peak:6.3f}")
-                note = "<span style='color:#888'>link-origin z (== reward height); sole ≈ z − 0.038</span>"
-                html.content = _wrap("<br/>".join(rows) + "<br/>" + note)
+        elif mode == "Link positions":
+            pos = rd.body_pos_w_all[env_idx].detach().cpu().numpy()  # (num_bodies, 3)
+            rows = [f"body {i:2d}  x={p[0]:6.3f} y={p[1]:6.3f} z={p[2]:6.3f}" for i, p in enumerate(pos)]
+            html.content = _wrap("<br/>".join(rows))
 
-            elif mode == "Link positions":
-                pos = rd.body_pos_w_all[env_idx].detach().cpu().numpy()  # (num_bodies, 3)
-                rows = [f"body {i:2d}  x={p[0]:6.3f} y={p[1]:6.3f} z={p[2]:6.3f}" for i, p in enumerate(pos)]
-                html.content = _wrap("<br/>".join(rows))
-
-            elif mode == "Joint angles":
-                names = list(self.env.act_manager.actuated_joint_names)
-                q = rd.joint_pos[env_idx].detach().cpu().numpy()
-                rows = [f"{n:22s} {float(v):+.3f}" for n, v in zip(names, q)]
-                html.content = _wrap("<br/>".join(rows))
-        except Exception as e:  # noqa: BLE001 — diagnostic readout, never crash the viewer
-            html.content = _wrap(f"<i>inspect error: {e}</i>")
+        elif mode == "Joint angles":
+            names = list(self.env.act_manager.actuated_joint_names)
+            q = rd.joint_pos[env_idx].detach().cpu().numpy()
+            rows = [f"{n:22s} {float(v):+.3f}" for n, v in zip(names, q)]
+            html.content = _wrap("<br/>".join(rows))
 
     def _build_motion_controls(self, tabs: Any) -> None:
         """Add a Motion tab exposing clip selection + rollover-lock toggle.
@@ -336,10 +328,7 @@ class ViserPlayViewer(PlayViewerBase):
         n_clips = motion_cmd._n_motions
         # Reflect whichever clip env 0 is currently tracking so the
         # dropdown's initial value matches sim state.
-        try:
-            current_idx = int(motion_cmd.motion_ids[0].item())
-        except Exception:
-            current_idx = 0
+        current_idx = int(motion_cmd.motion_ids[0].item())
         current_idx = max(0, min(current_idx, n_clips - 1))
 
         with tabs.add_tab("Motion", icon=viser.Icon.PLAYER_PLAY):
@@ -579,9 +568,7 @@ class ViserPlayViewer(PlayViewerBase):
                         if self._motion_ghost is not None:
                             self._motion_ghost.update(self._play_scene.env_idx, self._play_scene.scene_offset)
                         self._server.flush()
-            except Exception:
-                import traceback
-
+            except Exception:  # except-ok: the render worker thread prints the full traceback and keeps serving frames
                 print(f"[PlayViewer] Scene update error:\n{traceback.format_exc()}")
 
         self._threadpool.submit(_do_update)

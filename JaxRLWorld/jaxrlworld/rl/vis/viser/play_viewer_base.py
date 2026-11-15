@@ -272,7 +272,7 @@ class PlayViewerBase(ABC):
                     self.policy.notify_reset(reset_idx.cpu().numpy())
 
                 return True
-        except Exception:
+        except Exception:  # except-ok: the traceback goes to the console and the GUI status; the viewer pauses
             self._last_error = traceback.format_exc()
             print(f"[PlayViewer] Exception during step:\n{self._last_error}")
             self.pause()
@@ -375,7 +375,7 @@ class PlayViewerBase(ABC):
         try:
             try:
                 prev_handler = signal.signal(signal.SIGINT, self._sigint_handler)
-            except ValueError:
+            except ValueError:  # except-ok: signal handlers can only be installed from the main thread
                 pass  # Non-main thread.
 
             while self.is_running() and (num_steps is None or self._step_count < num_steps) and not self._interrupted:

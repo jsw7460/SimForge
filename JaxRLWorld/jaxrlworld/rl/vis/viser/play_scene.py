@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import viser
+from scipy.spatial.transform import Rotation
 
 from .looks import get_look
 
@@ -243,18 +244,12 @@ class MujocoPlayScene:
         yaw = _yaw_from_wxyz(xquat[env_idx, tracked_id])
         scene_offset = self._mj_scene._scene_offset
         # Body velocity from cvel.
-        vel = None
-        try:
-            cvel = data.cvel.cpu().numpy()
-            vel_6d = cvel[env_idx, tracked_id]  # (6,) [wx,wy,wz,vx,vy,vz]
-            world_vel = vel_6d[3:6]
-            w, x, y, z = xquat[env_idx, tracked_id]
-            from scipy.spatial.transform import Rotation
-
-            body_vel = Rotation.from_quat([x, y, z, w]).inv().apply(world_vel)
-            vel = body_vel[:2].astype(np.float32)
-        except Exception:
-            pass
+        cvel = data.cvel.cpu().numpy()
+        vel_6d = cvel[env_idx, tracked_id]  # (6,) [wx,wy,wz,vx,vy,vz]
+        world_vel = vel_6d[3:6]
+        w, x, y, z = xquat[env_idx, tracked_id]
+        body_vel = Rotation.from_quat([x, y, z, w]).inv().apply(world_vel)
+        vel = body_vel[:2].astype(np.float32)
         return TrackedBodyData(
             position=pos.copy(),
             yaw=yaw,

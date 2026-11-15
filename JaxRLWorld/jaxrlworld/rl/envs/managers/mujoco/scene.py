@@ -857,7 +857,7 @@ class MujocoSceneManager(BaseManager):
         return matched_names
 
     def _set_kinematic_tree(self) -> None:
-        """Build kinematic trees for all entities from their MjSpec XML.
+        """Build kinematic trees for all entities from a fresh MjSpec.
 
         Once the scene has been compiled, each entity's ``entity.spec``
         is attached by reference to the parent world spec, so calling
@@ -871,17 +871,10 @@ class MujocoSceneManager(BaseManager):
         was used to build the entity in the first place — for the
         standard ``EntityCfg`` path this is e.g.
         ``mujoco.MjSpec.from_file(...)``, which always returns a fresh
-        standalone spec with the full body tree intact. Entities whose
-        ``spec_fn`` cannot rebuild a standalone spec are skipped.
+        standalone spec with the full body tree intact.
         """
 
         def _resolve(name: str):
-            spec_fn = self._scene.entities[name].cfg.spec_fn
-            try:
-                fresh_spec = spec_fn()
-                xml_content = fresh_spec.to_xml()
-            except Exception:
-                return None
-            return ("mjcf_xml", xml_content)
+            return ("mjcf_spec", self._scene.entities[name].cfg.spec_fn())
 
         self.trees = build_kinematic_trees(self._scene.entities.keys(), _resolve)

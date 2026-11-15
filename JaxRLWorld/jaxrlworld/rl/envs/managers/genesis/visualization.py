@@ -11,13 +11,6 @@ if TYPE_CHECKING:
     from jaxrlworld.rl.envs import GenesisEnv
     from jaxrlworld.rl.vis.overlays import TextHUDOverlay
 
-try:
-    import cv2  # noqa: F401  # optional dep — gated by HAS_CV2 at use sites
-
-    HAS_CV2 = True
-except ImportError:
-    HAS_CV2 = False
-
 
 @dataclass
 class VisualizationManagerConfig:
@@ -41,7 +34,7 @@ class VisualizationManagerConfig:
     # 2D HUD settings
     enable_text_hud: bool = True
     hud_position: str = "top_left"
-    feet_names: tuple[str, ...] = ("FL", "FR", "RL", "RR")
+    feet_names: tuple[str, ...] | None = None  # None: no feet-height row
     extra_hud_items: list = field(default_factory=list)  # Added after default items
 
 
@@ -126,7 +119,6 @@ class VisualizationManager(BaseManager):
         overlay_settings = OverlaySettings(
             enable_command_arrow=self.config.enable_command_arrow,
             command_arrow_config=arrow_config,
-            feet_links=tuple(f"{name}_foot" if not name.endswith("_foot") else name for name in self.config.feet_names),
             render_env_ids=self.config.record_env_ids,
         )
 
@@ -221,10 +213,6 @@ class VisualizationManager(BaseManager):
 
     def _init_default_hud(self) -> None:
         """Initialize text HUD with default items."""
-        if not HAS_CV2:
-            gs.logger.warning("OpenCV not available. Text HUD disabled.")
-            return
-
         from jaxrlworld.rl.vis.overlays import TextHUDConfig, TextHUDOverlay
         from jaxrlworld.rl.vis.overlays.hud_items import (
             BaseHeightItem,
@@ -243,13 +231,8 @@ class VisualizationManager(BaseManager):
 
         self._text_hud.add_item(BaseHeightItem())
         self._text_hud.add_item(CommandVelItem())
-        self._text_hud.add_item(
-            FeetHeightItem(
-                FeetHeightItemConfig(
-                    feet_names=self.config.feet_names,
-                )
-            )
-        )
+        if self.config.feet_names is not None:
+            self._text_hud.add_item(FeetHeightItem(FeetHeightItemConfig(feet_names=self.config.feet_names)))
         self._text_hud.add_item(EpisodeInfoItem())
         self._text_hud.add_item(DOFPositionItem())
 

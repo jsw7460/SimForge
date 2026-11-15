@@ -118,7 +118,7 @@ class ContactForceOverlay:
                 try:
                     ids.append(rd.find_body_index(cand))
                     break
-                except (KeyError, ValueError):
+                except (KeyError, ValueError):  # except-ok: not this spelling of the name, try the next candidate
                     continue
             else:
                 self._status.content = f"⚠ `{group}`: tracked name `{name}` matches no robot body — not drawn."
@@ -141,15 +141,8 @@ class ContactForceOverlay:
         if ids is None:
             self._hide()
             return
-        try:
-            force = self._env.contact_manager.contact_force(group)
-        except (ValueError, RuntimeError) as e:
-            # Belt over the dropdown filter: a group without a force
-            # field (or a backend refusing the read) reports in the GUI
-            # instead of killing the viewer's update loop.
-            self._status.content = f"⚠ `{group}`: {e}"
-            self._hide()
-            return
+        # The dropdown lists only groups that track forces.
+        force = self._env.contact_manager.contact_force(group)
         self._status.content = ""
 
         force_np = force[env_idx].detach().cpu().numpy().astype(np.float32)  # (N, 3)
