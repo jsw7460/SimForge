@@ -48,8 +48,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+import mujoco_warp as mjwarp
 import numpy as np
 import torch
+import warp as wp
 
 # ── Asset paths ──────────────────────────────────────────────────────────────
 
@@ -75,13 +77,6 @@ def _try_arr(x: Any) -> Any:
 def _bridge_arr(x: Any) -> list:
     """Convert an mjlab ``TorchArray`` (a mujoco-warp field behind the torch bridge) to a nested list."""
     return x[...].detach().cpu().tolist()
-
-
-def _safe(f, default=None):
-    try:
-        return f()
-    except Exception:
-        return default
 
 
 # ── (1) g1.xml MJCF ground truth ─────────────────────────────────────────────
@@ -192,93 +187,65 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
         foot_link_names = list(cfg.robot.foot_names)
         out["foot_link_names"] = foot_link_names
 
-        # Per-link → per-geom capsule entries. Genesis ``RigidGeom`` stores
-        # the local capsule origin in ``_init_pos`` / ``_init_quat`` (frame:
-        # parent link), the capsule ``[radius, height]`` in ``_data``, and
-        # the type enum in ``_type``. World pose comes from ``get_pos`` /
-        # ``get_quat`` which read out of ``vgeoms_state``.
+        # Per-link → per-geom capsule entries. Genesis ``RigidGeom`` exposes
+        # the local capsule origin as ``init_pos`` / ``init_quat`` (frame:
+        # parent link), the capsule ``[radius, height]`` in ``data``, and
+        # the type enum as ``type``. World pose comes from ``get_pos`` /
+        # ``get_quat``; friction and sol_params from the solver-side getters
+        # (the values the simulation is currently using).
         capsules: list[dict] = []
         for link in robot.links:
             lname = link.name
             if "ankle_roll" not in lname:
                 continue
             for g in link.geoms:
-                gtype = type(g).__name__
-                gidx = g.idx
-                # data layout for capsule: [radius, height]
-                data = _try_arr(g.data)
-                radius = data[0] if isinstance(data, list) and len(data) >= 1 else None
-                height = data[1] if isinstance(data, list) and len(data) >= 2 else None
-                # Local pose in parent link frame.
-                local_pos = _try_arr(getattr(g, "_init_pos", None))
-                local_quat = _try_arr(getattr(g, "_init_quat", None))
-                # World pose at env 0 — via Genesis's own getters.
-                world_pos = None
-                world_quat = None
-                try:
-                    wp = g.get_pos(envs_idx=None)
-                    world_pos = _try_arr(wp[0])
-                except Exception as e:
-                    world_pos = f"err:{e!r}"
-                try:
-                    wq = g.get_quat(envs_idx=None)
-                    world_quat = _try_arr(wq[0])
-                except Exception as e:
-                    world_quat = f"err:{e!r}"
+                # data layout for capsule: [radius, height, ...]
+                data = g.data.tolist()
                 # Capsule endpoints in LOCAL frame (axis = z by Genesis convention):
                 # ``height`` is the distance between the two sphere centres, so the
                 # endpoints are ±height/2 along the local +z axis (transformed by
-                # _init_quat into the parent link frame and then by the world pose).
+                # init_quat into the parent link frame and then by the world pose).
                 # We just report the local axis half-length here; world endpoints
                 # are computed in the render layer using world_quat.
-                gtype_enum = getattr(g, "_type", None)
-                gtype_name = None
-                try:
-                    gtype_name = gtype_enum.name if hasattr(gtype_enum, "name") else str(gtype_enum)
-                except Exception:
-                    gtype_name = repr(gtype_enum)
                 entry: dict = {
                     "link_name": lname,
                     "link_idx": link.idx,
-                    "geom_idx": int(gidx),
-                    "py_type": gtype,
-                    "gs_type": gtype_name,
-                    "radius": radius,
-                    "height": height,
-                    "local_pos": local_pos,
-                    "local_quat": local_quat,
-                    "world_pos_env0": world_pos,
-                    "world_quat_env0": world_quat,
-                    "friction": _safe(lambda g=g: float(getattr(g, "_friction", float("nan")))),
-                    "contype": _safe(lambda g=g: getattr(g, "_contype", None)),
-                    "conaffinity": _safe(lambda g=g: getattr(g, "_conaffinity", None)),
-                    "is_convex": _safe(lambda g=g: bool(g.is_convex)),
-                    "needs_coup": _safe(lambda g=g: bool(g.needs_coup)),
-                    "sol_params": _try_arr(_safe(lambda g=g: g.sol_params)),
+                    "geom_idx": int(g.idx),
+                    "py_type": type(g).__name__,
+                    "gs_type": g.type.name,
+                    "radius": data[0],
+                    "height": data[1],
+                    "local_pos": g.init_pos.tolist(),
+                    "local_quat": g.init_quat.tolist(),
+                    # World pose at env 0 — via Genesis's own getters.
+                    "world_pos_env0": _try_arr(g.get_pos()[0]),
+                    "world_quat_env0": _try_arr(g.get_quat()[0]),
+                    "friction": float(g.get_friction()),
+                    "contype": int(g.contype),
+                    "conaffinity": int(g.conaffinity),
+                    "is_convex": bool(g.is_convex),
+                    "needs_coup": bool(g.needs_coup),
+                    "sol_params": _try_arr(g.get_sol_params()),
                 }
                 capsules.append(entry)
         out["genesis_foot_capsules_static"] = capsules
 
         # Total geom count (sanity).
-        try:
-            out["n_geoms_total"] = int(rs.n_geoms)
-        except Exception as e:
-            out["n_geoms_total_err"] = repr(e)
+        out["n_geoms_total"] = int(rs.n_geoms)
 
         # ── Contact result per capsule ────────────────────────────────
         # Re-query collider.get_contacts; the parity diag already proved this
         # is correct after the n_env0 slice fix.
         try:
-            ncon_per_env = _try_arr(rs.collider.collider_state.n_contacts)
-            n_env0 = int(ncon_per_env[0]) if isinstance(ncon_per_env, list) and ncon_per_env else 32
+            n_env0 = int(rs.collider.collider_state.n_contacts.to_numpy()[0])
             out["n_contacts_env0"] = n_env0
 
             ground_entity = env.scene_manager.terrain.entity
             if ground_entity is not None:
                 contacts = robot.get_contacts(with_entity=ground_entity)
-                ga = _try_arr(contacts.get("geom_a")) or []
-                fa = _try_arr(contacts.get("force_a")) or []
-                pos = _try_arr(contacts.get("position")) or []
+                ga = _try_arr(contacts["geom_a"])
+                fa = _try_arr(contacts["force_a"])
+                pos = _try_arr(contacts["position"])
                 ga0 = ga[0][:n_env0] if ga and isinstance(ga[0], list) else ga[:n_env0]
                 fa0 = fa[0][:n_env0] if fa and isinstance(fa[0], list) else fa[:n_env0]
                 pos0 = pos[0][:n_env0] if pos and isinstance(pos[0], list) else pos[:n_env0]
@@ -319,24 +286,21 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
                 "contact_pruning_tolerance": ro.contact_pruning_tolerance,
                 "enable_self_collision": ro.enable_self_collision,
                 "enable_collision": ro.enable_collision,
-                "use_contact_island": getattr(ro, "use_contact_island", None),
                 "constraint_timeconst": ro.constraint_timeconst,
                 "_sol_default_timeconst": float(rs._sol_default_timeconst),
                 "_sol_min_timeconst": float(rs._sol_min_timeconst),
-                "integrator": str(rs._integrator),
-                "collider_info_max_collision_pairs": _safe(lambda: int(collider_info.max_collision_pairs[None])),
-                "collider_info_max_collision_pairs_broad": _safe(
-                    lambda: int(collider_info.max_collision_pairs_broad[None])
-                ),
-                "static_config_has_prunable_contacts": _safe(lambda: bool(collider_static.has_prunable_contacts)),
-                "static_config_spatial_sort_supported": _safe(lambda: bool(collider_static.spatial_sort_supported)),
+                "integrator": rs._integrator.name,
+                "collider_info_max_collision_pairs": int(collider_info.max_collision_pairs[None]),
+                "collider_info_max_collision_pairs_broad": int(collider_info.max_collision_pairs_broad[None]),
+                "static_config_has_prunable_contacts": bool(collider_static.has_prunable_contacts),
             }
         except Exception as e:
             out["genesis_collider_cfg_err"] = repr(e)
 
         # ── Per-geom sol_params (effective post-sanitisation) ─────────
         try:
-            sp = _try_arr(rs.geoms_info.sol_params)
+            # The per-geom sol_params field ``RigidGeom.get_sol_params`` reads.
+            sp = _try_arr(rs.dyn_info.geoms.sol_params)
             out["genesis_geom_sol_params_for_foot_capsules"] = [
                 {
                     "geom_idx": c["geom_idx"],
@@ -390,8 +354,8 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
                 geom_name = mj.geom(gid).name or ""
                 if "_foot" not in geom_name or "_collision" not in geom_name:
                     continue
-                bid = _safe(lambda gid=gid: int(mj.geom_bodyid[gid]))
-                bname = _safe(lambda bid=bid: mj.body(bid).name) if bid is not None else None
+                bid = int(mj.geom_bodyid[gid])
+                bname = mj.body(bid).name
                 gtype = int(mj.geom_type[gid])
                 entry = {
                     "geom_id": gid,
@@ -411,7 +375,7 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
                     "contype": int(mj.geom_contype[gid]),
                     "conaffinity": int(mj.geom_conaffinity[gid]),
                     "group": int(mj.geom_group[gid]),
-                    "priority": _safe(lambda gid=gid: int(mj.geom_priority[gid])),
+                    "priority": int(mj.geom_priority[gid]),
                 }
                 capsules.append(entry)
         except Exception as e:
@@ -420,25 +384,14 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
         out["mujoco_foot_capsules_static"] = capsules
 
         # ── Runtime world pose at current step (env 0) ────────────────
-        # mujoco-warp packs geom_xpos/geom_xmat as (n_world, n_geoms, ...).
+        # mujoco-warp packs geom_xpos/geom_xmat as (nworld, ngeom, ...).
         try:
             geom_xpos = _bridge_arr(data.geom_xpos)
             geom_xmat = _bridge_arr(data.geom_xmat)
             for c in capsules:
                 gid = c["geom_id"]
-                try:
-                    if isinstance(geom_xpos, list) and geom_xpos and isinstance(geom_xpos[0], list):
-                        if isinstance(geom_xpos[0][0], list):  # (n_world, n_geoms, 3)
-                            c["world_pos_env0"] = geom_xpos[0][gid]
-                        else:  # (n_geoms, 3)
-                            c["world_pos_env0"] = geom_xpos[gid]
-                    if isinstance(geom_xmat, list) and geom_xmat and isinstance(geom_xmat[0], list):
-                        if isinstance(geom_xmat[0][0], list):
-                            c["world_mat_env0"] = geom_xmat[0][gid]
-                        else:
-                            c["world_mat_env0"] = geom_xmat[gid]
-                except Exception:
-                    pass
+                c["world_pos_env0"] = geom_xpos[0][gid]
+                c["world_mat_env0"] = geom_xmat[0][gid]
         except Exception as e:
             out["mujoco_world_pose_err"] = repr(e)
 
@@ -446,67 +399,69 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
         # mujoco-warp data: contact buffer at ``data.contact.{geom,dist,pos,frame,...}``,
         # shape ``(naconmax,)`` packed across worlds. Per-world contact index
         # is given by ``contact.worldid``. ``nacon`` is the active contact
-        # count, total across all worlds.
+        # count, total across all worlds: slots ``>= nacon`` hold stale rows
+        # from earlier steps and are skipped. ``Contact`` carries no force
+        # field; per-contact forces come from ``mujoco_warp.contact_force``,
+        # which decodes them from ``efc.force`` (world frame here).
         try:
             # 1) Active contact count.
+            nacon = int(scene_manager.wp_data.nacon.numpy()[0])
             out["mujoco_ncon_attr"] = "nacon"
             out["mujoco_ncon_raw"] = _bridge_arr(data.nacon)
             out["mujoco_naconmax"] = data.naconmax
 
             # 2) Per-contact fields (all envs interleaved by worldid).
-            contact_geom = _bridge_arr(data.contact.geom)
-            contact_dist = _bridge_arr(data.contact.dist)
-            contact_pos = _bridge_arr(data.contact.pos)
-            contact_worldid = _bridge_arr(data.contact.worldid)
-            contact_force = _try_arr(getattr(data.contact, "force", None))
+            contact_geom = _bridge_arr(data.contact.geom)[:nacon]
+            contact_dist = _bridge_arr(data.contact.dist)[:nacon]
+            contact_pos = _bridge_arr(data.contact.pos)[:nacon]
+            contact_worldid = _bridge_arr(data.contact.worldid)[:nacon]
+            force_out = wp.zeros(nacon, dtype=wp.spatial_vector, device=scene_manager.sim.wp_device)
+            mjwarp.contact_force(
+                scene_manager.sim.wp_model,
+                scene_manager.wp_data,
+                wp.array(np.arange(nacon, dtype=np.int32), dtype=int, device=scene_manager.sim.wp_device),
+                True,
+                force_out,
+            )
+            # spatial_vector rows are (force xyz, torque xyz).
+            contact_force = force_out.numpy()[:, :3].tolist()
 
             foot_geom_ids = {c["geom_id"] for c in capsules}
             per_geom: dict[int, dict] = {}
             n_env0_contacts_seen = 0
 
             # 3) Pick out env-0 contacts and aggregate per foot geom.
-            if contact_geom is not None and contact_worldid is not None:
-                # ncon_total can be a per-world or scalar. We just iterate the
-                # full buffer length and filter by worldid == 0 (env 0).
-                for i in range(len(contact_geom)):
-                    wid = int(contact_worldid[i]) if i < len(contact_worldid) else -1
-                    if wid != 0:
-                        continue
-                    pair = contact_geom[i]
-                    if not isinstance(pair, list) or len(pair) < 2:
-                        continue
-                    g1_, g2_ = int(pair[0]), int(pair[1])
-                    matched_fg = None
-                    if g1_ in foot_geom_ids:
-                        matched_fg = g1_
-                    elif g2_ in foot_geom_ids:
-                        matched_fg = g2_
-                    if matched_fg is None:
-                        continue
-                    n_env0_contacts_seen += 1
-                    g = per_geom.setdefault(
-                        matched_fg,
-                        {
-                            "n_contacts": 0,
-                            "total_force_mag": 0.0,
-                            "max_force_mag": 0.0,
-                            "min_force_mag": float("inf"),
-                            "penetrations": [],
-                            "positions": [],
-                        },
-                    )
-                    g["n_contacts"] += 1
-                    if contact_dist is not None and i < len(contact_dist):
-                        g["penetrations"].append(contact_dist[i])
-                    if contact_pos is not None and i < len(contact_pos):
-                        g["positions"].append(contact_pos[i])
-                    if contact_force is not None and i < len(contact_force):
-                        fvec = contact_force[i]
-                        if isinstance(fvec, list) and len(fvec) >= 3:
-                            fmag = (fvec[0] ** 2 + fvec[1] ** 2 + fvec[2] ** 2) ** 0.5
-                            g["total_force_mag"] += fmag
-                            g["max_force_mag"] = max(g["max_force_mag"], fmag)
-                            g["min_force_mag"] = min(g["min_force_mag"], fmag)
+            for i in range(nacon):
+                if int(contact_worldid[i]) != 0:
+                    continue
+                g1_, g2_ = int(contact_geom[i][0]), int(contact_geom[i][1])
+                matched_fg = None
+                if g1_ in foot_geom_ids:
+                    matched_fg = g1_
+                elif g2_ in foot_geom_ids:
+                    matched_fg = g2_
+                if matched_fg is None:
+                    continue
+                n_env0_contacts_seen += 1
+                g = per_geom.setdefault(
+                    matched_fg,
+                    {
+                        "n_contacts": 0,
+                        "total_force_mag": 0.0,
+                        "max_force_mag": 0.0,
+                        "min_force_mag": float("inf"),
+                        "penetrations": [],
+                        "positions": [],
+                    },
+                )
+                g["n_contacts"] += 1
+                g["penetrations"].append(contact_dist[i])
+                g["positions"].append(contact_pos[i])
+                fvec = contact_force[i]
+                fmag = (fvec[0] ** 2 + fvec[1] ** 2 + fvec[2] ** 2) ** 0.5
+                g["total_force_mag"] += fmag
+                g["max_force_mag"] = max(g["max_force_mag"], fmag)
+                g["min_force_mag"] = min(g["min_force_mag"], fmag)
             out["mujoco_foot_contacts_env0_count"] = n_env0_contacts_seen
             # For backward compatibility with the render code: report env0
             # total contacts under the historical key as well.

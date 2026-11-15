@@ -11,7 +11,7 @@ cadence, and dumping the compiled model + live contact counts:
    timed ``env.step(zero_actions)`` — their managers, their model.
 2. ours: the speed-parity preset, timed ``env.step(zero_actions)``.
 
-If the two engines see different ncon/nefc or model sizes, the gap is a
+If the two engines see different nacon/nefc or model sizes, the gap is a
 scene/model difference; if those match and mjlab still steps faster, the
 difference is in the stacks' host-side work.
 
@@ -33,15 +33,9 @@ def _cuda_sync() -> None:
 
 
 def _model_stats(mj_model, wp_data) -> dict:
-    import warp as wp
-
-    ncon_arr = getattr(wp_data, "ncon", None)
-    if ncon_arr is None:
-        ncon = -1
-    elif isinstance(ncon_arr, torch.Tensor):
-        ncon = int(ncon_arr.sum().item())
-    else:
-        ncon = int(wp.to_torch(ncon_arr).sum().item())
+    # mujoco_warp keeps one contact counter for the whole batch:
+    # ``Data.nacon`` is a 1-element array holding the count across worlds.
+    nacon = int(wp_data.nacon.numpy()[0])
     stats = {
         "nq": mj_model.nq,
         "nv": mj_model.nv,
@@ -51,7 +45,7 @@ def _model_stats(mj_model, wp_data) -> dict:
         "nsensor": mj_model.nsensor,
         "naconmax": wp_data.naconmax,
         "njmax": wp_data.njmax,
-        "live ncon (total)": ncon,
+        "live nacon (all worlds)": nacon,
     }
     names = [mj_model.sensor(i).name for i in range(mj_model.nsensor)]
     stats["sensor names"] = ", ".join(names)

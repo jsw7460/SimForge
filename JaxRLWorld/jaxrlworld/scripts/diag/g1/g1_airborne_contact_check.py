@@ -1,4 +1,4 @@
-"""Airborne contact check: verify mjwarp reports ncon=0 and zero base-DOF
+"""Airborne contact check: verify mjwarp reports nacon=0 and zero base-DOF
 constraint force when the robot is in free fall.
 
 NOTE: this script does NOT override the initial height at runtime (that path
@@ -21,11 +21,12 @@ Then run::
 Compare side by side.
 
 What it checks:
-  - ``ncon``              — mjwarp's active contact count
+  - ``nacon``             — mjwarp's active contact count (``Data.nacon``,
+                              summed over worlds; this script runs one world)
   - ``|qfrc_constraint[0:6]|`` — base 6 DOF (free joint) constraint force
   - ``|qfrc_constraint[6:]|``  — 29 hinge DOF constraint forces
 
-If the robot is truly in the air (z=10), ncon must be 0, base must be 0,
+If the robot is truly in the air (z=10), nacon must be 0, base must be 0,
 and hinge values must stay within ±frictionloss (0.3 for G1). Any deviation
 means the sim is generating phantom contacts even in free fall.
 """
@@ -40,10 +41,8 @@ import torch
 from jaxrlworld.rl.evals.evaluator import PolicyEvaluator
 
 
-def _np(x):
-    """Host copy of a raw mujoco_warp ``wp.array`` field (``None`` passes through)."""
-    if x is None:
-        return None
+def _np(x) -> np.ndarray:
+    """Host copy of a raw mujoco_warp ``wp.array`` field."""
     return x.numpy()
 
 
@@ -57,22 +56,9 @@ def _get_mjw_data(env, sim_type: str):
     raise ValueError(sim_type)
 
 
-def _scalar_int(x) -> int:
-    arr = _np(x)
-    if arr is None:
-        return -1
-    if arr.ndim == 0:
-        return int(arr)
-    return int(arr.flat[0])
-
-
 def _first_row(x) -> np.ndarray:
-    arr = _np(x)
-    if arr is None:
-        return np.array([])
-    if arr.ndim == 2:
-        return arr[0]
-    return arr
+    """World 0 of a ``(nworld, n)`` mujoco_warp field."""
+    return _np(x)[0]
 
 
 def main() -> None:
@@ -108,7 +94,7 @@ def main() -> None:
     print("")
 
     hdr = (
-        f"{'step':>4}  {'ncon':>5}  {'root_z':>8}  "
+        f"{'step':>4}  {'nacon':>5}  {'root_z':>8}  "
         f"{'|qcons[0:6]|max':>16}  {'|qcons[6:]|max':>16}  "
         f"{'hinge_over_fl':>14}  {'VERDICT':<10}"
     )
@@ -116,21 +102,23 @@ def main() -> None:
     print("-" * len(hdr))
 
     for step in range(args.n_steps):
-        ncon = _scalar_int(getattr(mjw, "ncon", None))
+        # ``nacon`` is a 1-element array: the contact count over all
+        # worlds, which is world 0's count with num_envs=1.
+        nacon = int(_np(mjw.nacon)[0])
         qfrc = _first_row(mjw.qfrc_constraint)
         qpos = _first_row(mjw.qpos)
-        root_z = float(qpos[2]) if qpos.size >= 3 else float("nan")
+        root_z = float(qpos[2])
 
-        base_max = float(np.abs(qfrc[0:6]).max()) if qfrc.size >= 6 else float("nan")
-        hinge = np.abs(qfrc[6:]) if qfrc.size > 6 else np.array([])
-        hinge_max = float(hinge.max()) if hinge.size else float("nan")
-        hinge_over = int((hinge > args.frictionloss + 1e-4).sum()) if hinge.size else -1
+        base_max = float(np.abs(qfrc[0:6]).max())
+        hinge = np.abs(qfrc[6:])
+        hinge_max = float(hinge.max())
+        hinge_over = int((hinge > args.frictionloss + 1e-4).sum())
 
-        clean = (base_max < 1e-4) and (hinge_over == 0) and (ncon == 0 or ncon == -1)
+        clean = (base_max < 1e-4) and (hinge_over == 0) and (nacon == 0)
         verdict = "CLEAN" if clean else "DIRTY"
 
         print(
-            f"{step:>4}  {ncon:>5}  {root_z:>+8.3f}  "
+            f"{step:>4}  {nacon:>5}  {root_z:>+8.3f}  "
             f"{base_max:>+16.6f}  {hinge_max:>+16.6f}  "
             f"{hinge_over:>14}  {verdict:<10}"
         )

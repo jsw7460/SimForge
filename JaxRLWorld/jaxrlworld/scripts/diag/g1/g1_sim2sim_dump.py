@@ -35,11 +35,15 @@ from __future__ import annotations
 import argparse
 import sys
 
+import mujoco
+import mujoco_warp as mjwarp
 import numpy as np
 import torch
+import warp as wp
 
 from jaxrlworld.rl.actuators.actuator_cfg import DelayedPDActuatorCfg
 from jaxrlworld.rl.actuators.actuator_pd import IdealPDActuator
+from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
 from jaxrlworld.rl.evals.evaluator import PolicyEvaluator
 
 
@@ -69,14 +73,6 @@ def _fmt_maybe_tensor(v, prec: int = 4) -> str:
     if isinstance(v, list | tuple | np.ndarray):
         return "[" + ", ".join(f"{float(x):+.{prec}f}" for x in v) + "]"
     return str(v)
-
-
-def _first_attr(obj, *names):
-    for n in names:
-        v = getattr(obj, n, None)
-        if v is not None:
-            return v
-    return None
 
 
 def _g0(x):
@@ -195,13 +191,6 @@ def dump_raw_sim_state(env, label: str, max_preview: int = 40) -> None:
 
 
 # ── contact + physics full dump ─────────────────────────────────────
-def _try(fn, default=None):
-    try:
-        return fn()
-    except Exception:
-        return default
-
-
 def _fmt_arr(arr, max_n: int = 40, prec: int = 5) -> str:
     try:
         flat = np.asarray(arr).flatten()
@@ -233,17 +222,8 @@ def dump_contact_and_physics(env, label: str) -> None:
     # MuJoCo / mjlab branch
     # ==============================================================
     if sim_type == "mujoco":
-        try:
-            import mujoco
-        except Exception as e:
-            print(f"  [cannot import mujoco: {e}]")
-            return
         mj = sm.mj_model
-        data = _try(lambda: sm.sim.data) or _try(lambda: sm._sim.data)
-        wp_data = _try(lambda: sm.sim.wp_data) or _try(lambda: sm._sim.wp_data)
-        if mj is None:
-            print("  [mj_model not reachable]")
-            return
+        wp_data = sm.wp_data
 
         # Sim options
         print("\n[MJ SIM OPTIONS]")
@@ -270,68 +250,64 @@ def dump_contact_and_physics(env, label: str) -> None:
         print(f"  opt.noslip_iterations={int(mj.opt.noslip_iterations)}")
         print(f"  opt.disableflags={int(mj.opt.disableflags)} enableflags={int(mj.opt.enableflags)}")
 
-        # Per-DoF forces — prefer wp_data (what mjwarp.step actually reads)
-        src, src_name = (wp_data, "wp_data") if wp_data is not None else (data, "data")
-        if src is not None:
-            print(f"\n[PER-DOF FORCES (from {src_name})]")
-            fields = {
-                "ctrl": src.ctrl,
-                "qfrc_applied": src.qfrc_applied,
-                "qfrc_actuator": src.qfrc_actuator,
-                "qfrc_bias": src.qfrc_bias,
-                "qfrc_passive": src.qfrc_passive,
-                "qfrc_smooth": src.qfrc_smooth,
-                "qfrc_constraint": src.qfrc_constraint,
-                "qacc": src.qacc,
-                "qvel": src.qvel,
-                "qpos": src.qpos,
-            }
-            for field, v in fields.items():
-                arr = _to_numpy(v)
-                if arr is None:
-                    print(f"  {field}: <missing>")
-                    continue
-                print(f"  {field}: shape={arr.shape} {_fmt_arr(arr, max_n=40, prec=5)}")
+        # Per-DoF forces — from wp_data (what mjwarp.step actually reads)
+        print("\n[PER-DOF FORCES (from wp_data)]")
+        fields = {
+            "ctrl": wp_data.ctrl,
+            "qfrc_applied": wp_data.qfrc_applied,
+            "qfrc_actuator": wp_data.qfrc_actuator,
+            "qfrc_bias": wp_data.qfrc_bias,
+            "qfrc_passive": wp_data.qfrc_passive,
+            "qfrc_smooth": wp_data.qfrc_smooth,
+            "qfrc_constraint": wp_data.qfrc_constraint,
+            "qacc": wp_data.qacc,
+            "qvel": wp_data.qvel,
+            "qpos": wp_data.qpos,
+        }
+        for field, v in fields.items():
+            arr = v.numpy()
+            print(f"  {field}: shape={arr.shape} {_fmt_arr(arr, max_n=40, prec=5)}")
 
-        # Contacts
+        # Contacts. mujoco_warp keeps one contact buffer for all worlds:
+        # ``nacon`` (a 1-element array) is the active count, each row is
+        # tagged by ``contact.worldid``, and slots ``>= nacon`` are stale.
+        # ``Contact`` carries no force; ``mujoco_warp.contact_force`` decodes
+        # it from ``efc.force``. In the contact frame (``to_world_frame=False``)
+        # the 6-vector is (normal, tangent1, tangent2, torques), the layout
+        # ``mj_contactForce`` returns.
         print("\n[ACTIVE CONTACTS]")
-        try:
-            ncon = int(data.ncon) if data is not None else 0
-        except Exception:
-            ncon = 0
-        try:
-            if wp_data is not None and ncon == 0:
-                ncon_wp = _to_numpy(getattr(wp_data, "ncon", None))
-                if ncon_wp is not None:
-                    ncon = int(np.asarray(ncon_wp).flatten()[0])
-        except Exception:
-            pass
-        print(f"  ncon={ncon}")
-        if ncon > 0 and data is not None:
-            for c in range(min(ncon, 30)):
-                try:
-                    con = data.contact[c]
-                    g0 = int(con.geom[0]) if hasattr(con, "geom") else int(con.geom1)
-                    g1 = int(con.geom[1]) if hasattr(con, "geom") else int(con.geom2)
-                    n0 = mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_GEOM, g0) or f"<{g0}>"
-                    n1 = mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_GEOM, g1) or f"<{g1}>"
-                    pos = con.pos
-                    dist = float(con.dist)
-                    force = np.zeros(6)
-                    try:
-                        mujoco.mj_contactForce(mj, data, c, force)
-                    except Exception:
-                        pass
-                    fr = con.friction if hasattr(con, "friction") else None
-                    print(
-                        f"  c{c}: {n0} <-> {n1} dist={dist:+.6f} "
-                        f"pos=({pos[0]:+.4f},{pos[1]:+.4f},{pos[2]:+.4f}) "
-                        f"F_n={force[0]:+.3f} F_t1={force[1]:+.3f} F_t2={force[2]:+.3f} "
-                        f"T=({force[3]:+.3f},{force[4]:+.3f},{force[5]:+.3f})"
-                        + (f" fric={list(fr)}" if fr is not None else "")
-                    )
-                except Exception as e:
-                    print(f"  c{c}: [unreadable: {e}]")
+        nacon = int(wp_data.nacon.numpy()[0])
+        print(f"  nacon={nacon} (all worlds)")
+        if nacon > 0:
+            con = wp_data.contact
+            con_geom = con.geom.numpy()[:nacon]
+            con_worldid = con.worldid.numpy()[:nacon]
+            con_pos = con.pos.numpy()[:nacon]
+            con_dist = con.dist.numpy()[:nacon]
+            con_friction = con.friction.numpy()[:nacon]
+            con_force = wp.zeros(nacon, dtype=wp.spatial_vector, device=sm.sim.wp_device)
+            mjwarp.contact_force(
+                sm.sim.wp_model,
+                wp_data,
+                wp.array(np.arange(nacon, dtype=np.int32), dtype=int, device=sm.sim.wp_device),
+                False,
+                con_force,
+            )
+            con_force = con_force.numpy()
+            env0_ids = np.flatnonzero(con_worldid == 0)
+            for c in env0_ids[:30]:
+                g0, g1 = int(con_geom[c, 0]), int(con_geom[c, 1])
+                n0 = mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_GEOM, g0) or f"<{g0}>"
+                n1 = mujoco.mj_id2name(mj, mujoco.mjtObj.mjOBJ_GEOM, g1) or f"<{g1}>"
+                pos = con_pos[c]
+                force = con_force[c]
+                print(
+                    f"  c{c}: {n0} <-> {n1} dist={float(con_dist[c]):+.6f} "
+                    f"pos=({pos[0]:+.4f},{pos[1]:+.4f},{pos[2]:+.4f}) "
+                    f"F_n={force[0]:+.3f} F_t1={force[1]:+.3f} F_t2={force[2]:+.3f} "
+                    f"T=({force[3]:+.3f},{force[4]:+.3f},{force[5]:+.3f})"
+                    f" fric={con_friction[c].tolist()}"
+                )
 
         # Per-geom collision params
         print("\n[PER-GEOM COLLISION PARAMS (contype|conaffinity != 0 only)]")
@@ -428,11 +404,6 @@ def dump_contact_and_physics(env, label: str) -> None:
     # Newton branch
     # ==============================================================
     elif sim_type == "newton":
-        try:
-            import warp as wp  # noqa: F401
-        except Exception as e:
-            print(f"  [cannot import warp: {e}]")
-            return
         model = sm.model
         control = sm.control
         state_0 = sm.state_0
@@ -718,7 +689,8 @@ def print_static(env) -> None:
             is_pd = isinstance(inst, IdealPDActuator)
             kp = inst.stiffness if is_pd else None
             kd = inst.damping if is_pd else None
-            armature = _first_attr(inst, "armature", "_armature")
+            # Configured reflected rotor inertia (float or per-joint dict).
+            armature = inst.cfg.armature
             effort = inst.effort_limit
             is_delayed = isinstance(inst.cfg, DelayedPDActuatorCfg)
             delay_min = inst.cfg.min_delay if is_delayed else None
@@ -732,42 +704,36 @@ def print_static(env) -> None:
             print(f"    min_delay    = {delay_min}")
             print(f"    max_delay    = {delay_max}")
 
-    # Bodies + masses (sim-dependent accessors).
+    # Bodies + masses of the robot entity, from each backend's runtime
+    # model (env 0). RobotData exposes no body names / masses, so this
+    # reads the backend directly.
     print("\n[BODIES]")
-    body_names = getattr(rd, "body_names_all", None) or getattr(rd, "body_names", None)
-    if body_names is None:
-        print("  (body_names unavailable)")
+    sm = env.scene_manager
+    if env.sim_type == "mujoco":
+        entity = sm.get_entity("robot")
+        body_names = list(entity.body_names)
+        masses = sm.model.body_mass[0][entity.indexing.body_ids].tolist()
+        gravity = sm.mj_model.opt.gravity
+    elif env.sim_type == "newton":
+        cache = get_cache(env)
+        body_names = cache.body_names
+        masses = wp.to_torch(sm.model.body_mass).reshape(env.num_envs, cache.bodies_per_env)[0].tolist()
+        gravity = sm.model.gravity.numpy()[0]
+    elif env.sim_type == "genesis":
+        robot = sm["robot"]
+        body_names = [link.name for link in robot.links]
+        # ``get_mass`` is per env when link info is batched; env 0.
+        masses = [float(link.get_mass().flatten()[0]) for link in robot.links]
+        gravity = sm.scene.sim.rigid_solver.get_gravity()[0]
     else:
-        print(f"  count = {len(body_names)}")
-        masses = None
-        for getter in (
-            lambda: rd.body_mass_all,
-            lambda: rd.body_masses,
-            lambda: rd.body_mass,
-            lambda: getattr(getattr(env, "scene_manager", None), "model", None).body_mass,
-        ):
-            try:
-                m = getter()
-                if m is not None:
-                    masses = _tensor_to_list(m) if torch.is_tensor(m) else list(m)
-                    break
-            except Exception:
-                continue
-        if masses is not None:
-            print(f"  {'idx':<4} {'body_name':<36} {'mass[kg]':>12}")
-            for i, nm in enumerate(body_names):
-                mm = masses[i] if i < len(masses) else None
-                mm_s = f"{float(mm):.6f}" if mm is not None else "?"
-                print(f"  {i:<4} {str(nm):<36} {mm_s:>12}")
-        else:
-            print(f"  body_names: {[str(n) for n in body_names]}")
+        raise ValueError(f"unsupported sim_type {env.sim_type!r}")
+    print(f"  count = {len(body_names)}")
+    print(f"  {'idx':<4} {'body_name':<36} {'mass[kg]':>12}")
+    for i, (nm, mm) in enumerate(zip(body_names, masses, strict=True)):
+        print(f"  {i:<4} {str(nm):<36} {float(mm):>12.6f}")
 
-    # Gravity (sim-dependent).
-    try:
-        g = env.scene_manager.gravity
-        print(f"\n[GRAVITY] {_fmt_maybe_tensor(g)}")
-    except Exception:
-        pass
+    # Gravity (sim-dependent source, env 0).
+    print(f"\n[GRAVITY] {_fmt_maybe_tensor(gravity)}")
 
     print("=" * 100)
 

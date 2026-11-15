@@ -120,10 +120,7 @@ def _run_marker_geom(gs, torch, path: str) -> float | None:
     for vg in entity.vgeoms:
         if vg.link.name != "ball":
             continue
-        init_pos = getattr(vg, "_init_pos", None)
-        if init_pos is None:
-            continue
-        if np.linalg.norm(np.asarray(init_pos) - _MARKER_LOCAL) < 1e-4:
+        if np.linalg.norm(vg.init_pos - _MARKER_LOCAL) < 1e-4:
             cand.append(vg)
     if not cand:
         print("FAIL — no vgeom on 'ball' with init_pos matching the marker offset.")
@@ -132,7 +129,7 @@ def _run_marker_geom(gs, torch, path: str) -> float | None:
         print(f"FAIL — multiple vgeoms matched the marker offset ({len(cand)}).")
         return None
     marker = cand[0]
-    print(f"OK — found marker vgeom (idx={marker.idx}, init_pos={_as_np(marker._init_pos)}).")
+    print(f"OK — found marker vgeom (idx={marker.idx}, init_pos={marker.init_pos}).")
 
     max_err = 0.0
     for i, (pos, quat) in enumerate(_cases()):
@@ -216,8 +213,8 @@ def main() -> int:
         print("=" * 60)
         ok_a = err_a is not None and err_a < tol
         ok_b = err_b is not None and err_b < tol
-        print(f"  Mode A (marker geom)  : {'PASS' if ok_a else 'FAIL'}" f"  (max resid {err_a!r}, tol {tol:.0e})")
-        print(f"  Mode B (welded body)  : {'PASS' if ok_b else 'FAIL'}" f"  (max resid {err_b!r}, tol {tol:.0e})")
+        print(f"  Mode A (marker geom)  : {'PASS' if ok_a else 'FAIL'}  (max resid {err_a!r}, tol {tol:.0e})")
+        print(f"  Mode B (welded body)  : {'PASS' if ok_b else 'FAIL'}  (max resid {err_b!r}, tol {tol:.0e})")
         if ok_b:
             print("\n→ Use Mode B (dummy fixed body) — name-addressable, cleanest.")
             return 0
