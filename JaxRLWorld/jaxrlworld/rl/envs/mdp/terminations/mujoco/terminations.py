@@ -82,60 +82,30 @@ def roll_pitch_violation(
 
 def illegal_contact(
     env: MujocoEnv,
-    sensor_name: str | None = None,
+    sensor_name: str,
     force_threshold: float = 10.0,
 ) -> TerminationResult:
     """Terminate when illegal contact is detected.
 
-    When ``sensor_name`` is provided, uses the contact sensor directly.
-    If the sensor has ``force_history`` (history_length > 0), checks whether
-    any substep force exceeds ``force_threshold``. Otherwise falls back to the
-    instantaneous ``found`` flag.
-
-    When ``sensor_name`` is None, uses the legacy contact_manager-based path.
+    Reads the contact sensor ``sensor_name``. If the sensor has
+    ``force_history`` (history_length > 0), checks whether any substep
+    force exceeds ``force_threshold``; otherwise uses the instantaneous
+    ``found`` flag.
 
     Args:
         env: The MujocoEnv environment.
-        sensor_name: Optional contact sensor name for sensor-based detection.
+        sensor_name: The contact sensor to read.
         force_threshold: Force magnitude threshold for history-based detection.
 
     Returns:
         TerminationResult for illegal contact.
     """
-    if sensor_name is not None:
-        sensor = env.scene_manager.get_sensor(sensor_name)
-        data = sensor.data
-        if data.force_history is not None:
-            force_mag = torch.norm(data.force_history, dim=-1)
-            return TerminationResult((force_mag > force_threshold).any(dim=-1).any(dim=-1))
-        assert data.found is not None
-        return TerminationResult(torch.any(data.found, dim=-1))
-
-    # Legacy fallback: contact_manager-based
-    contact_data = env.contact_manager
-    if hasattr(contact_data, "illegal_contact_detected"):
-        return TerminationResult(contact_data.illegal_contact_detected)
-    return TerminationResult(torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
-
-
-def base_contact(env: MujocoEnv) -> TerminationResult:
-    """Terminate when the base/torso makes contact with ground.
-
-    Args:
-        env: The MujocoEnv environment.
-
-    Returns:
-        TerminationResult for base contact.
-    """
-    contact_data = env.contact_manager
-
-    # Check for base contact (typically first body in contact sensor)
-    if hasattr(contact_data, "base_contact"):
-        terminated = contact_data.base_contact
-    else:
-        terminated = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-
-    return TerminationResult(terminated)
+    data = env.scene_manager.get_sensor(sensor_name).data
+    if data.force_history is not None:
+        force_mag = torch.norm(data.force_history, dim=-1)
+        return TerminationResult((force_mag > force_threshold).any(dim=-1).any(dim=-1))
+    assert data.found is not None
+    return TerminationResult(torch.any(data.found, dim=-1))
 
 
 def joint_limit_violation(
