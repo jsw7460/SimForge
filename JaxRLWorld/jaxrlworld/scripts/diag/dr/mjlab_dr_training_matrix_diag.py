@@ -89,8 +89,8 @@ def _used_fields(env) -> list[str]:
     fields: set[str] = set()
     for _name, term in iter_terms(env.event_cfg, EventTermConfig).items():
         fn = term.func
-        mod = getattr(fn, "__module__", "") or ""
-        name = getattr(fn, "__name__", "") or ""
+        mod = getattr(fn, "__module__", "") or ""  # dynamic-attr: arbitrary callable or str may lack it
+        name = getattr(fn, "__name__", "") or ""  # dynamic-attr: arbitrary callable or str may lack it
         if mod.endswith(".dr.unified") and name in _UNIFIED_TERM_FIELDS:
             fields.update(_UNIFIED_TERM_FIELDS[name])
     return sorted(fields)
@@ -128,7 +128,7 @@ def run_cell(preset: str, jax_on: bool, num_envs: int, num_steps: int, seed: int
     expand: dict[str, bool] = {}
     variance: dict[str, float] = {}
     for f in fields:
-        arr = getattr(sim.wp_model, f)
+        arr = getattr(sim.wp_model, f)  # dynamic-attr: field named in _UNIFIED_TERM_FIELDS
         expand[f] = int(arr.shape[0]) == num_envs
         t = wp.to_torch(arr).detach().float()
         flat = t.reshape(t.shape[0], -1)

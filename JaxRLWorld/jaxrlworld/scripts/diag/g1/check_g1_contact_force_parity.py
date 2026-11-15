@@ -49,6 +49,8 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+import torch
+
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 
@@ -92,61 +94,18 @@ def _to_jsonable(value: Any) -> Any:
     return str(value)
 
 
-def _safe_get(obj: Any, *names: str, default: Any = None) -> Any:
-    """Walk attribute chain returning ``default`` on any missing step."""
-    cur = obj
-    for n in names:
-        cur = getattr(cur, n, None)
-        if cur is None:
-            return default
-    return cur
-
-
 def _try_arr(maybe_arr: Any) -> Any:
-    """Convert a possibly-warp/numpy/tensor/quadrants array into a Python list.
-
-    Genesis uses quadrants tensors (``qd.Tensor``) for many arrays. These
-    have ``.to_numpy()`` (not ``.numpy()``); we try several converters
-    before falling back to ``repr``.
-    """
+    """Convert a torch tensor or a Genesis quadrants tensor (``qd.Tensor``) into a Python list."""
     if maybe_arr is None:
         return None
-    # Try a sequence of converters known to produce numpy.
-    for converter_name in ("to_numpy", "numpy", "cpu", "detach"):
-        if hasattr(maybe_arr, converter_name):
-            try:
-                arr = getattr(maybe_arr, converter_name)()
-                if hasattr(arr, "tolist"):
-                    return arr.tolist()
-                if hasattr(arr, "numpy"):
-                    return arr.numpy().tolist()
-            except Exception:
-                continue
-    # Try warp → torch → numpy.
-    try:
-        import warp as wp
+    if isinstance(maybe_arr, torch.Tensor):
+        return maybe_arr.detach().cpu().tolist()
+    return maybe_arr.to_numpy().tolist()
 
-        arr = wp.to_torch(maybe_arr).detach().cpu().numpy()
-        return arr.tolist()
-    except Exception:
-        pass
-    # Try torch directly.
-    try:
-        import torch
 
-        if isinstance(maybe_arr, torch.Tensor):
-            return maybe_arr.detach().cpu().tolist()
-    except Exception:
-        pass
-    # Try numpy directly.
-    try:
-        import numpy as np
-
-        arr = np.asarray(maybe_arr)
-        return arr.tolist()
-    except Exception:
-        pass
-    return repr(maybe_arr)
+def _bridge_arr(x: Any) -> list:
+    """Convert an mjlab ``TorchArray`` (a mujoco-warp field behind the torch bridge) into a Python list."""
+    return x[...].detach().cpu().tolist()
 
 
 def _walk_paths(root: Any, paths: list[tuple[str, ...]]) -> tuple[Any, str | None]:
@@ -187,19 +146,8 @@ def _genesis_dump(env, cfg) -> dict:
         robot = env.scene_manager["robot"]
 
         # ── native contact count per env ──────────────────────────────
-        ncon, ncon_path = _walk_paths(
-            rs,
-            [
-                ("collider", "collider_state", "n_contacts"),
-                ("collider", "contact_data", "n_contacts"),
-                ("collider", "n_contacts"),
-                ("collider_state", "n_contacts"),
-                ("_contacts", "n_contacts"),
-                ("contacts", "n_contacts"),
-            ],
-        )
-        out["n_contacts_per_env"] = _try_arr(ncon)
-        out["n_contacts_attr_path"] = ncon_path
+        out["n_contacts_per_env"] = _try_arr(rs.collider.collider_state.n_contacts)
+        out["n_contacts_attr_path"] = "collider.collider_state.n_contacts"
 
         # ── solver-internal contact constraint metrics (env 0) ──────────
         # Dump every plausibly-relevant value the constraint solver
@@ -216,33 +164,27 @@ def _genesis_dump(env, cfg) -> dict:
             n_env0 = int(_try_arr(cs_count)[0])
             metrics: dict = {
                 "n_contacts_env0": n_env0,
-                "rigid_options.substeps": int(getattr(rs._options, "substeps", -1))
-                if hasattr(rs, "_options")
-                else None,
-                "rigid_options.dt": float(getattr(rs._options, "dt", float("nan")))
-                if hasattr(rs, "_options")
-                else None,
-                "_substep_dt": float(getattr(rs, "_substep_dt", float("nan"))),
-                "_sol_default_timeconst": float(getattr(rs, "_sol_default_timeconst", float("nan"))),
-                "_sol_min_timeconst": float(getattr(rs, "_sol_min_timeconst", float("nan"))),
-                "integrator": type(getattr(rs, "_integrator", None)).__name__ if hasattr(rs, "_integrator") else None,
+                "rigid_options.substeps": int(getattr(rs._options, "substeps", -1)),
+                "rigid_options.dt": float(rs._options.dt),
+                "_substep_dt": float(rs._substep_dt),
+                "_sol_default_timeconst": float(rs._sol_default_timeconst),
+                "_sol_min_timeconst": float(rs._sol_min_timeconst),
+                "integrator": type(rs._integrator).__name__,
             }
             # Per-contact native fields — these are exactly the inputs
             # to gu.imp_aref and the diag formula.
-            for field in (
-                "penetration",
-                "normal",
-                "friction",
-                "sol_params",
-                "geom_a",
-                "geom_b",
-                "link_a",
-                "link_b",
-                "force",
-            ):
-                v = getattr(cs, field, None)
-                if v is None:
-                    continue
+            contact_fields = {
+                "penetration": cs.penetration,
+                "normal": cs.normal,
+                "friction": cs.friction,
+                "sol_params": cs.sol_params,
+                "geom_a": cs.geom_a,
+                "geom_b": cs.geom_b,
+                "link_a": cs.link_a,
+                "link_b": cs.link_b,
+                "force": cs.force,
+            }
+            for field, v in contact_fields.items():
                 try:
                     arr = _try_arr(v)
                     # Expected shape (n_contacts_max, n_envs, …) — slice
@@ -286,24 +228,19 @@ def _genesis_dump(env, cfg) -> dict:
                 inv_arr = _try_arr(inv)
                 # Map foot links + likely ground link by name.
                 links_meta = []
-                for link in getattr(robot, "links", []) or []:
-                    lname = getattr(link, "name", "?")
-                    li = getattr(link, "_idx", getattr(link, "idx", None))
-                    if li is None:
-                        continue
+                for link in robot.links:
+                    lname = link.name
+                    li = link.idx
                     if isinstance(inv_arr, list) and 0 <= li < len(inv_arr):
                         links_meta.append({"link_idx": int(li), "link_name": lname, "invweight": inv_arr[int(li)]})
                 metrics["robot_links_invweight"] = links_meta
                 # Ground entity links
-                ti = getattr(env.scene_manager, "terrain", None)
-                ground_entity = getattr(ti, "entity", None) if ti else None
+                ground_entity = env.scene_manager.terrain.entity
                 if ground_entity is not None:
                     g_links_meta = []
-                    for link in getattr(ground_entity, "links", []) or []:
-                        lname = getattr(link, "name", "?")
-                        li = getattr(link, "_idx", getattr(link, "idx", None))
-                        if li is None:
-                            continue
+                    for link in ground_entity.links:
+                        lname = link.name
+                        li = link.idx
                         if isinstance(inv_arr, list) and 0 <= li < len(inv_arr):
                             g_links_meta.append(
                                 {"link_idx": int(li), "link_name": lname, "invweight": inv_arr[int(li)]}
@@ -320,20 +257,8 @@ def _genesis_dump(env, cfg) -> dict:
         # link_b, position, force_a, force_b, valid_mask} per contact.
         # Filter to foot ↔ ground only and dump env 0's contacts.
         try:
-            ground_entity = None
-            # Find the ground entity (TerrainImporter-owned).
-            ti = getattr(env.scene_manager, "terrain", None)
-            if ti is not None:
-                ground_entity = getattr(ti, "entity", None)
-            # Fall back: scan scene entities for a plane/terrain morph.
-            if ground_entity is None:
-                for ent in scene.entities:
-                    morph = getattr(ent, "morph", None)
-                    if morph is None:
-                        continue
-                    if "plane" in type(morph).__name__.lower() or "terrain" in type(morph).__name__.lower():
-                        ground_entity = ent
-                        break
+            # The ground entity (TerrainImporter-owned).
+            ground_entity = env.scene_manager.terrain.entity
             if ground_entity is not None:
                 # Genesis ``collider.get_contacts(as_tensor=True)`` pads every
                 # env's buffer to ``max(n_contacts)`` across envs (see
@@ -376,20 +301,18 @@ def _genesis_dump(env, cfg) -> dict:
                     # capsule axis/length info for each robot geom.
                     geom_table: dict[int, dict] = {}
                     for ent in (robot, ground_entity):
-                        ent_name = getattr(ent, "name", type(ent).__name__) or "?"
-                        for link in getattr(ent, "links", []) or []:
-                            lname = getattr(link, "name", "?")
-                            lidx = getattr(link, "_idx", getattr(link, "idx", None))
-                            for g in getattr(link, "geoms", []) or []:
-                                gi = getattr(g, "_idx", getattr(g, "idx", None))
-                                if gi is None:
-                                    continue
+                        ent_name = ent.name or "?"
+                        for link in ent.links:
+                            lname = link.name
+                            lidx = link.idx
+                            for g in link.geoms:
+                                gi = g.idx
                                 gname = getattr(g, "name", None) or getattr(g, "_name", None) or ""
                                 entry = {
                                     "name": gname,
                                     "type": type(g).__name__,
                                     "link_name": lname,
-                                    "link_idx": int(lidx) if lidx is not None else None,
+                                    "link_idx": int(lidx),
                                     "entity": ent_name,
                                 }
                                 # Capsule axis / length for foot collision
@@ -497,7 +420,7 @@ def _genesis_dump(env, cfg) -> dict:
                 fi: dict = {"name": fname}
                 fi["mass"] = float(getattr(link, "_inertial_mass", getattr(link, "inertial_mass", 0)))
                 # geoms on this link
-                geoms = getattr(link, "geoms", None) or []
+                geoms = link.geoms
                 fi["n_geoms"] = len(geoms)
                 if geoms:
                     g = geoms[0]
@@ -517,7 +440,7 @@ def _genesis_dump(env, cfg) -> dict:
         # ── total robot mass ─────────────────────────────────────────
         try:
             total_mass = 0.0
-            for link in getattr(robot, "links", []):
+            for link in robot.links:
                 total_mass += float(getattr(link, "_inertial_mass", getattr(link, "inertial_mass", 0)))
             out["robot_total_mass"] = total_mass
         except Exception as e:
@@ -547,11 +470,10 @@ def _genesis_dump(env, cfg) -> dict:
                     for fi, fname in zip(out.get("feet", []), cfg.robot.foot_names):
                         try:
                             link = robot.get_link(fname)
-                            geoms_ = getattr(link, "geoms", None) or []
                             rows = []
-                            for g in geoms_:
-                                gi = getattr(g, "_idx", getattr(g, "idx", None))
-                                if gi is None or not (0 <= gi < len(arr)):
+                            for g in link.geoms:
+                                gi = g.idx
+                                if not (0 <= gi < len(arr)):
                                     rows.append({"idx": gi, "row": None})
                                 else:
                                     rows.append({"idx": int(gi), "row": arr[int(gi)]})
@@ -577,25 +499,9 @@ def _mujoco_dump(env, cfg) -> dict:
         mj = sm.mj_model
         wd = sm.data  # mujoco-warp Data
 
-        # ── native contact count per world ────────────────────────────
-        # mujoco-warp 's data exposes ``ncon`` as a warp scalar OR a per-
-        # world array, depending on version. Try several names.
-        ncon = None
-        for name in ("ncon", "n_contact", "nacon", "naconmax"):
-            v = getattr(wd, name, None)
-            if v is not None:
-                ncon = v
-                out["ncon_attr"] = name
-                break
-        # Also try the ``contact`` sub-namespace.
-        if ncon is None and hasattr(wd, "contact"):
-            for name in ("ncon", "n_contact", "size"):
-                v = getattr(wd.contact, name, None)
-                if v is not None:
-                    ncon = v
-                    out["ncon_attr"] = f"contact.{name}"
-                    break
-        out["ncon_per_world"] = _try_arr(ncon)
+        # ── native contact count (total across worlds) ────────────────
+        out["ncon_attr"] = "nacon"
+        out["ncon_per_world"] = _bridge_arr(wd.nacon)
 
         # ── per-contact info via mujoco-warp Data.contact ─────────────
         # Fields (from mujoco_warp/_src/types.py Contact dataclass):
@@ -608,218 +514,201 @@ def _mujoco_dump(env, cfg) -> dict:
         #   geom (naconmax, 2)     — geom ids
         #   worldid (naconmax,)    — which world the contact belongs to
         try:
-            if hasattr(wd, "contact"):
-                ctx: dict = {}
-                # 1) Total contact buffer size + active count.
-                ncon_total = getattr(wd, "naconmax", None) or getattr(wd, "nconmax", None)
-                ctx["buffer_naconmax"] = _try_arr(ncon_total)
-                # 2) Per-contact fields — convert and filter to foot↔ground.
-                fields_to_dump = (
-                    "dist",
-                    "pos",
-                    "frame",
-                    "solref",
-                    "solimp",
-                    "geom",
-                    "worldid",
-                    "friction",
-                    "includemargin",
-                    "dim",
-                    "efc_address",
-                )
-                raw: dict = {}
-                for f in fields_to_dump:
-                    v = getattr(wd.contact, f, None)
-                    if v is not None:
-                        raw[f] = _try_arr(v)
-                # Also pull constraint-state fields (efc_*) so we can
-                # see the exact aref / D / force that the solver used,
-                # mirroring the Genesis solver_metrics block. mujoco-warp
-                # stores these on the *efc sub-namespace* (``wd.efc.force``
-                # etc., not ``wd.efc_force``), with shape (nworld, nefcmax).
-                efc_ns = getattr(wd, "efc", None)
-                if efc_ns is not None:
-                    for f in ("pos", "aref", "D", "force"):
-                        v = getattr(efc_ns, f, None)
-                        if v is None:
-                            continue
-                        try:
-                            raw["efc_" + f] = _try_arr(v)
-                        except Exception as ee:
-                            raw["efc_" + f + "_err"] = repr(ee)
-                v_nefc = getattr(wd, "nefc", None)
-                if v_nefc is not None:
-                    try:
-                        raw["nefc"] = _try_arr(v_nefc)
-                    except Exception as ee:
-                        raw["nefc_err"] = repr(ee)
-                ctx["solver_internals_raw"] = {
-                    k: (v if not isinstance(v, list) else v[:64])
-                    for k, v in raw.items()
-                    if k in ("efc_aref", "efc_D", "efc_force", "efc_pos", "nefc")
+            ctx: dict = {}
+            # 1) Total contact buffer size + active count.
+            ctx["buffer_naconmax"] = wd.naconmax
+            # 2) Per-contact fields — convert and filter to foot↔ground.
+            con = wd.contact
+            raw: dict = {
+                "dist": _bridge_arr(con.dist),
+                "pos": _bridge_arr(con.pos),
+                "frame": _bridge_arr(con.frame),
+                "solref": _bridge_arr(con.solref),
+                "solimp": _bridge_arr(con.solimp),
+                "geom": _bridge_arr(con.geom),
+                "worldid": _bridge_arr(con.worldid),
+                "friction": _bridge_arr(con.friction),
+                "includemargin": _bridge_arr(con.includemargin),
+                "dim": _bridge_arr(con.dim),
+                "efc_address": _bridge_arr(con.efc_address),
+            }
+            # Also pull constraint-state fields (efc_*) so we can
+            # see the exact aref / D / force that the solver used,
+            # mirroring the Genesis solver_metrics block. mujoco-warp
+            # stores these on the *efc sub-namespace* (``wd.efc.force``
+            # etc., not ``wd.efc_force``), with shape (nworld, nefcmax).
+            efc_ns = wd.efc
+            for f, v in (("pos", efc_ns.pos), ("aref", efc_ns.aref), ("D", efc_ns.D), ("force", efc_ns.force)):
+                try:
+                    raw["efc_" + f] = _bridge_arr(v)
+                except Exception as ee:
+                    raw["efc_" + f + "_err"] = repr(ee)
+            try:
+                raw["nefc"] = _bridge_arr(wd.nefc)
+            except Exception as ee:
+                raw["nefc_err"] = repr(ee)
+            ctx["solver_internals_raw"] = {
+                k: (v if not isinstance(v, list) else v[:64])
+                for k, v in raw.items()
+                if k in ("efc_aref", "efc_D", "efc_force", "efc_pos", "nefc")
+            }
+            # invweight per body (foot links + world body for ground).
+            try:
+                ctx["body_invweight0"] = mj.body_invweight0.tolist()[: max(20, mj.nbody)]
+            except Exception as ee:
+                ctx["body_invweight0_err"] = repr(ee)
+            # opt fields that influence contact dynamics.
+            try:
+                opt = mj.opt
+                ctx["opt_extra"] = {
+                    "integrator": int(opt.integrator),
+                    "cone": int(opt.cone),
+                    "impratio": float(opt.impratio),
+                    "tolerance": float(opt.tolerance),
+                    "iterations": int(opt.iterations),
+                    "ls_iterations": int(opt.ls_iterations),
+                    "timestep": float(opt.timestep),
+                    "noslip_iterations": int(opt.noslip_iterations),
                 }
-                # invweight per body (foot links + world body for ground).
-                try:
-                    body_inv = getattr(mj, "body_invweight0", None)
-                    if body_inv is not None:
-                        bi_arr = body_inv.tolist() if hasattr(body_inv, "tolist") else body_inv
-                        ctx["body_invweight0"] = bi_arr[: max(20, mj.nbody)]
-                except Exception as ee:
-                    ctx["body_invweight0_err"] = repr(ee)
-                # opt fields that influence contact dynamics.
-                try:
-                    opt = mj.opt
-                    ctx["opt_extra"] = {
-                        "integrator": int(opt.integrator),
-                        "cone": int(opt.cone),
-                        "impratio": float(opt.impratio),
-                        "tolerance": float(opt.tolerance),
-                        "iterations": int(opt.iterations),
-                        "ls_iterations": int(opt.ls_iterations),
-                        "timestep": float(opt.timestep),
-                        "noslip_iterations": int(opt.noslip_iterations),
-                    }
-                except Exception as ee:
-                    ctx["opt_extra_err"] = repr(ee)
-                # 3) Build foot-↔-ground filter:
-                #    contact has geom pair where one is a foot geom and other is ground.
-                foot_geom_ids: set[int] = set()
-                ground_geom_ids: set[int] = set()
-                for fname in cfg.robot.foot_names:
-                    for cand in (f"robot/{fname}", fname):
-                        try:
-                            bid = mj.body(cand).id
-                            for gid in range(mj.ngeom):
-                                if mj.geom_bodyid[gid] == bid:
-                                    foot_geom_ids.add(gid)
-                            break
-                        except Exception:
-                            continue
-                # ground geoms: those whose body is the world (body 0) or
-                # whose name contains 'ground'/'terrain'.
+            except Exception as ee:
+                ctx["opt_extra_err"] = repr(ee)
+            # 3) Build foot-↔-ground filter:
+            #    contact has geom pair where one is a foot geom and other is ground.
+            foot_geom_ids: set[int] = set()
+            ground_geom_ids: set[int] = set()
+            for fname in cfg.robot.foot_names:
+                for cand in (f"robot/{fname}", fname):
+                    try:
+                        bid = mj.body(cand).id
+                        for gid in range(mj.ngeom):
+                            if mj.geom_bodyid[gid] == bid:
+                                foot_geom_ids.add(gid)
+                        break
+                    except Exception:
+                        continue
+            # ground geoms: those whose body is the world (body 0) or
+            # whose name contains 'ground'/'terrain'.
+            for gid in range(mj.ngeom):
+                if mj.geom_bodyid[gid] == 0:
+                    ground_geom_ids.add(gid)
+                gname = mj.geom(gid).name or ""
+                if "ground" in gname.lower() or "terrain" in gname.lower():
+                    ground_geom_ids.add(gid)
+            ctx["foot_geom_ids_count"] = len(foot_geom_ids)
+            ctx["ground_geom_ids_count"] = len(ground_geom_ids)
+            # 4) Filter foot↔ground contacts (env 0 only).
+            geom = raw.get("geom")
+            worldid = raw.get("worldid")
+            dist = raw.get("dist")
+            if geom and worldid and dist:
+                # Pre-build geom-id → (name, body_id, body_name, type, size)
+                # so each contact row carries human-readable
+                # identification for cross-sim comparison.
+                geom_table: dict[int, dict] = {}
                 for gid in range(mj.ngeom):
-                    if mj.geom_bodyid[gid] == 0:
-                        ground_geom_ids.add(gid)
-                    gname = mj.geom(gid).name or ""
-                    if "ground" in gname.lower() or "terrain" in gname.lower():
-                        ground_geom_ids.add(gid)
-                ctx["foot_geom_ids_count"] = len(foot_geom_ids)
-                ctx["ground_geom_ids_count"] = len(ground_geom_ids)
-                # 4) Filter foot↔ground contacts (env 0 only).
-                geom = raw.get("geom")
-                worldid = raw.get("worldid")
-                dist = raw.get("dist")
-                if geom and worldid and dist:
-                    # Pre-build geom-id → (name, body_id, body_name, type, size)
-                    # so each contact row carries human-readable
-                    # identification for cross-sim comparison.
-                    geom_table: dict[int, dict] = {}
-                    for gid in range(mj.ngeom):
+                    try:
+                        gname = mj.geom(gid).name or f"#{gid}"
+                        bid = int(mj.geom_bodyid[gid])
+                        bname = mj.body(bid).name or f"body#{bid}"
+                        geom_table[gid] = {
+                            "name": gname,
+                            "body_id": bid,
+                            "body_name": bname,
+                            "type": int(mj.geom_type[gid]),
+                            "size": mj.geom_size[gid].tolist(),
+                            "pos": mj.geom_pos[gid].tolist(),
+                        }
+                    except Exception:
+                        geom_table[gid] = {"name": f"#{gid}"}
+                ctx["geom_table"] = geom_table
+
+                rows: list[dict] = []
+                per_geom: dict[str, int] = {}
+                # Pre-fetch efc_force + efc_address for per-contact
+                # impulse lookup. The Genesis side dumps per-contact
+                # |F| directly; mujoco-warp stores impulses in efc_force
+                # and each contact owns up to ``condim`` consecutive
+                # rows pointed to by contact.efc_address.
+                efc_force_arr = raw.get("efc_force")
+                efc_addr_arr = raw.get("efc_address")
+                condim_arr = raw.get("dim")
+                import math as _math
+
+                for i, (g_pair, w, d) in enumerate(zip(geom, worldid, dist)):
+                    if w != 0:
+                        continue  # filter to env 0
+                    g1_, g2_ = g_pair[0], g_pair[1]
+                    if (g1_ in foot_geom_ids and g2_ in ground_geom_ids) or (
+                        g2_ in foot_geom_ids and g1_ in ground_geom_ids
+                    ):
+                        a_meta = geom_table.get(g1_, {"name": f"#{g1_}", "body_name": "?"})
+                        b_meta = geom_table.get(g2_, {"name": f"#{g2_}", "body_name": "?"})
+                        entry = {
+                            "idx": i,
+                            "geom": g_pair,
+                            "geom_a_name": a_meta.get("name"),
+                            "geom_a_body": a_meta.get("body_name"),
+                            "geom_b_name": b_meta.get("name"),
+                            "geom_b_body": b_meta.get("body_name"),
+                            "dist": d,
+                        }
+                        if "pos" in raw:
+                            entry["pos"] = raw["pos"][i]
+                        if "frame" in raw:
+                            # frame is 3x3 — normal = frame[0]
+                            entry["normal"] = raw["frame"][i][0] if isinstance(raw["frame"][i], list) else None
+                        if "solref" in raw:
+                            entry["solref"] = raw["solref"][i]
+                        if "solimp" in raw:
+                            entry["solimp"] = raw["solimp"][i]
+                        # Per-contact constraint impulse / normal-force lookup.
+                        # mujoco-warp shapes:
+                        #   contact.efc_address: (naconmax, nmaxpyramid) — int, -1 = unused
+                        #   efc.force:           (nworld, nefcmax)       — float
+                        # Env 0 lives at efc.force[0][...]. condim is
+                        # 1 for frictionless / 4 for pyramidal / 6 for
+                        # elliptic; we cap at 4.
                         try:
-                            gname = mj.geom(gid).name or f"#{gid}"
-                            bid = int(mj.geom_bodyid[gid])
-                            bname = mj.body(bid).name or f"body#{bid}"
-                            geom_table[gid] = {
-                                "name": gname,
-                                "body_id": bid,
-                                "body_name": bname,
-                                "type": int(mj.geom_type[gid]),
-                                "size": mj.geom_size[gid].tolist(),
-                                "pos": mj.geom_pos[gid].tolist(),
-                            }
-                        except Exception:
-                            geom_table[gid] = {"name": f"#{gid}"}
-                    ctx["geom_table"] = geom_table
-
-                    rows: list[dict] = []
-                    per_geom: dict[str, int] = {}
-                    # Pre-fetch efc_force + efc_address for per-contact
-                    # impulse lookup. The Genesis side dumps per-contact
-                    # |F| directly; mujoco-warp stores impulses in efc_force
-                    # and each contact owns up to ``condim`` consecutive
-                    # rows pointed to by contact.efc_address.
-                    efc_force_arr = raw.get("efc_force")
-                    efc_addr_arr = raw.get("efc_address")
-                    condim_arr = raw.get("dim")
-                    import math as _math
-
-                    for i, (g_pair, w, d) in enumerate(zip(geom, worldid, dist)):
-                        if w != 0:
-                            continue  # filter to env 0
-                        g1_, g2_ = g_pair[0], g_pair[1]
-                        if (g1_ in foot_geom_ids and g2_ in ground_geom_ids) or (
-                            g2_ in foot_geom_ids and g1_ in ground_geom_ids
-                        ):
-                            a_meta = geom_table.get(g1_, {"name": f"#{g1_}", "body_name": "?"})
-                            b_meta = geom_table.get(g2_, {"name": f"#{g2_}", "body_name": "?"})
-                            entry = {
-                                "idx": i,
-                                "geom": g_pair,
-                                "geom_a_name": a_meta.get("name"),
-                                "geom_a_body": a_meta.get("body_name"),
-                                "geom_b_name": b_meta.get("name"),
-                                "geom_b_body": b_meta.get("body_name"),
-                                "dist": d,
-                            }
-                            if "pos" in raw:
-                                entry["pos"] = raw["pos"][i]
-                            if "frame" in raw:
-                                # frame is 3x3 — normal = frame[0]
-                                entry["normal"] = raw["frame"][i][0] if isinstance(raw["frame"][i], list) else None
-                            if "solref" in raw:
-                                entry["solref"] = raw["solref"][i]
-                            if "solimp" in raw:
-                                entry["solimp"] = raw["solimp"][i]
-                            # Per-contact constraint impulse / normal-force lookup.
-                            # mujoco-warp shapes:
-                            #   contact.efc_address: (naconmax, nmaxpyramid) — int, -1 = unused
-                            #   efc.force:           (nworld, nefcmax)       — float
-                            # Env 0 lives at efc.force[0][...]. condim is
-                            # 1 for frictionless / 4 for pyramidal / 6 for
-                            # elliptic; we cap at 4.
-                            try:
-                                if efc_force_arr is not None and efc_addr_arr is not None:
-                                    addr_row = efc_addr_arr[i] if i < len(efc_addr_arr) else None
-                                    if addr_row is not None:
-                                        if not isinstance(addr_row, list):
-                                            addr_row = [addr_row]
-                                        # efc.force is (nworld, nefcmax) →
-                                        # env 0 row = efc_force_arr[0].
-                                        env0_efc = (
-                                            efc_force_arr[0]
-                                            if isinstance(efc_force_arr, list)
-                                            and efc_force_arr
-                                            and isinstance(efc_force_arr[0], list)
-                                            else efc_force_arr
-                                        )
-                                        cd_local = (
-                                            condim_arr[i] if condim_arr and i < len(condim_arr) else len(addr_row)
-                                        )
-                                        cd_local = min(int(cd_local), len(addr_row), 4)
-                                        impulses = []
-                                        for k in range(cd_local):
-                                            ai = addr_row[k]
-                                            if ai is None or ai < 0:
-                                                continue
-                                            if isinstance(env0_efc, list) and 0 <= ai < len(env0_efc):
-                                                impulses.append(env0_efc[ai])
-                                        entry["efc_force"] = impulses
-                                        if impulses and impulses[0] is not None:
-                                            entry["normal_force"] = float(impulses[0])
-                                            mag = _math.sqrt(sum((float(x) ** 2) for x in impulses if x is not None))
-                                            entry["reaction_norm"] = mag
-                            except Exception as eee:
-                                entry["efc_force_err"] = repr(eee)
-                            rows.append(entry)
-                            for key in (a_meta.get("name"), b_meta.get("name")):
-                                if key:
-                                    per_geom[key] = per_geom.get(key, 0) + 1
-                            if len(rows) >= 32:
-                                break
-                    ctx["foot_ground_contacts_env0"] = rows
-                    ctx["foot_ground_contacts_env0_count"] = len(rows)
-                    ctx["foot_ground_contacts_per_geom_count_env0"] = per_geom
-                out["contact_detail"] = ctx
+                            if efc_force_arr is not None and efc_addr_arr is not None:
+                                addr_row = efc_addr_arr[i] if i < len(efc_addr_arr) else None
+                                if addr_row is not None:
+                                    if not isinstance(addr_row, list):
+                                        addr_row = [addr_row]
+                                    # efc.force is (nworld, nefcmax) →
+                                    # env 0 row = efc_force_arr[0].
+                                    env0_efc = (
+                                        efc_force_arr[0]
+                                        if isinstance(efc_force_arr, list)
+                                        and efc_force_arr
+                                        and isinstance(efc_force_arr[0], list)
+                                        else efc_force_arr
+                                    )
+                                    cd_local = condim_arr[i] if condim_arr and i < len(condim_arr) else len(addr_row)
+                                    cd_local = min(int(cd_local), len(addr_row), 4)
+                                    impulses = []
+                                    for k in range(cd_local):
+                                        ai = addr_row[k]
+                                        if ai is None or ai < 0:
+                                            continue
+                                        if isinstance(env0_efc, list) and 0 <= ai < len(env0_efc):
+                                            impulses.append(env0_efc[ai])
+                                    entry["efc_force"] = impulses
+                                    if impulses and impulses[0] is not None:
+                                        entry["normal_force"] = float(impulses[0])
+                                        mag = _math.sqrt(sum((float(x) ** 2) for x in impulses if x is not None))
+                                        entry["reaction_norm"] = mag
+                        except Exception as eee:
+                            entry["efc_force_err"] = repr(eee)
+                        rows.append(entry)
+                        for key in (a_meta.get("name"), b_meta.get("name")):
+                            if key:
+                                per_geom[key] = per_geom.get(key, 0) + 1
+                        if len(rows) >= 32:
+                            break
+                ctx["foot_ground_contacts_env0"] = rows
+                ctx["foot_ground_contacts_env0_count"] = len(rows)
+                ctx["foot_ground_contacts_per_geom_count_env0"] = per_geom
+            out["contact_detail"] = ctx
         except Exception as e:
             out["contact_detail_err"] = repr(e)
             traceback.print_exc()
@@ -881,15 +770,12 @@ def _mujoco_dump(env, cfg) -> dict:
             out["robot_total_mass_err"] = repr(e)
 
         # ── solver actual niter (mujoco-warp Data exposes per-world) ──
-        for fname in ("solver_niter", "solver_iteration", "niter"):
-            v = getattr(wd, fname, None)
-            if v is not None:
-                out[fname] = _try_arr(v)
+        out["solver_niter"] = _bridge_arr(wd.solver_niter)
 
         # ── mj_model opt block ───────────────────────────────────────
         out["opt"] = {
-            "solref_default": mj.opt.o_solref.tolist() if hasattr(mj.opt, "o_solref") else None,
-            "solimp_default": mj.opt.o_solimp.tolist() if hasattr(mj.opt, "o_solimp") else None,
+            "solref_default": mj.opt.o_solref.tolist(),
+            "solimp_default": mj.opt.o_solimp.tolist(),
             "impratio": float(mj.opt.impratio),
             "solver": int(mj.opt.solver),
             "iterations": int(mj.opt.iterations),
@@ -961,27 +847,27 @@ def _capture_sim(
     }
 
     # ── Static solver/sim config ──────────────────────────────────────
-    sim_cfg: dict = {"physics_dt": getattr(env, "physics_dt", None), "decimation": env.decimation}
+    sim_cfg: dict = {"physics_dt": env.physics_dt, "decimation": env.decimation}
     if sim == "genesis":
         ro = env.scene_manager.config.rigid_options
         sim_cfg["genesis_rigid_options"] = {
-            "dt": getattr(ro, "dt", None),
-            "constraint_solver": str(getattr(ro, "constraint_solver", None)),
-            "constraint_timeconst": getattr(ro, "constraint_timeconst", None),
-            "iterations": getattr(ro, "iterations", None),
-            "ls_iterations": getattr(ro, "ls_iterations", None),
-            "max_collision_pairs": getattr(ro, "max_collision_pairs", None),
-            "contact_pruning_tolerance": getattr(ro, "contact_pruning_tolerance", None),
-            "enable_self_collision": getattr(ro, "enable_self_collision", None),
-            "enable_collision": getattr(ro, "enable_collision", None),
+            "dt": ro.dt,
+            "constraint_solver": str(ro.constraint_solver),
+            "constraint_timeconst": ro.constraint_timeconst,
+            "iterations": ro.iterations,
+            "ls_iterations": ro.ls_iterations,
+            "max_collision_pairs": ro.max_collision_pairs,
+            "contact_pruning_tolerance": ro.contact_pruning_tolerance,
+            "enable_self_collision": ro.enable_self_collision,
+            "enable_collision": ro.enable_collision,
             "use_contact_island": getattr(ro, "use_contact_island", None),
-            "batch_dofs_info": getattr(ro, "batch_dofs_info", None),
+            "batch_dofs_info": ro.batch_dofs_info,
         }
         # Genesis effective sol-params for foot geoms (from rigid solver).
         try:
             rs = env.scene_manager.scene.sim.rigid_solver
-            sim_cfg["genesis_sol_min_timeconst"] = float(getattr(rs, "_sol_min_timeconst", 0.0))
-            sim_cfg["genesis_sol_default_timeconst"] = float(getattr(rs, "_sol_default_timeconst", 0.0))
+            sim_cfg["genesis_sol_min_timeconst"] = float(rs._sol_min_timeconst)
+            sim_cfg["genesis_sol_default_timeconst"] = float(rs._sol_default_timeconst)
         except Exception as e:
             sim_cfg["genesis_sol_introspect_err"] = repr(e)
     elif sim == "mujoco":
@@ -996,7 +882,7 @@ def _capture_sim(
             "integrator": int(mj.opt.integrator),
             "cone": int(mj.opt.cone),
             "noslip_iterations": int(mj.opt.noslip_iterations),
-            "ccd_iterations": int(mj.opt.ccd_iterations) if hasattr(mj.opt, "ccd_iterations") else None,
+            "ccd_iterations": int(mj.opt.ccd_iterations),
         }
         # Foot geom solref/solimp (per-geom). Capture the first foot geom.
         foot_names = list(cfg.robot.foot_names)
@@ -1021,13 +907,13 @@ def _capture_sim(
         # Newton SolverMuJoCoCfg lives on the scene-config side.
         scfg = env.scene_cfg.solver_cfg
         sim_cfg["newton_solver_cfg"] = {
-            "solver": getattr(scfg, "solver", None),
-            "integrator": getattr(scfg, "integrator", None),
-            "cone": getattr(scfg, "cone", None),
-            "iterations": getattr(scfg, "iterations", None),
-            "ls_iterations": getattr(scfg, "ls_iterations", None),
-            "impratio": getattr(scfg, "impratio", None),
-            "use_mujoco_contacts": getattr(scfg, "use_mujoco_contacts", None),
+            "solver": scfg.solver,
+            "integrator": scfg.integrator,
+            "cone": scfg.cone,
+            "iterations": scfg.iterations,
+            "ls_iterations": scfg.ls_iterations,
+            "impratio": scfg.impratio,
+            "use_mujoco_contacts": scfg.use_mujoco_contacts,
         }
     out["sim_config"] = sim_cfg
 
@@ -1121,16 +1007,14 @@ def _capture_sim(
             try:
                 rd_s = env.robot_data
                 root_pos_s = rd_s.root_link_pos_w.detach().cpu()
-                root_vel_s = rd_s.root_link_lin_vel_w.detach().cpu() if hasattr(rd_s, "root_link_lin_vel_w") else None
+                root_vel_s = rd_s.root_link_lin_vel_w.detach().cpu()
                 try:
                     foot_bids = rd_s.find_bodies_idx(cfg.robot.foot_names)
                 except Exception:
                     foot_bids = None
                 if foot_bids is not None:
                     foot_pos_s = rd_s.body_pos_w[:, foot_bids, :].detach().cpu()
-                    foot_vel_s = (
-                        rd_s.body_lin_vel_w[:, foot_bids, :].detach().cpu() if hasattr(rd_s, "body_lin_vel_w") else None
-                    )
+                    foot_vel_s = rd_s.body_lin_vel_w[:, foot_bids, :].detach().cpu()
                 else:
                     foot_pos_s = foot_vel_s = None
             except Exception:
@@ -1214,29 +1098,10 @@ def _capture_sim(
 
     # ── Command state (try common attribute paths) ───────────────────
     try:
-        cm = getattr(env, "command_manager", None)
-        cmd = None
-        if cm is not None:
-            for attr in ("command", "get_commands", "compute"):
-                method = getattr(cm, attr, None)
-                if method is None:
-                    continue
-                try:
-                    cmd = method() if callable(method) else method
-                    if cmd is not None and hasattr(cmd, "shape"):
-                        break
-                except Exception:
-                    continue
-            # Some managers expose a dict of named command tensors —
-            # concatenate the per-name tensors so the norm reflects the
-            # effective command vector.
-            if cmd is None and hasattr(cm, "_commands"):
-                d = cm._commands
-                if isinstance(d, dict) and d:
-                    import torch as _t
-
-                    cmd = _t.cat([v.reshape(v.shape[0], -1) for v in d.values() if hasattr(v, "shape")], dim=-1)
-        if cmd is not None and hasattr(cmd, "shape"):
+        # The first command term's command (the velocity command for this preset).
+        first_term = next(env.command_manager.iter_terms(), None)
+        cmd = first_term[1].command if first_term is not None else None
+        if cmd is not None:
             out["command"] = {
                 "shape": list(cmd.shape),
                 "env0": cmd[0].detach().cpu().tolist(),
@@ -1289,9 +1154,7 @@ def _capture_sim(
             rs = env.scene_manager.scene.sim.rigid_solver
             # Genesis stores contacts under collider state. Path may vary
             # across versions, so guard each step.
-            n_contacts = _safe_get(rs, "collider", "collider_state", "n_contacts")
-            if n_contacts is None:
-                n_contacts = _safe_get(rs, "collider", "contact_data", "n_contacts")
+            n_contacts = rs.collider.collider_state.n_contacts
             if n_contacts is not None:
                 arr = n_contacts.numpy() if hasattr(n_contacts, "numpy") else n_contacts
                 native_count["genesis_n_contacts_per_env"] = arr.tolist() if hasattr(arr, "tolist") else int(arr)
@@ -1685,8 +1548,8 @@ def _print_compare(per_sim: dict[str, dict], lg) -> None:
                 lg("    resolved contacts (env 0):")
                 lg(f"      {'i':>3} {'geom_a (link)':<48s} {'geom_b (link)':<28s} {'|F_a|':>9s}")
                 for r in resolved:
-                    a = f"{r.get('geom_a_name','?')} ({r.get('geom_a_link','?')})"
-                    b = f"{r.get('geom_b_name','?')} ({r.get('geom_b_link','?')})"
+                    a = f"{r.get('geom_a_name', '?')} ({r.get('geom_a_link', '?')})"
+                    b = f"{r.get('geom_b_name', '?')} ({r.get('geom_b_link', '?')})"
                     fn = r.get("force_a_norm")
                     fns = f"{fn:9.3f}" if isinstance(fn, int | float) else "       -"
                     lg(f"      {r.get('i'):>3} {a:<48s} {b:<28s} {fns}")

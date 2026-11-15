@@ -101,16 +101,16 @@ def check_contact_frame(seeds: int = 10, num_envs: int = 2048, n: int = 4, subst
         shape = (num_envs, n)
         state = [torch.zeros(shape, dtype=torch.bool), *(torch.rand(shape, generator=g) * 0.1 for _ in range(4))]
         group = SimpleNamespace(**{name: value.clone() for name, value in zip(fields, state)})
-        handed_in = [getattr(group, name) for name in fields]
+        handed_in = [vars(group)[name] for name in fields]
         for _ in range(substeps):
             is_contact = torch.rand(shape, generator=g) < 0.5
             state = _old_contact_frame(*state, is_contact, dt)
             BaseContactManager._apply_contact_frame(group, is_contact, dt)
         for name, old in zip(fields, state):
-            assert torch.equal(old, getattr(group, name)), f"seed {seed}: {name} differs"
+            assert torch.equal(old, vars(group)[name]), f"seed {seed}: {name} differs"
         # The buffers must still be the objects handed in — that is the point.
         for name, before in zip(fields, handed_in):
-            assert getattr(group, name) is before, f"{name} was rebound"
+            assert vars(group)[name] is before, f"{name} was rebound"
     print(f"  contact frame: {seeds} seeds x {substeps} substeps bit-identical, buffers never rebound")
 
 
@@ -150,9 +150,10 @@ def check_stacked_timing(
         )
         for i, w in enumerate(widths):
             m._register_group(f"g{i}", [f"b{i}{j}" for j in range(w)], ("found",))
-        refs = {
-            name: SimpleNamespace(**{f: getattr(grp, f).clone() for f in fields}) for name, grp in m._groups.items()
-        }
+        refs = {}
+        for name, grp in m._groups.items():
+            snapshot = {f: getattr(grp, f).clone() for f in fields}  # dynamic-attr: ContactGroup timing field names
+            refs[name] = SimpleNamespace(**snapshot)
         for k in range(substeps):
             m.frames = {
                 name: torch.rand((num_envs, grp.num_tracked), generator=g) < 0.5 for name, grp in m._groups.items()
@@ -163,14 +164,15 @@ def check_stacked_timing(
                 m.reset(env_ids)
                 for ref in refs.values():
                     for f in fields:
-                        getattr(ref, f)[env_ids] = 0
+                        vars(ref)[f][env_ids] = 0
             m.advance(dt)
             for name, ref in refs.items():
                 BaseContactManager._apply_contact_frame(ref, m.frames[name], dt)
         for name, ref in refs.items():
             grp = m._groups[name]
             for f in fields:
-                assert torch.equal(getattr(ref, f), getattr(grp, f)), f"seed {seed}: {name}.{f} differs"
+                live = getattr(grp, f)  # dynamic-attr: ContactGroup timing field names
+                assert torch.equal(vars(ref)[f], live), f"seed {seed}: {name}.{f} differs"
             # The accessors must hand out the live column views, not copies.
             assert m.current_air_time(name).data_ptr() == grp.current_air_time.data_ptr()
     how = "compiled" if compile_timing else "eager"

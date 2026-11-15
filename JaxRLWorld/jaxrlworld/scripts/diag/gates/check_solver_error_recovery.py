@@ -46,7 +46,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 def build_env(config: str, sim: str, num_envs: int, nconmax: int | None = None):
     mod_path, cls_name = config.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs, seed=0).build()
     if nconmax is not None:
         # The per-world contact budget lives on the solver config for Newton

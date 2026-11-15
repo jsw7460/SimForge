@@ -32,6 +32,7 @@ import argparse
 import sys
 
 import mujoco
+import newton
 import numpy as np
 
 from jaxrlworld.rl.evals.evaluator import PolicyEvaluator
@@ -130,7 +131,7 @@ def dump_sizes(mj: mujoco.MjModel) -> None:
         "nexclude",
         "npair",
     ):
-        print(f"  {k:<10}= {getattr(mj, k)}")
+        print(f"  {k:<10}= {getattr(mj, k)}")  # dynamic-attr: iterates a list of MjModel size-field names
 
 
 # ── per-joint ──────────────────────────────────────────────────────────
@@ -303,7 +304,7 @@ def _resolve_mj_model(env, eval_sim: str) -> mujoco.MjModel:
         solver = env.scene_manager.solver
         if solver is None:
             raise RuntimeError("Newton scene_manager.solver is None")
-        if not hasattr(solver, "mj_model") or solver.mj_model is None:
+        if not isinstance(solver, newton.solvers.SolverMuJoCo) or solver.mj_model is None:
             raise RuntimeError(
                 "Newton solver does not expose mj_model — expected SolverMuJoCo with use_mujoco_contacts=True"
             )

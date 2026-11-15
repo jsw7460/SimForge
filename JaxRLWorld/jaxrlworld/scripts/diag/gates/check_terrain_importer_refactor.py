@@ -86,6 +86,8 @@ import sys
 import traceback
 from dataclasses import dataclass
 
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 
@@ -191,7 +193,7 @@ def _build_env(
         raise RuntimeError(f"preset {preset!r} does not support use_rough_terrain (no flat-vs-rough flag).")
 
     cfg_module = importlib.import_module(info["module"])
-    cfg_cls = getattr(cfg_module, info["class_name"])
+    cfg_cls = getattr(cfg_module, info["class_name"])  # dynamic-attr: preset class named in _PRESETS
     cfg_kwargs = {"sim_type": sim, "num_envs": num_envs, "seed": seed}
     if info["supports_rough"]:
         cfg_kwargs["use_rough_terrain"] = use_rough
@@ -209,7 +211,7 @@ def _build_env(
     if sim == "newton":
         robot_entity_cfg = cfgs.scene.entities["robot"]
         if newton_asset == "urdf":
-            urdf_path = getattr(cfgs.scene.robot_cfg, "urdf_path", None)
+            urdf_path = cfgs.scene.robot_cfg.urdf_path
             if not urdf_path:
                 raise RuntimeError(f"{preset}: robot_cfg.urdf_path is None — cannot test URDF path.")
             robot_entity_cfg.urdf_path = urdf_path
@@ -219,7 +221,7 @@ def _build_env(
             # MJCF when explicitly asked. Go2's Newton preset already
             # wires mjcf only, so the swap is a no-op there.
             if not robot_entity_cfg.mjcf_path:
-                mjcf_path = getattr(cfgs.scene.robot_cfg, "mjcf_path", None)
+                mjcf_path = cfgs.scene.robot_cfg.mjcf_path
                 if not mjcf_path:
                     raise RuntimeError(f"{preset}: robot_cfg.mjcf_path is None — cannot test MJCF path.")
                 robot_entity_cfg.mjcf_path = mjcf_path
@@ -247,17 +249,15 @@ def _strip_mjcf_shape_dependent_terms(cfgs, *, lg_prefix: str = "") -> None:
     Touches only the live ``EventConfig`` (dataclass fields); the source
     preset is unmodified.
     """
-    event_cfg = getattr(cfgs, "event", None)
+    event_cfg = cfgs.event
     if event_cfg is None:
         return
     removed: list[str] = []
-    for field_name in list(vars(event_cfg)):
-        term = getattr(event_cfg, field_name, None)
-        params = getattr(term, "params", None)
-        if not isinstance(params, dict):
+    for field_name, term in list(vars(event_cfg).items()):
+        if not isinstance(term, EventTermConfig):
             continue
-        asset_cfg = params.get("asset_cfg")
-        geom_names = getattr(asset_cfg, "geom_names", None) if asset_cfg is not None else None
+        asset_cfg = term.params.get("asset_cfg")
+        geom_names = asset_cfg.geom_names if asset_cfg is not None else None
         if not geom_names:
             continue
         # Heuristic: any leaf-glob ``.*/<name>`` pattern is MJCF-specific
@@ -287,7 +287,7 @@ def _check_scene_config_shape(cfg_built, sim: str, use_rough: bool, lg: _Logger,
     lg.w(f"    SceneConfig: {type(scene_cfg).__name__}")
 
     # terrain_cfg present + correct terrain_type
-    terrain_cfg = getattr(scene_cfg, "terrain_cfg", None)
+    terrain_cfg = scene_cfg.terrain_cfg
     if terrain_cfg is None:
         lg.fail(combo, "SceneConfig.terrain_cfg missing — terrain_cfg was not threaded through preset builder")
         return False
@@ -309,7 +309,9 @@ def _check_scene_config_shape(cfg_built, sim: str, use_rough: bool, lg: _Logger,
         return False
 
     # Sim-specific: Newton SceneConfig should NOT have `add_ground`.
-    if sim == "newton" and hasattr(scene_cfg, "add_ground"):
+    if sim == "newton" and hasattr(
+        scene_cfg, "add_ground"
+    ):  # dynamic-attr: guards that the removed legacy field stays gone
         lg.fail(combo, "NewtonSceneConfig still exposes `add_ground` field — legacy not deleted")
         return False
     return True
@@ -319,12 +321,7 @@ def _check_importer_state(env, sim: str, use_rough: bool, lg: _Logger, combo: st
     """Dump + verify ``scene_manager.terrain`` after env build."""
     import torch
 
-    sm = env.scene_manager
-    if not hasattr(sm, "terrain"):
-        lg.fail(combo, f"scene_manager (sim={sim}) has no ``terrain`` attribute")
-        return False
-
-    importer = sm.terrain
+    importer = env.scene_manager.terrain
     lg.w(f"    importer class: {type(importer).__name__}")
 
     # `terrain.data` semantics: None for plane, populated for generator.
@@ -363,7 +360,7 @@ def _check_importer_state(env, sim: str, use_rough: bool, lg: _Logger, combo: st
     # Genesis-only: ``entity`` slot must be populated (used by the
     # ``entity="terrain"`` contact-sensor sentinel).
     if sim == "genesis":
-        ent = getattr(importer, "entity", "<missing>")
+        ent = importer.entity
         lg.w(f"    importer.entity (genesis)      = {type(ent).__name__ if ent is not None else None}")
         if ent is None:
             lg.fail(combo, "Genesis terrain importer: ``entity`` slot is None after add_to_scene")
@@ -382,10 +379,6 @@ def _check_unified_env_origins(env, sim: str, use_rough: bool, lg: _Logger, comb
     import torch
 
     sm = env.scene_manager
-    if not hasattr(sm, "env_origins"):
-        lg.fail(combo, "scene_manager.env_origins property missing")
-        return False
-
     o = sm.env_origins
     lg.w(f"    scene_manager.env_origins.shape= {tuple(o.shape)}")
     lg.w(f"    scene_manager.env_origins[0]   = {o[0].detach().cpu().tolist()}")
@@ -412,10 +405,7 @@ def _check_unified_env_origins(env, sim: str, use_rough: bool, lg: _Logger, comb
         # plane: should be mjlab's grid; sample it and compare against
         # the underlying mjlab Scene.env_origins.
         mjlab_scene = sm.scene
-        mjlab_origins = getattr(mjlab_scene, "env_origins", None)
-        if mjlab_origins is None:
-            lg.fail(combo, "mjlab plane: scene.env_origins missing on mjlab Scene")
-            return False
+        mjlab_origins = mjlab_scene.env_origins
         if not torch.equal(o, mjlab_origins):
             lg.fail(combo, "mjlab plane: scene_manager.env_origins != scene.env_origins (env_spacing grid)")
             return False
@@ -486,14 +476,14 @@ def _check_newton_terrain_sentinel(env, lg: _Logger, combo: str) -> bool:
     actually resolves through the contact-sensor scoping path (the new
     sentinel branch). Reads from the live ``NewtonContactSensorManager``."""
     cm = env.contact_manager
-    if cm is None or not getattr(cm, "_group_sensors", None):
+    if cm is None or not cm._group_sensors:
         lg.w("    (no Newton contact sensors registered — skipping sentinel check)")
         return True
     # Find any sensor with secondary.entity == "terrain"; the go2
     # preset registers two such sensors (foot_ground, body_ground).
     matched: list[str] = []
     for sensor in cm._group_sensors.values():
-        secondary = getattr(sensor.cfg, "secondary", None)
+        secondary = sensor.cfg.secondary
         if secondary is not None and secondary.entity == "terrain":
             matched.append(sensor.cfg.name)
     lg.w(f"    Newton contact sensors with entity='terrain': {matched}")
@@ -516,10 +506,6 @@ def _check_newton_label_indexing(env, lg: _Logger, combo: str) -> bool:
     contact-sensor wiring is broken.
     """
     sm = env.scene_manager
-    if not hasattr(sm, "label_indexing"):
-        lg.fail(combo, "scene_manager.label_indexing missing (NewtonSceneManager._build_label_indexing not wired)")
-        return False
-
     idx_map = sm.label_indexing
     lg.w(f"    scene_manager.label_indexing keys: {sorted(idx_map)}")
 
@@ -746,7 +732,7 @@ def _run_combo(
 
         info = _PRESETS[preset]
         cfg_module = importlib.import_module(info["module"])
-        cfg_cls = getattr(cfg_module, info["class_name"])
+        cfg_cls = getattr(cfg_module, info["class_name"])  # dynamic-attr: preset class named in _PRESETS
         cfg_kwargs = {"sim_type": sim, "num_envs": num_envs, "seed": seed}
         if info["supports_rough"]:
             cfg_kwargs["use_rough_terrain"] = use_rough

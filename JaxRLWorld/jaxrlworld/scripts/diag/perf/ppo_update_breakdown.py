@@ -47,7 +47,7 @@ def _build_runner(preset: str, sim: str, num_envs: int):
         mod_path, cls_name = preset.split(":", 1)
     else:
         mod_path, cls_name = _PRESETS[preset]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: "module:Class" preset path
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     return BaseRunner.create_with_env(cfgs, use_wandb=False)
 

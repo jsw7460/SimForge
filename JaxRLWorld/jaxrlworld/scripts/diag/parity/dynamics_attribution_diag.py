@@ -245,7 +245,8 @@ def build_env(preset: str, cell: str, num_envs: int, stripped: bool):
     sim, forward = CELLS[cell]
     path = spec["cls"][sim] if isinstance(spec["cls"], dict) else spec["cls"]
     mod_path, cls_name = path.split(":", 1)
-    cfg = getattr(importlib.import_module(mod_path), cls_name)(sim_type=sim, num_envs=num_envs)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
+    cfg = cfg_cls(sim_type=sim, num_envs=num_envs)
     if stripped:
         fields = {f.name for f in dataclasses.fields(cfg)}
         for key, value in spec["stripped_overrides"].items():
@@ -325,7 +326,7 @@ def read_params(env, sim: str) -> dict:
             model = env.scene_manager.sim.model
 
             def field(attr: str) -> torch.Tensor:
-                return per_env(getattr(model, attr)[:], n)
+                return per_env(getattr(model, attr)[:], n)  # dynamic-attr: model array named by the caller
 
             entity = env.scene_manager.get_entity("robot")
             bodies = {int(b) for b in entity.indexing.body_ids.cpu().tolist()}
@@ -337,7 +338,8 @@ def read_params(env, sim: str) -> dict:
             mj = solver.mj_model
 
             def field(attr: str) -> torch.Tensor:
-                return per_env(wp.to_torch(getattr(solver.mjw_model, attr)), n)
+                arr = getattr(solver.mjw_model, attr)  # dynamic-attr: model array named by the caller
+                return per_env(wp.to_torch(arr), n)
 
             bodies = set(range(1, mj.nbody))
         body_mass = field("body_mass")
@@ -390,8 +392,11 @@ def read_params(env, sim: str) -> dict:
             out["dof"][name] = {k: to_list(v[:, col]) for k, v in dof_fields.items()}
 
     for actuator, joint_ids in env.act_manager._actuators:
-        for attr in ("stiffness", "damping", "effort_limit"):
-            values = getattr(actuator, attr)
+        for attr, values in (
+            ("stiffness", actuator.stiffness),
+            ("damping", actuator.damping),
+            ("effort_limit", actuator.effort_limit),
+        ):
             values = per_env_cols(values, n) if values.dim() == 1 else per_env(values, n)
             for col, j in enumerate(torch.as_tensor(joint_ids).cpu().tolist()):
                 out["pd"].setdefault(names[j], {})[attr] = to_list(values[:, col])

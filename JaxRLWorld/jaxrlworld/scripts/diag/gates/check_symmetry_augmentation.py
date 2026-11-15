@@ -400,8 +400,8 @@ def section_3_same_graph(chk, spec, batch, model, key):
         for k in ("policy_loss", "value_loss", "entropy", "analytical_kl"):
             chk(
                 f"{tag}: {k}",
-                maxdiff(getattr(info, k), parts[k]) < 1e-6,
-                f"|d| {maxdiff(getattr(info, k), parts[k]):.2e}",
+                maxdiff(info._asdict()[k], parts[k]) < 1e-6,
+                f"|d| {maxdiff(info._asdict()[k], parts[k]):.2e}",
             )
         chk(
             f"{tag}: parameter gradients",
@@ -431,7 +431,7 @@ def section_4_invariance(chk, spec, batch, model, key):
     # approx_kl is excluded: it is measured on the originals only, and
     # mirroring the batch swaps which rows are the originals.
     for k in ("policy_loss", "value_loss", "entropy", "clip_fraction"):
-        d = maxdiff(getattr(a, k), getattr(b, k))
+        d = maxdiff(a._asdict()[k], b._asdict()[k])
         chk(f"{k}(B) == {k}(mirror B)", d < 1e-5, f"|d| {d:.2e}")
     _, a0, _ = run_loss(model, batch, spec, False, key)
     _, b0, _ = run_loss(model, mirror_batch(batch, spec), spec, False, key)
@@ -453,7 +453,7 @@ def section_5_equivariant(chk, spec, batch, base, key):
     l_aug, i_aug, g_aug = run_loss(model, b, spec, True, key)
     l_pl, i_pl, g_pl = run_loss(model, b, spec, False, key)
     for k in ("policy_loss", "value_loss", "entropy", "analytical_kl", "approx_kl", "clip_fraction"):
-        d = maxdiff(getattr(i_aug, k), getattr(i_pl, k))
+        d = maxdiff(i_aug._asdict()[k], i_pl._asdict()[k])
         chk(f"{k}: augmented == plain", d < 1e-5, f"|d| {d:.2e}")
     chk("total loss: augmented == plain", maxdiff(l_aug, l_pl) < 1e-5, f"|d| {maxdiff(l_aug, l_pl):.2e}")
     chk("gradients: augmented == plain", grad_maxdiff(g_aug, g_pl) < 1e-5, f"max|d| {grad_maxdiff(g_aug, g_pl):.2e}")
@@ -496,7 +496,7 @@ def section_6_real_model(chk, spec, batch, key):
     chk("augmented loss and gradients are finite", finite, f"loss {float(loss):.5f}")
     (_, info_m), _ = jax.value_and_grad(loss_fn, has_aux=True)(params, mirror_batch(batch, spec), True)
     for k in ("policy_loss", "value_loss"):
-        d = maxdiff(getattr(info, k), getattr(info_m, k))
+        d = maxdiff(info._asdict()[k], info_m._asdict()[k])
         chk(f"{k}(B) == {k}(mirror B) with the real model", d < 1e-5, f"|d| {d:.2e}")
     # KL on originals only: recompute from the model on the N originals.
     m = eqx.combine(params, static)

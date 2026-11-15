@@ -637,7 +637,7 @@ def _build_env(sim: str, num_envs: int, extra_sensors: tuple = ()):
     # holds IMU-style sensors), while the mjlab scene keeps them in `sensors`.
     # Appending to the wrong one registers nothing, silently.
     field = "sensors" if sim == "mujoco" else "contact_sensors"
-    existing = tuple(getattr(cfgs.scene, field) or ())
+    existing = tuple((cfgs.scene.sensors if sim == "mujoco" else cfgs.scene.contact_sensors) or ())
     # history_length must equal the decimation on the Genesis backend, so it is
     # taken from a sensor the preset already built rather than hardcoded.
     history_length = existing[0].history_length if existing else 0
@@ -808,7 +808,8 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
         print(f"[cube]   PLACEMENT ERROR: {type(e).__name__}: {e}")
         results["object_placed_by_event"] = False
 
-    has_joint_attr = hasattr(env.get_rigid_object_data("cube"), "joint_pos")
+    cube_data = env.get_rigid_object_data("cube")
+    has_joint_attr = hasattr(cube_data, "joint_pos")  # dynamic-attr: asserts rigid-object data has no joint state
     print(f"[cube]   exposes joint_pos? {has_joint_attr} (expect False — RigidObjectData)")
     results["object_is_rigid_only"] = not has_joint_attr
 
@@ -876,7 +877,7 @@ def run_one_sim(sim: str, num_envs: int, settle_steps: int) -> dict:
     # C2 — data object type and surface.
     td = env.get_entity_data("table")
     type_name = type(td).__name__
-    fixed_has_joint = hasattr(td, "joint_pos")
+    fixed_has_joint = hasattr(td, "joint_pos")  # dynamic-attr: asserts rigid-object data has no joint state
     print(f"[table]  get_entity_data -> {type_name}   exposes joint_pos? {fixed_has_joint} (expect False)")
     results["fixed_is_rigid_only"] = not fixed_has_joint
     measured["fixed_data_type"] = type_name

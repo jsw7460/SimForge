@@ -60,7 +60,7 @@ def main() -> int:
 
     torch.manual_seed(args.seed)
     module, cls_name = _PRESETS[args.preset]
-    cfg_cls = getattr(importlib.import_module(module), cls_name)
+    cfg_cls = getattr(importlib.import_module(module), cls_name)  # dynamic-attr: preset class named in _PRESETS
     cfgs = cfg_cls(sim_type="genesis", num_envs=args.num_envs, seed=args.seed).build()
 
     from jaxrlworld.rl.evals.sim_initializers import get_initializer
@@ -80,7 +80,7 @@ def main() -> int:
     calls: dict[str, int] = defaultdict(int)
 
     def counted(obj, name: str):
-        fn = getattr(obj, name)
+        fn = getattr(obj, name)  # dynamic-attr: method patched by name with a counting shim
 
         @functools.wraps(fn)
         def shim(*a, **kw):

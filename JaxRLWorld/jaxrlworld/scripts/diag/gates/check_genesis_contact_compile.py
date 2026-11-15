@@ -38,7 +38,7 @@ def _build_env(preset: str, num_envs: int):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = preset.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type="genesis", num_envs=num_envs).build()
     if not cfgs.env.compile_contact_kernels:
         raise RuntimeError("compile_contact_kernels is off for this preset; nothing to compare.")
@@ -69,7 +69,8 @@ def main() -> int:
     def checked_capture_and_advance(timing, dt: float) -> None:
         inputs = batch._gather_inputs()
         link_a, link_b, force, n_live, found_hists, force_hists = inputs
-        ref_timing = SimpleNamespace(**{f: getattr(timing, f).clone() for f in fields})
+        before = {f: getattr(timing, f) for f in fields}  # dynamic-attr: ContactGroup timing field names
+        ref_timing = SimpleNamespace(**{f: t.clone() for f, t in before.items()})
         ref_found, ref_force = GenesisContactBatch._substep_impl(
             batch,
             link_a,
@@ -88,8 +89,9 @@ def main() -> int:
         for a, b in zip(ref_found, new_found):
             if not torch.equal(a, b):
                 stats["found_mismatch"] += 1
+        after = {f: getattr(timing, f) for f in fields}  # dynamic-attr: ContactGroup timing field names
         for f in fields:
-            if not torch.equal(getattr(ref_timing, f), getattr(timing, f)):
+            if not torch.equal(vars(ref_timing)[f], after[f]):
                 stats["timing_mismatch"] += 1
         for a, b in zip(ref_force, new_force):
             scale = a[:, 0].abs().max().clamp_min(1e-6)

@@ -136,17 +136,18 @@ class _ContactShadow:
         batch._substep = self
 
     def __call__(self, link_a, link_b, force, n_live, found_hists, force_hists, timing, dt):
-        before = {f: getattr(timing, f).clone() for f in self._fields}
+        before = {f: getattr(timing, f).clone() for f in self._fields}  # dynamic-attr: ContactGroup timing field names
         eager = self._batch._substep_impl(link_a, link_b, force, n_live, found_hists, force_hists, timing, dt)
-        after = {f: getattr(timing, f).clone() for f in self._fields}
+        after = {f: getattr(timing, f).clone() for f in self._fields}  # dynamic-attr: ContactGroup timing field names
         for f in self._fields:
-            getattr(timing, f).copy_(before[f])
+            getattr(timing, f).copy_(before[f])  # dynamic-attr: ContactGroup timing field names
         for t in (link_a, link_b, force):
             torch._dynamo.mark_dynamic(t, 1)
         compiled = self._compiled(link_a, link_b, force, n_live, found_hists, force_hists, timing, dt)
         for f in self._fields:
-            self.worst = max(self.worst, _rel(after[f], getattr(timing, f)))
-            getattr(timing, f).copy_(after[f])
+            live = getattr(timing, f)  # dynamic-attr: ContactGroup timing field names
+            self.worst = max(self.worst, _rel(after[f], live))
+            live.copy_(after[f])
         for e_list, c_list in zip(eager, compiled):
             for e, c in zip(e_list, c_list):
                 self.worst = max(self.worst, _rel(e, c))
@@ -165,15 +166,16 @@ class _TimingShadow:
         manager._frame = self
 
     def __call__(self, timing, is_contact, dt):
-        before = {f: getattr(timing, f).clone() for f in self._fields}
+        before = {f: getattr(timing, f).clone() for f in self._fields}  # dynamic-attr: ContactGroup timing field names
         BaseContactManager._apply_contact_frame(timing, is_contact, dt)
-        after = {f: getattr(timing, f).clone() for f in self._fields}
+        after = {f: getattr(timing, f).clone() for f in self._fields}  # dynamic-attr: ContactGroup timing field names
         for f in self._fields:
-            getattr(timing, f).copy_(before[f])
+            getattr(timing, f).copy_(before[f])  # dynamic-attr: ContactGroup timing field names
         self._compiled(timing, is_contact, dt)
         for f in self._fields:
-            self.worst = max(self.worst, _rel(after[f], getattr(timing, f)))
-            getattr(timing, f).copy_(after[f])
+            live = getattr(timing, f)  # dynamic-attr: ContactGroup timing field names
+            self.worst = max(self.worst, _rel(after[f], live))
+            live.copy_(after[f])
 
 
 def install_shadows(env, sim: str, no_reward_shadow: str | None = None) -> dict:

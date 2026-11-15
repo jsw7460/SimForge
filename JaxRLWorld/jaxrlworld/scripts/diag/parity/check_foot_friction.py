@@ -58,7 +58,7 @@ def _build_env(preset: str, sim: str, num_envs: int):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = _PRESETS[preset]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
@@ -101,22 +101,10 @@ def _read_newton_friction(env) -> dict[str, tuple[float, float, float]]:
     model = env.scene_manager.solver.model
     n_shapes = model.shape_count
     # shape_material_mu / mu_torsional / mu_rolling are wp.array — pull as torch then numpy.
-    mu = (
-        model.shape_material_mu.numpy()
-        if hasattr(model.shape_material_mu, "numpy")
-        else np.asarray(model.shape_material_mu)
-    )
-    mu_tor = (
-        model.shape_material_mu_torsional.numpy()
-        if hasattr(model.shape_material_mu_torsional, "numpy")
-        else np.asarray(model.shape_material_mu_torsional)
-    )
-    mu_rol = (
-        model.shape_material_mu_rolling.numpy()
-        if hasattr(model.shape_material_mu_rolling, "numpy")
-        else np.asarray(model.shape_material_mu_rolling)
-    )
-    labels = list(getattr(model, "shape_label", []))
+    mu = model.shape_material_mu.numpy()
+    mu_tor = model.shape_material_mu_torsional.numpy()
+    mu_rol = model.shape_material_mu_rolling.numpy()
+    labels = list(model.shape_label)
     for i in range(n_shapes):
         name = labels[i] if i < len(labels) else f"shape_{i}"
         # Drop the world/entity prefix Newton's MJCF importer adds (e.g. ``robot/g1_29dof/left_foot1_collision``).

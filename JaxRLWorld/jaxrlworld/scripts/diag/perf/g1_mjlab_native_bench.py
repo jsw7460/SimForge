@@ -49,8 +49,8 @@ def _model_stats(mj_model, wp_data) -> dict:
         "ngeom": mj_model.ngeom,
         "npair": mj_model.npair,
         "nsensor": mj_model.nsensor,
-        "naconmax": getattr(wp_data, "naconmax", -1),
-        "njmax": getattr(wp_data, "njmax", -1),
+        "naconmax": wp_data.naconmax,
+        "njmax": wp_data.njmax,
         "live ncon (total)": ncon,
     }
     names = [mj_model.sensor(i).name for i in range(mj_model.nsensor)]

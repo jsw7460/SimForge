@@ -35,8 +35,6 @@ from pathlib import Path
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
-import numpy as np
-
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
 }
@@ -57,7 +55,7 @@ def _build_env(preset: str, sim: str, num_envs: int = 1):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = _PRESETS[preset]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset class named in _PRESETS
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
@@ -78,7 +76,7 @@ def _genesis_body_names(env) -> list[str]:
 
 def _newton_body_names(env) -> list[str]:
     model = env.scene_manager.solver.model
-    labels = list(getattr(model, "body_label", []))
+    labels = list(model.body_label)
     return [bl.rsplit("/", 1)[-1] if "/" in bl else bl for bl in labels]
 
 
@@ -104,10 +102,8 @@ def _body_world_pos(env, sim: str, body_name: str):
             except Exception:
                 return None
             pos = link.get_pos()
-            # Genesis returns either (B, 3) torch tensor or numpy
-            arr = pos[0] if hasattr(pos, "shape") and len(pos.shape) == 2 else pos
-            if hasattr(arr, "cpu"):
-                arr = arr.cpu().numpy()
+            # Genesis returns a (B, 3) or (3,) torch tensor.
+            arr = (pos[0] if pos.ndim == 2 else pos).cpu().numpy()
             return tuple(float(x) for x in arr)
         elif sim == "newton":
             names = _newton_body_names(env)
@@ -151,21 +147,9 @@ def _resolved_gains(env, sim: str, joint_names: list[str]) -> dict[str, dict[str
                     dof_ids, _ = entity_utils.find_dofs(entity=entity, name_keys=[n])
                     if not dof_ids:
                         continue
-                    kp = (
-                        entity.get_dofs_kp(dof_ids).cpu().numpy()
-                        if hasattr(entity.get_dofs_kp(dof_ids), "cpu")
-                        else np.asarray(entity.get_dofs_kp(dof_ids))
-                    )
-                    kv = (
-                        entity.get_dofs_kv(dof_ids).cpu().numpy()
-                        if hasattr(entity.get_dofs_kv(dof_ids), "cpu")
-                        else np.asarray(entity.get_dofs_kv(dof_ids))
-                    )
-                    arm = (
-                        entity.get_dofs_armature(dof_ids).cpu().numpy()
-                        if hasattr(entity.get_dofs_armature(dof_ids), "cpu")
-                        else np.asarray(entity.get_dofs_armature(dof_ids))
-                    )
+                    kp = entity.get_dofs_kp(dof_ids).cpu().numpy()
+                    kv = entity.get_dofs_kv(dof_ids).cpu().numpy()
+                    arm = entity.get_dofs_armature(dof_ids).cpu().numpy()
                     out[n] = {"kp": float(kp.flat[0]), "kd": float(kv.flat[0]), "armature": float(arm.flat[0])}
                 except Exception:
                     pass
@@ -173,22 +157,10 @@ def _resolved_gains(env, sim: str, joint_names: list[str]) -> dict[str, dict[str
             import warp as wp
 
             model = env.scene_manager.solver.model
-            jl = list(getattr(model, "joint_label", getattr(model, "joint_name", [])))
-            ke = (
-                wp.to_torch(model.joint_target_ke).cpu().numpy()
-                if hasattr(model.joint_target_ke, "shape")
-                else np.asarray(model.joint_target_ke)
-            )
-            kd = (
-                wp.to_torch(model.joint_target_kd).cpu().numpy()
-                if hasattr(model.joint_target_kd, "shape")
-                else np.asarray(model.joint_target_kd)
-            )
-            arm = (
-                wp.to_torch(model.joint_armature).cpu().numpy()
-                if hasattr(model.joint_armature, "shape")
-                else np.asarray(model.joint_armature)
-            )
+            jl = list(model.joint_label)
+            ke = wp.to_torch(model.joint_target_ke).cpu().numpy()
+            kd = wp.to_torch(model.joint_target_kd).cpu().numpy()
+            arm = wp.to_torch(model.joint_armature).cpu().numpy()
             jl_bare = [n.rsplit("/", 1)[-1] if "/" in n else n for n in jl]
             for n in joint_names:
                 if n in jl_bare:
@@ -249,15 +221,7 @@ def _collect(env, sim: str) -> dict:
 
     # Base pose
     info["base_pos_at_reset"] = _safe(lambda: tuple(float(x) for x in rd.body_link_pos_w[0, 0].detach().cpu().numpy()))
-    info["base_quat_at_reset"] = _safe(
-        lambda: tuple(
-            float(x)
-            for x in (rd.body_link_quat_w[0, 0] if hasattr(rd, "body_link_quat_w") else rd.base_quat[0])
-            .detach()
-            .cpu()
-            .numpy()
-        )
-    )
+    info["base_quat_at_reset"] = _safe(lambda: tuple(float(x) for x in rd.base_quat[0].detach().cpu().numpy()))
 
     # Body names enumeration
     body_namer = {"genesis": _genesis_body_names, "newton": _newton_body_names, "mujoco": _mujoco_body_names}[sim]

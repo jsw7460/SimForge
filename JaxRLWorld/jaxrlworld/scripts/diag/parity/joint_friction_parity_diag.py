@@ -40,31 +40,16 @@ _PRESETS = {"go2": Go2FlatConfig}
 _SIMS = ("genesis", "newton", "mujoco")
 
 
-def _as_numpy(value) -> np.ndarray | None:
-    if value is None:
-        return None
-    if isinstance(value, np.ndarray):
-        return value
-    if hasattr(value, "numpy"):
-        return np.asarray(value.detach().cpu().numpy() if hasattr(value, "detach") else value.numpy())
-    try:
-        import warp as wp
-
-        return wp.to_torch(value).detach().cpu().numpy()
-    except Exception:
-        return None
-
-
 def _friction_per_dof(sim: str, env) -> np.ndarray:
     """Per-DOF joint friction, straight out of the built model."""
     if sim == "mujoco":
         return np.asarray(env.scene_manager.sim.mj_model.dof_frictionloss)
     if sim == "newton":
         model = env.scene_manager.model
-        return _as_numpy(model.joint_friction)
+        return model.joint_friction.numpy()
     if sim == "genesis":
         entity = env.scene_manager["robot"]
-        return _as_numpy(entity.get_dofs_frictionloss())
+        return entity.get_dofs_frictionloss().detach().cpu().numpy()
     raise ValueError(f"Unknown sim {sim!r}")
 
 

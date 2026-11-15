@@ -47,7 +47,7 @@ def _build_env(preset: str, sim: str, num_envs: int):
         mod_path, cls_name = preset.split(":", 1)
     else:
         mod_path, cls_name = _PER_SIM_PRESETS[preset][sim]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env

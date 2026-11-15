@@ -31,7 +31,12 @@ from jaxrlworld.rl.configs.base_config import iter_terms
 from jaxrlworld.rl.configs.curriculums import CurriculumTermConfig
 from jaxrlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
 from jaxrlworld.rl.configs.presets.yam_lift.vision import CAMERA_GROUP, YamLiftVisionConfig
-from jaxrlworld.rl.modules.architectures.cnn.encoder import CNNEncoder, SpatialSoftmax, compute_output_dim, compute_padding
+from jaxrlworld.rl.modules.architectures.cnn.encoder import (
+    CNNEncoder,
+    SpatialSoftmax,
+    compute_output_dim,
+    compute_padding,
+)
 from jaxrlworld.rl.runners import BaseRunner
 
 
@@ -238,7 +243,7 @@ def main() -> int:
                 term_name: dataclasses.asdict(term)
                 for term_name, term in iter_terms(cfgs_obj.curriculum, CurriculumTermConfig).items()
             }
-        return getattr(cfgs_obj, name).recursive_to_dict()
+        return getattr(cfgs_obj, name).recursive_to_dict()  # dynamic-attr: config section named by the comparison loop
 
     for name in ("reward", "terminations", "command", "curriculum", "action"):
         mine, theirs = _section(fresh_vision, name), _section(fresh_plain, name)

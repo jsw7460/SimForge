@@ -160,10 +160,10 @@ def main() -> int:
         *parents, leaf = path.split(".")
         target = cfgs
         for name in parents:
-            target = getattr(target, name)
-        getattr(target, leaf)  # the field must exist: a typo must not silently add an attribute
+            target = getattr(target, name)  # dynamic-attr: dotted --set override path
+        getattr(target, leaf)  # dynamic-attr: --set field must exist; a typo must not silently add an attribute
         setattr(target, leaf, ast.literal_eval(value))
-        print(f"  override {path} = {getattr(target, leaf)!r}")
+        print(f"  override {path} = {getattr(target, leaf)!r}")  # dynamic-attr: dotted --set override path
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env
 
@@ -482,10 +482,13 @@ def _probe_contact_sensors(env, timer: _Timer, repeats: int) -> None:
     paid on the WIDTH OF THE LIST rather than on the number of contacts
     that actually happened — worth knowing how far apart those two are.
     """
-    sensors = getattr(env.contact_manager, "_sensors", None)
-    reader = getattr(next(iter(sensors.values())), "_reader", None) if sensors else None
-    if not sensors or reader is None:
-        return  # Backends whose sensors are native have nothing to split.
+    # Backends whose sensors are native have nothing to split.
+    if env.sim_type != "genesis":
+        return
+    sensors = env.contact_manager._sensors
+    if not sensors:
+        return
+    reader = next(iter(sensors.values()))._reader
 
     print()
     print("=" * 78)

@@ -34,6 +34,7 @@ import tempfile
 import textwrap
 
 import numpy as np
+import torch
 
 _MARKER_LOCAL = np.array([0.10, 0.05, -0.03], dtype=np.float64)
 
@@ -81,7 +82,7 @@ def _q_rot_wxyz(q: np.ndarray, v: np.ndarray) -> np.ndarray:
 
 
 def _as_np(x) -> np.ndarray:
-    if hasattr(x, "detach"):
+    if isinstance(x, torch.Tensor):
         x = x.detach().cpu().numpy()
     return np.asarray(x)
 
@@ -107,9 +108,9 @@ def _run_marker_geom(gs, torch, path: str) -> float | None:
 
     print(f"entity.geoms (collision)  : {len(entity.geoms)}")
     print(f"entity.vgeoms (visual)    : {len(entity.vgeoms)}")
-    print(f"entity.links              : {[getattr(L, 'name', None) for L in entity.links]}")
+    print(f"entity.links              : {[L.name for L in entity.links]}")
 
-    ball_link = next((L for L in entity.links if getattr(L, "name", None) == "ball"), None)
+    ball_link = next((L for L in entity.links if L.name == "ball"), None)
     if ball_link is None:
         print("FAIL — 'ball' link not found.")
         return None
@@ -117,8 +118,7 @@ def _run_marker_geom(gs, torch, path: str) -> float | None:
     # Marker has no name in Genesis. Match by parent link + init_pos.
     cand = []
     for vg in entity.vgeoms:
-        parent = getattr(vg, "link", None) or getattr(vg, "_link", None)
-        if parent is None or getattr(parent, "name", None) != "ball":
+        if vg.link.name != "ball":
             continue
         init_pos = getattr(vg, "_init_pos", None)
         if init_pos is None:
@@ -132,7 +132,7 @@ def _run_marker_geom(gs, torch, path: str) -> float | None:
         print(f"FAIL — multiple vgeoms matched the marker offset ({len(cand)}).")
         return None
     marker = cand[0]
-    print(f"OK — found marker vgeom (idx={getattr(marker, '_idx', '?')}, init_pos={_as_np(marker._init_pos)}).")
+    print(f"OK — found marker vgeom (idx={marker.idx}, init_pos={_as_np(marker._init_pos)}).")
 
     max_err = 0.0
     for i, (pos, quat) in enumerate(_cases()):
@@ -162,10 +162,10 @@ def _run_marker_body(gs, torch, path: str) -> float | None:
     entity = scene.add_entity(gs.morphs.MJCF(file=path))
     scene.build(n_envs=1)
 
-    print(f"entity.links              : {[getattr(L, 'name', None) for L in entity.links]}")
+    print(f"entity.links              : {[L.name for L in entity.links]}")
 
-    ball_link = next((L for L in entity.links if getattr(L, "name", None) == "ball"), None)
-    marker_link = next((L for L in entity.links if getattr(L, "name", None) == "ball_marker"), None)
+    ball_link = next((L for L in entity.links if L.name == "ball"), None)
+    marker_link = next((L for L in entity.links if L.name == "ball_marker"), None)
     if ball_link is None or marker_link is None:
         print(
             f"FAIL — missing link(s). ball={ball_link is not None}, "

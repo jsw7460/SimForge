@@ -136,25 +136,18 @@ def main() -> int:
         mjm, name2jid, jid2act = _mj_maps()
         sim = env.scene_manager.sim
         model = env.scene_manager.model
-        raw = getattr(model, field)
-        wp_shape = tuple(getattr(sim.wp_model, field).shape)
-        t = raw._tensor if hasattr(raw, "_tensor") else raw
-        stride0 = t.stride(0) if hasattr(t, "stride") and t.dim() > 0 else "?"
+        # ``model`` is mjlab's WarpBridge: every warp-array field comes back
+        # as a TorchArray proxy over a torch view.
+        raw = getattr(model, field)  # dynamic-attr: model field name passed by the caller
+        wp_shape = tuple(getattr(sim.wp_model, field).shape)  # dynamic-attr: model field name passed by the caller
+        t = raw._tensor
+        stride0 = t.stride(0) if t.dim() > 0 else "?"
         print(
             f"    [read_mujoco] {field}: type={type(raw).__name__} wp_shape={wp_shape} "
             f"bridge_shape={tuple(t.shape)} stride0={stride0} "
             f"in_expanded={field in sim._expanded_fields}"
         )
-        if isinstance(raw, torch.Tensor):
-            vals = raw
-        elif hasattr(raw, "_tensor"):  # mjlab TorchArray proxy
-            vals = raw._tensor
-        elif hasattr(raw, "__dlpack__"):
-            # DLPack works for warp arrays regardless of warp-version quirks
-            # (wp.to_torch chokes on this build's device object).
-            vals = torch.from_dlpack(raw)
-        else:
-            raise RuntimeError(f"{field}: unsupported model field type {type(raw)}")
+        vals = t
         # Un-expanded mjwarp fields may lack the per-world dim entirely
         # (mjlab's @requires_model_fields expands them on the term's 1st call).
         core_dims = 2 if field == "actuator_gainprm" else 1

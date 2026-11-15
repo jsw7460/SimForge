@@ -23,6 +23,7 @@ Usage (GPU box, run with CUDA_LAUNCH_BLOCKING=1 for exact fault points):
 from __future__ import annotations
 
 import argparse
+from importlib import metadata
 
 import mujoco
 import torch
@@ -66,12 +67,8 @@ def main() -> int:
     n = args.num_envs
     torch.manual_seed(args.seed)
 
-    import mjlab
-
-    print(f"[INFO] mjlab {getattr(mjlab, '__version__', '?')}  warp {wp.__version__}  mujoco {mujoco.__version__}")
-    import mujoco_warp
-
-    print(f"[INFO] mujoco_warp {getattr(mujoco_warp, '__version__', '?')}")
+    print(f"[INFO] mjlab {metadata.version('mjlab')}  warp {wp.__version__}  mujoco {mujoco.__version__}")
+    print(f"[INFO] mujoco_warp {metadata.version('mujoco_warp')}")
     print(f"[INFO] num_envs={n} steps={args.steps}")
 
     mj_model = mujoco.MjModel.from_xml_string(_XML)
@@ -87,7 +84,7 @@ def main() -> int:
     sim.expand_model_fields(expand_fields)
     torch.cuda.synchronize()
     for f in _FIELDS:
-        shape = tuple(getattr(sim.wp_model, f).shape)
+        shape = tuple(getattr(sim.wp_model, f).shape)  # dynamic-attr: field named in _FIELDS
         print(f"[INFO] {f}: wp_model shape = {shape}")
         assert shape[0] == n, f"{f} not expanded: {shape}"
     _stage("expand_model_fields done")

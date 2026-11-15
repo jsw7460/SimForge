@@ -34,7 +34,7 @@ from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 
 def build_env(config: str, num_envs: int):
     mod_path, cls_name = config.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type="genesis", num_envs=num_envs, seed=0).build()
     return get_initializer("Genesis").init_environment(cfgs)
 

@@ -15,7 +15,7 @@ def main() -> None:
     from genesis.engine.solvers.rigid.collider import narrowphase
 
     fn = narrowphase._func_narrowphase_contact0
-    underlying = getattr(fn, "fn", fn)
+    underlying = getattr(fn, "fn", fn)  # dynamic-attr: quadrants kernel wrapper may or may not expose .fn
     print("fn type:", type(fn).__name__)
     print("underlying type:", type(underlying).__name__)
     print("underlying.__code__.co_filename:", underlying.__code__.co_filename)

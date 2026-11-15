@@ -33,7 +33,8 @@ import sys
 from dataclasses import dataclass
 
 from jaxrlworld.rl.configs.base_config import iter_terms
-from jaxrlworld.rl.configs.common_config_classes import RewardConfig
+from jaxrlworld.rl.configs.common_config_classes import ObservationGroupConfig, RewardConfig
+from jaxrlworld.rl.configs.observations.observation_term_config import ObservationTermConfig
 from jaxrlworld.rl.configs.rewards.reward_term_config import RewardTermConfig
 from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from jaxrlworld.rl.envs.managers.base import BaseManager
@@ -136,7 +137,7 @@ def part_b(preset: str, sim_type: str) -> None:
     from jaxrlworld.rl.runners.base_runner import BaseRunner
 
     module_name, class_name = preset.split(":")
-    cls = getattr(importlib.import_module(module_name), class_name)
+    cls = getattr(importlib.import_module(module_name), class_name)  # dynamic-attr: --preset module:Class
     cfgs = cls(sim_type=sim_type).build()
     cfgs.env.num_envs = 4
     cfgs.visualization.show_viewer = False
@@ -153,10 +154,9 @@ def part_b(preset: str, sim_type: str) -> None:
     obs_ok = all(
         not type(v).__name__ == "ResolvedEntity"
         for group in vars(type(cfgs.observation)).values()
-        if hasattr(group, "__dict__")
-        for t in iter_terms(group, object).values()
-        if isinstance(t, RewardTermConfig) or hasattr(t, "params")
-        for v in getattr(t, "params", {}).values()
+        if isinstance(group, ObservationGroupConfig)
+        for t in iter_terms(group, ObservationTermConfig).values()
+        for v in t.params.values()
     )
     chk("config observation params carry no ResolvedEntity", obs_ok)
     eval_cfgs = copy.deepcopy(cfgs)

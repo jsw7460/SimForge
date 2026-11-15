@@ -70,8 +70,7 @@ def _force_state(env, pose_dict, joint_pos_vec):
     writer.set_root_velocity(lv, av, env_ids=env_ids)
     writer.set_dof_positions(jp, env_ids=env_ids)
     writer.set_dof_velocities(jv, env_ids=env_ids)
-    if hasattr(writer, "eval_fk"):
-        writer.eval_fk(env_ids=env_ids)
+    writer.eval_fk(env_ids=env_ids)
 
 
 def _build_default_joint_pos(env, robot_cfg):
@@ -95,28 +94,23 @@ def _dump_step(env, step_idx, raw_action, settle_steps):
             return x[0].detach().cpu().tolist() if x.dim() > 1 else x.detach().cpu().tolist()
         return list(x)
 
-    ep_len = int(env.episode_length_buf[0].item()) if hasattr(env, "episode_length_buf") else -1
+    ep_len = int(env.episode_length_buf[0].item())
     in_settle = "SETTLE" if ep_len < settle_steps else "POLICY"
 
     print(f"\n── step {step_idx}  (episode_length_buf={ep_len}, mode={in_settle}) ──")
     print(f"raw_action      = {_fmt_row(g(raw_action))}")
 
-    if hasattr(am, "_processed_action_history") and am._processed_action_history:
+    if am._processed_action_history:
         pa = am._processed_action_history[0]
         print(f"processed_action= {_fmt_row(g(pa))}")
 
-    tq = getattr(am, "applied_torque", None)
-    if tq is None:
-        tq = getattr(am, "_applied_torque", None)
-    if tq is not None:
-        print(f"applied_torque  = {_fmt_row(g(tq))}")
+    print(f"applied_torque  = {_fmt_row(g(am.applied_torque))}")
 
     print(f"joint_pos       = {_fmt_row(g(rd.joint_pos))}")
     print(f"joint_vel       = {_fmt_row(g(rd.joint_vel))}")
     print(f"root_pos_w      = {_fmt_row(g(rd.root_link_pos_w))}")
     print(f"root_quat_wxyz  = {_fmt_row(g(rd.root_link_quat_w))}")
-    if hasattr(rd, "projected_gravity_b"):
-        print(f"proj_gravity_b  = {_fmt_row(g(rd.projected_gravity_b))}")
+    print(f"proj_gravity_b  = {_fmt_row(g(rd.projected_gravity_b))}")
 
 
 def main():
@@ -157,14 +151,7 @@ def main():
     # Force num_envs = 1 usage
     assert env.num_envs == 1 or env.num_envs > 0  # we'll only read env 0
 
-    # Build default joint pos vector
-    robot_cfg = (
-        evaluator.eval_cfgs.scene.robot_cfg
-        if hasattr(evaluator.eval_cfgs.scene, "robot_cfg")
-        else evaluator.eval_cfgs.scene.entities["robot"]
-    )
-    # Some configs put robot on eval_cfgs.scene.robot_cfg; others on entities["robot"].init_state.joint_pos etc.
-    # Fall back to env.robot_data.default_joint_pos
+    # Default joint pos vector, from the robot data
     default_jp = env.robot_data.default_joint_pos.clone().detach().cpu()
     if default_jp.dim() > 1:
         default_jp = default_jp[0]
@@ -176,14 +163,11 @@ def main():
 
     # Zero out action history and episode counter so settle_steps logic
     # starts from step 0
-    if hasattr(env, "episode_length_buf"):
-        env.episode_length_buf.zero_()
-    if hasattr(env.act_manager, "_raw_action_history"):
-        for h in env.act_manager._raw_action_history:
-            h.zero_()
-    if hasattr(env.act_manager, "_processed_action_history"):
-        for h in env.act_manager._processed_action_history:
-            h.zero_()
+    env.episode_length_buf.zero_()
+    for h in env.act_manager._raw_action_history:
+        h.zero_()
+    for h in env.act_manager._processed_action_history:
+        h.zero_()
 
     # Canonical joint order header
     print("\n[canonical joint order]")
@@ -203,14 +187,13 @@ def main():
     # Initial obs / robot_states after state forcing — same pattern as
     # evaluator.evaluate(): compute obs manually, then loop.
     obs = env.obs_manager.get_observation()
-    robot_states = env.get_robot_state() if hasattr(env, "get_robot_state") else None
+    robot_states = env.get_robot_state()
 
     # Step loop
     for t in range(dump_hi + 1):
         raw_action = policy.get_action(obs, robot_states)
         obs, _, _, _, _ = env.step(raw_action)
-        if hasattr(env, "get_robot_state"):
-            robot_states = env.get_robot_state()
+        robot_states = env.get_robot_state()
 
         if dump_lo <= t <= dump_hi:
             _dump_step(env, t, raw_action, args.settle_steps)

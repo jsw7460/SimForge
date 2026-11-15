@@ -41,7 +41,7 @@ _SIM_NAMES = {"genesis": "Genesis", "newton": "Newton", "mujoco": "MujocoEnv"}
 
 def build_env(config: str, sim: str, num_envs: int):
     mod_path, cls_name = config.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs, seed=0).build()
     return get_initializer(_SIM_NAMES[sim]).init_environment(cfgs)
 

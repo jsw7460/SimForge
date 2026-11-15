@@ -69,7 +69,7 @@ def _build_env(preset: str, num_envs: int):
             "jaxrlworld.rl.configs.presets.go2.newton.gait_conditioned",
             "Go2GaitConditionedNewtonConfig",
         )
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type="newton", num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
@@ -94,22 +94,23 @@ def main() -> int:
         env.step(0.1 * torch.randn_like(action))
 
         for name in _MEMO_PROPERTIES:
-            cached = getattr(rd, name)
-            fresh = getattr(rd_cls, name).fget.__wrapped__(rd)
+            cached = getattr(rd, name)  # dynamic-attr: iterates the memoized RobotData member names
+            prop = getattr(rd_cls, name)  # dynamic-attr: iterates the memoized RobotData member names
+            fresh = prop.fget.__wrapped__(rd)
             if not _values_equal(cached, fresh):
                 failures += 1
                 print(f"[step {step:3d}] STALE property {name}")
-            if getattr(rd, name) is not cached:
+            if getattr(rd, name) is not cached:  # dynamic-attr: iterates the memoized RobotData member names
                 failures += 1
                 print(f"[step {step:3d}] NO CACHE HIT on property {name}")
 
         for name in _MEMO_METHODS:
-            cached = getattr(rd, name)()
-            fresh = getattr(rd_cls, name).__wrapped__(rd)
+            cached = getattr(rd, name)()  # dynamic-attr: iterates the memoized RobotData member names
+            fresh = getattr(rd_cls, name).__wrapped__(rd)  # dynamic-attr: iterates the memoized RobotData member names
             if not _values_equal(cached, fresh):
                 failures += 1
                 print(f"[step {step:3d}] STALE method {name}")
-            if getattr(rd, name)() is not cached:
+            if getattr(rd, name)() is not cached:  # dynamic-attr: iterates the memoized RobotData member names
                 failures += 1
                 print(f"[step {step:3d}] NO CACHE HIT on method {name}")
 

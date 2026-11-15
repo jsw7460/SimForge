@@ -107,7 +107,7 @@ def main() -> int:
     )
     chk(
         "the removed terms are None on the instance (serialize as disabled)",
-        all(getattr(cfgs.event, name) is None for name in ("mass_dr", "push_robot", "friction_dr")),
+        all(t is None for t in (cfgs.event.mass_dr, cfgs.event.push_robot, cfgs.event.friction_dr)),
     )
     chk("corruption off on every group", set(corruption(cfgs).values()) == {False}, str(corruption(cfgs)))
     before = cfgs.recursive_to_dict()

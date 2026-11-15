@@ -166,7 +166,7 @@ def main() -> int:
     chk(
         "mirror_clip is an involution (bitwise)",
         all(
-            np.array_equal(getattr(mm, f), getattr(clip, f))
+            np.array_equal(getattr(mm, f), getattr(clip, f))  # dynamic-attr: iterates the ClipState array field names
             for f in ("joint_pos", "joint_vel", "root_pos", "root_quat_wxyz", "root_lin_vel_w", "root_ang_vel_w")
         ),
     )

@@ -47,9 +47,9 @@ def main() -> None:
     print("\n=== Newton T1 — indexing (canonical -> sim) ===")
     idx = am._indexing
     print(f"  sim_indices:       {idx.sim_indices.cpu().tolist()}")
-    if hasattr(idx, "newton_q_indices") and idx.newton_q_indices is not None:
+    if idx.newton_q_indices is not None:
         print(f"  newton_q_indices:  {idx.newton_q_indices.cpu().tolist()}")
-    if hasattr(idx, "newton_qd_indices") and idx.newton_qd_indices is not None:
+    if idx.newton_qd_indices is not None:
         print(f"  newton_qd_indices: {idx.newton_qd_indices.cpu().tolist()}")
 
     print("\n=== Newton T1 — observation group layout ===")

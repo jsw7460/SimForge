@@ -212,7 +212,7 @@ def run_case_old_emulated(dict_obs: bool):
 
 
 def main() -> int:
-    old_api = hasattr(RolloutStorage, "get_stacked_batches")
+    old_api = hasattr(RolloutStorage, "get_stacked_batches")  # dynamic-attr: probes the pre-refactor API
     backend = jax.default_backend()
     print("=" * 78)
     print(f"  PPO MINIBATCH REFACTOR — BITWISE EQUIVALENCE ({backend})")

@@ -30,6 +30,7 @@ import math
 
 import torch
 
+from jaxrlworld.rl.actuators import IdealPDActuator
 from jaxrlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from jaxrlworld.rl.runners import BaseRunner
 
@@ -62,7 +63,7 @@ def _print_header(env) -> None:
     print("=" * 100)
     print(f"num_envs = {env.num_envs}")
     print(f"device   = {env.device}")
-    print(f"sim_type = {getattr(env, 'sim_type', '?')}")
+    print(f"sim_type = {env.sim_type}")
     print(f"total_action_dim = {am.total_action_dim}")
 
     # Canonical joint order — the single source of truth for all
@@ -92,26 +93,17 @@ def _print_header(env) -> None:
         print("  (no explicit actuators — Implicit mode, PD is sim-side)")
     else:
 
-        def _first_attr(obj, *names):
-            for n in names:
-                v = getattr(obj, n, None)
-                if v is not None:
-                    return v
-            return None
-
         def _fmt_maybe_tensor(v, prec=4):
             if v is None:
                 return "None"
-            if torch.is_tensor(v):
-                flat = v.detach().flatten().cpu().tolist()
-                return "[" + ", ".join(f"{float(x):+.{prec}f}" for x in flat) + "]"
-            if hasattr(v, "__len__") and not isinstance(v, str):
-                return "[" + ", ".join(f"{float(x):+.{prec}f}" for x in v) + "]"
-            return str(v)
+            flat = v.detach().flatten().cpu().tolist()
+            return "[" + ", ".join(f"{float(x):+.{prec}f}" for x in flat) + "]"
 
         for idx, (inst, joint_ids) in enumerate(am._actuators):
-            kp = _first_attr(inst, "stiffness", "_stiffness", "kp", "_kp")
-            kd = _first_attr(inst, "damping", "_damping", "kd", "_kd")
+            # Only the PD family carries gains; network actuators have none.
+            is_pd = isinstance(inst, IdealPDActuator)
+            kp = inst.stiffness if is_pd else None
+            kd = inst.damping if is_pd else None
             ids = _tensor_to_list(joint_ids) if torch.is_tensor(joint_ids) else list(joint_ids)
             print(f"  actuator[{idx}] type={type(inst).__name__} joint_ids={ids}")
             print(f"    kp = {_fmt_maybe_tensor(kp)}")
@@ -136,8 +128,7 @@ def _force_state(env, pos, quat_wxyz, lin_vel, ang_vel, joint_pos_vec):
     writer.set_root_velocity(lv, av, env_ids=env_ids)
     writer.set_dof_positions(jp, env_ids=env_ids)
     writer.set_dof_velocities(jv, env_ids=env_ids)
-    if hasattr(writer, "eval_fk"):
-        writer.eval_fk(env_ids=env_ids)
+    writer.eval_fk(env_ids=env_ids)
 
 
 def _dump_step(env, step_idx: int, raw_action) -> None:
@@ -153,16 +144,12 @@ def _dump_step(env, step_idx: int, raw_action) -> None:
     print(f"\n── step {step_idx} ──")
     print(f"raw_action       [{len(_tensor_to_list(raw_action[0])):2d}] = {_fmt_row(g(raw_action))}")
 
-    if hasattr(am, "_processed_action_history") and am._processed_action_history:
+    if am._processed_action_history:
         pa = am._processed_action_history[0]
         print(f"processed_action [{pa.shape[-1]:2d}] = {_fmt_row(g(pa))}")
 
-    if hasattr(am, "applied_torque"):
-        tq = am.applied_torque
-        print(f"applied_torque   [{tq.shape[-1]:2d}] = {_fmt_row(g(tq))}")
-    elif hasattr(am, "_applied_torque"):
-        tq = am._applied_torque
-        print(f"applied_torque   [{tq.shape[-1]:2d}] = {_fmt_row(g(tq))}")
+    tq = am.applied_torque
+    print(f"applied_torque   [{tq.shape[-1]:2d}] = {_fmt_row(g(tq))}")
 
     print(f"joint_pos        [{rd.joint_pos.shape[-1]:2d}] = {_fmt_row(g(rd.joint_pos))}")
     print(f"joint_vel        [{rd.joint_vel.shape[-1]:2d}] = {_fmt_row(g(rd.joint_vel))}")
@@ -171,12 +158,9 @@ def _dump_step(env, step_idx: int, raw_action) -> None:
     print(f"root_quat_w wxyz [ 4] = {_fmt_row(g(rd.root_link_quat_w))}")
     print(f"root_lin_vel_w   [ 3] = {_fmt_row(g(rd.root_link_lin_vel_w))}")
     print(f"root_ang_vel_w   [ 3] = {_fmt_row(g(rd.root_link_ang_vel_w))}")
-    if hasattr(rd, "root_link_lin_vel_b"):
-        print(f"root_lin_vel_b   [ 3] = {_fmt_row(g(rd.root_link_lin_vel_b))}")
-    if hasattr(rd, "root_link_ang_vel_b"):
-        print(f"root_ang_vel_b   [ 3] = {_fmt_row(g(rd.root_link_ang_vel_b))}")
-    if hasattr(rd, "projected_gravity_b"):
-        print(f"proj_gravity_b   [ 3] = {_fmt_row(g(rd.projected_gravity_b))}")
+    print(f"root_lin_vel_b   [ 3] = {_fmt_row(g(rd.root_link_lin_vel_b))}")
+    print(f"root_ang_vel_b   [ 3] = {_fmt_row(g(rd.root_link_ang_vel_b))}")
+    print(f"proj_gravity_b   [ 3] = {_fmt_row(g(rd.projected_gravity_b))}")
 
 
 def main() -> None:
@@ -247,14 +231,11 @@ def main() -> None:
     )
 
     # Also reset episode counter so settle_steps logic starts fresh
-    if hasattr(env, "episode_length_buf"):
-        env.episode_length_buf[:] = 0
-    if hasattr(env.act_manager, "_raw_action_history"):
-        for h in env.act_manager._raw_action_history:
-            h.zero_()
-    if hasattr(env.act_manager, "_processed_action_history"):
-        for h in env.act_manager._processed_action_history:
-            h.zero_()
+    env.episode_length_buf[:] = 0
+    for h in env.act_manager._raw_action_history:
+        h.zero_()
+    for h in env.act_manager._processed_action_history:
+        h.zero_()
 
     # Action tensor
     action_dim = env.act_manager.total_action_dim

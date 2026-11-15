@@ -37,7 +37,7 @@ def _build_env(preset: str, num_envs: int):
             "jaxrlworld.rl.configs.presets.go2.genesis.gait_conditioned",
             "Go2GaitConditionedGenesisConfig",
         )
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type="genesis", num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env

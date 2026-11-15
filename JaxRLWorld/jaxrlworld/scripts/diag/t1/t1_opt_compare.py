@@ -62,7 +62,7 @@ def main():
     print(f"\n=== [{args.sim}] mj_model.opt ===")
     for attr in OPT_ATTRS:
         try:
-            v = getattr(mj.opt, attr)
+            v = getattr(mj.opt, attr)  # dynamic-attr: option named in OPT_ATTRS; MjOption fields vary by version
         except AttributeError:
             v = "N/A"
         print(f"  {attr:<22} = {v}")
@@ -71,20 +71,20 @@ def main():
     # mj_model.opt.timestep is the MJCF compile-time default (unused); the
     # effective timestep is in mjw_model.opt.timestep, set every step by
     # SolverMuJoCo.step(..., dt) → mjw_model.opt.timestep.fill_(dt).
-    if args.sim == "newton":
-        mjw = getattr(env.scene_manager.solver, "mjw_model", None)
-        if mjw is not None:
-            print("\n=== [newton] mjw_model.opt (effective, GPU-side) ===")
-            ts = mjw.opt.timestep
-            try:
-                ts_val = ts.numpy() if hasattr(ts, "numpy") else ts
-            except Exception:
-                ts_val = ts
-            print(f"  timestep (mjw_model)   = {ts_val}")
-            print(f"  iterations             = {mjw.opt.iterations}")
-            print(f"  ls_iterations          = {mjw.opt.ls_iterations}")
-            print(f"  impratio               = {mjw.opt.impratio}")
-            print(f"  cone                   = {mjw.opt.cone}")
+    # The CPU solver path builds no mujoco-warp model.
+    if args.sim == "newton" and not env.scene_manager.config.solver_cfg.use_mujoco_cpu:
+        mjw = env.scene_manager.solver.mjw_model
+        print("\n=== [newton] mjw_model.opt (effective, GPU-side) ===")
+        ts = mjw.opt.timestep
+        try:
+            ts_val = ts.numpy()
+        except Exception:
+            ts_val = ts
+        print(f"  timestep (mjw_model)   = {ts_val}")
+        print(f"  iterations             = {mjw.opt.iterations}")
+        print(f"  ls_iterations          = {mjw.opt.ls_iterations}")
+        print(f"  impratio               = {mjw.opt.impratio}")
+        print(f"  cone                   = {mjw.opt.cone}")
 
     # Enum name lookups for integrator/solver/cone/jacobian (they print as ints)
     try:
@@ -99,7 +99,7 @@ def main():
         }
         for attr, enum_cls in enums.items():
             try:
-                v = int(getattr(mj.opt, attr))
+                v = int(getattr(mj.opt, attr))  # dynamic-attr: enum-valued option named in the table
                 name = enum_cls(v).name
                 print(f"  {attr:<22} = {v} ({name})")
             except Exception as e:

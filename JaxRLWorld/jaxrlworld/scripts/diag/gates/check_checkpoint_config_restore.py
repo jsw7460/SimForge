@@ -141,7 +141,7 @@ def part_a() -> None:
     chk(
         "scheduled weight restored as a LinearSchedule",
         isinstance(sched, LinearSchedule) and (sched.initial, sched.final, sched.total_steps) == (-0.1, -1.0, 5000),
-        f"{type(sched).__name__} {getattr(sched, '__dict__', sched)}",
+        f"{type(sched).__name__} {vars(sched) if isinstance(sched, LinearSchedule) else sched}",
     )
     chk(
         "saved YAML holds the schedule as a typed dict",
@@ -296,7 +296,7 @@ def part_a() -> None:
             self.model_fields_set = set(kw)
 
         def model_dump(self):
-            return {k: getattr(self, k) for k in self.model_fields}
+            return {k: self.__dict__[k] for k in self.model_fields}
 
     @dataclass
     class _Holder(BaseConfig):
@@ -342,19 +342,19 @@ def part_a() -> None:
 def part_b(preset: str, sim_type: str) -> None:
     print(f"\n=== B. real preset round trip: {preset} ({sim_type}) ===")
     module_name, class_name = preset.split(":")
-    cls = getattr(importlib.import_module(module_name), class_name)
+    cls = getattr(importlib.import_module(module_name), class_name)  # dynamic-attr: --preset module:Class
     trained = cls(sim_type=sim_type).build()
     trained.apply_overrides(algorithm={"gamma": 0.931}, env={"num_envs": 24})
     trained.runner.save_interval = 777
-    first_term = next(iter(iter_terms(trained.reward, RewardTermConfig)))
-    getattr(trained.reward, first_term).weight = 12.5
+    first_term, first_cfg = next(iter(iter_terms(trained.reward, RewardTermConfig).items()))
+    first_cfg.weight = 12.5
     saved = yaml_round_trip(trained)
     restored = load_config_from_checkpoint({"config": saved})
     chk("load_config_from_checkpoint returns the saved config", restored.recursive_to_dict() == saved)
     chk("algorithm.gamma", restored.algorithm.gamma == 0.931)
     chk("env.num_envs", restored.env.num_envs == 24)
     chk("runner.save_interval", restored.runner.save_interval == 777)
-    chk(f"reward.{first_term}.weight", getattr(restored.reward, first_term).weight == 12.5)
+    chk(f"reward.{first_term}.weight", iter_terms(restored.reward, RewardTermConfig)[first_term].weight == 12.5)
 
 
 def main() -> int:

@@ -360,8 +360,8 @@ class NewtonArm:
         self.state_1 = self.model.state()
         self.control = self.model.control()
 
-        self._labels = list(getattr(self.model, "joint_label", None) or self.model.joint_key)
-        self._body_labels = list(getattr(self.model, "body_label", None) or self.model.body_key)
+        self._labels = list(self.model.joint_label)
+        self._body_labels = list(self.model.body_label)
         self._q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
         self._qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
         self._qadr = int(self._q_start[self._joint_index(HINGE_JOINT)])
@@ -394,13 +394,14 @@ class NewtonArm:
         mass = wp.to_torch(model.body_mass).cpu().numpy()
         lower = wp.to_torch(model.joint_limit_lower).cpu().numpy()
         upper = wp.to_torch(model.joint_limit_upper).cpu().numpy()
-        springref = getattr(getattr(model, "mujoco", None), "dof_springref", None)
-        stiffness = getattr(getattr(model, "mujoco", None), "dof_passive_stiffness", None)
+        # Deprecated alias of ``joint_rest_q``; Newton withdraws it for models
+        # whose coordinates and DOFs differ, which reads as no spring reference.
+        springref = getattr(model.mujoco, "dof_springref", None)  # dynamic-attr: alias withdrawn for some models
         return {
             "joints": [label.split("/")[-1] for label in self._labels],
             "tong_arm_masses": [float(mass[self._body_index(n)]) for n in ("tong_base", "tong_jaw")],
             "total_mass": round(float(mass.sum()), 6),
-            "stiffness": None if stiffness is None else float(wp.to_torch(stiffness).cpu().numpy()[self._dadr]),
+            "stiffness": float(wp.to_torch(model.joint_stiffness).cpu().numpy()[self._dadr]),
             "damping": float(wp.to_torch(model.joint_damping).cpu().numpy()[self._dadr]),
             "armature": float(wp.to_torch(model.joint_armature).cpu().numpy()[self._dadr]),
             "range": [float(lower[self._dadr]), float(upper[self._dadr])],
@@ -559,7 +560,7 @@ BACKENDS = {"mujoco": MujocoArm, "newton": NewtonArm, "genesis": GenesisArm}
 
 
 def _np(value) -> np.ndarray:
-    return np.asarray(value.detach().cpu() if hasattr(value, "detach") else value, dtype=np.float64)
+    return np.asarray(value.detach().cpu(), dtype=np.float64)
 
 
 def _scalar(value) -> float:

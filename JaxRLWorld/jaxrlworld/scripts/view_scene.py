@@ -86,7 +86,7 @@ def _resolve_preset(name: str):
     if ":" not in target:
         raise SystemExit(f"Unknown preset {name!r}. Use one of {sorted(_PRESETS)} or a 'module:ClassName' path.")
     module_path, class_name = target.split(":", 1)
-    return getattr(importlib.import_module(module_path), class_name)
+    return getattr(importlib.import_module(module_path), class_name)  # dynamic-attr: "module:ClassName" preset path
 
 
 def _add_action_sliders(viewer, policy: FixedAction, env) -> None:
@@ -178,10 +178,7 @@ def _report_geometry(play_scene) -> None:
     do with each other. This settles which half to look at before anyone
     starts guessing.
     """
-    bridge = getattr(play_scene, "_bridge", None)
-    if bridge is None:
-        print("[view_scene] this backend does not expose a bridge; geometry not inspected")
-        return
+    bridge = play_scene._bridge
     geometry = bridge.extract_geometry()
     total = sum(len(group.meshes) for group in geometry.mesh_groups)
     print(f"[view_scene] bridge extracted {len(geometry.mesh_groups)} body groups, {total} meshes")

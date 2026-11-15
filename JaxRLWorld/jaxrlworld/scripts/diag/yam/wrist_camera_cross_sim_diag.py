@@ -42,6 +42,7 @@ os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import torch  # noqa: E402
 
+from jaxrlworld.rl.configs.mujoco_config_classes import MujocoSceneConfig  # noqa: E402
 from jaxrlworld.rl.configs.presets.yam_arm.base import CUBE_HALF, TABLE_TOP_Z  # noqa: E402
 from jaxrlworld.rl.configs.presets.yam_lift.vision import CAMERA_SENSOR, YamLiftVisionConfig  # noqa: E402
 from jaxrlworld.rl.configs.scene.unified_entity_config import InitialStateCfg, RigidObjectCfg  # noqa: E402
@@ -93,10 +94,12 @@ def _build_env(sim_type: str, args, clutter_names: list[str]):
     # preset's defaults allow. Scaled with the clutter rather than set to
     # a number that silently stops being enough.
     bodies = len(clutter_names) + 1
-    if getattr(cfgs.scene, "nconmax", None) is not None:
-        cfgs.scene.nconmax = max(cfgs.scene.nconmax, 128 * bodies)
-    if getattr(cfgs.scene, "njmax", None) is not None:
-        cfgs.scene.njmax = max(cfgs.scene.njmax, 512 * bodies)
+    # Only the MuJoCo scene config carries the buffer sizes.
+    if isinstance(cfgs.scene, MujocoSceneConfig):
+        if cfgs.scene.nconmax is not None:
+            cfgs.scene.nconmax = max(cfgs.scene.nconmax, 128 * bodies)
+        if cfgs.scene.njmax is not None:
+            cfgs.scene.njmax = max(cfgs.scene.njmax, 512 * bodies)
     env = BaseRunner._create_env_from_config(cfgs)
     env.reset()
     return env, cfg
@@ -502,7 +505,8 @@ def main() -> int:
         # Keep the sample with the most interior disagreement, not the
         # last one: the last is whatever the loop happened to end on, and
         # inspecting it says nothing about the aggregate above.
-        b_shape_index = getattr(b_camera.data, "shape_index", None)
+        # Only Newton's camera data carries a per-pixel shape index.
+        b_shape_index = b_camera.data.shape_index if args.sim_b == "newton" else None
         interior_bad = int(((diff > args.tolerance) & interior).sum())
         if interior_bad > worst_interior["count"]:
             worst_interior.update(

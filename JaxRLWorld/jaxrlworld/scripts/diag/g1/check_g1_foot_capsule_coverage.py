@@ -48,6 +48,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import torch
+
 # ── Asset paths ──────────────────────────────────────────────────────────────
 
 # Resolved relative to the JaxRLWorld root so the script works from any cwd.
@@ -59,39 +62,19 @@ G1_XML_PATH = _JAXRLWORLD_ROOT / "jaxrlworld" / "assets" / "g1" / "g1.xml"
 
 
 def _try_arr(x: Any) -> Any:
-    """Convert tensor / warp / numpy / quadrants tensors to a nested Python list."""
+    """Convert a torch tensor / numpy array / Genesis (quadrants) field to a nested Python list."""
     if x is None:
         return None
-    for name in ("to_numpy", "numpy", "cpu", "detach"):
-        if hasattr(x, name):
-            try:
-                arr = getattr(x, name)()
-                if hasattr(arr, "tolist"):
-                    return arr.tolist()
-                if hasattr(arr, "numpy"):
-                    return arr.numpy().tolist()
-            except Exception:
-                continue
-    try:
-        import warp as wp
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().tolist()
+    if isinstance(x, np.ndarray):
+        return x.tolist()
+    return x.to_numpy().tolist()
 
-        return wp.to_torch(x).detach().cpu().numpy().tolist()
-    except Exception:
-        pass
-    try:
-        import torch
 
-        if isinstance(x, torch.Tensor):
-            return x.detach().cpu().tolist()
-    except Exception:
-        pass
-    try:
-        import numpy as np
-
-        return np.asarray(x).tolist()
-    except Exception:
-        pass
-    return repr(x)
+def _bridge_arr(x: Any) -> list:
+    """Convert an mjlab ``TorchArray`` (a mujoco-warp field behind the torch bridge) to a nested list."""
+    return x[...].detach().cpu().tolist()
 
 
 def _safe(f, default=None):
@@ -216,14 +199,14 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
         # ``get_quat`` which read out of ``vgeoms_state``.
         capsules: list[dict] = []
         for link in robot.links:
-            lname = getattr(link, "name", "")
+            lname = link.name
             if "ankle_roll" not in lname:
                 continue
             for g in link.geoms:
                 gtype = type(g).__name__
-                gidx = getattr(g, "_idx", getattr(g, "idx", None))
-                # _data layout for capsule: [radius, height]
-                data = _try_arr(getattr(g, "_data", None))
+                gidx = g.idx
+                # data layout for capsule: [radius, height]
+                data = _try_arr(g.data)
                 radius = data[0] if isinstance(data, list) and len(data) >= 1 else None
                 height = data[1] if isinstance(data, list) and len(data) >= 2 else None
                 # Local pose in parent link frame.
@@ -234,12 +217,12 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
                 world_quat = None
                 try:
                     wp = g.get_pos(envs_idx=None)
-                    world_pos = _try_arr(wp[0]) if hasattr(wp, "__getitem__") else _try_arr(wp)
+                    world_pos = _try_arr(wp[0])
                 except Exception as e:
                     world_pos = f"err:{e!r}"
                 try:
                     wq = g.get_quat(envs_idx=None)
-                    world_quat = _try_arr(wq[0]) if hasattr(wq, "__getitem__") else _try_arr(wq)
+                    world_quat = _try_arr(wq[0])
                 except Exception as e:
                     world_quat = f"err:{e!r}"
                 # Capsule endpoints in LOCAL frame (axis = z by Genesis convention):
@@ -256,8 +239,8 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
                     gtype_name = repr(gtype_enum)
                 entry: dict = {
                     "link_name": lname,
-                    "link_idx": getattr(link, "_idx", getattr(link, "idx", None)),
-                    "geom_idx": int(gidx) if gidx is not None else None,
+                    "link_idx": link.idx,
+                    "geom_idx": int(gidx),
                     "py_type": gtype,
                     "gs_type": gtype_name,
                     "radius": radius,
@@ -269,8 +252,8 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
                     "friction": _safe(lambda g=g: float(getattr(g, "_friction", float("nan")))),
                     "contype": _safe(lambda g=g: getattr(g, "_contype", None)),
                     "conaffinity": _safe(lambda g=g: getattr(g, "_conaffinity", None)),
-                    "is_convex": _safe(lambda g=g: bool(getattr(g, "_is_convex", True))),
-                    "needs_coup": _safe(lambda g=g: bool(getattr(g, "_needs_coup", False))),
+                    "is_convex": _safe(lambda g=g: bool(g.is_convex)),
+                    "needs_coup": _safe(lambda g=g: bool(g.needs_coup)),
                     "sol_params": _try_arr(_safe(lambda g=g: g.sol_params)),
                 }
                 capsules.append(entry)
@@ -290,19 +273,7 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
             n_env0 = int(ncon_per_env[0]) if isinstance(ncon_per_env, list) and ncon_per_env else 32
             out["n_contacts_env0"] = n_env0
 
-            ground_entity = None
-            ti = getattr(env.scene_manager, "terrain", None)
-            if ti is not None:
-                ground_entity = getattr(ti, "entity", None)
-            if ground_entity is None:
-                for ent in scene.entities:
-                    morph = getattr(ent, "morph", None)
-                    if morph is None:
-                        continue
-                    if "plane" in type(morph).__name__.lower() or "terrain" in type(morph).__name__.lower():
-                        ground_entity = ent
-                        break
-
+            ground_entity = env.scene_manager.terrain.entity
             if ground_entity is not None:
                 contacts = robot.get_contacts(with_entity=ground_entity)
                 ga = _try_arr(contacts.get("geom_a")) or []
@@ -341,32 +312,24 @@ def _genesis_dump_foot_capsules(env, cfg) -> dict:
         try:
             ro = env.scene_manager.config.rigid_options
             collider = rs.collider
-            collider_info = getattr(collider, "collider_info", None)
-            collider_static = getattr(collider, "collider_config", None)
+            collider_info = collider.collider_info
+            collider_static = collider.collider_config
             out["genesis_collider_config"] = {
-                "max_collision_pairs": getattr(ro, "max_collision_pairs", None),
-                "contact_pruning_tolerance": getattr(ro, "contact_pruning_tolerance", None),
-                "enable_self_collision": getattr(ro, "enable_self_collision", None),
-                "enable_collision": getattr(ro, "enable_collision", None),
+                "max_collision_pairs": ro.max_collision_pairs,
+                "contact_pruning_tolerance": ro.contact_pruning_tolerance,
+                "enable_self_collision": ro.enable_self_collision,
+                "enable_collision": ro.enable_collision,
                 "use_contact_island": getattr(ro, "use_contact_island", None),
-                "constraint_timeconst": getattr(ro, "constraint_timeconst", None),
-                "_sol_default_timeconst": float(getattr(rs, "_sol_default_timeconst", float("nan"))),
-                "_sol_min_timeconst": float(getattr(rs, "_sol_min_timeconst", float("nan"))),
-                "integrator": str(getattr(rs, "_integrator", None)),
-                "collider_info_max_collision_pairs": _safe(lambda: int(collider_info.max_collision_pairs[None]))
-                if collider_info is not None
-                else None,
+                "constraint_timeconst": ro.constraint_timeconst,
+                "_sol_default_timeconst": float(rs._sol_default_timeconst),
+                "_sol_min_timeconst": float(rs._sol_min_timeconst),
+                "integrator": str(rs._integrator),
+                "collider_info_max_collision_pairs": _safe(lambda: int(collider_info.max_collision_pairs[None])),
                 "collider_info_max_collision_pairs_broad": _safe(
                     lambda: int(collider_info.max_collision_pairs_broad[None])
-                )
-                if collider_info is not None
-                else None,
-                "static_config_has_prunable_contacts": _safe(lambda: bool(collider_static.has_prunable_contacts))
-                if collider_static is not None
-                else None,
-                "static_config_spatial_sort_supported": _safe(lambda: bool(collider_static.spatial_sort_supported))
-                if collider_static is not None
-                else None,
+                ),
+                "static_config_has_prunable_contacts": _safe(lambda: bool(collider_static.has_prunable_contacts)),
+                "static_config_spatial_sort_supported": _safe(lambda: bool(collider_static.spatial_sort_supported)),
             }
         except Exception as e:
             out["genesis_collider_cfg_err"] = repr(e)
@@ -409,10 +372,7 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
         # always a renamed attribute; this dump pinpoints which name to use.
         try:
             out["debug_data_attrs"] = sorted([a for a in dir(data) if not a.startswith("_")])[:80]
-            if hasattr(data, "contact"):
-                out["debug_data_contact_attrs"] = sorted([a for a in dir(data.contact) if not a.startswith("_")])[:80]
-            else:
-                out["debug_data_contact_attrs"] = "data has no 'contact' attr"
+            out["debug_data_contact_attrs"] = sorted([a for a in dir(data.contact) if not a.startswith("_")])[:80]
             out["debug_data_type"] = type(data).__name__
             out["debug_data_module"] = type(data).__module__
         except Exception as e:
@@ -462,8 +422,8 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
         # ── Runtime world pose at current step (env 0) ────────────────
         # mujoco-warp packs geom_xpos/geom_xmat as (n_world, n_geoms, ...).
         try:
-            geom_xpos = _try_arr(data.geom_xpos)
-            geom_xmat = _try_arr(data.geom_xmat)
+            geom_xpos = _bridge_arr(data.geom_xpos)
+            geom_xmat = _bridge_arr(data.geom_xmat)
             for c in capsules:
                 gid = c["geom_id"]
                 try:
@@ -485,36 +445,20 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
         # ── Contact result per capsule (env 0) ────────────────────────
         # mujoco-warp data: contact buffer at ``data.contact.{geom,dist,pos,frame,...}``,
         # shape ``(naconmax,)`` packed across worlds. Per-world contact index
-        # is given by ``contact.worldid``. ``ncon`` is exposed as either a
-        # warp scalar or per-world array depending on version, so we probe.
+        # is given by ``contact.worldid``. ``nacon`` is the active contact
+        # count, total across all worlds.
         try:
-            # 1) Resolve ncon (active contact count, total across all worlds).
-            ncon_attr = None
-            ncon = None
-            for name in ("ncon", "n_contact", "nacon", "naconmax"):
-                v = getattr(data, name, None)
-                if v is not None:
-                    ncon = v
-                    ncon_attr = name
-                    break
-            if ncon is None and hasattr(data, "contact"):
-                for name in ("ncon", "n_contact", "size"):
-                    v = getattr(data.contact, name, None)
-                    if v is not None:
-                        ncon = v
-                        ncon_attr = f"contact.{name}"
-                        break
-            ncon_arr = _try_arr(ncon)
-            out["mujoco_ncon_attr"] = ncon_attr
-            out["mujoco_ncon_raw"] = ncon_arr
-            out["mujoco_naconmax"] = _try_arr(getattr(data, "naconmax", None) or getattr(data, "nconmax", None))
+            # 1) Active contact count.
+            out["mujoco_ncon_attr"] = "nacon"
+            out["mujoco_ncon_raw"] = _bridge_arr(data.nacon)
+            out["mujoco_naconmax"] = data.naconmax
 
             # 2) Per-contact fields (all envs interleaved by worldid).
-            contact_geom = _try_arr(data.contact.geom) if hasattr(data, "contact") else None
-            contact_dist = _try_arr(data.contact.dist) if hasattr(data, "contact") else None
-            contact_pos = _try_arr(data.contact.pos) if hasattr(data, "contact") else None
-            contact_worldid = _try_arr(data.contact.worldid) if hasattr(data, "contact") else None
-            contact_force = _try_arr(getattr(data.contact, "force", None)) if hasattr(data, "contact") else None
+            contact_geom = _bridge_arr(data.contact.geom)
+            contact_dist = _bridge_arr(data.contact.dist)
+            contact_pos = _bridge_arr(data.contact.pos)
+            contact_worldid = _bridge_arr(data.contact.worldid)
+            contact_force = _try_arr(getattr(data.contact, "force", None))
 
             foot_geom_ids = {c["geom_id"] for c in capsules}
             per_geom: dict[int, dict] = {}
@@ -584,11 +528,11 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
                 "integrator": int(mj.opt.integrator),
                 "cone": int(mj.opt.cone),
                 "noslip_iterations": int(mj.opt.noslip_iterations),
-                "ccd_iterations": int(getattr(mj.opt, "ccd_iterations", -1)),
-                "disableflags": int(getattr(mj.opt, "disableflags", 0)),
-                "enableflags": int(getattr(mj.opt, "enableflags", 0)),
-                "default_solref": mj.opt.o_solref.tolist() if hasattr(mj.opt, "o_solref") else None,
-                "default_solimp": mj.opt.o_solimp.tolist() if hasattr(mj.opt, "o_solimp") else None,
+                "ccd_iterations": int(mj.opt.ccd_iterations),
+                "disableflags": int(mj.opt.disableflags),
+                "enableflags": int(mj.opt.enableflags),
+                "default_solref": mj.opt.o_solref.tolist(),
+                "default_solimp": mj.opt.o_solimp.tolist(),
             }
         except Exception as e:
             out["mujoco_opt_err"] = repr(e)

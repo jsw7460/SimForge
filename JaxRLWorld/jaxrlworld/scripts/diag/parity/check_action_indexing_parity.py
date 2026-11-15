@@ -37,6 +37,8 @@ import os
 import traceback
 from pathlib import Path
 
+from jaxrlworld.rl.actuators.actuator_pd import IdealPDActuator
+
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
@@ -61,7 +63,7 @@ def _build_env(preset: str, sim: str, num_envs: int = 1):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = _PRESETS[preset]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
@@ -85,13 +87,12 @@ def _capture_actuator_gains(env) -> dict[str, dict[str, float]]:
     act_mgr = env.act_manager
     names = list(act_mgr.actuated_joint_names)
     for actuator, joint_indices in act_mgr._actuators:
-        idx_list = joint_indices.detach().cpu().tolist() if hasattr(joint_indices, "detach") else list(joint_indices)
+        idx_list = joint_indices.detach().cpu().tolist()
         for local_i, canonical_i in enumerate(idx_list):
             jname = names[int(canonical_i)]
             d: dict[str, float] = {}
-            if hasattr(actuator, "stiffness"):
+            if isinstance(actuator, IdealPDActuator):
                 d["kp"] = float(actuator.stiffness[0, local_i])
-            if hasattr(actuator, "damping"):
                 d["kd"] = float(actuator.damping[0, local_i])
             out[jname] = d
     return out
@@ -106,7 +107,7 @@ def _capture_sim_side(env, sim: str) -> dict[str, dict[str, float]]:
     out: dict[str, dict[str, float]] = {}
     act_mgr = env.act_manager
     names = list(act_mgr.actuated_joint_names)
-    indexing = getattr(act_mgr, "_indexing", None)
+    indexing = act_mgr._indexing
     if indexing is None:
         return out
 
@@ -130,11 +131,7 @@ def _capture_sim_side(env, sim: str) -> dict[str, dict[str, float]]:
         import warp as wp
 
         model = env.scene_manager.solver.model
-        qd_indices = (
-            indexing.newton_qd_indices.detach().cpu().numpy() if hasattr(indexing, "newton_qd_indices") else None
-        )
-        if qd_indices is None:
-            return out
+        qd_indices = indexing.newton_qd_indices.detach().cpu().numpy()
         arm = _try(lambda: wp.to_torch(model.joint_armature).detach().cpu().numpy())
         fri = _try(lambda: wp.to_torch(model.joint_friction).detach().cpu().numpy())
         for ci, jname in enumerate(names):

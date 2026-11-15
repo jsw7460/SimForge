@@ -81,8 +81,8 @@ def decode_disableflags(flags: int) -> str:
 
     names = [
         n.removeprefix("mjDSBL_").lower()
-        for n in dir(mujoco.mjtDisableBit)
-        if n.startswith("mjDSBL_") and flags & getattr(mujoco.mjtDisableBit, n).value
+        for n, bit in mujoco.mjtDisableBit.__members__.items()
+        if n.startswith("mjDSBL_") and flags & bit.value
     ]
     return "+".join(sorted(names)) if names else "none"
 
@@ -178,8 +178,7 @@ def read_pd(env) -> dict[str, dict[str, tuple[float, float]]]:
     names = list(mgr._actuated_joint_names)
     out: dict[str, dict[str, tuple[float, float]]] = {}
     for act, jidx in mgr._actuators:
-        for field in _PD_FIELDS:
-            t = getattr(act, field)
+        for field, t in (("stiffness", act.stiffness), ("damping", act.damping), ("effort_limit", act.effort_limit)):
             if t.dim() == 2:
                 vals, stds = t[0], t.std(dim=0)
             else:

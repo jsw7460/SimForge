@@ -68,28 +68,6 @@ os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _to_list(t) -> list:
-    """Detach + cpu + tolist for tensors; passthrough for already-list values."""
-    try:
-        import torch
-
-        if isinstance(t, torch.Tensor):
-            t2 = t.detach().cpu()
-            if t2.dtype == torch.bool:
-                return t2.tolist()
-            return t2.float().tolist()
-    except ImportError:
-        pass
-    if hasattr(t, "tolist"):
-        return t.tolist()
-    return t
-
-
-# ---------------------------------------------------------------------------
 # Per-sim capture (runs inside subprocess)
 # ---------------------------------------------------------------------------
 

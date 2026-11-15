@@ -294,7 +294,11 @@ def check_dr_forwarding(chk) -> None:
             ("joint_damping", "gaussian"),
         ):
             got = recorded.get(name, {}).get("distribution")
-            chk(f"mujoco {name} forwards distribution", getattr(got, "name", None) == f"keyed:{dist}", f"got {got!r}")
+            chk(
+                f"mujoco {name} forwards distribution",
+                isinstance(got, SimpleNamespace) and got.name == f"keyed:{dist}",
+                f"got {got!r}",
+            )
         chk("mujoco joint_friction forwards shared_random", recorded["joint_friction"].get("shared_random") is True)
 
         for sim in ("genesis", "newton"):

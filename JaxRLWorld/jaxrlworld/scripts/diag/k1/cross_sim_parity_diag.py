@@ -446,8 +446,8 @@ def dump_asset(env) -> dict:
     # actuator carrying only the joints it drives.
     for attr in ("stiffness", "damping", "effort_limit"):
         full = [float("nan")] * len(joints)
-        for actuator, joint_indices in getattr(act, "_actuators", []):
-            value = getattr(actuator, attr, None)
+        for actuator, joint_indices in act._actuators:
+            value = getattr(actuator, attr, None)  # dynamic-attr: attr named by the loop; ActuatorNet* has no PD gains
             if not isinstance(value, torch.Tensor):
                 continue
             values = row(value)

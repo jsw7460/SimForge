@@ -50,25 +50,6 @@ def _fmt(x, w: int = 11, prec: int = 6) -> str:
     return f"{f:>+{w}.{prec}f}"
 
 
-def _safe_to_numpy(x):
-    if x is None:
-        return None
-    if hasattr(x, "numpy"):
-        try:
-            return x.numpy()
-        except Exception:
-            pass
-    if hasattr(x, "detach"):
-        try:
-            return x.detach().cpu().numpy()
-        except Exception:
-            pass
-    try:
-        return np.asarray(x)
-    except Exception:
-        return None
-
-
 # ── MuJoCo side ────────────────────────────────────────────────────
 def dump_mujoco(env, canonical_names) -> None:
     import mujoco
@@ -82,7 +63,7 @@ def dump_mujoco(env, canonical_names) -> None:
     print(f"  integrator (mjtInt)     = {int(mj.opt.integrator)}")
     print(f"  solver (mjtSolver)      = {int(mj.opt.solver)}")
     print(f"  iterations              = {int(mj.opt.iterations)}")
-    print(f"  ls_iterations           = {int(getattr(mj.opt, 'ls_iterations', -1))}")
+    print(f"  ls_iterations           = {int(mj.opt.ls_iterations)}")
     print(f"  gravity                 = [{mj.opt.gravity[0]:+.4f}, {mj.opt.gravity[1]:+.4f}, {mj.opt.gravity[2]:+.4f}]")
     print(f"  nu (actuators)          = {int(mj.nu)}")
     print(f"  njnt                    = {int(mj.njnt)}")
@@ -174,30 +155,16 @@ def dump_newton(env, canonical_names) -> None:
     print(f"  decimation              = {int(env.decimation)}")
     print(f"  num_worlds              = {int(model.world_count)}")
 
-    # Probe whatever Newton exposes about integrator / solver / gravity.
-    def _probe(attr_name: str):
-        obj = getattr(model, attr_name, None)
-        if obj is None:
-            return None
-        arr = _safe_to_numpy(obj)
-        if arr is None:
-            return obj
-        return arr
-
-    for a in (
-        "gravity",
-        "soft_contact_ke",
-        "soft_contact_kd",
-        "soft_contact_mu",
-        "soft_contact_kf",
-        "rigid_contact_margin",
-        "rigid_contact_torsional_friction",
-    ):
-        v = _probe(a)
-        if v is not None:
-            if isinstance(v, np.ndarray):
-                v = v.tolist() if v.size <= 6 else f"<ndarray shape={v.shape}>"
-            print(f"  {a:<24}= {v}")
+    meta = {
+        "gravity": model.gravity.numpy(),
+        "soft_contact_ke": np.asarray(model.soft_contact_ke),
+        "soft_contact_kd": np.asarray(model.soft_contact_kd),
+        "soft_contact_mu": np.asarray(model.soft_contact_mu),
+        "soft_contact_kf": np.asarray(model.soft_contact_kf),
+    }
+    for a, arr in meta.items():
+        v = arr.tolist() if arr.size <= 6 else f"<ndarray shape={arr.shape}>"
+        print(f"  {a:<24}= {v}")
 
     num_worlds = int(model.world_count)
     joints_per_world = len(model.joint_label) // num_worlds
@@ -206,20 +173,16 @@ def dump_newton(env, canonical_names) -> None:
     print(f"  dofs_per_world          = {dofs_per_world}")
 
     # Parameter arrays — per-world, stride of dofs_per_world.
-    ke = _safe_to_numpy(model.joint_target_ke)
-    kd = _safe_to_numpy(model.joint_target_kd)
-    armature = _safe_to_numpy(model.joint_armature)
-    effort_limit = _safe_to_numpy(model.joint_effort_limit)
-    qd_start = _safe_to_numpy(model.joint_qd_start)
+    ke = model.joint_target_ke.numpy()
+    kd = model.joint_target_kd.numpy()
+    armature = model.joint_armature.numpy()
+    effort_limit = model.joint_effort_limit.numpy()
+    qd_start = model.joint_qd_start.numpy()
+    damping = model.joint_damping.numpy()
+    friction = model.joint_friction.numpy()
 
-    # damping / frictionloss: probe both the obvious names.
-    damping = _safe_to_numpy(getattr(model, "joint_damping", None))
-    friction = _safe_to_numpy(getattr(model, "joint_friction", None))
-    if friction is None:
-        friction = _safe_to_numpy(getattr(model, "joint_frictionloss", None))
-
-    print(f"  joint_damping exposed?  = {damping is not None}")
-    print(f"  joint_friction exposed? = {friction is not None}")
+    print("  joint_damping exposed?  = True")
+    print("  joint_friction exposed? = True")
 
     # Build leaf-name → newton joint index for world 0 only.
     name_to_jidx = {}
@@ -245,8 +208,8 @@ def dump_newton(env, canonical_names) -> None:
         kd_v = float(kd[dof_start])
         arm_v = float(armature[dof_start])
         eff = float(effort_limit[dof_start])
-        dmp_v = float(damping[dof_start]) if damping is not None else _NAN
-        frn_v = float(friction[dof_start]) if friction is not None else _NAN
+        dmp_v = float(damping[dof_start])
+        frn_v = float(friction[dof_start])
         print(
             f"{i:<4} {name:<32} "
             f"{_fmt(kp_v)} {_fmt(kd_v)} {_fmt(arm_v)} {_fmt(dmp_v)} "
@@ -257,34 +220,24 @@ def dump_newton(env, canonical_names) -> None:
     print("\n[ROOT FREE JOINT — first 6 DoF]")
     for d in range(min(6, dofs_per_world)):
         a_v = float(armature[d])
-        d_v = float(damping[d]) if damping is not None else _NAN
-        f_v = float(friction[d]) if friction is not None else _NAN
+        d_v = float(damping[d])
+        f_v = float(friction[d])
         print(f"  dof[{d}] armature={_fmt(a_v)} damping={_fmt(d_v)} frictionloss={_fmt(f_v)}")
 
     # Per-body mass + inertia (world 0).
     print("\n[PER-BODY MASS + INERTIA]")
     body_label = model.body_label
     bodies_per_world = len(body_label) // num_worlds
-    body_mass = _safe_to_numpy(getattr(model, "body_mass", None))
-    body_inertia = _safe_to_numpy(getattr(model, "body_inertia", None))
+    body_mass = model.body_mass.numpy()
+    body_inertia = model.body_inertia.numpy()
     header = f"{'Idx':<4} {'body_name':<36} {'mass[kg]':>11} {'Ixx':>11} {'Iyy':>11} {'Izz':>11}"
     print(header)
     print("-" * len(header))
     for b in range(bodies_per_world):
         name = leaf_name(body_label[b])
-        mass = float(body_mass[b]) if body_mass is not None else _NAN
-        ixx = iyy = izz = _NAN
-        if body_inertia is not None:
-            inert = body_inertia[b]
-            shape = np.asarray(inert).shape
-            if shape == (3, 3):
-                ixx, iyy, izz = float(inert[0, 0]), float(inert[1, 1]), float(inert[2, 2])
-            elif shape == (6,):
-                # Common warp inertia layout: diag + off-diag.
-                ixx, iyy, izz = float(inert[0]), float(inert[1]), float(inert[2])
-            elif shape == (9,):
-                # Flattened row-major 3x3.
-                ixx, iyy, izz = float(inert[0]), float(inert[4]), float(inert[8])
+        mass = float(body_mass[b])
+        inert = body_inertia[b]  # wp.mat33 -> (3, 3)
+        ixx, iyy, izz = float(inert[0, 0]), float(inert[1, 1]), float(inert[2, 2])
         print(f"{b:<4} {name:<36} {_fmt(mass)} {_fmt(ixx)} {_fmt(iyy)} {_fmt(izz)}")
 
 

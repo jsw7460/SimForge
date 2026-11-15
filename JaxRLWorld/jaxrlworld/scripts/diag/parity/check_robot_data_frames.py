@@ -78,7 +78,7 @@ def _build_env(preset: str, sim: str, num_envs: int):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = _PRESETS[preset]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
@@ -96,7 +96,8 @@ def _probe(env, settle: int, steps: int, perturb: float) -> dict[str, np.ndarray
     for _ in range(steps):
         env.step(pert)
     rd = env.get_robot_data()
-    return {name: getattr(rd, name)[0].detach().cpu().double().numpy() for name in _FIELDS}
+    values = {name: getattr(rd, name) for name in _FIELDS}  # dynamic-attr: RobotData property names in _FIELDS
+    return {name: v[0].detach().cpu().double().numpy() for name, v in values.items()}
 
 
 def _checks(d: dict[str, np.ndarray]) -> dict[str, float]:

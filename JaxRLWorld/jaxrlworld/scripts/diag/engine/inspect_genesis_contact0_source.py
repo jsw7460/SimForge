@@ -36,8 +36,8 @@ def main() -> None:
         "wrapped",
         "__wrapped__",
     ):
-        if hasattr(fn, attr):
-            val = getattr(fn, attr)
+        if hasattr(fn, attr):  # dynamic-attr: surveys candidate wrapper attributes by name
+            val = getattr(fn, attr)  # dynamic-attr: surveys candidate wrapper attributes by name
             print(f"  {attr}: {val!r}")
 
     try:

@@ -59,7 +59,6 @@ _ENTITY_GETTERS = (
 _SOLVER_GETTERS = (
     "get_links_pos",
     "get_links_vel",
-    "get_links_COM_shift",
 )
 
 
@@ -70,9 +69,7 @@ class _Meter:
         self.enabled = False
 
     def wrap(self, obj, name: str, label: str) -> None:
-        fn = getattr(obj, name, None)
-        if fn is None:
-            return
+        fn = getattr(obj, name)  # dynamic-attr: getter named in the instrumentation tables
 
         import torch
 
@@ -105,7 +102,7 @@ def main() -> int:
 
     torch.manual_seed(args.seed)
     module, cls_name = _PRESETS[args.preset]
-    cfg_cls = getattr(importlib.import_module(module), cls_name)
+    cfg_cls = getattr(importlib.import_module(module), cls_name)  # dynamic-attr: preset class named in _PRESETS
     cfgs = cfg_cls(sim_type="genesis", num_envs=args.num_envs, seed=args.seed).build()
 
     from jaxrlworld.rl.evals.sim_initializers import get_initializer

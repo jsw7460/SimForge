@@ -184,10 +184,10 @@ def main() -> int:
         *parents, leaf = path.split(".")
         target = cfgs
         for name in parents:
-            target = getattr(target, name)
-        getattr(target, leaf)  # the field must exist: a typo must not silently add an attribute
+            target = getattr(target, name)  # dynamic-attr: dotted --set override path
+        getattr(target, leaf)  # dynamic-attr: --set field must exist; a typo must not silently add an attribute
         setattr(target, leaf, ast.literal_eval(value))
-        print(f"  override {path} = {getattr(target, leaf)!r}")
+        print(f"  override {path} = {getattr(target, leaf)!r}")  # dynamic-attr: dotted --set override path
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env
 

@@ -407,7 +407,7 @@ class NewtonTong:
         self.state_1 = self.model.state()
         self.control = self.model.control()
 
-        labels = list(getattr(self.model, "joint_label", None) or self.model.joint_key)
+        labels = list(self.model.joint_label)
         matches = [i for i, label in enumerate(labels) if label.endswith(HINGE_JOINT)]
         if len(matches) != 1:
             raise ValueError(f"Newton labels {matches} match {HINGE_JOINT!r}; it must name exactly one joint.")
@@ -448,10 +448,9 @@ class NewtonTong:
         return out
 
     def _custom_dof_attribute(self, attribute: str) -> np.ndarray | None:
-        mujoco_attrs = getattr(self.model, "mujoco", None)
-        if mujoco_attrs is None:
-            return None
-        array = getattr(mujoco_attrs, attribute, None)
+        # Deprecated Newton aliases; dof_springref is withdrawn for models
+        # whose coordinates and DOFs do not line up.
+        array = getattr(self.model.mujoco, attribute, None)  # dynamic-attr: named alias may be withdrawn
         if array is None:
             return None
         return self._wp.to_torch(array).cpu().numpy()
@@ -572,7 +571,7 @@ BACKENDS = {"mujoco": MujocoTong, "newton": NewtonTong, "genesis": GenesisTong}
 
 
 def _numpy(value) -> np.ndarray:
-    return np.asarray(value.detach().cpu() if hasattr(value, "detach") else value)
+    return np.asarray(value.detach().cpu())
 
 
 def _scalar(value) -> float:

@@ -252,10 +252,10 @@ def main():
     # squash_action=True: world model outputs in [-1, 1], scale to env range
     action_low = torch.full((n_act,), -1.0, device=device)
     action_high = torch.full((n_act,), 1.0, device=device)
-    # RSLRLBraxWrapper expects actions in env's native range
+    # RSLRLBraxWrapper exposes no action bounds; it takes actions in [-1, 1]
     # With squash_action=True, model outputs [-1, 1] which we scale
-    env_action_low = train_env.clip_actions_low if hasattr(train_env, "clip_actions_low") else -1.0
-    env_action_high = train_env.clip_actions_high if hasattr(train_env, "clip_actions_high") else 1.0
+    env_action_low = -1.0
+    env_action_high = 1.0
 
     def scale_action(actions_jax: jax.Array) -> jax.Array:
         """Scale actions from [-1, 1] to env range."""

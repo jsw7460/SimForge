@@ -70,7 +70,7 @@ def main() -> int:
         for name, term in iter_terms(env.event_cfg, EventTermConfig).items():
             if term.mode != mode:
                 continue
-            fn_name = getattr(term.func, "__name__", str(term.func))
+            fn_name = getattr(term.func, "__name__", str(term.func))  # dynamic-attr: func may be a "module:attr" str
             env.event_manager.run_term(name, all_ids)
             _sync()
             _stage(f"[{mode}] term '{name}' ({fn_name}) done")

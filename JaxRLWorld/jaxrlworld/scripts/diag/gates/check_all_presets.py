@@ -136,7 +136,7 @@ def _no_reward_shadow(extra) -> dict[str, str]:
 
 def _load(loader: str, sim: str, num_envs: int):
     kind, module, name = loader.split(":", 2)
-    target = getattr(importlib.import_module(module), name)
+    target = getattr(importlib.import_module(module), name)  # dynamic-attr: loader "kind:module:name"
     if kind == "cls":
         return target(sim_type=sim, num_envs=num_envs).build()
     cfgs = target(sim=sim) if "sim" in inspect.signature(target).parameters else target()

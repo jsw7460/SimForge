@@ -49,7 +49,11 @@ _OPTION_FIELDS = (
 def census(scene, steps: int, step_fn) -> str:
     solver = scene.rigid_solver
     options = solver._options
-    lines = ["rigid options: " + ", ".join(f"{name}={getattr(options, name)}" for name in _OPTION_FIELDS)]
+    option_text = ", ".join(
+        f"{name}={getattr(options, name)}"  # dynamic-attr: option names listed in _OPTION_FIELDS
+        for name in _OPTION_FIELDS
+    )
+    lines = ["rigid options: " + option_text]
     kinds = Counter(str(geom.type).rsplit(".", 1)[-1] for entity in scene.entities for geom in entity.geoms)
     lines.append(
         f"collision geometry: {solver.n_geoms} geoms ({dict(kinds)}), {solver.n_verts} verts, "

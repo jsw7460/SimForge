@@ -110,7 +110,7 @@ def run_cell(preset: str, num_envs: int, num_steps: int, warmup: int, seed: int)
     module, cls_name = _PRESETS[preset]
     _stage(f"cell start: {preset} (num_envs={num_envs}, steps={num_steps})")
 
-    cfg_cls = getattr(importlib.import_module(module), cls_name)
+    cfg_cls = getattr(importlib.import_module(module), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type="genesis", num_envs=num_envs, seed=seed).build()
 
     from jaxrlworld.rl.evals.sim_initializers import get_initializer

@@ -63,8 +63,7 @@ def main() -> None:
     pos = torch.tensor([[0.0, 0.0, 0.665]], device=env.device).expand(env.num_envs, -1).contiguous()
     quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=env.device).expand(env.num_envs, -1).contiguous()
     writer.set_root_pose(pos, quat, env_ids=env_ids)
-    if hasattr(writer, "eval_fk"):
-        writer.eval_fk(env_ids=env_ids)
+    writer.eval_fk(env_ids=env_ids)
     print(f"  root_pos_w = {_fmt(rd.root_link_pos_w)}")
 
     # Mjlab-specific: check env_origins, HOME_KEYFRAME qpos, xfrc_applied
@@ -75,13 +74,7 @@ def main() -> None:
 
         print("\n=== Mjlab-specific introspection ===")
         # env_origins (from mjlab Scene)
-        scene_obj = getattr(sm, "scene", None)
-        if scene_obj is not None:
-            origins = getattr(scene_obj, "env_origins", None)
-            if origins is not None:
-                print(f"  scene.env_origins[:1] = {_fmt(origins[:1])}")
-            else:
-                print("  scene.env_origins: None")
+        print(f"  scene.env_origins[:1] = {_fmt(sm.scene.env_origins[:1])}")
         # Home keyframe z from compiled model
         if mj.nkey > 0:
             for k in range(mj.nkey):

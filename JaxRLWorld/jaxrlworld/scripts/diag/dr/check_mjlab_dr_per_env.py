@@ -85,7 +85,7 @@ class _SilenceFD:
 def _build_env(num_envs: int, seed: int):
     from jaxrlworld.rl.runners import BaseRunner
 
-    cfg_cls = getattr(importlib.import_module(_PRESET_MODULE), _PRESET_CLASS)
+    cfg_cls = getattr(importlib.import_module(_PRESET_MODULE), _PRESET_CLASS)  # dynamic-attr: preset named by constant
     cfgs = cfg_cls(sim_type="mujoco", num_envs=num_envs, seed=seed).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
@@ -105,8 +105,8 @@ def _preset_unified_terms(env) -> set[str]:
         fn = term.func
         if fn is None:
             continue
-        mod = getattr(fn, "__module__", "") or ""
-        name = getattr(fn, "__name__", "") or ""
+        mod = getattr(fn, "__module__", "") or ""  # dynamic-attr: arbitrary callable or str may lack it
+        name = getattr(fn, "__name__", "") or ""  # dynamic-attr: arbitrary callable or str may lack it
         if mod.endswith(".dr.unified") and name in _UNIFIED_TERM_FIELDS:
             used.add(name)
     return used
@@ -119,17 +119,13 @@ def _fields_used_by_preset(used_terms: set[str]) -> set[str]:
     return out
 
 
-def _field_shape(sim, field: str) -> tuple | None:
-    arr = getattr(sim.wp_model, field, None)
-    if arr is None:
-        return None
+def _field_shape(sim, field: str) -> tuple:
+    arr = getattr(sim.wp_model, field)  # dynamic-attr: field named in _UNIFIED_TERM_FIELDS
     return tuple(arr.shape)
 
 
-def _field_tensor(sim, field: str) -> torch.Tensor | None:
-    arr = getattr(sim.wp_model, field, None)
-    if arr is None:
-        return None
+def _field_tensor(sim, field: str) -> torch.Tensor:
+    arr = getattr(sim.wp_model, field)  # dynamic-attr: field named in _UNIFIED_TERM_FIELDS
     t = wp.to_torch(arr)
     return t.detach().float()
 
@@ -188,9 +184,6 @@ def run(num_envs: int, seed: int, out_path: Path) -> int:
     n_test1_pass = 0
     for field in _ALL_FIELDS:
         shape = _field_shape(sim, field)
-        if shape is None:
-            lines.append(_fmt_row(field, "<missing>", "-", "SKIP (no such wp_model attr)"))
-            continue
         in_use = field in used_fields
         expanded = shape[0] == num_envs
         if not in_use:
@@ -221,9 +214,6 @@ def run(num_envs: int, seed: int, out_path: Path) -> int:
     n_test2_pass = 0
     for field in _ALL_FIELDS:
         t = _field_tensor(sim, field)
-        if t is None:
-            lines.append(_fmt_row(field, "<missing>", "-", "SKIP (no such wp_model attr)"))
-            continue
         in_use = field in used_fields
         if not in_use:
             lines.append(_fmt_row(field, str(tuple(t.shape)), "-", "SKIP (preset does not randomize)"))

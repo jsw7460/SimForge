@@ -62,7 +62,7 @@ def _build_env(sim: str, num_envs: int):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod = importlib.import_module(_PRESET[0])
-    cls = getattr(mod, _PRESET[1])
+    cls = getattr(mod, _PRESET[1])  # dynamic-attr: resolves the _PRESET (module, class) pair
     cfgs = cls(sim_type=sim, num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs)
     return runner.env
@@ -92,7 +92,7 @@ def _body_idx(env, sim: str, name: str) -> int | None:
     elif sim == "newton":
         # Newton: ``body_label`` ordered slice for world-0 is the entity-
         # local body list ``NewtonRobotData.body_*_by_ids`` indexes into.
-        labels = list(getattr(env.scene_manager.solver.model, "body_label", []))
+        labels = list(env.scene_manager.solver.model.body_label)
         num_worlds = env.scene_manager.solver.model.world_count
         per_world = len(labels) // max(num_worlds, 1)
         for i in range(per_world):
@@ -325,21 +325,13 @@ def _read_foot_geom_friction(env, sim: str) -> dict:
 
             model = env.scene_manager.solver.model
             num_worlds = model.world_count
-            body_labels = list(getattr(model, "body_label", []))
+            body_labels = list(model.body_label)
             n_bodies = len(body_labels)
             bodies_per_world = n_bodies // max(num_worlds, 1)
             # shape_body[i] = body id that owns shape i (per-world replication
             # means shape ids run over all worlds; restrict to world 0).
-            shape_body = (
-                wp.to_torch(model.shape_body).detach().cpu().numpy()
-                if hasattr(model.shape_body, "numpy")
-                else np.asarray(model.shape_body)
-            )
-            mu = (
-                wp.to_torch(model.shape_material_mu).detach().cpu().numpy()
-                if hasattr(model.shape_material_mu, "numpy")
-                else np.asarray(model.shape_material_mu)
-            )
+            shape_body = wp.to_torch(model.shape_body).detach().cpu().numpy()
+            mu = wp.to_torch(model.shape_material_mu).detach().cpu().numpy()
             # Restrict to world 0: shapes whose body is in [0, bodies_per_world).
             for s in range(len(shape_body)):
                 b = int(shape_body[s])
@@ -645,7 +637,7 @@ def _format_step(step_idx, sims, per_sim):
             if cur is None:
                 return default
             if isinstance(p, str):
-                cur = cur.get(p, default) if hasattr(cur, "get") else default
+                cur = cur.get(p, default) if isinstance(cur, dict) else default
             else:
                 try:
                     cur = cur[p]

@@ -118,14 +118,14 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int) -> dict:
         import inspect
 
         mod = importlib.import_module(mod_name)
-        orig = getattr(mod, fn_name)
+        orig = getattr(mod, fn_name)  # dynamic-attr: term function named by the per-sim term map
 
         if inspect.isclass(orig):
             orig_call = orig.__call__
 
             def call_shim(self, env, *a, __orig_call=orig_call, __term=term, **kw):
                 out = __orig_call(self, env, *a, **kw)
-                kwargs_repr = {k: repr(v)[:160] for k, v in vars(self).items() if not hasattr(v, "shape")}
+                kwargs_repr = {k: repr(v)[:160] for k, v in vars(self).items() if not isinstance(v, torch.Tensor)}
                 kwargs_repr["__class__"] = f"{mod_name}.{fn_name}"
                 _record(__term, out, kwargs_repr)
                 return out
@@ -161,7 +161,7 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int) -> dict:
     wiring: dict = {}
     wiring["reward_terms"] = {
         name: {
-            "func": f"{t.func.__module__}.{getattr(t.func, '__name__', type(t.func).__name__)}",
+            "func": f"{t.func.__module__}.{getattr(t.func, '__name__', type(t.func).__name__)}",  # dynamic-attr: term func may be a function, class or callable instance
             "weight": t.weight,
             "params": {k: repr(v)[:150] for k, v in (t.params or {}).items()},
         }
@@ -188,7 +188,7 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int) -> dict:
             f"integrator={ro.integrator} constraint_solver={ro.constraint_solver} iterations={ro.iterations} "
             f"constraint_timeconst={ro.constraint_timeconst} friction_cone={ro.friction_cone}"
         )
-    tcfg = cfgs.scene.terrain_cfg if hasattr(cfgs.scene, "terrain_cfg") else None
+    tcfg = cfgs.scene.terrain_cfg
     wiring["terrain_cfg"] = repr(tcfg)[:400]
     _stage("config built")
 

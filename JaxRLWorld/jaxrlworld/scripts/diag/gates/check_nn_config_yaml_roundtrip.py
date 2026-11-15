@@ -280,7 +280,7 @@ def _values_match(a: NNConfig, b: NNConfig) -> tuple[bool, str]:
         return False, f"critic type {type(a.policy.critic).__name__} != {type(b.policy.critic).__name__}"
 
     def _field_values(obj):
-        return {f.name: _coerce(getattr(obj, f.name)) for f in dc_fields(obj)}
+        return {f.name: _coerce(getattr(obj, f.name)) for f in dc_fields(obj)}  # dynamic-attr: dataclass fields
 
     def _coerce(v):
         if isinstance(v, Enum):

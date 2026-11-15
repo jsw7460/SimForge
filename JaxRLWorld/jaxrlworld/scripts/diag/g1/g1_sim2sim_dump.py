@@ -38,6 +38,8 @@ import sys
 import numpy as np
 import torch
 
+from jaxrlworld.rl.actuators.actuator_cfg import DelayedPDActuatorCfg
+from jaxrlworld.rl.actuators.actuator_pd import IdealPDActuator
 from jaxrlworld.rl.evals.evaluator import PolicyEvaluator
 
 
@@ -64,7 +66,7 @@ def _fmt_maybe_tensor(v, prec: int = 4) -> str:
     if torch.is_tensor(v):
         flat = v.detach().flatten().cpu().tolist()
         return "[" + ", ".join(f"{float(x):+.{prec}f}" for x in flat) + "]"
-    if hasattr(v, "__len__") and not isinstance(v, str):
+    if isinstance(v, list | tuple | np.ndarray):
         return "[" + ", ".join(f"{float(x):+.{prec}f}" for x in v) + "]"
     return str(v)
 
@@ -95,11 +97,12 @@ def _to_numpy(x):
     if x is None:
         return None
     # Skip callables (bound methods, functions) and obvious non-numeric types.
-    if callable(x) and not hasattr(x, "__array_interface__") and not hasattr(x, "numpy"):
+    array_like = hasattr(x, "__array_interface__") or hasattr(x, "numpy")  # dynamic-attr: x is any reflected value
+    if callable(x) and not array_like:
         return None
     if isinstance(x, str | bytes | type | dict | set):
         return None
-    if hasattr(x, "numpy") and not isinstance(x, np.ndarray):
+    if hasattr(x, "numpy") and not isinstance(x, np.ndarray):  # dynamic-attr: x is any value reflected off a sim object
         try:
             arr = x.numpy()
             if arr is None or callable(arr):
@@ -110,7 +113,7 @@ def _to_numpy(x):
             return arr
         except Exception:
             pass
-    if hasattr(x, "detach"):
+    if hasattr(x, "detach"):  # dynamic-attr: x is any value reflected off a sim object
         try:
             arr = x.detach().cpu().numpy()
             if arr.dtype == object:
@@ -146,10 +149,7 @@ def dump_raw_sim_state(env, label: str, max_preview: int = 40) -> None:
     Tries a list of candidate attribute paths and dumps whichever exist.
     """
     print(f"\n[RAW SIM STATE — {label}]")
-    sm = getattr(env, "scene_manager", None)
-    if sm is None:
-        print("  (env has no scene_manager)")
-        return
+    sm = env.scene_manager
 
     probes = [
         # mjlab / MuJoCo backend candidate paths.
@@ -181,8 +181,8 @@ def dump_raw_sim_state(env, label: str, max_preview: int = 40) -> None:
             continue
         hit += 1
         flat = np.asarray(arr).flatten()
-        shape = getattr(arr, "shape", "?")
-        dtype = getattr(arr, "dtype", "?")
+        shape = arr.shape
+        dtype = arr.dtype
         preview_n = min(max_preview, flat.size)
         preview = flat[:preview_n]
         preview_str = _fmt_row(preview) if preview.size > 0 else "(empty)"
@@ -225,11 +225,8 @@ def dump_contact_and_physics(env, label: str) -> None:
     print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"[CONTACT+PHYSICS FULL — {label}]")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    sm = getattr(env, "scene_manager", None)
-    if sm is None:
-        print("  (no scene_manager)")
-        return
-    sim_type = getattr(env, "sim_type", "?")
+    sm = env.scene_manager
+    sim_type = env.sim_type
     print(f"  sim_type = {sim_type}")
 
     # ==============================================================
@@ -241,7 +238,7 @@ def dump_contact_and_physics(env, label: str) -> None:
         except Exception as e:
             print(f"  [cannot import mujoco: {e}]")
             return
-        mj = getattr(sm, "mj_model", None) or _try(lambda: sm.sim.mj_model)
+        mj = sm.mj_model
         data = _try(lambda: sm.sim.data) or _try(lambda: sm._sim.data)
         wp_data = _try(lambda: sm.sim.wp_data) or _try(lambda: sm._sim.wp_data)
         if mj is None:
@@ -270,26 +267,26 @@ def dump_contact_and_physics(env, label: str) -> None:
         print(f"  opt.o_solref={list(mj.opt.o_solref)}")
         print(f"  opt.o_solimp={list(mj.opt.o_solimp)}")
         print(f"  opt.o_margin={float(mj.opt.o_margin):.6f}")
-        print(f"  opt.noslip_iterations={int(getattr(mj.opt, 'noslip_iterations', -1))}")
+        print(f"  opt.noslip_iterations={int(mj.opt.noslip_iterations)}")
         print(f"  opt.disableflags={int(mj.opt.disableflags)} enableflags={int(mj.opt.enableflags)}")
 
         # Per-DoF forces — prefer wp_data (what mjwarp.step actually reads)
         src, src_name = (wp_data, "wp_data") if wp_data is not None else (data, "data")
         if src is not None:
             print(f"\n[PER-DOF FORCES (from {src_name})]")
-            for field in (
-                "ctrl",
-                "qfrc_applied",
-                "qfrc_actuator",
-                "qfrc_bias",
-                "qfrc_passive",
-                "qfrc_smooth",
-                "qfrc_constraint",
-                "qacc",
-                "qvel",
-                "qpos",
-            ):
-                v = getattr(src, field, None)
+            fields = {
+                "ctrl": src.ctrl,
+                "qfrc_applied": src.qfrc_applied,
+                "qfrc_actuator": src.qfrc_actuator,
+                "qfrc_bias": src.qfrc_bias,
+                "qfrc_passive": src.qfrc_passive,
+                "qfrc_smooth": src.qfrc_smooth,
+                "qfrc_constraint": src.qfrc_constraint,
+                "qacc": src.qacc,
+                "qvel": src.qvel,
+                "qpos": src.qpos,
+            }
+            for field, v in fields.items():
                 arr = _to_numpy(v)
                 if arr is None:
                     print(f"  {field}: <missing>")
@@ -436,12 +433,12 @@ def dump_contact_and_physics(env, label: str) -> None:
         except Exception as e:
             print(f"  [cannot import warp: {e}]")
             return
-        model = getattr(sm, "model", None)
-        control = getattr(sm, "control", None)
-        state_0 = getattr(sm, "state_0", None)
-        state_1 = getattr(sm, "state_1", None)
-        contacts = getattr(sm, "contacts", None)
-        solver = getattr(sm, "solver", None)
+        model = sm.model
+        control = sm.control
+        state_0 = sm.state_0
+        state_1 = sm.state_1
+        contacts = sm.contacts
+        solver = sm.solver
 
         # Core scalars
         print("\n[NEWTON SIM OPTIONS]")
@@ -464,7 +461,9 @@ def dump_contact_and_physics(env, label: str) -> None:
         ):
             if model is None:
                 break
-            v = getattr(model, a, "<missing>")
+            v = getattr(
+                model, a, "<missing>"
+            )  # dynamic-attr: candidate Model names across Newton releases; absent ones print <missing>
             arr = _to_numpy(v) if v != "<missing>" else None
             if arr is not None and arr.size <= 6:
                 print(f"  {a} = {arr.tolist()}")
@@ -480,7 +479,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                 if a.startswith("_"):
                     continue
                 try:
-                    v = getattr(control, a)
+                    v = getattr(control, a)  # dynamic-attr: iterates dir(control)
                 except Exception:
                     continue
                 arr = _to_numpy(v)
@@ -497,7 +496,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                 if a.startswith("_") or a in ("assign", "clear_forces", "requires_grad"):
                     continue
                 try:
-                    v = getattr(st, a)
+                    v = getattr(st, a)  # dynamic-attr: iterates dir(state)
                 except Exception:
                     continue
                 arr = _to_numpy(v)
@@ -505,14 +504,16 @@ def dump_contact_and_physics(env, label: str) -> None:
                     continue
                 print(f"  {st_name}.{a}: shape={arr.shape} {_fmt_arr(arr, max_n=40, prec=5)}")
             # mujoco namespace
-            mjns = getattr(st, "mujoco", None)
+            mjns = getattr(
+                st, "mujoco", None
+            )  # dynamic-attr: Newton attaches the "mujoco" State namespace only when its attributes are requested
             if mjns is not None:
                 print(f"\n[NEWTON {st_name}.mujoco namespace — mjwarp Data mirror]")
                 for a in sorted(dir(mjns)):
                     if a.startswith("_"):
                         continue
                     try:
-                        v = getattr(mjns, a)
+                        v = getattr(mjns, a)  # dynamic-attr: iterates dir(state.mujoco)
                     except Exception:
                         continue
                     arr = _to_numpy(v)
@@ -527,7 +528,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                 if a.startswith("_"):
                     continue
                 try:
-                    v = getattr(contacts, a)
+                    v = getattr(contacts, a)  # dynamic-attr: iterates dir(contacts)
                 except Exception:
                     continue
                 arr = _to_numpy(v)
@@ -587,7 +588,9 @@ def dump_contact_and_physics(env, label: str) -> None:
             for gname, attrs in groups.items():
                 print(f"  -- group [{gname}] --")
                 for a in attrs:
-                    v = getattr(model, a, None)
+                    v = getattr(
+                        model, a, None
+                    )  # dynamic-attr: candidate Model names across Newton releases; absent or unset ones are skipped
                     if v is None:
                         continue
                     arr = _to_numpy(v)
@@ -596,14 +599,16 @@ def dump_contact_and_physics(env, label: str) -> None:
                         continue
                     print(f"    model.{a}: shape={arr.shape} dtype={arr.dtype} {_fmt_arr(arr, max_n=60, prec=5)}")
             # Shape materials submembers
-            sm_attr = getattr(model, "shape_materials", None)
+            sm_attr = getattr(
+                model, "shape_materials", None
+            )  # dynamic-attr: only older Newton releases carry shape_materials
             if sm_attr is not None:
                 print("  -- group [shape_materials sub-fields] --")
                 for a in sorted(dir(sm_attr)):
                     if a.startswith("_"):
                         continue
                     try:
-                        v = getattr(sm_attr, a)
+                        v = getattr(sm_attr, a)  # dynamic-attr: iterates dir(shape_materials)
                     except Exception:
                         continue
                     arr = _to_numpy(v)
@@ -614,9 +619,11 @@ def dump_contact_and_physics(env, label: str) -> None:
         # SolverMuJoCo internal mjwarp model / data
         if solver is not None:
             print(f"\n[NEWTON SOLVER — {type(solver).__name__}]")
-            print(f"  use_mujoco_cpu = {getattr(solver, 'use_mujoco_cpu', '?')}")
+            print(f"  use_mujoco_cpu = {solver.use_mujoco_cpu}")
             for inner_name in ("mjw_model", "mjw_data", "mj_model", "mj_data"):
-                inner = getattr(solver, inner_name, None)
+                inner = getattr(
+                    solver, inner_name, None
+                )  # dynamic-attr: SolverMuJoCo holds mjw_* only on the warp path
                 if inner is None:
                     continue
                 print(f"\n  [solver.{inner_name}] -- interesting attrs")
@@ -649,7 +656,7 @@ def dump_contact_and_physics(env, label: str) -> None:
                     if not any(k in a.lower() for k in interesting_kw):
                         continue
                     try:
-                        v = getattr(inner, a)
+                        v = getattr(inner, a)  # dynamic-attr: iterates dir() of the solver's model / data
                     except Exception:
                         continue
                     arr = _to_numpy(v)
@@ -669,26 +676,22 @@ def print_static(env) -> None:
 
     print("=" * 100)
     print("[SIM META]")
-    print(f"  sim_type              = {getattr(env, 'sim_type', '?')}")
+    print(f"  sim_type              = {env.sim_type}")
     print(f"  device                = {env.device}")
     print(f"  num_envs              = {env.num_envs}")
     print(f"  num_actions           = {env.num_actions}")
-    print(f"  physics_dt            = {getattr(env, 'physics_dt', '?')}")
-    print(f"  control_dt            = {getattr(env, 'control_dt', '?')}")
-    print(f"  decimation            = {getattr(env, 'decimation', '?')}")
+    print(f"  physics_dt            = {env.physics_dt}")
+    print(f"  control_dt            = {env.control_dt}")
+    print(f"  decimation            = {env.decimation}")
     print(f"  total_action_dim      = {am.total_action_dim}")
 
     # Canonical joint order — this is the single source of truth used
     # everywhere for obs / action indexing.
     print("\n[CANONICAL JOINT ORDER]")
     print(f"{'idx':<4} {'joint_name':<36} {'sim_idx':<8} {'scale':>12} {'offset':>12}")
-    scales = _tensor_to_list(am._scale) if hasattr(am, "_scale") else [None] * am.total_action_dim
-    offsets = (
-        _tensor_to_list(am._offset[0])
-        if hasattr(am, "_offset") and am._offset is not None
-        else [None] * am.total_action_dim
-    )
-    sim_ids = _tensor_to_list(am._indexing.sim_indices) if hasattr(am, "_indexing") else [None] * am.total_action_dim
+    scales = _tensor_to_list(am._scale)
+    offsets = _tensor_to_list(am._offset[0]) if am._offset is not None else [None] * am.total_action_dim
+    sim_ids = _tensor_to_list(am._indexing.sim_indices)
     for i, name in enumerate(am.actuated_joint_names):
         s = f"{scales[i]:+.6f}" if scales[i] is not None else "?"
         o = f"{offsets[i]:+.6f}" if offsets[i] is not None else "?"
@@ -708,16 +711,18 @@ def print_static(env) -> None:
 
     # Per-actuator PD / armature / effort.
     print("\n[ACTUATOR PD GAINS]")
-    if not getattr(am, "_actuators", None):
+    if not am._actuators:
         print("  (no explicit actuators — Implicit mode, PD is sim-side)")
     else:
         for idx, (inst, joint_ids) in enumerate(am._actuators):
-            kp = _first_attr(inst, "stiffness", "_stiffness", "kp", "_kp")
-            kd = _first_attr(inst, "damping", "_damping", "kd", "_kd")
+            is_pd = isinstance(inst, IdealPDActuator)
+            kp = inst.stiffness if is_pd else None
+            kd = inst.damping if is_pd else None
             armature = _first_attr(inst, "armature", "_armature")
-            effort = _first_attr(inst, "effort_limit", "_effort_limit", "effort")
-            delay_min = _first_attr(inst.cfg, "min_delay")
-            delay_max = _first_attr(inst.cfg, "max_delay")
+            effort = inst.effort_limit
+            is_delayed = isinstance(inst.cfg, DelayedPDActuatorCfg)
+            delay_min = inst.cfg.min_delay if is_delayed else None
+            delay_max = inst.cfg.max_delay if is_delayed else None
             ids = _tensor_to_list(joint_ids) if torch.is_tensor(joint_ids) else list(joint_ids)
             print(f"  actuator[{idx}] type={type(inst).__name__}  joint_ids={ids}")
             print(f"    kp           = {_fmt_maybe_tensor(kp)}")
@@ -788,18 +793,12 @@ def dump_step(env, step_idx: int, obs, raw_action) -> None:
     print(f"policy_action    [{len(vec):2d}] = {_fmt_row(vec)}")
 
     # Processed action (after scale/offset) if the act_manager exposes it.
-    pa = _first_attr(am, "_processed_action", "processed_action")
-    if pa is None and getattr(am, "_processed_action_history", None):
-        pa = am._processed_action_history[0]
-    if pa is not None:
-        vec = _g0(pa)
-        print(f"processed_action [{len(vec):2d}] = {_fmt_row(vec)}")
+    vec = _g0(am.processed_actions)
+    print(f"processed_action [{len(vec):2d}] = {_fmt_row(vec)}")
 
     # Applied torque (the PD output that actually goes into the sim).
-    tq = _first_attr(am, "applied_torque", "_applied_torque")
-    if tq is not None:
-        vec = _g0(tq)
-        print(f"applied_torque   [{len(vec):2d}] = {_fmt_row(vec)}")
+    vec = _g0(am.applied_torque)
+    print(f"applied_torque   [{len(vec):2d}] = {_fmt_row(vec)}")
 
     # Joint state.
     print(f"joint_pos        [{rd.joint_pos.shape[-1]:2d}] = {_fmt_row(_g0(rd.joint_pos))}")
@@ -810,12 +809,9 @@ def dump_step(env, step_idx: int, obs, raw_action) -> None:
     print(f"root_quat_w wxyz [ 4] = {_fmt_row(_g0(rd.root_link_quat_w))}")
     print(f"root_lin_vel_w   [ 3] = {_fmt_row(_g0(rd.root_link_lin_vel_w))}")
     print(f"root_ang_vel_w   [ 3] = {_fmt_row(_g0(rd.root_link_ang_vel_w))}")
-    if hasattr(rd, "root_link_lin_vel_b"):
-        print(f"root_lin_vel_b   [ 3] = {_fmt_row(_g0(rd.root_link_lin_vel_b))}")
-    if hasattr(rd, "root_link_ang_vel_b"):
-        print(f"root_ang_vel_b   [ 3] = {_fmt_row(_g0(rd.root_link_ang_vel_b))}")
-    if hasattr(rd, "projected_gravity_b"):
-        print(f"proj_gravity_b   [ 3] = {_fmt_row(_g0(rd.projected_gravity_b))}")
+    print(f"root_lin_vel_b   [ 3] = {_fmt_row(_g0(rd.root_link_lin_vel_b))}")
+    print(f"root_ang_vel_b   [ 3] = {_fmt_row(_g0(rd.root_link_ang_vel_b))}")
+    print(f"proj_gravity_b   [ 3] = {_fmt_row(_g0(rd.projected_gravity_b))}")
 
 
 # ── main ────────────────────────────────────────────────────────────

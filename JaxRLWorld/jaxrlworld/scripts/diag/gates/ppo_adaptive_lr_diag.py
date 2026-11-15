@@ -49,7 +49,7 @@ def _moments(opt_state) -> dict[str, jnp.ndarray]:
     out: dict[str, jnp.ndarray] = {}
     leaves = jax.tree_util.tree_leaves_with_path(opt_state)
     for path, leaf in leaves:
-        if not hasattr(leaf, "shape"):
+        if not isinstance(leaf, jax.Array):
             continue
         key = ".".join(str(p) for p in path)
         if "mu" in key or "nu" in key:

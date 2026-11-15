@@ -42,6 +42,8 @@ import numpy as np
 import torch
 
 from jaxrlworld.rl.evals import PolicyEvaluator
+from jaxrlworld.rl.modules.policies.base_ac import BaseActorCritic
+from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 
 
 def _l2(x: jax.Array) -> float:
@@ -223,18 +225,19 @@ def main():
 
     # ── 1. Weight summary ────────────────────────────────────────────
     model = runner.alg.train_state.model
+    is_actor_critic = isinstance(model, BaseActorCritic)
     print("\n══════════════ MODEL WEIGHTS ══════════════")
-    if hasattr(model, "actor"):
+    if is_actor_critic:
         _summarise_module("actor", model.actor)
-    if hasattr(model, "critic"):
         _summarise_module("critic", model.critic)
-    if hasattr(model, "std_module"):
+    # Only the PPO actor-critic carries a separate std module.
+    if isinstance(model, PPOActorCritic):
         _summarise_module("std_module", model.std_module)
 
     # ── 2. Obs normalizer state ─────────────────────────────────────
     print("\n══════════════ OBSERVATION NORMALIZER ══════════════")
-    _dump_obs_normalizer("actor", getattr(model, "actor_obs_normalizer", None))
-    _dump_obs_normalizer("critic", getattr(model, "critic_obs_normalizer", None))
+    _dump_obs_normalizer("actor", model.actor_obs_normalizer if is_actor_critic else None)
+    _dump_obs_normalizer("critic", model.critic_obs_normalizer if is_actor_critic else None)
 
     # ── 3. First reset diagnostics ───────────────────────────────────
     # PolicyEvaluator already called env.reset() in __init__. Run a
@@ -263,10 +266,8 @@ def main():
                 f"(terminated={bool(terminated[0].item())}, "
                 f"truncated={bool(truncated[0].item())})"
             )
-            tm = getattr(env, "termination_manager", None)
-            if tm is not None and hasattr(tm, "term_dones"):
-                fired = [name for name, mask in tm.term_dones.items() if bool(mask[0].item())]
-                print(f"  term_dones fired this step: {fired}")
+            fired = [name for name, mask in env.termination_manager.term_dones.items() if bool(mask[0].item())]
+            print(f"  term_dones fired this step: {fired}")
             break
     else:
         print(f"\n  Survived all {args.max_steps} steps without termination.")

@@ -101,8 +101,6 @@ def _build_env(sim: str, num_envs: int):
             history_length=cfgs.env.decimation,
         )
 
-    field = "sensors" if sim == "mujoco" else "contact_sensors"
-    existing = tuple(getattr(cfgs.scene, field) or ())
     # One column per pad, so "both jaws are on it" is directly observable
     # instead of inferred from positions.
     pads = ContactSensorCfg(
@@ -115,7 +113,11 @@ def _build_env(sim: str, num_envs: int):
         history_length=cfgs.env.decimation,
     )
     added = [_vs("arm_table_contact", "table"), _vs("arm_cube_contact", "cube"), pads]
-    setattr(cfgs.scene, field, list(existing) + added)
+    # Contact sensors live under a different field name per backend.
+    if sim == "mujoco":
+        cfgs.scene.sensors = list(cfgs.scene.sensors or ()) + added
+    else:
+        cfgs.scene.contact_sensors = list(cfgs.scene.contact_sensors or ()) + added
 
     env = BaseRunner._create_env_from_config(cfgs)
     env.reset()

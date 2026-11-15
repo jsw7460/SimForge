@@ -134,7 +134,7 @@ def _resolve_per_joint(value, patterns: tuple[str, ...], joint_names: list[str],
 def _merge_groups(cfgs, field: str, joint_names: list[str], device) -> torch.Tensor:
     merged = torch.full((len(joint_names),), float("nan"), device=device)
     for a in cfgs:
-        vals = _resolve_per_joint(getattr(a, field), tuple(a.target_names_expr), joint_names, device)
+        vals = _resolve_per_joint(vars(a)[field], tuple(a.target_names_expr), joint_names, device)
         mask = ~torch.isnan(vals)
         merged[mask] = vals[mask]
     if torch.isnan(merged).any():

@@ -76,7 +76,7 @@ def run_cell(preset: str, sim: str, num_envs: int, seed: int) -> dict:
     _stage(f"cell start: {preset}:{sim} (num_envs={num_envs})")
 
     module, cls_name = _PRESETS[preset]
-    cfg_cls = getattr(importlib.import_module(module), cls_name)
+    cfg_cls = getattr(importlib.import_module(module), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs, seed=seed).build()
 
     # ---- config-level dump: factor + every term, verbatim ----------
@@ -88,7 +88,9 @@ def run_cell(preset: str, sim: str, num_envs: int, seed: int) -> dict:
     from jaxrlworld.rl.configs.rewards import RewardTermConfig
 
     def fq(fn) -> str:
-        return f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', repr(fn))}"
+        module = getattr(fn, "__module__", "?")  # dynamic-attr: func may be a callable, partial or string
+        qualname = getattr(fn, "__qualname__", repr(fn))  # dynamic-attr: func may be a callable, partial or string
+        return f"{module}.{qualname}"
 
     reward_terms = {name: fq(t.func) for name, t in iter_terms(cfgs.reward, RewardTermConfig).items()}
     event_terms = {

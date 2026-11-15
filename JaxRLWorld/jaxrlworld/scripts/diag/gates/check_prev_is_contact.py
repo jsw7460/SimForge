@@ -92,13 +92,13 @@ def _run(compile_timing: bool) -> list[str]:
             problems.append(f"step {k}: is_contact is not this step's last substep")
         if not torch.equal(prev, now):
             differ_steps += 1
-        for key, field in (
-            ("cat", "current_air_time"),
-            ("cct", "current_contact_time"),
-            ("lat", "last_air_time"),
-            ("lct", "last_contact_time"),
+        for key, field, accessor in (
+            ("cat", "current_air_time", m.current_air_time),
+            ("cct", "current_contact_time", m.current_contact_time),
+            ("lat", "last_air_time", m.last_air_time),
+            ("lct", "last_contact_time", m.last_contact_time),
         ):
-            got = getattr(m, field)(GROUP)
+            got = accessor(GROUP)
             if not torch.allclose(got, ref[key][:, declared], atol=1e-7):
                 problems.append(f"step {k}: {field} drifted from the reference substep timing")
         expected_prev = contacts[k, -1].clone()

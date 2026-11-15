@@ -60,6 +60,7 @@ import torch
 import warp as wp
 
 from jaxrlworld.rl.actuators import DelayedPDActuatorCfg, ImplicitActuatorCfg
+from jaxrlworld.rl.actuators.actuator_pd import IdealPDActuator
 from jaxrlworld.rl.runners import BaseRunner
 
 _PRESET_MOD = "jaxrlworld.rl.configs.presets.g1_29dof.base"
@@ -82,7 +83,7 @@ def _build_env(actuator_variant: str, num_envs: int, seed: int):
     behavioural delta isolates to the actuator path itself.
     """
     mod = importlib.import_module(_PRESET_MOD)
-    cls = getattr(mod, _PRESET_CLS)
+    cls = getattr(mod, _PRESET_CLS)  # dynamic-attr: resolves the _PRESET_MOD / _PRESET_CLS preset
     preset = cls(sim_type=_SIM, num_envs=num_envs)
     cfgs = preset.build()
 
@@ -136,6 +137,7 @@ def _fmt_field(v) -> str:
 
 def _dump_actuator_cfg(act_cfg) -> str:
     lines = [f"  class: {type(act_cfg).__name__}"]
+    cfg_values = vars(act_cfg)
     for fname in (
         "target_names_expr",
         "stiffness",
@@ -147,8 +149,8 @@ def _dump_actuator_cfg(act_cfg) -> str:
         "min_delay",
         "max_delay",
     ):
-        if hasattr(act_cfg, fname):
-            lines.append(f"  {fname}: {_fmt_field(getattr(act_cfg, fname))}")
+        if fname in cfg_values:
+            lines.append(f"  {fname}: {_fmt_field(cfg_values[fname])}")
     return "\n".join(lines)
 
 
@@ -164,37 +166,38 @@ def _dump_manager_state(env) -> str:
         kp_str = "—"
         kd_str = "—"
         eff_str = "—"
-        if hasattr(act, "stiffness"):
+        if isinstance(act, IdealPDActuator):
             t = act.stiffness
             kp_str = (
                 f"shape={tuple(t.shape)} mean={t.mean().item():.2f} min={t.min().item():.2f} max={t.max().item():.2f}"
             )
-        if hasattr(act, "damping"):
             t = act.damping
             kd_str = (
                 f"shape={tuple(t.shape)} mean={t.mean().item():.2f} min={t.min().item():.2f} max={t.max().item():.2f}"
             )
-        if hasattr(act, "effort_limit"):
-            t = act.effort_limit
-            if isinstance(t, torch.Tensor):
-                eff_str = f"shape={tuple(t.shape)} mean={t.mean().item():.2f}"
-            else:
-                eff_str = f"{t}"
+        t = act.effort_limit
+        if isinstance(t, torch.Tensor):
+            eff_str = f"shape={tuple(t.shape)} mean={t.mean().item():.2f}"
+        else:
+            eff_str = f"{t}"
         lines.append(f"  actuator[{i}] class={type(act).__name__} n_joints={jidx.numel()}")
         lines.append(f"    Kp: {kp_str}")
         lines.append(f"    Kd: {kd_str}")
         lines.append(f"    effort_limit: {eff_str}")
     # Manager-side action-pipeline tensors (scale/offset/clip).
-    for name in ("_scale", "_offset", "_clip_low", "_clip_high"):
-        if hasattr(mgr, name):
-            t = getattr(mgr, name)
-            if isinstance(t, torch.Tensor):
-                lines.append(
-                    f"  manager.{name[1:]}: shape={tuple(t.shape)} mean={t.float().mean().item():.4f} "
-                    f"min={t.float().min().item():.4f} max={t.float().max().item():.4f}"
-                )
-            else:
-                lines.append(f"  manager.{name[1:]}: {t!r}")
+    for name, t in (
+        ("scale", mgr._scale),
+        ("offset", mgr._offset),
+        ("clip_low", mgr._clip_low),
+        ("clip_high", mgr._clip_high),
+    ):
+        if isinstance(t, torch.Tensor):
+            lines.append(
+                f"  manager.{name}: shape={tuple(t.shape)} mean={t.float().mean().item():.4f} "
+                f"min={t.float().min().item():.4f} max={t.float().max().item():.4f}"
+            )
+        else:
+            lines.append(f"  manager.{name}: {t!r}")
     return "\n".join(lines)
 
 
@@ -227,47 +230,41 @@ def _dump_newton_model(env) -> str:
     sm = env.scene_manager
     model = sm.model
     lines = []
-    for name in (
-        "joint_target_ke",
-        "joint_target_kd",
-        "joint_armature",
-        "joint_friction",
-        "joint_effort_limit",
-        "joint_velocity_limit",
+    for name, arr in (
+        ("joint_target_ke", model.joint_target_ke),
+        ("joint_target_kd", model.joint_target_kd),
+        ("joint_armature", model.joint_armature),
+        ("joint_friction", model.joint_friction),
+        ("joint_effort_limit", model.joint_effort_limit),
+        ("joint_velocity_limit", model.joint_velocity_limit),
     ):
-        arr = getattr(model, name, None)
         lines.append(_stats_line(name, _wp_to_np(arr)))
-    # Mode-style fields: surface whatever exists.
-    for name in (
-        "joint_axis_mode",
-        "joint_target_mode",
-        "joint_mode",
-        "joint_dof_count",
-        "joint_dof_dim",
-        "joint_type",
+    # Mode-style fields.
+    for name, attr in (
+        ("joint_target_mode", model.joint_target_mode),
+        ("joint_dof_count", model.joint_dof_count),
+        ("joint_dof_dim", model.joint_dof_dim),
+        ("joint_type", model.joint_type),
     ):
-        if hasattr(model, name):
-            try:
-                attr = getattr(model, name)
-                if isinstance(attr, int):
-                    lines.append(f"  {name}: {attr}")
-                else:
-                    np_v = _wp_to_np(attr)
-                    if np_v is None:
-                        lines.append(f"  {name}: <unreadable>")
-                    elif np_v.dtype.kind in ("i", "u"):
-                        unique = sorted(set(np_v.flatten().tolist()))
-                        if len(unique) <= 8:
-                            lines.append(f"  {name}: shape={tuple(np_v.shape)} unique={unique}")
-                        else:
-                            lines.append(
-                                f"  {name}: shape={tuple(np_v.shape)} unique_count={len(unique)} "
-                                f"sample={unique[:8]}"
-                            )
+        try:
+            if isinstance(attr, int):
+                lines.append(f"  {name}: {attr}")
+            else:
+                np_v = _wp_to_np(attr)
+                if np_v is None:
+                    lines.append(f"  {name}: <unreadable>")
+                elif np_v.dtype.kind in ("i", "u"):
+                    unique = sorted(set(np_v.flatten().tolist()))
+                    if len(unique) <= 8:
+                        lines.append(f"  {name}: shape={tuple(np_v.shape)} unique={unique}")
                     else:
-                        lines.append(_stats_line(name, np_v))
-            except Exception as e:
-                lines.append(f"  {name}: <err: {type(e).__name__}: {e}>")
+                        lines.append(
+                            f"  {name}: shape={tuple(np_v.shape)} unique_count={len(unique)} " f"sample={unique[:8]}"
+                        )
+                else:
+                    lines.append(_stats_line(name, np_v))
+        except Exception as e:
+            lines.append(f"  {name}: <err: {type(e).__name__}: {e}>")
     return "\n".join(lines)
 
 

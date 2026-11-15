@@ -86,7 +86,7 @@ def main() -> int:
     print("=" * 78)
     print("  DOES NEWTON'S MJCF IMPORTER KEEP <geom priority>")
     print("=" * 78)
-    print(f"  newton {getattr(newton, '__version__', 'unknown')}")
+    print(f"  newton {newton.__version__}")
     print("  loaded exactly as NewtonSceneManager does: parse_sites=True,")
     print("  collapse_fixed_joints=False, and WITHOUT the priority workaround")
 

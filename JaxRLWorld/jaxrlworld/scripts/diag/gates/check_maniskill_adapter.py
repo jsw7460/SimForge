@@ -132,7 +132,7 @@ def spec_limit(venv):
     here (rather than trusting the ``max_episode_steps=`` override) keeps the
     diagnostic correct whether or not the override is honored.
     """
-    return getattr(venv.spec, "max_episode_steps", None)
+    return venv.spec.max_episode_steps
 
 
 def sample_action_seq(num_envs, num_actions, low, high, steps, device, seed):
@@ -181,7 +181,7 @@ def phase1_construction(args):
     check("calculate_obs_dim has critic", dims.get("critic") == env._obs_dim, str(dims))
 
     # scene_manager contract: on_policy_runner does scene_manager.trees.get("robot", None).
-    check("scene_manager present", hasattr(env, "scene_manager"))
+    check("scene_manager present", env.scene_manager is not None)
     tree = env.scene_manager.trees.get("robot", None)
     check("scene_manager.trees.get('robot') is None (MLP path)", tree is None, repr(tree))
 

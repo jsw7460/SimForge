@@ -33,7 +33,7 @@ _DEFAULT_PRESET = "jaxrlworld.rl.configs.presets.k1_velocity.base:K1VelocityConf
 
 def _build_env(preset: str, sim: str, num_envs: int):
     mod_path, cls_name = preset.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     # The gate compares the compiled chain against eager; it turns the
     # chain on itself so a preset's own setting (every preset leaves it
@@ -75,7 +75,8 @@ class TermState:
                 if isinstance(value, torch.Tensor):
                     self._slots.append((obj, key, value, value.clone()))
                 elif isinstance(value, dict) or (
-                    hasattr(value, "__dict__") and not isinstance(value, types.FunctionType | types.MethodType | type)
+                    hasattr(value, "__dict__")  # dynamic-attr: walks arbitrary term-state objects
+                    and not isinstance(value, types.FunctionType | types.MethodType | type)
                 ):
                     # Not ``callable``: the trackers define ``__call__``.
                     walk(value, depth + 1)
@@ -86,7 +87,7 @@ class TermState:
 
     def restore(self) -> None:
         for container, key, tensor, copy in self._slots:
-            current = container[key] if isinstance(container, dict) else getattr(container, key)
+            current = container[key] if isinstance(container, dict) else vars(container)[key]
             if current is not tensor:
                 if isinstance(container, dict):
                     container[key] = tensor

@@ -35,13 +35,9 @@ def main() -> None:
 
     # Resolve foot shape indices via the same path as the DR term
     cache = get_cache(env)
-    body_idx = (
-        cache.get_body_indices(env.env_config.robot.foot_body_pattern_newton)
-        if hasattr(env, "env_config")
-        else cache.get_body_indices(r"(left|right)_foot_link")
-    )
+    body_idx = cache.get_body_indices(r"(left|right)_foot_link")
     foot_shape_idx = []
-    for bi in body_idx.tolist() if hasattr(body_idx, "tolist") else body_idx:
+    for bi in body_idx:
         foot_shape_idx.extend(int(si) for si in m.body_shapes[int(bi)])
 
     slide = _attr(view, m, "shape_material_mu")  # (W, 1, shapes)

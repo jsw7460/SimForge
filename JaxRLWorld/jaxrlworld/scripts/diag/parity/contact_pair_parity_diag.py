@@ -98,11 +98,11 @@ GENESIS_TYPE = {
 def _np(x) -> np.ndarray:
     if isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
-    wp_array = getattr(x, "wp_array", None)
+    wp_array = getattr(x, "wp_array", None)  # dynamic-attr: array wrapper types differ per backend
     if wp_array is not None:
         return np.asarray(wp_array.numpy())
     for name in ("to_numpy", "numpy", "to_torch"):
-        accessor = getattr(x, name, None)
+        accessor = getattr(x, name, None)  # dynamic-attr: array wrapper types differ per backend
         if accessor is not None:
             out = accessor()
             return _np(out) if isinstance(out, torch.Tensor) else np.asarray(out)
@@ -153,7 +153,7 @@ def build(robot: str, sim: str):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = ROBOTS[robot] if robot in ROBOTS else robot.rsplit(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=NUM_ENVS).build()
     return BaseRunner._create_env_from_config(cfgs)
 

@@ -41,25 +41,17 @@ from jaxrlworld.rl.evals.evaluator import PolicyEvaluator
 
 
 def _np(x):
+    """Host copy of a raw mujoco_warp ``wp.array`` field (``None`` passes through)."""
     if x is None:
         return None
-    if hasattr(x, "numpy"):
-        try:
-            return x.numpy()
-        except Exception:
-            pass
-    if hasattr(x, "detach"):
-        try:
-            return x.detach().cpu().numpy()
-        except Exception:
-            pass
-    return np.asarray(x)
+    return x.numpy()
 
 
 def _get_mjw_data(env, sim_type: str):
+    """Raw ``mujoco_warp.Data`` of the scene (mjlab's torch bridge unwrapped)."""
     sm = env.scene_manager
     if sim_type == "mujoco":
-        return sm.sim.data
+        return sm.sim.data.struct
     if sim_type == "newton":
         return sm.solver.mjw_data
     raise ValueError(sim_type)

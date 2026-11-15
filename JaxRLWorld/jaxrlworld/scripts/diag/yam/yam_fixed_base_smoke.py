@@ -103,10 +103,11 @@ def _build_env(sim: str, num_envs: int):
     )
     # Contact sensors live under a different field name per backend, and
     # Genesis requires the history to match the decimation.
-    field = "sensors" if sim == "mujoco" else "contact_sensors"
-    existing = tuple(getattr(cfgs.scene, field) or ())
     ground = replace(ground, history_length=cfgs.env.decimation)
-    setattr(cfgs.scene, field, list(existing) + [ground])
+    if sim == "mujoco":
+        cfgs.scene.sensors = list(cfgs.scene.sensors or ()) + [ground]
+    else:
+        cfgs.scene.contact_sensors = list(cfgs.scene.contact_sensors or ()) + [ground]
 
     env = BaseRunner._create_env_from_config(cfgs)
     env.reset()

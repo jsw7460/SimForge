@@ -63,34 +63,16 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+import torch
+
 
 def _try_arr(x: Any) -> Any:
+    """Nested-list copy of a torch tensor or a Genesis (quadrants) field / ndarray."""
     if x is None:
         return None
-    for name in ("to_numpy", "numpy", "cpu", "detach"):
-        if hasattr(x, name):
-            try:
-                arr = getattr(x, name)()
-                if hasattr(arr, "tolist"):
-                    return arr.tolist()
-                if hasattr(arr, "numpy"):
-                    return arr.numpy().tolist()
-            except Exception:
-                continue
-    try:
-        import torch
-
-        if isinstance(x, torch.Tensor):
-            return x.detach().cpu().tolist()
-    except Exception:
-        pass
-    try:
-        import numpy as np
-
-        return np.asarray(x).tolist()
-    except Exception:
-        pass
-    return repr(x)
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().tolist()
+    return x.to_numpy().tolist()
 
 
 def _safe(f, default=None):
@@ -181,37 +163,35 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
     ground_ent = env.scene_manager.terrain.entity
 
     # ── Backend & narrowphase routing — which Genesis kernel actually runs?
-    out["gs_backend"] = str(getattr(_gs_mod, "backend", None))
-    out["gs_cpu_enum"] = str(getattr(_gs_mod, "cpu", None))
+    out["gs_backend"] = str(_gs_mod.backend)
+    out["gs_cpu_enum"] = str(_gs_mod.cpu)
     try:
         out["use_split_narrowphase"] = bool(rs.collider._use_split_narrowphase)
     except Exception as e:
         out["use_split_narrowphase_err"] = repr(e)
     try:
         csc = rs.collider.collider_config
-        out["has_non_box_plane_convex_convex"] = bool(getattr(csc, "has_non_box_plane_convex_convex", None))
-        out["has_convex_specialization"] = bool(getattr(csc, "has_convex_specialization", None))
-        out["has_terrain"] = bool(getattr(csc, "has_terrain", None)) if hasattr(csc, "has_terrain") else None
-        out["has_nonconvex_nonterrain"] = (
-            bool(getattr(csc, "has_nonconvex_nonterrain", None)) if hasattr(csc, "has_nonconvex_nonterrain") else None
-        )
-        out["box_box_detection"] = bool(getattr(rs._static_rigid_sim_config, "box_box_detection", None))
-        out["ccd_algorithm"] = str(getattr(csc, "ccd_algorithm", None))
+        out["has_non_box_plane_convex_convex"] = bool(csc.has_non_box_plane_convex_convex)
+        out["has_convex_specialization"] = bool(csc.has_convex_specialization)
+        out["has_terrain"] = bool(csc.has_terrain)
+        out["has_nonconvex_nonterrain"] = bool(csc.has_nonconvex_nonterrain)
+        out["box_box_detection"] = bool(rs._static_rigid_sim_config.box_box_detection)
+        out["ccd_algorithm"] = str(csc.ccd_algorithm)
     except Exception as e:
         out["collider_static_config_err"] = repr(e)
 
     # ── Resolve geom indices for the 14 foot capsules and the ground plane.
     foot_caps: list[dict] = []
     for link in robot.links:
-        lname = getattr(link, "name", "")
+        lname = link.name
         if "ankle_roll" not in lname:
             continue
         for g in link.geoms:
             foot_caps.append(
                 {
-                    "geom_idx": int(getattr(g, "_idx", getattr(g, "idx", None))),
+                    "geom_idx": int(g.idx),
                     "link_name": lname,
-                    "link_idx": int(getattr(link, "_idx", getattr(link, "idx", None))),
+                    "link_idx": int(link.idx),
                     "_geom_obj": g,  # stripped before return
                 }
             )
@@ -221,7 +201,7 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
     plane_geom_obj = None
     for link in ground_ent.links:
         for g in link.geoms:
-            plane_geom_idx = int(getattr(g, "_idx", getattr(g, "idx", None)))
+            plane_geom_idx = int(g.idx)
             plane_geom_obj = g
             break
         if plane_geom_idx is not None:
@@ -341,12 +321,10 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
             out["plane_vert_start"] = pvs
             out["plane_vert_end"] = pve
         # is_convex flag for plane and capsules.
-        if hasattr(rs.geoms_info, "is_convex"):
-            is_convex_arr = _try_arr(rs.geoms_info.is_convex)
-            if is_convex_arr is not None:
-                out["plane_is_convex"] = bool(is_convex_arr[plane_geom_idx]) if plane_geom_idx is not None else None
-                for c in foot_caps:
-                    c["S3b_is_convex"] = bool(is_convex_arr[c["geom_idx"]])
+        is_convex_arr = _try_arr(rs.geoms_info.is_convex)
+        out["plane_is_convex"] = bool(is_convex_arr[plane_geom_idx]) if plane_geom_idx is not None else None
+        for c in foot_caps:
+            c["S3b_is_convex"] = bool(is_convex_arr[c["geom_idx"]])
     except Exception as e:
         out["S3b_err"] = repr(e)
         out["S3b_tb"] = traceback.format_exc()
@@ -376,8 +354,8 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
                     g = c["_geom_obj"]
                     wp = g.get_pos(envs_idx=None)
                     wq = g.get_quat(envs_idx=None)
-                    wp0 = _try_arr(wp[0]) if hasattr(wp, "__getitem__") else _try_arr(wp)
-                    wq0 = _try_arr(wq[0]) if hasattr(wq, "__getitem__") else _try_arr(wq)
+                    wp0 = _try_arr(wp[0])
+                    wq0 = _try_arr(wq[0])
                     c["S4_world_pos_env0"] = wp0
                     c["S4_world_quat_env0"] = wq0
                     # S5. expected penetration from pure geometry.
@@ -484,19 +462,17 @@ def _genesis_debug(num_envs: int, seed: int, settle_steps: int) -> dict:
                     "mc_perturbation": _safe(lambda ci=ci: float(_try_arr(ci.mc_perturbation)[0]))
                     if _try_arr(ci.mc_perturbation) is not None
                     else _try_arr(ci.mc_perturbation),
-                    "contact_pruning_tolerance_cfg": getattr(ro, "contact_pruning_tolerance", None),
+                    "contact_pruning_tolerance_cfg": ro.contact_pruning_tolerance,
                     "contact_pruning_tolerance_runtime": _safe(
                         lambda ci=ci: float(_try_arr(ci.contact_pruning_tolerance)[0])
-                    )
-                    if hasattr(ci, "contact_pruning_tolerance")
-                    else None,
-                    "max_collision_pairs_cfg": getattr(ro, "max_collision_pairs", None),
+                    ),
+                    "max_collision_pairs_cfg": ro.max_collision_pairs,
                     "max_collision_pairs_runtime": _safe(lambda ci=ci: int(_try_arr(ci.max_collision_pairs)[0])),
                     "max_contact_pairs_runtime": _safe(lambda ci=ci: int(_try_arr(ci.max_contact_pairs)[0]))
                     if hasattr(ci, "max_contact_pairs")
                     else None,
-                    "integrator_runtime": str(getattr(rs, "_integrator", None)),
-                    "_sol_default_timeconst": float(getattr(rs, "_sol_default_timeconst", float("nan"))),
+                    "integrator_runtime": str(rs._integrator),
+                    "_sol_default_timeconst": float(rs._sol_default_timeconst),
                 }
             except Exception as e:
                 out["snapshot_err"] = repr(e)
@@ -570,7 +546,7 @@ def _render(report: dict) -> str:
         s1 = c.get("S1_pair_admitted")
         s5 = c.get("S5_expected_penetration")
         s6_n = c.get("S6_n_contacts", 0)
-        L.append(f"{gi:>5} {link:<28} {R:>6.3f} {H:>7.4f} " f"{str(s1):>8} {((s5 or 0)*1000):>11.4f} {s6_n:>9}")
+        L.append(f"{gi:>5} {link:<28} {R:>6.3f} {H:>7.4f} {str(s1):>8} {((s5 or 0) * 1000):>11.4f} {s6_n:>9}")
         L.append(
             f"        contype={s2.get('contype')}  conaffinity={s2.get('conaffinity')}  "
             f"link_idx={s2.get('link_idx')}  entity_idx={s2.get('entity_idx')}"
@@ -580,7 +556,7 @@ def _render(report: dict) -> str:
             f"local_aabb_max={c.get('S3_local_aabb_max')}  "
             f"diag={c.get('S3_local_aabb_diag')}"
         )
-        L.append(f"        world_pos={c.get('S4_world_pos_env0')}  " f"world_quat={c.get('S4_world_quat_env0')}")
+        L.append(f"        world_pos={c.get('S4_world_pos_env0')}  world_quat={c.get('S4_world_quat_env0')}")
         s6 = c.get("S6_contacts_for_this_geom") or []
         if s6:
             for entry in s6[:4]:

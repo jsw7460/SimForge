@@ -79,7 +79,7 @@ def _build_train_env(sim: str, preset: str, num_envs: int, seed: int):
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = _PRESETS[preset]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     cfgs.env.seed = seed
     runner = BaseRunner.create_with_env(cfgs)

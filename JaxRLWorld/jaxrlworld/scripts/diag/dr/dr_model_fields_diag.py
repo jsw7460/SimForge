@@ -183,12 +183,11 @@ def check_c2() -> bool:
     from jaxrlworld.rl.envs.mdp.events.dr import unified as u
 
     _hdr("C2  every randomize_* entry point declares its model fields")
-    entries = sorted(n for n in dir(u) if n.startswith("randomize_") and callable(getattr(u, n)))
+    entries = sorted((n, f) for n, f in vars(u).items() if n.startswith("randomize_") and callable(f))
     ok = True
-    for name in entries:
-        func = getattr(u, name)
-        declared = getattr(func, "model_fields", None)
-        level = getattr(func, "recompute", None)
+    for name, func in entries:
+        declared = getattr(func, "model_fields", None)  # dynamic-attr: optional @requires_model_fields marker
+        level = getattr(func, "recompute", None)  # dynamic-attr: optional @requires_model_fields marker
         status = "OK" if declared is not None else "MISSING @requires_model_fields"
         ok &= declared is not None
         level_name = level.name if level is not None else "-"
@@ -326,7 +325,7 @@ def check_c5() -> bool:
         for level in RecomputeLevel:
             if level is RecomputeLevel.none:
                 continue  # never dispatched; recompute is skipped at this level
-            resolves = hasattr(mujoco_warp, level.name)
+            resolves = hasattr(mujoco_warp, level.name)  # dynamic-attr: dispatch resolves the level by name
             ok &= resolves
             print(f"  getattr(mujoco_warp, {level.name!r}) resolves: {resolves}")
     except ImportError as exc:
@@ -352,7 +351,7 @@ def _field_view(wp_model, field: str):
     """
     import warp as wp
 
-    arr = getattr(wp_model, field, None)
+    arr = getattr(wp_model, field, None)  # dynamic-attr: declared field names are checked against the model
     if arr is None:
         return None
     return wp.to_torch(arr)

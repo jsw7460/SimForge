@@ -34,20 +34,15 @@ def main() -> None:
     mj = sm.mj_model
     m = sm.model  # mujoco-warp Model (per-env geom_friction lives here)
 
-    r = cfgs.runner.robot if hasattr(cfgs, "runner") and hasattr(cfgs.runner, "robot") else None
     foot_names = (
-        r.foot_geom_names_mjlab
-        if r is not None
-        else (
-            "left_foot1_collision",
-            "left_foot2_collision",
-            "left_foot3_collision",
-            "left_foot4_collision",
-            "right_foot1_collision",
-            "right_foot2_collision",
-            "right_foot3_collision",
-            "right_foot4_collision",
-        )
+        "left_foot1_collision",
+        "left_foot2_collision",
+        "left_foot3_collision",
+        "left_foot4_collision",
+        "right_foot1_collision",
+        "right_foot2_collision",
+        "right_foot3_collision",
+        "right_foot4_collision",
     )
 
     foot_ids = []

@@ -80,7 +80,7 @@ class SectionTimer:
         self, owner: object, method: str, label: str, mode_label: bool = False, name_arg: int | None = None
     ) -> None:
         """Time ``owner.method``; ``mode_label`` suffixes the ``mode`` keyword, ``name_arg`` the positional arg."""
-        original: Callable = getattr(owner, method)
+        original: Callable = getattr(owner, method)  # dynamic-attr: method named by the caller
         timer = self
 
         def timed(*args, **kwargs):
@@ -126,17 +126,17 @@ class SectionTimer:
 
 def build_env(config: str, sim: str, num_envs: int, overrides: list[str]):
     mod_path, cls_name = config.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: "module:Class" config path
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs, seed=0).build()
     for item in overrides:
         path, value = item.split("=", 1)
         *parents, leaf = path.split(".")
         target = cfgs
         for name in parents:
-            target = getattr(target, name)
-        getattr(target, leaf)  # the field must exist: a typo must not silently add an attribute
+            target = getattr(target, name)  # dynamic-attr: dotted override path
+        getattr(target, leaf)  # dynamic-attr: override field must exist; a typo must not silently add an attribute
         setattr(target, leaf, ast.literal_eval(value))
-        print(f"[breakdown] override {path} = {getattr(target, leaf)!r}")
+        print(f"[breakdown] override {path} = {getattr(target, leaf)!r}")  # dynamic-attr: dotted override path
     return get_initializer(_SIM_NAMES[sim]).init_environment(cfgs)
 
 

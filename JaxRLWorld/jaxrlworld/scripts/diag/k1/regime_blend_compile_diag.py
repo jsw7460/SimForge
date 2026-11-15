@@ -237,7 +237,7 @@ def phase_standalone(args, device) -> int:
 
 def _build_env(sim: str, num_envs: int):
     mod_path, cls_name = _PRESET.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: "module:Class" preset path
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
     cfgs.reward.compile_terms = True
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)

@@ -97,7 +97,7 @@ def main() -> int:
 
     # 2) the preset config module + .build() (this is what picks the sim builder)
     mod_path, cls_name = _PRESETS[args.preset]
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfg_cls(sim_type=args.sim).build()
 
     after_build = _loaded_sim_pkgs()

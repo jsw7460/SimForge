@@ -334,8 +334,8 @@ def per_joint_from_actuators(act, attr: str, joints: list[str]) -> torch.Tensor 
     quietly averaging away.
     """
     pairs = []
-    for actuator, joint_indices in getattr(act, "_actuators", []):
-        value = getattr(actuator, attr, None)
+    for actuator, joint_indices in act._actuators:
+        value = getattr(actuator, attr, None)  # dynamic-attr: attr named by caller; ActuatorNet* has no PD gains
         if isinstance(value, torch.Tensor):
             pairs.append((value.detach().double().cpu(), torch.as_tensor(joint_indices).cpu()))
     if not pairs:

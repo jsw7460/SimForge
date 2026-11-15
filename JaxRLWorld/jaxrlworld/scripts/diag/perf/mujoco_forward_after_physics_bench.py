@@ -43,7 +43,7 @@ def _cell(spec: str, num_envs: int, forward: bool, warmup: int, steps: int, forw
     from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = spec.split(":", 1)
-    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)
+    cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: "module:Class" preset spec
     cfgs = cfg_cls(sim_type="mujoco", num_envs=num_envs).build()
     cfgs.scene.forward_after_physics = forward
     env = BaseRunner.create_with_env(cfgs, use_wandb=False).env

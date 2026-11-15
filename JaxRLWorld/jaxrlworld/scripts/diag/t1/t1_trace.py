@@ -12,8 +12,7 @@ What it does (num_envs=1, deterministic, no DR, no fallen branch):
     2. Reset with fixed seed. Dump: root_pos, root_quat (wxyz), root
        linear + angular velocity (world + body frame), per-DOF
        joint_pos / joint_vel in canonical order,
-       projected_gravity_b. Also dump actor-group obs tensor and the
-       per-term breakdown so obs-layout drift surfaces immediately.
+       projected_gravity_b.
     3. Step 5 times with a fixed deterministic action vector (ramp
        [0, 1/N, 2/N, ...]). Dump the same quantities after each step.
        With IdealPDActuator the torque is Python-computed — we dump
@@ -48,33 +47,11 @@ def _dump_state(env, tag: str) -> None:
     print(f"root_quat_w (wxyz) = {_fmt(rd.root_link_quat_w)}")
     print(f"root_lin_vel_w     = {_fmt(rd.root_link_lin_vel_w)}")
     print(f"root_ang_vel_w     = {_fmt(rd.root_link_ang_vel_w)}")
-    if hasattr(rd, "root_link_lin_vel_b"):
-        print(f"root_lin_vel_b     = {_fmt(rd.root_link_lin_vel_b)}")
-    if hasattr(rd, "root_link_ang_vel_b"):
-        print(f"root_ang_vel_b     = {_fmt(rd.root_link_ang_vel_b)}")
-    if hasattr(rd, "projected_gravity_b"):
-        print(f"projected_gravity_b= {_fmt(rd.projected_gravity_b)}")
+    print(f"root_lin_vel_b     = {_fmt(rd.root_link_lin_vel_b)}")
+    print(f"root_ang_vel_b     = {_fmt(rd.root_link_ang_vel_b)}")
+    print(f"projected_gravity_b= {_fmt(rd.projected_gravity_b)}")
     print(f"joint_pos          = {_fmt(rd.joint_pos)}")
     print(f"joint_vel          = {_fmt(rd.joint_vel)}")
-
-    # Full actor obs tensor + per-term breakdown (obs ordering audit)
-    try:
-        obs_mgr = env.obs_manager
-        for group_name in ("actor", "critic"):
-            group = obs_mgr.get_group(group_name) if hasattr(obs_mgr, "get_group") else None
-            if group is None:
-                continue
-            print(f"\n[{group_name}] per-term:")
-            offset = 0
-            for name in group.term_names:
-                t = group.terms[name].last_obs
-                if t is None:
-                    continue
-                dim = t.shape[-1]
-                print(f"  {offset:>3}..{offset + dim:<3} {name:<28} {_fmt(t, prec=4)}")
-                offset += dim
-    except Exception as e:
-        print(f"[obs dump skipped: {e}]")
 
 
 def main() -> None:

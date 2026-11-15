@@ -51,15 +51,13 @@ def apply_contact_friction(
     mj_model = solver.mj_model
     mjw_friction = wp.to_torch(solver.mjw_model.geom_friction)  # [nworld, ngeom, 3]
 
-    if not hasattr(env, "_ground_geom_indices"):
-        ground_indices = []
-        for i in range(mj_model.ngeom):
-            name = mj_model.geom(i).name.lower()
-            if "terrain" in name or "ground" in name or "plane" in name:
-                ground_indices.append(i)
-        env._ground_geom_indices = ground_indices
+    ground_indices = []
+    for i in range(mj_model.ngeom):
+        name = mj_model.geom(i).name.lower()
+        if "terrain" in name or "ground" in name or "plane" in name:
+            ground_indices.append(i)
 
-    for gi in env._ground_geom_indices:
+    for gi in ground_indices:
         mjw_friction[env_ids, gi, 0] = mu_val
 
 

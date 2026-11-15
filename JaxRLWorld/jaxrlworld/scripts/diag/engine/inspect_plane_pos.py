@@ -28,7 +28,7 @@ def main() -> None:
     plane_geom_idx = None
     for link in ground_ent.links:
         for g in link.geoms:
-            plane_geom_idx = int(getattr(g, "_idx", getattr(g, "idx", None)))
+            plane_geom_idx = int(g.idx)
             break
         if plane_geom_idx is not None:
             break
@@ -75,10 +75,10 @@ def main() -> None:
         if "ankle_roll" not in link.name:
             continue
         for g in link.geoms:
-            gi = int(getattr(g, "_idx", getattr(g, "idx", None)))
+            gi = int(g.idx)
             try:
                 pos = g.get_pos(envs_idx=None)
-                p0 = pos[0].detach().cpu().tolist() if hasattr(pos, "__getitem__") else None
+                p0 = pos[0].detach().cpu().tolist()
                 print(f"  geom #{gi} ({link.name}): pos={p0}")
             except Exception as e:
                 print(f"  err on geom #{gi}:", repr(e))
