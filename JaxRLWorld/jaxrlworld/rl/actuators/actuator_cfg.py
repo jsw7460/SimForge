@@ -90,7 +90,8 @@ class IdealPDActuatorCfg(ActuatorBaseCfg):
             real actuators exhibit in the high-torque regime (small torques
             pass ~linearly; large ones roll off toward +/-kappa). ``None``
             (default) keeps the plain hard clip only. Same scalar-or-dict
-            format as ``stiffness``.
+            format as ``stiffness``; a joint a dict leaves out is not
+            saturated, only clipped.
     """
 
     tau_scale: float | dict[str, float] | None = None

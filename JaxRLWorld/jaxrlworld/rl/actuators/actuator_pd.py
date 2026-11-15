@@ -31,7 +31,9 @@ class IdealPDActuator(ActuatorBase):
 
     so small torques pass ~linearly and large ones roll off toward
     :math:`\pm\kappa` (the torque decay real motors show under high load),
-    followed by the same hard effort clip as a safety ceiling.
+    followed by the same hard effort clip as a safety ceiling. A joint a
+    per-joint ``tau_scale`` map leaves out is not saturated (its
+    :math:`\kappa` is infinite).
     """
 
     cfg: IdealPDActuatorCfg
@@ -129,7 +131,13 @@ class IdealPDActuator(ActuatorBase):
         error_pos = target_pos - joint_pos
         computed = self.stiffness * error_pos - self.damping * joint_vel
         if self._use_tau_scale:
-            effort = self.tau_scale * torch.tanh(computed / self.tau_scale)
+            # A joint a per-joint kappa map leaves out holds kappa = inf, no
+            # saturation: its torque passes through, as the limit kappa -> inf
+            # of kappa * tanh(tau / kappa). Evaluated literally that limit is
+            # inf * tanh(0) = inf * 0 = NaN.
+            effort = torch.where(
+                torch.isinf(self.tau_scale), computed, self.tau_scale * torch.tanh(computed / self.tau_scale)
+            )
         else:
             effort = computed
         # Motor-side torque bandwidth (first-order lag), then the
