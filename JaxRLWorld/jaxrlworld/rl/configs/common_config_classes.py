@@ -290,7 +290,7 @@ _INIT_CFG_CLASSES: Dict[str, type] = {
 def _hydrate_init_scheme(val: Any) -> InitScheme:
     """Convert a dict (deserialized form) back to the right Init dataclass."""
     if isinstance(val, dict):
-        cls_name = val.pop("_type", "OrthoInit")
+        cls_name = val.pop("_type")
         cls = _INIT_CFG_CLASSES[cls_name]
         return cls(**val)
     return val
@@ -471,7 +471,7 @@ _ACTOR_CFG_CLASSES: Dict[str, type] = {
 
 def _hydrate_actor_cfg(val: Any) -> ActorCfg:
     if isinstance(val, dict):
-        cls_name = val.pop("_type", "MLPActorCfg")
+        cls_name = val.pop("_type")
         cls = _ACTOR_CFG_CLASSES[cls_name]
         return cls.from_dict(val)
     return val
@@ -587,7 +587,7 @@ _CRITIC_CFG_CLASSES: Dict[str, type] = {
 
 def _hydrate_critic_cfg(val: Any) -> CriticCfg:
     if isinstance(val, dict):
-        cls_name = val.pop("_type", "MLPCriticCfg")
+        cls_name = val.pop("_type")
         cls = _CRITIC_CFG_CLASSES[cls_name]
         return cls.from_dict(val)
     return val
@@ -721,7 +721,7 @@ class NNConfig(BaseConfig):
 
     def __post_init__(self):
         if isinstance(self.policy, dict):
-            cls_name = self.policy.pop("_type", "PPOPolicyConfig")
+            cls_name = self.policy.pop("_type")
             cls = _POLICY_CONFIG_CLASSES[cls_name]
             self.policy = cls.from_dict(self.policy)
 
@@ -741,7 +741,7 @@ class NNConfig(BaseConfig):
         update_from_dict(obj, d)
         if policy_dict is not None:
             pd = dict(policy_dict)
-            cls_name = pd.pop("_type", "PPOPolicyConfig")
+            cls_name = pd.pop("_type")
             policy_cls = _POLICY_CONFIG_CLASSES[cls_name]
             obj.policy = policy_cls.from_dict(pd)
         return obj

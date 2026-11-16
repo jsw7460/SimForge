@@ -239,6 +239,10 @@ _MISSING = object()
 def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
     """Update *obj* in-place from *data*, following IsaacLab's pattern.
 
+    Every key of *data* must name a field of *obj*: a key the class no
+    longer has raises ``KeyError`` (nothing is dropped silently), and a
+    ``_type`` key must match ``type(obj).__name__``.
+
     - Nested Mapping → recurse into existing member.
     - Iterable with nested Mappings → recurse element-wise.
     - Callable attribute + string value → keep as string (resolved lazily).
@@ -255,10 +259,19 @@ def update_from_dict(obj: Any, data: dict, _ns: str = "") -> None:
                 continue
             obj_mem = obj[key]
         else:
-            # Unknown keys are skipped (fields removed, _EXCLUDE_FROM_SERIALIZATION, etc.)
-            obj_mem = getattr(obj, key, _MISSING)  # dynamic-attr: key comes from saved data; absent = removed field
-            if obj_mem is _MISSING:
+            if key == "_type":
+                # The class the nested config was saved as. The caller chose
+                # ``obj``'s class from it; a mismatch would write one class's
+                # fields onto another.
+                if value != type(obj).__name__:
+                    raise TypeError(f"{key_ns}: saved as {value}, restoring onto {type(obj).__name__}")
                 continue
+            obj_mem = getattr(obj, key, _MISSING)  # dynamic-attr: key comes from saved data
+            if obj_mem is _MISSING:
+                raise KeyError(
+                    f"{key_ns}: {type(obj).__name__} has no field {key!r}. The saved config is from a version "
+                    "that had it; strip the key from the saved config or re-train."
+                )
 
         # 0) Simulator option object (pydantic model) + mapping → rebuild it
         if isinstance(value, Mapping) and _is_options_model(obj_mem):
