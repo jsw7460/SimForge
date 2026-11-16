@@ -1,7 +1,7 @@
-"""End-to-end smoke for the ``TerrainImporter`` refactor.
+"""End-to-end smoke for the ``TerrainImporter`` hierarchy.
 
-The refactor (this commit series) promotes terrain to a class hierarchy
-mirroring IsaacLab's ``TerrainImporter`` / mjlab's ``TerrainEntity``:
+Terrain is a class hierarchy mirroring IsaacLab's ``TerrainImporter`` /
+mjlab's ``TerrainEntity``:
 
   * ``jaxrlworld/rl/terrains/importer.py``                — base class
   * ``jaxrlworld/rl/envs/managers/<sim>/terrain_importer.py``
@@ -11,10 +11,6 @@ mirroring IsaacLab's ``TerrainImporter`` / mjlab's ``TerrainEntity``:
   * ``scene_manager.env_origins``                      — unified property
   * ``scene_manager.terrain.data``                     — generated terrain data
   * ``ContactMatch(entity="terrain")``                 — singleton sentinel
-
-It also rips out the legacy ``GroundPlaneCfg`` entity, the per-sim
-scaffolding fields, the ``add_ground`` kwarg, and the mjlab-only
-``scene.env_origins`` branch in ``reset_root_state_uniform``.
 
 This script tries to fail loudly on every plausible regression site by
 building Go2Flat (the only preset with a flip-able ``use_rough_terrain``)
@@ -27,12 +23,10 @@ What gets exercised per (sim, terrain) combo:
        — ``Go2FlatConfig(sim_type=..., use_rough_terrain=...).build()``
        — verifies ``make_terrain_cfg`` returns ``TerrainCfg`` with the
          right ``terrain_type``, ``terrain_cfg`` is plumbed into
-         ``SceneConfig``, and the ``entities`` dict has NO ``ground`` /
-         ``base_entity`` legacy key.
+         ``SceneConfig``.
   2. Env build (``BaseRunner.create_with_env``)
        — verifies ``ManagerRegistry`` resolves ``"terrain"`` for every
-         sim, and ``SceneManager.__init__`` instantiates the importer
-         without an ``add_ground``/``ground_config`` collision.
+         sim, and ``SceneManager.__init__`` instantiates the importer.
   3. Terrain importer state
        — class name, ``terrain.data`` (None for plane; populated for
          generator with shape + ``half_extent`` + ``origins[0]``),
@@ -276,12 +270,11 @@ def _strip_mjcf_shape_dependent_terms(cfgs, *, lg_prefix: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 
-def _check_scene_config_shape(cfg_built, sim: str, use_rough: bool, lg: _Logger, combo: str) -> bool:
+def _check_scene_config_shape(cfg_built, use_rough: bool, lg: _Logger, combo: str) -> bool:
     """Sanity-check the *config* dataclass (no env yet).
 
-    Catches: ``make_terrain_cfg`` returning the wrong terrain_type, a
-    stale ``entities["ground"]`` left in a preset, ``terrain_cfg`` not
-    threaded through ``SceneConfig``.
+    Catches: ``make_terrain_cfg`` returning the wrong terrain_type,
+    ``terrain_cfg`` not threaded through ``SceneConfig``.
     """
     scene_cfg = cfg_built.scene
     lg.w(f"    SceneConfig: {type(scene_cfg).__name__}")
@@ -299,21 +292,7 @@ def _check_scene_config_shape(cfg_built, sim: str, use_rough: bool, lg: _Logger,
     if use_rough and terrain_cfg.terrain_generator is None:
         lg.fail(combo, "use_rough_terrain=True but terrain_cfg.terrain_generator is None")
         return False
-
-    # entities dict must not contain legacy ground/base_entity keys
-    entities = scene_cfg.entities
-    lg.w(f"    entities keys: {sorted(entities)}")
-    legacy = [k for k in ("ground", "base_entity") if k in entities]
-    if legacy:
-        lg.fail(combo, f"legacy entity keys still present in scene config: {legacy}")
-        return False
-
-    # Sim-specific: Newton SceneConfig should NOT have `add_ground`.
-    if sim == "newton" and hasattr(
-        scene_cfg, "add_ground"
-    ):  # dynamic-attr: guards that the removed legacy field stays gone
-        lg.fail(combo, "NewtonSceneConfig still exposes `add_ground` field — legacy not deleted")
-        return False
+    lg.w(f"    entities keys: {sorted(scene_cfg.entities)}")
     return True
 
 
@@ -716,10 +695,7 @@ def _run_combo(
     extra_parts = [f"preset={preset!r}"]
     if sim == "newton":
         extra_parts.append(f"newton_asset={newton_asset!r}")
-    lg.w(
-        f"[{combo}] building {preset} (num_envs={num_envs}, use_rough_terrain={use_rough}, "
-        f"{', '.join(extra_parts)})"
-    )
+    lg.w(f"[{combo}] building {preset} (num_envs={num_envs}, use_rough_terrain={use_rough}, {', '.join(extra_parts)})")
     lg.w("=" * 78)
 
     # ---- Step 1: config-only sanity (cheapest — no GPU) -------------
@@ -738,7 +714,7 @@ def _run_combo(
         traceback.print_exc()
         return False
 
-    if not _check_scene_config_shape(cfg_built, sim, use_rough, lg, combo):
+    if not _check_scene_config_shape(cfg_built, use_rough, lg, combo):
         return False
 
     # ---- Step 2..9: full env build + runtime checks ------------------

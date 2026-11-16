@@ -145,8 +145,8 @@ def main() -> int:
     print("  (a checkpoint without action_terms warns:)")
     _check_term_action_parity(no_terms, _manager(), "train", "eval")
     changed = _manager(arm={"scale": {"j0": 0.25, "j1": 1.0}})
-    legacy_ok = not _rejects(lambda: _check_resolved_action_parity(saved, changed, "train", "eval"))[0]
-    chk("the manager-level check alone does not see a term scale (why the term check exists)", legacy_ok)
+    manager_blind = not _rejects(lambda: _check_resolved_action_parity(saved, changed, "train", "eval"))[0]
+    chk("the manager-level check alone does not see a term scale (why the term check exists)", manager_blind)
 
     print("-- 2. dispatch to a second, simulator-PD entity")
     m = _manager()

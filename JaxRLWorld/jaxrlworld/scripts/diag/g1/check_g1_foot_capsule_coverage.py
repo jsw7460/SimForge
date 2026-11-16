@@ -433,9 +433,6 @@ def _mujoco_dump_foot_capsules(env, cfg) -> dict:
         g["max_force_mag"] = max(g["max_force_mag"], fmag)
         g["min_force_mag"] = min(g["min_force_mag"], fmag)
     out["mujoco_foot_contacts_env0_count"] = n_env0_contacts_seen
-    # For backward compatibility with the render code: report env0
-    # total contacts under the historical key as well.
-    out["mujoco_ncon_env0"] = n_env0_contacts_seen
     out["mujoco_contact_by_geom_env0"] = {int(k): v for k, v in per_geom.items()}
 
     # ── Sim-wide collider config (opt + default) ──────────────────
@@ -619,7 +616,7 @@ def _render_comparison(g1_xml: dict, gen: dict | None, muj: dict | None) -> str:
         elif label == "MUJOCO":
             caps = snap.get("mujoco_foot_capsules_static") or []
             contact_by_geom = snap.get("mujoco_contact_by_geom_env0") or {}
-            lines.append(f"  mujoco_ncon_env0: {snap.get('mujoco_ncon_env0')}")
+            lines.append(f"  mujoco_foot_contacts_env0_count: {snap.get('mujoco_foot_contacts_env0_count')}")
             for c in caps:
                 gid = c.get("geom_id")
                 cr = contact_by_geom.get(int(gid)) if gid is not None else None

@@ -1,20 +1,18 @@
-"""Is the trimmed per-substep actuator dispatch bit-identical to the old one?
+"""Is the per-substep explicit-actuator dispatch bit-identical to its reference?
 
-Two launch-count trims on the explicit-actuator path, both claiming to
-change nothing but the number of kernels per substep:
+Two checks on the explicit-actuator path:
 
 - ``ActionManagerBase._compute_actuator_torques`` hands the full-width
   target / joint state straight to the actuator when a single actuator
-  covers every actuated joint in order, instead of gathering three
-  subsets by an identity index, computing, and scattering the result
-  into a zeroed buffer.
-- ``DelayedPDActuator`` looks the ring-buffer read slot up in a table
-  rebuilt at reset instead of recomputing ``(head - 1 - delay) % n``
-  and an ``arange`` on every substep.
+  covers every actuated joint in order. That fast path must equal the
+  general path (gather the subsets by index, compute, scatter into a
+  zeroed buffer) bit for bit.
+- ``DelayedPDActuator`` reads its delayed target from a ring buffer
+  through a slot table rebuilt at reset. The delayed targets must equal a
+  history-based reference of the delay semantics bit for bit, through
+  resets.
 
-This runs the old formulation next to the new one on the CPU, through
-resets, and demands ``torch.equal`` on every torque and on the internal
-state.
+CPU, ``torch.equal`` on every delayed target and fast-path torque.
 
     python -m jaxrlworld.scripts.diag.gates.check_actuator_dispatch_parity
 """
@@ -47,7 +45,7 @@ def _make_actuator(min_delay: int, max_delay: int, num_envs: int) -> DelayedPDAc
         min_delay=min_delay,
         max_delay=max_delay,
         # This gate is about dispatch, not the torque chain: the eager
-        # chain is what the inline old formulation below reproduces
+        # chain is what the gather/scatter reference below reproduces
         # exactly (check_actuator_compile_parity covers the compiled one).
         compile_kernel=False,
     )
@@ -86,8 +84,8 @@ class _ReferenceDelay:
         return stacked[i - lag - offset, self.env_idx]
 
 
-def _old_manager_compute(actuators, target, pos, vel) -> torch.Tensor:
-    """``_compute_actuator_torques`` as it was: gather / compute / scatter."""
+def _gather_scatter_compute(actuators, target, pos, vel) -> torch.Tensor:
+    """``_compute_actuator_torques``'s general path: gather / compute / scatter."""
     full = torch.zeros_like(target)
     for actuator, joint_idx in actuators:
         full[:, joint_idx] = actuator.compute(target[:, joint_idx], pos[:, joint_idx], vel[:, joint_idx])
@@ -142,7 +140,7 @@ def check_manager_fast_path(seeds: int = 8, num_envs: int = 1024, substeps: int 
     for seed in range(seeds):
         torch.manual_seed(seed)
         act = _make_actuator(6, 12, num_envs)
-        act_old = copy.deepcopy(act)
+        act_ref = copy.deepcopy(act)
         joint_idx = torch.arange(n)
         state = SimpleNamespace(pos=None, vel=None)
         stub = SimpleNamespace(
@@ -156,8 +154,8 @@ def check_manager_fast_path(seeds: int = 8, num_envs: int = 1024, substeps: int 
         for k in range(substeps):
             target, state.pos, state.vel = _random_inputs(g, num_envs)
             tau_new = ActionManagerBase._compute_actuator_torques(stub, target, "robot")
-            tau_old = _old_manager_compute([(act_old, joint_idx)], target, state.pos, state.vel)
-            assert torch.equal(tau_old, tau_new), f"seed {seed} substep {k}: fast path differs from gather/scatter"
+            tau_ref = _gather_scatter_compute([(act_ref, joint_idx)], target, state.pos, state.vel)
+            assert torch.equal(tau_ref, tau_new), f"seed {seed} substep {k}: fast path differs from gather/scatter"
     print(f"  manager fast path: {seeds} seeds x {substeps} substeps bit-identical")
 
 

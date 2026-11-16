@@ -177,33 +177,7 @@ def main() -> int:
     else:
         t_scan = _timed(scan_only, args.reps)
 
-    # ---- piece 6: the pre-refactor layout — gather every minibatch up
-    # front, scan over stacked data with no in-scan gather. Splits the
-    # lazy path's cost into [one big gather] + [gather-free scan] so the
-    # in-scan gather's share of the 10.6 ms/grad-step is measurable.
-    from jaxrlworld.scripts.diag.gates.check_ppo_minibatch_bitwise import _old_update_all_batches
-
-    def pregather():
-        return jax.tree.map(lambda x: x[batch_indices], flat_batch)
-
-    t_pregather = _timed(pregather, args.reps)
-    stacked = pregather()
-
-    old_scan_jit = jax.jit(_old_update_all_batches, static_argnums=(3,))
-
-    def old_scan():
-        params, static = eqx.partition(
-            alg.train_state.model,
-            eqx.is_inexact_array,
-            is_leaf=lambda x: isinstance(x, EmpiricalNormalization),
-        )
-        opt_state = alg.optimizer.init(params)
-        out = old_scan_jit(params, static, opt_state, alg.optimizer, stacked, jax.random.PRNGKey(1))
-        return out[0]
-
-    t_old_scan = _timed(old_scan, args.reps)
-
-    # ---- piece 7: the actor alone. One rollout step's act (what every
+    # ---- piece 6: the actor alone. One rollout step's act (what every
     # env step pays), the actor's fwd+bwd over one minibatch (what every
     # grad step pays on top of the critic), and the auxiliary step the
     # update runs once when the actor declares one.
@@ -250,8 +224,6 @@ def main() -> int:
     rep("update() metrics off", t_update_nometrics)
     label = f"scan only (epochs={args.scan_epochs or alg.num_learning_epochs}, mm={args.matmul_precision or '-'})"
     rep(label, t_scan)
-    rep("pre-gather (all minibatches)", t_pregather)
-    rep("old scan (no in-scan gather)", t_old_scan)
     rep("actor act (one env step)", t_act)
     rep("actor fwd+bwd (one minibatch)", t_actor_grad)
     if t_aux is not None:

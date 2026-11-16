@@ -81,12 +81,9 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=500, help="policy steps run before the windows are collected")
     args = parser.parse_args()
 
-    # The config is rebuilt from the preset here rather than restored from
-    # the checkpoint's config.yaml: a run started before managers took their
-    # own copies of the config's terms saved the selectors already resolved
-    # (index tensors in place of name patterns), which the strict restore
-    # refuses. The policy, discriminator and normalizer load from the
-    # checkpoint either way; only the env is built from this preset.
+    # The env is built from the AMP K1 preset at the requested backend and
+    # env count; the policy, discriminator and normalizer load from the
+    # checkpoint.
     cfgs = K1VelocityConfig(sim_type=args.sim, num_envs=args.num_envs, use_amp=True).build()
     if args.checkpoint is None:
         runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
@@ -204,7 +201,7 @@ def main() -> int:
     s_mix = score(mixed)
     acc_p, acc_e = (sig(s_mix[: 2 * B]) < 0.5).mean(), (sig(s_mix[2 * B :]) >= 0.5).mean()
     print(
-        f"    mixed batch (2B policy + B expert, as trained): policy sigmoid {sig(s_mix[:2 * B]).mean():.3f}, expert sigmoid {sig(s_mix[2 * B:]).mean():.3f}; accuracy policy {acc_p:.3f} expert {acc_e:.3f}"
+        f"    mixed batch (2B policy + B expert, as trained): policy sigmoid {sig(s_mix[: 2 * B]).mean():.3f}, expert sigmoid {sig(s_mix[2 * B :]).mean():.3f}; accuracy policy {acc_p:.3f} expert {acc_e:.3f}"
     )
     print(
         f"    minibatch-std feature: policy-only batch {float(minibatch_std_of(pol)):.4f}, expert-only {float(minibatch_std_of(exp)):.4f}, mixed {float(minibatch_std_of(mixed)):.4f}; head weight on it {float(prior.disc.head.weight[0, -1]):+.3f}"
