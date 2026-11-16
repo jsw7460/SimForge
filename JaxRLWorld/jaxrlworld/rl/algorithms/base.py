@@ -47,24 +47,17 @@ def load_optimizer_state(checkpoint_dir: str, template: Any, metadata: Dict[str,
     """The saved optimizer state read into ``template``, a fresh ``init``.
 
     ``init`` gives the tree the saved leaves are read into: same optimizer,
-    same parameter groups, so the structures match leaf for leaf. A
-    checkpoint written before the optimizer state was saved has no file
-    and no flag, and starts from zero moments, said out loud; a checkpoint
-    whose flag promises the file must have it.
+    same parameter groups, so the structures match leaf for leaf. The
+    checkpoint's ``optimizer_state`` flag must promise the file, and the
+    file must be there.
     """
     path = os.path.join(checkpoint_dir, OPTIMIZER_STATE_FILE)
-    if metadata.get("optimizer_state", False):
-        if not os.path.isfile(path):
-            raise FileNotFoundError(
-                f"{path} is missing: train_state.yaml says this checkpoint saved its optimizer state."
-            )
-        print(f"  Optimizer state restored from {OPTIMIZER_STATE_FILE}")
-        return eqx.tree_deserialise_leaves(path, template)
-    print(
-        f"  No optimizer state in this checkpoint (written before {OPTIMIZER_STATE_FILE} was saved): "
-        "Adam moments start from zero"
-    )
-    return template
+    if not metadata["optimizer_state"]:
+        raise ValueError(f"train_state.yaml in {checkpoint_dir} says this checkpoint holds no optimizer state.")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"{path} is missing: train_state.yaml says this checkpoint saved its optimizer state.")
+    print(f"  Optimizer state restored from {OPTIMIZER_STATE_FILE}")
+    return eqx.tree_deserialise_leaves(path, template)
 
 
 def _resolve_path(tree: Any, path: tuple) -> Any:

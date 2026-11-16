@@ -338,10 +338,6 @@ class BaseConfig:
                     f"which a dataclass ignores. Write '{name}: {type_name} = {value!r}'."
                 )
 
-    def get(self, key: str, default: Any = None) -> Any:
-        """Dict-like get method for attribute access with default."""
-        return getattr(self, key, default)  # dynamic-attr: dict-like get; the default is the API contract
-
     def to_dict(self) -> Dict:
         return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
 

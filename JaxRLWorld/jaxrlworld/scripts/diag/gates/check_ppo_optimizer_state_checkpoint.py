@@ -1,20 +1,19 @@
 """Gate: a resumed PPO run is the run it continues, bit for bit.
 
-A PPO checkpoint used to hold the model and not the optimizer state, so a
-resume re-initialized Adam: zero moments, step count 1, the config's
-learning rates in place of the ones the run had reached. No simulator; the
-experience stream is synthetic and a deterministic function of the
-iteration and step, so two PPOs fed the same stream must agree exactly.
+A PPO checkpoint holds the optimizer state next to the model: the Adam
+moments, step counts and the learning rates the run had reached. No
+simulator; the experience stream is synthetic and a deterministic
+function of the iteration and step, so two PPOs fed the same stream must
+agree exactly.
 
 1. a PPO trained for a few iterations is saved; its optimizer state comes
    back leaf for leaf (shapes, dtypes, values) in a freshly built PPO;
 2. the resumed PPO and the uninterrupted one, fed the same further
    experience, end with bit-identical parameters, optimizer state and key;
-3. the old behaviour (model restored, optimizer re-initialized) does NOT
-   reproduce the uninterrupted run — so 2 is a real test, not a tautology;
-4. a checkpoint written before the optimizer state was saved (no flag, no
-   file) loads with zero moments and says so; a checkpoint whose flag
-   promises the file but lacks it is refused;
+3. the model restored with a re-initialized optimizer does NOT reproduce
+   the uninterrupted run — so 2 is a real test, not a tautology;
+4. a checkpoint whose flag promises the optimizer-state file but lacks
+   it is refused;
 5. the AMP discriminator's optimizer state round-trips the same way.
 
 Run::
@@ -28,6 +27,7 @@ import os
 import sys
 import tempfile
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -37,6 +37,7 @@ from jaxrlworld.rl.algorithms.amp_ppo.expert_motion import ExpertMotionSet
 from jaxrlworld.rl.algorithms.ppo import PPO
 from jaxrlworld.rl.configs.algorithms.amp_ppo import AmpConfig
 from jaxrlworld.rl.configs.common_config_classes import PPOPolicyConfig
+from jaxrlworld.rl.modules.normalization import EmpiricalNormalization
 from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 
 OBS_A, OBS_C, ACT = 6, 8, 3
@@ -164,7 +165,7 @@ def main() -> int:
     chk("moments advanced before save", all(c == ITERS_BEFORE_SAVE * 4 for c in counts), f"adam counts {counts}")
     with tempfile.TemporaryDirectory() as d:
         meta = reference.save_train_state(d)
-        chk("metadata flags optimizer state", meta.get("optimizer_state") is True)
+        chk("metadata flags optimizer state", meta["optimizer_state"] is True)
         chk("optimizer_state.eqx written", os.path.isfile(os.path.join(d, "optimizer_state.eqx")))
 
         resumed = make_ppo(jax.random.PRNGKey(99))
@@ -196,22 +197,22 @@ def main() -> int:
             bool(np.array_equal(np.asarray(reference.train_state.key), np.asarray(resumed.train_state.key))),
         )
 
-        print("\n=== 3. the old behaviour is told apart ===")
+        print("\n=== 3. a re-initialized optimizer is told apart ===")
         reinit = make_ppo(jax.random.PRNGKey(5))
-        reinit.load_train_state(d, {**meta, "optimizer_state": False})
+        reinit.load_train_state(d, meta)
+        params, _ = eqx.partition(
+            reinit.train_state.model,
+            eqx.is_inexact_array,
+            is_leaf=lambda x: isinstance(x, EmpiricalNormalization),
+        )
+        reinit.train_state = reinit.train_state._replace(opt_state=reinit.optimizer.init(params))
         chk("re-initialized optimizer starts from zero moments", all(c == 0 for c in adam_counts(reinit)))
         run_iterations(reinit, obs_at_save, ITERS_BEFORE_SAVE, ITERS_AFTER)
         ok, detail = trees_equal(reference.train_state.model, reinit.train_state.model)
         chk("re-initialized optimizer diverges from the uninterrupted run", not ok, detail)
 
-        print("\n=== 4. legacy and corrupt checkpoints ===")
-        legacy_meta = {k: v for k, v in meta.items() if k != "optimizer_state"}
+        print("\n=== 4. a checkpoint missing its optimizer state ===")
         os.remove(os.path.join(d, "optimizer_state.eqx"))
-        legacy = make_ppo(jax.random.PRNGKey(6))
-        legacy.load_train_state(d, legacy_meta)
-        chk("checkpoint without the flag loads with zero moments", all(c == 0 for c in adam_counts(legacy)))
-        ok, detail = trees_equal(reference.train_state.model, legacy.train_state.model)
-        chk("...and its model is still the saved one", not ok and "leaf" in detail, "(reference trained on)")
         try:
             make_ppo(jax.random.PRNGKey(7)).load_train_state(d, meta)
             chk("flag without file is refused", False, "loaded")
@@ -225,18 +226,14 @@ def main() -> int:
         amp.save(d)
         chk("amp_optimizer_state.eqx written", os.path.isfile(os.path.join(d, "amp_optimizer_state.eqx")))
         fresh = make_amp(jax.random.PRNGKey(11))
-        fresh.load(d, optimizer_state=True)
+        fresh.load(d)
         ok, detail = trees_equal(amp.opt_state, fresh.opt_state)
         chk("restored discriminator optimizer state equals the saved one", ok, detail)
         ok, detail = trees_equal(amp.disc, fresh.disc)
         chk("restored discriminator equals the saved one", ok, detail)
-        legacy = make_amp(jax.random.PRNGKey(12))
-        legacy.load(d, optimizer_state=False)
-        ok, _ = trees_equal(amp.opt_state, legacy.opt_state)
-        chk("legacy load keeps zero moments", not ok)
         os.remove(os.path.join(d, "amp_optimizer_state.eqx"))
         try:
-            make_amp(jax.random.PRNGKey(13)).load(d, optimizer_state=True)
+            make_amp(jax.random.PRNGKey(13)).load(d)
             chk("AMP flag without file is refused", False, "loaded")
         except FileNotFoundError as e:  # except-ok: the refusal under test
             chk("AMP flag without file is refused", True, str(e)[:60])

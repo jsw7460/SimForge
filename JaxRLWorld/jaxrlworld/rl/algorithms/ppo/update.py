@@ -302,7 +302,7 @@ def update_all_batches(
         batch_indices: Shuffled minibatch rows into ``flat_batch``,
             ``(num_batches, minibatch_size)`` — each scan step gathers
             just its own minibatch, so the shuffled epochs are never
-            materialized together (the old pre-gathered layout held
+            materialized together (pre-gathering them would hold
             ``num_epochs`` full rollout copies on device)
         key: JAX random key
 

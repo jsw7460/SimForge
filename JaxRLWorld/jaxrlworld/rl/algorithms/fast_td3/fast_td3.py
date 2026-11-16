@@ -377,9 +377,8 @@ class FastTD3(OffPolicyAlgorithm):
         metric set to the host — see the off-policy runner, which updates
         once per environment step and logs every few hundred.
 
-        NOTE: Observation normalization is now handled inside model methods
-        (_normalize_actor_obs, _normalize_critic_obs), so we no longer need
-        to pass mean/std parameters to update functions.
+        Observation normalization happens inside the model methods
+        (_normalize_actor_obs, _normalize_critic_obs).
         """
         self.total_it += 1
 
@@ -562,8 +561,8 @@ class FastTD3(OffPolicyAlgorithm):
         """
         Load FastTD3 training state.
 
-        NOTE: Normalizers are now loaded as part of model.eqx since they are
-        stored inside FastTD3ActorCritic.
+        The observation normalizers live inside FastTD3ActorCritic and load
+        with model.eqx.
         """
         model_path = os.path.join(checkpoint_dir, "model.eqx")
         new_model = eqx.tree_deserialise_leaves(model_path, self.train_state.model)
@@ -591,7 +590,7 @@ class FastTD3(OffPolicyAlgorithm):
         )
 
         # Restore noise scales
-        noise_scales = jnp.array(metadata.get("noise_scales", self.train_state.noise_scales))
+        noise_scales = jnp.array(metadata["noise_scales"])
 
         self.train_state = FastTD3TrainState(
             model=new_model,
@@ -607,6 +606,6 @@ class FastTD3(OffPolicyAlgorithm):
             key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
-        self.actor_lr = metadata.get("actor_lr", self.actor_lr)
-        self.critic_lr = metadata.get("critic_lr", self.critic_lr)
-        self.total_it = metadata.get("total_it", 0)
+        self.actor_lr = metadata["actor_lr"]
+        self.critic_lr = metadata["critic_lr"]
+        self.total_it = metadata["total_it"]

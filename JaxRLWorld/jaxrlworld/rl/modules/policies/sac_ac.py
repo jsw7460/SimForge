@@ -513,29 +513,6 @@ class SACActorCritic(BaseActorCritic):
         q2 = self.critic2_forward(critic_observations, actions)
         return jnp.minimum(q1, q2)
 
-    def evaluate_value(self, critic_obs: jax.Array) -> Tuple[jax.Array, dict]:
-        """
-        Evaluate value function (for compatibility with base class).
-
-        Note: This uses critic1 only. For proper SAC value estimation,
-        use evaluate() which takes the minimum of both critics.
-
-        Args:
-            critic_obs: Critic observations
-
-        Returns:
-            Tuple of (value, aux_dict)
-        """
-        # For SAC, we need an action to evaluate Q-value
-        # This is a simplified version that returns zeros
-        # Use evaluate() for proper value estimation
-        normalized_obs = self._normalize_critic_obs(critic_obs)
-        # Return zeros as placeholder - SAC doesn't use V(s) directly
-        if normalized_obs.ndim == 1:
-            return jnp.zeros((1,)), {}
-        else:
-            return jnp.zeros((normalized_obs.shape[0], 1)), {}
-
     def act_inference(self, actor_obs: jax.Array, *, key: jax.Array) -> tuple[jax.Array, dict]:
         """Deterministic action for inference."""
         actions, aux = self.act(actor_obs, key=key, deterministic=True)

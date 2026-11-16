@@ -78,12 +78,6 @@ class BaseMetrics:
         """Return all metrics for wandb (flat, with prefixes)."""
         raise NotImplementedError
 
-    def to_full_dict(self) -> dict[str, Any]:
-        """Return full dict for backward compatibility."""
-        return {
-            "wandb_extra": self.to_wandb_dict(),
-        }
-
 
 # ==================== Shared Metrics ====================
 

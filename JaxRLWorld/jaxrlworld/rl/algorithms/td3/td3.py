@@ -523,6 +523,6 @@ class TD3(OffPolicyAlgorithm):
             key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
-        self.actor_lr = metadata.get("actor_lr", self.actor_lr)
-        self.critic_lr = metadata.get("critic_lr", self.critic_lr)
-        self.total_it = metadata.get("total_it", 0)
+        self.actor_lr = metadata["actor_lr"]
+        self.critic_lr = metadata["critic_lr"]
+        self.total_it = metadata["total_it"]

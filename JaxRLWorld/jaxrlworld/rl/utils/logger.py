@@ -8,9 +8,8 @@ import sys
 from collections import deque
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List
 
-import torch
 import wandb
 from colorama import Fore, Style, init
 from rich.console import Console, Group
@@ -245,8 +244,7 @@ class ConsoleWriter:
         section("Performance", "yellow")
         indent(
             Text.from_markup(
-                f"[bold green]{fps:,.0f}[/] steps/s   "
-                f"collect [cyan]{col:.3f}s[/] │ learn [cyan]{lrn:.3f}s[/]{roll_txt}"
+                f"[bold green]{fps:,.0f}[/] steps/s   collect [cyan]{col:.3f}s[/] │ learn [cyan]{lrn:.3f}s[/]{roll_txt}"
             )
         )
 
@@ -267,7 +265,7 @@ class ConsoleWriter:
         mean_return = data.get("mean_return", 0.0)
         ret_style = "green" if mean_return >= 0 else "red"
         ep_line = (
-            f"return [{ret_style}]{mean_return:.2f}[/]   " f"ep len [cyan]{data.get('mean_episode_length', 0.0):.1f}[/]"
+            f"return [{ret_style}]{mean_return:.2f}[/]   ep len [cyan]{data.get('mean_episode_length', 0.0):.1f}[/]"
         )
         success = data.get("success_rate")
         if success is not None:
@@ -708,134 +706,6 @@ class WandbLogger:
                     log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(raw_actions[:, i].flatten())
 
         wandb.log(log_dict, step=step)
-
-    def log_training_data(
-        self,
-        training_data: Dict[str, Union[float, torch.Tensor, List, Dict]],
-        step: int,
-    ):
-        """Log training metrics to WandB only."""
-        log_dict = {}
-
-        # Episode info
-        if "ep_infos" in training_data:
-            log_dict.update(self._process_episode_info(training_data["ep_infos"]))
-
-        # Returns and lengths
-        if "return_buffer" in training_data and training_data["return_buffer"]:
-            log_dict["Train/mean_return"] = statistics.mean(training_data["return_buffer"])
-
-        if "length_buffer" in training_data and training_data["length_buffer"]:
-            log_dict["Train/mean_episode_length"] = statistics.mean(training_data["length_buffer"])
-
-        if "success_rate" in training_data:
-            log_dict["Train/success_rate"] = training_data["success_rate"]
-
-        # Reward breakdown
-        if "reward_breakdown_stats" in training_data:
-            for reward_name, stats in training_data["reward_breakdown_stats"].items():
-                for category, val in stats.items():
-                    log_dict[f"Rewards/{category}/{reward_name}"] = val
-
-        # Training metrics
-        metrics_mapping = {
-            "value_loss": "Loss/value_function",
-            "surrogate_loss": "Loss/surrogate",
-            "entropy": "Loss/entropy",
-            "actor_loss": "Loss/actor",
-            "critic_loss": "Loss/critic",
-            "estimator_loss": "Loss/estimator",
-        }
-
-        for key, metric_name in metrics_mapping.items():
-            if key in training_data:
-                value = training_data[key]
-                if isinstance(value, torch.Tensor):
-                    value = value.item()
-                log_dict[metric_name] = value
-
-        # Action distribution logging
-        if "action_distribution" in training_data:
-            action_dist = training_data["action_distribution"]
-
-            # Per-dimension statistics
-            for stat_name in ["mean", "std", "min", "max"]:
-                if stat_name in action_dist:
-                    values = action_dist[stat_name]
-                    for i, v in enumerate(values):
-                        log_dict[f"ActionDist/{stat_name}/dim_{i}"] = v.item()
-
-            # Histograms per dimension
-            if "raw" in action_dist:
-                raw_actions = action_dist["raw"]  # (num_steps * num_envs, action_dim)
-                for i in range(raw_actions.shape[-1]):
-                    log_dict[f"ActionDist/histogram/dim_{i}"] = wandb.Histogram(raw_actions[:, i].flatten())
-
-        # Performance
-        if "collection_time" in training_data and "learning_time" in training_data:
-            total_time = training_data["collection_time"] + training_data["learning_time"]
-            fps = training_data.get("fps") or int(
-                training_data.get("num_steps", 0) * training_data.get("num_envs", 1) / total_time
-            )
-            log_dict["Performance/fps"] = fps
-            log_dict["Performance/collection_time"] = training_data["collection_time"]
-            log_dict["Performance/learning_time"] = training_data["learning_time"]
-
-        # Curriculum
-        if "curriculum_info" in training_data:
-            log_dict["Curriculum/current_level"] = training_data["curriculum_info"]["current_level"]
-            log_dict["Curriculum/steps_in_level"] = training_data["curriculum_info"]["steps_in_level"]
-
-        if "wandb_extra" in training_data:
-            extra_dict = training_data["wandb_extra"]
-            if isinstance(extra_dict, dict):
-                log_dict.update(self._flatten_dict(extra_dict))
-
-        wandb.log(log_dict, step=step)
-
-    def _flatten_dict(self, d: Dict, parent_key: str = "", sep: str = "/") -> Dict:
-        """Flatten nested dictionary for wandb logging"""
-        items = []
-        for k, v in d.items():
-            new_key = f"{parent_key}{sep}{k}" if parent_key else k
-
-            if isinstance(v, dict):
-                items.extend(self._flatten_dict(v, new_key, sep=sep).items())
-            elif isinstance(v, torch.Tensor):
-                if v.numel() == 1:
-                    items.append((new_key, v.item()))
-                else:
-                    # Individual values for line plots
-                    for i, val in enumerate(v.flatten()):
-                        items.append((f"{new_key}{sep}{i}", val.item()))
-                    # Histogram for distribution view
-                    items.append((f"{new_key}_hist", wandb.Histogram(v.detach().cpu().numpy())))
-            else:
-                items.append((new_key, v))
-
-        return dict(items)
-
-    def _process_episode_info(self, ep_infos: List[Dict], prefix: str = "Episode") -> Dict[str, float]:
-        """Process episode information."""
-        log_dict = {}
-        if not ep_infos:
-            return log_dict
-
-        for key in ep_infos[0]:
-            infos = []
-            for ep_info in ep_infos:
-                if key not in ep_info:
-                    continue
-                value = ep_info[key]
-                if isinstance(value, torch.Tensor):
-                    value = value.item()
-                infos.append(value)
-
-            if infos:
-                mean_value = sum(infos) / len(infos)
-                metric_name = f"{prefix}/{key}" if "/" not in key else key
-                log_dict[metric_name] = mean_value
-        return log_dict
 
     def log_eval_data(self, eval_stats: Dict[str, Any], step: int) -> None:
         """Log evaluation metrics to WandB with structured keys."""

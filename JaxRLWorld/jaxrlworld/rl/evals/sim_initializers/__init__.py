@@ -1,6 +1,8 @@
 """SimInitializer framework — strategy pattern for simulator-specific eval setup."""
 
+import importlib
 from abc import ABC, abstractmethod
+from dataclasses import fields, is_dataclass
 from typing import Any
 
 import torch
@@ -82,36 +84,6 @@ class SimInitializer(ABC):
         return ".mp4"
 
 
-def _detect_robot_key(metadata: dict) -> str:
-    """Best-effort robot identifier from checkpoint metadata.
-
-    Purely for labelling — the cross-sim config resolver does NOT use
-    this; it resolves via the ``preset_module`` / ``preset_class_name``
-    fields instead.
-    """
-    config = metadata.get("config", {})
-    task_name = config.get("env", {}).get("task_name", "").lower()
-    action_cfg = config.get("action", {})
-
-    if "go2" in task_name:
-        return "go2"
-    if "g1" in task_name:
-        return "g1_29dof"
-    if "t1" in task_name:
-        return "t1"
-
-    dof_names = action_cfg.get("actuated_dof_names", [])
-    if len(dof_names) == 12:
-        return "go2"
-    if len(dof_names) == 29:
-        return "g1_29dof"
-    if len(dof_names) in (23, 24):
-        return "t1"
-
-    num_actions = action_cfg.get("num_joint_actions", 0)
-    raise ValueError(f"Cannot detect robot from checkpoint (task_name={task_name!r}, num_actions={num_actions}).")
-
-
 def resolve_cross_sim_config(metadata: dict, target_sim: str):
     """Auto-resolve a ConfigsForRun for the target simulator.
 
@@ -139,9 +111,6 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     Returns:
         A ConfigsForRun object for the target simulator and robot.
     """
-    import importlib
-    from dataclasses import fields, is_dataclass
-
     sim_key = target_sim.lower()
     if sim_key in ("mjlabenv", "mjlab"):
         sim_key = "mujoco"
@@ -154,14 +123,14 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
     _SIM_NAMES = {"genesis", "newton", "mujoco"} | {spec.sim_type for spec in registered_backends()}
     preset_roots = {public_presets: None} | {spec.preset_package: spec.sim_type for spec in external}
 
-    config_dict = metadata.get("config", {})
-    preset_module_path = config_dict.get("preset_module")
-    preset_class_name = config_dict.get("preset_class_name")
+    config_dict = metadata["config"]
+    preset_module_path = config_dict["preset_module"]
+    preset_class_name = config_dict["preset_class_name"]
 
-    def build_with_kwargs(cls, preset_kwargs: dict | None):
+    def build_with_kwargs(cls, preset_kwargs: dict):
         """Instantiate a preset class with the checkpoint's kwargs, refusing any it lacks."""
         field_names = {f.name for f in fields(cls)}
-        kwargs = dict(preset_kwargs or {})
+        kwargs = dict(preset_kwargs)
         unknown = sorted(set(kwargs) - field_names)
         if unknown:
             raise ValueError(
@@ -204,7 +173,7 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
                     raise
                 mod = None
             if mod is not None:
-                preset_kwargs = config_dict.get("preset_kwargs") or {}
+                preset_kwargs = config_dict["preset_kwargs"]
                 if not preset_kwargs:
                     return mod.get_config()
                 # The target module's own preset class carries the kwargs
@@ -235,31 +204,20 @@ def resolve_cross_sim_config(metadata: dict, target_sim: str):
         if cls is not None and is_dataclass(cls):
             field_names = {f.name for f in fields(cls)}
             if "sim_type" in field_names:
-                preset_kwargs = config_dict["preset_kwargs"]
-                if preset_kwargs is None:
-                    raise ValueError(
-                        f"{preset_class_name}.build() left preset_kwargs unset in this "
-                        "checkpoint, so the eval env cannot be rebuilt faithfully -- "
-                        "reconstructing from class defaults would silently drop any "
-                        "non-default constructor kwargs the training run used. Fix the "
-                        "preset to capture its kwargs (see K1VelocityConfig."
-                        "_get_preset_kwargs) and retrain, or pass eval_cfgs manually."
-                    )
-                return build_with_kwargs(cls, preset_kwargs)
+                return build_with_kwargs(cls, config_dict["preset_kwargs"])
 
     raise ValueError(
         f"Could not resolve cross-sim config for target_sim={sim_key!r}. "
         f"Checkpoint preset_module={preset_module_path!r}, "
         f"preset_class_name={preset_class_name!r}. "
-        "Checkpoint may predate the unified-config metadata fields "
-        "(preset_module / preset_class_name / preset_kwargs). Retrain or "
-        "pass eval_cfgs manually."
+        "The preset has neither a module for the target simulator nor a "
+        "sim_type field. Pass eval_cfgs manually."
     )
 
 
 def detect_sim_type(metadata: dict) -> str:
     """Detect simulator type from checkpoint metadata."""
-    env_name = metadata.get("config", {}).get("env", {}).get("env_name", "")
+    env_name = metadata["config"]["env"]["env_name"]
     if "Genesis" in env_name:
         return "Genesis"
     elif "Newton" in env_name:
@@ -272,7 +230,7 @@ def detect_sim_type(metadata: dict) -> str:
         return "Gymnasium"
 
     # Fallback: check sim_type field directly
-    sim_type = metadata.get("sim_type", "")
+    sim_type = metadata["sim_type"]
     if sim_type == "genesis":
         return "Genesis"
     elif sim_type == "newton":

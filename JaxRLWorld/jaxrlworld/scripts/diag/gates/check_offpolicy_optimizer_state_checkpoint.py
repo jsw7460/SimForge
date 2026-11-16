@@ -1,11 +1,9 @@
 """Gate: a resumed off-policy run continues its optimizer, bit for bit.
 
-SAC, TD3, FastTD3 and TD-MPC2 checkpoints held the networks and their
-targets and not the optimizer states, so a resume re-initialized every
-Adam: zero moments, step count 1. PPO had the same gap, closed earlier;
-the four now save and restore through the shared helpers in
-``algorithms.base`` (``optimizer_state.eqx`` next to the model, flagged
-in the metadata).
+SAC, TD3, FastTD3 and TD-MPC2 checkpoints hold the optimizer states next
+to the networks and their targets, saved and restored through the shared
+helpers in ``algorithms.base`` (``optimizer_state.eqx`` next to the
+model, flagged in the metadata).
 
 No simulator: each algorithm is fed synthetic replay batches that are a
 deterministic function of the update index, so an uninterrupted run and
@@ -16,10 +14,9 @@ a saved-then-resumed run must agree exactly. For each algorithm:
    state differed before the load);
 2. the resumed and the uninterrupted algorithm, fed the same further
    batches, end with bit-identical parameters, optimizer states and key;
-3. the old behaviour (optimizer re-initialized) does not reproduce the
-   uninterrupted run;
-4. a checkpoint without the flag loads with the fresh state and says so;
-   a flag without the file is refused.
+3. the model restored with re-initialized optimizers does not reproduce
+   the uninterrupted run;
+4. a flag without the file is refused.
 
 Run::
 
@@ -115,6 +112,17 @@ def opt_states(name: str, alg) -> tuple:
     return (s.actor_opt_state, s.critic_opt_state)
 
 
+def replace_opt_states(name: str, alg, states: tuple) -> None:
+    """Swap ``states`` (in :func:`opt_states` order) into the train state."""
+    s = alg.train_state
+    if name == "tdmpc2":
+        alg.train_state = s._replace(wm_opt_state=states[0], pi_opt_state=states[1])
+    elif name == "sac":
+        alg.train_state = s._replace(actor_opt_state=states[0], critic_opt_state=states[1], alpha_opt_state=states[2])
+    else:
+        alg.train_state = s._replace(actor_opt_state=states[0], critic_opt_state=states[1])
+
+
 def leaves(tree) -> list[np.ndarray]:
     return [np.asarray(x) for x in jax.tree_util.tree_leaves(tree)]
 
@@ -148,7 +156,7 @@ def main() -> int:
         run_updates(name, reference, 0, UPDATES_BEFORE_SAVE)
         with tempfile.TemporaryDirectory() as d:
             meta = reference.save_train_state(d)
-            chk("metadata flags optimizer state", meta.get("optimizer_state") is True)
+            chk("metadata flags optimizer state", meta["optimizer_state"] is True)
             chk(f"{OPTIMIZER_STATE_FILE} written", os.path.isfile(os.path.join(d, OPTIMIZER_STATE_FILE)))
 
             resumed = build(name, 99)
@@ -171,23 +179,17 @@ def main() -> int:
                 bool(np.array_equal(np.asarray(reference.train_state.key), np.asarray(resumed.train_state.key))),
             )
 
+            # A fresh build's optimizer states are an init over parameters of
+            # the same shapes: zero moments and the config's rates.
             reinit = build(name, 5)
-            reinit.load_train_state(d, {**meta, "optimizer_state": False})
+            fresh_states = opt_states(name, reinit)
+            reinit.load_train_state(d, meta)
+            replace_opt_states(name, reinit, fresh_states)
             run_updates(name, reinit, UPDATES_BEFORE_SAVE, UPDATES_AFTER)
             ok, detail = trees_equal(reference.train_state.model, reinit.train_state.model)
             chk("a re-initialized optimizer diverges from the uninterrupted run", not ok, detail)
 
-            legacy_meta = {k: v for k, v in meta.items() if k != "optimizer_state"}
             os.remove(os.path.join(d, OPTIMIZER_STATE_FILE))
-            legacy = build(name, 6)
-            fresh_states = opt_states(name, legacy)
-            legacy.load_train_state(d, legacy_meta)
-            # The template is a fresh init over the LOADED parameters, so it
-            # has the fresh structure and zero moments.
-            chk(
-                "checkpoint without the flag loads with a fresh optimizer state",
-                jax.tree_util.tree_structure(opt_states(name, legacy)) == jax.tree_util.tree_structure(fresh_states),
-            )
             try:
                 build(name, 7).load_train_state(d, meta)
                 chk("flag without file is refused", False, "loaded")

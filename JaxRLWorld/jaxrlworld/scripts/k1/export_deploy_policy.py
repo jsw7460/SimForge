@@ -263,8 +263,7 @@ def main() -> None:
     # Sidecar metadata for the deploy repo. Joint names are written bare
     # (simulator prefixes such as "K1/" stripped), which is how the
     # evaluator compares them too.
-    canonical = metadata.get("canonical_joint_names") or list(am.actuated_joint_names)
-    canonical = [n.rsplit("/", 1)[-1] for n in canonical]
+    canonical = [n.rsplit("/", 1)[-1] for n in metadata["canonical_joint_names"]]
 
     obs_layout = _actor_obs_layout(evaluator.env, actor_obs_dim, num_actions)
     uses_phase = any(entry.startswith("gait_phase_cos_sin(") for entry in obs_layout)
@@ -275,12 +274,12 @@ def main() -> None:
         "uses_gait_phase": uses_phase,
         "obs_normalizer_baked_in": mean is not None,
         "canonical_joint_names": canonical,
-        "sim_type": metadata.get("sim_type"),
-        "iteration": metadata.get("iteration"),
+        "sim_type": metadata["sim_type"],
+        "iteration": metadata["iteration"],
         # Provenance: which W&B run this checkpoint came from (None if the run
         # was not logged to W&B). Lets a .pt be traced back to its training run.
-        "wandb_run_path": metadata.get("wandb_run_path"),
-        "wandb_run_name": metadata.get("wandb_run_name"),
+        "wandb_run_path": metadata["wandb_run_path"],
+        "wandb_run_name": metadata["config"]["runner"]["run_name"],
         "obs_layout": obs_layout,
         "action_pipeline": "target_k = clip(a_k, clip_low_k, clip_high_k) * scale_k + offset_k",
         "action_scale": action_scale,

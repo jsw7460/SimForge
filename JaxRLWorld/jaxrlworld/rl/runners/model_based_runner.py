@@ -64,7 +64,6 @@ class ModelBasedRunner(BaseRunner):
         alg_cfg = self.cfgs.algorithm
         self.key, subkey = jax.random.split(self.key)
 
-        # Determine squash_action from config (default: True for backward compatibility)
         squash_action = alg_cfg.squash_action
 
         # Action bounds from environment (used when squash_action=False)
@@ -159,7 +158,7 @@ class ModelBasedRunner(BaseRunner):
         """Initialize sequence replay buffer."""
         obs_dim = self.env.obs_manager.calculate_obs_dim()
         alg_cfg = self.cfgs.algorithm
-        size_per_env = alg_cfg.get("buffer_size", 1_000_000) // self.env.num_envs
+        size_per_env = alg_cfg.buffer_size // self.env.num_envs
 
         cfg = {
             "num_envs": self.env.num_envs,
@@ -196,7 +195,7 @@ class ModelBasedRunner(BaseRunner):
 
         for step in range(self.num_steps_per_env):
             # Warmup: random actions
-            if self.total_timesteps < self.cfgs.algorithm.get("learning_starts", 0):
+            if self.total_timesteps < self.cfgs.algorithm.learning_starts:
                 self.key, subkey = jax.random.split(self.key)
                 if self.world_model.squash_action:
                     # Original behavior: sample in [-1, 1] with scalar bounds

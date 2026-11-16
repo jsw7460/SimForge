@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Dict, Literal, Sequence, Union
 
-from .base_config import BaseConfig
+from .base_config import BaseConfig, update_from_dict
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.vis.overlays.hud_items.items import HUDItem
@@ -199,7 +199,7 @@ def disable_corruption(observation_cfg) -> None:
 # Neural network configuration — strict-typed
 # ════════════════════════════════════════════════════════════════════
 #
-# Design (long-term clean, no legacy shims):
+# Design:
 #   • StrEnum for closed value sets (Activation, DistributionType, StdType)
 #       — IDE-rename refactorable, mypy strict, single source of truth.
 #   • Union dataclass for mutually-exclusive init schemes
@@ -210,10 +210,6 @@ def disable_corruption(observation_cfg) -> None:
 #       SpaceTimeTransformerActorCfg, ...). The cfg type *is* the
 #       actor-class identity — no string ``actor_class_name`` field
 #       (registry is keyed by cfg type). isinstance-based dispatch.
-#   • Backward compat with old `actor_kwargs`-style dict configs is
-#       NOT preserved; every preset / benchmark gets migrated in one
-#       pass. Checkpoints saved under the old schema cannot be loaded
-#       (acceptable per design decision).
 
 
 # ── Enums ───────────────────────────────────────────────────────────
@@ -332,8 +328,6 @@ class MLPActorCfg(BaseConfig):
         # BaseConfig.update_from_dict can't switch a Union member's
         # type. Then re-run __post_init__ so string → Enum coercion
         # picks up the value yaml.safe_load left as a plain string.
-        from .base_config import update_from_dict
-
         d = dict(config_dict)
         init_dict = d.pop("init", None)
         obj = cls()
@@ -504,8 +498,6 @@ class MLPCriticCfg(BaseConfig):
     @classmethod
     def from_dict(cls, config_dict: Dict):
         # See MLPActorCfg.from_dict for rationale.
-        from .base_config import update_from_dict
-
         d = dict(config_dict)
         init_dict = d.pop("init", None)
         obj = cls()
@@ -631,8 +623,6 @@ class PolicyConfig(BaseConfig):
         We extract ``actor`` / ``critic`` ahead of the update and
         rebuild them via the ``_type`` discriminator.
         """
-        from .base_config import update_from_dict
-
         d = dict(config_dict)
         actor_dict = d.pop("actor", None)
         critic_dict = d.pop("critic", None)
@@ -733,8 +723,6 @@ class NNConfig(BaseConfig):
         Union actor/critic *types* — both must be discriminated by
         ``_type`` ahead of the update.
         """
-        from .base_config import update_from_dict
-
         d = dict(config_dict)
         policy_dict = d.pop("policy", None)
         obj = cls()

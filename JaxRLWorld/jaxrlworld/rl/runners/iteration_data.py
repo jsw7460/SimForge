@@ -1,6 +1,4 @@
-"""Typed dataclasses for training iteration data.
-
-Replaces the untyped Dict[str, Any] that was previously passed between
+"""Typed dataclasses for the training iteration data passed between
 runners, loggers, and console writers.
 """
 

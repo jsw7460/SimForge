@@ -123,8 +123,7 @@ def _metric_values(model: PPOActorCritic, outputs, flat_actions, flat_returns, m
             masked_mean(outputs.approx_kl),
             masked_mean(outputs.clip_fraction),
             masked_mean(outputs.aux["mirror_loss"]),
-            # Also feeds the adaptive-LR schedule (identical formula to
-            # the duplicate the host code used to recompute).
+            # Also feeds the adaptive-LR schedule.
             masked_mean(outputs.analytical_kl),
             flat_returns.mean(),
             flat_returns.std(),
@@ -446,9 +445,9 @@ class PPO(OnPolicyAlgorithm):
             "critic": self.critic_lr,
             "std": self.actor_lr,
         }
-        # A fixed std is a parameter leaf like any other; it used to sit in
-        # the "std" group and drift under the optimizer (1.0 -> 0.999 after
-        # one update). Frozen here, and detached in the model.
+        # A fixed std is a parameter leaf like any other; in the "std" group
+        # it would drift under the optimizer (1.0 -> 0.999 after one
+        # update). Frozen here, and detached in the model.
         self._frozen_labels = frozenset({"std"}) if model.std_type == "fixed" else frozenset()
 
         optimizer, self._param_labels = create_optimizer_with_labels(
@@ -939,16 +938,11 @@ class PPO(OnPolicyAlgorithm):
     def _set_actor_lr(self, lr: float) -> None:
         """Change the actor learning rate, keeping the optimizer's state.
 
-        This used to rebuild the optimizer and call ``init`` again, which
-        returns ZEROED Adam moments — so every adjustment threw away the
-        gradient history, most often early on where the KL swings hardest
-        and the rate is adjusted most. It also replaced the optimizer
-        object, forcing a recompile of the update step each time.
-
-        The rate now lives in the optimizer state (see
+        The rate lives in the optimizer state (see
         ``create_optimizer_with_labels``), so it is written in place: the
-        moments survive and nothing is retraced. The critic keeps its own
-        rate, which the adaptive schedule does not touch.
+        Adam moments survive and the update step is not retraced. The
+        critic keeps its own rate, which the adaptive schedule does not
+        touch.
         """
         self.actor_lr = lr
         # The std module is trained at the actor's rate, so it follows.
@@ -1028,19 +1022,13 @@ class PPO(OnPolicyAlgorithm):
                     "its critic cannot be resumed with use_value_normalization=True."
                 )
             self.value_normalizer = eqx.tree_deserialise_leaves(normalizer_path, self.value_normalizer)
-        elif metadata.get("value_normalization", False):
+        elif metadata["value_normalization"]:
             raise ValueError(
                 "Checkpoint was trained with use_value_normalization=True but this run has it off; the "
                 "critic's outputs are in the normalized scale."
             )
 
-        self.actor_lr = metadata.get("actor_lr", self.actor_lr)
-        self.critic_lr = metadata.get("critic_lr", self.critic_lr)
-
-        # The rates the run had reached. A restored optimizer state already
-        # carries them (they are saved in the same state), so this is a
-        # no-op there; a fresh init carries the config's rates, and the
-        # adaptive schedule would eventually pull the actor back but never
-        # the critic.
-        self._write_injected_lr(("actor", "std"), self.actor_lr)
-        self._write_injected_lr(("critic",), self.critic_lr)
+        # The rates the run had reached; the restored optimizer state
+        # carries the same values as its injected hyperparameters.
+        self.actor_lr = metadata["actor_lr"]
+        self.critic_lr = metadata["critic_lr"]

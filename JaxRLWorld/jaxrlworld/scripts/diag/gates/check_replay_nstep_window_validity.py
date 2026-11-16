@@ -237,7 +237,7 @@ def main() -> int:
                 update_many=lambda *a, **k: calls.append(1),
             ),
             cfgs=SimpleNamespace(
-                algorithm=SimpleNamespace(batch_size=8, learning_starts=learning_starts, get=lambda k, d: 1)
+                algorithm=SimpleNamespace(batch_size=8, learning_starts=learning_starts, num_gradient_steps=1)
             ),
             runner_cfg=SimpleNamespace(log_interval=10),
             env=SimpleNamespace(num_envs=2048),

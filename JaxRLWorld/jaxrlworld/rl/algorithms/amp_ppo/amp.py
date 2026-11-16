@@ -396,22 +396,17 @@ class AdversarialMotionPrior:
         if self.normalizer is not None:
             eqx.tree_serialise_leaves(os.path.join(checkpoint_dir, _NORM_FILE), self.normalizer)
 
-    def load(self, checkpoint_dir: str, optimizer_state: bool) -> None:
-        """Restore the discriminator, its normalizer and, when the checkpoint
-        has it (``optimizer_state``, the flag PPO writes), its optimizer."""
+    def load(self, checkpoint_dir: str) -> None:
+        """Restore the discriminator, its normalizer and its optimizer state."""
         self.disc = eqx.tree_deserialise_leaves(os.path.join(checkpoint_dir, _DISC_FILE), self.disc)
         if self.normalizer is not None:
             self.normalizer = eqx.tree_deserialise_leaves(os.path.join(checkpoint_dir, _NORM_FILE), self.normalizer)
         params, _ = eqx.partition(self.disc, eqx.is_inexact_array)
-        self.opt_state = self.optimizer.init(params)
         opt_path = os.path.join(checkpoint_dir, _OPT_FILE)
-        if optimizer_state:
-            if not os.path.isfile(opt_path):
-                raise FileNotFoundError(
-                    f"{opt_path} is missing: train_state.yaml says this checkpoint saved its optimizer state."
-                )
-            self.opt_state = eqx.tree_deserialise_leaves(opt_path, self.opt_state)
-            print(f"  AMP discriminator optimizer state restored from {_OPT_FILE}")
-        else:
-            print("  No AMP discriminator optimizer state in this checkpoint: Adam moments start from zero")
+        if not os.path.isfile(opt_path):
+            raise FileNotFoundError(
+                f"{opt_path} is missing: an AMP checkpoint saves its discriminator optimizer state."
+            )
+        self.opt_state = eqx.tree_deserialise_leaves(opt_path, self.optimizer.init(params))
+        print(f"  AMP discriminator optimizer state restored from {_OPT_FILE}")
         self.set_learning_rate(self.learning_rate)

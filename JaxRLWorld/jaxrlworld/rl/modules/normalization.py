@@ -56,7 +56,3 @@ class EmpiricalNormalization(eqx.Module):
         """
         std = jnp.sqrt(self.var)
         return x * (std + self.epsilon) + self.mean
-
-    def __call__(self, x: jax.Array) -> jax.Array:
-        """Alias for normalize."""
-        return self.normalize(x)

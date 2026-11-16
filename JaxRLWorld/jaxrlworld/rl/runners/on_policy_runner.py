@@ -359,8 +359,7 @@ class OnPolicyRunner(BaseRunner):
             # dtype exchange is what once produced rare random bit flips).
             # The flags ride in the packed tensor as 0/1 floats and are
             # read back with a defined ``!= 0`` inside the compiled
-            # record. Adoption was gated on check_bool_dlpack_bridge and
-            # check_record_step_bitwise.
+            # record (check_bool_dlpack_bridge).
             terminal_obs = infos.get("final_observation")
             bootstrap_mask = infos.get("bootstrap_mask")
             trunc_no_reset = infos.get("trunc_no_reset_mask")
@@ -473,9 +472,9 @@ class OnPolicyRunner(BaseRunner):
         """Extract action stats from rollout storage.
 
         Gated BEFORE the device transfer: with both action-logging flags
-        off (the default) the old path still paid a blocking D2H of the
-        whole rollout's actions every iteration — and, sitting between
-        compute_returns and update(), charged it to learning_time.
+        off (the default) nothing leaves the device. The transfer is a
+        blocking D2H of the whole rollout's actions, and sitting between
+        compute_returns and update() it is charged to learning_time.
         """
         logging_cfg = self.runner_cfg.logging
         if not (logging_cfg.action_dist or logging_cfg.action_histogram):

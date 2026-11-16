@@ -590,8 +590,6 @@ class TDMPC2(OffPolicyAlgorithm):
             key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
-        self.total_it = metadata.get("total_it", 0)
-        self.scale._value = metadata.get("scale_value", 1.0)
-        prev_mean = metadata.get("prev_mean")
-        if prev_mean is not None:
-            self._prev_mean = np.array(prev_mean, dtype=np.float32)
+        self.total_it = metadata["total_it"]
+        self.scale._value = metadata["scale_value"]
+        self._prev_mean = np.array(metadata["prev_mean"], dtype=np.float32)

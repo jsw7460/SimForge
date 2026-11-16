@@ -182,9 +182,9 @@ class PolicyEvaluator:
         # back to a policy that finished training without it.
         self.env.env_step_counter = int(metadata["iteration"]) * self.eval_cfgs.algorithm.num_steps_per_env
 
-        # Validate dims BEFORE loading weights (fail fast on mismatch)
+        # Report dims and check the action mapping BEFORE loading weights
         if self._cross_sim:
-            self._validate_dims(metadata)
+            self._report_dims()
             _check_resolved_action_parity(metadata, self.env.act_manager, self._train_sim_type, self.sim_type)
             _check_term_action_parity(metadata, self.env.act_manager, self._train_sim_type, self.sim_type)
 
@@ -275,18 +275,12 @@ class PolicyEvaluator:
         from copy import deepcopy
 
         cfgs = deepcopy(eval_cfgs)
-        train_config = metadata.get("config", {})
+        train_config = metadata["config"]
 
-        # Copy algorithm config from checkpoint
+        # Copy algorithm and nn config from checkpoint
         # (must match: hidden dims, num_q, etc. determine weight shapes)
-        train_algo = train_config.get("algorithm", {})
-        if train_algo:
-            cfgs.algorithm = type(cfgs.algorithm).from_dict(train_algo)
-
-        # Copy nn config from checkpoint
-        train_nn = train_config.get("nn", {})
-        if train_nn:
-            cfgs.nn = type(cfgs.nn).from_dict(train_nn)
+        cfgs.algorithm = type(cfgs.algorithm).from_dict(train_config["algorithm"])
+        cfgs.nn = type(cfgs.nn).from_dict(train_config["nn"])
 
         # The observation layout must be the training one, term for term,
         # and the action mapping must be the training one too.
@@ -316,44 +310,16 @@ class PolicyEvaluator:
 
         return cfgs
 
-    def _validate_dims(self, metadata: dict) -> None:
-        """Validate that eval env obs/action dims match the trained model.
+    def _report_dims(self) -> None:
+        """Report the eval env's obs/action dims before the weights load.
 
-        Reads the checkpoint's nn config to infer expected obs dims and
-        compares against the eval env.  Raises ValueError on mismatch with
-        a clear message explaining what to fix.
+        A layout that differs from training surfaces as a shape mismatch
+        when the weights are read into the eval model.
         """
         env_obs_dim = self.env.calculate_obs_dim()
         env_actor_obs = env_obs_dim.get("actor", 0)
         env_critic_obs = env_obs_dim.get("critic", 0)
         env_action_dim = self.env.num_actions
-
-        train_config = metadata.get("config", {})
-
-        # Try to read training obs dims from nn/policy config
-        nn_cfg = train_config.get("nn", {})
-        policy_cfg = nn_cfg.get("policy", {})
-        # New typed NN config (post-migration): policy_cfg holds
-        # ``actor`` and ``critic`` sub-dicts (one of MLPActorCfg /
-        # SpaceTimeTransformerActorCfg / ... serialized form, with
-        # ``_type`` discriminator).
-        actor_cfg_dict = policy_cfg.get("actor", {})
-        critic_cfg_dict = policy_cfg.get("critic", {})
-
-        # For off-policy (SAC/TD3), input_dim is stored directly
-        # For on-policy (PPO), first layer shape = num_actor_obs
-        # We can also check storage config if available
-        train_storage = train_config.get("algorithm", {})
-        train_action_dim = train_config.get("action", {}).get("num_joint_actions")
-
-        # Action dim check
-        if train_action_dim is not None and env_action_dim != train_action_dim:
-            raise ValueError(
-                f"Action dim mismatch!\n"
-                f"  Checkpoint (trained on {self._train_sim_type}): {train_action_dim} actions\n"
-                f"  Eval env ({self.sim_type}): {env_action_dim} actions\n"
-                f"  Both simulators must use the same robot."
-            )
 
         print_info(f"Eval env dims: actor_obs={env_actor_obs}, critic_obs={env_critic_obs}, actions={env_action_dim}")
         print_warning(
@@ -376,15 +342,7 @@ class PolicyEvaluator:
 
         eval_names = list(self.env.act_manager.actuated_joint_names)
 
-        # Load canonical joint names from checkpoint metadata.
-        # Saved by base_runner since the joint-permutation fix.
-        canonical_names = metadata.get("canonical_joint_names")
-        if canonical_names is None:
-            print_warning(
-                "Checkpoint has no canonical_joint_names in metadata. "
-                "Joint permutation skipped — retrain to enable cross-sim eval."
-            )
-            return None
+        canonical_names = metadata["canonical_joint_names"]
 
         # Compare bare names (strip simulator prefixes like "g1_29dof/").
         def _bare(name: str) -> str:
@@ -881,19 +839,9 @@ def _check_resolved_action_parity(metadata: dict, act_manager, train_sim_type: s
     ``action_offset``, ``action_clip_low``, ``action_clip_high``) in
     ``canonical_joint_names`` order. This compares them, joint by joint,
     to the eval env's resolved vectors, permuted to the canonical order
-    by joint name. A checkpoint written before these vectors were saved
-    is reported, not rejected: its config kinds were checked, its values
-    were not.
+    by joint name.
     """
-    canonical = metadata.get("canonical_joint_names")
-    missing = [key for key in _RESOLVED_ACTION_KEYS if key not in metadata]
-    if canonical is None or missing:
-        print_warning(
-            "Checkpoint train_state.yaml has no resolved action mapping (canonical_joint_names and "
-            f"{', '.join(_RESOLVED_ACTION_KEYS)}); the per-joint action scale/offset/clip values of the eval env "
-            "were NOT verified against the training env's. Checkpoints written since the mapping is saved are."
-        )
-        return
+    canonical = metadata["canonical_joint_names"]
 
     def _bare(name: str) -> str:
         return name.rsplit("/", 1)[-1]
@@ -965,7 +913,7 @@ def _check_term_action_parity(metadata: dict, act_manager, train_sim_type: str, 
     if current is None:
         raise ValueError(
             f"Cross-sim eval: the checkpoint maps its actions through terms {list(saved)}, the eval env through "
-            "the legacy single mapping"
+            "the manager's single mapping"
         )
 
     def _bare(name: str) -> str:

@@ -2,6 +2,7 @@ import importlib
 import os
 from typing import TYPE_CHECKING, Optional
 
+from jaxrlworld.rl.configs.base_config import diff_config_dicts, flatten_leaf_paths, missing_from_saved
 from jaxrlworld.rl.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
@@ -56,8 +57,6 @@ def restore_saved_config(cfgs: "ConfigsForRun", saved: dict) -> None:
     since training) raises: the saved run never ran with it, and a restore
     that let it through would evaluate a different MDP without a word.
     """
-    from jaxrlworld.rl.configs.base_config import diff_config_dicts, flatten_leaf_paths
-
     diff = _saved_diff(saved, cfgs.recursive_to_dict())
     if not diff:
         return
@@ -81,8 +80,6 @@ def _saved_diff(saved: dict, current: dict) -> dict:
     not (added since training) raises, and so does a difference in the
     top-level scalars that identify the preset itself.
     """
-    from jaxrlworld.rl.configs.base_config import diff_config_dicts, missing_from_saved
-
     added = missing_from_saved(saved, current)
     if added:
         raise ValueError(
@@ -137,8 +134,6 @@ def replay_training_overrides(cfgs: "ConfigsForRun", saved: dict) -> tuple[list[
     not have. Returns the dotted paths applied and the dotted paths of
     the simulator-bound differences left alone, for the caller to report.
     """
-    from jaxrlworld.rl.configs.base_config import flatten_leaf_paths
-
     diff = training_overrides(saved)
     left_alone = SIM_BOUND_SECTIONS | EVALUATOR_OWNED_SECTIONS
     replay = {section: values for section, values in diff.items() if section not in left_alone}
@@ -151,110 +146,33 @@ def replay_training_overrides(cfgs: "ConfigsForRun", saved: dict) -> tuple[list[
 def _rebuild_preset(config_dict: dict) -> "ConfigsForRun":
     """Re-run the preset named in a saved config.
 
-    Resolution order (most specific → least specific):
-
-    1. **Class + kwargs** (preferred, set automatically by
-       ``Go2FlatConfig.build()`` / ``G1FlatConfig.build()``): if the
-       checkpoint has both ``preset_class_name`` and ``preset_kwargs``,
-       reconstruct via ``getattr(module, class_name)(**kwargs).build()``.
-
-    2. **Module-level get_config()** (legacy entry-point convention):
-       fall through to ``preset_mod.get_config()`` for older checkpoints
-       whose ``preset_module`` already pointed at a wrapper module like
-       ``presets.go2.mlp``.
-
-    3. **Convention-based fallback**: locate a buildable ``*Config``
-       class inside ``preset_module`` (e.g. ``Go2FlatConfig`` inside
-       ``presets.go2.base``) and instantiate it with
-       ``sim_type=<config.sim_type>`` from the checkpoint metadata. This
-       covers the gap created in Phase A, when the unified
-       ``Go2FlatConfig`` started writing ``preset_module = base`` (the
-       dataclass module) but no ``get_config()`` lived there. Existing
-       Phase-A-era checkpoints reload via this path.
-
-    Raises ``AttributeError`` only when none of the three paths can
-    rebuild the config.
+    ``build()`` stamps ``preset_module``, ``preset_class_name`` and
+    ``preset_kwargs`` on the config; the preset is rebuilt as
+    ``getattr(module, class_name)(**kwargs).build()``.
     """
-    preset_module_path = config_dict.get("preset_module")
-
-    if preset_module_path is None:
+    preset_module_path = config_dict["preset_module"]
+    preset_class_name = config_dict["preset_class_name"]
+    if preset_module_path is None or preset_class_name is None:
         raise ValueError(
-            "Checkpoint missing 'preset_module' in config.yaml. "
-            "This checkpoint was saved before preset_module tracking was added."
+            f"Saved config has preset_module={preset_module_path!r}, preset_class_name={preset_class_name!r}; "
+            "only a config built by a preset class's build() can be rebuilt."
         )
 
     preset_mod = importlib.import_module(preset_module_path)
-
-    # Path 1: explicit class + kwargs
-    preset_class_name = config_dict.get("preset_class_name")
-    if preset_class_name is not None:
-        cls = getattr(preset_mod, preset_class_name, None)  # dynamic-attr: class named by checkpoint
-        if cls is None:
-            raise AttributeError(
-                f"Checkpoint references preset class {preset_class_name!r} "
-                f"in module {preset_module_path!r}, but the class is no "
-                f"longer defined there."
-            )
-        preset_kwargs = config_dict.get("preset_kwargs") or {}
-        return cls(**preset_kwargs).build()
-
-    # Path 2: legacy module-level get_config()
-    if hasattr(preset_mod, "get_config"):  # dynamic-attr: optional legacy module-level preset function
-        return preset_mod.get_config()
-
-    # Path 3: convention-based fallback for Phase-A-era checkpoints.
-    # Locate a buildable *Config class inside the module.
-    sim_type = config_dict.get("sim_type")
-    candidate_cls = None
-    for attr_name in dir(preset_mod):
-        if attr_name.startswith("_") or not attr_name.endswith("Config"):
-            continue
-        obj = getattr(preset_mod, attr_name)  # dynamic-attr: scan of the preset module namespace
-        if isinstance(obj, type) and hasattr(obj, "build"):  # dynamic-attr: duck-typed preset class scan
-            candidate_cls = obj
-            break
-
-    if candidate_cls is None:
+    cls = getattr(preset_mod, preset_class_name, None)  # dynamic-attr: class named by checkpoint
+    if cls is None:
         raise AttributeError(
-            f"Cannot reconstruct config from checkpoint: module "
-            f"{preset_module_path!r} has neither preset_class_name in "
-            f"the checkpoint nor a get_config() function nor a buildable "
-            f"*Config class."
+            f"Checkpoint references preset class {preset_class_name!r} "
+            f"in module {preset_module_path!r}, but the class is no "
+            f"longer defined there."
         )
-
-    try:
-        if sim_type is not None:
-            return candidate_cls(sim_type=sim_type).build()
-        return candidate_cls().build()
-    except TypeError as e:
-        raise AttributeError(
-            f"Found candidate class {candidate_cls.__name__} in "
-            f"{preset_module_path!r} but could not instantiate it with "
-            f"sim_type={sim_type!r}: {e}"
-        ) from e
+    return cls(**config_dict["preset_kwargs"]).build()
 
 
 def runner_class_from_metadata(metadata: dict) -> type:
     """The runner class a checkpoint was trained with."""
-    runner_class_name = metadata.get("runner_class")
-    if runner_class_name is None:
-        raise ValueError("Checkpoint missing 'runner_class' in train_state.yaml.")
-
-    # The runner is imported from the module the checkpoint names, so a
-    # runner defined outside this package loads too. Checkpoints saved
-    # before the module was recorded name one of the runners exported here.
-    runner_module = metadata.get("runner_module")
-    if runner_module is not None:
-        module = importlib.import_module(runner_module)
-        return getattr(module, runner_class_name)  # dynamic-attr: runner named by checkpoint
-    from jaxrlworld.rl import runners
-
-    if not hasattr(runners, runner_class_name):  # dynamic-attr: runner named by checkpoint
-        raise ValueError(
-            f"Unknown runner class: {runner_class_name}. "
-            f"Available: {[name for name in dir(runners) if 'Runner' in name]}"
-        )
-    return getattr(runners, runner_class_name)  # dynamic-attr: runner named by checkpoint
+    module = importlib.import_module(metadata["runner_module"])
+    return getattr(module, metadata["runner_class"])  # dynamic-attr: runner named by checkpoint
 
 
 def load_runner(
@@ -288,11 +206,11 @@ def get_checkpoint_info(checkpoint_path: str) -> dict:
     file_sizes = {f: os.path.getsize(os.path.join(checkpoint_path, f)) for f in files}
 
     return {
-        "runner_class": metadata.get("runner_class", "unknown"),
-        "alg_class": metadata.get("alg_class", "unknown"),
-        "iteration": metadata.get("iteration", 0),
-        "total_timesteps": metadata.get("total_timesteps", 0),
-        "total_time": metadata.get("total_time", 0),
+        "runner_class": metadata["runner_class"],
+        "alg_class": metadata["alg_class"],
+        "iteration": metadata["iteration"],
+        "total_timesteps": metadata["total_timesteps"],
+        "total_time": metadata["total_time"],
         "files": file_sizes,
     }
 

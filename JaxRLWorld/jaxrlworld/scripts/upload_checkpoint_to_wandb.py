@@ -38,18 +38,12 @@ def _resolve_iteration(checkpoint_dir: str, train_state: dict, override: int | N
     if override is not None:
         return override
     # A dir like ``checkpoint_18000`` names its iteration; ``checkpoint_latest``
-    # does not, so fall back to the value train_state.yaml recorded.
+    # does not, so use the value train_state.yaml recorded.
     base = os.path.basename(os.path.normpath(checkpoint_dir))
     m = re.search(r"checkpoint[_-](\d+)", base)
     if m:
         return int(m.group(1))
-    it = train_state.get("iteration")
-    if it is None:
-        raise ValueError(
-            f"Cannot determine iteration: {base!r} has no number and "
-            "train_state.yaml has no 'iteration'. Pass --iteration N."
-        )
-    return int(it)
+    return int(train_state["iteration"])
 
 
 def main() -> None:
@@ -73,10 +67,10 @@ def main() -> None:
         raise NotADirectoryError(f"Not a directory: {ckpt}")
 
     train_state = _load_train_state(ckpt)
-    run_path = args.wandb_run_path or train_state.get("wandb_run_path")
+    run_path = args.wandb_run_path or train_state["wandb_run_path"]
     if not run_path:
         raise ValueError(
-            "No 'wandb_run_path' in train_state.yaml (the run was not logged to "
+            "train_state.yaml records no wandb_run_path (the run was not logged to "
             "wandb). Pass --wandb_run_path entity/project/run_id explicitly."
         )
     parts = run_path.split("/")

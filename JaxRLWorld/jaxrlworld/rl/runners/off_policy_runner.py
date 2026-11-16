@@ -164,7 +164,7 @@ class OffPolicyRunner(BaseRunner):
             raise NotImplementedError(f"Unknown algorithm: {self.algorithm_name}")
 
         # Compute training info
-        num_gradient_steps = alg_cfg.get("num_gradient_steps", 1)
+        num_gradient_steps = alg_cfg.num_gradient_steps
         num_transitions = self.env.num_envs * self.cfgs.algorithm.num_steps_per_env
 
         print(f"\n🔧 JAX {self.algorithm_name} initialized")
@@ -186,14 +186,14 @@ class OffPolicyRunner(BaseRunner):
             actor_critic=self.actor_critic,
             actor_lr=alg_cfg.actor_lr,
             critic_lr=alg_cfg.critic_lr,
-            alpha_lr=alg_cfg.get("alpha_lr", 3e-4),
+            alpha_lr=alg_cfg.alpha_lr,
             gamma=alg_cfg.gamma,
             tau=alg_cfg.tau,
             batch_size=alg_cfg.batch_size,
-            ent_coef=alg_cfg.get("ent_coef", "auto"),
-            target_entropy=alg_cfg.get("target_entropy", "auto"),
-            policy_delay=alg_cfg.get("policy_delay", 1),
-            max_grad_norm=alg_cfg.get("max_grad_norm", 10.0),
+            ent_coef=alg_cfg.ent_coef,
+            target_entropy=alg_cfg.target_entropy,
+            policy_delay=alg_cfg.policy_delay,
+            max_grad_norm=alg_cfg.max_grad_norm,
             key=key,
         )
 
@@ -206,11 +206,11 @@ class OffPolicyRunner(BaseRunner):
             gamma=alg_cfg.gamma,
             tau=alg_cfg.tau,
             batch_size=alg_cfg.batch_size,
-            policy_delay=alg_cfg.get("policy_delay", 2),
-            exploration_noise=alg_cfg.get("exploration_noise", 0.1),
-            target_policy_noise=alg_cfg.get("target_policy_noise", 0.2),
-            target_noise_clip=alg_cfg.get("target_noise_clip", 0.5),
-            max_grad_norm=alg_cfg.get("max_grad_norm", 10.0),
+            policy_delay=alg_cfg.policy_delay,
+            exploration_noise=alg_cfg.exploration_noise,
+            target_policy_noise=alg_cfg.target_policy_noise,
+            target_noise_clip=alg_cfg.target_noise_clip,
+            max_grad_norm=alg_cfg.max_grad_norm,
             key=key,
         )
 
@@ -224,14 +224,14 @@ class OffPolicyRunner(BaseRunner):
             gamma=alg_cfg.gamma,
             tau=alg_cfg.tau,
             batch_size=alg_cfg.batch_size,
-            policy_delay=alg_cfg.get("policy_delay", 2),
-            noise_min=alg_cfg.get("noise_min", 0.05),
-            noise_max=alg_cfg.get("noise_max", 0.4),
-            target_policy_noise=alg_cfg.get("target_policy_noise", 0.2),
-            target_noise_clip=alg_cfg.get("target_noise_clip", 0.5),
-            use_cdq=alg_cfg.get("use_cdq", True),
-            use_target_actor=alg_cfg.get("use_target_actor", False),
-            max_grad_norm=alg_cfg.get("max_grad_norm", 10.0),
+            policy_delay=alg_cfg.policy_delay,
+            noise_min=alg_cfg.noise_min,
+            noise_max=alg_cfg.noise_max,
+            target_policy_noise=alg_cfg.target_policy_noise,
+            target_noise_clip=alg_cfg.target_noise_clip,
+            use_cdq=alg_cfg.use_cdq,
+            use_target_actor=alg_cfg.use_target_actor,
+            max_grad_norm=alg_cfg.max_grad_norm,
             key=key,
         )
 
@@ -448,7 +448,7 @@ class OffPolicyRunner(BaseRunner):
             # runs as one scanned program instead of num_updates x 3
             # dispatches with Python in between. Only the last update's
             # metrics are ever read, and only on a logging iteration.
-            num_updates = max(1, self.cfgs.algorithm.get("num_gradient_steps", 1))
+            num_updates = max(1, self.cfgs.algorithm.num_gradient_steps)
             metrics = self.alg.update_many(num_updates, batch_size, build_metrics=logging_now)
 
             learning_time = time.time() - training_start_time

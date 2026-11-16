@@ -275,21 +275,3 @@ class TD3ActorCritic(BaseActorCritic):
         q1 = self.critic1_forward(critic_observations, actions)
         q2 = self.critic2_forward(critic_observations, actions)
         return jnp.minimum(q1, q2)
-
-    def evaluate_value(self, critic_obs: jax.Array) -> Tuple[jax.Array, dict]:
-        """
-        Evaluate value function (for compatibility with base class).
-
-        Note: TD3 doesn't use V(s) directly. Returns zeros as placeholder.
-
-        Args:
-            critic_obs: Critic observations
-
-        Returns:
-            Tuple of (value, aux_dict)
-        """
-        normalized_obs = self._normalize_critic_obs(critic_obs)
-        if normalized_obs.ndim == 1:
-            return jnp.zeros((1,)), {}
-        else:
-            return jnp.zeros((normalized_obs.shape[0], 1)), {}

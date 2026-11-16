@@ -607,7 +607,7 @@ class SAC(OffPolicyAlgorithm):
         target_critics = eqx.tree_deserialise_leaves(target_path, target_critics_template)
 
         log_ent_coef = None
-        if metadata.get("log_ent_coef") is not None:
+        if metadata["log_ent_coef"] is not None:
             log_ent_coef = jnp.array(metadata["log_ent_coef"])
 
         new_actor_params, _ = eqx.partition(new_model.actor, eqx.is_inexact_array)
@@ -636,6 +636,6 @@ class SAC(OffPolicyAlgorithm):
             key=jnp.array(metadata["alg_key"], dtype=jnp.uint32),
         )
 
-        self.actor_lr = metadata.get("actor_lr", self.actor_lr)
-        self.critic_lr = metadata.get("critic_lr", self.critic_lr)
-        self.total_it = metadata.get("total_it", 0)
+        self.actor_lr = metadata["actor_lr"]
+        self.critic_lr = metadata["critic_lr"]
+        self.total_it = metadata["total_it"]

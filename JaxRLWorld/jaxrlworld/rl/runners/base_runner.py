@@ -128,10 +128,10 @@ class BaseRunner(ABC):
                 def make_env(seed):
                     return lambda: gym_env_factory(seed)
             else:
-                # Bare fallback for the legacy / wrapper-less Gymnasium
-                # path.  Used by scripts that don't set
-                # ``runner.gym_env_factory`` — fine for simple tasks
-                # whose raw observation is already a flat ``Box``.
+                # Wrapper-less ``gym.make(task_name)``.  Used by scripts
+                # that don't set ``runner.gym_env_factory`` and by
+                # checkpoint loads — fine for simple tasks whose raw
+                # observation is already a flat ``Box``.
                 def make_env(seed):
                     def _init():
                         env = gym.make(cfgs.env.task_name)
@@ -238,8 +238,8 @@ class BaseRunner(ABC):
         # Gymnasium-only: user-supplied ``(seed) -> gym.Env`` factory
         # used by ``_create_env_from_config`` when building the eval
         # env, so the runner-built eval env shares the same wrapper
-        # chain as the user-built training env.  ``None`` falls back
-        # to a bare ``gym.make(task_name)`` factory (legacy path).
+        # chain as the user-built training env.  ``None`` builds each
+        # env with a bare ``gym.make(task_name)``.
         self.gym_env_factory: Callable[[int], gym.Env] | None = None
 
         # Evaluation envs, built on first use (see ``_get_or_create_eval_env``
@@ -893,8 +893,8 @@ class BaseRunner(ABC):
             train_state["action_offset"] = act_manager.offset[0].detach().cpu().tolist()
             train_state["action_clip_low"] = act_manager.clip_low.detach().cpu().tolist()
             train_state["action_clip_high"] = act_manager.clip_high.detach().cpu().tolist()
-            # With action terms the vectors above are the unused legacy
-            # mapping; what maps the policy output is each term's own.
+            # With action terms the manager-level vectors above are unused;
+            # what maps the policy output is each term's own mapping.
             term_mappings = act_manager.resolved_term_mappings()
             if term_mappings is not None:
                 train_state["action_terms"] = term_mappings
@@ -908,22 +908,12 @@ class BaseRunner(ABC):
         """Restore the runner-level state a checkpoint's ``train_state.yaml`` holds.
 
         Iteration, timestep and wall-time counters, the JAX key, and the
-        env clock. A checkpoint written before the env clock was saved
-        cannot be resumed faithfully by a preset whose curricula or
-        schedules read that clock, so the key is required; add
-        ``env_step_counter`` to its ``train_state.yaml`` by hand (0 is
-        exact for a preset with nothing clock-driven).
+        env clock.
         """
-        self.current_learning_iteration = metadata.get("current_learning_iteration", metadata["iteration"])
+        self.current_learning_iteration = metadata["current_learning_iteration"]
         self.total_timesteps = metadata["total_timesteps"]
-        self.total_time = metadata.get("total_time", 0)
+        self.total_time = metadata["total_time"]
         self.key = jnp.array(metadata["jax_key"], dtype=jnp.uint32)
-        if "env_step_counter" not in metadata:
-            raise KeyError(
-                "train_state.yaml has no 'env_step_counter'; this checkpoint predates the env clock being "
-                "saved. Add the key (the number of env steps taken when it was written; 0 if nothing in "
-                "the preset is clock-driven) to resume from it."
-            )
         self.env.env_step_counter = metadata["env_step_counter"]
 
     def _save_latest_checkpoint(self, iteration: int) -> None:

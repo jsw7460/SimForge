@@ -56,8 +56,10 @@ class GymnasiumEnvConfig(BaseConfig):
     # the underlying ``gym.make`` is configured via the wrapper chain
     # (``max_episode_steps`` argument of ``make_dmc_env_factory``).
     episode_length_s: float = 1000.0
-    # Optional ``gym.make`` kwargs passed through by callers that don't
-    # use ``runner.gym_env_factory`` (legacy / wrapper-less path).
+    # Extra ``gym.make`` kwargs. The ManiSkill branch of
+    # ``BaseRunner._create_env_from_config`` passes them to ``gym.make``;
+    # on the Gymnasium branch they are recorded only (the wrapper chain in
+    # ``runner.gym_env_factory`` takes its own kwargs).
     gym_make_kwargs: Dict[str, Any] = field(default_factory=dict)
 
 

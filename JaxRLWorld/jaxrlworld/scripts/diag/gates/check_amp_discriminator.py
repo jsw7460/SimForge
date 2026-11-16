@@ -469,7 +469,7 @@ def main() -> int:
         twin = AdversarialMotionPrior(cfg, expert, D, 0.02, 1e-3, jax.random.PRNGKey(99))
         r_before = np.asarray(discriminator_reward(twin.disc, twin.normalizer, prior.expert_windows[:64]))
         twin.learning_rate = prior.learning_rate
-        twin.load(tmp, optimizer_state=True)
+        twin.load(tmp)
         r_after = np.asarray(discriminator_reward(twin.disc, twin.normalizer, prior.expert_windows[:64]))
         chk("fresh prior differs before load", np.abs(r_before - r_exp).max() > 1e-3)
         chk(

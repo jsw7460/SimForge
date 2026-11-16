@@ -475,14 +475,6 @@ class FastTD3ActorCritic(BaseActorCritic):
 
         return actions, aux
 
-    def evaluate_value(self, critic_obs: jax.Array) -> Tuple[jax.Array, dict]:
-        """Placeholder for compatibility."""
-        normalized_obs = self._normalize_critic_obs(critic_obs)
-        if normalized_obs.ndim == 1:
-            return jnp.zeros((1,)), {}
-        else:
-            return jnp.zeros((normalized_obs.shape[0], 1)), {}
-
     @property
     def support(self) -> jax.Array:
         """Value support atoms."""

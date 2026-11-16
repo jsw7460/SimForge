@@ -23,7 +23,6 @@ from .pretty import (
 
 _LAZY: dict[str, str] = {
     "compare_dicts": ".utils",
-    "deprecated": ".utils",
     "gs_rand_float": ".utils",
     "set_seed": ".utils",
     "setup_log_dir": ".utils",
@@ -46,7 +45,6 @@ __all__ = [
     "print_env_summary",
     "table_to_string",
     "compare_dicts",
-    "deprecated",
     "gs_rand_float",
     "set_seed",
     "setup_log_dir",
