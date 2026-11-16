@@ -178,7 +178,7 @@ class NewtonLabelIndexing:
 
         # Validate patterns against world-0 leaves (the canonical per-env
         # name set). resolve_matching_names raises if any pattern matches
-        # nothing — caller behaviour matches the legacy resolver.
+        # nothing.
         world0_leaves = pool.leaves[: pool.n_per_world]
         _, matched_leaves = string_utils.resolve_matching_names(list(patterns), world0_leaves, preserve_order=True)
         if exclude:
@@ -195,7 +195,7 @@ class NewtonLabelIndexing:
         indices = [gid for gid, leaf in zip(pool.ids, pool.leaves, strict=True) if leaf in matched]
         if not indices:
             raise ValueError(
-                f"NewtonLabelIndexing[{self.name!r}]: resolved leaves {sorted(matched)!r} to " f"zero {kind} indices."
+                f"NewtonLabelIndexing[{self.name!r}]: resolved leaves {sorted(matched)!r} to zero {kind} indices."
             )
         return indices
 
@@ -219,7 +219,7 @@ def _scan_articulation_pool(
             (i, lbl) for i, lbl in enumerate(labels) if lbl == prefix or lbl.startswith(prefix + "/")
         ]
     else:
-        # No prefix → unscoped (rare for articulations; matches legacy fallback).
+        # No prefix → unscoped (rare for articulations).
         scoped = list(enumerate(labels))
     if not scoped:
         return _LabelPool(ids=[], leaves=[], n_per_world=0)
@@ -256,7 +256,7 @@ def _scan_singleton_pool(
 def _matches_any_search(name: str, patterns: tuple[str, ...]) -> bool:
     """Whether ``name`` matches any of ``patterns`` (regex search).
 
-    Mirrors the legacy resolver and the Genesis contact-sensor backend.
+    Mirrors the Genesis contact-sensor backend.
     """
     import re
 

@@ -289,11 +289,9 @@ def soft_landing_mjlab(
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_soft_landing``.
 
-    Bit-identical: the cost is summed over feet so reordering does not
-    affect the result. We pass ``contact_order=feet_bodies`` only to
-    keep the call-site explicit about which group elements are intended;
-    the legacy code's ``contact_indices`` slicing reorders the same
-    columns before the sum.
+    The cost is summed over feet, so the column order does not affect
+    the result; ``contact_order=feet_bodies`` only keeps the call site
+    explicit about which group elements are intended.
     """
     names = [feet_bodies] if isinstance(feet_bodies, str) else list(feet_bodies)
     return penalize_soft_landing(
@@ -368,9 +366,9 @@ class variable_posture:
     Passes ``env.act_manager.actuated_joint_names`` as the joint name
     list, reads current joint positions via ``env.robot_data.joint_pos``,
     and uses ``env.robot_data.default_joint_pos`` (the nominal standing
-    pose) as the reference. The legacy code used ``act_manager.offset``,
-    which equals the default pose only for absolute-action presets and
-    diverges under joint-limit action mapping (offset = limit midpoint).
+    pose) as the reference, not ``act_manager.offset``, which equals the
+    default pose only for absolute-action presets and diverges under
+    joint-limit action mapping (offset = limit midpoint).
     """
 
     __name__ = "variable_posture"
@@ -452,7 +450,7 @@ class feet_swing_height_mjlab:
 
 
 # ============================================================
-# feet_swing_height (alias for backward compatibility)
+# feet_swing_height (absolute-error variant)
 # ============================================================
 
 
@@ -502,11 +500,8 @@ def angular_momentum_penalty(
 ) -> torch.Tensor:
     """Penalize whole-body angular momentum.
 
-    Delegates to ``common.penalize_angular_momentum_l2``. Bit-identical
-    to the legacy implementation: ``RobotData.angular_momentum_w`` for
-    Newton uses the same ``model.body_inertia`` warp array, the same
-    ``state.body_q/qd`` reshape, and the same xyzw quaternion rotation
-    helpers (``_quat_rotate_inverse`` / ``_quat_rotate``) that this
-    function previously called inline.
+    Delegates to ``common.penalize_angular_momentum_l2``, which reads the
+    whole-body angular momentum about the system CoM from
+    ``RobotData.angular_momentum_w``.
     """
     return penalize_angular_momentum_l2(env)

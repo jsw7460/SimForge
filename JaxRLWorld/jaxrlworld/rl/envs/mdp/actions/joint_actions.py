@@ -183,9 +183,7 @@ class JointPositionActionCfg(JointActionCfg):
     Target = ``raw * scale + offset``. If ``use_default_offset=True``,
     the ``offset`` field is overridden at construction with the
     robot's default joint angles (read from the scene's
-    ``act_manager.offset[0]`` first row). Legacy-compatible with the
-    monolithic ``ActionManagerBase`` code path when wrapped by the
-    manager's auto-shim.
+    ``act_manager.offset[0]`` first row).
 
     Attributes:
         use_default_offset: When True, override ``offset`` with the

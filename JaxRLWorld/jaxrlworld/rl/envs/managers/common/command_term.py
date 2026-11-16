@@ -110,7 +110,7 @@ class CommandTerm(ABC):
     def _resolve_columns(self, columns: tuple[str, ...] | list[str] | None) -> torch.Tensor:
         """Resolve a column-name selector to a long-tensor of indices.
 
-        ``None`` resolves to all columns (legacy whole-row semantics).
+        ``None`` resolves to all columns (whole-row semantics).
         """
         if columns is None:
             return torch.arange(self.command.shape[1], device=self.device)
@@ -120,8 +120,7 @@ class CommandTerm(ABC):
                 idx.append(self.column_names.index(name))
             except ValueError as e:
                 raise KeyError(
-                    f"Column {name!r} is not declared by {type(self).__name__}.column_names "
-                    f"(got {self.column_names!r})"
+                    f"Column {name!r} is not declared by {type(self).__name__}.column_names (got {self.column_names!r})"
                 ) from e
         return torch.tensor(idx, dtype=torch.long, device=self.device)
 
@@ -219,11 +218,9 @@ class CommandTerm(ABC):
             env_ids: Environment indices to override.
             values: Either ``(len(env_ids), len(columns))`` for a
                 column-selective override, or ``(len(env_ids), command_dim)``
-                when ``columns is None`` (whole-row override; legacy
-                shape).
+                when ``columns is None`` (whole-row override).
             columns: Column names (from ``column_names``) to override.
-                ``None`` (default) means override every column — same as
-                the pre-refactor behavior.
+                ``None`` (default) means override every column.
         """
         col_idx = self._resolve_columns(columns)
         # Index-assign: _command[env_ids[:, None], col_idx[None, :]] = values.
@@ -344,8 +341,7 @@ class VelocityCommandTerm(CommandTerm):
 
     def _update_command(self) -> None:
         # Training fast path: when nothing is externally controlled,
-        # bypass per-column gating to keep behavior bit-identical to
-        # the pre-refactor code (and avoid a 3× write in standing
+        # bypass per-column gating (avoids a 3× write in standing
         # zeroing). The base ``compute()`` already short-circuits the
         # clone-and-restore in the same case.
         any_locked = self._any_locked

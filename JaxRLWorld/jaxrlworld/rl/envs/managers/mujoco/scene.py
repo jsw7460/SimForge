@@ -21,7 +21,7 @@ from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 
 if TYPE_CHECKING:
     from mjlab.entity import Entity
-    from mjlab.scene import Scene
+    from mjlab.scene import Scene, SceneCfg
     from mjlab.sim import Simulation
 
     from jaxrlworld.rl.envs import World
@@ -247,11 +247,6 @@ class MujocoSceneManagerConfig:
     # ``MujocoSceneConfig.warn_overflow``.
     warn_overflow: bool = False
 
-    # Legacy — set by mjlab_env for backward compat
-    mjlab_scene_cfg: Any = None
-    mjlab_sim_cfg: Any = None
-    unified_entities: Any = None
-
 
 class MujocoSceneManager(BaseManager):
     """Manages mjlab Scene and Simulation lifecycle.
@@ -278,6 +273,7 @@ class MujocoSceneManager(BaseManager):
         self.config = config
 
         # mjlab objects (initialized in build_scene)
+        self._mjlab_scene_cfg: SceneCfg = None
         self._scene: Scene = None
         self._sim: Simulation = None
 
@@ -462,19 +458,15 @@ class MujocoSceneManager(BaseManager):
         terrain_spec_fn = self.terrain.build_spec_fn()
 
         # Build mjlab SceneCfg
-        if self.config.mjlab_scene_cfg is not None:
-            # Legacy path — user provided mjlab SceneCfg directly
-            scene_cfg = self.config.mjlab_scene_cfg
-        else:
-            scene_cfg = SceneCfg(
-                num_envs=self.config.num_envs,
-                env_spacing=self.config.env_spacing,
-                terrain=None if terrain_spec_fn is not None else TerrainEntityCfg(terrain_type="plane"),
-                entities={},
-                sensors=(),
-                spec_fn=terrain_spec_fn,
-            )
-            self.config.mjlab_scene_cfg = scene_cfg
+        scene_cfg = SceneCfg(
+            num_envs=self.config.num_envs,
+            env_spacing=self.config.env_spacing,
+            terrain=None if terrain_spec_fn is not None else TerrainEntityCfg(terrain_type="plane"),
+            entities={},
+            sensors=(),
+            spec_fn=terrain_spec_fn,
+        )
+        self._mjlab_scene_cfg = scene_cfg
 
         # Convert unified entities → mjlab entities and merge
         if self.config.entities is not None:
@@ -485,10 +477,9 @@ class MujocoSceneManager(BaseManager):
 
         # Sensors last: a ``mode="entity"`` match needs the entity's root body
         # name, which only its (now registered) mjlab spec knows.
-        if self.config.mjlab_scene_cfg is scene_cfg:
-            scene_cfg.sensors = tuple(
-                _to_mjlab_sensor_cfg(s, self._mjlab_entity_root_body) for s in self.config.sensors
-            ) + tuple(self._to_mjlab_camera_cfg(c) for c in self.config.cameras)
+        scene_cfg.sensors = tuple(
+            _to_mjlab_sensor_cfg(s, self._mjlab_entity_root_body) for s in self.config.sensors
+        ) + tuple(self._to_mjlab_camera_cfg(c) for c in self.config.cameras)
 
         # Create scene
         self._scene = Scene(scene_cfg, device=self.config.device)
@@ -497,25 +488,22 @@ class MujocoSceneManager(BaseManager):
         mj_model = self._scene.compile()
 
         # Build SimulationCfg
-        if self.config.mjlab_sim_cfg is not None:
-            sim_cfg = self.config.mjlab_sim_cfg
-        else:
-            substep_dt = self.config.physics_dt / self.config.substeps
-            sim_cfg = SimulationCfg(
-                nconmax=self.config.nconmax,
-                njmax=self.config.njmax,
-                mujoco=MujocoCfg(
-                    timestep=substep_dt,
-                    iterations=self.config.solver_iterations,
-                    ls_iterations=self.config.solver_ls_iterations,
-                    ccd_iterations=self.config.ccd_iterations,
-                    impratio=self.config.impratio,
-                    cone=self.config.cone,
-                    disableflags=self.config.disableflags,
-                ),
-                contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
-                warn_overflow=self.config.warn_overflow,
-            )
+        substep_dt = self.config.physics_dt / self.config.substeps
+        sim_cfg = SimulationCfg(
+            nconmax=self.config.nconmax,
+            njmax=self.config.njmax,
+            mujoco=MujocoCfg(
+                timestep=substep_dt,
+                iterations=self.config.solver_iterations,
+                ls_iterations=self.config.solver_ls_iterations,
+                ccd_iterations=self.config.ccd_iterations,
+                impratio=self.config.impratio,
+                cone=self.config.cone,
+                disableflags=self.config.disableflags,
+            ),
+            contact_sensor_maxmatch=self.config.contact_sensor_maxmatch,
+            warn_overflow=self.config.warn_overflow,
+        )
 
         # Update physics dt (the per-substep dt used by MuJoCo internally)
         self._physics_dt = sim_cfg.mujoco.timestep
@@ -668,7 +656,7 @@ class MujocoSceneManager(BaseManager):
                 sort_actuators=True,
             )
 
-            self.config.mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
+            self._mjlab_scene_cfg.entities[entity_name] = mjlab_cfg
 
     def _build_mjlab_rigid_objects(self) -> None:
         """Convert passive ``RigidObjectCfg`` entries → actuator-free mjlab entities.
@@ -698,7 +686,7 @@ class MujocoSceneManager(BaseManager):
                 articulation=None,
                 sort_actuators=True,
             )
-            self.config.mjlab_scene_cfg.entities[object_name] = mjlab_cfg
+            self._mjlab_scene_cfg.entities[object_name] = mjlab_cfg
             self._rigid_object_names.append(object_name)
 
     def _mjlab_entity_root_body(self, entity_name: str) -> str:
@@ -714,7 +702,7 @@ class MujocoSceneManager(BaseManager):
         cached = self._entity_root_body_cache.get(entity_name)
         if cached is not None:
             return cached
-        entities = self.config.mjlab_scene_cfg.entities
+        entities = self._mjlab_scene_cfg.entities
         if entity_name not in entities:
             raise ValueError(
                 f"MuJoCo backend: contact sensor references entity {entity_name!r}, which is not in "

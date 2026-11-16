@@ -129,4 +129,4 @@ def actuated_dof_force(env: GenesisEnv) -> torch.Tensor:
     """
     Output: [num_envs, num_actuated_dofs]
     """
-    return env.robot.get_dofs_force(dofs_idx_local=env.act_manager.actuated_dof_ids)
+    return env.robot.get_dofs_force(dofs_idx_local=env.act_manager.indexing.sim_indices)

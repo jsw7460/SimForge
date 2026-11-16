@@ -88,15 +88,14 @@ class ActionManagerBaseConfig:
     actor) then commands targets spanning exactly the soft limit
     range. Ignored unless one of the auto modes is selected."""
 
-    # New term-based action path. When ``action_terms`` is a non-empty
+    # Term-based action path. When ``action_terms`` is a non-empty
     # dict, the action manager builds each ``ActionTerm`` from the
     # config and routes ``process_actions`` / ``apply_actions``
     # through them. When ``action_terms`` is ``None`` or empty, the
-    # legacy monolithic path is used: scale/clip/offset above are
-    # applied directly in ``process_actions`` and the term system is
-    # inactive. This dual path exists so existing go2/g1 presets
-    # keep working unchanged while new tasks (T1 getup, etc.) can
-    # declare explicit terms.
+    # direct path is used: scale/clip/offset above are applied in
+    # ``process_actions`` to one joint-position mapping over the
+    # actuated joints (go2, g1, k1 velocity, ...), and the term
+    # system is inactive.
     action_terms: dict[str, Any] | None = None
 
 
@@ -119,7 +118,7 @@ class ActionManagerBase(BaseManager):
         self._actuated_joint_names = list(self._indexing.joint_names)
         self._actuated_joint_indices = self._indexing.sim_indices.tolist()
         # Total policy output dim: term-based path sums each term's
-        # action_dim; legacy path uses the actuated joint count.
+        # action_dim; direct path uses the actuated joint count.
         # Mirrors IsaacLab's ActionManager: terms own their own
         # action_dim, allowing non-joint terms (propeller thrust,
         # body-wrench, etc.) to participate in the action space.
@@ -168,9 +167,8 @@ class ActionManagerBase(BaseManager):
         # ── Term-based action system (optional) ──────────────────
         # If the preset supplied an ``action_terms`` dict, instantiate
         # each :class:`ActionTerm` and route process/apply through
-        # them. Otherwise the legacy monolithic path is used (same as
-        # before). See ``jaxrlworld/rl/envs/mdp/actions/`` for the term
-        # definitions.
+        # them. Otherwise the direct path is used. See
+        # ``jaxrlworld/rl/envs/mdp/actions/`` for the term definitions.
         # Persistent per-entity joint command buffers, keyed by entity
         # name. IsaacLab's equivalent is ``ArticulationData.joint_pos_target``
         # / ``joint_effort_target``: a term writes only the columns it owns
@@ -316,7 +314,7 @@ class ActionManagerBase(BaseManager):
                 soft_half = (upper - lower) / 2 * joint_limit_soft_factor
 
         Used by the ``scale="joint_limit"`` / ``offset="joint_limit_center"``
-        auto modes. Only valid on the legacy (non-term) action path where
+        auto modes. Only valid on the direct (non-term) action path where
         every action dimension is an actuated joint.
         """
         joint_lower, _ = self._get_joint_limits()
@@ -590,7 +588,7 @@ class ActionManagerBase(BaseManager):
 
     @property
     def clip_bounds(self) -> tuple[float, float] | None:
-        """Get clip bounds for compatibility with World.action_space."""
+        """Tuple clip bounds, read by ``World.action_space``; None otherwise."""
         if isinstance(self.config.clip, tuple):
             return self.config.clip
         return None
@@ -606,7 +604,7 @@ class ActionManagerBase(BaseManager):
 
     def resolved_term_mappings(self) -> dict[str, dict] | None:
         """Each action term's :meth:`~jaxrlworld.rl.envs.mdp.actions.base.ActionTerm.resolved_mapping`,
-        in term (= policy output) order; ``None`` on the legacy single-mapping path."""
+        in term (= policy output) order; ``None`` on the direct single-mapping path."""
         if not self._has_action_terms:
             return None
         return {name: term.resolved_mapping() for name, term in self._terms.items()}
@@ -788,17 +786,17 @@ class ActionManagerBase(BaseManager):
            ``ActionManager.apply_actions`` and removes the
            joint-position assumption from the manager.
 
-        2. **Legacy path** (no terms): ``processed_actions`` is the
+        2. **Direct path** (no terms): ``processed_actions`` is the
            absolute joint position target; route through the actuator
-           path as a single full-action-dim call. Preserved for
-           existing presets (Go2 flat, G1 flat, …) that declare
-           ``scale``/``clip``/``offset`` directly on the
-           ``*ActionConfig`` instead of using terms.
+           path as a single full-action-dim call. Used by presets
+           (Go2 flat, G1 flat, …) that declare ``scale``/``clip``/
+           ``offset`` directly on the ``*ActionConfig`` instead of
+           using terms.
 
         Args:
             processed_actions: Tensor of shape (num_envs, total_action_dim).
                 The return value of :meth:`process_actions`; used only
-                on the legacy path. With terms, each term carries its
+                on the direct path. With terms, each term carries its
                 own ``processed_actions`` internally.
         """
         if self._has_action_terms:
@@ -807,7 +805,7 @@ class ActionManagerBase(BaseManager):
             self._flush_entity_commands()
             return
 
-        # Legacy non-term path: processed_actions is the full target.
+        # Direct path: processed_actions is the full target.
         target = processed_actions
         name = self.env.robot_entity_name
         if not self._has_explicit_actuators:
@@ -861,7 +859,7 @@ class ActionManagerBase(BaseManager):
 
     def _apply_joint_target_full(self, target: torch.Tensor, entity_name: str | None = None) -> None:
         """Run actuator compute + sim force apply on one entity's
-        joint position target. Internal helper used by the legacy path
+        joint position target. Internal helper used by the direct path
         and by :meth:`_apply_joint_target_via_actuators`.
         """
         name = entity_name or self.env.robot_entity_name
@@ -977,7 +975,7 @@ class ActionManagerBase(BaseManager):
             self._pending_effort_entities.append(name)
 
     def process_actions(self, actions: torch.Tensor) -> torch.Tensor:
-        """Process raw actions: dispatch to term system or legacy path.
+        """Process raw actions: dispatch to term system or direct path.
 
         Two code paths:
 
@@ -989,11 +987,10 @@ class ActionManagerBase(BaseManager):
            Final target computation (absolute vs relative vs
            settle-relative) happens later in :meth:`apply_actions`.
 
-        2. **Legacy path** (``config.action_terms`` is None/empty):
-           ``clip → scale → offset → optional settle-mask`` exactly
-           as before the term system was introduced. Preserved for
-           existing presets (Go2 flat, G1 flat, rod_stand, …) that
-           declare ``scale``/``clip``/``offset`` directly on
+        2. **Direct path** (``config.action_terms`` is None/empty):
+           ``clip → scale → offset → optional settle-mask``. Used by
+           presets (Go2 flat, G1 flat, …) that declare
+           ``scale``/``clip``/``offset`` directly on
            ``Newton/Genesis/MujocoActionConfig``.
 
         Args:

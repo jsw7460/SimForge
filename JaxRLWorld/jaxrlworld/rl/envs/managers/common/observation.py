@@ -16,9 +16,6 @@ from jaxrlworld.rl.storages.delay_buffer import DelayBuffer
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
 
-# Backward-compatible alias
-ObsManagerConfig = None  # deprecated
-
 
 class ObservationManager(BaseManager):
     """Manages observation generation and processing for RL environments.

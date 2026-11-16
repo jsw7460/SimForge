@@ -42,7 +42,7 @@ def dof_pos(env: GenesisEnv, dofs_idx_local: torch.Tensor | None = None) -> torc
         When dofs_idx_local is None, ordering matches env.act_manager._actuated_joint_names.
     """
     if dofs_idx_local is None:
-        dofs_idx_local = env.act_manager.actuated_dof_ids  # To remove base 6-dof joint
+        dofs_idx_local = env.act_manager.indexing.sim_indices  # To remove base 6-dof joint
     return env.robot.get_dofs_position(dofs_idx_local)
 
 
@@ -62,7 +62,7 @@ def dof_vel(
     env: GenesisEnv, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR, dofs_idx_local: torch.Tensor | None = None
 ) -> torch.Tensor:
     if dofs_idx_local is None:
-        dofs_idx_local = env.act_manager.actuated_dof_ids  # To remove base 6-dof joint
+        dofs_idx_local = env.act_manager.indexing.sim_indices  # To remove base 6-dof joint
     return env.scene_manager[asset_cfg.name].get_dofs_velocity(dofs_idx_local)
 
 

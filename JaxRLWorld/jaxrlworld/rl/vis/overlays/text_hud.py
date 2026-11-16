@@ -160,10 +160,6 @@ class TextHUDOverlay(Base2DOverlay):
     # Core Methods
     # =========================================================================
 
-    def update(self, state: dict) -> None:
-        """Not used in new design. Kept for interface compatibility."""
-        pass
-
     def render(
         self,
         env: "GenesisEnv",

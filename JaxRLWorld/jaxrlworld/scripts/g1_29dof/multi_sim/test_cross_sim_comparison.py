@@ -36,8 +36,8 @@ def _build_common_actor_obs_terms():
     """Per user spec: exclude base_lin_vel, use dof_pos (not nominal_difference)."""
     from jaxrlworld.rl.configs.observations import ObservationTermConfig
     from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
+        all_commands,
         base_ang_vel,
-        command,
         dof_pos,
         dof_vel,
         prev_processed_actions,
@@ -47,7 +47,7 @@ def _build_common_actor_obs_terms():
     return [
         ("base_ang_vel", ObservationTermConfig(func=base_ang_vel, scale=1.0)),
         ("projected_gravity", ObservationTermConfig(func=projected_gravity, scale=1.0)),
-        ("command", ObservationTermConfig(func=command, scale=1.0)),
+        ("command", ObservationTermConfig(func=all_commands, scale=1.0)),
         ("dof_pos", ObservationTermConfig(func=dof_pos, scale=1.0)),
         ("dof_vel", ObservationTermConfig(func=dof_vel, scale=1.0)),
         ("prev_processed_actions", ObservationTermConfig(func=prev_processed_actions, scale=1.0)),
@@ -276,9 +276,7 @@ def _mujoco_reward_terms():
     import math
 
     from jaxrlworld.rl.configs.rewards import RewardTermConfig
-    from jaxrlworld.rl.configs.scene import (
-        SceneEntitySelector as SceneEntityCfg,  # alias for minimal diff in this diag script
-    )
+    from jaxrlworld.rl.configs.scene import SceneEntitySelector
     from jaxrlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
     from jaxrlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_m
 
@@ -300,7 +298,10 @@ def _mujoco_reward_terms():
             "flat_orientation": RewardTermConfig(
                 rf_m.flat_orientation,
                 weight=1.0,
-                params={"std": math.sqrt(0.2), "asset_cfg": SceneEntityCfg(name="robot", body_names=("torso_link",))},
+                params={
+                    "std": math.sqrt(0.2),
+                    "asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",)),
+                },
             ),
             "raw_action_rate_l2": RewardTermConfig(
                 rf_m.raw_action_rate_l2,
@@ -311,7 +312,7 @@ def _mujoco_reward_terms():
                 rf_m.variable_posture,
                 weight=1.0,
                 params={
-                    "asset_cfg": SceneEntityCfg(name="robot", joint_names=(".*",)),
+                    "asset_cfg": SceneEntitySelector(name="robot", joint_names=(".*",)),
                     "std_standing": {".*": 0.05},
                     "std_walking": {
                         r".*hip_pitch.*": 0.3,
@@ -352,7 +353,7 @@ def _mujoco_reward_terms():
             "body_ang_vel_penalty": RewardTermConfig(
                 rf_m.body_angular_velocity_penalty,
                 weight=0.05,
-                params={"asset_cfg": SceneEntityCfg(name="robot", body_names=("torso_link",))},
+                params={"asset_cfg": SceneEntitySelector(name="robot", body_names=("torso_link",))},
             ),
             "joint_pos_limits": RewardTermConfig(
                 rf_m.joint_pos_limits,
@@ -362,7 +363,7 @@ def _mujoco_reward_terms():
                 rf_m.feet_clearance,
                 weight=2.0,
                 params={
-                    "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                    "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
@@ -372,7 +373,7 @@ def _mujoco_reward_terms():
                 weight=0.25,
                 params={
                     "sensor_name": "feet_ground_contact",
-                    "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                    "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
                     "target_height": 0.1,
                     "command_threshold": 0.05,
                 },
@@ -382,7 +383,7 @@ def _mujoco_reward_terms():
                 weight=0.1,
                 params={
                     "sensor_name": "feet_ground_contact",
-                    "asset_cfg": SceneEntityCfg(name="robot", site_names=site_names),
+                    "asset_cfg": SceneEntitySelector(name="robot", site_names=site_names),
                     "command_threshold": 0.05,
                 },
             ),

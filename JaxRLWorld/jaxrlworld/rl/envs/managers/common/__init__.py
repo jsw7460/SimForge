@@ -16,11 +16,11 @@ from .command_ui import (
 )
 from .contact import BaseContactManager
 from .curriculum import CurriculumManager
-from .event import EventManager, EventManagerConfig
+from .event import EventManager
 from .gait import GaitManager, GaitManagerConfig, gait_config_to_manager_config
-from .observation import ObservationManager, ObsManagerConfig
-from .reward import RewardManager, RewardManagerConfig
-from .termination import TerminationConfig, TerminationManager
+from .observation import ObservationManager
+from .reward import RewardManager
+from .termination import TerminationManager
 
 __all__ = [
     "BaseContactManager",
@@ -38,15 +38,11 @@ __all__ = [
     "PresetButton",
     "SliderControl",
     "RewardManager",
-    "RewardManagerConfig",
     "TerminationManager",
-    "TerminationConfig",
     "EventManager",
-    "EventManagerConfig",
     "CurriculumManager",
     "GaitManager",
     "GaitManagerConfig",
     "gait_config_to_manager_config",
     "ObservationManager",
-    "ObsManagerConfig",
 ]

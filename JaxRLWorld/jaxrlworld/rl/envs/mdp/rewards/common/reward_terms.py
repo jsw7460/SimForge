@@ -238,10 +238,9 @@ def penalize_angular_momentum_l2(
       ``model.body_mass`` / ``model.body_inertia`` + per-body state.
     - Genesis: not implemented (raises NotImplementedError).
 
-    The Newton path previously summed only the spin term and
-    underestimated by 1-2 orders of magnitude vs mjlab; ``8d11.. .``
-    added the orbital term so the two now agree (up to solver-state
-    divergence in independent runs).
+    The Newton sum includes both the orbital and the spin term, so it
+    agrees with mjlab's ``subtreeangmom`` (up to solver-state divergence
+    in independent runs).
 
     Args:
         env: Any environment whose RobotData implements
@@ -342,8 +341,7 @@ def penalize_body_ang_vel_xy(
     NOT penalized — only roll/pitch are.
 
     Matches the behavior of mjlab's ``body_angular_velocity_penalty``
-    exactly (single-body case), which the legacy sim-specific
-    implementations also matched.
+    exactly (single-body case).
 
     Args:
         env: Any environment whose RobotData implements the body-level
@@ -659,14 +657,9 @@ def penalize_contact_force_count(
     instantaneous ``contact_force`` fallback is only for a group registered
     without history.
 
-    This unifies three legacy functions across simulators:
-
-    - mjlab ``self_collision_cost``
-    - mjlab ``wtw_collision``
-    - Newton/Genesis ``wtw_collision``
-
-    The math is identical: ``-sum((force_mag > threshold).float())`` over
-    the N tracked bodies of the contact group.
+    Backs mjlab ``self_collision_cost``, mjlab ``wtw_collision`` and
+    Newton/Genesis ``wtw_collision``: ``-sum((force_mag > threshold).float())``
+    over the N tracked bodies of the contact group.
 
     Args:
         env: Any environment with a contact_manager.
@@ -837,7 +830,7 @@ class FeetSwingHeightTracker:
         if self._reset_mode == "zero":
             self.peak_heights[env_ids] = 0.0
             return
-        # "current_foot_height": Newton legacy — re-seed peak with current z.
+        # "current_foot_height": re-seed peak with the current foot z.
         foot_heights = self._foot_heights(self._env)
         self.peak_heights[env_ids] = foot_heights[env_ids]
 
@@ -856,10 +849,10 @@ class VariablePostureTracker:
       - ``std_walking`` when ``walking_threshold <= total_speed < running_threshold``
       - ``std_running`` when ``total_speed >= running_threshold``
 
-    The three legacy implementations (Newton, Genesis, MuJoCo) all share
-    this math but resolve joint state differently — Newton/Genesis use
+    The backend wrappers (Newton, Genesis, MuJoCo) share this math but
+    resolve joint state differently — Newton/Genesis use
     ``env.act_manager.actuated_joint_names`` plus ``env.robot_data.joint_pos``
-    and a 1-D ``act_manager.offset``, while MuJoCo uses
+    and ``robot_data.default_joint_pos``, while MuJoCo uses
     ``robot.find_joints(asset_cfg.joint_names)`` plus a sliced
     ``robot.data.joint_pos[:, joint_ids]`` and a 2-D
     ``robot.data.default_joint_pos[:, joint_ids]``. To accommodate both
@@ -940,11 +933,6 @@ class VariablePostureTracker:
 
     def reset(self, env_ids: torch.Tensor) -> None:
         pass
-
-
-# ── Getup rewards moved to rewards/common/getup.py ──────────────
-# (orientation_upright, height_to_target, GatedPostureTracker,
-# GetupSuccessTracker). Import from ``rewards.common.getup``.
 
 
 def penalize_joint_pos_limits_l1(

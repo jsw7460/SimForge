@@ -580,11 +580,6 @@ class NewtonSceneManager(BaseManager):
         self.graph = None
 
     @property
-    def robot(self) -> Any:
-        """For compatibility - returns model in Newton."""
-        return self.model
-
-    @property
     def state(self) -> newton.State:
         """Current state (state_0)."""
         return self.state_0
@@ -1559,11 +1554,6 @@ class NewtonSceneManager(BaseManager):
         return self.env._robot_data
 
     @property
-    def robot_state(self):
-        """Alias for robot_data (backward compat)."""
-        return self.robot_data
-
-    @property
     def robot_state_writer(self):
         """NewtonRobotStateWriter from the environment (single instance).
 
@@ -1860,18 +1850,15 @@ class NewtonSceneManager(BaseManager):
             return
 
         for i in range(self.config.substeps):
-            # NOTE: ``state_0.clear_forces()`` USED to live here. Moved
-            # out to ``NewtonEnv._step_physics`` so that callers writing
-            # to ``state_0.body_f`` (e.g. PropellerThrustAction's body
-            # wrench dispatch) can do so AFTER the clear but BEFORE the
-            # solver runs — matches Newton's example convention
-            # (``clear_forces → user wrench write → solver.step``) seen
-            # in every newton/examples/*/example_*.py. Existing JaxRLWorld
-            # newton presets only write ``control.joint_f`` (never
-            # ``state.body_f``), so removing the per-substep clear here
-            # has no effect on go2/g1/t1 tasks — body_f simply stays at
-            # whatever the enclosing _step_physics wrote (zero for
-            # legacy tasks, the propeller wrench for drone tasks).
+            # No ``state_0.clear_forces()`` here: ``NewtonEnv._step_physics``
+            # clears the forces, so callers writing to ``state_0.body_f``
+            # (e.g. PropellerThrustAction's body wrench dispatch) do so
+            # AFTER the clear but BEFORE the solver runs — Newton's example
+            # convention (``clear_forces → user wrench write → solver.step``)
+            # in every newton/examples/*/example_*.py. body_f stays at
+            # whatever the enclosing _step_physics wrote (zero for tasks
+            # that write only ``control.joint_f``, the propeller wrench for
+            # drone tasks).
             self.solver.step(
                 self.state_0,
                 self.state_1,

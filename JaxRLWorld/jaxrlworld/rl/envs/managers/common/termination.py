@@ -13,9 +13,6 @@ if TYPE_CHECKING:
     from jaxrlworld.rl.configs.common_config_classes import TerminationsConfig
     from jaxrlworld.rl.envs import World
 
-# Backward-compatible alias
-TerminationConfig = None  # will be cleaned up later
-
 # The built-in absorbing termination of the envs whose physics state the
 # solver corrupted this step (see ``World._solver_error_mask``). Counted like
 # a configured term (``Episode_Termination/solver_error``) and exposed in

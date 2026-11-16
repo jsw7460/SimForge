@@ -278,9 +278,6 @@ class G1TrackingConfig:
                 kwargs[f.name] = value
         return kwargs
 
-    def to_dict(self) -> Dict[str, Any]:
-        return self.build().recursive_to_dict()
-
     def _build_command_config(self, builders) -> CommandConfig:
         return CommandConfig(
             terms={

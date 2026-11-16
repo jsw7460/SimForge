@@ -141,13 +141,3 @@ class NewtonActionManager(ActionManagerBase):
             "joint_f",
         )
         rows[:, write_indices] = torques
-
-    # -- Backward compat properties ------------------------------------------
-
-    @property
-    def actuated_q_indices(self) -> torch.Tensor:
-        return self._indexing.newton_q_indices
-
-    @property
-    def actuated_qd_indices(self) -> torch.Tensor:
-        return self._indexing.newton_qd_indices

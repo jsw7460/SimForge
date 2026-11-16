@@ -4,11 +4,8 @@ Mirrors ``eval_newton.py`` and ``eval_genesis.py``. Loads a trained
 policy from a local path or W&B run and either runs batch evaluation
 or launches the interactive viser viewer.
 
-The mjlab scene config (``mjlab_scene_cfg``) is **automatically
-reconstructed** from the checkpoint via the ``preset_class_name +
-preset_kwargs`` mechanism added in the eval-script fix — there is no
-need to pass ``mjlab_scene_cfg`` through ``extra_overrides`` like the
-old workflow required.
+The run config is rebuilt from the checkpoint's ``preset_class_name``
+and ``preset_kwargs``, and the saved values are restored onto it.
 
 Usage::
 

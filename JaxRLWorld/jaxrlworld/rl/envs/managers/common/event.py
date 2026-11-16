@@ -19,9 +19,6 @@ from jaxrlworld.rl.envs.mdp.events.keyed_sampler import (
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
 
-# Backward-compatible alias
-EventManagerConfig = EventConfig
-
 
 class EventManager(BaseManager):
     """Manages event execution for domain randomization and disturbances.

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 def _accessor(env: NewtonEnv):
-    return env.scene_manager.robot_state
+    return env.scene_manager.robot_data
 
 
 def _quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:

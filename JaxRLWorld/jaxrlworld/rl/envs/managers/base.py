@@ -62,8 +62,7 @@ class BaseManager:
            ``__init__`` for class-based terms) and injected.
 
         Parameters whose value/default is not a :class:`SceneEntitySelector`
-        are left untouched, so legacy terms (``entity_name="robot"``) keep
-        working until migrated.
+        (e.g. a plain ``entity_name="robot"`` string) are left untouched.
         """
         # Case 1: user-provided selectors.
         for key, value in list(params.items()):

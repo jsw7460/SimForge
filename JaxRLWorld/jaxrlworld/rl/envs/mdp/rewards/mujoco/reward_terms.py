@@ -205,8 +205,7 @@ def angular_momentum_penalty(
 
     Delegates to ``common.penalize_angular_momentum_l2`` which calls
     ``RobotData.angular_momentum_w(sensor_name)``. For mjlab this
-    in turn calls ``env.scene_manager.get_sensor(sensor_name)`` —
-    bit-identical to the legacy direct sensor read.
+    in turn reads ``env.scene_manager.get_sensor(sensor_name)``.
     """
     return penalize_angular_momentum_l2(env, sensor_name=sensor_name)
 
@@ -218,11 +217,10 @@ def self_collision_cost(
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_contact_force_count``.
 
-    Bit-identical to the legacy implementation: the common helper uses
-    ``contact_manager.contact_force_history`` first (mjlab returns the
-    substep history when registered with ``history_length > 0``), then
-    falls back to instantaneous ``contact_force`` — exactly the legacy
-    branching.
+    The common helper reads ``contact_manager.contact_force_history``
+    when present (mjlab returns the substep history when registered with
+    ``history_length > 0``) and the instantaneous ``contact_force``
+    otherwise.
     """
     return penalize_contact_force_count(env, contact_group=contact_group, force_threshold=force_threshold)
 
@@ -337,8 +335,7 @@ def soft_landing(
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_soft_landing``.
 
-    Bit-identical: legacy code summed forces over the natural group
-    order; the common helper does the same when ``contact_order=None``.
+    Sums forces over the natural group order (``contact_order=None``).
     """
     return penalize_soft_landing(
         env,
@@ -363,8 +360,7 @@ def lin_vel_z_penalty(env: MujocoEnv) -> torch.Tensor:
 class variable_posture:
     """Thin wrapper around ``common.VariablePostureTracker``.
 
-    Bit-identical to the legacy MuJoCo implementation: pre-resolves the
-    asset_cfg joint subset at construction time, slices
+    Pre-resolves the asset_cfg joint subset at construction time, slices
     ``robot.data.default_joint_pos`` by ``joint_ids`` for the default
     pose tensor, and provides a per-step closure that returns
     ``robot.data.joint_pos[:, joint_ids]``. The closure binds

@@ -51,10 +51,10 @@ from jaxrlworld.rl.configs.scene import TerrainCfg
 from jaxrlworld.rl.envs.managers.common.command_term import VelocityCommandTermCfg
 from jaxrlworld.rl.envs.mdp.events import common as common_ef
 from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
+    all_commands as command_obs,
     base_ang_vel,
     base_height,
     base_lin_vel,
-    command as command_obs,
     dof_pos,
     dof_vel,
     projected_gravity,
@@ -246,10 +246,6 @@ class Go2FlatConfig:
             if value != default:
                 kwargs[f.name] = value
         return kwargs
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Backward-compatible dict output."""
-        return self.build().recursive_to_dict()
 
     def make_terrain_cfg(self) -> TerrainCfg:
         """Build the scene ``terrain_cfg`` (flat or rough).

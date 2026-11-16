@@ -34,16 +34,9 @@ class MujocoEnv(World):
     the standard jaxrlworld manager-based architecture.
 
     Example:
-        from mjlab.scene import SceneCfg
-        from mjlab.entity import EntityCfg
-
-        scene_cfg = SceneCfg(
-            num_envs=4096,
-            entities={"robot": robot_entity_cfg},
-        )
-
         mujoco_scene_cfg = MujocoSceneConfig(
-            mjlab_scene_cfg=scene_cfg,
+            entities={"robot": robot_entity_cfg},
+            ...
         )
 
         env = MujocoEnv(
@@ -241,10 +234,6 @@ class MujocoEnv(World):
                 contact_sensor_maxmatch=self.scene_cfg.contact_sensor_maxmatch,
                 disableflags=self.scene_cfg.disableflags,
                 warn_overflow=self.scene_cfg.warn_overflow,
-                # Legacy — declared on the dataclass like everything else.
-                mjlab_scene_cfg=self.scene_cfg.mjlab_scene_cfg,
-                mjlab_sim_cfg=self.scene_cfg.mjlab_sim_cfg,
-                unified_entities=self.scene_cfg.unified_entities,
             ),
         )
         self.scene_manager.build_scene()

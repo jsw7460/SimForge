@@ -16,10 +16,7 @@ from jaxrlworld.rl.configs import (
 )
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.envs.genesis.dof_selection import build_dof_selection
-from jaxrlworld.rl.envs.managers import (
-    VisualizationManager,
-    VisualizationManagerConfig,
-)
+from jaxrlworld.rl.envs.managers.genesis import VisualizationManager, VisualizationManagerConfig
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 from jaxrlworld.rl.envs.site_frames import resolve_sites
 from jaxrlworld.rl.envs.world import World

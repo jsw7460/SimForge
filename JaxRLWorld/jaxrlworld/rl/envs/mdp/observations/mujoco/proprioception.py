@@ -139,7 +139,7 @@ def dof_pos(env: MujocoEnv) -> torch.Tensor:
         Tensor of shape [num_envs, num_actions]
     """
     robot_data = _get_robot_data(env)
-    joint_ids = env.act_manager._joint_ids
+    joint_ids = env.act_manager.indexing.sim_indices
     return robot_data.joint_pos[:, joint_ids]
 
 
@@ -167,7 +167,7 @@ def dof_vel(env: MujocoEnv) -> torch.Tensor:
         Tensor of shape [num_envs, num_actions]
     """
     robot_data = _get_robot_data(env)
-    joint_ids = env.act_manager._joint_ids
+    joint_ids = env.act_manager.indexing.sim_indices
     return robot_data.joint_vel[:, joint_ids]
 
 
@@ -191,30 +191,6 @@ def all_joint_vel(env: MujocoEnv) -> torch.Tensor:
     """
     robot_data = _get_robot_data(env)
     return robot_data.joint_vel
-
-
-@joint_indexed
-@EnvStepCache()
-def joint_pos_rel(env: MujocoEnv) -> torch.Tensor:
-    """Get joint positions relative to default positions.
-
-    Alias for dof_pos_nominal_difference.
-
-    Returns:
-        Tensor of shape [num_envs, num_actions]
-    """
-    return dof_pos_nominal_difference(env)
-
-
-@joint_indexed
-@EnvStepCache()
-def joint_vel_rel(env: MujocoEnv) -> torch.Tensor:
-    """Get joint velocities (default velocity is assumed zero).
-
-    Returns:
-        Tensor of shape [num_envs, num_actions]
-    """
-    return dof_vel(env)
 
 
 # =============================================================================
@@ -255,28 +231,6 @@ def prev_processed_actions(env: MujocoEnv) -> torch.Tensor:
     return env.act_manager.prev_processed_actions.clone()
 
 
-@joint_indexed
-@EnvStepCache()
-def last_action(env: MujocoEnv) -> torch.Tensor:
-    """Get last action (alias for processed_actions).
-
-    Returns:
-        Tensor of shape [num_envs, num_actions]
-    """
-    return processed_actions(env)
-
-
-@joint_indexed
-@EnvStepCache()
-def last_raw_action(env: MujocoEnv) -> torch.Tensor:
-    """Get last action (alias for processed_actions).
-
-    Returns:
-        Tensor of shape [num_envs, num_actions]
-    """
-    return env.act_manager.raw_actions
-
-
 # =============================================================================
 # Command observations
 # =============================================================================
@@ -290,16 +244,6 @@ def command_velocity(env: MujocoEnv) -> torch.Tensor:
         Tensor of shape [num_envs, 3] (lin_x, lin_y, ang_z)
     """
     return env.command_manager.get_commands_tensor()
-
-
-@EnvStepCache()
-def generated_commands(env: MujocoEnv) -> torch.Tensor:
-    """Get generated commands (alias for command_velocity).
-
-    Returns:
-        Tensor of shape [num_envs, 3]
-    """
-    return command_velocity(env)
 
 
 # =============================================================================

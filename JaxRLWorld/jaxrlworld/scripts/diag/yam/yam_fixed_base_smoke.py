@@ -163,8 +163,8 @@ def _newton_control_evidence(env, act_names: list[str]) -> None:
     n_show = min(len(tq_start), 2 * per_world_joints + 2)
     print(f"[newton] joint_target_q_start[:{n_show}] = {tq_start[:n_show].tolist()}")
     print(f"[newton] joint_qd_start[:{n_show}]       = {qd_start[:n_show].tolist()}")
-    print(f"[newton] q_indices  = {env.act_manager.actuated_q_indices.tolist()}")
-    print(f"[newton] qd_indices = {env.act_manager.actuated_qd_indices.tolist()}")
+    print(f"[newton] q_indices  = {env.act_manager.indexing.newton_q_indices.tolist()}")
+    print(f"[newton] qd_indices = {env.act_manager.indexing.newton_qd_indices.tolist()}")
 
     target = wp.to_torch(sm.control.joint_target_q).reshape(n_worlds, -1)
     print(f"[newton] control.joint_target_q shape = {tuple(target.shape)}")

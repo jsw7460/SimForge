@@ -125,8 +125,9 @@ class G1MujocoConfig(RobotConfig):
 
     actuated_dof_patterns: List[str] = field(
         default_factory=lambda: [
-            # Exclude hand_palm_joint (legacy) and foot_frame_joint
-            # (welded dummy bodies for the foot-pad kinematic frame in g1.xml).
+            # Exclude hand_palm_joint (fixed palm frame in the URDF) and
+            # foot_frame_joint (welded dummy bodies for the foot-pad
+            # kinematic frame in g1.xml).
             r"left_(?!hand_palm_joint|foot_frame_joint).*",
             r"right_(?!hand_palm_joint|foot_frame_joint).*",
             r"waist_(?!support_joint).*",
@@ -251,15 +252,14 @@ class G1MujocoConfig(RobotConfig):
 
     foot_names: List[str] = field(default_factory=lambda: ["left_ankle_roll_link", "right_ankle_roll_link"])
 
-    # ── Per-joint PD overrides (Newton only, default None = legacy) ──
+    # ── Per-joint PD overrides (Newton only, default None = no override) ──
     # When set, ``_newton_builders`` feeds these per-joint dicts to the
     # actuator's ``stiffness`` / ``damping`` (which natively accept a
     # ``{joint_regex: value}`` map) in place of the nominal ``p_gains`` /
     # ``d_gains``, so callers can pin heterogeneous per-joint PD
     # without touching the actuator wiring. Keys are joint-name regexes —
     # for per-DOF identification use exact joint names. Default ``None``
-    # means "no override" (every existing training run is bit-identical to
-    # before these fields were added).
+    # means "no override" (the nominal ``p_gains`` / ``d_gains`` apply).
     kp_per_dof_override: dict[str, float] | None = None
     kd_per_dof_override: dict[str, float] | None = None
 

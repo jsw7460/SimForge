@@ -41,10 +41,10 @@ from jaxrlworld.rl.configs.scene.unified_entity_config import (
 )
 from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
+    all_commands as command_obs,
     base_ang_vel,
     base_height,
     base_quat,
-    command as command_obs,
     dof_pos,
     dof_pos_biased,
     dof_vel,

@@ -88,15 +88,6 @@ class Base2DOverlay(BaseOverlay):
     These overlays are drawn on top of the rendered image using OpenCV.
     """
 
-    def __init__(self, config: Overlay2DConfig):
-        super().__init__(config)
-        self._cached_data: dict[str, Any] = {}
-
-    @abstractmethod
-    def update(self, state: dict[str, Any]) -> None:
-        """Update cached state data."""
-        pass
-
     @abstractmethod
     def render(self, frame: np.ndarray, env_idx: int = 0) -> np.ndarray:
         """

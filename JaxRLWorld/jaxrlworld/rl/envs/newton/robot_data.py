@@ -340,15 +340,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
             return None
         return entity["body_label_prefix"]
 
-    def body_ang_vel_w(self, body_index: int) -> Tensor:
-        """World-frame angular velocity of a single body.
-
-        Thin wrapper around :attr:`body_ang_vel_w_all` that selects one
-        body from the batched view. Kept for backward compatibility with
-        Phase D-2 callers.
-        """
-        return self.body_ang_vel_w_all[:, body_index, :]
-
     # ------------------------------------------------------------------
     # Batched per-body reads
     # ------------------------------------------------------------------

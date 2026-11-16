@@ -58,6 +58,7 @@ class MotionLoader:
         - ``body_lin_vel_w`` ``[T, B, 3]``
         - ``body_ang_vel_w`` ``[T, B, 3]``
         - ``body_names``     ``[B]`` string array — the replayer's body order
+        - ``joint_names``    ``[J]`` string array — the replayer's joint order
         - ``fps``            scalar (optional)
 
     ``body_names_cfg`` lists the subset of bodies (bare names, no sim
@@ -71,7 +72,7 @@ class MotionLoader:
         self,
         motion_file: str,
         body_names_cfg: tuple[str, ...],
-        joint_names_cfg: tuple[str, ...] | None = None,
+        joint_names_cfg: tuple[str, ...],
         device: str | torch.device = "cpu",
     ) -> None:
         data = np.load(motion_file, allow_pickle=True)
@@ -109,32 +110,24 @@ class MotionLoader:
         # actuator order even though all three load the same robot.
         # Without this permutation, dof values land on the wrong
         # joints on at least one simulator.
-        if joint_names_cfg is not None:
-            if "joint_names" not in data.files:
-                raise ValueError(
-                    f"Motion file {motion_file!r} lacks a 'joint_names' array but "
-                    "the caller requested canonical-order permutation. Regenerate "
-                    "the NPZ via jaxrlworld.tools.motion.csv_to_npz."
-                )
-            npz_joint_names = [str(n) for n in np.asarray(data["joint_names"]).tolist()]
-            missing = [n for n in joint_names_cfg if n not in npz_joint_names]
-            if missing:
-                raise ValueError(
-                    f"Motion file {motion_file!r} is missing joints {missing}. NPZ contains {npz_joint_names}."
-                )
-            joint_perm = torch.tensor(
-                [npz_joint_names.index(n) for n in joint_names_cfg],
-                dtype=torch.long,
-                device=device,
+        if "joint_names" not in data.files:
+            raise ValueError(
+                f"Motion file {motion_file!r} lacks a 'joint_names' array. "
+                "Regenerate the NPZ via jaxrlworld.tools.motion.csv_to_npz."
             )
-            self.joint_pos = joint_pos_raw[:, joint_perm]
-            self.joint_vel = joint_vel_raw[:, joint_perm]
-        else:
-            # Backwards compat: caller promises NPZ column order matches
-            # their canonical order. Dangerous across simulators; kept
-            # only for tests that don't have an env handy.
-            self.joint_pos = joint_pos_raw
-            self.joint_vel = joint_vel_raw
+        npz_joint_names = [str(n) for n in np.asarray(data["joint_names"]).tolist()]
+        missing = [n for n in joint_names_cfg if n not in npz_joint_names]
+        if missing:
+            raise ValueError(
+                f"Motion file {motion_file!r} is missing joints {missing}. NPZ contains {npz_joint_names}."
+            )
+        joint_perm = torch.tensor(
+            [npz_joint_names.index(n) for n in joint_names_cfg],
+            dtype=torch.long,
+            device=device,
+        )
+        self.joint_pos = joint_pos_raw[:, joint_perm]
+        self.joint_vel = joint_vel_raw[:, joint_perm]
 
         idx = torch.tensor(motion_idx, dtype=torch.long, device=device)
         bp = torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device)
@@ -853,8 +846,8 @@ class MotionCommand(CommandTerm):
         # Mode-specific dispatch. Adaptive owns both ``motion_id`` and
         # ``time_step`` (jointly factored — motion-level then bin-level)
         # so it has to be the one to write ``motion_ids[env_ids]``. The
-        # non-adaptive modes keep the legacy factored shape (clip first
-        # via ``_motion_weights``, then frame within that clip).
+        # non-adaptive modes factor the draw (clip first via
+        # ``_motion_weights``, then frame within that clip).
         mode = self.cfg.sampling_mode
         if mode == "adaptive":
             self._adaptive_sampling(env_ids, keep_motion_id=keep_motion_id)

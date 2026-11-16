@@ -10,9 +10,6 @@ from jaxrlworld.rl.configs.rewards import RewardTermConfig, get_weight_value
 from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.envs.managers.common.reward_view import RecordingEnvView, RewardEnvView, RewardReadRecord
 
-# Backward-compatible alias (used by ManagerRegistry and imports)
-RewardManagerConfig = RewardConfig
-
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
 

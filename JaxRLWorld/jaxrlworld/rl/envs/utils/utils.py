@@ -46,24 +46,3 @@ class EnvStepCache:
             env_id = id(env)
             if env_id in cls._global_cache:
                 del cls._global_cache[env_id]
-
-
-# For methods that should invalidate the cache when called
-class LearningIterationObserver:
-    """Deprecated: kept as empty mixin for backward compatibility.
-    Learning iteration is now tracked directly by the runner."""
-
-    @property
-    def learning_iteration(self):
-        raise AttributeError(
-            "LearningIterationObserver singleton removed. Use runner.current_learning_iteration instead."
-        )
-
-
-class NumStepCallsObserver:
-    """Deprecated: kept as empty mixin for backward compatibility.
-    Env step count is now accessed via env._env_step_counter."""
-
-    @property
-    def env_step_calls(self):
-        raise AttributeError("NumStepCallsObserver singleton removed. Use env._env_step_counter instead.")

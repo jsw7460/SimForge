@@ -24,10 +24,6 @@ from .proprioception import (
     foot_contact_time,
     # Contact/feet
     foot_height,
-    generated_commands,
-    joint_pos_rel,
-    joint_vel_rel,
-    last_action,
     prev_processed_actions,
     processed_actions,
     # Root state
@@ -50,16 +46,12 @@ __all__ = [
     "dof_vel",
     "all_joint_pos",
     "all_joint_vel",
-    "joint_pos_rel",
-    "joint_vel_rel",
     # Actions
     "raw_actions",
     "processed_actions",
     "prev_processed_actions",
-    "last_action",
     # Commands
     "command_velocity",
-    "generated_commands",
     # Contact/feet
     "foot_height",
     "foot_air_time",

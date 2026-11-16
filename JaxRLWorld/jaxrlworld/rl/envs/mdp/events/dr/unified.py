@@ -145,7 +145,7 @@ def randomize_friction(
         axes: Which friction axes to randomize.  Any subset of
             ``[0, 1, 2]`` (slide / torsional / rolling).  ``None``
             defaults to ``[0]`` (slide only) for parity with mjlab's
-            ``geom_friction`` and the legacy per-sim ``randomize_friction``.
+            ``geom_friction``.
 
     Backends:
 
@@ -540,8 +540,7 @@ def _newton_body_mass_backend(env, env_ids, sampler, resolved, mass_range, opera
     else:
         # Map view-local link indices to model-global body indices via cache.
         # ``view.link_names`` is a subset (the robot articulation), so resolve
-        # the names back to bodies via NewtonBodyCache for consistency with
-        # legacy ``body_patterns`` path.
+        # the names back to model bodies via NewtonBodyCache.
         view = env.scene_manager.articulation_views[resolved.name]
         names = [view.link_names[i] for i in resolved.body_ids.tolist()]
         body_indices = cache.get_body_indices(names)

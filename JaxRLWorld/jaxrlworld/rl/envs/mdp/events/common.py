@@ -565,11 +565,10 @@ def reset_fallen_or_standing(
     ang_vel = torch.where(is_fallen_3, fallen_ang_vel, zero_vel)
 
     # ── Joint state ───────────────────────────────────────────────
-    # Build default joint positions from the explicit dict when
-    # provided, falling back to act_manager.offset for backward
-    # compatibility. Relative-action presets (getup) zero the
-    # action offset, so relying on it produces an all-zero home
-    # pose instead of the real standing configuration.
+    # With ``default_joint_pos_dict`` the home pose is
+    # ``RobotData.default_joint_pos``; without it, ``act_manager.offset``.
+    # Relative-action presets (getup) zero the action offset, so the
+    # offset gives an all-zero home pose instead of the standing pose.
     if default_joint_pos_dict is not None:
         rd = env.get_entity_data(asset_cfg.name)
         default_joint_pos = rd.default_joint_pos.unsqueeze(0).expand(n, -1).clone()

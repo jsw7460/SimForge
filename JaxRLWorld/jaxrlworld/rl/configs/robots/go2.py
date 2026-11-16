@@ -99,13 +99,12 @@ class Go2Config(RobotConfig):
 
     foot_names: List[str] = field(default_factory=lambda: ["FR_foot", "FL_foot", "RR_foot", "RL_foot"])
 
-    # ── Optional PD / friction overrides (default None = legacy) ──
+    # ── Optional PD / friction overrides (default None = no override) ──
     # When set on a preset, downstream builders use these values
     # instead of the module-level ``STIFFNESS_*`` / ``DAMPING_*``
     # constants and install deterministic friction event terms in
-    # place of the default wide DR. Default ``None`` means "no
-    # override" — every existing training run is bit-identical to
-    # before these fields were added. See ``jaxrlworld/rl/configs/
+    # place of the default wide DR. Default ``None`` keeps the
+    # module constants and the default DR. See ``jaxrlworld/rl/configs/
     # presets/go2/_newton_builders.py`` for the read sites.
     kp_hip_override: float | None = None
     kd_hip_override: float | None = None
@@ -114,7 +113,7 @@ class Go2Config(RobotConfig):
     joint_frictionloss_override: float | None = None
     foot_friction_override: float | None = None
 
-    # ── Per-leg PD overrides (Newton only, default None = legacy) ──
+    # ── Per-leg PD overrides (Newton only, default None = no override) ──
     # When set, builders broadcast a per-joint stiffness/damping dict to
     # the actuator instead of a single scalar — the four quadrants then
     # ship distinct PD gains. Format:
@@ -132,7 +131,7 @@ class Go2Config(RobotConfig):
     kd_per_leg_override: dict[str, dict[str, float]] | None = None
 
     # ── Per-DOF / per-foot friction overrides (Newton only, default
-    # None = legacy) ──
+    # None = no override) ──
     # When set, builders install a deterministic per-dim friction event
     # (``set_joint_friction_per_dim`` / ``set_foot_friction_per_foot``)
     # that rewrites the heterogeneous values every reset, in place of the

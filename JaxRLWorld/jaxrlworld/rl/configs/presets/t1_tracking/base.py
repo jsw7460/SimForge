@@ -284,9 +284,6 @@ class T1TrackingConfig:
                 kwargs[f.name] = value
         return kwargs
 
-    def to_dict(self) -> Dict[str, Any]:
-        return self.build().recursive_to_dict()
-
     # ── Shared build methods ──────────────────────────────────────────
     def _build_command_config(self, builders) -> CommandConfig:
         """Motion command — tracks the clips in ``motion_files`` (length-1

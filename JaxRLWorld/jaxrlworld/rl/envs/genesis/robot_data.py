@@ -184,15 +184,6 @@ class GenesisRigidObjectData(SiteReaderMixin):
         link = self._entity.get_link(name=body_name)
         return link.idx_local
 
-    def body_ang_vel_w(self, body_index: int) -> Tensor:
-        """World-frame angular velocity of a single link.
-
-        Thin wrapper around :attr:`body_ang_vel_w_all` that selects one
-        body from the batched view. Kept for backward compatibility with
-        Phase D-2 callers.
-        """
-        return self.body_ang_vel_w_all[:, body_index, :]
-
     # ------------------------------------------------------------------
     # Batched per-body reads
     # ------------------------------------------------------------------

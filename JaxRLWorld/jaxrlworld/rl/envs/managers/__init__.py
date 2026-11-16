@@ -5,14 +5,10 @@ from .common import (
     CommandManager,
     CommandManagerConfig,
     EventManager,
-    EventManagerConfig,
     GaitManager,
     GaitManagerConfig,
-    ObservationManager as CommonObservationManager,
-    ObsManagerConfig as CommonObsManagerConfig,
+    ObservationManager,
     RewardManager,
-    RewardManagerConfig,
-    TerminationConfig,
     TerminationManager,
     gait_config_to_manager_config,
 )
@@ -22,37 +18,23 @@ from .registry import ManagerRegistry
 # Per-sim managers each ``import`` a heavyweight simulator package at module
 # load (Genesis → ``genesis``, Newton → ``warp`` + ``newton``,
 # MuJoCo → ``mjlab``), so they are exposed lazily via ``__getattr__`` — a
-# process that runs one simulator no longer pays the import cost of the others.
-# Genesis is also the historical default, so the un-prefixed aliases
-# (``ActionManager`` etc.) resolve to the Genesis managers.
+# process that runs one simulator does not pay the import cost of the others.
+# The Genesis package names its managers without a prefix, so they are
+# exported here under a ``Genesis`` prefix.
 _GENESIS_NAMES: dict[str, str] = {
     "GenesisActionManager": "ActionManager",
     "GenesisActionManagerConfig": "ActionManagerConfig",
     "GenesisContactManager": "ContactManager",
-    "GenesisObservationManager": "ObservationManager",
-    "GenesisObsManagerConfig": "ObsManagerConfig",
     "GenesisSceneManager": "SceneManager",
     "GenesisSceneManagerConfig": "SceneManagerConfig",
     "GenesisVisualizationManager": "VisualizationManager",
     "GenesisVisualizationManagerConfig": "VisualizationManagerConfig",
-    # Backward-compatibility aliases (Genesis as default)
-    "ActionManager": "ActionManager",
-    "ActionManagerConfig": "ActionManagerConfig",
-    "ContactManager": "ContactManager",
-    "ObservationManager": "ObservationManager",
-    "ObsManagerConfig": "ObsManagerConfig",
-    "SceneManager": "SceneManager",
-    "SceneManagerConfig": "SceneManagerConfig",
-    "VisualizationManager": "VisualizationManager",
-    "VisualizationManagerConfig": "VisualizationManagerConfig",
 }
 _NEWTON_NAMES = {
     "NewtonSceneManager",
     "NewtonSceneManagerConfig",
     "NewtonActionManager",
     "NewtonActionManagerConfig",
-    "NewtonObservationManager",
-    "NewtonObsManagerConfig",
     "NewtonContactManager",
 }
 _MUJOCO_NAMES = {
@@ -88,21 +70,15 @@ __all__ = [
     "CommandManager",
     "CommandManagerConfig",
     "RewardManager",
-    "RewardManagerConfig",
     "TerminationManager",
-    "TerminationConfig",
     "EventManager",
-    "EventManagerConfig",
     "GaitManager",
     "GaitManagerConfig",
     "gait_config_to_manager_config",
-    "CommonObservationManager",
-    "CommonObsManagerConfig",
+    "ObservationManager",
     # Genesis (with prefix)
     "GenesisActionManager",
     "GenesisActionManagerConfig",
-    "GenesisObservationManager",
-    "GenesisObsManagerConfig",
     "GenesisSceneManager",
     "GenesisSceneManagerConfig",
     "GenesisContactManager",
@@ -113,8 +89,6 @@ __all__ = [
     "NewtonSceneManagerConfig",
     "NewtonActionManager",
     "NewtonActionManagerConfig",
-    "NewtonObservationManager",
-    "NewtonObsManagerConfig",
     "NewtonContactManager",
     # MuJoCo/mjlab (lazy loaded)
     "MujocoSceneManager",
@@ -122,14 +96,4 @@ __all__ = [
     "MujocoActionManager",
     "MujocoActionManagerConfig",
     "MujocoContactManager",
-    # Backward compatibility
-    "ActionManager",
-    "ActionManagerConfig",
-    "ObservationManager",
-    "ObsManagerConfig",
-    "SceneManager",
-    "SceneManagerConfig",
-    "ContactManager",
-    "VisualizationManager",
-    "VisualizationManagerConfig",
 ]

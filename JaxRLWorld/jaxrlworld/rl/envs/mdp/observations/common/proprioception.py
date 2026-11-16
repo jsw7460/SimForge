@@ -61,15 +61,11 @@ def projected_gravity(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR)
 def base_quat(env: World, asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR) -> torch.Tensor:
     """Base quaternion in world frame, **wxyz** convention.
 
+    Newton's native xyzw order is converted to wxyz by ``RobotData``, so
+    every backend returns the same convention.
+
     Returns:
         Tensor of shape (num_envs, 4).
-
-    Note:
-        The legacy ``observations.newton.state.base_quat`` returned the
-        Newton-native **xyzw** order. Migrating to this common helper
-        normalizes Newton onto the wxyz convention shared by Genesis,
-        mjlab, and the ``RobotData`` protocol — old Newton checkpoints
-        whose critic obs included ``base_quat`` will need to retrain.
     """
     return env.get_entity_data(asset_cfg.name).root_link_quat_w
 
@@ -354,12 +350,6 @@ def all_commands(env: World) -> torch.Tensor:
     return env.command_manager.get_commands_tensor()
 
 
-# Short alias kept for the historical name used by every preset that
-# previously imported `command` from `genesis.exteroception` (which was
-# misplaced — it was sim-agnostic from day one).
-command = all_commands
-
-
 # ── Contact-based observations ───────────────────────────────────────
 
 
@@ -381,8 +371,7 @@ def foot_air_time(
             foot ordering. Pass as **tuple** for cache hashability.
         use_last: If True, return the last completed air-time interval
             (frozen at landing) instead of the live current air-time
-            counter. The legacy Newton presets used the "last" variant;
-            new code should prefer ``False`` (the current counter).
+            counter. ``False`` (the current counter) is the default.
 
     Returns:
         Tensor of shape ``(num_envs, num_feet)``.

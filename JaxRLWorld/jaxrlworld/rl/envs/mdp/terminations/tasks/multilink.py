@@ -24,7 +24,7 @@ def end_effector_below_ground(
     ``asset_cfg.body_names`` selects the link(s) to check; an environment
     terminates if **any** selected link's z drops below ``z_threshold``.
     If the selector specifies no ``body_names`` the entity's last link is
-    used (legacy default).
+    used.
 
     Args:
         env: The environment.

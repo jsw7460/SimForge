@@ -264,7 +264,7 @@ def _protocol_sweep(env, name: str, results: dict, measured: dict, tag: str) -> 
     * root reads == the named body's reads for a single-link entity,
     * CoM reads == link-origin reads for a box whose inertial origin is its
       geometric centre,
-    * the four addressing routes (``*_all`` / by-name / by-id / single-index)
+    * the three addressing routes (``*_all`` / by-name / by-id)
       returning the same numbers.
 
     Results are keyed ``<tag>_*`` so the free cube in flight and the welded
@@ -387,19 +387,17 @@ def _protocol_sweep(env, name: str, results: dict, measured: dict, tag: str) -> 
     print(f"[{tag}] body[{idx}] quat vs root quat: angular error = {quat_err:.3e} rad")
     results[f"{tag}_named_body_matches_root"] = max(gaps.values()) < ROT_TOL and quat_err < 1e-3
 
-    # ── the four addressing routes must agree ────────────────────────────
+    # ── the three addressing routes must agree ───────────────────────────
     ids = torch.tensor([idx], device=env.device, dtype=torch.long)
     by_name_pos = d.body_pos_w([name])
     by_ids_pos = d.body_pos_w_by_ids(ids)
     by_name_vel = d.body_lin_vel_w([name])
     by_ids_vel = d.body_lin_vel_w_by_ids(ids)
-    single_ang = d.body_ang_vel_w(idx)
     route_gaps = {
         "body_pos_w(names)": _gap(by_name_pos[:, 0, :], bpos[:, idx, :]),
         "body_pos_w_by_ids": _gap(by_ids_pos[:, 0, :], bpos[:, idx, :]),
         "body_lin_vel_w(names)": _gap(by_name_vel[:, 0, :], blin[:, idx, :]),
         "body_lin_vel_w_by_ids": _gap(by_ids_vel[:, 0, :], blin[:, idx, :]),
-        "body_ang_vel_w(index)": _gap(single_ang.reshape(n, 3), bang[:, idx, :]),
     }
     for k, v in route_gaps.items():
         print(f"[{tag}] {k:<24} vs *_all: {v:.3e}")

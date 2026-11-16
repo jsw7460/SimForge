@@ -41,8 +41,3 @@ class ActionManager(ActionManagerBase):
         entity = self._genesis_env.scene_manager.entities[entity_name]
         dofs = self._genesis_env.dof_selection(entity_name)
         entity.control_dofs_force(dofs.to_sim_order(torques), dofs.dofs)
-
-    @property
-    def actuated_dof_ids(self):
-        """DOF indices (alias for indexing.sim_indices)."""
-        return self._indexing.sim_indices

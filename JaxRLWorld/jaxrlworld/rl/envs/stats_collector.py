@@ -347,28 +347,6 @@ class EpisodeStatsCollector:
             "reward_stats": self.get_all_reward_stats(),
         }
 
-    # ==================== Legacy API ====================
-
-    def get_current_returns(self, dones: torch.Tensor | None = None) -> torch.Tensor:
-        if dones is not None and torch.any(dones):
-            return self.episode_returns[dones]
-        return self.episode_returns
-
-    def get_returns_buffer(self) -> deque:
-        self._drain_to_host()
-        return self.return_history
-
-    def get_length_buffer(self) -> deque:
-        self._drain_to_host()
-        return self.episode_length_history
-
-    def get_returns_buffer_per_type(self) -> dict[str, deque]:
-        self._drain_to_host()
-        return dict(self.return_history_per_type)
-
-    def get_reward_stats_per_type(self) -> dict[str, dict[str, float]]:
-        return self.get_all_reward_stats()
-
     def snapshot(self) -> "EpisodeStats":
         """Create a typed EpisodeStats snapshot of current statistics."""
         from jaxrlworld.rl.runners.iteration_data import EpisodeStats

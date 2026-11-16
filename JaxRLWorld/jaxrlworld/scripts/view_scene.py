@@ -157,8 +157,8 @@ def _add_action_sliders(viewer, policy: FixedAction, env) -> None:
                 term._offset,
             )
     else:
-        # Legacy path: the whole action vector is the driven robot's joints,
-        # and the manager owns the scale/offset directly.
+        # No action terms: the whole action vector is the driven robot's
+        # joints, and the manager owns the scale/offset directly.
         names = list(manager.actuated_joint_names)
         _group(
             f"actions ({env.robot_entity_name})",

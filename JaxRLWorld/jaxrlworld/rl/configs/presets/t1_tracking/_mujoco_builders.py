@@ -42,11 +42,11 @@ from jaxrlworld.rl.envs.mdp.observations.common.motion_tracking import (
     robot_body_pos_b,
 )
 from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
+    all_commands as command_obs,
     base_ang_vel,
     base_height,
     base_lin_vel,
     base_quat,
-    command as command_obs,
     dof_pos,
     dof_pos_nominal_difference,
     dof_vel,

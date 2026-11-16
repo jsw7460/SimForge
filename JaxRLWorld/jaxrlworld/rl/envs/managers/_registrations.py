@@ -11,6 +11,7 @@ through :class:`~jaxrlworld.rl.envs.backends.BackendSpec`.
 
 from __future__ import annotations
 
+from jaxrlworld.rl.configs.common_config_classes import EventConfig, RewardConfig
 from jaxrlworld.rl.envs.backends import BUILTIN_SIM_TYPES, get_backend
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 
@@ -21,28 +22,24 @@ def _register_common(*extra_sim_types: str) -> None:
         CommandManager,
         CommandManagerConfig,
         EventManager,
-        EventManagerConfig,
         RewardManager,
-        RewardManagerConfig,
-        TerminationConfig,
         TerminationManager,
     )
 
     for sim_type in (*BUILTIN_SIM_TYPES, *extra_sim_types):
         ManagerRegistry.register(sim_type, "command", CommandManager, CommandManagerConfig)
-        ManagerRegistry.register(sim_type, "reward", RewardManager, RewardManagerConfig)
-        ManagerRegistry.register(sim_type, "termination", TerminationManager, TerminationConfig)
-        ManagerRegistry.register(sim_type, "event", EventManager, EventManagerConfig)
+        ManagerRegistry.register(sim_type, "reward", RewardManager, RewardConfig)
+        ManagerRegistry.register(sim_type, "termination", TerminationManager)
+        ManagerRegistry.register(sim_type, "event", EventManager, EventConfig)
 
 
 def _register_genesis() -> None:
     """Register Genesis-specific managers."""
+    from jaxrlworld.rl.envs.managers.common import ObservationManager
     from jaxrlworld.rl.envs.managers.genesis import (
         ActionManager,
         ActionManagerConfig,
         ContactManager,
-        ObservationManager,
-        ObsManagerConfig,
         SceneManager,
         SceneManagerConfig,
         VisualizationManager,
@@ -52,7 +49,7 @@ def _register_genesis() -> None:
 
     ManagerRegistry.register("genesis", "scene", SceneManager, SceneManagerConfig)
     ManagerRegistry.register("genesis", "action", ActionManager, ActionManagerConfig)
-    ManagerRegistry.register("genesis", "observation", ObservationManager, ObsManagerConfig)
+    ManagerRegistry.register("genesis", "observation", ObservationManager)
     ManagerRegistry.register("genesis", "contact", ContactManager)
     ManagerRegistry.register("genesis", "visualization", VisualizationManager, VisualizationManagerConfig)
     ManagerRegistry.register("genesis", "terrain", GenesisTerrainImporter)
@@ -60,12 +57,11 @@ def _register_genesis() -> None:
 
 def _register_newton() -> None:
     """Register Newton-specific managers (lazy — imports warp)."""
+    from jaxrlworld.rl.envs.managers.common import ObservationManager
     from jaxrlworld.rl.envs.managers.newton import (
         NewtonActionManager,
         NewtonActionManagerConfig,
         NewtonContactManager,
-        NewtonObservationManager,
-        NewtonObsManagerConfig,
         NewtonSceneManager,
         NewtonSceneManagerConfig,
         NewtonVisualizationManager,
@@ -75,7 +71,7 @@ def _register_newton() -> None:
 
     ManagerRegistry.register("newton", "scene", NewtonSceneManager, NewtonSceneManagerConfig)
     ManagerRegistry.register("newton", "action", NewtonActionManager, NewtonActionManagerConfig)
-    ManagerRegistry.register("newton", "observation", NewtonObservationManager, NewtonObsManagerConfig)
+    ManagerRegistry.register("newton", "observation", ObservationManager)
     ManagerRegistry.register("newton", "contact", NewtonContactManager)
     ManagerRegistry.register("newton", "visualization", NewtonVisualizationManager, NewtonVisualizationManagerConfig)
     ManagerRegistry.register("newton", "terrain", NewtonTerrainImporter)
@@ -83,10 +79,7 @@ def _register_newton() -> None:
 
 def _register_mujoco() -> None:
     """Register MuJoCo/mjlab-specific managers (lazy — imports mjlab)."""
-    from jaxrlworld.rl.envs.managers.common import (
-        ObservationManager,
-        ObsManagerConfig,
-    )
+    from jaxrlworld.rl.envs.managers.common import ObservationManager
     from jaxrlworld.rl.envs.managers.mujoco import (
         MujocoActionManager,
         MujocoActionManagerConfig,
@@ -98,7 +91,7 @@ def _register_mujoco() -> None:
 
     ManagerRegistry.register("mujoco", "scene", MujocoSceneManager, MujocoSceneManagerConfig)
     ManagerRegistry.register("mujoco", "action", MujocoActionManager, MujocoActionManagerConfig)
-    ManagerRegistry.register("mujoco", "observation", ObservationManager, ObsManagerConfig)
+    ManagerRegistry.register("mujoco", "observation", ObservationManager)
     ManagerRegistry.register("mujoco", "contact", MujocoContactManager)
     ManagerRegistry.register("mujoco", "terrain", MujocoTerrainImporter)
 

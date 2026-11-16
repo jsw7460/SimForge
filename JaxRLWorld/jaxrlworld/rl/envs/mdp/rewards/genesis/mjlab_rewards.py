@@ -167,10 +167,8 @@ def flat_orientation_mjlab(
 class variable_posture:
     """Thin wrapper around ``common.VariablePostureTracker``.
 
-    Bit-identical to the legacy Genesis implementation. The legacy code
-    read ``env.act_manager._actuated_joint_names`` (private name), but
-    the public ``actuated_joint_names`` property exposes the same list
-    so we use that here.
+    Joint names come from ``env.act_manager.actuated_joint_names``,
+    current positions from ``env.robot_data.joint_pos``.
     """
 
     __name__ = "variable_posture"
@@ -421,8 +419,7 @@ def soft_landing_mjlab(
 ) -> torch.Tensor:
     """Thin redirect to ``common.penalize_soft_landing``.
 
-    Bit-identical: legacy code summed forces over the natural group
-    order; the common helper does the same when ``contact_order=None``.
+    Sums forces over the natural group order (``contact_order=None``).
     """
     return penalize_soft_landing(
         env,

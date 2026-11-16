@@ -204,15 +204,14 @@ def build_observation(cfg: T1GetupConfig) -> NewtonObservationConfig:
 def build_action(cfg: T1GetupConfig) -> NewtonActionConfig:
     """Settle-relative joint position action (mjlab_playground T1 getup).
 
-    Uses the new ActionTerm system: a single
-    :class:`SettleRelativeJointPositionAction` spanning every
+    A single :class:`SettleRelativeJointPositionAction` term spans every
     actuated joint. Target = ``current_joint_pos + raw * scale``,
     with a forced hold at ``current_joint_pos`` for the first
     ``settle_steps`` control steps after each reset. This mirrors
     mjlab_playground's ``SettleRelativeJointPositionActionCfg`` used
-    for fall-recovery tasks. Legacy ``scale``/``clip``/``offset``
-    fields are intentionally left at their defaults because
-    ``action_terms`` takes precedence once non-empty.
+    for fall-recovery tasks. The config-level ``scale``/``clip``/``offset``
+    fields stay at their defaults because ``action_terms`` takes
+    precedence once non-empty.
     """
     from jaxrlworld.rl.envs.mdp.actions import (
         SettleRelativeJointPositionAction,

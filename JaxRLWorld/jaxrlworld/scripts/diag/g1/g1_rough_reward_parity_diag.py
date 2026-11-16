@@ -168,14 +168,8 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int) -> dict:
         for name, t in iter_terms(cfgs.reward, RewardTermConfig).items()
     }
     if sim == "mujoco":
-        sim_cfg = cfgs.scene.mjlab_sim_cfg
-        if sim_cfg is None:
-            wiring["solver"] = "mjlab defaults (mjlab_sim_cfg=None)"
-        else:
-            mj_cfg = sim_cfg.mujoco
-            wiring["solver"] = (
-                f"iterations={mj_cfg.iterations} cone={mj_cfg.cone} impratio={mj_cfg.impratio} integrator={mj_cfg.integrator}"
-            )
+        sc = cfgs.scene
+        wiring["solver"] = f"iterations={sc.solver_iterations} cone={sc.cone} impratio={sc.impratio}"
     elif sim == "newton":
         nt = cfgs.scene.solver_cfg
         wiring["solver"] = (

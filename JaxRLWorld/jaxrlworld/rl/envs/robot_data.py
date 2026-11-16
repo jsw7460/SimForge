@@ -156,18 +156,6 @@ class RigidObjectData(Protocol):
         """
         ...
 
-    def body_ang_vel_w(self, body_index: int) -> Tensor:
-        """World-frame angular velocity of a single body.
-
-        Args:
-            body_index: Index returned by :meth:`find_body_index`.
-
-        Returns:
-            Tensor of shape ``(num_envs, 3)`` — angular velocity in
-            world frame, x/y/z order.
-        """
-        ...
-
     # ── Batched per-body reads (all bodies at once) ──────────────────
     #
     # These return data for *all* bodies in the entity's body list,

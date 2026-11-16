@@ -32,9 +32,9 @@ def dof_pos(env: NewtonEnv) -> torch.Tensor:
     Returns:
         Tensor of shape [num_envs, num_actions]
     """
-    accessor = env.scene_manager.robot_state
+    accessor = env.scene_manager.robot_data
     dof_q = accessor.dof_positions(env.scene_manager.state)
-    return dof_q[:, env.act_manager.actuated_q_indices]
+    return dof_q[:, env.act_manager.indexing.newton_q_indices]
 
 
 @joint_indexed
@@ -60,9 +60,9 @@ def dof_vel(env: NewtonEnv) -> torch.Tensor:
     Returns:
         Tensor of shape [num_envs, num_actions]
     """
-    accessor = env.scene_manager.robot_state
+    accessor = env.scene_manager.robot_data
     dof_qd = accessor.dof_velocities(env.scene_manager.state)
-    return dof_qd[:, env.act_manager.actuated_qd_indices]
+    return dof_qd[:, env.act_manager.indexing.newton_qd_indices]
 
 
 @joint_indexed

@@ -44,8 +44,3 @@ class MujocoActionManager(ActionManagerBase):
     def _apply_force(self, torques, entity_name):
         entity = self.env.scene_manager.entities[entity_name]
         entity.set_joint_effort_target(torques, joint_ids=self._sim_indices(entity_name))
-
-    # -- Backward compat --
-    @property
-    def _joint_ids(self):
-        return self._indexing.sim_indices

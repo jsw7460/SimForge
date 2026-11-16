@@ -128,18 +128,6 @@ class MujocoSceneConfig(BaseConfig):
     preset_class_name: str | None = None
     preset_module_path: str | None = None
 
-    # Legacy — will be removed. Use entities/sensors/solver fields instead.
-    mjlab_scene_cfg: Any = None
-    mjlab_sim_cfg: Any = None
-    unified_entities: Any = None
-
-    def recursive_to_dict(self) -> Dict:
-        result = super().recursive_to_dict()
-        result.pop("mjlab_scene_cfg", None)
-        result.pop("mjlab_sim_cfg", None)
-        result.pop("unified_entities", None)
-        return result
-
     def require_solver_fields(self) -> None:
         """Raise unless every cross-backend contact-solver field is set.
 

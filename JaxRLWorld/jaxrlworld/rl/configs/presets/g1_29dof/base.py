@@ -241,10 +241,6 @@ class G1FlatConfig:
                 kwargs[f.name] = value
         return kwargs
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Backward-compatible dict output."""
-        return self.build().recursive_to_dict()
-
     def make_terrain_cfg(self) -> TerrainCfg:
         """Build the scene ``terrain_cfg`` (flat or rough).
 

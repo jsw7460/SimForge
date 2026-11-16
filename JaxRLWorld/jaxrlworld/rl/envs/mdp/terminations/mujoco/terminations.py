@@ -122,7 +122,7 @@ def joint_limit_violation(
         TerminationResult for joint limit violation.
     """
     robot_data = env.scene_manager.robot.data
-    joint_ids = env.act_manager._joint_ids
+    joint_ids = env.act_manager.indexing.sim_indices
 
     soft_limits = robot_data.soft_joint_pos_limits
     if soft_limits is None:

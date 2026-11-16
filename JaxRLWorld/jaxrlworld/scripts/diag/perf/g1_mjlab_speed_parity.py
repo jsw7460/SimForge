@@ -46,22 +46,17 @@ class G1FlatMjlabSpeedParityConfig(G1FlatConfig):
     """G1 flat mujoco with Mjlab-Velocity-Flat-Unitree-G1's physics knobs."""
 
     def build(self):
-        from mjlab.sim.sim import MujocoCfg, SimulationCfg
-
         cfgs = super().build()
         sc = cfgs.scene
-        # Verbatim Mjlab-Velocity-Flat-Unitree-G1 SimulationCfg, used by the
-        # scene manager as-is.
-        sc.mjlab_sim_cfg = SimulationCfg(
-            nconmax=None,
-            njmax=300,
-            mujoco=MujocoCfg(
-                timestep=0.005,
-                iterations=10,
-                ls_iterations=20,
-            ),
-            contact_sensor_maxmatch=64,
-        )
+        # Mjlab-Velocity-Flat-Unitree-G1's SimulationCfg (timestep 0.005,
+        # iterations 10, ls_iterations 20, njmax 300, nconmax None,
+        # contact_sensor_maxmatch 64, MujocoCfg defaults otherwise). The
+        # preset already matches all of it except the solver iterations.
+        assert sc.physics_dt / sc.substeps == 0.005 and sc.njmax == 300 and sc.nconmax is None
+        assert (sc.impratio, sc.cone, sc.ccd_iterations, sc.disableflags) == (1.0, "pyramidal", 50, ())
+        assert sc.contact_sensor_maxmatch == 64
+        sc.solver_iterations = 10
+        sc.solver_ls_iterations = 20
 
         # Match mjlab's self_collision sensor shape: one subtree-vs-subtree
         # pair (2 mj sensors). Our preset's per-link body match expands to
