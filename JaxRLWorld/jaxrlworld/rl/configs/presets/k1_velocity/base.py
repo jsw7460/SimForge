@@ -315,8 +315,10 @@ class K1VelocityConfig:
     # over 3000 iterations at 5.0).
     amp_w_standing_pose_l1: float = 0.5
     # Reference clips: the LAFAN1 locomotion set retargeted to the K1, converted
-    # at the control rate by ``scripts/k1/convert_lafan_k1.py``.
-    amp_motion_dir: str = str(Path(__file__).resolve().parents[4] / "assets" / "motions" / "lafan1_k1")
+    # at the control rate by ``scripts/k1/convert_lafan_k1.py``. Relative to the
+    # SimForge root (the working directory every entry point runs from), like
+    # the robot's asset paths, so a saved config rebuilds on any machine.
+    amp_motion_dir: str = "./JaxRLWorld/jaxrlworld/assets/motions/lafan1_k1"
 
     # ── Training ─────────────────────────────────────────────────────
     algorithm_name: str = "PPO"
