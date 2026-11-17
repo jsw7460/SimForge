@@ -27,7 +27,7 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, Dict
 
 from jaxrlworld.rl.configs import ConfigsForRun
@@ -75,11 +75,11 @@ _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
 def _get_sim_builders(sim_type: str):
     """Lazy-import the simulator-specific builders module."""
     if sim_type == "newton":
-        from . import _newton_builders as mod
+        from . import _newton_builders as mod  # local-import: backend (newton builders), only on the newton path
     elif sim_type == "genesis":
-        from . import _genesis_builders as mod
+        from . import _genesis_builders as mod  # local-import: backend (genesis builders), only on the genesis path
     elif sim_type == "mujoco":
-        from . import _mujoco_builders as mod
+        from . import _mujoco_builders as mod  # local-import: backend (mujoco builders), only on the mujoco path
     else:
         raise ValueError(f"Unknown sim_type: {sim_type!r}. Expected one of {sorted(_SIM_TIMINGS)}.")
     return mod
@@ -226,8 +226,6 @@ class T1GetupConfig:
         return cfgs
 
     def _get_preset_kwargs(self) -> Dict[str, Any]:
-        from dataclasses import MISSING, fields
-
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":

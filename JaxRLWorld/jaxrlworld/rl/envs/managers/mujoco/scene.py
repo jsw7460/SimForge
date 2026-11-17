@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
+import mujoco
 import torch
 
+from jaxrlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from jaxrlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from jaxrlworld.rl.configs.scene.terrain_config import TerrainCfg
 from jaxrlworld.rl.configs.scene.unified_entity_config import (
@@ -13,11 +15,13 @@ from jaxrlworld.rl.configs.scene.unified_entity_config import (
 )
 from jaxrlworld.rl.configs.sensors import ContactSensorCfg
 from jaxrlworld.rl.configs.sensors.camera_sensor_config import CameraSensorCfg, resolve_mjcf_geom_groups
+from jaxrlworld.rl.envs.indexing import ArticulationIndexing
 from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from jaxrlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from jaxrlworld.rl.envs.managers.common.visual_mesh import extract_visual_meshes_from_mj_model
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.utils.resolve import resolve_callable
 
 if TYPE_CHECKING:
     from mjlab.entity import Entity
@@ -42,8 +46,6 @@ def _canonical_joint_order_mujoco(mj_model, body_prefix: str | None = None) -> l
     an unrestricted walk — and a caller filtering by name then cannot tell
     which arm a joint belongs to, silently mapping both to the first one.
     """
-    import mujoco
-
     n = mj_model.nbody
     raw_body_names = [mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, i) or "" for i in range(n)]
 
@@ -109,7 +111,10 @@ def _to_mjlab_sensor_cfg(cfg: Any, root_body_of: Callable[[str], str]) -> Any:
     """
     if not isinstance(cfg, ContactSensorCfg):
         return cfg
-    from mjlab.sensor import ContactMatch as MjContactMatch, ContactSensorCfg as MjContactSensorCfg
+    from mjlab.sensor import (  # local-import: backend (mjlab), only on the mujoco path
+        ContactMatch as MjContactMatch,
+        ContactSensorCfg as MjContactSensorCfg,
+    )
 
     def _match(m):
         if m is None:
@@ -153,13 +158,10 @@ def _rigid_object_spec_fn(source_path: str, floating: bool):
     mjlab's ``EntityCfg.spec_fn`` expects). When ``floating`` is True a free
     joint is added to the single root body so the object is a 6-DOF floating
     base (box / ball / mug); when False the body stays welded to the world
-    (table / wall). ``mujoco`` is imported lazily — this module loads without
-    mjlab/mujoco installed (see ``_canonical_joint_order_mujoco``).
+    (table / wall).
     """
 
     def spec_fn():
-        import mujoco
-
         spec = mujoco.MjSpec.from_file(source_path)
         if floating:
             spec.worldbody.bodies[0].add_freejoint()
@@ -378,7 +380,9 @@ class MujocoSceneManager(BaseManager):
         asset keeps defining the placement and the intrinsics. The
         by-hand path is expressed as a parented camera instead.
         """
-        from mjlab.sensor import CameraSensorCfg as MjCameraSensorCfg
+        from mjlab.sensor import (
+            CameraSensorCfg as MjCameraSensorCfg,  # local-import: backend (mjlab), only on the mujoco path
+        )
 
         entity = cfg.entity_name
         entity_cfg = self.config.entities[entity]
@@ -447,9 +451,16 @@ class MujocoSceneManager(BaseManager):
         Constructs mjlab SceneCfg and SimulationCfg internally from the
         jaxrlworld config fields.  No mjlab imports needed at config level.
         """
-        from mjlab.scene import Scene, SceneCfg
-        from mjlab.sim import MujocoCfg, Simulation, SimulationCfg
-        from mjlab.terrains import TerrainEntityCfg
+        from mjlab.scene import (  # local-import: backend (mjlab), only on the mujoco path
+            Scene,
+            SceneCfg,
+        )
+        from mjlab.sim import (  # local-import: backend (mjlab), only on the mujoco path
+            MujocoCfg,
+            Simulation,
+            SimulationCfg,
+        )
+        from mjlab.terrains import TerrainEntityCfg  # local-import: backend (mjlab), only on the mujoco path
 
         # Terrain importer (constructed in __init__) decides between
         # mjlab's built-in plane and a spec_fn that injects our generated
@@ -542,13 +553,14 @@ class MujocoSceneManager(BaseManager):
           ImplicitActuatorCfg → BuiltinPositionActuatorCfg (simulator PD)
           Any other type      → BuiltinMotorActuatorCfg (direct torque)
         """
-        from mjlab.actuator.builtin_actuator import (
+        from mjlab.actuator.builtin_actuator import (  # local-import: backend (mjlab), only on the mujoco path
             BuiltinMotorActuatorCfg,
             BuiltinPositionActuatorCfg,
         )
-        from mjlab.entity import EntityArticulationInfoCfg, EntityCfg as MjlabEntityCfg
-
-        from jaxrlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
+        from mjlab.entity import (  # local-import: backend (mjlab), only on the mujoco path
+            EntityArticulationInfoCfg,
+            EntityCfg as MjlabEntityCfg,
+        )
 
         for entity_name, cfg in self.config.entities.items():
             if not isinstance(cfg, MujocoEntityCfg):
@@ -643,8 +655,6 @@ class MujocoSceneManager(BaseManager):
             )
             spec_fn = cfg.spec_fn
             if isinstance(spec_fn, str):
-                from jaxrlworld.rl.utils.resolve import resolve_callable
-
                 spec_fn = resolve_callable(spec_fn)
             if not cfg.enable_self_collisions:
                 spec_fn = _spec_fn_without_self_collisions(spec_fn)
@@ -669,7 +679,7 @@ class MujocoSceneManager(BaseManager):
         properties partition the registry and the env routes it to a
         RigidObjectData (root-only) reader.
         """
-        from mjlab.entity import EntityCfg as MjlabEntityCfg
+        from mjlab.entity import EntityCfg as MjlabEntityCfg  # local-import: backend (mjlab), only on the mujoco path
 
         for object_name, cfg in self.config.rigid_objects.items():
             source_path = cfg.mjcf_path or cfg.urdf_path
@@ -735,8 +745,6 @@ class MujocoSceneManager(BaseManager):
         Returns:
             ArticulationIndexing with canonical ↔ simulator mappings.
         """
-        from jaxrlworld.rl.envs.indexing import ArticulationIndexing
-
         entity = self._scene[entity_name]
         all_entity_joint_names = list(entity.joint_names)
         # Scoped to this entity's own subtree — mjlab attaches it under

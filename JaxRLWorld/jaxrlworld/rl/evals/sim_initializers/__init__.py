@@ -248,23 +248,23 @@ def detect_sim_type(metadata: dict) -> str:
 def get_initializer(sim_type: str) -> SimInitializer:
     """Lazy-import factory: return the appropriate SimInitializer subclass."""
     if sim_type == "Genesis":
-        from .genesis import GenesisInitializer
+        from .genesis import GenesisInitializer  # local-import: backend (genesis), only on the Genesis path
 
         return GenesisInitializer()
     elif sim_type == "Newton":
-        from .newton import NewtonInitializer
+        from .newton import NewtonInitializer  # local-import: backend (newton, warp), only on the Newton path
 
         return NewtonInitializer()
     elif sim_type == "MujocoEnv":
-        from .mjlab import MujocoInitializer
+        from .mjlab import MujocoInitializer  # local-import: circular (sim_initializers <-> sim_initializers.mjlab)
 
         return MujocoInitializer()
     elif sim_type == "ManiSkill":
-        from .maniskill import ManiSkillInitializer
+        from .maniskill import ManiSkillInitializer  # local-import: optional (mani_skill, not a dependency)
 
         return ManiSkillInitializer()
     elif sim_type == "Gymnasium":
-        from .gymnasium import GymnasiumInitializer
+        from .gymnasium import GymnasiumInitializer  # local-import: backend (genesis), only on the Gymnasium path
 
         return GymnasiumInitializer()
     backend = find_backend_by_eval_key(sim_type)

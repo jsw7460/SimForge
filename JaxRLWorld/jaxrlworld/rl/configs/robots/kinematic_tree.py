@@ -1,11 +1,7 @@
 import xml.etree.ElementTree as ET
-from typing import TYPE_CHECKING
 
+import jax.numpy as jnp
 import mujoco
-
-if TYPE_CHECKING:
-    import jax.numpy as jnp
-
 
 __all__ = ["KinematicTree"]
 
@@ -375,8 +371,6 @@ class KinematicTree:
         """Get bidirectional adjacency matrix as JAX array (cached)."""
         if self._adjacency_cache is not None:
             return self._adjacency_cache
-
-        import jax.numpy as jnp
 
         num_bodies = self.num_bodies
         adjacency = jnp.zeros((num_bodies, num_bodies), dtype=jnp.float32)

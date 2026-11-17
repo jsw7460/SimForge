@@ -16,6 +16,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
+import wandb
 
 from jaxrlworld.rl.algorithms.tdmpc2 import TDMPC2
 from jaxrlworld.rl.configs import ConfigsForRun
@@ -24,6 +25,7 @@ from jaxrlworld.rl.modules.policies.tdmpc2_world_model import TDMPC2WorldModel
 from jaxrlworld.rl.modules.utils import count_parameters, print_model_summary
 from jaxrlworld.rl.runners.base_runner import BaseRunner
 from jaxrlworld.rl.runners.iteration_data import IterationData
+from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_config_from_checkpoint
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 
 
@@ -170,8 +172,6 @@ class ModelBasedRunner(BaseRunner):
 
     def _log_model_parameters(self) -> None:
         """Log model parameters to wandb."""
-        import wandb
-
         total = count_parameters(self.world_model)
         wandb.summary["model/total_parameters"] = total
 
@@ -503,13 +503,9 @@ class ModelBasedRunner(BaseRunner):
         use_wandb: bool = True,
     ) -> "ModelBasedRunner":
         """Load runner from checkpoint."""
-        from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata
-
         metadata = load_checkpoint_metadata(checkpoint_path)
 
         if cfgs is None:
-            from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
             cfgs = load_config_from_checkpoint(metadata)
         if env is None:
             env = cls._create_env_from_config(cfgs)

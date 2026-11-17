@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Union
 import jax
 import jax.numpy as jnp
 import torch
+import wandb
 
 from jaxrlworld.rl.algorithms import SAC, TD3, FastTD3
 from jaxrlworld.rl.algorithms.base import ActInput
@@ -16,6 +17,7 @@ from jaxrlworld.rl.modules.policies.td3_ac import TD3ActorCritic
 from jaxrlworld.rl.modules.utils import count_parameters, print_model_summary
 from jaxrlworld.rl.runners.base_runner import BaseRunner
 from jaxrlworld.rl.runners.iteration_data import EpisodeStats, IterationData
+from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_config_from_checkpoint
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax, torch_to_jax_many
 
 
@@ -130,8 +132,6 @@ class OffPolicyRunner(BaseRunner):
 
     def _log_model_parameters(self) -> None:
         """Log model parameters to wandb."""
-        import wandb
-
         actor_params = count_parameters(self.actor_critic.actor)
         critic1_params = count_parameters(self.actor_critic.critic1)
         critic2_params = count_parameters(self.actor_critic.critic2)
@@ -541,14 +541,10 @@ class OffPolicyRunner(BaseRunner):
             use_wandb: Whether to use WandB
         """
         # Load metadata (YAML)
-        from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata
-
         metadata = load_checkpoint_metadata(checkpoint_path)
 
         # Use saved config if not provided
         if cfgs is None:
-            from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
             cfgs = load_config_from_checkpoint(metadata)
 
         # Create env if not provided (reuse BaseRunner logic)

@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List
 
+import pytz
 import wandb
 from colorama import Fore, Style, init
 from rich.console import Console, Group
@@ -627,8 +628,6 @@ class WandbLogger:
     ):
         if run_name is None:
             utc_now = datetime.now(timezone.utc)
-            import pytz
-
             central = pytz.timezone("America/Chicago")
             ct_now = utc_now.astimezone(central)
 

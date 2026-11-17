@@ -13,19 +13,19 @@ from __future__ import annotations
 
 from jaxrlworld.rl.configs.common_config_classes import EventConfig, RewardConfig
 from jaxrlworld.rl.envs.backends import BUILTIN_SIM_TYPES, get_backend
+from jaxrlworld.rl.envs.managers.common import (
+    CommandManager,
+    CommandManagerConfig,
+    EventManager,
+    ObservationManager,
+    RewardManager,
+    TerminationManager,
+)
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 
 
 def _register_common(*extra_sim_types: str) -> None:
     """Register simulator-agnostic managers shared by all backends."""
-    from jaxrlworld.rl.envs.managers.common import (
-        CommandManager,
-        CommandManagerConfig,
-        EventManager,
-        RewardManager,
-        TerminationManager,
-    )
-
     for sim_type in (*BUILTIN_SIM_TYPES, *extra_sim_types):
         ManagerRegistry.register(sim_type, "command", CommandManager, CommandManagerConfig)
         ManagerRegistry.register(sim_type, "reward", RewardManager, RewardConfig)
@@ -35,8 +35,7 @@ def _register_common(*extra_sim_types: str) -> None:
 
 def _register_genesis() -> None:
     """Register Genesis-specific managers."""
-    from jaxrlworld.rl.envs.managers.common import ObservationManager
-    from jaxrlworld.rl.envs.managers.genesis import (
+    from jaxrlworld.rl.envs.managers.genesis import (  # local-import: backend (genesis), only on the genesis path
         ActionManager,
         ActionManagerConfig,
         ContactManager,
@@ -45,7 +44,9 @@ def _register_genesis() -> None:
         VisualizationManager,
         VisualizationManagerConfig,
     )
-    from jaxrlworld.rl.envs.managers.genesis.terrain_importer import GenesisTerrainImporter
+    from jaxrlworld.rl.envs.managers.genesis.terrain_importer import (
+        GenesisTerrainImporter,  # local-import: backend (genesis), only on the genesis path
+    )
 
     ManagerRegistry.register("genesis", "scene", SceneManager, SceneManagerConfig)
     ManagerRegistry.register("genesis", "action", ActionManager, ActionManagerConfig)
@@ -57,8 +58,7 @@ def _register_genesis() -> None:
 
 def _register_newton() -> None:
     """Register Newton-specific managers (lazy — imports warp)."""
-    from jaxrlworld.rl.envs.managers.common import ObservationManager
-    from jaxrlworld.rl.envs.managers.newton import (
+    from jaxrlworld.rl.envs.managers.newton import (  # local-import: backend (newton), only on the newton path
         NewtonActionManager,
         NewtonActionManagerConfig,
         NewtonContactManager,
@@ -67,7 +67,9 @@ def _register_newton() -> None:
         NewtonVisualizationManager,
         NewtonVisualizationManagerConfig,
     )
-    from jaxrlworld.rl.envs.managers.newton.terrain_importer import NewtonTerrainImporter
+    from jaxrlworld.rl.envs.managers.newton.terrain_importer import (
+        NewtonTerrainImporter,  # local-import: backend (newton), only on the newton path
+    )
 
     ManagerRegistry.register("newton", "scene", NewtonSceneManager, NewtonSceneManagerConfig)
     ManagerRegistry.register("newton", "action", NewtonActionManager, NewtonActionManagerConfig)
@@ -79,15 +81,16 @@ def _register_newton() -> None:
 
 def _register_mujoco() -> None:
     """Register MuJoCo/mjlab-specific managers (lazy — imports mjlab)."""
-    from jaxrlworld.rl.envs.managers.common import ObservationManager
-    from jaxrlworld.rl.envs.managers.mujoco import (
+    from jaxrlworld.rl.envs.managers.mujoco import (  # local-import: backend (mjlab), only on the mujoco path
         MujocoActionManager,
         MujocoActionManagerConfig,
         MujocoContactManager,
         MujocoSceneManager,
         MujocoSceneManagerConfig,
     )
-    from jaxrlworld.rl.envs.managers.mujoco.terrain_importer import MujocoTerrainImporter
+    from jaxrlworld.rl.envs.managers.mujoco.terrain_importer import (
+        MujocoTerrainImporter,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     ManagerRegistry.register("mujoco", "scene", MujocoSceneManager, MujocoSceneManagerConfig)
     ManagerRegistry.register("mujoco", "action", MujocoActionManager, MujocoActionManagerConfig)

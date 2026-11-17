@@ -64,11 +64,11 @@ _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
 def _get_sim_builders(sim_type: str):
     """Lazy-import the simulator-specific builders module."""
     if sim_type == "newton":
-        from . import _newton_builders as mod
+        from . import _newton_builders as mod  # local-import: backend (newton builders), only on the newton path
     elif sim_type == "genesis":
-        from . import _genesis_builders as mod
+        from . import _genesis_builders as mod  # local-import: backend (genesis builders), only on the genesis path
     elif sim_type == "mujoco":
-        from . import _mujoco_builders as mod
+        from . import _mujoco_builders as mod  # local-import: backend (mujoco builders), only on the mujoco path
     else:
         raise ValueError(f"Unknown sim_type: {sim_type!r}.")
     return mod

@@ -33,6 +33,7 @@ from jaxrlworld.rl.configs.mujoco_config_classes import (
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from jaxrlworld.rl.configs.rewards import RewardTermConfig
+from jaxrlworld.rl.configs.scene import SceneEntitySelector
 from jaxrlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     InitialStateCfg,
@@ -45,6 +46,7 @@ from jaxrlworld.rl.envs.mdp.actions import (
     MotionResidualJointPositionAction,
     MotionResidualJointPositionActionCfg,
 )
+from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from jaxrlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -366,9 +368,6 @@ def build_dr_terms(cfg: G1TrackingConfig) -> Dict[str, EventTermConfig]:
     geom_friction DR is scoped to the foot collision geom names that the
     G1 MJCF defines (``^(left|right)_foot[1-7]_collision$``).
     """
-    from jaxrlworld.rl.configs.scene import SceneEntitySelector
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
-
     return {
         "randomize_body_com": EventTermConfig(
             func=unified_dr.randomize_body_com_offset,

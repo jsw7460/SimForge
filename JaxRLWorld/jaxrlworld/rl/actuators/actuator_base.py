@@ -7,6 +7,8 @@ from collections.abc import Sequence
 
 import torch
 
+from jaxrlworld.rl.utils import string as string_utils
+
 from .actuator_cfg import ActuatorBaseCfg
 
 
@@ -90,12 +92,10 @@ class ActuatorBase(ABC):
 
     def _resolve_per_joint_param(self, value: float | dict[str, float] | None, default: float = 0.0) -> torch.Tensor:
         """Resolve a scalar or per-joint-regex dict into a (num_envs, num_joints) tensor."""
-        from jaxrlworld.rl.utils import string as string_utils
-
         tensor = torch.full((self._num_envs, self._num_joints), default, device=self._device)
         if value is None:
             return tensor
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             tensor[:] = float(value)
             return tensor
         if isinstance(value, dict) and self._joint_names:

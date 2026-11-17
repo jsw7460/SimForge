@@ -16,11 +16,16 @@ from jaxrlworld.rl.configs import (
 )
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.envs.genesis.dof_selection import build_dof_selection
+from jaxrlworld.rl.envs.genesis.robot_data import GenesisRigidObjectData, GenesisRobotData
+from jaxrlworld.rl.envs.genesis.robot_state_writer import GenesisRobotStateWriter
 from jaxrlworld.rl.envs.managers.genesis import VisualizationManager, VisualizationManagerConfig
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 from jaxrlworld.rl.envs.site_frames import resolve_sites
 from jaxrlworld.rl.envs.world import World
 from jaxrlworld.rl.utils import entity_utils as _eu, set_seed
+from jaxrlworld.rl.vis.viser import ViserVisualizationManager
+from jaxrlworld.rl.vis.viser.bridges.genesis_bridge import GenesisBridge
+from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
 
 # The errors Genesis flags for an env whose state the solve corrupted, which
 # the env recovers from by resetting it (``World._solver_error_mask``). The
@@ -248,10 +253,6 @@ class GenesisEnv(World):
         # this env took over (see ``_recover_flagged_envs``).
         self._solver_error = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if self.visualization_cfg.viewer_type == "viser":
-            from jaxrlworld.rl.vis.viser import ViserVisualizationManager
-            from jaxrlworld.rl.vis.viser.bridges import GenesisBridge
-            from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
-
             bridge = GenesisBridge(self.scene_manager)
             viser_cfg = ViserViewerConfig(
                 port=self.visualization_cfg.viser_port,
@@ -298,9 +299,6 @@ class GenesisEnv(World):
         if contact_sensors:
             for sensor_cfg in contact_sensors:
                 self.contact_manager.register_sensor(sensor_cfg)
-
-        from jaxrlworld.rl.envs.genesis.robot_data import GenesisRigidObjectData, GenesisRobotData
-        from jaxrlworld.rl.envs.genesis.robot_state_writer import GenesisRobotStateWriter
 
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}

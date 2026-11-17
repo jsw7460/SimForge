@@ -6,6 +6,16 @@ import genesis as gs
 import numpy as np
 
 from jaxrlworld.rl.envs.managers.base import BaseManager
+from jaxrlworld.rl.vis.overlays import TextHUDConfig, TextHUDOverlay
+from jaxrlworld.rl.vis.overlays.hud_items import (
+    BaseHeightItem,
+    CommandVelItem,
+    DOFPositionItem,
+    EpisodeInfoItem,
+    FeetHeightItem,
+    FeetHeightItemConfig,
+)
+from jaxrlworld.rl.vis.rasterizer_context import CommandArrowConfig, OverlaySettings, inject_into_scene
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import GenesisEnv
@@ -101,12 +111,6 @@ class VisualizationManager(BaseManager):
 
     def inject_custom_context(self) -> None:
         """Inject RLWorldRasterizerContext into scene."""
-        from jaxrlworld.rl.vis.rasterizer_context import (
-            CommandArrowConfig,
-            OverlaySettings,
-            inject_into_scene,
-        )
-
         arrow_config = None
         if self.config.enable_command_arrow:
             arrow_config = CommandArrowConfig(
@@ -213,16 +217,6 @@ class VisualizationManager(BaseManager):
 
     def _init_default_hud(self) -> None:
         """Initialize text HUD with default items."""
-        from jaxrlworld.rl.vis.overlays import TextHUDConfig, TextHUDOverlay
-        from jaxrlworld.rl.vis.overlays.hud_items import (
-            BaseHeightItem,
-            CommandVelItem,
-            DOFPositionItem,
-            EpisodeInfoItem,
-            FeetHeightItem,
-            FeetHeightItemConfig,
-        )
-
         self._text_hud = TextHUDOverlay(
             TextHUDConfig(
                 position=self.config.hud_position,

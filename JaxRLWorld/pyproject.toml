@@ -100,6 +100,9 @@ fixable = ["ALL"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["jaxrlworld"]
+# A W&B run directory named wandb/ next to the code would otherwise make
+# isort classify the package as first-party, depending on where ruff runs.
+known-third-party = ["wandb"]
 combine-as-imports = true
 
 [tool.ruff.format]

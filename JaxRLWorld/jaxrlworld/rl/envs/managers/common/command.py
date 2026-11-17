@@ -7,6 +7,7 @@ import torch
 
 from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.envs.managers.common.command_term import CommandTerm, CommandTermCfg
+from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
@@ -184,8 +185,6 @@ class CommandManager(BaseManager):
         return object.__getattribute__(self, name)
 
     def __str__(self) -> str:
-        from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
-
         if not self._terms:
             return ""
 

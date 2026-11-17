@@ -9,6 +9,7 @@ from jaxrlworld.rl.configs.common_config_classes import RewardConfig
 from jaxrlworld.rl.configs.rewards import RewardTermConfig, get_weight_value
 from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.envs.managers.common.reward_view import RecordingEnvView, RewardEnvView, RewardReadRecord
+from jaxrlworld.rl.utils.pretty import create_manager_table, format_weight, table_to_string
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
@@ -281,8 +282,6 @@ class RewardManager(BaseManager):
 
     def __str__(self) -> str:
         """Pretty print reward manager configuration."""
-        from jaxrlworld.rl.utils.pretty import create_manager_table, format_weight, table_to_string
-
         if not self.reward_terms:
             return ""
 

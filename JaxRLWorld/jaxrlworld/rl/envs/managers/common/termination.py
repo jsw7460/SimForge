@@ -8,6 +8,7 @@ import torch
 from jaxrlworld.rl.configs import TerminationResult, TerminationTermConfig
 from jaxrlworld.rl.configs.base_config import iter_terms
 from jaxrlworld.rl.envs.managers.base import BaseManager
+from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.configs.common_config_classes import TerminationsConfig
@@ -302,8 +303,6 @@ class TerminationManager(BaseManager):
 
     def __str__(self) -> str:
         """Pretty print termination manager configuration."""
-        from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
-
         if not self._all_terms:
             return ""
 

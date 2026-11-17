@@ -59,7 +59,7 @@ from __future__ import annotations
 
 import importlib
 import math
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict
 
@@ -356,8 +356,6 @@ class K1VelocityConfig:
         return cfgs
 
     def _get_preset_kwargs(self) -> Dict[str, Any]:
-        from dataclasses import MISSING, fields
-
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":

@@ -15,6 +15,7 @@ from jaxrlworld.rl.envs.mdp.events.keyed_sampler import (
     STAGE_INTERVAL_TIMER,
     TermSampler,
 )
+from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
@@ -265,8 +266,6 @@ class EventManager(BaseManager):
 
     def __str__(self) -> str:
         """Pretty print event manager configuration."""
-        from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
-
         if not self._all_terms:
             return ""
 

@@ -2,16 +2,18 @@
 
 from typing import Any
 
+import genesis as gs
 import gymnasium as gym
 import torch
+from gymnasium.vector import SyncVectorEnv
 
+from jaxrlworld.rl.envs import GymnasiumEnv
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
+from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
 
 
 class GymnasiumInitializer(SimInitializer):
     def init_device(self) -> torch.device:
-        import genesis as gs
-
         return gs.device
 
     def prepare_configs(
@@ -22,8 +24,6 @@ class GymnasiumInitializer(SimInitializer):
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
-        from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
         eval_cfgs = load_config_from_checkpoint(metadata)
 
         if extra_overrides is not None:
@@ -36,10 +36,6 @@ class GymnasiumInitializer(SimInitializer):
         return eval_cfgs
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
-        from gymnasium.vector import SyncVectorEnv
-
-        from jaxrlworld.rl.envs import GymnasiumEnv
-
         seed = kwargs.get("seed", 42)
 
         def make_env(env_seed):

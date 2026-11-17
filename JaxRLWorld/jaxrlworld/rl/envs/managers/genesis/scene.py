@@ -21,7 +21,7 @@ from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.envs.managers.common.canonical_joint_order import filter_canonical_to_actuated
 from jaxrlworld.rl.envs.managers.common.scene_helpers import build_kinematic_trees
 from jaxrlworld.rl.envs.managers.common.visual_mesh_transform import apply_local_transform
-from jaxrlworld.rl.envs.managers.genesis.camera_sensor import collider_render_mjcf
+from jaxrlworld.rl.envs.managers.genesis.camera_sensor import GenesisCameraSensor, collider_render_mjcf
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
 from jaxrlworld.rl.utils import entity_utils, string as string_utils
 
@@ -363,8 +363,6 @@ class SceneManager(BaseManager):
 
     def _add_cameras(self) -> None:
         """Attach the sim-agnostic cameras, before the scene is built."""
-        from jaxrlworld.rl.envs.managers.genesis.camera_sensor import GenesisCameraSensor
-
         for camera_cfg in self.config.cameras:
             if camera_cfg.name in self._cameras:
                 raise ValueError(f"Camera '{camera_cfg.name}' already exists")

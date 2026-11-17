@@ -4,8 +4,12 @@ from typing import Any
 
 import torch
 
+from jaxrlworld.rl import envs
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
+from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
 from jaxrlworld.rl.utils.console import print_info, print_success
+from jaxrlworld.rl.vis.viser.bridges.mujoco_bridge import MujocoBridge
+from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
 
 
 class MujocoInitializer(SimInitializer):
@@ -20,8 +24,6 @@ class MujocoInitializer(SimInitializer):
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
-        from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
         eval_cfgs = load_config_from_checkpoint(metadata)
 
         if extra_overrides is not None:
@@ -41,8 +43,6 @@ class MujocoInitializer(SimInitializer):
         return eval_cfgs
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
-        from jaxrlworld.rl import envs
-
         env_class_name = eval_cfgs.env.env_name
         env_class = getattr(envs, env_class_name)  # dynamic-attr: env class named by config
 
@@ -66,9 +66,6 @@ class MujocoInitializer(SimInitializer):
     def create_play_scene(self, env: Any):
         # Route MuJoCo through the same unified ViserScene path as Genesis/Newton
         # so the configurable ground + robot material apply here too.
-        from jaxrlworld.rl.vis.viser.bridges import MujocoBridge
-        from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
-
         scene_cfg = env.visualization_cfg.viser_scene
         return BridgePlayScene(MujocoBridge(env.scene_manager), scene_config=scene_cfg)
 

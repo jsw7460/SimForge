@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import re
 
+import wandb
+
 
 def get_wandb_checkpoint(
     wandb_run_path: str,
@@ -25,11 +27,8 @@ def get_wandb_checkpoint(
         (checkpoint_path, was_cached) — local path and whether the result came from cache.
 
     Raises:
-        ImportError: If wandb is not installed.
         ValueError: If no checkpoint artifacts are found for the run.
     """
-    import wandb
-
     run_id = wandb_run_path.split("/")[-1]
 
     # Collect checkpoint artifacts
@@ -108,8 +107,6 @@ def list_wandb_checkpoints(wandb_run_path: str) -> list[dict]:
     Returns:
         List of dicts with keys: name, full_name, iteration, version, created_at.
     """
-    import wandb
-
     api = wandb.Api()
 
     results = []

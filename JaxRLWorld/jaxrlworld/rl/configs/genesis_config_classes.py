@@ -14,19 +14,17 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
+from .curriculums.curriculum_term_config import CurriculumManagerConfig
 from .scene.terrain_config import TerrainCfg
 from .sensors import SensorConfig
 
 if TYPE_CHECKING:
-    from jaxrlworld.rl.configs import CurriculumManagerConfig
     from jaxrlworld.rl.configs.robots.base import RobotConfig
     from jaxrlworld.rl.configs.sensors import ContactSensorCfg
 
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
-    """Lazy default to avoid importing CurriculumManagerConfig at module load."""
-    from jaxrlworld.rl.configs import CurriculumManagerConfig
-
+    """Default factory for the ``curriculum`` field."""
     return CurriculumManagerConfig()
 
 

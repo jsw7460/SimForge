@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from jaxrlworld.rl.configs.rewards import ExponentialDecay, LinearSchedule, StepSchedule, WeightSchedule
 from jaxrlworld.rl.utils.verbosity import build_summary_enabled
 
 if TYPE_CHECKING:
@@ -52,8 +53,6 @@ def format_weight(weight: Any) -> str:
     Returns:
         Formatted string representation of the weight.
     """
-    from jaxrlworld.rl.configs.rewards import ExponentialDecay, LinearSchedule, StepSchedule, WeightSchedule
-
     if isinstance(weight, int | float):
         if abs(weight) < 0.0001 and weight != 0:
             return f"{weight:.2e}"

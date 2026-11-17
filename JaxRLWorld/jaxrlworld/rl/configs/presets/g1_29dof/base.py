@@ -23,7 +23,7 @@ Per-simulator variants inherit ``G1FlatConfig`` directly and pin
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, Dict
 
 from jaxrlworld.rl.configs import ConfigsForRun
@@ -77,11 +77,11 @@ def _get_sim_builders(sim_type: str) -> G1SimBuilderProtocol:
     see ``presets/_sim_builder_protocol.py`` for the full contract.
     """
     if sim_type == "newton":
-        from . import _newton_builders as mod
+        from . import _newton_builders as mod  # local-import: backend (newton builders), only on the newton path
     elif sim_type == "genesis":
-        from . import _genesis_builders as mod
+        from . import _genesis_builders as mod  # local-import: backend (genesis builders), only on the genesis path
     elif sim_type == "mujoco":
-        from . import _mujoco_builders as mod
+        from . import _mujoco_builders as mod  # local-import: backend (mujoco builders), only on the mujoco path
     else:
         mod = get_sim_builders("g1_29dof", sim_type, tuple(_SIM_TIMINGS)).load()
     return mod  # type: ignore[return-value]
@@ -221,8 +221,6 @@ class G1FlatConfig:
         Only fields whose value differs from the dataclass default are
         included so the dict stays small and forward-compatible.
         """
-        from dataclasses import MISSING, fields
-
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":

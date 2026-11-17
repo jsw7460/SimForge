@@ -38,6 +38,10 @@ from jaxrlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
+from jaxrlworld.rl.envs.mdp.actions import (
+    SettleRelativeJointPositionAction,
+    SettleRelativeJointPositionActionCfg,
+)
 from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
@@ -236,11 +240,6 @@ def build_action(cfg: T1GetupConfig) -> ActionConfig:
     :class:`SettleRelativeJointPositionAction` spanning every
     actuated joint.
     """
-    from jaxrlworld.rl.envs.mdp.actions import (
-        SettleRelativeJointPositionAction,
-        SettleRelativeJointPositionActionCfg,
-    )
-
     r = cfg.robot
     return ActionConfig(
         actuated_dof_names=r.actuated_dof_patterns,

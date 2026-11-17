@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Any
 
-import genesis as gs
 import mujoco
 import numpy as np
 import torch
@@ -9,6 +8,7 @@ from gymnasium.envs.mujoco import MujocoEnv as GymMujocoEnv
 from jaxrlworld.rl.configs import ActionConfig, CommandConfig, EnvConfig, ObservationConfig, RewardConfig, SceneConfig
 from jaxrlworld.rl.configs.robots.kinematic_tree import KinematicTree
 from jaxrlworld.rl.envs.world import World
+from jaxrlworld.rl.utils import set_seed
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.managers.common.robot_state_writer_protocol import RobotStateWriterProtocol
@@ -364,6 +364,16 @@ class MuJoCoKinematicTree:
         )
 
 
+def _default_device() -> torch.device:
+    """The accelerator torch offers: the current CUDA device, else Apple's
+    MPS, else the CPU (the device Genesis's default backend picks)."""
+    if torch.cuda.is_available():
+        return torch.device("cuda", torch.cuda.current_device())
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 class GymnasiumEnv(World):
     """Wrapper to make vectorized Gymnasium envs compatible with RLEnv interface"""
 
@@ -381,13 +391,6 @@ class GymnasiumEnv(World):
         max_episode_length: int = 1000,
         seed: int = 0,
     ):
-        from jaxrlworld.rl.utils import set_seed
-
-        # Initialise the Genesis runtime on first use (kept out of package
-        # import so Newton-/MuJoCo-only processes never touch Genesis).
-        if not gs._initialized:
-            gs.init(logging_level="warning")
-
         set_seed(seed)
         super().__init__()
         # Check if vectorized or not
@@ -405,7 +408,7 @@ class GymnasiumEnv(World):
         self.command_cfg = command_cfg
 
         self.mj_model: mujoco.MjModel | None = None
-        self.device = gs.device
+        self.device = _default_device()
 
         # Required attributes
         self.seed = seed

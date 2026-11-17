@@ -42,6 +42,7 @@ world-major. The result is suitable for
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -258,6 +259,4 @@ def _matches_any_search(name: str, patterns: tuple[str, ...]) -> bool:
 
     Mirrors the Genesis contact-sensor backend.
     """
-    import re
-
     return any(re.search(p, name) for p in patterns)

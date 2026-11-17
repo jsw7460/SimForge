@@ -4,6 +4,7 @@ import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
+from fnmatch import fnmatch
 from typing import TYPE_CHECKING, Any, Dict, Literal
 
 import mujoco
@@ -12,7 +13,8 @@ import newton
 import numpy as np
 import torch
 import warp as wp
-from newton import JointTargetMode
+from newton import JointTargetMode, ShapeFlags
+from newton._src.solvers.mujoco.collision_masks import MUJOCO_COLLISION_MASK_UNSET
 from newton.selection import ArticulationView
 
 from jaxrlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
@@ -281,8 +283,6 @@ and treating it as anything else would invent a rule no asset states.
 
 def _never_collides(builder, shape: int) -> bool:
     """Is this shape masked 0/0 -- collides with nothing, in MuJoCo's terms?"""
-    from newton._src.solvers.mujoco.collision_masks import MUJOCO_COLLISION_MASK_UNSET
-
     attrs = builder.custom_attributes
     contype = (attrs["mujoco:contype"].values or {}).get(shape, MUJOCO_COLLISION_MASK_UNSET)
     conaffinity = (attrs["mujoco:conaffinity"].values or {}).get(shape, MUJOCO_COLLISION_MASK_UNSET)
@@ -323,9 +323,6 @@ def _forbidden_pairs(builder, shapes, against=None) -> list[tuple[int, int]]:
     bet the Genesis manager makes and the same one mjlab has always made:
     within a scene, a non-default bit means the same thing in every asset.
     """
-    import numpy as np
-    from newton._src.solvers.mujoco.collision_masks import MUJOCO_COLLISION_MASK_UNSET
-
     attrs = builder.custom_attributes
     contype_attr = attrs.get("mujoco:contype")
     conaffinity_attr = attrs.get("mujoco:conaffinity")
@@ -848,8 +845,6 @@ class NewtonSceneManager(BaseManager):
             # cfg works for URDF flat labels (``entity/joint``) and
             # MJCF XPath labels (``entity/.../joint``) uniformly.
             if cfg.links_to_keep:
-                from fnmatch import fnmatch
-
                 patterns = as_leaf_globs(list(cfg.links_to_keep))
                 all_labels = list(builder.joint_label)
                 expanded = sorted({label for pat in patterns for label in all_labels if fnmatch(label, pat)})
@@ -1100,8 +1095,6 @@ class NewtonSceneManager(BaseManager):
         template, where the shape count is small; the ground pass runs
         against every replicated shape and has to stay linear.
         """
-        from newton import ShapeFlags
-
         flags = builder.shape_flags
         colliding = [i for i in range(len(flags)) if int(flags[i]) & int(ShapeFlags.COLLIDE_SHAPES)]
 
@@ -1438,8 +1431,6 @@ class NewtonSceneManager(BaseManager):
         if num_actuators == 0:
             print("✓ MuJoCo actuators validated: 0 actuators (no external control)")
             return
-
-        import mujoco  # noqa: PLC0415 — lazy to avoid mjwarp import at module load
 
         gainprm = mj_model.actuator_gainprm
         biasprm = mj_model.actuator_biasprm

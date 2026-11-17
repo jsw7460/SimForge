@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import jax
 import numpy as np
 import torch
+import wandb
 
 from jaxrlworld.rl.algorithms import get_algorithm_class
 from jaxrlworld.rl.algorithms.ppo import PPO
@@ -16,6 +17,7 @@ from jaxrlworld.rl.modules.policies.ppo_ac import PPOActorCritic
 from jaxrlworld.rl.modules.utils import count_parameters, print_model_summary
 from jaxrlworld.rl.runners.base_runner import BaseRunner
 from jaxrlworld.rl.runners.iteration_data import IterationData
+from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_config_from_checkpoint
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax, torch_to_jax_many
 
 
@@ -160,8 +162,6 @@ class OnPolicyRunner(BaseRunner):
 
     def _log_model_parameters(self) -> None:
         """Log model parameters to wandb."""
-        import wandb
-
         actor_params = count_parameters(self.actor_critic.actor)
         critic_params = count_parameters(self.actor_critic.critic)
         std_params = count_parameters(self.actor_critic.std_module)
@@ -505,14 +505,10 @@ class OnPolicyRunner(BaseRunner):
             Loaded OnPolicyRunner instance
         """
         # Load metadata (YAML)
-        from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata
-
         metadata = load_checkpoint_metadata(checkpoint_path)
 
         # Use saved config if not provided
         if cfgs is None:
-            from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
             cfgs = load_config_from_checkpoint(metadata)
 
         # Create env if not provided

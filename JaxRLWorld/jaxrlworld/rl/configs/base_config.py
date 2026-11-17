@@ -10,6 +10,7 @@ from typing import Any, ClassVar, Dict, TypeVar
 from colorama import Fore, Style
 
 from jaxrlworld.rl.configs.rewards.reward_term_config import WeightSchedule
+from jaxrlworld.rl.utils.resolve import callable_to_string
 
 T = TypeVar("T", bound="BaseConfig")
 
@@ -181,8 +182,6 @@ def _convert_value(v: Any) -> Any:
     if isinstance(v, WeightSchedule):
         return v.to_dict()
     if callable(v):
-        from jaxrlworld.rl.utils.resolve import callable_to_string
-
         return callable_to_string(v)
     return str(v)
 

@@ -40,6 +40,7 @@ from jaxrlworld.rl.configs.scene.unified_entity_config import (
     MujocoEntityCfg,
 )
 from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
+from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
     all_commands as command_obs,
     base_ang_vel,
@@ -444,8 +445,6 @@ def build_reward(cfg: G1FlatConfig) -> RewardConfig:
 
 def build_dr_terms(cfg: G1FlatConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo-specific domain randomization terms."""
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
-
     return {
         "randomize_encoder_bias": EventTermConfig(
             func=unified_dr.randomize_encoder_bias,

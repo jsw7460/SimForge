@@ -12,6 +12,7 @@ from jaxrlworld.rl.envs.managers.genesis.contact_sensor import (
     GenesisContactListReader,
     GenesisContactSensor,
 )
+from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import GenesisEnv
@@ -166,8 +167,6 @@ class ContactManager(BaseContactManager):
     # -- pretty print --
 
     def __str__(self) -> str:
-        from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
-
         if not self._groups:
             return ""
 

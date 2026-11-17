@@ -5,8 +5,12 @@ from typing import Any
 
 import gymnasium as gym
 import torch
+from mani_skill.utils.wrappers.record import RecordEpisode
+from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 
+from jaxrlworld.rl.envs import ManiSkillEnv
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
+from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
 from jaxrlworld.rl.utils.console import print_info, print_success
 
 
@@ -26,8 +30,6 @@ class ManiSkillInitializer(SimInitializer):
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
-        from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
         eval_cfgs = load_config_from_checkpoint(metadata)
 
         if extra_overrides is not None:
@@ -44,11 +46,6 @@ class ManiSkillInitializer(SimInitializer):
         video_dir = kwargs.get("video_dir", None)
         record_steps = kwargs.get("record_steps", 1000)
         seed = kwargs.get("seed", 42)
-
-        from mani_skill.utils.wrappers.record import RecordEpisode
-        from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
-
-        from jaxrlworld.rl.envs import ManiSkillEnv
 
         env_kwargs = dict(eval_cfgs.env.gym_make_kwargs)
         if record_video and video_dir:

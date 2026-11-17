@@ -80,11 +80,11 @@ _SIM_DEFAULT_RUN_NAMES: Dict[str, str] = {
 
 def _get_sim_builders(sim_type: str):
     if sim_type == "newton":
-        from . import _newton_builders as mod
+        from . import _newton_builders as mod  # local-import: backend (newton builders), only on the newton path
     elif sim_type == "genesis":
-        from . import _genesis_builders as mod
+        from . import _genesis_builders as mod  # local-import: backend (genesis builders), only on the genesis path
     elif sim_type == "mujoco":
-        from . import _mujoco_builders as mod
+        from . import _mujoco_builders as mod  # local-import: backend (mujoco builders), only on the mujoco path
     else:
         mod = get_sim_builders("yam_lift", sim_type, tuple(_SIM_DEFAULT_RUN_NAMES)).load()
     return mod

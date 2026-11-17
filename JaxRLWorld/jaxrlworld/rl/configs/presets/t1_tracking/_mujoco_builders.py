@@ -28,12 +28,20 @@ from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from jaxrlworld.rl.configs.presets.t1_getup._mujoco_builders import T1SpecFn
 from jaxrlworld.rl.configs.rewards import RewardTermConfig
+from jaxrlworld.rl.configs.scene import SceneEntitySelector
 from jaxrlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     InitialStateCfg,
     MujocoEntityCfg,
 )
 from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
+from jaxrlworld.rl.envs.mdp.actions import (
+    JointPositionAction,
+    JointPositionActionCfg,
+    MotionResidualJointPositionAction,
+    MotionResidualJointPositionActionCfg,
+)
+from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from jaxrlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
     motion_anchor_pos_b,
@@ -281,13 +289,6 @@ def build_observation(cfg: T1TrackingConfig) -> MujocoObservationConfig:
 
 def build_action(cfg: T1TrackingConfig) -> MujocoActionConfig:
     """Action term selection — see ``_newton_builders.build_action``."""
-    from jaxrlworld.rl.envs.mdp.actions import (
-        JointPositionAction,
-        JointPositionActionCfg,
-        MotionResidualJointPositionAction,
-        MotionResidualJointPositionActionCfg,
-    )
-
     r = cfg.robot
     if cfg.action_mode == "motion_residual":
         action_term = MotionResidualJointPositionActionCfg(
@@ -370,9 +371,6 @@ def build_reward(cfg: T1TrackingConfig) -> RewardConfig:
 
 def build_dr_terms(cfg: T1TrackingConfig) -> Dict[str, EventTermConfig]:
     """MuJoCo DR (3-axis friction)."""
-    from jaxrlworld.rl.configs.scene import SceneEntitySelector
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
-
     r = cfg.robot
     foot_geom_names = r.foot_geom_names_mjlab
     return {

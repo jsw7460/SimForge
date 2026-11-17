@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Literal
+from typing import Any, Dict, Literal
 
 from .algorithms import AlgorithmConfig, PPOConfig
 from .base_config import BaseConfig
@@ -12,18 +12,12 @@ from .common_config_classes import (
     RunnerConfig,
     VisualizationConfig,
 )
+from .curriculums.curriculum_term_config import CurriculumManagerConfig
 from .scene.terrain_config import TerrainCfg
-
-if TYPE_CHECKING:
-    from jaxrlworld.rl.configs import (
-        CurriculumManagerConfig,
-    )
 
 
 def _default_curriculum_cfg() -> "CurriculumManagerConfig":
-    """Lazy default to avoid importing CurriculumManagerConfig at module load."""
-    from jaxrlworld.rl.configs import CurriculumManagerConfig
-
+    """Default factory for the ``curriculum`` field."""
     return CurriculumManagerConfig()
 
 

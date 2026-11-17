@@ -71,7 +71,7 @@ class NewtonIMUSensorConfig(NewtonSensorConfig):
         Returns:
             The created SensorIMU object
         """
-        import newton
+        import newton  # local-import: backend (newton), configs.sensors loads this module on every backend
 
         return newton.sensors.SensorIMU(model, site_indices)
 
@@ -89,6 +89,6 @@ class NewtonFrameTransformSensorConfig(NewtonSensorConfig):
     @staticmethod
     def create_sensor(model: "newton.Model", site_indices: list[int]) -> "newton.sensors.SensorFrameTransform":
         """Create the actual FrameTransform sensor object."""
-        import newton
+        import newton  # local-import: backend (newton), configs.sensors loads this module on every backend
 
         return newton.sensors.SensorFrameTransform(model, site_indices)

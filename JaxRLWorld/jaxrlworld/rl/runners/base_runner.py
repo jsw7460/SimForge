@@ -1,18 +1,20 @@
+import math
 import os
 import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Dict
+from typing import Any, Callable, Dict
 
-if TYPE_CHECKING:
-    import gymnasium as gym
-
+import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
+import wandb
+from gymnasium.vector import AutoresetMode, SyncVectorEnv
 
+from jaxrlworld.rl.algorithms import get_runner_class
 from jaxrlworld.rl.algorithms.base import ActInput, RLAlgorithm
 from jaxrlworld.rl.configs import ConfigsForRun
 from jaxrlworld.rl.configs.eval_mode import in_training_eval_configs
@@ -25,6 +27,8 @@ from jaxrlworld.rl.utils import setup_log_dir
 from jaxrlworld.rl.utils.console import GREEN, RESET
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
 from jaxrlworld.rl.utils.logger import ConsoleWriter, WandbLogger
+from jaxrlworld.rl.utils.wandb_checkpoint import resolve_checkpoint_path
+from jaxrlworld.rl.utils.yaml_io import dump_yaml
 
 # ==================== Base Runner ====================
 
@@ -89,10 +93,11 @@ class BaseRunner(ABC):
             env = env_class(**kwargs)
 
         elif env_class.sim_name == "ManiSkill":
-            import gymnasium as gym
-            from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+            from mani_skill.vector.wrappers.gymnasium import (  # local-import: optional (mani_skill, not a dependency)
+                ManiSkillVectorEnv,
+            )
 
-            from jaxrlworld.rl.envs import ManiSkillEnv
+            from jaxrlworld.rl.envs import ManiSkillEnv  # local-import: backend (genesis), only on the ManiSkill path
 
             env_kwargs = dict(
                 obs_mode="state",
@@ -115,10 +120,7 @@ class BaseRunner(ABC):
             )
 
         elif env_class.sim_name == "Gymnasium":
-            import gymnasium as gym
-            from gymnasium.vector import AutoresetMode, SyncVectorEnv
-
-            from jaxrlworld.rl.envs import GymnasiumEnv
+            from jaxrlworld.rl.envs import GymnasiumEnv  # local-import: backend (genesis), only on the Gymnasium path
 
             if gym_env_factory is not None:
                 # User-supplied factory carries the full wrapper chain
@@ -162,9 +164,6 @@ class BaseRunner(ABC):
 
     @classmethod
     def create_with_env(cls, configs: ConfigsForRun, use_wandb: bool = True, seed: int = 0) -> "BaseRunner":
-        from jaxrlworld.rl.algorithms import get_runner_class
-        from jaxrlworld.rl.utils.wandb_checkpoint import resolve_checkpoint_path
-
         runner_cls = get_runner_class(configs.algorithm.algorithm_name)
         env = cls._create_env_from_config(configs)
         # Guard the per-process single-backend invariant — see
@@ -381,10 +380,6 @@ class BaseRunner(ABC):
             has_managers = self.env.builds_from_manager_configs
             if has_managers and self.env.curriculum_manager.state:
                 curriculum_manager = self.env.curriculum_manager
-                import math as _math
-
-                import wandb as _wandb
-
                 curr_log: dict[str, float] = {}
                 for term_name, field_dict in curriculum_manager.state.items():
                     if not isinstance(field_dict, dict):
@@ -392,11 +387,11 @@ class BaseRunner(ABC):
                     for field_name, value in field_dict.items():
                         if not isinstance(value, int | float):
                             continue
-                        if not _math.isfinite(value):
+                        if not math.isfinite(value):
                             continue
                         curr_log[f"Curriculum/{term_name}/{field_name}"] = float(value)
                 if curr_log:
-                    _wandb.log(curr_log, step=self.total_timesteps)
+                    wandb.log(curr_log, step=self.total_timesteps)
 
             # Per-term termination-cause ratios, aggregated over the
             # iteration window by the termination manager's internal
@@ -406,9 +401,7 @@ class BaseRunner(ABC):
             if has_managers:
                 term_log = self.env.termination_manager.consume_episode_stats()
                 if term_log:
-                    import wandb as _wandb
-
-                    _wandb.log(term_log, step=self.total_timesteps)
+                    wandb.log(term_log, step=self.total_timesteps)
 
     def _build_episode_stats(self) -> EpisodeStats:
         """Build EpisodeStats from reward_statistics."""
@@ -737,8 +730,6 @@ class BaseRunner(ABC):
         )
         if not self.wandb_logger:
             return
-        import wandb
-
         prefix = f"Eval/heldout_{label}"
         core = {
             "eval/mean_return",
@@ -851,8 +842,6 @@ class BaseRunner(ABC):
 
     def _save_checkpoint_to(self, checkpoint_dir: str, iteration: int) -> None:
         """Save checkpoint to specified directory."""
-        from jaxrlworld.rl.utils.yaml_io import dump_yaml
-
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         # 1. Algorithm saves weights (.eqx / .pt files)

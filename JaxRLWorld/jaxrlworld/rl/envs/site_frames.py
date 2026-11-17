@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+import mujoco
 import torch
 from torch import Tensor
 
@@ -74,8 +75,6 @@ def sites_from_mjcf(mjcf_path: str) -> tuple[SiteFrame, ...]:
     Compiled rather than parsed. ``MjSpec.compile()`` resolves defaults,
     angle units and frame nesting; the raw attribute text does not.
     """
-    import mujoco
-
     resolved = Path(mjcf_path).resolve()
     if not resolved.exists():
         raise FileNotFoundError(f"MJCF not found for site extraction: {resolved}")

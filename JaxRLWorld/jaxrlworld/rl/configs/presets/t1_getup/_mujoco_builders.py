@@ -48,12 +48,18 @@ from jaxrlworld.rl.configs.mujoco_config_classes import (
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import UniformNoiseConfig as Unoise
 from jaxrlworld.rl.configs.rewards import RewardTermConfig
+from jaxrlworld.rl.configs.scene import SceneEntitySelector
 from jaxrlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
     InitialStateCfg,
     MujocoEntityCfg,
 )
 from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
+from jaxrlworld.rl.envs.mdp.actions import (
+    SettleRelativeJointPositionAction,
+    SettleRelativeJointPositionActionCfg,
+)
+from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
     base_ang_vel,
     base_height,
@@ -245,11 +251,6 @@ def build_action(cfg: T1GetupConfig) -> MujocoActionConfig:
 
     See ``_newton_builders.build_action`` for the rationale.
     """
-    from jaxrlworld.rl.envs.mdp.actions import (
-        SettleRelativeJointPositionAction,
-        SettleRelativeJointPositionActionCfg,
-    )
-
     r = cfg.robot
     return MujocoActionConfig(
         entity_name="robot",
@@ -340,9 +341,6 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
     MuJoCo's solver natively uses the 3-vector ``geom_friction`` so
     this is applied via mjlab's ``dr.geom_friction`` under the hood.
     """
-    from jaxrlworld.rl.configs.scene import SceneEntitySelector
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
-
     r = cfg.robot
     # mjlab asset_zoo T1 has explicit collision geom names that survive
     # the MJCF load; T1Config exposes the foot names via a property.

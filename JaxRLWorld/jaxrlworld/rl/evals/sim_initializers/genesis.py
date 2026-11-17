@@ -2,16 +2,19 @@
 
 from typing import Any
 
+import genesis as gs
 import torch
 
+from jaxrlworld.rl import envs
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
+from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
 from jaxrlworld.rl.utils.console import print_info, print_success
+from jaxrlworld.rl.vis.viser.bridges.genesis_bridge import GenesisBridge
+from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
 
 
 class GenesisInitializer(SimInitializer):
     def init_device(self) -> torch.device:
-        import genesis as gs
-
         return gs.device
 
     def prepare_configs(
@@ -22,8 +25,6 @@ class GenesisInitializer(SimInitializer):
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
-        from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
         eval_cfgs = load_config_from_checkpoint(metadata)
 
         if extra_overrides is not None:
@@ -36,8 +37,6 @@ class GenesisInitializer(SimInitializer):
         return eval_cfgs
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
-        from jaxrlworld.rl import envs
-
         env_class_name = eval_cfgs.env.env_name
         if hasattr(envs, env_class_name):  # dynamic-attr: env class named by config
             env_class = getattr(envs, env_class_name)  # dynamic-attr: env class named by config
@@ -60,9 +59,6 @@ class GenesisInitializer(SimInitializer):
         raise NotImplementedError(f"Undefined env class name {env_class_name}")
 
     def create_play_scene(self, env: Any):
-        from jaxrlworld.rl.vis.viser.bridges import GenesisBridge
-        from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
-
         scene_cfg = env.visualization_cfg.viser_scene
         return BridgePlayScene(GenesisBridge(env.scene_manager), scene_config=scene_cfg)
 

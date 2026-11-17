@@ -19,7 +19,9 @@ import torch
 import warp as wp
 from torch import Tensor
 
+from jaxrlworld.rl.envs.mdp.observations.newton.state import _quat_rotate, _quat_rotate_inverse
 from jaxrlworld.rl.envs.site_frames import SiteReaderMixin
+from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
 from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz, quat_rotate_wxyz, quat_to_euler_wxyz
 
 if TYPE_CHECKING:
@@ -148,8 +150,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         exact.
         """
         if self._root_body_idx is None:
-            from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
             cache = get_cache(self._env)
             labels = self._env.scene_manager.model.body_label[: cache.bodies_per_env]
             self._root_body_idx = labels.index(self._view.link_labels[0])
@@ -308,8 +308,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         (``scene.py``: ``add_builder(label_prefix=entity_name)``). With a
         single robot there is no prefix and no ambiguity to resolve.
         """
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
         cache = get_cache(self._env)
         indices = cache.get_body_indices(body_name)
         if not indices:
@@ -354,8 +352,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         Each transform is ``(pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w)``
         — note Newton's native quaternion is **xyzw**.
         """
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
         cache = get_cache(self._env)
         state = self._env.scene_manager.state
         return wp.to_torch(state.body_q).view(self._env.num_envs, cache.bodies_per_env, 7)
@@ -371,8 +367,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         origin). ``body_lin_vel_w_all`` transfers it to the link origin;
         ``body_com_lin_vel_w_all`` returns it as-is.
         """
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
         cache = get_cache(self._env)
         state = self._env.scene_manager.state
         return wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
@@ -391,8 +385,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         velocity transferred with another world's or a stale offset is off by
         ``omega x (R @ dc)``.
         """
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
         cache = get_cache(self._env)
         model = self._env.scene_manager.model
         return wp.to_torch(model.body_com).view(self._env.num_envs, cache.bodies_per_env, 3)
@@ -474,8 +466,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         the input order so the resulting tensor columns line up with
         ``names``.
         """
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
         cache = get_cache(self._env)
         out: list[int] = []
         for name in names:
@@ -528,12 +518,6 @@ class NewtonRigidObjectData(SiteReaderMixin):
         the previous version underestimated by 1-2 orders of magnitude
         relative to ``subtreeangmom``.
         """
-        from jaxrlworld.rl.envs.mdp.observations.newton.state import (
-            _quat_rotate,
-            _quat_rotate_inverse,
-        )
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
         cache = get_cache(self._env)
         num_envs = self._env.num_envs
         bodies_per_env = cache.bodies_per_env

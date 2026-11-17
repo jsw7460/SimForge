@@ -37,8 +37,10 @@ updated in place per frame, mirroring mjviser's decor renderer.
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
+import mujoco
 import numpy as np
 import trimesh
 import viser
@@ -74,13 +76,9 @@ class MjvContactOverlay:
         if not self._available:
             return
 
-        # Backend-specific imports and model access live here on purpose:
-        # this module is imported by the viewers on every backend, and a
-        # genesis process must not touch mujoco/warp state it never uses.
-        import copy
-
-        import mujoco
-
+        # Backend-specific model access lives here on purpose: this module
+        # is imported by the viewers on every backend, and a genesis
+        # process must not touch mujoco/warp state it never uses.
         if env.sim_type == "mujoco":
             sm = env.scene_manager
             base_model = sm.mj_model
@@ -144,7 +142,7 @@ class MjvContactOverlay:
             self._hide_all()
             return
 
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the mujoco / newton path
 
         mujoco = self._mujoco
         m, d = self._mj_model, self._mj_data

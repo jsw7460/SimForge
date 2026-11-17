@@ -349,7 +349,9 @@ class EpisodeStatsCollector:
 
     def snapshot(self) -> "EpisodeStats":
         """Create a typed EpisodeStats snapshot of current statistics."""
-        from jaxrlworld.rl.runners.iteration_data import EpisodeStats
+        from jaxrlworld.rl.runners.iteration_data import (  # local-import: circular (envs.stats_collector <-> runners via envs/__init__)
+            EpisodeStats,
+        )
 
         self._drain_to_host()
         return EpisodeStats(

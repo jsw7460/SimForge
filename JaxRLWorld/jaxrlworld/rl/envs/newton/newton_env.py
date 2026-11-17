@@ -17,12 +17,17 @@ from jaxrlworld.rl.envs.managers.newton import (
     NewtonVisualizationManagerConfig,
 )
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.envs.newton.robot_data import NewtonRigidObjectData, NewtonRobotData
+from jaxrlworld.rl.envs.newton.robot_state_writer import NewtonRigidObjectStateWriter, NewtonRobotStateWriter
 from jaxrlworld.rl.envs.site_frames import resolve_sites
 from jaxrlworld.rl.envs.utils.mjwarp_overflow import MjwarpOverflowGuard
 from jaxrlworld.rl.envs.utils.newton.dr_baselines import snapshot_newton_dr_baselines
 from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from jaxrlworld.rl.envs.world import World
 from jaxrlworld.rl.utils import set_seed, string as _su
+from jaxrlworld.rl.vis.viser import ViserVisualizationManager
+from jaxrlworld.rl.vis.viser.bridges.newton_bridge import NewtonBridge
+from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
 
 # Opt-in first-NaN forensics (JAXRLWORLD_NAN_TRIPWIRE=1): stop the run at
 # the first non-finite physics state and dump contact/constraint counter
@@ -251,12 +256,6 @@ class NewtonEnv(World):
         self.contact_manager = ContactCls(env=self)
         self.contact_manager.register_sensors()
 
-        from jaxrlworld.rl.envs.newton.robot_data import NewtonRigidObjectData, NewtonRobotData
-        from jaxrlworld.rl.envs.newton.robot_state_writer import (
-            NewtonRigidObjectStateWriter,
-            NewtonRobotStateWriter,
-        )
-
         # Per-entity RobotData / state-writer caches (mirrors GenesisEnv). The
         # "robot" entry is built from the same articulation view as before
         # (scene_manager.robot_view IS articulation_views["robot"]), so the
@@ -320,10 +319,6 @@ class NewtonEnv(World):
         """Create the visualization manager for the configured viewer type."""
         # viewer_type="viser" → always use ViserVisualizationManager (matches Genesis pattern)
         if self.visualization_cfg.viewer_type == "viser":
-            from jaxrlworld.rl.vis.viser import ViserVisualizationManager
-            from jaxrlworld.rl.vis.viser.bridges import NewtonBridge
-            from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
-
             bridge = NewtonBridge(self.scene_manager)
             viser_cfg = ViserViewerConfig(
                 port=self.visualization_cfg.viser_port,

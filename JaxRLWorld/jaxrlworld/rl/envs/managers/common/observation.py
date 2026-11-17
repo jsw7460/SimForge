@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zlib
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,7 @@ from jaxrlworld.rl.configs.observations.noise import apply_noise
 from jaxrlworld.rl.envs.managers.base import BaseManager
 from jaxrlworld.rl.storages import CircularBuffer
 from jaxrlworld.rl.storages.delay_buffer import DelayBuffer
+from jaxrlworld.rl.utils.pretty import create_manager_table, format_shape, table_to_string
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import World
@@ -95,8 +97,6 @@ class ObservationManager(BaseManager):
                     )
 
     def _initialize_delay_buffers(self) -> None:
-        import zlib
-
         for group_name, terms in self._group_terms.items():
             self._group_obs_term_delay_buffer[group_name] = {}
             for term_name, obs_term in terms.items():
@@ -393,8 +393,6 @@ class ObservationManager(BaseManager):
         self.process_observations(update_history=True)
 
     def __str__(self) -> str:
-        from jaxrlworld.rl.utils.pretty import create_manager_table, format_shape, table_to_string
-
         output_parts = []
 
         for group_name, terms in self._group_terms.items():

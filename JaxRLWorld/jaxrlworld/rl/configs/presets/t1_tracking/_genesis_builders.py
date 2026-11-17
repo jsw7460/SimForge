@@ -37,6 +37,12 @@ from jaxrlworld.rl.configs.scene.unified_entity_config import (
     InitialStateCfg,
 )
 from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
+from jaxrlworld.rl.envs.mdp.actions import (
+    JointPositionAction,
+    JointPositionActionCfg,
+    MotionResidualJointPositionAction,
+    MotionResidualJointPositionActionCfg,
+)
 from jaxrlworld.rl.envs.mdp.events.dr import unified as unified_dr
 from jaxrlworld.rl.envs.mdp.observations.common.motion_tracking import (
     motion_anchor_ori_b,
@@ -301,13 +307,6 @@ def build_observation(cfg: T1TrackingConfig) -> ObservationConfig:
 
 def build_action(cfg: T1TrackingConfig) -> ActionConfig:
     """Action term selection — see ``_newton_builders.build_action``."""
-    from jaxrlworld.rl.envs.mdp.actions import (
-        JointPositionAction,
-        JointPositionActionCfg,
-        MotionResidualJointPositionAction,
-        MotionResidualJointPositionActionCfg,
-    )
-
     r = cfg.robot
     if cfg.action_mode == "motion_residual":
         action_term = MotionResidualJointPositionActionCfg(

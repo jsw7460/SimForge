@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import torch
 import warp as wp
+from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
 from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
 
 from jaxrlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
@@ -20,11 +21,17 @@ from jaxrlworld.rl.configs.mujoco_config_classes import (
 )
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeLevel, collect_expand_fields
+from jaxrlworld.rl.envs.mujoco.robot_data import MujocoRigidObjectData, MujocoRobotData
+from jaxrlworld.rl.envs.mujoco.robot_state_writer import MujocoRobotStateWriter
 from jaxrlworld.rl.envs.site_frames import resolve_sites
 from jaxrlworld.rl.envs.utils.mjwarp_overflow import MjwarpOverflowGuard
 from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from jaxrlworld.rl.envs.world import World
 from jaxrlworld.rl.utils import set_seed
+from jaxrlworld.rl.vis.viser import ViserVisualizationManager
+from jaxrlworld.rl.vis.viser.bridges.mujoco_bridge import MujocoBridge
+from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
 
 
 class MujocoEnv(World):
@@ -264,8 +271,6 @@ class MujocoEnv(World):
         )
 
         # Build MujocoRobotData using ArticulationIndexing
-        from jaxrlworld.rl.envs.mujoco.robot_data import MujocoRigidObjectData, MujocoRobotData
-        from jaxrlworld.rl.envs.mujoco.robot_state_writer import MujocoRobotStateWriter
 
         self._robot_data_cache = {}
         self._robot_state_writer_cache = {}
@@ -323,10 +328,6 @@ class MujocoEnv(World):
         if self.visualization_cfg.viewer_type == "viser":
             # Same unified ViserScene path as Genesis/Newton (so ViserSceneConfig
             # applies to MuJoCo too — configurable ground + robot material).
-            from jaxrlworld.rl.vis.viser import ViserVisualizationManager
-            from jaxrlworld.rl.vis.viser.bridges import MujocoBridge
-            from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
-
             viser_cfg = ViserViewerConfig(
                 port=self.visualization_cfg.viser_port,
                 share=self.visualization_cfg.viser_share,
@@ -360,11 +361,6 @@ class MujocoEnv(World):
         declaration belongs next to the function that writes the field, and
         for the derived-field write sets a recompute pulls in.
         """
-        # Local import: the ``dr`` package's ``__init__`` pulls in ``unified``,
-        # which imports the mujoco event adapter and resolves back into this
-        # env package (circular at load time).
-        from jaxrlworld.rl.envs.mdp.events.dr._model_fields import collect_expand_fields
-
         self._assert_recompute_level_names()
 
         dr_fields = collect_expand_fields(self.event_cfg)
@@ -381,10 +377,6 @@ class MujocoEnv(World):
         rename upstream would otherwise only surface as an ``AttributeError``
         deep inside the first reset-time recompute, long after build.
         """
-        from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
-
-        from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeLevel
-
         unknown = {level.name for level in RecomputeLevel} - {level.name for level in MjlabRecomputeLevel}
         if unknown:
             raise RuntimeError(

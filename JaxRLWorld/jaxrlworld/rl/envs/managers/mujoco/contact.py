@@ -6,6 +6,7 @@ import torch
 
 from jaxrlworld.rl.configs.sensors import ContactSensorCfg
 from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager, ContactGroup, primary_patterns
+from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
 
 if TYPE_CHECKING:
     from mjlab.sensor.contact_sensor import ContactSensor
@@ -30,7 +31,7 @@ class MujocoContactManager(BaseContactManager):
     # -- sensor registration --
 
     def register_sensors(self) -> None:
-        from mjlab.sensor.contact_sensor import ContactSensor
+        from mjlab.sensor.contact_sensor import ContactSensor  # local-import: backend (mjlab), only on the mujoco path
 
         declared = {cfg.name: cfg for cfg in self.env.scene_manager.config.sensors if isinstance(cfg, ContactSensorCfg)}
         for sensor_name, sensor in self.env.scene_manager.sensors.items():
@@ -81,8 +82,6 @@ class MujocoContactManager(BaseContactManager):
     # -- pretty print --
 
     def __str__(self) -> str:
-        from jaxrlworld.rl.utils.pretty import create_manager_table, table_to_string
-
         if not self._groups:
             return ""
 

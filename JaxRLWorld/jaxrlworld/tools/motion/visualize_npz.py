@@ -42,7 +42,9 @@ import time
 from pathlib import Path
 from typing import Literal
 
+import imageio.v2 as imageio
 import mujoco
+import mujoco.viewer
 import numpy as np
 import tyro
 
@@ -210,8 +212,6 @@ def _run_viewer(
     cam_azimuth: float,
     cam_elevation: float,
 ) -> None:
-    import mujoco.viewer  # local: optional dep, viewer mode only
-
     T = npz["joint_pos"].shape[0]
     dt = 1.0 / fps
     track_idx = _resolve_track_body_index(npz, track_body)
@@ -263,8 +263,6 @@ def _save_video(
     cam_azimuth: float,
     cam_elevation: float,
 ) -> None:
-    import imageio.v2 as imageio  # local: optional dep, video mode only
-
     # MJCFs typically declare a default offscreen framebuffer of 640x480
     # (mujoco.MjVisual.global_.offwidth/offheight). The Renderer rejects
     # render sizes larger than that buffer. Bump both to match the

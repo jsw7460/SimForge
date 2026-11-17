@@ -21,7 +21,7 @@ pin ``sim_type`` themselves; see
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from typing import Any, Dict, List
 
 from jaxrlworld.rl.configs import ConfigsForRun
@@ -85,11 +85,11 @@ def _get_sim_builders(sim_type: str) -> Go2SimBuilderProtocol:
     ``presets/_sim_builder_protocol.py`` for the full contract.
     """
     if sim_type == "newton":
-        from . import _newton_builders as mod
+        from . import _newton_builders as mod  # local-import: backend (newton builders), only on the newton path
     elif sim_type == "genesis":
-        from . import _genesis_builders as mod
+        from . import _genesis_builders as mod  # local-import: backend (genesis builders), only on the genesis path
     elif sim_type == "mujoco":
-        from . import _mujoco_builders as mod
+        from . import _mujoco_builders as mod  # local-import: backend (mujoco builders), only on the mujoco path
     else:
         mod = get_sim_builders("go2", sim_type, tuple(_SIM_TIMINGS)).load()
     return mod  # type: ignore[return-value]
@@ -227,8 +227,6 @@ class Go2FlatConfig:
         Only fields whose value differs from the dataclass default are
         included so the dict stays small and forward-compatible.
         """
-        from dataclasses import MISSING, fields
-
         kwargs: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "robot":

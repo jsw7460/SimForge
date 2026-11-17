@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from genesis.utils.geom import inv_quat, transform_by_quat
 from genesis.vis.rasterizer_context import RasterizerContext
 
 from .overlays import (
@@ -110,8 +111,6 @@ class RLWorldRasterizerContext(RasterizerContext):
 
         # Actual base velocity (body frame) for tracking visualization
         if robot is not None:
-            from genesis.utils.geom import inv_quat, transform_by_quat
-
             world_vel = robot.get_vel()
             body_vel = transform_by_quat(world_vel, inv_quat(robot.get_quat()))
             state["actual_lin_vel"] = body_vel

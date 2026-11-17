@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable
 
+from jaxrlworld.rl.utils.resolve import resolve_callable
+
 
 class WeightSchedule(ABC):
     """Base class for reward weight scheduling.
@@ -141,6 +143,4 @@ class RewardTermConfig:
     def resolved_func(self) -> Callable:
         if callable(self.func):
             return self.func
-        from jaxrlworld.rl.utils.resolve import resolve_callable
-
         return resolve_callable(self.func)

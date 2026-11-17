@@ -2,6 +2,7 @@ import atexit
 import json
 import os
 import signal
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from jaxrlworld.rl.algorithms.tdmpc2 import TDMPC2
 from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector
 from jaxrlworld.rl.envs.backends import find_backend
+from jaxrlworld.rl.envs.joint_permutation import JointPermutation, find_joint_obs_slices
 from jaxrlworld.rl.evals.policy_wrappers import PolicyWrapper
 from jaxrlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer, resolve_cross_sim_config
 from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_runner, replay_training_overrides
@@ -28,6 +30,8 @@ from jaxrlworld.rl.utils.console import (
     print_success,
     print_warning,
 )
+from jaxrlworld.rl.utils.wandb_checkpoint import get_wandb_checkpoint
+from jaxrlworld.rl.vis.viser.play_viewer import ViserPlayViewer
 
 
 class PolicyEvaluator:
@@ -85,8 +89,6 @@ class PolicyEvaluator:
 
         # Resolve policy_path from wandb if needed
         if wandb_run_path is not None:
-            from jaxrlworld.rl.utils.wandb_checkpoint import get_wandb_checkpoint
-
             policy_path, was_cached = get_wandb_checkpoint(
                 wandb_run_path=wandb_run_path,
                 iteration=wandb_checkpoint_iter,
@@ -272,8 +274,6 @@ class PolicyEvaluator:
         defaults are not. Scene overrides are bound to the training
         simulator and are reported, not carried over.
         """
-        from copy import deepcopy
-
         cfgs = deepcopy(eval_cfgs)
         train_config = metadata["config"]
 
@@ -338,8 +338,6 @@ class PolicyEvaluator:
 
         Returns JointPermutation if reordering is needed, else None.
         """
-        from jaxrlworld.rl.envs.joint_permutation import JointPermutation, find_joint_obs_slices
-
         eval_names = list(self.env.act_manager.actuated_joint_names)
 
         canonical_names = metadata["canonical_joint_names"]
@@ -428,8 +426,6 @@ class PolicyEvaluator:
         Args:
             port: Viser server port.
         """
-        from jaxrlworld.rl.vis.viser.play_viewer import ViserPlayViewer
-
         play_scene = self._create_play_scene()
         viewer = ViserPlayViewer(
             env=self.env,

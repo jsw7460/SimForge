@@ -17,6 +17,7 @@ import viser
 from scipy.spatial.transform import Rotation
 
 from .looks import get_look
+from .scene import ViserScene
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs.managers.mujoco.scene import MujocoSceneManager
@@ -90,8 +91,6 @@ class BridgePlayScene:
         self._scene = None
 
     def create(self, server: viser.ViserServer) -> None:
-        from .scene import ViserScene
-
         self._scene = ViserScene.create(server, self._bridge, scene_config=self._scene_config)
 
     @property
@@ -170,7 +169,7 @@ class MujocoPlayScene:
         self._mj_scene = None
 
     def create(self, server: viser.ViserServer) -> None:
-        from mjlab.viewer.viser.scene import MjlabViserScene
+        from mjlab.viewer.viser.scene import MjlabViserScene  # local-import: backend (mjlab), only on the MuJoCo path
 
         mj_model = self._scene_manager.mj_model
         num_envs = self._scene_manager.scene.num_envs

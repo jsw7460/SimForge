@@ -282,8 +282,8 @@ def _newton_friction_backend(
     shared_random: bool,
     axes: list[int],
 ) -> None:
-    import warp as wp
-    from newton import ModelFlags
+    import warp as wp  # local-import: backend (warp), only on the newton path
+    from newton import ModelFlags  # local-import: backend (newton), only on the newton path
 
     view = env.scene_manager.articulation_views[resolved.name]
     model = env.scene_manager.model
@@ -374,8 +374,12 @@ def _mujoco_friction_backend(
     # locally and resolve against the mjlab Scene; this is the *only*
     # place in the unified DR module where SceneEntitySelector → mjlab
     # cfg conversion happens for friction.
-    from mjlab.envs.mdp.dr import geom_friction as _mjlab_geom_friction
-    from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
+    from mjlab.envs.mdp.dr import (
+        geom_friction as _mjlab_geom_friction,  # local-import: backend (mjlab), only on the mujoco path
+    )
+    from mjlab.managers.scene_entity_config import (
+        SceneEntityCfg as _MjlabSceneEntityCfg,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     mjlab_cfg = _MjlabSceneEntityCfg(
         name=asset_cfg.name,
@@ -420,7 +424,9 @@ def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scen
     and ``resolve`` re-runs the name regexes each time even though both
     the selector and the compiled scene are static after build.
     """
-    from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
+    from mjlab.managers.scene_entity_config import (
+        SceneEntityCfg as _MjlabSceneEntityCfg,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     if isinstance(asset_cfg, ResolvedEntity):
         asset_cfg = asset_cfg.source_selector
@@ -528,10 +534,12 @@ def _genesis_body_mass_backend(env, env_ids, sampler, resolved, mass_range, oper
 
 
 def _newton_body_mass_backend(env, env_ids, sampler, resolved, mass_range, operation, distribution):
-    import warp as wp
-    from newton import ModelFlags
+    import warp as wp  # local-import: backend (warp), only on the newton path
+    from newton import ModelFlags  # local-import: backend (newton), only on the newton path
 
-    from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
+    from jaxrlworld.rl.envs.utils.newton.body_cache import (
+        get_cache,  # local-import: backend (warp), only on the newton path
+    )
 
     cache = get_cache(env)
     model = env.scene_manager.model
@@ -557,7 +565,9 @@ def _newton_body_mass_backend(env, env_ids, sampler, resolved, mass_range, opera
 
 
 def _mujoco_body_mass_backend(env, env_ids, sampler, asset_cfg, mass_range, operation, distribution, shared_random):
-    from mjlab.envs.mdp.dr import body_mass as _mjlab_body_mass
+    from mjlab.envs.mdp.dr import (
+        body_mass as _mjlab_body_mass,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
@@ -652,10 +662,12 @@ def _genesis_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, op
 
 
 def _newton_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, operation):
-    import warp as wp
-    from newton import ModelFlags
+    import warp as wp  # local-import: backend (warp), only on the newton path
+    from newton import ModelFlags  # local-import: backend (newton), only on the newton path
 
-    from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
+    from jaxrlworld.rl.envs.utils.newton.body_cache import (
+        get_cache,  # local-import: backend (warp), only on the newton path
+    )
 
     if operation != "add":
         raise NotImplementedError(
@@ -688,7 +700,9 @@ def _newton_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, ope
 
 
 def _mujoco_body_com_offset_backend(env, env_ids, sampler, asset_cfg, ranges, operation, axes, shared_random):
-    from mjlab.envs.mdp.dr import body_com_offset as _mjlab_body_com_offset
+    from mjlab.envs.mdp.dr import (
+        body_com_offset as _mjlab_body_com_offset,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
@@ -823,7 +837,7 @@ def _index_coords(n: int, device) -> tuple[torch.Tensor]:
 def _keyed_mjlab_distribution(sampler: TermSampler, env_ids: torch.Tensor, distribution: str, stream: int = 0):
     """An mjlab ``Distribution`` whose draws come from ``sampler`` (mjlab's
     engines sample a field axis by axis through ``Distribution.sample``)."""
-    from mjlab.envs.mdp.dr import Distribution
+    from mjlab.envs.mdp.dr import Distribution  # local-import: backend (mjlab), only on the mujoco path
 
     return Distribution(
         name=f"keyed:{distribution}", sample=keyed_field_sampler(sampler, env_ids, distribution, stream)
@@ -961,8 +975,8 @@ def _newton_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_rang
     # Implicit actuators only (the explicit case is handled sim-agnostically in
     # randomize_pd_gains via _explicit_pd_gains_backend): Newton's internal PD
     # consumes joint_target_ke/kd, so randomize the solver store.
-    import warp as wp
-    from newton import ModelFlags
+    import warp as wp  # local-import: backend (warp), only on the newton path
+    from newton import ModelFlags  # local-import: backend (newton), only on the newton path
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -1039,7 +1053,7 @@ def _explicit_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_ra
 
 
 def _mujoco_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_range, operation, distribution):
-    from mjlab.envs.mdp.dr import pd_gains as _mjlab_pd_gains
+    from mjlab.envs.mdp.dr import pd_gains as _mjlab_pd_gains  # local-import: backend (mjlab), only on the mujoco path
 
     if kp_range is None or kd_range is None:
         raise NotImplementedError(
@@ -1137,8 +1151,8 @@ def _genesis_armature_backend(env, env_ids, sampler, resolved, armature_range, o
 
 
 def _newton_armature_backend(env, env_ids, sampler, asset_cfg, armature_range, operation, distribution):
-    import warp as wp
-    from newton import ModelFlags
+    import warp as wp  # local-import: backend (warp), only on the newton path
+    from newton import ModelFlags  # local-import: backend (newton), only on the newton path
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -1157,7 +1171,9 @@ def _newton_armature_backend(env, env_ids, sampler, asset_cfg, armature_range, o
 
 
 def _mujoco_armature_backend(env, env_ids, sampler, asset_cfg, armature_range, operation, distribution, shared_random):
-    from mjlab.envs.mdp.dr import joint_armature as _mjlab_joint_armature
+    from mjlab.envs.mdp.dr import (
+        joint_armature as _mjlab_joint_armature,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
@@ -1242,8 +1258,8 @@ def _genesis_joint_friction_backend(env, env_ids, sampler, resolved, friction_ra
 
 
 def _newton_joint_friction_backend(env, env_ids, sampler, asset_cfg, friction_range, operation, distribution):
-    import warp as wp
-    from newton import ModelFlags
+    import warp as wp  # local-import: backend (warp), only on the newton path
+    from newton import ModelFlags  # local-import: backend (newton), only on the newton path
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -1264,7 +1280,9 @@ def _newton_joint_friction_backend(env, env_ids, sampler, asset_cfg, friction_ra
 def _mujoco_joint_friction_backend(
     env, env_ids, sampler, asset_cfg, friction_range, operation, distribution, shared_random
 ):
-    from mjlab.envs.mdp.dr import joint_friction as _mjlab_joint_friction
+    from mjlab.envs.mdp.dr import (
+        joint_friction as _mjlab_joint_friction,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)
@@ -1355,8 +1373,8 @@ def _genesis_joint_damping_backend(env, env_ids, sampler, resolved, damping_rang
 
 
 def _newton_joint_damping_backend(env, env_ids, sampler, asset_cfg, damping_range, operation, distribution):
-    import warp as wp
-    from newton import ModelFlags
+    import warp as wp  # local-import: backend (warp), only on the newton path
+    from newton import ModelFlags  # local-import: backend (newton), only on the newton path
 
     view = env.scene_manager.robot_view
     model = env.scene_manager.model
@@ -1376,7 +1394,9 @@ def _newton_joint_damping_backend(env, env_ids, sampler, asset_cfg, damping_rang
 def _mujoco_joint_damping_backend(
     env, env_ids, sampler, asset_cfg, damping_range, operation, distribution, shared_random
 ):
-    from mjlab.envs.mdp.dr import joint_damping as _mjlab_joint_damping
+    from mjlab.envs.mdp.dr import (
+        joint_damping as _mjlab_joint_damping,  # local-import: backend (mjlab), only on the mujoco path
+    )
 
     adapter = _MujocoEnvAdapter(env)
     mjlab_cfg = _selector_to_mjlab_cfg(asset_cfg, adapter.scene)

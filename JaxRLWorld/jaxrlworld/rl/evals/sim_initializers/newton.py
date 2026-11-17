@@ -3,9 +3,14 @@
 from typing import Any
 
 import torch
+import warp as wp
 
+from jaxrlworld.rl import envs
 from jaxrlworld.rl.evals.sim_initializers import SimInitializer
+from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
 from jaxrlworld.rl.utils.console import print_info, print_success
+from jaxrlworld.rl.vis.viser.bridges.newton_bridge import NewtonBridge
+from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
 
 
 class NewtonInitializer(SimInitializer):
@@ -14,8 +19,6 @@ class NewtonInitializer(SimInitializer):
         return ".bin"
 
     def init_device(self) -> torch.device:
-        import warp as wp
-
         return wp.device_to_torch(wp.get_device())
 
     def prepare_configs(
@@ -26,8 +29,6 @@ class NewtonInitializer(SimInitializer):
         record_video: bool,
         video_dir: str | None,
     ) -> Any:
-        from jaxrlworld.rl.utils.checkpoint import load_config_from_checkpoint
-
         eval_cfgs = load_config_from_checkpoint(metadata)
 
         if extra_overrides is not None:
@@ -40,8 +41,6 @@ class NewtonInitializer(SimInitializer):
         return eval_cfgs
 
     def init_environment(self, eval_cfgs: Any, **kwargs) -> Any:
-        from jaxrlworld.rl import envs
-
         env_class_name = eval_cfgs.env.env_name
         env_class = getattr(envs, env_class_name)  # dynamic-attr: env class named by config
 
@@ -63,9 +62,6 @@ class NewtonInitializer(SimInitializer):
         return env_class(**kw)
 
     def create_play_scene(self, env: Any):
-        from jaxrlworld.rl.vis.viser.bridges import NewtonBridge
-        from jaxrlworld.rl.vis.viser.play_scene import BridgePlayScene
-
         scene_cfg = env.visualization_cfg.viser_scene
         return BridgePlayScene(NewtonBridge(env.scene_manager), scene_config=scene_cfg)
 

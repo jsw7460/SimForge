@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from io import StringIO
 from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import numpy as np
 import torch
 from gymnasium import spaces
+from rich.console import Console
 
+from jaxrlworld.rl.envs.indexing import ArticulationIndexing
 from jaxrlworld.rl.envs.lifecycle import LifecycleEvent, LifecycleManager
+from jaxrlworld.rl.envs.managers import CommandManager, CommandManagerConfig, EventManager, TerminationManager
+from jaxrlworld.rl.envs.managers._registrations import register_all_for
+from jaxrlworld.rl.envs.managers.common.curriculum import CurriculumManager
+from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.utils import string as _su
+from jaxrlworld.rl.utils.pretty import create_env_panel, print_env_summary
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
@@ -18,8 +27,6 @@ if TYPE_CHECKING:
 
 def _empty_articulation_indexing(device):
     """An :class:`ArticulationIndexing` describing something with no joints."""
-    from jaxrlworld.rl.envs.indexing import ArticulationIndexing
-
     empty_long = torch.zeros(0, device=device, dtype=torch.long)
     empty_float = torch.zeros(0, device=device, dtype=torch.float32)
     return ArticulationIndexing(
@@ -470,8 +477,6 @@ class World(ABC):
         True the result follows the order of the regex patterns; when
         False (default) the result follows the canonical joint order.
         """
-        from jaxrlworld.rl.utils import string as _su
-
         name = entity_name if entity_name is not None else self.robot_entity_name
         all_names = list(self.entity_indexing(name).joint_names)
         if joint_name_patterns is None:
@@ -498,8 +503,6 @@ class World(ABC):
         pays a regex match plus one scalar H2D kernel per joint each
         time. Callers treat the returned tensor as read-only.
         """
-        from jaxrlworld.rl.utils import string as _su
-
         name = entity_name if entity_name is not None else self.robot_entity_name
         cached = self._default_joint_pos_resolved.get(name)
         if cached is not None:
@@ -606,7 +609,6 @@ class World(ABC):
         can hook in.
         """
         # Register backend-specific managers in the registry
-        from jaxrlworld.rl.envs.managers._registrations import register_all_for
 
         register_all_for(self.sim_type)
 
@@ -636,7 +638,6 @@ class World(ABC):
         self.lifecycle.dispatch(LifecycleEvent.ENV_READY)
 
         # Pretty print environment summary
-        from jaxrlworld.rl.utils.pretty import print_env_summary
 
         print_env_summary(self)
 
@@ -664,14 +665,6 @@ class World(ABC):
         The reward manager class is resolved via ManagerRegistry, so a
         backend can substitute its own without a subclass hook.
         """
-        from jaxrlworld.rl.envs.managers import (
-            CommandManager,
-            CommandManagerConfig,
-            EventManager,
-            TerminationManager,
-        )
-        from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
-
         self.command_manager = CommandManager(
             env=self,
             config=CommandManagerConfig(terms=self.command_cfg.terms),
@@ -700,7 +693,6 @@ class World(ABC):
         # instance — the three ConfigsForRun dataclasses default it to an
         # empty config via ``_default_curriculum_cfg``, so presets that
         # don't register any curriculum terms still get a no-op manager.
-        from jaxrlworld.rl.envs.managers.common.curriculum import CurriculumManager
 
         self.curriculum_manager = CurriculumManager(
             env=self,
@@ -1138,12 +1130,6 @@ class World(ABC):
 
     def __str__(self) -> str:
         """Pretty print environment summary with all manager information."""
-        from io import StringIO
-
-        from rich.console import Console
-
-        from jaxrlworld.rl.utils.pretty import create_env_panel
-
         output = StringIO()
         console = Console(file=output, force_terminal=True, width=100)
 

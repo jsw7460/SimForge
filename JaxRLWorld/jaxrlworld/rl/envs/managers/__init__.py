@@ -48,15 +48,15 @@ _MUJOCO_NAMES = {
 
 def __getattr__(name):
     if name in _GENESIS_NAMES:
-        from . import genesis as genesis_module
+        from . import genesis as genesis_module  # local-import: backend (genesis), lazy package export
 
         return getattr(genesis_module, _GENESIS_NAMES[name])  # dynamic-attr: lazy module __getattr__ export
     if name in _NEWTON_NAMES:
-        from . import newton as newton_module
+        from . import newton as newton_module  # local-import: backend (newton), lazy package export
 
         return getattr(newton_module, name)  # dynamic-attr: lazy module __getattr__ export
     if name in _MUJOCO_NAMES:
-        from . import mujoco as mujoco_module
+        from . import mujoco as mujoco_module  # local-import: backend (mjlab), lazy package export
 
         return getattr(mujoco_module, name)  # dynamic-attr: lazy module __getattr__ export
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
