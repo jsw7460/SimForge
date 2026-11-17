@@ -39,6 +39,9 @@ os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 import importlib
 
 import numpy as np
+import torch
+
+from jaxrlworld.rl.runners import BaseRunner
 
 _SIMS = ("genesis", "newton", "mujoco")
 
@@ -48,8 +51,6 @@ _COMMAND_THRESHOLD = 0.05  # matches g1_29dof feet_slip preset
 
 
 def _build_env(sim: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod = importlib.import_module("jaxrlworld.rl.configs.presets.g1_29dof.base")
     cfg_cls = mod.G1FlatConfig
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
@@ -63,7 +64,6 @@ def _np(t):
 
 def _probe(env, settle: int, steps: int, action_scale: float, seed: int) -> dict[str, np.ndarray]:
     """Reset env, settle with zero action, then run random-action steps. Capture state."""
-    import torch
 
     torch.manual_seed(seed)
     env.reset()
@@ -160,8 +160,6 @@ def main() -> int:
     out.append("so 'is_contact' is sampled at ankle_roll while 'foot_vel' is at the welded frame body.")
 
     for sim in sims:
-        import torch  # local; torch imported inside _probe too
-
         print(f"Building [{sim}] ...", flush=True)
         env = _build_env(sim, args.num_envs)
         d = _probe(env, args.settle, args.steps, args.action_scale, args.seed)
@@ -258,7 +256,7 @@ def main() -> int:
             rew = r["reward_per_env"].mean()
             rew_ref = rref["reward_per_env"].mean()
             ratio = rew / rew_ref if abs(rew_ref) > 1e-9 else float("nan")
-            out.append(f"  {sim:<10s}  {d_fp:<15.6f}  {d_fv:<15.6f}  " f"{d_fcb:<+10.3f}  {ratio:<+14.3f}")
+            out.append(f"  {sim:<10s}  {d_fp:<15.6f}  {d_fv:<15.6f}  {d_fcb:<+10.3f}  {ratio:<+14.3f}")
 
     # ───────────────────────────────────────────────────────────
     # Welded-body kinematic consistency check.

@@ -12,6 +12,8 @@ actually fired and that non-foot geoms are untouched.
 from __future__ import annotations
 
 import mujoco
+import numpy as np
+import torch
 
 from jaxrlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from jaxrlworld.rl.runners import BaseRunner
@@ -52,9 +54,6 @@ def main() -> None:
             print(f"  WARN: geom {n!r} not found")
             continue
         foot_ids.append((n, gid))
-
-    import numpy as np
-    import torch
 
     # mujoco-warp stores per-env geom_friction. Shape: (nworld, ngeom, 3).
     # Newer warp versions' to_torch hit an is_cpu attr error on torch.device,

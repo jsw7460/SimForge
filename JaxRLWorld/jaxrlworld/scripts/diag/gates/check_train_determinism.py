@@ -48,6 +48,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import torch
+
+from jaxrlworld.rl.runners import BaseRunner
+
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
@@ -75,7 +79,6 @@ def _build_train_env(sim: str, preset: str, num_envs: int, seed: int):
     terms are left active — that's the whole point of this diag,
     versus :mod:`check_eval_determinism` which strips them.
     """
-    from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
@@ -91,7 +94,6 @@ def _capture_state(env) -> list[float]:
     Field order is part of the on-disk format the driver parses; do
     NOT reorder without updating ``_section_slices``.
     """
-    import torch
 
     rd = env.get_robot_data()
     out: list[float] = []
@@ -111,7 +113,6 @@ def _capture_state(env) -> list[float]:
 
 def _build_action_seq(env, steps: int, seed: int):
     """Deterministic action sequence — same seed → same actions."""
-    import torch
 
     g = torch.Generator(device="cpu").manual_seed(seed + 99999)
     actions = []
@@ -123,7 +124,6 @@ def _build_action_seq(env, steps: int, seed: int):
 
 def _run_inner(sim: str, preset: str, num_envs: int, seed: int, rollouts: int, steps: int, out_path: Path) -> int:
     """Build env, run the rollout schedule, dump a numeric trace to disk."""
-    import torch
 
     lines: list[str] = []
     lines.append(f"# sim={sim} preset={preset} num_envs={num_envs} seed={seed} rollouts={rollouts} steps={steps}")

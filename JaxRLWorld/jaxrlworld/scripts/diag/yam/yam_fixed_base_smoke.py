@@ -132,7 +132,7 @@ def _step_n(env, action, n: int) -> bool:
 
 def _newton_control_evidence(env, act_names: list[str]) -> None:
     """Dump the joint targets as written, and as MuJoCo Warp sees them."""
-    import warp as wp
+    import warp as wp  # local-import: backend (warp), only on the newton path
 
     sm = env.scene_manager
     model = sm.model

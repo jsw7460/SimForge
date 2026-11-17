@@ -31,14 +31,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import re
 
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
+import mujoco
 import numpy as np
 import torch
+
+from jaxrlworld.rl.runners import BaseRunner
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
@@ -54,10 +58,6 @@ _FOOT_REGEX = r"^(left|right)_(foot[1-7]_collision|ankle_roll_link/g\d+)$"
 
 
 def _build_env(preset: str, sim: str, num_envs: int):
-    import importlib
-
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
@@ -115,7 +115,6 @@ def _read_newton_friction(env) -> dict[str, tuple[float, float, float]]:
 
 def _read_mujoco_friction(env) -> dict[str, tuple[float, float, float]]:
     """Return {geom_name: (slide, torsion, roll)} from the live MjModel."""
-    import mujoco
 
     out: dict[str, tuple[float, float, float]] = {}
     mj_model = env.scene_manager.mj_model

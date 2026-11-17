@@ -37,12 +37,14 @@ from __future__ import annotations
 
 import argparse
 
+import mujoco
 import torch
 
 from jaxrlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from jaxrlworld.rl.envs.mdp.events.dr.unified import (
+    _newton_dof_view,
     randomize_joint_armature,
     randomize_joint_friction,
     randomize_pd_gains,
@@ -107,9 +109,7 @@ def main() -> int:
         return (vals[sim_idx] if vals.dim() == 1 else vals[:, sim_idx]).clone()
 
     def read_newton(attr):
-        import warp as wp
-
-        from jaxrlworld.rl.envs.mdp.events.dr.unified import _newton_dof_view
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
         view = env.scene_manager.robot_view
         vals = _newton_dof_view(wp.to_torch(view.get_attribute(attr, env.scene_manager.model)))
@@ -119,8 +119,6 @@ def main() -> int:
     #    per-world mujoco-warp model fields the mjlab dr terms mutate. Verifies
     #    the FULL chain including our selector->mjlab SceneEntityCfg conversion.
     def _mj_maps():
-        import mujoco
-
         mjm = env.scene_manager.mj_model
         name2jid = {}
         for j in range(mjm.njnt):

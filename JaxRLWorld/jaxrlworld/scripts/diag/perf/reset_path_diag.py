@@ -65,6 +65,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+import torch
+
+from jaxrlworld.rl.configs.curriculums import CurriculumTermConfig
+from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
+from jaxrlworld.rl.runners import BaseRunner
+
 _MODULE = "jaxrlworld.scripts.diag.perf.reset_path_diag"
 
 # Sentinel written into the solver input buffers before the A1 reset. Large and
@@ -153,10 +159,6 @@ def record_terminal_state(env, env_ids):
 
 
 def _build_env(case: Case, num_envs: int):
-    from jaxrlworld.rl.configs.curriculums import CurriculumTermConfig
-    from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfgs = Go2FlatConfig(sim_type=case.sim, num_envs=num_envs).build()
     # iter_terms() discovers instance attributes, so a plain assignment
     # registers the term without needing a preset subclass.
@@ -220,8 +222,7 @@ def _base_link_name(env) -> str:
 
 def _force_run(env, force_z: float, victim: int) -> dict:
     """Place the robot in the air, step once, return the momentum delta + telemetry."""
-    import torch
-    import warp as wp
+    import warp as wp  # local-import: backend (warp), only on the newton path
 
     rd = env.get_robot_data("robot")
     writer = env.get_robot_state_writer("robot")
@@ -315,8 +316,6 @@ def check_a5(env, force: float, victim: int) -> dict:
 
 
 def check_a2(env, warmup_steps: int) -> dict:
-    import torch
-
     print("-" * 92)
     print("A2  curriculum observes the terminal state")
     print("-" * 92)
@@ -386,8 +385,7 @@ def check_a2(env, warmup_steps: int) -> dict:
 
 
 def check_a1(env, steps: int) -> dict:
-    import torch
-    import warp as wp
+    import warp as wp  # local-import: backend (warp), only on the newton path
 
     solver = env.scene_manager.solver
     mjw = solver.mjw_data

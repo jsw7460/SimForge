@@ -63,6 +63,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import torch
+
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import _command_active
+from jaxrlworld.rl.runners import BaseRunner
+
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 
@@ -90,12 +97,6 @@ def _capture_sim(
     inputs => same output, so any divergence we observe in the
     runtime tracker is reproduced in our replay.
     """
-    import torch
-
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
-    from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import _command_active
-    from jaxrlworld.rl.runners import BaseRunner
 
     out: dict = {
         "sim": sim,

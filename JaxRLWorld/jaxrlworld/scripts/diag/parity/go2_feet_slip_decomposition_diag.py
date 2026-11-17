@@ -44,7 +44,10 @@ import os
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import numpy as np  # noqa: E402
+import torch
 
+from jaxrlworld.rl.envs.managers.common.reward import get_weight_value
+from jaxrlworld.rl.utils import entity_utils as eu
 from jaxrlworld.scripts.diag.parity.check_reward_parity import _build_env  # noqa: E402
 
 SIMS = ("genesis", "newton", "mujoco")
@@ -67,7 +70,6 @@ def capture_step(env, action):
     resolved callable is kept so the SAME function can be re-invoked
     after the step returns, against whatever the buffers hold then.
     """
-    from jaxrlworld.rl.envs.managers.common.reward import get_weight_value
 
     mgr = env.reward_manager
     raw_rt: dict[str, np.ndarray] = {}
@@ -107,9 +109,7 @@ def foot_readers(env, sim: str):
     feet = list(env.gait_manager.foot_names)
 
     if sim == "genesis":
-        import genesis as gs
-
-        from jaxrlworld.rl.utils import entity_utils as eu
+        import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
         entity = env.scene_manager["robot"]
         idx, _ = eu.find_links(entity, feet, global_ids=False, preserve_order=True)
@@ -123,10 +123,12 @@ def foot_readers(env, sim: str):
         return pos, vel
 
     if sim == "newton":
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
-        from jaxrlworld.rl.envs.mdp.observations.newton.body_utils import get_bodies_pos
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
+        from jaxrlworld.rl.envs.mdp.observations.newton.body_utils import (
+            get_bodies_pos,  # local-import: backend (newton)
+        )
+        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache  # local-import: backend (newton)
 
         cache = get_cache(env)
         body_indices = cache.get_body_indices(feet)
@@ -141,7 +143,7 @@ def foot_readers(env, sim: str):
         return pos, vel
 
     # mujoco: site positions straight off the live warp data, by site id.
-    import warp as wp
+    import warp as wp  # local-import: backend (warp), only on the mujoco path
 
     m = env.scene_manager.mj_model
     names = [m.site(i).name for i in range(m.nsite)]
@@ -164,8 +166,6 @@ def contact_force_norms(env) -> np.ndarray:
 
 
 def run(sim: str, steps: int) -> dict[str, object]:
-    import torch
-
     env = _build_env("go2_gait", sim, NUM_ENVS)
     pos_fn, vel_fn = foot_readers(env, sim)
     zero = torch.zeros(NUM_ENVS, env.act_manager.num_actions, device=env.device)

@@ -34,6 +34,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import genesis as gs
+import torch
+from genesis.utils.geom import inv_transform_by_quat
+from genesis.utils.misc import qd_to_torch
+
 from jaxrlworld.scripts.diag.perf.g1_step_benchmark import _DECIMATION, _DT, _G1_XML, _SPAWN_Z, _setup_active_pd
 
 
@@ -46,11 +51,6 @@ def main() -> int:
     ap.add_argument("--flail", type=float, default=0.8, help="random joint-target amplitude [rad]")
     ap.add_argument("--out", default="genesis_contact_list_parity_diag.txt")
     args = ap.parse_args()
-
-    import genesis as gs
-    import torch
-    from genesis.utils.geom import inv_transform_by_quat
-    from genesis.utils.misc import qd_to_torch
 
     torch.manual_seed(args.seed)
     gs.init(backend=gs.gpu, logging_level="warning", seed=args.seed)

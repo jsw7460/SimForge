@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import builtins
+import importlib
 import sys
 import traceback
 
@@ -89,9 +90,8 @@ def main() -> int:
         _install_import_tracer(watch)
 
     # 1) what a training script imports first
-    import importlib
 
-    from jaxrlworld.rl.runners import BaseRunner  # noqa: F401  (this is the import under test)
+    from jaxrlworld.rl.runners import BaseRunner  # noqa: F401  # local-import: the import under test (after --trace)
 
     after_runner_import = _loaded_sim_pkgs()
 

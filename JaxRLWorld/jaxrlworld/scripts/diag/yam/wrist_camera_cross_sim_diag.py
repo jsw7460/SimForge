@@ -263,8 +263,8 @@ def _geometry_report(env, sim_type: str, label: str) -> None:
             groups[group] = groups.get(group, 0) + 1
         print(f"  {label:<8} {mj_model.ngeom} geoms by group: {dict(sorted(groups.items()))}")
     elif sim_type == "newton":
-        import warp as wp
-        from newton import ShapeFlags
+        import warp as wp  # local-import: backend (warp), only on the newton path
+        from newton import ShapeFlags  # local-import: backend (newton), only on the newton path
 
         flags = wp.to_torch(env.scene_manager.model.shape_flags)
         visible = (flags & int(ShapeFlags.VISIBLE)) != 0

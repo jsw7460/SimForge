@@ -10,6 +10,7 @@ genesis.utils.misc.get_assets_dir = lambda: custom_assets
 genesis.utils.terrain.get_assets_dir = lambda: custom_assets
 
 import gymnasium as gym
+from gymnasium.vector import SyncVectorEnv
 
 from jaxrlworld.rl.configs import SACPolicyConfig
 from jaxrlworld.rl.configs.algorithms.sac import SACConfig
@@ -20,6 +21,7 @@ from jaxrlworld.rl.configs.common_config_classes import (
     MLPCriticCfg,
 )
 from jaxrlworld.rl.configs.presets.go2.mlp import get_config
+from jaxrlworld.rl.envs import GymnasiumEnv
 from jaxrlworld.rl.runners import OffPolicyRunner
 
 
@@ -48,10 +50,6 @@ def main():
         hidden_dims=[256, 128],
         activation=Activation.TANH,
     )
-
-    from gymnasium.vector import SyncVectorEnv
-
-    from jaxrlworld.rl.envs import GymnasiumEnv
 
     def make_env(seed):
         def _init():

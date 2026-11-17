@@ -29,10 +29,14 @@ import importlib
 import statistics
 import time
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 
 from jaxrlworld.rl.algorithms.ppo.metrics import PPOMetrics
+from jaxrlworld.rl.algorithms.ppo.ppo import EmpiricalNormalization
+from jaxrlworld.rl.algorithms.ppo.update import update_all_batches
+from jaxrlworld.rl.runners import BaseRunner
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
@@ -41,8 +45,6 @@ _PRESETS: dict[str, tuple[str, str]] = {
 
 
 def _build_runner(preset: str, sim: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     if ":" in preset:
         mod_path, cls_name = preset.split(":", 1)
     else:
@@ -127,11 +129,6 @@ def main() -> int:
     # ---- piece 5: the jitted scan alone, python wrapper excluded -----
     # Replicates update()'s call to update_all_batches with fixed inputs
     # so the number is the compiled program's own wall time.
-    import equinox as eqx
-
-    from jaxrlworld.rl.algorithms.ppo.ppo import EmpiricalNormalization
-    from jaxrlworld.rl.algorithms.ppo.update import update_all_batches
-
     flat_batch = alg.storage.get_flat_batch()
     batch_indices = alg.storage.get_minibatch_indices(
         num_minibatches=alg.num_mini_batches,

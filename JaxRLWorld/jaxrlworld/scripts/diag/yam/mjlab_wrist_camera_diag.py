@@ -38,6 +38,7 @@ from dataclasses import dataclass
 
 import mujoco
 import torch
+from mjlab.sensor import CameraSensorCfg as MjCameraSensorCfg
 
 from jaxrlworld.rl.configs.common_config_classes import ObservationGroupConfig
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
@@ -82,8 +83,6 @@ def main() -> int:
     ap.add_argument("--height", type=int, default=48)
     ap.add_argument("--fovy", type=float, default=58.0, help="D405's vertical FOV, degrees.")
     args = ap.parse_args()
-
-    from mjlab.sensor import CameraSensorCfg as MjCameraSensorCfg
 
     print("=" * 78)
     print(f"WRIST DEPTH CAMERA  [yam_lift / mjlab  num_envs={args.num_envs}  {args.width}x{args.height}]")

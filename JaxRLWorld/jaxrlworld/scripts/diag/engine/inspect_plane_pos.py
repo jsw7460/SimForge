@@ -8,14 +8,15 @@ calculation suggests.
 
 from __future__ import annotations
 
+import genesis as gs
+from genesis.utils.misc import qd_to_torch
+
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.runners import BaseRunner
+
 
 def main() -> None:
-    import genesis as gs
-    from genesis.utils.misc import qd_to_torch
-
     gs.init(backend=gs.gpu, logging_level="warning")
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.runners import BaseRunner
 
     cfg = G1FlatConfig(sim_type="genesis", num_envs=16, seed=42)
     cfgs = cfg.build()

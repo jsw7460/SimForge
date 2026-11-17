@@ -26,6 +26,7 @@ So it is checked directly:
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
@@ -69,8 +70,6 @@ def _injected_lrs(opt_state) -> dict[str, float]:
 
 
 def main() -> int:
-    import equinox as eqx
-
     print("=" * 78)
     print("PPO ADAPTIVE LEARNING RATE — does the optimizer keep its state?")
     print("=" * 78)

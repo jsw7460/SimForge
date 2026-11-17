@@ -43,6 +43,18 @@ import sys
 import time
 from pathlib import Path
 
+import torch
+import warp as wp
+
+from jaxrlworld.rl.algorithms.base import ActInput
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.configs.presets.g1_29dof.mujoco.rough import G1RoughMujocoConfig
+from jaxrlworld.rl.evals.sim_initializers.mjlab import MujocoInitializer
+from jaxrlworld.rl.runners import BaseRunner
+from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+
 _MODULE = "jaxrlworld.scripts.diag.dr.mjlab_dr_training_matrix_diag"
 
 _PRESETS = ("flat", "rough")
@@ -71,10 +83,7 @@ def _stage(msg: str) -> None:
 
 def _build_cfgs(preset: str, num_envs: int, seed: int):
     if preset == "flat":
-        from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-
         return G1FlatConfig(sim_type="mujoco", num_envs=num_envs, seed=seed).build()
-    from jaxrlworld.rl.configs.presets.g1_29dof.mujoco.rough import G1RoughMujocoConfig
 
     cfgs = G1RoughMujocoConfig().build()
     cfgs.apply_overrides(**{"env": {"num_envs": num_envs, "seed": seed}})
@@ -83,8 +92,6 @@ def _build_cfgs(preset: str, num_envs: int, seed: int):
 
 def _used_fields(env) -> list[str]:
     """mjlab fields the preset's unified DR terms write."""
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
 
     fields: set[str] = set()
     for _name, term in iter_terms(env.event_cfg, EventTermConfig).items():
@@ -97,9 +104,6 @@ def _used_fields(env) -> list[str]:
 
 
 def run_cell(preset: str, jax_on: bool, num_envs: int, num_steps: int, seed: int) -> dict:
-    import torch
-    import warp as wp
-
     _stage(f"cell start: preset={preset} jax={'on' if jax_on else 'off'} num_envs={num_envs}")
     torch.manual_seed(seed)
 
@@ -109,14 +113,10 @@ def run_cell(preset: str, jax_on: bool, num_envs: int, num_steps: int, seed: int
     if jax_on:
         # Full training entry: builds the env, initializes the JAX policy
         # stack, and calls env.reset() — identical to rough.py training.
-        from jaxrlworld.rl.runners import BaseRunner
-
         runner = BaseRunner.create_with_env(cfgs, use_wandb=False, seed=seed)
         env = runner.env
         _stage("runner built (env + JAX policy) + reset done")
     else:
-        from jaxrlworld.rl.evals.sim_initializers.mjlab import MujocoInitializer
-
         runner = None
         env = MujocoInitializer().init_environment(cfgs)
         _stage("env built (no JAX)")
@@ -138,9 +138,6 @@ def run_cell(preset: str, jax_on: bool, num_envs: int, num_steps: int, seed: int
     obs = env.obs_manager.get_observation()
     obs_finite = True
     if jax_on:
-        from jaxrlworld.rl.algorithms.base import ActInput
-        from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
-
         for k in range(num_steps):
             actions = runner.alg.act(
                 ActInput(torch_to_jax(obs["actor"]), torch_to_jax(obs["critic"])),

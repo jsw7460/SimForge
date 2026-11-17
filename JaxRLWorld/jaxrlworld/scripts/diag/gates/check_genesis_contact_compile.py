@@ -30,13 +30,12 @@ import torch
 
 from jaxrlworld.rl.envs.managers.common.contact import BaseContactManager
 from jaxrlworld.rl.envs.managers.genesis.contact_sensor import GenesisContactBatch
+from jaxrlworld.rl.runners import BaseRunner
 
 _DEFAULT_PRESET = "jaxrlworld.rl.configs.presets.k1_velocity.base:K1VelocityConfig"
 
 
 def _build_env(preset: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod_path, cls_name = preset.split(":", 1)
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type="genesis", num_envs=num_envs).build()

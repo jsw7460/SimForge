@@ -42,9 +42,7 @@ import time
 from collections import defaultdict
 
 import jax.numpy as jnp
-import mujoco_warp
 import torch
-import warp as wp
 
 from jaxrlworld.rl.algorithms.base import ActInput
 from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
@@ -543,8 +541,6 @@ def _probe_capture_stages(env, sensor, timer: _Timer, repeats: int) -> None:
     but their sum will exceed the method: draining between stages removes
     the overlap the real call gets.
     """
-    import torch as _torch
-
     print()
     print("=" * 78)
     print("capture_substep, STAGE BY STAGE")
@@ -577,10 +573,10 @@ def _probe_capture_stages(env, sensor, timer: _Timer, repeats: int) -> None:
         "counterpart test": counterpart_test,
         "combine into pmask_a/b": lambda: (on_p_a & b_ok.unsqueeze(-1), on_p_b & a_ok.unsqueeze(-1)),
         "found = (a|b).any(1)": lambda: (pmask_a | pmask_b).any(1),
-        "einsum -> world force": lambda: _torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force),
+        "einsum -> world force": lambda: torch.einsum("ncp,nci->npi", pmask_b.float() - pmask_a.float(), force),
         "roll the two history rings": lambda: (
-            _torch.roll(sensor._found_hist, 1, dims=1),
-            _torch.roll(sensor._force_hist, 1, dims=1),
+            torch.roll(sensor._found_hist, 1, dims=1),
+            torch.roll(sensor._force_hist, 1, dims=1),
         ),
     }
     _time_probes(timer, probes, repeats)
@@ -685,6 +681,9 @@ def _probe_newton_reset_forward(env, timer: _Timer, env_ids: torch.Tensor, repea
     load the ``newton`` package into a mujoco or genesis process and trip
     the single-backend guard before the env is even built.
     """
+    import mujoco_warp  # local-import: backend (mujoco_warp), only on the Newton path
+    import warp as wp  # local-import: backend (warp), only on the Newton path
+
     cm = env.contact_manager
     if not cm._group_sensors:
         return

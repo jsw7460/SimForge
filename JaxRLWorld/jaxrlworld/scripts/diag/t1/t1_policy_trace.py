@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 
 import torch
 
 from jaxrlworld.rl.evals import PolicyEvaluator
+from jaxrlworld.rl.utils import string as string_utils
 
 # ── Deterministic init poses ────────────────────────────────────────
 
@@ -75,7 +77,6 @@ def _force_state(env, pose_dict, joint_pos_vec):
 
 def _build_default_joint_pos(env, robot_cfg):
     """Regex-resolve cfg.robot.default_joint_angles against canonical joint order."""
-    from jaxrlworld.rl.utils import string as string_utils
 
     all_names = list(env.act_manager.actuated_joint_names)
     matched_idx, _, matched_vals = string_utils.resolve_matching_names_values(robot_cfg.default_joint_angles, all_names)
@@ -126,10 +127,9 @@ def main():
     args = parser.parse_args()
 
     out_path = args.out or f"t1_policy_trace_{args.sim}_{args.scenario}.txt"
-    import sys as _sys
 
     _log_fh = open(out_path, "w")
-    _sys.stdout = _log_fh
+    sys.stdout = _log_fh
     print(f"# t1_policy_trace sim={args.sim} scenario={args.scenario} wandb={args.wandb} settle={args.settle_steps}")
 
     torch.manual_seed(args.seed)
@@ -199,7 +199,7 @@ def main():
             _dump_step(env, t, raw_action, args.settle_steps)
 
     _log_fh.close()
-    _sys.stdout = _sys.__stdout__
+    sys.stdout = sys.__stdout__
     print(f"Trace written to: {out_path}")
 
 

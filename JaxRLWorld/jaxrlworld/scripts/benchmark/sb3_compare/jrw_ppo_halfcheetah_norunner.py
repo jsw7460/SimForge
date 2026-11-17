@@ -28,9 +28,9 @@ import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import numpy as np
+import wandb
 from gymnasium.vector import AutoresetMode, SyncVectorEnv
 
-import wandb
 from jaxrlworld.rl.algorithms.ppo.ppo import PPO
 from jaxrlworld.rl.configs.common_config_classes import (
     Activation,

@@ -40,6 +40,26 @@ import math
 import os
 import time
 
+import gymnasium as gym
+import numpy as np
+import torch
+import wandb
+from gymnasium.vector import AutoresetMode, SyncVectorEnv
+
+from jaxrlworld.rl.configs import SACPolicyConfig, TD3PolicyConfig
+from jaxrlworld.rl.configs.algorithms import SACConfig, TD3Config
+from jaxrlworld.rl.configs.algorithms.ppo import PPOConfig
+from jaxrlworld.rl.configs.common_config_classes import (
+    Activation,
+    DefaultInit,
+    DistributionType,
+    MLPActorCfg,
+    MLPCriticCfg,
+    OrthoInit,
+)
+from jaxrlworld.rl.configs.presets.go2.mlp import get_config
+from jaxrlworld.rl.runners import BaseRunner, OffPolicyRunner
+
 PROJECT = "SB3_vs_JRW"
 
 # Fixed budgets, sized for roughly 10-15 minutes; edit here to change.
@@ -122,17 +142,11 @@ def _run_name(framework: str, algo: str, task_key: str, seed: int) -> str:
 
 def run_sb3(algo: str, task_key: str) -> None:
     try:
-        import stable_baselines3 as sb3
-        from stable_baselines3.common.callbacks import BaseCallback
-        from stable_baselines3.common.env_util import make_vec_env
+        import stable_baselines3 as sb3  # local-import: optional (stable_baselines3)
+        from stable_baselines3.common.callbacks import BaseCallback  # local-import: optional (stable_baselines3)
+        from stable_baselines3.common.env_util import make_vec_env  # local-import: optional (stable_baselines3)
     except ImportError as e:
         raise SystemExit("stable-baselines3 is not installed: pip install stable-baselines3") from e
-
-    import gymnasium as gym
-    import numpy as np
-    import torch
-
-    import wandb
 
     task = TASKS[task_key]
     seed = _seed()
@@ -194,7 +208,7 @@ def run_sb3(algo: str, task_key: str) -> None:
             verbose=1,
         )
     elif algo == "td3":
-        from stable_baselines3.common.noise import NormalActionNoise
+        from stable_baselines3.common.noise import NormalActionNoise  # local-import: optional (stable_baselines3)
 
         hp = TD3_HP
         env = gym.make(task)
@@ -234,12 +248,10 @@ def _jrw_base_cfg(algo: str, task_key: str, num_envs: int):
     # benchmark script in this tree — get_config("genesis") imports
     # genesis, which insists on resolving its asset directory.
     custom_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ppo", "assets"))
-    import genesis.utils.terrain
+    import genesis.utils.terrain  # local-import: backend (genesis), only on the JRW path
 
     genesis.utils.misc.get_assets_dir = lambda: custom_assets
     genesis.utils.terrain.get_assets_dir = lambda: custom_assets
-
-    from jaxrlworld.rl.configs.presets.go2.mlp import get_config
 
     seed = _seed()
     cfgs = get_config(sim="genesis")
@@ -261,19 +273,7 @@ def run_jrw(algo: str, task_key: str, buffer_device: str = "host") -> None:
     compared without editing this file. "host" is the default because it
     is the faster of the two *here* — see the off-policy branch below.
     """
-    from jaxrlworld.rl.configs.common_config_classes import (
-        Activation,
-        DefaultInit,
-        DistributionType,
-        MLPActorCfg,
-        MLPCriticCfg,
-        OrthoInit,
-    )
-
     if algo == "ppo":
-        from jaxrlworld.rl.configs.algorithms.ppo import PPOConfig
-        from jaxrlworld.rl.runners import BaseRunner
-
         hp = PPO_HP
         cfgs = _jrw_base_cfg(algo, task_key, num_envs=hp["n_envs"])
         cfgs.runner.log_interval = 5
@@ -321,16 +321,9 @@ def run_jrw(algo: str, task_key: str, buffer_device: str = "host") -> None:
 
     # SAC / TD3: mirror the existing off-policy gym scripts — a manual
     # SyncVectorEnv wrapped in GymnasiumEnv, fed to OffPolicyRunner.
-    import gymnasium as gym
-    from gymnasium.vector import AutoresetMode, SyncVectorEnv
-
-    from jaxrlworld.rl.envs import GymnasiumEnv
-    from jaxrlworld.rl.runners import OffPolicyRunner
+    from jaxrlworld.rl.envs import GymnasiumEnv  # local-import: backend (genesis), only on the JRW path
 
     if algo == "sac":
-        from jaxrlworld.rl.configs import SACPolicyConfig
-        from jaxrlworld.rl.configs.algorithms import SACConfig
-
         hp = SAC_HP
         cfgs = _jrw_base_cfg(algo, task_key, num_envs=hp["n_envs"])
         cfgs.algorithm = SACConfig(
@@ -347,9 +340,6 @@ def run_jrw(algo: str, task_key: str, buffer_device: str = "host") -> None:
         cfgs.nn.policy = cfgs.nn.policy.to(SACPolicyConfig)
         policy_cfg = cfgs.nn.policy
     elif algo == "td3":
-        from jaxrlworld.rl.configs import TD3PolicyConfig
-        from jaxrlworld.rl.configs.algorithms import TD3Config
-
         hp = TD3_HP
         cfgs = _jrw_base_cfg(algo, task_key, num_envs=hp["n_envs"])
         cfgs.algorithm = TD3Config(

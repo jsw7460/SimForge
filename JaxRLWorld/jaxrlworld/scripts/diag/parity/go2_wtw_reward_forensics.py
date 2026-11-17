@@ -41,6 +41,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from jaxrlworld.rl.evals import PolicyEvaluator
+
 
 def _quantiles(x: torch.Tensor) -> dict:
     if x.numel() == 0:
@@ -58,8 +60,6 @@ def _quantiles(x: torch.Tensor) -> dict:
 
 
 def dump(args) -> None:
-    from jaxrlworld.rl.evals import PolicyEvaluator
-
     evaluator = PolicyEvaluator(
         policy_path=args.policy_path,
         eval_target=args.sim,

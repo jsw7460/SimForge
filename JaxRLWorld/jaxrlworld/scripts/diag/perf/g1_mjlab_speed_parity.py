@@ -39,6 +39,7 @@ import argparse
 from jaxrlworld.rl.actuators.actuator_cfg import ImplicitActuatorCfg
 from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 from jaxrlworld.rl.configs.scene.unified_entity_config import ArticulationCfg
+from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
 from jaxrlworld.rl.runners import BaseRunner
 
 
@@ -62,8 +63,6 @@ class G1FlatMjlabSpeedParityConfig(G1FlatConfig):
         # pair (2 mj sensors). Our preset's per-link body match expands to
         # 31 links x 2 fields = 62 mj sensors, all evaluated inside the
         # mjwarp step graph every substep.
-        from jaxrlworld.rl.configs.sensors import ContactMatch, ContactSensorCfg
-
         sensors = []
         for s in sc.sensors:
             if s.name == "self_collision":

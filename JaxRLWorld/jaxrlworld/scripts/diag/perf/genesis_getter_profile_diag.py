@@ -31,6 +31,10 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+import torch
+
+from jaxrlworld.rl.evals.sim_initializers import get_initializer
+
 _PRESETS: dict[str, tuple[str, str]] = {
     "go2": ("jaxrlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
@@ -71,8 +75,6 @@ class _Meter:
     def wrap(self, obj, name: str, label: str) -> None:
         fn = getattr(obj, name)  # dynamic-attr: getter named in the instrumentation tables
 
-        import torch
-
         @functools.wraps(fn)
         def shim(*a, **kw):
             if not self.enabled:
@@ -98,14 +100,10 @@ def main() -> int:
     ap.add_argument("--out", default="genesis_getter_profile.txt")
     args = ap.parse_args()
 
-    import torch
-
     torch.manual_seed(args.seed)
     module, cls_name = _PRESETS[args.preset]
     cfg_cls = getattr(importlib.import_module(module), cls_name)  # dynamic-attr: preset class named in _PRESETS
     cfgs = cfg_cls(sim_type="genesis", num_envs=args.num_envs, seed=args.seed).build()
-
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
     env = get_initializer("Genesis").init_environment(cfgs)
     env.reset()

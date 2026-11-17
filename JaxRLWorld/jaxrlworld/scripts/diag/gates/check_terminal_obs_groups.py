@@ -35,6 +35,8 @@ import importlib
 
 import torch
 
+from jaxrlworld.rl.runners import BaseRunner
+
 _PER_SIM_PRESETS: dict[str, dict[str, tuple[str, str]]] = {
     "go2_gait": {
         "genesis": ("jaxrlworld.rl.configs.presets.go2.genesis.gait_conditioned", "Go2GaitConditionedGenesisConfig"),
@@ -45,8 +47,6 @@ _PER_SIM_PRESETS: dict[str, dict[str, tuple[str, str]]] = {
 
 
 def _build_env(preset: str, sim: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     if ":" in preset:
         mod_path, cls_name = preset.split(":", 1)
     else:

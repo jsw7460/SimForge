@@ -29,8 +29,10 @@ from __future__ import annotations
 import argparse
 import sys
 
+import mujoco
 import numpy as np
 
+from jaxrlworld.rl.envs.utils.newton.label import leaf_name
 from jaxrlworld.rl.evals.evaluator import PolicyEvaluator
 
 _NAN = float("nan")
@@ -49,8 +51,6 @@ def _fmt(x, w: int = 11, prec: int = 6) -> str:
 
 # ── MuJoCo side ────────────────────────────────────────────────────
 def dump_mujoco(env, canonical_names) -> None:
-    import mujoco
-
     mj = env.scene_manager.mj_model
 
     print("[SIM META]")
@@ -141,8 +141,6 @@ def dump_mujoco(env, canonical_names) -> None:
 
 # ── Newton side ────────────────────────────────────────────────────
 def dump_newton(env, canonical_names) -> None:
-    from jaxrlworld.rl.envs.utils.newton.label import leaf_name
-
     model = env.scene_manager.model
 
     print("[SIM META]")

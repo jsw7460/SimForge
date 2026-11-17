@@ -284,7 +284,7 @@ def read_solver(env, sim: str) -> dict:
         )
     else:
         # Per-backend import: genesis is only loaded in a genesis process.
-        import genesis as gs
+        import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
         rigid = env.scene_manager.scene.sim.rigid_solver
         options = rigid._options
@@ -332,7 +332,7 @@ def read_params(env, sim: str) -> dict:
             bodies = {int(b) for b in entity.indexing.body_ids.cpu().tolist()}
         else:
             # Per-backend import: warp is read only for Newton's own model.
-            import warp as wp
+            import warp as wp  # local-import: backend (warp), only on the newton path
 
             solver = env.scene_manager.solver
             mj = solver.mj_model

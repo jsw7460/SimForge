@@ -50,6 +50,19 @@ import argparse
 import pathlib
 import re
 
+import mujoco_warp
+import torch
+import warp as wp
+from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
+
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.common_config_classes import EventConfig
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
+from jaxrlworld.rl.envs.mdp.events.dr import unified as u
+from jaxrlworld.rl.envs.mdp.events.dr._model_fields import DERIVED_FIELDS, RecomputeLevel, collect_expand_fields
+from jaxrlworld.rl.runners import BaseRunner
+
 # Fields written per world that never need expansion, because the write
 # sizes itself to whatever the array already is and can never store out of
 # bounds:
@@ -81,10 +94,6 @@ def _retired_collect(event_cfg) -> tuple[str, ...]:
     migration, so C1 compares against the real previous behaviour rather than a
     paraphrase of it. Do not "fix" this table -- it is a frozen reference.
     """
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as _unified
-    from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeLevel
 
     set_const_0_fields = (
         "dof_invweight0",
@@ -108,13 +117,13 @@ def _retired_collect(event_cfg) -> tuple[str, ...]:
         RecomputeLevel.set_const: ("body_subtreemass",) + set_const_0_fields + ("tendon_lengthspring",),
     }
     unified_to_fields = {
-        _unified.randomize_friction: (("geom_friction",), RecomputeLevel.none),
-        _unified.randomize_body_mass: (("body_mass",), RecomputeLevel.set_const),
-        _unified.randomize_body_com_offset: (("body_ipos",), RecomputeLevel.set_const),
-        _unified.randomize_pd_gains: (("actuator_gainprm", "actuator_biasprm"), RecomputeLevel.none),
-        _unified.randomize_joint_armature: (("dof_armature",), RecomputeLevel.set_const_0),
-        _unified.randomize_joint_friction: (("dof_frictionloss",), RecomputeLevel.none),
-        _unified.randomize_joint_damping: (("dof_damping",), RecomputeLevel.none),
+        u.randomize_friction: (("geom_friction",), RecomputeLevel.none),
+        u.randomize_body_mass: (("body_mass",), RecomputeLevel.set_const),
+        u.randomize_body_com_offset: (("body_ipos",), RecomputeLevel.set_const),
+        u.randomize_pd_gains: (("actuator_gainprm", "actuator_biasprm"), RecomputeLevel.none),
+        u.randomize_joint_armature: (("dof_armature",), RecomputeLevel.set_const_0),
+        u.randomize_joint_friction: (("dof_frictionloss",), RecomputeLevel.none),
+        u.randomize_joint_damping: (("dof_damping",), RecomputeLevel.none),
     }
 
     out: list[str] = []
@@ -131,9 +140,6 @@ def _retired_collect(event_cfg) -> tuple[str, ...]:
 
 def _all_dr_config():
     """EventConfig registering every unified DR term plus an mjlab-native one."""
-    from jaxrlworld.rl.configs.common_config_classes import EventConfig
-    from jaxrlworld.rl.configs.events import EventTermConfig
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as u
 
     terms = (
         u.randomize_friction,
@@ -164,8 +170,6 @@ def _native_startup_term(env, env_ids, field):
 
 
 def check_c1() -> bool:
-    from jaxrlworld.rl.envs.mdp.events.dr._model_fields import collect_expand_fields
-
     _hdr("C1  collected fields identical to the retired lookup table")
     cfg = _all_dr_config()
     new, old = collect_expand_fields(cfg), _retired_collect(cfg)
@@ -183,8 +187,6 @@ def check_c1() -> bool:
 
 
 def check_c2() -> bool:
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as u
-
     _hdr("C2  every randomize_* entry point declares its model fields")
     entries = sorted((n, f) for n, f in vars(u).items() if n.startswith("randomize_") and callable(f))
     ok = True
@@ -200,11 +202,6 @@ def check_c2() -> bool:
 
 
 def check_c3() -> bool:
-    from jaxrlworld.rl.configs.common_config_classes import EventConfig
-    from jaxrlworld.rl.configs.events import EventTermConfig
-    from jaxrlworld.rl.envs.mdp.events.dr import unified as u
-    from jaxrlworld.rl.envs.mdp.events.dr._model_fields import collect_expand_fields
-
     _hdr("C3  CONTROL: an undecorated DR-package term must raise")
     # A private backend helper: lives in the DR package, carries no declaration.
     cfg = EventConfig()
@@ -230,7 +227,6 @@ def _mujoco_warp_write_sets() -> dict[str, set[str]] | None:
     layout is not recognised, so the caller reports INCONCLUSIVE rather than
     a spurious failure.
     """
-    import mujoco_warp
 
     src_path = pathlib.Path(mujoco_warp.__file__).parent / "_src" / "set_const.py"
     if not src_path.is_file():
@@ -272,8 +268,6 @@ def _mujoco_warp_write_sets() -> dict[str, set[str]] | None:
 
 
 def check_c4() -> bool | None:
-    from jaxrlworld.rl.envs.mdp.events.dr._model_fields import DERIVED_FIELDS, RecomputeLevel
-
     _hdr("C4  derived-field table vs the installed mujoco-warp")
     detected = _mujoco_warp_write_sets()
     if detected is None:
@@ -302,12 +296,7 @@ def check_c4() -> bool | None:
 
 
 def check_c5() -> bool:
-    from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeLevel
-
     _hdr("C5  RecomputeLevel name contract")
-    import mujoco_warp
-    from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
-
     ok = True
     theirs = {lvl.name for lvl in MjlabRecomputeLevel}
     unknown = {lvl.name for lvl in RecomputeLevel} - theirs
@@ -341,7 +330,6 @@ def _field_view(wp_model, field: str):
     left to propagate: a field that exists but cannot be read is a finding,
     not something to paper over.
     """
-    import warp as wp
 
     arr = getattr(wp_model, field, None)  # dynamic-attr: declared field names are checked against the model
     if arr is None:
@@ -350,12 +338,6 @@ def _field_view(wp_model, field: str):
 
 
 def check_live(num_envs: int, steps: int) -> bool:
-    import torch
-
-    from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
-    from jaxrlworld.rl.envs.mdp.events.dr._model_fields import collect_expand_fields
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfgs = Go2FlatConfig(sim_type="mujoco", num_envs=num_envs).build()
     collected = collect_expand_fields(cfgs.event)
     env = BaseRunner.create_with_env(cfgs).env

@@ -25,6 +25,11 @@ import argparse
 import time
 
 import torch
+from mjlab.envs import ManagerBasedRlEnv
+from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
+
+from jaxrlworld.rl.runners import BaseRunner
+from jaxrlworld.scripts.diag.perf.g1_mjlab_speed_parity import G1FlatMjlabSpeedParityConfig
 
 
 def _cuda_sync() -> None:
@@ -64,9 +69,6 @@ def _time_steps(step_fn, warmup: int, steps: int) -> float:
 
 
 def _bench_mjlab_native(num_envs: int, warmup: int, steps: int) -> None:
-    from mjlab.envs import ManagerBasedRlEnv
-    from mjlab.tasks.velocity.config.g1.env_cfgs import unitree_g1_flat_env_cfg
-
     cfg = unitree_g1_flat_env_cfg()
     cfg.scene.num_envs = num_envs
     env = ManagerBasedRlEnv(cfg, device="cuda:0")
@@ -86,9 +88,6 @@ def _bench_mjlab_native(num_envs: int, warmup: int, steps: int) -> None:
 
 
 def _bench_ours(num_envs: int, warmup: int, steps: int) -> None:
-    from jaxrlworld.rl.runners import BaseRunner
-    from jaxrlworld.scripts.diag.perf.g1_mjlab_speed_parity import G1FlatMjlabSpeedParityConfig
-
     cfgs = G1FlatMjlabSpeedParityConfig(sim_type="mujoco", num_envs=num_envs).build()
     runner = BaseRunner.create_with_env(cfgs, use_wandb=False)
     env = runner.env

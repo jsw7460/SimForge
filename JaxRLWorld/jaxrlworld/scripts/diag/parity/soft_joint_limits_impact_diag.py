@@ -40,12 +40,20 @@ Usage (GPU box):
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+import torch
+
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.configs.rewards import RewardTermConfig
+from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
 _MODULE = "jaxrlworld.scripts.diag.parity.soft_joint_limits_impact_diag"
 
@@ -68,10 +76,6 @@ def _stage(msg: str) -> None:
 
 
 def run_cell(preset: str, sim: str, num_envs: int, seed: int) -> dict:
-    import importlib
-
-    import torch
-
     torch.manual_seed(seed)
     _stage(f"cell start: {preset}:{sim} (num_envs={num_envs})")
 
@@ -82,10 +86,6 @@ def run_cell(preset: str, sim: str, num_envs: int, seed: int) -> dict:
     # ---- config-level dump: factor + every term, verbatim ----------
     art = cfgs.scene.entities["robot"].articulation
     factor = art.soft_joint_pos_limit_factor
-
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
-    from jaxrlworld.rl.configs.rewards import RewardTermConfig
 
     def fq(fn) -> str:
         module = getattr(fn, "__module__", "?")  # dynamic-attr: func may be a callable, partial or string
@@ -111,8 +111,6 @@ def run_cell(preset: str, sim: str, num_envs: int, seed: int) -> dict:
         if "dof_pos_limits" in name or "dof_pos_limits" in f or "joint_pos_limits" in f:
             note = " [mjlab-data-direct, NOT via rd]" if ".mujoco." in f else ""
             consumers.append(f"reward '{name}' ({f}){note}")
-
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
     env = get_initializer(_SIM_KEY[sim]).init_environment(cfgs)
     env.reset()

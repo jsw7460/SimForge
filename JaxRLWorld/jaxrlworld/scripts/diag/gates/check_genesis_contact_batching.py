@@ -26,10 +26,10 @@ import importlib
 
 import torch
 
+from jaxrlworld.rl.runners import BaseRunner
+
 
 def _build_env(preset: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     if ":" in preset:
         mod_path, cls_name = preset.split(":", 1)
     else:

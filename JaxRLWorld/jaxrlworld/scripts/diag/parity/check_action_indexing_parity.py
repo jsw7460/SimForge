@@ -33,10 +33,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 from pathlib import Path
 
+import mujoco
+import torch
+
 from jaxrlworld.rl.actuators.actuator_pd import IdealPDActuator
+from jaxrlworld.rl.runners import BaseRunner
 
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
@@ -57,10 +62,6 @@ _METRICS = ("kp", "kd", "armature", "frictionloss", "q_reset")
 
 
 def _build_env(preset: str, sim: str, num_envs: int = 1):
-    import importlib
-
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
@@ -117,7 +118,7 @@ def _capture_sim_side(env, sim: str) -> dict[str, dict[str, float]]:
             out[jname] = d
 
     elif sim == "newton":
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
         model = env.scene_manager.solver.model
         qd_indices = indexing.newton_qd_indices.detach().cpu().numpy()
@@ -133,8 +134,6 @@ def _capture_sim_side(env, sim: str) -> dict[str, dict[str, float]]:
             out[jname] = d
 
     elif sim == "mujoco":
-        import mujoco
-
         mj_model = env.scene_manager.mj_model
         entity = env.scene_manager._scene["robot"]
         entity_joint_names = list(entity.joint_names)
@@ -164,7 +163,6 @@ def _capture_sim_side(env, sim: str) -> dict[str, dict[str, float]]:
 
 def _collect(preset: str, sim: str) -> dict:
     """Build + reset + capture every order-sensitive per-joint quantity."""
-    import torch
 
     info: dict = {"preset": preset, "sim": sim}
     env = _build_env(preset, sim, num_envs=1)

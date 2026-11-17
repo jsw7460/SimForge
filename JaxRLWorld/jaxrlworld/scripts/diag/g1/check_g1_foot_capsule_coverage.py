@@ -52,6 +52,9 @@ import numpy as np
 import torch
 import warp as wp
 
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.runners import BaseRunner
+
 # ── Asset paths ──────────────────────────────────────────────────────────────
 
 # Resolved relative to the JaxRLWorld root so the script works from any cwd.
@@ -464,10 +467,6 @@ def _capture_sim(sim: str, num_envs: int, seed: int, settle_steps: int) -> dict:
     Returns a dict mirroring the structure used by ``check_g1_contact_force_parity.py``
     but containing ONLY the foot-capsule coverage fields needed for this diag.
     """
-    import torch
-
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.runners import BaseRunner
 
     out: dict = {
         "sim": sim,

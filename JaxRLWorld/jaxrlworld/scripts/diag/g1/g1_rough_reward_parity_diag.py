@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import functools
 import importlib
+import inspect
 import json
 import os
 import subprocess
@@ -42,6 +43,15 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
+
+import torch
+
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.configs.rewards import RewardTermConfig
+from jaxrlworld.rl.configs.scene import SceneEntitySelector
+from jaxrlworld.rl.evals.sim_initializers import get_initializer
+from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 
 _MODULE = "jaxrlworld.scripts.diag.g1.g1_rough_reward_parity_diag"
 _SIMS = ("genesis", "newton", "mujoco")
@@ -95,8 +105,6 @@ def _term_map(sim: str) -> dict[str, tuple[str, str]]:
 
 
 def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int) -> dict:
-    import torch
-
     torch.manual_seed(seed)
     _stage(f"cell start: {sim} num_envs={num_envs}")
 
@@ -115,8 +123,6 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int) -> dict:
         records[term].append(rec)
 
     def _install(term: str, mod_name: str, fn_name: str) -> None:
-        import inspect
-
         mod = importlib.import_module(mod_name)
         orig = getattr(mod, fn_name)  # dynamic-attr: term function named by the per-sim term map
 
@@ -148,13 +154,6 @@ def run_cell(sim: str, num_envs: int, settle_steps: int, seed: int) -> dict:
     for term, (m, f) in _term_map(sim).items():
         _install(term, m, f)
     _stage("shims installed")
-
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.configs.rewards import RewardTermConfig
-    from jaxrlworld.rl.configs.scene import SceneEntitySelector
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
-    from jaxrlworld.rl.utils.quat_utils import quat_rotate_inverse_wxyz
 
     cfgs = G1FlatConfig(sim_type=sim, num_envs=num_envs, seed=seed, use_rough_terrain=True).build()
 

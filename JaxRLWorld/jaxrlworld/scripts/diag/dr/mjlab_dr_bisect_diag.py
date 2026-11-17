@@ -24,6 +24,12 @@ import argparse
 import torch
 import warp as wp
 
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.configs.presets.g1_29dof.mujoco.rough import G1RoughMujocoConfig
+from jaxrlworld.rl.evals.sim_initializers.mjlab import MujocoInitializer
+
 
 def _stage(msg: str) -> None:
     print(f"[STAGE] {msg}", flush=True)
@@ -44,23 +50,14 @@ def main() -> int:
     torch.manual_seed(args.seed)
 
     if args.preset == "flat":
-        from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-
         cfgs = G1FlatConfig(sim_type="mujoco", num_envs=n, seed=args.seed).build()
     else:
-        from jaxrlworld.rl.configs.presets.g1_29dof.mujoco.rough import G1RoughMujocoConfig
-
         cfgs = G1RoughMujocoConfig().build()
         cfgs.apply_overrides(**{"env": {"num_envs": n, "seed": args.seed}})
-
-    from jaxrlworld.rl.evals.sim_initializers.mjlab import MujocoInitializer
 
     env = MujocoInitializer().init_environment(cfgs)
     _sync()
     _stage(f"env built (num_envs={n}, preset={args.preset})")
-
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
 
     all_ids = torch.arange(n, device=env.device, dtype=torch.long)
 

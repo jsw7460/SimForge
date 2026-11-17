@@ -51,7 +51,9 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import mujoco
 import numpy as np
+import torch
 
 ARM_XML = Path("./JaxRLWorld/jaxrlworld/assets/i2rt_yam/xmls/yam_tong.xml")
 """Relative to the SimForge root, like every other asset path here."""
@@ -259,8 +261,6 @@ class MujocoArm:
     name = "mujoco"
 
     def __init__(self, xml: str, gravity: bool):
-        import mujoco
-
         self._mj = mujoco
         self.model = mujoco.MjModel.from_xml_path(xml)
         self.model.opt.timestep = DT
@@ -336,10 +336,10 @@ class NewtonArm:
     name = "newton"
 
     def __init__(self, xml: str, gravity: bool):
-        import newton
-        import warp as wp
+        import newton  # local-import: backend (newton), only on the newton path
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
-        from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
+        from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging  # local-import: backend (warp)
 
         configure_warp_logging()
         self._newton, self._wp = newton, wp
@@ -461,7 +461,7 @@ class GenesisArm:
     name = "genesis"
 
     def __init__(self, xml: str, gravity: bool):
-        import genesis as gs
+        import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
         self._gs = gs
         if not gs._initialized:
@@ -513,8 +513,6 @@ class GenesisArm:
         }
 
     def set_arm(self, angles: np.ndarray) -> None:
-        import torch
-
         self.entity.set_dofs_position(
             torch.tensor([[float(v) for v in angles]], dtype=torch.float32, device=self._device()),
             self._arm_dofs,
@@ -530,15 +528,11 @@ class GenesisArm:
         )
 
     def set_hinge(self, q: float) -> None:
-        import torch
-
         self.entity.set_dofs_position(
             torch.tensor([[q]], dtype=torch.float32, device=self._device()), self._hinge, zero_velocity=True
         )
 
     def set_torque(self, tau: float) -> None:
-        import torch
-
         self.entity.control_dofs_force(torch.tensor([[tau]], dtype=torch.float32, device=self._device()), self._hinge)
 
     def step(self) -> None:

@@ -38,6 +38,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib
 import math
 import os
 from pathlib import Path
@@ -45,8 +46,11 @@ from pathlib import Path
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
+import mujoco
 import numpy as np
 import torch
+
+from jaxrlworld.rl.runners import BaseRunner
 
 _PRESET = ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig")
 _SIMS = ("genesis", "newton", "mujoco")
@@ -57,10 +61,6 @@ _REWARD_WEIGHT = 0.1  # matches g1_29dof feet_slip RewardTermConfig weight
 
 
 def _build_env(sim: str, num_envs: int):
-    import importlib
-
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod = importlib.import_module(_PRESET[0])
     cls = getattr(mod, _PRESET[1])  # dynamic-attr: resolves the _PRESET (module, class) pair
     cfgs = cls(sim_type=sim, num_envs=num_envs).build()
@@ -112,7 +112,6 @@ def _body_idx(env, sim: str, name: str) -> int | None:
 
 def _mujoco_global_body_idx(env, name: str) -> int | None:
     """Global mj_model body id for ``name`` — for cross-check only."""
-    import mujoco
 
     mj_model = env.scene_manager.mj_model
     for i in range(mj_model.nbody):
@@ -198,7 +197,7 @@ def _read_joint_frictionloss_runtime(env, sim: str) -> dict[str, list[float]]:
         out["runtime"] = [float(arr[i]) for i in range(arr.shape[0])]
 
     elif sim == "newton":
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
         model = env.scene_manager.solver.model
         qd_idx = indexing.newton_qd_indices.detach().cpu().numpy()
@@ -206,8 +205,7 @@ def _read_joint_frictionloss_runtime(env, sim: str) -> dict[str, list[float]]:
         out["runtime"] = [float(fri[int(q)]) for q in qd_idx]
 
     elif sim == "mujoco":
-        import mujoco
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the mujoco path
 
         mj_model = env.scene_manager.mj_model
         entity = env.scene_manager._scene["robot"]
@@ -264,7 +262,7 @@ def _read_foot_geom_friction(env, sim: str) -> dict:
     elif sim == "newton":
         # Newton: shape_material_mu indexed by global shape id; group by the
         # ankle_roll body so we can compare to the other sims by link.
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
         model = env.scene_manager.solver.model
         num_worlds = model.world_count
@@ -287,8 +285,6 @@ def _read_foot_geom_friction(env, sim: str) -> dict:
     elif sim == "mujoco":
         # MuJoCo: read mj_model.geom_friction by name for each
         # left/right_foot[1-7]_collision geom.
-        import mujoco
-
         mj_model = env.scene_manager.mj_model
         for side in ("left", "right"):
             key = f"{side}_ankle_roll_link"
@@ -346,14 +342,12 @@ def _read_joint_armature_runtime(env, sim: str) -> list[float]:
         arr = arm[0] if arm.ndim == 2 else arm
         return [float(arr[i]) for i in range(arr.shape[0])]
     elif sim == "newton":
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
         qd_idx = indexing.newton_qd_indices.detach().cpu().numpy()
         arr = wp.to_torch(env.scene_manager.solver.model.joint_armature).detach().cpu().numpy()
         return [float(arr[int(q)]) for q in qd_idx]
     elif sim == "mujoco":
-        import mujoco
-
         mj_model = env.scene_manager.mj_model
         entity = env.scene_manager._scene["robot"]
         entity_joint_names = list(entity.joint_names)

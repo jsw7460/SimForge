@@ -29,6 +29,10 @@ import importlib
 import numpy as np
 import torch
 
+from jaxrlworld.rl.evals.sim_initializers import get_initializer
+from jaxrlworld.rl.runners import BaseRunner
+from jaxrlworld.rl.vis.viser.play_viewer import ViserPlayViewer
+
 # Short names for the presets worth eyeballing. Anything not here is
 # still reachable as ``module:ClassName``.
 _PRESETS: dict[str, str] = {
@@ -259,10 +263,6 @@ def main() -> int:
         for name, target in sorted(_PRESETS.items()):
             print(f"  {name:<12} {target}")
         return 0
-
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
-    from jaxrlworld.rl.runners import BaseRunner
-    from jaxrlworld.rl.vis.viser.play_viewer import ViserPlayViewer
 
     preset_cls = _resolve_preset(args.preset)
     cfgs = preset_cls(sim_type=args.sim, num_envs=args.num_envs).build()

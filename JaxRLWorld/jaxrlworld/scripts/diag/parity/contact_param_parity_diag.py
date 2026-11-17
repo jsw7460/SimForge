@@ -81,6 +81,7 @@ import os
 
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
+import mujoco
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
@@ -137,8 +138,6 @@ def key_for(body: str, geom_type: str, vocab: set[str]) -> tuple[str, str]:
 
 
 def read_mujoco(env, sim: str, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]], set[str]]:
-    import mujoco
-
     manager = env.scene_manager
     mj_model = manager.solver.mj_model if sim == "newton" else manager.mj_model
 
@@ -174,7 +173,7 @@ def read_mujoco(env, sim: str, vocab: set[str]) -> tuple[dict[tuple[str, str], l
 
 
 def read_genesis(env, vocab: set[str]) -> tuple[dict[tuple[str, str], list[dict]], set[str]]:
-    from genesis.utils.misc import qd_to_torch
+    from genesis.utils.misc import qd_to_torch  # local-import: backend (genesis), only on the genesis path
 
     solver = env.scene_manager.scene.sim.rigid_solver
     geoms = solver.dyn_info.geoms

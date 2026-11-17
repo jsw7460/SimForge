@@ -16,6 +16,8 @@ Usage:
 
 from __future__ import annotations
 
+import mujoco
+
 from jaxrlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from jaxrlworld.rl.runners import BaseRunner
 
@@ -25,8 +27,6 @@ def main() -> None:
     runner = BaseRunner.create_with_env(cfgs)
     env = runner.env
     mj = env.scene_manager.mj_model
-
-    import mujoco
 
     print("\n=== Mjlab T1 — actual actuator PD / effort values ===")
     print(

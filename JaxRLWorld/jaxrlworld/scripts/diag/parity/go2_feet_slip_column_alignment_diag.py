@@ -44,6 +44,7 @@ from pathlib import Path
 import torch
 
 from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import _feet_contact_order, _foot_pos_vel
+from jaxrlworld.rl.evals import PolicyEvaluator
 
 GROUP = "feet_ground_contact"
 TERM = "feet_slip"
@@ -67,8 +68,6 @@ def _stats(x: torch.Tensor) -> dict:
 
 
 def dump(args) -> None:
-    from jaxrlworld.rl.evals import PolicyEvaluator
-
     evaluator = PolicyEvaluator(
         policy_path=args.policy_path,
         eval_target=args.sim,

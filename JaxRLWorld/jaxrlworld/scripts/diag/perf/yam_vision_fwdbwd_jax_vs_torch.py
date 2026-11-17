@@ -50,6 +50,7 @@ import torch
 
 from jaxrlworld.rl.configs.presets.yam_lift.vision import YamLiftVisionConfig
 from jaxrlworld.rl.modules.architectures.actor_registry import build_actor, build_critic
+from jaxrlworld.rl.runners import BaseRunner
 
 _IMAGE_GROUP = "camera"
 _ACTOR_GROUP = "actor"
@@ -61,8 +62,6 @@ _CRITIC_GROUP = "critic"
 
 def _shapes_from_env() -> tuple[dict[str, tuple[int, ...]], int]:
     """Build the mujoco env briefly and read every obs group's per-env shape."""
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfgs = YamLiftVisionConfig(sim_type="mujoco", num_envs=64).build()
     runner = BaseRunner.create_with_env(cfgs)
     env = runner.env

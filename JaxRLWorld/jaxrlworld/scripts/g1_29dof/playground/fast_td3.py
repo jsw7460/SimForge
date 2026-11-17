@@ -22,6 +22,7 @@ import jax.numpy as jnp
 import mujoco
 import numpy as np
 import torch
+import wandb
 from mujoco_playground import registry, wrapper_torch
 
 from jaxrlworld.rl.algorithms.base import ActInput
@@ -77,8 +78,6 @@ def main():
 
     # ===================== Wandb =====================
     if USE_WANDB:
-        import wandb
-
         wandb.init(
             project="FastTD3-Playground-Diagnostic",
             name=f"{ENV_NAME}__ours__seed{SEED}",

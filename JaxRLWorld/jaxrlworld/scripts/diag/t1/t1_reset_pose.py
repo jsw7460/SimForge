@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 
+import mujoco
 import torch
 
 from jaxrlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
@@ -70,7 +71,6 @@ def main() -> None:
     if args.sim == "mujoco":
         sm = env.scene_manager
         mj = sm.mj_model
-        import mujoco
 
         print("\n=== Mjlab-specific introspection ===")
         # env_origins (from mjlab Scene)

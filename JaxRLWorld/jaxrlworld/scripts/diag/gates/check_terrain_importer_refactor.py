@@ -74,13 +74,22 @@ from __future__ import annotations
 
 import argparse
 import gc
+import importlib
 import os
 import subprocess
 import sys
 import traceback
 from dataclasses import dataclass
+from types import SimpleNamespace
+
+import torch
 
 from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.terminations.common.terminations import terrain_out_of_bounds
+from jaxrlworld.rl.runners import BaseRunner
+from jaxrlworld.rl.vis.viser.bridges.genesis_bridge import GenesisBridge
+from jaxrlworld.rl.vis.viser.bridges.mujoco_bridge import MujocoBridge
 
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
@@ -176,9 +185,6 @@ def _build_env(
     URDF body name (``"base"``) instead of the MJCF default
     (``"trunk"``).
     """
-    import importlib
-
-    from jaxrlworld.rl.runners import BaseRunner
 
     if preset not in _PRESETS:
         raise ValueError(f"Unknown preset {preset!r}; known: {sorted(_PRESETS)}")
@@ -298,7 +304,6 @@ def _check_scene_config_shape(cfg_built, use_rough: bool, lg: _Logger, combo: st
 
 def _check_importer_state(env, sim: str, use_rough: bool, lg: _Logger, combo: str) -> bool:
     """Dump + verify ``scene_manager.terrain`` after env build."""
-    import torch
 
     importer = env.scene_manager.terrain
     lg.w(f"    importer class: {type(importer).__name__}")
@@ -355,7 +360,6 @@ def _check_unified_env_origins(env, sim: str, use_rough: bool, lg: _Logger, comb
     MuJoCo plane: = mjlab ``Scene.env_origins`` (env_spacing grid).
     MuJoCo rough: = importer.env_origins (importer sub-terrain grid).
     """
-    import torch
 
     sm = env.scene_manager
     o = sm.env_origins
@@ -429,9 +433,6 @@ def _check_termination_wiring(env, sim: str, use_rough: bool, lg: _Logger, combo
     """Exercise ``out_of_terrain_bounds`` directly through the
     termination registry. Plane: must short-circuit. Rough: must read
     ``terrain.half_extent`` and produce a per-env bool tensor."""
-
-    from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
-    from jaxrlworld.rl.envs.mdp.terminations.common.terminations import terrain_out_of_bounds
 
     # Synthetic ResolvedEntity that just names the robot.
     resolved = env.resolve_selector(SceneEntitySelector(name="robot"))
@@ -549,9 +550,8 @@ def _check_newton_label_indexing_urdf_synthetic(lg: _Logger) -> bool:
     URDF-shaped labels, this check builds a stand-in ``model`` and
     drives the helper directly. No GPU / sim init needed.
     """
-    from types import SimpleNamespace
 
-    from jaxrlworld.rl.envs.managers.newton.label_indexing import NewtonLabelIndexing
+    from jaxrlworld.rl.envs.managers.newton.label_indexing import NewtonLabelIndexing  # local-import: backend (newton)
 
     lg.w("")
     lg.w("=" * 78)
@@ -624,7 +624,6 @@ def _check_newton_label_indexing_urdf_synthetic(lg: _Logger) -> bool:
 
 def _check_step(env, lg: _Logger, combo: str) -> bool:
     """One full ``World.step`` to make sure nothing blew up at runtime."""
-    import torch
 
     env.reset()
     n_act = env.num_actions
@@ -648,9 +647,9 @@ def _check_viser_bridge_geometry(env, sim: str, use_rough: bool, lg: _Logger, co
         # nothing in the refactor changed that surface. Skip.
         return True
     if sim == "genesis":
-        from jaxrlworld.rl.vis.viser.bridges import GenesisBridge as Bridge
+        Bridge = GenesisBridge
     else:
-        from jaxrlworld.rl.vis.viser.bridges import MujocoBridge as Bridge
+        Bridge = MujocoBridge
 
     try:
         bridge = Bridge(env.scene_manager)
@@ -700,8 +699,6 @@ def _run_combo(
 
     # ---- Step 1: config-only sanity (cheapest — no GPU) -------------
     try:
-        import importlib
-
         info = _PRESETS[preset]
         cfg_module = importlib.import_module(info["module"])
         cfg_cls = getattr(cfg_module, info["class_name"])  # dynamic-attr: preset class named in _PRESETS

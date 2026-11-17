@@ -25,6 +25,8 @@ import importlib
 
 import torch
 
+from jaxrlworld.rl.runners import BaseRunner
+
 _MEMO_PROPERTIES = (
     "root_link_pos_w",
     "root_link_quat_w",
@@ -60,8 +62,6 @@ def _values_equal(a, b) -> bool:
 
 
 def _build_env(preset: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     if ":" in preset:
         mod_path, cls_name = preset.split(":", 1)
     else:

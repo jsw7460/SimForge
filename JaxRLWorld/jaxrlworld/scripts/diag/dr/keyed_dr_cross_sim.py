@@ -39,6 +39,7 @@ import numpy as np
 import torch
 
 from jaxrlworld.rl.envs.mdp.events.keyed_sampler import STAGE_IDS, TermSampler, term_id
+from jaxrlworld.rl.runners import BaseRunner
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "go2": ("jaxrlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
@@ -49,8 +50,6 @@ _STAGE_NAMES = {v: k for k, v in STAGE_IDS.items()}
 
 
 def _build_env(preset: str, sim: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     if ":" in preset:
         mod_path, cls_name = preset.split(":", 1)
     else:

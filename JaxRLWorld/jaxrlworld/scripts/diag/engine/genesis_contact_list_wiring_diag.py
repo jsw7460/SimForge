@@ -36,12 +36,18 @@ Usage (GPU box):
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+import torch
+from genesis.utils.misc import qd_to_torch
+
+from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
 _MODULE = "jaxrlworld.scripts.diag.engine.genesis_contact_list_wiring_diag"
 
@@ -68,8 +74,6 @@ class _ShadowGroup:
     (mirrors BaseContactManager._apply_contact_frame verbatim)."""
 
     def __init__(self, num_envs: int, num_tracked: int, device):
-        import torch
-
         z = lambda: torch.zeros(num_envs, num_tracked, device=device)
         self.current_air_time = z()
         self.current_contact_time = z()
@@ -78,8 +82,6 @@ class _ShadowGroup:
         self.prev_is_contact = torch.zeros(num_envs, num_tracked, device=device, dtype=torch.bool)
 
     def apply_frame(self, is_contact, dt: float) -> None:
-        import torch
-
         is_landing = ~self.prev_is_contact & is_contact
         is_liftoff = self.prev_is_contact & ~is_contact
         self.last_air_time = torch.where(is_landing, self.current_air_time + dt, self.last_air_time)
@@ -101,19 +103,12 @@ class _ShadowGroup:
 
 
 def run_cell(preset: str, num_envs: int, num_steps: int, warmup: int, seed: int) -> dict:
-    import importlib
-
-    import torch
-    from genesis.utils.misc import qd_to_torch
-
     torch.manual_seed(seed)
     module, cls_name = _PRESETS[preset]
     _stage(f"cell start: {preset} (num_envs={num_envs}, steps={num_steps})")
 
     cfg_cls = getattr(importlib.import_module(module), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type="genesis", num_envs=num_envs, seed=seed).build()
-
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
     env = get_initializer("Genesis").init_environment(cfgs)
     env.reset()

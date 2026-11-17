@@ -40,6 +40,8 @@ import os
 
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
+import mujoco
+
 from jaxrlworld.scripts.diag.parity.contact_pair_parity_diag import (  # noqa: E402
     ROBOTS,
     build,
@@ -77,8 +79,6 @@ def canonical_joint(raw: str, vocab: list[str]) -> str:
 
 
 def decode_disableflags(flags: int) -> str:
-    import mujoco
-
     names = [
         n.removeprefix("mjDSBL_").lower()
         for n, bit in mujoco.mjtDisableBit.__members__.items()
@@ -117,7 +117,7 @@ def read_solver(env, sim: str) -> dict[str, object]:
     else:
         # Per-sim lazy import: genesis only loads in the process that
         # actually builds a genesis env.
-        import genesis as gs
+        import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
         options = env.scene_manager.scene.sim.rigid_solver._options
         out.update(

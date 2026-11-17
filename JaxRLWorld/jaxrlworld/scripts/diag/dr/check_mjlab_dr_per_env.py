@@ -34,6 +34,10 @@ from pathlib import Path
 import torch
 import warp as wp
 
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.runners import BaseRunner
+
 # Preset used for the diagnostic — g1_29dof mujoco exercises every unified
 # DR term below (friction, body_mass, body_com_offset, pd_gains,
 # joint_armature, joint_friction).
@@ -83,8 +87,6 @@ class _SilenceFD:
 
 
 def _build_env(num_envs: int, seed: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfg_cls = getattr(importlib.import_module(_PRESET_MODULE), _PRESET_CLASS)  # dynamic-attr: preset named by constant
     cfgs = cfg_cls(sim_type="mujoco", num_envs=num_envs, seed=seed).build()
     runner = BaseRunner.create_with_env(cfgs)
@@ -97,8 +99,6 @@ def _preset_unified_terms(env) -> set[str]:
     Detected by term.func.__module__ ending in ``.dr.unified`` and
     term.func.__name__ being one of ``_UNIFIED_TERM_FIELDS``.
     """
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
 
     used: set[str] = set()
     for _name, term in iter_terms(env.event_cfg, EventTermConfig).items():

@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 
 # This diag builds multiple sim backends sequentially in one process —
@@ -36,6 +37,10 @@ import os
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import numpy as np
+import torch
+
+from jaxrlworld.rl.envs.managers.common.reward import get_weight_value
+from jaxrlworld.rl.runners import BaseRunner
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "go2": ("jaxrlworld.rl.configs.presets.go2.base", "Go2FlatConfig"),
@@ -64,10 +69,6 @@ _SIMS = ("genesis", "newton", "mujoco")
 
 
 def _build_env(preset: str, sim: str, num_envs: int, genesis_performance_mode: bool, mujoco_forward: bool):
-    import importlib
-
-    from jaxrlworld.rl.runners import BaseRunner
-
     if ":" in preset:
         # ``module.path:ClassName`` — any preset whose config class takes
         # ``sim_type`` and ``num_envs``, including ones that live outside
@@ -96,7 +97,6 @@ def _capture_step(env, action) -> dict[str, np.ndarray]:
     output. The patched method's weighted return is bit-identical to the
     original so the env still trains correctly.
     """
-    from jaxrlworld.rl.envs.managers.common.reward import get_weight_value
 
     mgr = env.reward_manager
     # The compiled chain (``compile_terms``) bypasses the per-term seam
@@ -130,8 +130,6 @@ def _stat(arr: np.ndarray) -> str:
 
 
 def main() -> int:
-    import torch
-
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
         "--preset",

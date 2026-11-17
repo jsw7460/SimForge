@@ -39,6 +39,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import mujoco
 import torch
 
 from jaxrlworld.rl.configs.common_config_classes import disable_corruption
@@ -474,8 +475,6 @@ def _joint_armature(env, joints: list[str]) -> dict[str, float] | None:
     configured one shows up here.
     """
     if env.sim_type == "mujoco":
-        import mujoco
-
         mj = env.scene_manager.sim.mj_model
         model = env.scene_manager.sim.model
         # Joint names in the compiled model are prefixed with the entity they
@@ -491,7 +490,7 @@ def _joint_armature(env, joints: list[str]) -> dict[str, float] | None:
         return {name: float(model.dof_armature[0, dof_of[name]]) for name in joints}
 
     if env.sim_type == "newton":
-        import warp as wp
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
         view = env.scene_manager.articulation_views["robot"]
         armature = wp.to_torch(view.get_attribute("joint_armature", env.scene_manager.model))
@@ -542,10 +541,10 @@ def _backend_bodies_and_geoms(env):
         return masses, geoms, trunk_com
 
     if env.sim_type == "newton":
-        import newton as _newton
-        import warp as wp
+        import newton as _newton  # local-import: backend (newton), only on the newton path
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
-        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
+        from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache  # local-import: backend (warp)
 
         cache = get_cache(env)
         model = env.scene_manager.model
@@ -576,7 +575,7 @@ def _backend_bodies_and_geoms(env):
             )
         return masses, geoms, trunk_com
 
-    import genesis as gs
+    import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
     entity = env.scene_manager["robot"]
     masses, geoms = {}, []

@@ -26,6 +26,10 @@ import subprocess
 import sys
 import time
 
+import torch
+
+from jaxrlworld.rl.runners import BaseRunner
+
 # Shorthand -> "module:Class"; any other "module:Class" is taken as given.
 # The class must accept ``sim_type`` and ``num_envs``.
 _PRESETS = {
@@ -38,10 +42,6 @@ _DEFAULT_PRESETS = ("g1_29dof", "go2", "k1_velocity")
 
 
 def _cell(spec: str, num_envs: int, forward: bool, warmup: int, steps: int, forward_calls: int, seed: int) -> dict:
-    import torch
-
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod_path, cls_name = spec.split(":", 1)
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: "module:Class" preset spec
     cfgs = cfg_cls(sim_type="mujoco", num_envs=num_envs).build()

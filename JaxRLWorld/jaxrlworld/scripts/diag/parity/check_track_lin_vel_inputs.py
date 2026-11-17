@@ -28,13 +28,14 @@ os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 import importlib
 
 import numpy as np
+import torch
+
+from jaxrlworld.rl.runners import BaseRunner
 
 _SIMS = ("genesis", "newton", "mujoco")
 
 
 def _build_env(sim: str, num_envs: int):
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod = importlib.import_module("jaxrlworld.rl.configs.presets.g1_29dof.base")
     cfg_cls = mod.G1FlatConfig
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
@@ -59,8 +60,6 @@ def _read(env) -> dict[str, np.ndarray]:
 
 
 def main() -> int:
-    import torch
-
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--num-envs", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)

@@ -107,8 +107,8 @@ def run_recovery(sim: str, config: str, num_envs: int, warmup: int, corrupt_env:
 def run_misconfiguration(sim: str, config: str, num_envs: int, thrash_steps: int) -> None:
     print(f"--- configuration error ({sim})")
     if sim == "genesis":
-        import genesis as gs
-        from genesis.utils.array_class import ErrorCode
+        import genesis as gs  # local-import: backend (genesis), only on the genesis path
+        from genesis.utils.array_class import ErrorCode  # local-import: backend (genesis), only on the genesis path
 
         env = build_env(config, sim, num_envs)
         zeros = torch.zeros(num_envs, env.num_actions, device=env.device)

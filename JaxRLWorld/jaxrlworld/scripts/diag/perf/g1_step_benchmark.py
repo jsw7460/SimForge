@@ -7,7 +7,7 @@ wrapper (managers/obs/reward/event machinery) or by the simulator itself?
 
     mode "jaxrlworld": full G1FlatConfig env (the thing training runs);
         zero-action env.step() timed.
-    mode "raw":        the simulator's OWN API only — no JaxRLWorld import
+    mode "raw":        the simulator's OWN API only — no JaxRLWorld runtime
         anywhere in the cell.  Same G1 MJCF asset, same physics timing
         (dt=0.005, substeps=1; one measured "control step" = 4 physics
         steps = 0.02 s, matching the presets' decimation), solver options
@@ -55,10 +55,21 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+import mujoco
+import numpy as np
+import torch
+
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
+from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
 _MODULE = "jaxrlworld.scripts.diag.perf.g1_step_benchmark"
 
@@ -109,7 +120,6 @@ def _probe_scene(scene, robot, tag: str, drive=None, start_step: int = 0) -> Non
     live contact counts diverge, the bare-step time difference is physics
     workload, not overhead.
     """
-    import numpy as np
 
     solver = scene.rigid_solver
     _stage(
@@ -143,9 +153,6 @@ def _setup_active_pd(robot):
 
     Returns ``drive(ctrl_step)`` to call once per control step.
     """
-    import re
-
-    from jaxrlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 
     gains = G1MujocoConfig()
     dof_ids: list[int] = []
@@ -188,9 +195,6 @@ def _mirror_dynamics(robot) -> None:
     hardcoded value).  Joint frictionloss adds a friction constraint per
     dof to every Newton solve — a physics-cost difference, not overhead.
     """
-    import re
-
-    from jaxrlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
 
     gains = G1MujocoConfig()
     dof_ids: list[int] = []
@@ -212,7 +216,7 @@ def _mirror_dynamics(robot) -> None:
 def raw_genesis(num_envs: int, steps: int, warmup: int, active: bool = False) -> dict:
     """Genesis native: mirrors Genesis's own locomotion-example driving and
     the g1_29dof genesis preset's SimOptions/RigidOptions."""
-    import genesis as gs
+    import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
     t_build0 = time.perf_counter()
     gs.init(backend=gs.gpu, logging_level="warning")
@@ -282,7 +286,7 @@ def raw_genesis_sensors(
     jumps from raw_genesis's level toward the wrapped level, the wrapped
     slowdown lives in the sensors, not in the manager stack.
     """
-    import genesis as gs
+    import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
     t_build0 = time.perf_counter()
     gs.init(backend=gs.gpu, logging_level="warning")
@@ -387,8 +391,8 @@ def raw_newton(num_envs: int, steps: int, warmup: int) -> dict:
     """Newton native: mirrors newton/examples/robot/example_robot_g1.py
     (replicate + SolverMuJoCo + CUDA-graph over the substep loop) with the
     g1_29dof newton preset's solver budget."""
-    import newton
-    import warp as wp
+    import newton  # local-import: backend (newton), only on the newton path
+    import warp as wp  # local-import: backend (warp), only on the newton path
 
     t_build0 = time.perf_counter()
     robot_b = newton.ModelBuilder()
@@ -454,9 +458,12 @@ def raw_mujoco(num_envs: int, steps: int, warmup: int) -> dict:
     """mjlab native: Simulation (mujoco-warp + internal CUDA graphs) fed the
     same G1 MJCF plus a ground plane; solver options mirror the g1_29dof
     mujoco preset."""
-    import mujoco
-    import warp as wp
-    from mjlab.sim.sim import MujocoCfg, Simulation, SimulationCfg
+    import warp as wp  # local-import: backend (warp), only on the mujoco path
+    from mjlab.sim.sim import (  # local-import: backend (mjlab), only on the mujoco path
+        MujocoCfg,
+        Simulation,
+        SimulationCfg,
+    )
 
     t_build0 = time.perf_counter()
     spec = mujoco.MjSpec.from_file(str(_G1_XML))
@@ -515,11 +522,6 @@ def _rough() -> bool:
 
 
 def wrapped(sim: str, num_envs: int, steps: int, warmup: int) -> dict:
-    import torch
-
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
-
     t_build0 = time.perf_counter()
     cfgs = G1FlatConfig(sim_type=sim, num_envs=num_envs, seed=0, use_rough_terrain=_rough()).build()
     sim_key = {"genesis": "Genesis", "newton": "Newton", "mujoco": "MujocoEnv"}[sim]
@@ -560,8 +562,7 @@ def raw_genesis_contact_list(num_envs: int, steps: int, warmup: int) -> dict:
         rawact      (no sensors)       -> the floor
         rawsensact  (68 native sensors) -> the current design's cost
     """
-    import genesis as gs
-    import torch
+    import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
     t_build0 = time.perf_counter()
     gs.init(backend=gs.gpu, logging_level="warning")
@@ -679,10 +680,6 @@ def wrapped_bare_scene(num_envs: int, steps: int, warmup: int, strip_dr: bool = 
       - ≈ rawsensact                 -> the scene is fine and the cost
         comes from per-step interleaving.
     """
-    import torch
-
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
     t_build0 = time.perf_counter()
     cfgs = G1FlatConfig(sim_type="genesis", num_envs=num_envs, seed=0, use_rough_terrain=_rough()).build()
@@ -692,9 +689,6 @@ def wrapped_bare_scene(num_envs: int, steps: int, warmup: int, strip_dr: bool = 
         # per-env DR writes (friction ratio / mass shift / COM shift /
         # gains) are what makes the wrapped-built scene's bare physics
         # slower than the raw mirror.
-        from jaxrlworld.rl.configs.base_config import iter_terms
-        from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
-
         stripped = []
         for name, _term in list(iter_terms(cfgs.event, EventTermConfig).items()):
             if "randomize" in name:
@@ -750,10 +744,6 @@ def wrapped_bisect(num_envs: int, steps: int, warmup: int) -> dict:
     write responsible.  A final baseline-order re-run is NOT possible
     (writes are destructive), so read deltas chunk-to-chunk.
     """
-    import torch
-
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
     t_build0 = time.perf_counter()
     cfgs = G1FlatConfig(sim_type="genesis", num_envs=num_envs, seed=0, use_rough_terrain=_rough()).build()

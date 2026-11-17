@@ -50,6 +50,7 @@ from pathlib import Path
 
 import torch
 
+from jaxrlworld.rl.configs.presets.yam_arm.base import YamArmConfig
 from jaxrlworld.rl.runners.base_runner import BaseRunner
 from jaxrlworld.rl.utils.quat_utils import quat_from_angle_axis_wxyz, quat_mul_wxyz, quat_rotate_wxyz
 
@@ -158,8 +159,6 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", choices=["newton", "mujoco", "genesis"], required=True)
     args = ap.parse_args()
-
-    from jaxrlworld.rl.configs.presets.yam_arm.base import YamArmConfig
 
     tmpdir = tempfile.mkdtemp(prefix="root_vel_roundtrip_")
     offset_urdf = offset_cube_urdf(tmpdir)

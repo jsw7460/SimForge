@@ -33,6 +33,7 @@ import argparse
 import json
 from pathlib import Path
 
+import mujoco
 import torch
 
 from jaxrlworld.rl.runners import BaseRunner
@@ -74,8 +75,6 @@ def _mjlab_np(field):
 
 class _MujocoProbe:
     def __init__(self, env, entity_names):
-        import mujoco
-
         self.env = env
         self.margin_only_rows = 0
         self.mjm = env.scene_manager.mj_model
@@ -114,7 +113,7 @@ class _MujocoProbe:
 
 class _NewtonProbe:
     def __init__(self, env, entity_names):
-        import mujoco_warp
+        import mujoco_warp  # local-import: backend (mujoco_warp), only on the newton path
 
         self.env = env
         self.margin_only_rows = 0
@@ -166,7 +165,7 @@ class _NewtonProbe:
 
 class _GenesisProbe:
     def __init__(self, env, entity_names):
-        from genesis.utils.misc import qd_to_torch
+        from genesis.utils.misc import qd_to_torch  # local-import: backend (genesis), only on the genesis path
 
         self.env = env
         self.margin_only_rows = 0

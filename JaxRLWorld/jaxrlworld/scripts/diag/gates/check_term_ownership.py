@@ -38,6 +38,7 @@ from jaxrlworld.rl.configs.observations.observation_term_config import Observati
 from jaxrlworld.rl.configs.rewards.reward_term_config import RewardTermConfig
 from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from jaxrlworld.rl.envs.managers.base import BaseManager
+from jaxrlworld.rl.runners.base_runner import BaseRunner
 
 failures: list[str] = []
 
@@ -134,7 +135,6 @@ def part_a() -> None:
 
 def part_b(preset: str, sim_type: str) -> None:
     print(f"\n=== B. real env: {preset} ({sim_type}) ===")
-    from jaxrlworld.rl.runners.base_runner import BaseRunner
 
     module_name, class_name = preset.split(":")
     cls = getattr(importlib.import_module(module_name), class_name)  # dynamic-attr: --preset module:Class

@@ -52,6 +52,17 @@ from typing import Any
 import numpy as np
 import torch
 
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import (
+    _command_active,
+    _feet_contact_order,
+    _foot_pos_vel,
+    penalize_feet_slip,
+    penalize_soft_landing,
+)
+from jaxrlworld.rl.runners import BaseRunner
+
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 
@@ -687,18 +698,6 @@ def _capture_sim(
       - ``random``: small uniform-random actions every step (more
         chaotic, closer to early-training distribution)
     """
-    import torch
-
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
-    from jaxrlworld.rl.envs.mdp.rewards.common.reward_terms import (
-        _command_active,
-        _feet_contact_order,
-        _foot_pos_vel,
-        penalize_feet_slip,
-        penalize_soft_landing,
-    )
-    from jaxrlworld.rl.runners import BaseRunner
 
     out: dict = {
         "sim": sim,

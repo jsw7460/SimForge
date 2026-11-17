@@ -39,8 +39,11 @@ from collections import Counter
 
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
+import mujoco
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
+
+from jaxrlworld.rl.runners import BaseRunner
 
 ROBOTS: dict[str, tuple[str, str]] = {
     "g1": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
@@ -150,7 +153,6 @@ def build(robot: str, sim: str):
     measured all the same -- a task living in a private overlay, or one
     written this afternoon. The roster stays a convenience, not a gate.
     """
-    from jaxrlworld.rl.runners import BaseRunner
 
     mod_path, cls_name = ROBOTS[robot] if robot in ROBOTS else robot.rsplit(":", 1)
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
@@ -159,8 +161,6 @@ def build(robot: str, sim: str):
 
 
 def mjwarp_pairs(env, sim: str, vocab: set[str]) -> tuple[Counter, set[str]]:
-    import mujoco
-
     manager = env.scene_manager
     if sim == "newton":
         mj_model, data = manager.solver.mj_model, manager.solver.mjw_data
@@ -194,7 +194,7 @@ def mjwarp_pairs(env, sim: str, vocab: set[str]) -> tuple[Counter, set[str]]:
 
 
 def genesis_pairs(env, vocab: set[str]) -> tuple[Counter, set[str]]:
-    from genesis.utils.misc import qd_to_torch
+    from genesis.utils.misc import qd_to_torch  # local-import: backend (genesis), only on the genesis path
 
     solver = env.scene_manager.scene.sim.rigid_solver
     keys = [f"<geom {i}>" for i in range(solver.n_geoms)]
@@ -271,8 +271,6 @@ def inventory(env, sim: str, vocab: set[str]) -> dict[tuple[str, str], tuple[int
                         tuple(round(float(v), 4) for v in np.asarray(geom.data)[:3]),
                     )
         return out
-
-    import mujoco
 
     manager = env.scene_manager
     mj_model = manager.solver.mj_model if sim == "newton" else manager.mj_model

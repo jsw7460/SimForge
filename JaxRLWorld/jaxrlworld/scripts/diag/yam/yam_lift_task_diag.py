@@ -45,9 +45,10 @@ from pathlib import Path
 
 import torch
 
-from jaxrlworld.rl.configs.presets.yam_lift.base import CUBE, DROPPED_Z, GRASP_SITE, YamLiftConfig
+from jaxrlworld.rl.configs.presets.yam_lift.base import CUBE, DROPPED_Z, GRASP_SITE, YamLiftConfig, _cube_below
 from jaxrlworld.rl.configs.rewards.reward_term_config import get_weight_value
 from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.observations.common import manipulation as manip
 from jaxrlworld.rl.runners import BaseRunner
 from jaxrlworld.rl.utils.quat_utils import quat_inv_wxyz, quat_rotate_wxyz
 
@@ -199,7 +200,6 @@ def run_single(sim: str, num_envs: int) -> dict:
     on_table = origins + torch.tensor([preset.cube_pos[0], preset.cube_pos[1], preset.cube_pos[2]], device=env.device)
     _place_cube(env, on_table)
     drop_penalty_on_table = float(_reward(env, "dropped").mean())
-    from jaxrlworld.rl.configs.presets.yam_lift.base import _cube_below
 
     # The termination's own selector, for the same reason as in section F:
     # this must exercise what the task is configured with.
@@ -266,7 +266,6 @@ def run_single(sim: str, num_envs: int) -> dict:
     for _ in range(20):
         env.step(torch.zeros(env.num_envs, env.act_manager.num_actions, device=env.device))
     env._invalidate_cache()
-    from jaxrlworld.rl.envs.mdp.observations.common import manipulation as manip
 
     # The selector the preset itself hands the terms, so this checks what
     # the task runs with rather than a cube-shaped guess at it.

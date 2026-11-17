@@ -33,6 +33,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 
 # This diag builds multiple sim backends sequentially in one process — bypass
@@ -40,6 +41,9 @@ import os
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import numpy as np
+import torch
+
+from jaxrlworld.rl.runners import BaseRunner
 
 # preset key -> (module path, config class name)
 _PRESETS: dict[str, tuple[str, str]] = {
@@ -73,10 +77,6 @@ def _qrot_inv_wxyz(q: np.ndarray, v: np.ndarray) -> np.ndarray:
 
 
 def _build_env(preset: str, sim: str, num_envs: int):
-    import importlib
-
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
@@ -85,8 +85,6 @@ def _build_env(preset: str, sim: str, num_envs: int):
 
 
 def _probe(env, settle: int, steps: int, perturb: float) -> dict[str, np.ndarray]:
-    import torch
-
     env.reset()
     n_act = env.num_actions
     zero = torch.zeros(env.num_envs, n_act, device=env.device)

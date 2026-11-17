@@ -10,12 +10,31 @@ Usage:
     python -m jaxrlworld.scripts.g1_29dof.multi_sim.test_cross_sim_comparison
 """
 
+import math
 import random
 from collections import OrderedDict
 from typing import Dict
 
 import numpy as np
 import torch
+
+from jaxrlworld.rl.configs.common_config_classes import disable_corruption
+from jaxrlworld.rl.configs.observations import ObservationTermConfig
+from jaxrlworld.rl.configs.presets.g1_29dof.mlp import get_config
+from jaxrlworld.rl.configs.rewards import RewardTermConfig
+from jaxrlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
+from jaxrlworld.rl.configs.scene import SceneEntitySelector
+from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
+    all_commands,
+    base_ang_vel,
+    dof_pos,
+    dof_vel,
+    prev_processed_actions,
+    projected_gravity,
+)
+from jaxrlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
+from jaxrlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_m
+from jaxrlworld.rl.runners import BaseRunner
 
 SEED = 42
 random.seed(SEED)
@@ -34,15 +53,6 @@ NUM_ENVS = 4
 
 def _build_common_actor_obs_terms():
     """Per user spec: exclude base_lin_vel, use dof_pos (not nominal_difference)."""
-    from jaxrlworld.rl.configs.observations import ObservationTermConfig
-    from jaxrlworld.rl.envs.mdp.observations.common.proprioception import (
-        all_commands,
-        base_ang_vel,
-        dof_pos,
-        dof_vel,
-        prev_processed_actions,
-        projected_gravity,
-    )
 
     return [
         ("base_ang_vel", ObservationTermConfig(func=base_ang_vel, scale=1.0)),
@@ -65,9 +75,7 @@ FEET_LINKS_GENESIS = ["left_ankle_roll_link", "right_ankle_roll_link"]
 
 
 def _genesis_reward_terms():
-    from jaxrlworld.rl.configs.rewards import RewardTermConfig
-    from jaxrlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-    from jaxrlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_g
+    from jaxrlworld.rl.envs.mdp.rewards.genesis import mjlab_rewards as rf_g  # local-import: backend (genesis)
 
     return OrderedDict(
         {
@@ -167,10 +175,7 @@ def _genesis_reward_terms():
 
 
 def _newton_reward_terms():
-    from jaxrlworld.rl.configs.rewards import RewardTermConfig
-    from jaxrlworld.rl.configs.robots.g1_29dof import G1MujocoConfig
-    from jaxrlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-    from jaxrlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_n
+    from jaxrlworld.rl.envs.mdp.rewards.newton import mjlab_rewards as rf_n  # local-import: backend (warp)
 
     robot = G1MujocoConfig()
     feet = robot.foot_names
@@ -273,13 +278,6 @@ def _newton_reward_terms():
 
 
 def _mujoco_reward_terms():
-    import math
-
-    from jaxrlworld.rl.configs.rewards import RewardTermConfig
-    from jaxrlworld.rl.configs.scene import SceneEntitySelector
-    from jaxrlworld.rl.envs.mdp.rewards.common import reward_terms as rf_common
-    from jaxrlworld.rl.envs.mdp.rewards.mujoco import reward_terms as rf_m
-
     site_names = ("left_foot", "right_foot")
 
     return OrderedDict(
@@ -421,14 +419,10 @@ REWARD_NAMES = [
 
 
 def _create_genesis_env():
-    from jaxrlworld.rl.configs.presets.g1_29dof.mlp import get_config
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfg = get_config(sim="genesis")
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    from jaxrlworld.rl.configs.common_config_classes import disable_corruption
 
     disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _genesis_reward_terms()
@@ -436,14 +430,10 @@ def _create_genesis_env():
 
 
 def _create_newton_env():
-    from jaxrlworld.rl.configs.presets.g1_29dof.mlp import get_config
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfg = get_config(sim="newton")
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    from jaxrlworld.rl.configs.common_config_classes import disable_corruption
 
     disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _newton_reward_terms()
@@ -451,14 +441,10 @@ def _create_newton_env():
 
 
 def _create_mujoco_env():
-    from jaxrlworld.rl.configs.presets.g1_29dof.mlp import get_config
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfg = get_config(sim="mujoco")
     cfg.env.num_envs = NUM_ENVS
     obs = [t for _, t in _build_common_actor_obs_terms()]
     cfg.observation.obs_group = {"actor": obs, "critic": obs}
-    from jaxrlworld.rl.configs.common_config_classes import disable_corruption
 
     disable_corruption(cfg.observation)
     cfg.reward.reward_terms = _mujoco_reward_terms()

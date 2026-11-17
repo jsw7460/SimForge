@@ -27,12 +27,14 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 
 import torch
 
 from jaxrlworld.rl.actuators import IdealPDActuator
 from jaxrlworld.rl.configs.presets.t1_getup.base import T1GetupConfig
 from jaxrlworld.rl.runners import BaseRunner
+from jaxrlworld.rl.utils import string as string_utils
 
 # ─── Hardcoded deterministic fallen pose (wxyz, z=0.8, face-down tilt) ──
 
@@ -178,11 +180,9 @@ def main() -> None:
     # Redirect all prints to a file (unless --out stdout)
     out_path = args.out or f"t1_trace_{args.sim}.txt"
     if out_path != "stdout":
-        import sys as _sys
-
         _log_fh = open(out_path, "w")
-        _orig_stdout = _sys.stdout
-        _sys.stdout = _log_fh
+        _orig_stdout = sys.stdout
+        sys.stdout = _log_fh
         print(f"# t1_trace_v2 sim={args.sim} steps={args.steps} seed={args.seed} action={args.action}")
     else:
         _log_fh = None
@@ -208,7 +208,6 @@ def main() -> None:
 
     # Build canonical joint_pos vector from T1Config.default_joint_angles
     # using the same pattern-resolve as everywhere else.
-    from jaxrlworld.rl.utils import string as string_utils
 
     matched_idx, _, matched_vals = string_utils.resolve_matching_names_values(
         cfg.robot.default_joint_angles, list(env.act_manager.actuated_joint_names)
@@ -251,9 +250,7 @@ def main() -> None:
         _dump_step(env, step_idx=t, raw_action=action)
 
     if _log_fh is not None:
-        import sys as _sys
-
-        _sys.stdout = _orig_stdout
+        sys.stdout = _orig_stdout
         _log_fh.close()
         print(f"Trace written to: {out_path}")
 

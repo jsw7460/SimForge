@@ -51,6 +51,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import torch
+
+from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
+from jaxrlworld.rl.evals.sim_initializers import get_initializer
+
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
@@ -84,8 +89,6 @@ def _build_eval_env(sim: str, preset: str, num_envs: int, seed: int):
          stochasticity).
       4. Build env via ``sim_initializer.init_environment``.
     """
-    from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
-    from jaxrlworld.rl.evals.sim_initializers import get_initializer
 
     mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
@@ -108,7 +111,6 @@ def _capture_state(env) -> list[float]:
     The fields and their order are part of the on-disk format the
     driver parses; do NOT reorder without updating ``_DUMP_HEADER``.
     """
-    import torch
 
     rd = env.get_robot_data()
     out: list[float] = []
@@ -135,7 +137,6 @@ def _build_action_seq(env, steps: int, seed: int):
     Held on CPU then moved per-step so the rollout is portable across
     devices without GPU RNG entering the picture.
     """
-    import torch
 
     g = torch.Generator(device="cpu").manual_seed(seed + 99999)
     actions = []
@@ -147,7 +148,6 @@ def _build_action_seq(env, steps: int, seed: int):
 
 def _run_inner(sim: str, preset: str, num_envs: int, seed: int, rollouts: int, steps: int, out_path: Path) -> int:
     """Build env, run the rollout schedule, dump a numeric trace to disk."""
-    import torch
 
     lines: list[str] = []
     lines.append(f"# sim={sim} preset={preset} num_envs={num_envs} seed={seed} rollouts={rollouts} steps={steps}")

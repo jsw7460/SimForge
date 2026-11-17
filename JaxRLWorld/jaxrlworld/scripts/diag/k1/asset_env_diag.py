@@ -38,14 +38,18 @@ import math
 import re
 from pathlib import Path
 
+import mujoco
+import numpy as np
 import torch
 
 from jaxrlworld.rl.configs.base_config import iter_terms
 from jaxrlworld.rl.configs.events import EventTermConfig
-from jaxrlworld.rl.configs.presets.k1_velocity.base import K1VelocityConfig
+from jaxrlworld.rl.configs.presets.k1_velocity.base import _SIM_TIMINGS, K1VelocityConfig
 from jaxrlworld.rl.configs.robots.k1 import K1Config
 from jaxrlworld.rl.envs.mdp.events import common as ev
+from jaxrlworld.rl.envs.mdp.terminations import k1_velocity as booster_tf
 from jaxrlworld.rl.runners.base_runner import BaseRunner
+from jaxrlworld.rl.utils import string as string_utils
 
 # ── expected values, stated independently of the environment ─────────
 
@@ -236,7 +240,6 @@ def ref(values) -> torch.Tensor:
 
 def mjcf_joint_limits(path: str) -> dict[str, tuple[float, float]]:
     """Hinge joint ranges read straight off the asset file."""
-    import mujoco
 
     model = mujoco.MjModel.from_xml_path(path)
     out: dict[str, tuple[float, float]] = {}
@@ -250,7 +253,6 @@ def mjcf_joint_limits(path: str) -> dict[str, tuple[float, float]]:
 
 def mjcf_contact_params(path: str) -> dict[str, dict]:
     """Contact parameters of every collision geom, read off the asset file."""
-    import mujoco
 
     model = mujoco.MjModel.from_xml_path(path)
     out: dict[str, dict] = {}
@@ -271,7 +273,6 @@ def mjcf_contact_params(path: str) -> dict[str, dict]:
 
 def mjcf_joint_armature(path: str) -> dict[str, float]:
     """Armature the asset file declares for each hinge joint."""
-    import mujoco
 
     model = mujoco.MjModel.from_xml_path(path)
     out: dict[str, float] = {}
@@ -302,8 +303,6 @@ def explicit_damping_margins(
     Returns ``{joint: (effective inertia, margin)}``; a margin of 1.0 IS the
     stability limit.
     """
-    import mujoco
-    import numpy as np
 
     model = mujoco.MjModel.from_xml_path(path)
     data = mujoco.MjData(model)
@@ -431,8 +430,6 @@ def section_a_asset(env, cfg, chk: Checker) -> None:
     mjcf_armature = mjcf_joint_armature(mjcf)
     want = ref([REF_ARMATURE[suffix(j)] for j in joints])
 
-    from jaxrlworld.rl.utils import string as string_utils
-
     _, names, values = string_utils.resolve_matching_names_values(robot.armature, joints, preserve_order=True)
     chk("robot config armature covers every joint", len(names) == len(joints), f"{len(names)} of {len(joints)}")
     if len(names) == len(joints):
@@ -484,7 +481,6 @@ def section_a_asset(env, cfg, chk: Checker) -> None:
     )
 
     print("\n  -- explicit PD damping: dt < 2*J/kd, at the home pose --")
-    from jaxrlworld.rl.configs.presets.k1_velocity.base import _SIM_TIMINGS
 
     dt = _SIM_TIMINGS[cfg.sim_type]["dt"]
     kd_table = dict(REF_KD)
@@ -686,7 +682,6 @@ def _termination_bool(result) -> torch.Tensor:
 
 def section_d_terminations(env, cfg, chk: Checker) -> None:
     print("\n=== D. terminations ===")
-    from jaxrlworld.rl.envs.mdp.terminations import k1_velocity as booster_tf
 
     limit = math.radians(cfg.fall_limit_angle_deg)
     probability = cfg.fall_probability

@@ -33,12 +33,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 
 # Multi-sim run in one process — bypass the single-backend guard.
 os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import numpy as np
+import torch
+
+from jaxrlworld.rl.runners import BaseRunner
 
 _PRESETS: dict[str, tuple[str, str]] = {
     "g1_29dof": ("jaxrlworld.rl.configs.presets.g1_29dof.base", "G1FlatConfig"),
@@ -50,10 +54,6 @@ _CONTACT_GROUPS = ("feet_ground_contact", "self_collision")
 
 
 def _build_env(preset: str, sim: str, num_envs: int):
-    import importlib
-
-    from jaxrlworld.rl.runners import BaseRunner
-
     mod_path, cls_name = _PRESETS[preset]
     cfg_cls = getattr(importlib.import_module(mod_path), cls_name)  # dynamic-attr: preset module:Class
     cfgs = cfg_cls(sim_type=sim, num_envs=num_envs).build()
@@ -89,8 +89,6 @@ def _stat_block(arr: np.ndarray) -> str:
 
 
 def main() -> int:
-    import torch
-
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--preset", choices=sorted(_PRESETS), default="g1_29dof")
     ap.add_argument("--sim", choices=[*_SIMS, "all"], default="all")

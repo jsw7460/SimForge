@@ -31,8 +31,11 @@ import argparse
 import sys
 from typing import Any
 
+import torch
+
 from jaxrlworld.rl.configs.presets.k1_getup.base import K1GetupConfig
 from jaxrlworld.rl.configs.presets.k1_velocity.base import K1VelocityConfig
+from jaxrlworld.rl.runners.base_runner import BaseRunner
 
 # Config paths that may differ between the two presets. Everything else
 # under the compared sections must be identical.
@@ -115,8 +118,6 @@ def section_a(sim: str, num_envs: int) -> bool:
 
 
 def _env_fingerprint(cfgs) -> dict[str, Any]:
-    from jaxrlworld.rl.runners.base_runner import BaseRunner
-
     env = BaseRunner._create_env_from_config(cfgs)
     am = env.act_manager
     actuators = [(act.stiffness.detach().cpu().clone(), act.damping.detach().cpu().clone()) for act, _ in am.actuators]
@@ -132,8 +133,6 @@ def _env_fingerprint(cfgs) -> dict[str, Any]:
 
 
 def section_b(sim: str, num_envs: int) -> bool:
-    import torch
-
     fp_v = _env_fingerprint(K1VelocityConfig(sim_type=sim, num_envs=num_envs).build())
     fp_g = _env_fingerprint(K1GetupConfig(sim_type=sim, num_envs=num_envs).build())
 

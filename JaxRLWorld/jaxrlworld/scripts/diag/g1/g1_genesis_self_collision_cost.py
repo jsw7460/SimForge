@@ -40,11 +40,11 @@ os.environ.setdefault("JAXRLWORLD_ALLOW_MULTI_SIM", "1")
 
 import torch  # noqa: E402
 
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.runners import BaseRunner
+
 
 def build(num_envs: int, self_collision: bool):
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
-    from jaxrlworld.rl.runners import BaseRunner
-
     cfgs = G1FlatConfig(sim_type="genesis", num_envs=num_envs, seed=0).build()
     cfgs.scene.rigid_options.enable_self_collision = self_collision
     return BaseRunner._create_env_from_config(cfgs)

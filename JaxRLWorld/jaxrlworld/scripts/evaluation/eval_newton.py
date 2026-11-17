@@ -2,7 +2,10 @@ import argparse
 
 import numpy as np
 import torch
+import warp as wp
+from newton import ModelFlags
 
+from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
 from jaxrlworld.rl.evals import PolicyEvaluator
 
 
@@ -19,10 +22,6 @@ def apply_contact_friction(
     because the Newton MuJoCo wrapper combines pair friction with max(),
     so the ground's friction would otherwise override the foot value.
     """
-    import warp as wp
-    from newton import ModelFlags
-
-    from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
 
     cache = get_cache(env)
     model = env.scene_manager.model

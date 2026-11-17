@@ -32,6 +32,7 @@ import argparse
 import datetime
 import os
 import sys
+import tempfile
 import traceback
 from dataclasses import fields as dc_fields
 from enum import Enum
@@ -448,7 +449,6 @@ def main() -> int:
     out_path = os.path.join(args.output_dir, f"nn_config_yaml_roundtrip_{ts}.txt")
 
     # Per-case tmp dir for variant 3 (framework dump_yaml).
-    import tempfile
 
     with tempfile.TemporaryDirectory(prefix="nn_cfg_diag_") as tmp_dir:
         results: list[dict] = []

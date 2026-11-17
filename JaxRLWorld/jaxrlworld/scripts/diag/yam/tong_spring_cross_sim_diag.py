@@ -61,7 +61,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree
 
+import mujoco
 import numpy as np
+import torch
 
 TONG_XML = Path("./JaxRLWorld/jaxrlworld/assets/props/tong.xml")
 """Relative to the SimForge root, like every other asset path here."""
@@ -321,8 +323,6 @@ class MujocoTong:
     name = "mujoco"
 
     def __init__(self, xml: str, gravity: bool):
-        import mujoco
-
         self._mj = mujoco
         self.model = mujoco.MjModel.from_xml_path(xml)
         self.model.opt.timestep = DT
@@ -370,10 +370,10 @@ class NewtonTong:
     name = "newton"
 
     def __init__(self, xml: str, gravity: bool):
-        import newton
-        import warp as wp
+        import newton  # local-import: backend (newton), only on the newton path
+        import warp as wp  # local-import: backend (warp), only on the newton path
 
-        from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
+        from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging  # local-import: backend (warp)
 
         # Warp logs one line per kernel module it loads, ~45 of them, which
         # buries the report this diag exists to print. Silenced through the
@@ -480,7 +480,7 @@ class GenesisTong:
     name = "genesis"
 
     def __init__(self, xml: str, gravity: bool):
-        import genesis as gs
+        import genesis as gs  # local-import: backend (genesis), only on the genesis path
 
         self._gs = gs
         if not gs._initialized:
@@ -549,15 +549,11 @@ class GenesisTong:
         return self.entity.get_dofs_position(self._dofs).device
 
     def set_hinge(self, q: float) -> None:
-        import torch
-
         self.entity.set_dofs_position(
             torch.tensor([[q]], dtype=torch.float32, device=self._device()), self._dofs, zero_velocity=True
         )
 
     def set_torque(self, tau: float) -> None:
-        import torch
-
         self.entity.control_dofs_force(torch.tensor([[tau]], dtype=torch.float32, device=self._device()), self._dofs)
 
     def step(self) -> None:

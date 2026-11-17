@@ -49,6 +49,18 @@ import sys
 import time
 from pathlib import Path
 
+import torch
+import warp as wp
+
+from jaxrlworld.rl.algorithms import get_runner_class
+from jaxrlworld.rl.configs.base_config import iter_terms
+from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
+from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
+from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
+from jaxrlworld.rl.evals.sim_initializers.newton import NewtonInitializer
+from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
+from jaxrlworld.rl.utils.wandb_checkpoint import resolve_checkpoint_path
+
 _MODULE = "jaxrlworld.scripts.diag.dr.newton_g1_dr_nan_diag"
 
 # Round 1 (event-term bisect) showed EVERY cell non-finite, including
@@ -74,8 +86,6 @@ def _stage(msg: str) -> None:
 
 
 def _finite(t) -> bool:
-    import torch
-
     return bool(torch.isfinite(t).all().item())
 
 
@@ -94,7 +104,6 @@ def _check_ccd_scratch(num_envs: int, nconmax: int, ccd_iterations: int) -> None
     shown — so the fix (fewer envs, or a smaller ceiling) is obvious rather
     than something to bisect.
     """
-    import torch
 
     row_vec3 = 10 + 2 * ccd_iterations
     scratch = num_envs * nconmax * row_vec3 * 12
@@ -122,9 +131,6 @@ def _load_policy(checkpoint: str, cfgs, env):
     gait places on the contact buffers, and exploration noise would blur
     the peak this is trying to find.
     """
-    from jaxrlworld.rl.algorithms import get_runner_class
-    from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax
-    from jaxrlworld.rl.utils.wandb_checkpoint import resolve_checkpoint_path
 
     # Through the concrete runner class, as ``BaseRunner.create_with_env``
     # does. ``BaseRunner.load_checkpoint`` is the abstract declaration and
@@ -159,19 +165,12 @@ def run_cell(
     rough: bool,
     checkpoint: str | None = None,
 ) -> dict:
-    import torch
-    import warp as wp
-
     torch.manual_seed(seed)
     disable, action_scale = _CELLS[cell]
     _stage(
         f"cell start: {cell} (disable={list(disable)}, action_scale={action_scale}) "
         f"num_envs={num_envs} nconmax={nconmax} njmax={njmax} rough={rough}"
     )
-
-    from jaxrlworld.rl.configs.base_config import iter_terms
-    from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
-    from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 
     cfgs = G1FlatConfig(sim_type="newton", num_envs=num_envs, seed=seed, use_rough_terrain=rough).build()
     # Budget overrides for overflow-free demand measurement (overflowed
@@ -191,8 +190,6 @@ def run_cell(
             disabled_names.append(name)
     _stage(f"config built (disabled terms: {disabled_names})")
 
-    from jaxrlworld.rl.evals.sim_initializers.newton import NewtonInitializer
-
     env = NewtonInitializer().init_environment(cfgs)
     _stage("env built")
 
@@ -210,8 +207,6 @@ def run_cell(
     _stage("reset done")
 
     # ── body_com write sanity (always dumped for visibility) ─────────
-    from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
-
     cache = get_cache(env)
     model = env.scene_manager.model
     body_com = wp.to_torch(model.body_com).reshape(env.num_envs, cache.bodies_per_env, 3)
