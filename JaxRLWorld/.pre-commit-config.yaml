@@ -58,3 +58,12 @@ repos:
         language: system
         types: [python]
         files: ^JaxRLWorld/jaxrlworld/
+      # Imports inside functions only for a cycle, a backend that must stay
+      # lazy, or an optional dependency, each marked `# local-import: <reason>`
+      # (JaxRLWorld/tools/check_local_imports.py).
+      - id: no-unmarked-local-import
+        name: no unmarked local import
+        entry: python3 JaxRLWorld/tools/check_local_imports.py
+        language: system
+        types: [python]
+        files: ^JaxRLWorld/jaxrlworld/

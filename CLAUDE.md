@@ -10,7 +10,7 @@
 
 ## Code Style
 
-* NEVER: Import inside functions. The only exception is circular imports.
+* NEVER: Import inside functions. An import stays inside a function only for a circular import, a simulator backend that must not load on the other backends (see Architecture Principles), or an optional dependency the environment does not declare, and carries `# local-import: <reason>` on the statement. The pre-commit hook (`JaxRLWorld/tools/check_local_imports.py`) rejects unmarked ones.
 * NEVER: Silent fallback. Crash immediately on failure. No `except: pass` or empty fallbacks.
 * An `except` that does not raise is legitimate only as control flow (a retry, a `KeyboardInterrupt` stop, a worker/server forwarding the traceback to its caller, a parse attempt trying the next type) and carries `# except-ok: <reason>` on the `except` line. The pre-commit hook (`JaxRLWorld/tools/check_silent_except.py`) rejects unmarked ones.
 * NEVER: `getattr`/`hasattr` on an attribute the type declares. Read it directly and let `AttributeError` surface the bug. An optional attribute is declared (`None` default, a protocol method); type-dependent paths branch with `isinstance` (manager-built envs: `builds_from_manager_configs`).
