@@ -460,7 +460,6 @@ def reset_fallen_or_standing(
     standing_z_offset: float = 0.02,
     default_pos: tuple[float, ...] = (0.0, 0.0, 0.665),
     default_quat_wxyz: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0),
-    default_joint_pos_dict: dict[str, float] | None = None,
     asset_cfg: ResolvedEntity = _DEFAULT_SELECTOR,
 ) -> None:
     """Reset robots to a mix of fallen (random orientation) and standing poses.
@@ -473,25 +472,17 @@ def reset_fallen_or_standing(
         * root z = ``fall_height`` (dropped from above)
         * root orientation = uniform random quaternion on S³
           (Shoemake sampling — truly isotropic over SO(3))
-        * joint positions = ``act_manager.offset`` + uniform noise in
-          ``fall_joint_noise_range`` (additive, per-joint). This is a
-          simplification of mjlab which samples uniformly over the
-          full soft joint limit range; sampling from an absolute
-          range avoids a cross-sim abstraction for hard/soft limits
-          (MuJoCo's RobotData does not expose hard limits directly).
-          The skeleton MVP uses ±0.8 rad which gives a visibly fallen
-          pose for humanoids without risking extreme self-penetration;
-          Phase K tuning can widen to full soft limits via a new
-          ``rd.soft_joint_pos_limits`` accessor if needed.
+        * joint positions sampled uniformly over the soft joint limits
+          (``fall_joint_noise_range="soft_limit"``), or the home pose
+          plus uniform noise in a ``(min, max)`` range
         * root linear + angular velocity and joint velocity uniformly
           sampled in ``fall_velocity_range``
 
     - **Standing** (``1 - fallen_prob`` of envs):
         * root pose = ``default_pos + (0, 0, standing_z_offset)``
           and ``default_quat_wxyz``
-        * joint positions = ``default_joint_pos_dict`` (regex→float
-          dict resolved against actuated joint names) when provided,
-          otherwise ``act_manager.offset``
+        * joint positions = the home pose, ``RobotData.default_joint_pos``
+          (the preset's ``init_state.joint_pos``)
         * all velocities = 0
 
     The two branches are computed on the full ``env_ids`` tensor and
@@ -516,14 +507,7 @@ def reset_fallen_or_standing(
             the robot does not spawn intersecting the ground plane.
         default_pos: Standing-branch root ``(x, y, z)``.
         default_quat_wxyz: Standing-branch root quaternion (wxyz).
-        default_joint_pos_dict: Regex→float dict of default joint
-            angles (same format as ``RobotConfig.default_joint_angles``).
-            Resolved against ``act_manager.actuated_joint_names`` at
-            call time. When ``None``, falls back to
-            ``act_manager.offset`` (correct for absolute-action
-            presets but **all-zero** for relative-action presets that
-            force ``use_zero_offset=True``).
-        entity_name: Entity to reset.
+        asset_cfg: Entity to reset.
     """
     if len(env_ids) == 0:
         return
@@ -565,17 +549,10 @@ def reset_fallen_or_standing(
     ang_vel = torch.where(is_fallen_3, fallen_ang_vel, zero_vel)
 
     # ── Joint state ───────────────────────────────────────────────
-    # With ``default_joint_pos_dict`` the home pose is
-    # ``RobotData.default_joint_pos``; without it, ``act_manager.offset``.
-    # Relative-action presets (getup) zero the action offset, so the
-    # offset gives an all-zero home pose instead of the standing pose.
-    if default_joint_pos_dict is not None:
-        rd = env.get_entity_data(asset_cfg.name)
-        default_joint_pos = rd.default_joint_pos.unsqueeze(0).expand(n, -1).clone()
-    else:
-        default_joint_pos = env.act_manager.offset[env_ids].clone()
-        if default_joint_pos.dim() == 1:
-            default_joint_pos = default_joint_pos.unsqueeze(0)
+    # The home pose is the robot's, not ``act_manager.offset``: the getup
+    # presets act relative to the current pose and zero the offset.
+    rd = env.get_entity_data(asset_cfg.name)
+    default_joint_pos = rd.default_joint_pos.unsqueeze(0).expand(n, -1).clone()
     num_joints = default_joint_pos.shape[-1]
 
     if fall_joint_noise_range == "soft_limit":
@@ -583,7 +560,6 @@ def reset_fallen_or_standing(
         # full soft joint limit range so fallen poses span the whole
         # reachable configuration space. Requires
         # ``rd.soft_joint_pos_limits`` (all 3 sims implement it).
-        rd = env.get_entity_data(asset_cfg.name)
         jp_lo, jp_hi = rd.soft_joint_pos_limits
         u = sampler.uniforms(env_ids, _axis_coords(num_joints, device), stream=6)
         fallen_joint_pos = jp_lo + u * (jp_hi - jp_lo)

@@ -281,7 +281,6 @@ class K1GetupConfig(K1VelocityConfig):
                     "standing_z_offset": self.standing_z_offset,
                     "default_pos": (0.0, 0.0, r.base_init_height),
                     "default_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
-                    "default_joint_pos_dict": r.default_joint_angles,
                 },
             ),
         }

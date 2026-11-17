@@ -265,7 +265,6 @@ class T1GetupConfig:
             "standing_z_offset": self.standing_z_offset,
             "default_pos": (0.0, 0.0, self.robot.base_init_height),
             "default_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
-            "default_joint_pos_dict": self.robot.default_joint_angles,
         }
         if hasattr(builders, "customize_reset_root_params"):  # dynamic-attr: optional sim-builder hook
             builders.customize_reset_root_params(self, reset_root_params)
