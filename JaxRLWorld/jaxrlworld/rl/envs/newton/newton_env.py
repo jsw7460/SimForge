@@ -309,8 +309,8 @@ class NewtonEnv(World):
         # ``MjwarpOverflowGuard``). SolverXPBD and the CPU MuJoCo path publish
         # no bitmask, so neither is guarded.
         self._overflow_guard = None
-        observables = self.scene_manager.overflow_observables
-        if observables is not None:
+        observables = self.scene_manager.observables
+        if observables is not None and observables.is_requested(self.scene_manager.solver.ObservableKind.OVERFLOW):
             self._overflow_guard = MjwarpOverflowGuard(
                 lambda: observables.overflow, extra_flags=type(self.scene_manager.solver).OverflowBits
             )

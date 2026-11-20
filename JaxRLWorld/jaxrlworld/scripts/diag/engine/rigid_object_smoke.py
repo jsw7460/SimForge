@@ -467,7 +467,7 @@ def _newton_raw_contacts(env, name: str) -> None:
     produced, before any sensor filtering.
     """
     sm = env.scene_manager
-    contacts = sm.sensor_contacts if sm.sensor_contacts is not None else sm.contacts
+    contacts = sm.contacts
     if contacts is None:
         print(f"[{name}/newton] no contact buffer to dump")
         return

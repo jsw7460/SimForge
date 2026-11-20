@@ -497,11 +497,13 @@ class NewtonSceneManager(BaseManager):
         # Newton objects
         self.model: newton.Model | None = None
         self.solver: Any = None
-        # The per-world capacity-overflow bitmask SolverMuJoCo collects on
-        # every step (mujoco-warp's bits plus the Newton collision pipeline's);
-        # ``NewtonEnv`` raises on it. None for SolverXPBD and the CPU MuJoCo
-        # path, which publish none.
-        self.overflow_observables: Any = None
+        # The solver observables every step fills: the per-world
+        # capacity-overflow bitmask SolverMuJoCo collects on the GPU
+        # (mujoco-warp's bits plus the Newton collision pipeline's; ``NewtonEnv``
+        # raises on it) and, for the contact sensors, the force of every
+        # contact row of ``self.contacts``. None when nothing is requested.
+        self.observables: Any = None
+        self._observable_kinds: set[str] = set()
         self.state_0: newton.State | None = None
         self.state_1: newton.State | None = None
         self.control: newton.Control | None = None
@@ -1265,7 +1267,7 @@ class NewtonSceneManager(BaseManager):
             # the kernels it builds at the first step.
             self.solver.mjw_model.opt.warn_overflow = int(mujoco_warp.OverflowType.ALL) if scfg.warn_overflow else 0
             if not scfg.use_mujoco_cpu:
-                self.overflow_observables = self.solver.observables({self.solver.ObservableKind.OVERFLOW})
+                self._observable_kinds.add(self.solver.ObservableKind.OVERFLOW)
             # SolverMuJoCo is a reduced-coordinate solver: the authoritative
             # state lives in its own ``mjw_data`` (qpos/qvel) and the Newton
             # ``State`` is only an in/out sync surface, so passing the same
@@ -1312,7 +1314,7 @@ class NewtonSceneManager(BaseManager):
             # requires a Contacts container; size it the way Newton's
             # own basic_heightfield example does on this path.
             self.collision_pipeline = None
-            self.contacts = newton.Contacts(self.solver.get_max_contact_count(), 0)
+            self.contacts = newton.Contacts(self.solver.get_max_contact_count(), 0, device=self.model.device)
         elif self.config.collision_max_triangle_pairs is not None or tri_override:
             max_pairs = int(tri_override) if tri_override else self.config.collision_max_triangle_pairs
             self.collision_pipeline = newton.CollisionPipeline(
@@ -1381,17 +1383,15 @@ class NewtonSceneManager(BaseManager):
             self.sensors[camera_cfg.name] = camera
             self._cameras[camera_cfg.name] = camera
 
-        # Create sensor-specific contacts with extended attributes
-        has_contact_sensor = bool(self._contact_sensor_wrappers)
-        if has_contact_sensor:
-            self.sensor_contacts = newton.Contacts(
-                self.solver.get_max_contact_count(),
-                0,
-                device=self.model.device,
-                requested_attributes=self.model.get_requested_contact_attributes(),
-            )
-        else:
-            self.sensor_contacts = None
+        # The contact sensors read the force the solver computed for every
+        # row of ``self.contacts``: a solver observable the step writes
+        # (mjwarp exports its own contacts into the buffer first on the
+        # ``use_mujoco_contacts`` path). Allocated once, before any
+        # CUDA-graph capture, together with the overflow bitmask.
+        if self._contact_sensor_wrappers:
+            self._observable_kinds.add(self.solver.ObservableKind.CONTACT_F)
+        if self._observable_kinds:
+            self.observables = self.solver.observables(self._observable_kinds, contacts=self.contacts)
 
         # Clean up temporary builders
         self._entity_builders.clear()
@@ -1796,9 +1796,7 @@ class NewtonSceneManager(BaseManager):
         # running the CollisionPipeline would be pure dead work (Newton's
         # own basic_heightfield example skips it the same way).
         if not self._use_mujoco_contacts:
-            self.contacts = self.model.collide(
-                self.state_0, contacts=self.contacts, collision_pipeline=self.collision_pipeline
-            )
+            self.collision_pipeline.collide(self.state_0, self.contacts)
         self._substep_loop(need_state_copy, last_idx)
         # Sensor refresh, warp-kernel half. Lives inside ``_step`` so the
         # captured CUDA graph replays it instead of the host relaunching
@@ -1836,7 +1834,7 @@ class NewtonSceneManager(BaseManager):
                     self.control,
                     self.contacts,
                     self.substep_dt,
-                    observables=self.overflow_observables,
+                    observables=self.observables,
                 )
             return
 
@@ -1856,7 +1854,7 @@ class NewtonSceneManager(BaseManager):
                 self.control,
                 self.contacts,
                 self.substep_dt,
-                observables=self.overflow_observables,
+                observables=self.observables,
             )
 
             if need_state_copy and i == last_idx:
@@ -1872,18 +1870,16 @@ class NewtonSceneManager(BaseManager):
     def _update_sensors_native(self) -> None:
         """Warp-kernel half of the sensor refresh — CUDA-graph safe.
 
-        Runs at the tail of ``_step`` (inside the captured graph): the
-        mjwarp contact export plus every native sensor's kernel launches
-        (SensorContact accumulation, IMU, frame transforms). Nothing
-        here may allocate or run torch ops — the warm-up step before
-        capture triggers any first-call allocations these make.
+        Runs at the tail of ``_step`` (inside the captured graph): every
+        native sensor's kernel launches (SensorContact accumulation over
+        the contact forces the step wrote into ``self.observables``, IMU,
+        frame transforms). Nothing here may allocate or run torch ops —
+        the warm-up step before capture triggers any first-call
+        allocations these make.
         """
-        if self._contact_sensor_wrappers:
-            self.solver.update_contacts(self.sensor_contacts, self.state_0)
-
         for sensor in self.sensors.values():
             if isinstance(sensor, NewtonContactSensor):
-                sensor.update_native(self.state_0, self.sensor_contacts)
+                sensor.update_native(self.state_0, self.contacts, self.observables)
             elif isinstance(sensor, newton.sensors.SensorIMU | newton.sensors.SensorFrameTransform):
                 sensor.update(self.state_0)  # IMU takes State
 

@@ -274,14 +274,16 @@ class NewtonContactSensor:
     # substep history (only when history_length > 0)
     # ------------------------------------------------------------------
 
-    def update_native(self, state, contacts) -> None:
+    def update_native(self, state, contacts, observables) -> None:
         """Refresh the native sensor — pure warp kernels, CUDA-graph safe.
 
         Called from ``NewtonSceneManager._update_sensors_native`` at the
-        tail of the captured physics step. ``state`` / ``contacts`` are
-        the scene manager's current ``state_0`` / ``sensor_contacts``.
+        tail of the captured physics step. ``state`` / ``contacts`` /
+        ``observables`` are the scene manager's step buffers: the solver
+        wrote this step's force for every row of ``contacts`` into
+        ``observables.contact_f``.
         """
-        self._native.update(state, contacts)
+        self._native.update(state, contacts, observables=observables)
 
     def push_history(self) -> None:
         """Push one substep frame into the history ring (torch side).
