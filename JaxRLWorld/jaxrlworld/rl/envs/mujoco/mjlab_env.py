@@ -6,9 +6,9 @@ while following jaxrlworld's World interface and manager pattern.
 
 from __future__ import annotations
 
+import mujoco_warp
 import torch
 import warp as wp
-from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
 from mjlab.managers.scene_entity_config import SceneEntityCfg as _MjlabSceneEntityCfg
 
 from jaxrlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
@@ -21,7 +21,7 @@ from jaxrlworld.rl.configs.mujoco_config_classes import (
 )
 from jaxrlworld.rl.configs.scene.entity_selector import ResolvedEntity, SceneEntitySelector
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
-from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeLevel, collect_expand_fields
+from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeGroups, collect_expand_fields
 from jaxrlworld.rl.envs.mujoco.robot_data import MujocoRigidObjectData, MujocoRobotData
 from jaxrlworld.rl.envs.mujoco.robot_state_writer import MujocoRobotStateWriter
 from jaxrlworld.rl.envs.site_frames import resolve_sites
@@ -361,30 +361,28 @@ class MujocoEnv(World):
         declaration belongs next to the function that writes the field, and
         for the derived-field write sets a recompute pulls in.
         """
-        self._assert_recompute_level_names()
+        self._assert_recompute_groups()
 
         dr_fields = collect_expand_fields(self.event_cfg)
         if dr_fields:
             self.scene_manager.sim.expand_model_fields(dr_fields)
 
     @staticmethod
-    def _assert_recompute_level_names() -> None:
-        """Fail loudly if our ``RecomputeLevel`` names drift from mjlab's.
+    def _assert_recompute_groups() -> None:
+        """Fail loudly if our ``RecomputeGroups`` drift from mujoco-warp's ``SetConstGroup``.
 
-        DR terms declare their recompute level with JaxRLWorld's own enum so
-        that ``unified.py`` needs no module-level mjlab import, and
-        ``Simulation.recompute_constants`` dispatches on ``level.name``. A
-        rename upstream would otherwise only surface as an ``AttributeError``
-        deep inside the first reset-time recompute, long after build.
+        DR terms declare the groups they leave stale with JaxRLWorld's own flags
+        so that ``unified.py`` needs no module-level mujoco-warp import, and
+        ``Simulation.recompute_constants`` hands them to ``mujoco_warp.set_const``,
+        which tests the bits against its own enum. A renumbering upstream would
+        otherwise silently recompute the wrong groups at the first reset-time DR.
         """
-        unknown = {level.name for level in RecomputeLevel} - {level.name for level in MjlabRecomputeLevel}
-        if unknown:
+        theirs = {member.name: int(member) for member in mujoco_warp.SetConstGroup}
+        ours = {member.name: int(member) for member in RecomputeGroups}
+        if ours != theirs:
             raise RuntimeError(
-                f"RecomputeLevel names {sorted(unknown)} are not present on mjlab's "
-                f"RecomputeLevel ({sorted(level.name for level in MjlabRecomputeLevel)}). "
-                f"Simulation.recompute_constants dispatches with getattr(mujoco_warp, "
-                f"level.name), so the two enums must stay name-compatible; update "
-                f"jaxrlworld.rl.envs.mdp.events.dr._model_fields.RecomputeLevel."
+                f"RecomputeGroups {ours} do not mirror mujoco_warp.SetConstGroup {theirs}; "
+                f"update jaxrlworld.rl.envs.mdp.events.dr._model_fields.RecomputeGroups."
             )
 
     def _post_setup(self) -> None:

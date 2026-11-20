@@ -10,6 +10,7 @@ from jaxrlworld.rl.configs.base_config import iter_terms
 from jaxrlworld.rl.configs.common_config_classes import EventConfig
 from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
 from jaxrlworld.rl.envs.managers.base import BaseManager
+from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeGroups
 from jaxrlworld.rl.envs.mdp.events.keyed_sampler import (
     STAGE_IDS,
     STAGE_INTERVAL_TIMER,
@@ -194,11 +195,10 @@ class EventManager(BaseManager):
         terms. No-op for Genesis (its backends never touch the attributes).
 
         MuJoCo: symmetric. ``sim.recompute_constants`` is model-global and its
-        most expensive level (set_const, for body_mass) dominates the reset path
-        when several body_mass/body_com terms fire together. The MuJoCo DR
-        backends defer their recompute into ``env._dr_pending_recompute_level``
-        (keeping the MAX level — RecomputeLevel is an ordered IntEnum whose higher
-        levels are a superset), and we flush ONE recompute after all terms.
+        full recompute (for body_mass) dominates the reset path when several
+        body_mass/body_com terms fire together. The MuJoCo DR backends OR the
+        groups they need into ``env._dr_pending_recompute_groups``, and we
+        flush ONE recompute of the union after all terms.
 
         Shared by reset_dr (per-reset, env_ids = the reset envs) and interval_dr
         (global period, env_ids = all envs).
@@ -206,17 +206,17 @@ class EventManager(BaseManager):
         env = self.env
         env._dr_batch_active = True
         env._dr_pending_notify_flags = 0
-        env._dr_pending_recompute_level = None
+        env._dr_pending_recompute_groups = RecomputeGroups.NONE
         for name, term in terms:
             self._call_event_fn(name, term, env_ids, self._sampler(name, stage, counter))
         env._dr_batch_active = False
-        flags, level = env._dr_pending_notify_flags, env._dr_pending_recompute_level
+        flags, groups = env._dr_pending_notify_flags, env._dr_pending_recompute_groups
         env._dr_pending_notify_flags = 0
-        env._dr_pending_recompute_level = None
+        env._dr_pending_recompute_groups = RecomputeGroups.NONE
         if flags:  # only Newton's DR backends fold flags in
             env.scene_manager.solver.notify_model_changed(flags)
-        if level:  # only MuJoCo's; None (no recompute term) or none(0) -> skip
-            env.scene_manager.sim.recompute_constants(level)
+        if groups:  # only MuJoCo's DR backends fold groups in
+            env.scene_manager.sim.recompute_constants(groups)
 
     def _apply_reset_dr(self, env_ids: torch.Tensor) -> None:
         self._run_dr_batch(self._terms_by_mode["reset_dr"], env_ids, "reset_dr", self._episode_count)

@@ -16,6 +16,7 @@ from jaxrlworld.rl.envs.managers import CommandManager, CommandManagerConfig, Ev
 from jaxrlworld.rl.envs.managers._registrations import register_all_for
 from jaxrlworld.rl.envs.managers.common.curriculum import CurriculumManager
 from jaxrlworld.rl.envs.managers.registry import ManagerRegistry
+from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeGroups
 from jaxrlworld.rl.utils import string as _su
 from jaxrlworld.rl.utils.pretty import create_env_panel, print_env_summary
 
@@ -128,11 +129,11 @@ class World(ABC):
 
         # A batch of DR terms (``EventManager._run_dr_batch``) defers the
         # model refresh its terms ask for to one flush: the Newton notify
-        # flags OR-ed together, the highest MuJoCo recompute level. Outside a
-        # batch a term refreshes at once.
+        # flags OR-ed together, the MuJoCo recompute groups OR-ed together.
+        # Outside a batch a term refreshes at once.
         self._dr_batch_active = False
         self._dr_pending_notify_flags = 0
-        self._dr_pending_recompute_level = None
+        self._dr_pending_recompute_groups = RecomputeGroups.NONE
 
         # Which observation groups the terminal-observation pass computes.
         # ``None`` means every group. A runner that consumes only part of

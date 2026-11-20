@@ -31,11 +31,11 @@ Static (no environment, no GPU):
       declaration -- a new DR function cannot silently skip the expansion.
   C3  CONTROL: an undecorated DR-package function makes ``collect_expand_fields``
       raise. If this passes, C1/C2 prove nothing.
-  C4  the derived-field table matches what the installed mujoco-warp actually
-      writes, recovered from ``_src/set_const.py`` by walking the ``set_const*`` call
-      graph. Re-run after every mujoco-warp bump.
-  C5  ``RecomputeLevel`` member names still resolve on mjlab's enum and on
-      mujoco-warp, which is what ``recompute_constants`` dispatches through.
+  C4  the derived-field table covers every field the installed mujoco-warp
+      ``set_const`` writes (recovered from ``_src/set_const.py``) and matches
+      mjlab's own per-group table. Re-run after every mujoco-warp bump.
+  C5  ``RecomputeGroups`` mirrors ``mujoco_warp.SetConstGroup`` bit for bit,
+      which is what ``recompute_constants`` hands to ``set_const``.
 
 Live (builds one Go2 MuJoCo environment):
   C6  every collected field is really ``(num_envs, ...)`` in the warp model,
@@ -53,23 +53,25 @@ import re
 import mujoco_warp
 import torch
 import warp as wp
-from mjlab.managers.event_manager import RecomputeLevel as MjlabRecomputeLevel
+from mjlab.managers.event_manager import _DERIVED_FIELDS as MJLAB_DERIVED_FIELDS
 
 from jaxrlworld.rl.configs.base_config import iter_terms
 from jaxrlworld.rl.configs.common_config_classes import EventConfig
 from jaxrlworld.rl.configs.events.event_term_config import EventTermConfig
 from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from jaxrlworld.rl.envs.mdp.events.dr import unified as u
-from jaxrlworld.rl.envs.mdp.events.dr._model_fields import DERIVED_FIELDS, RecomputeLevel, collect_expand_fields
+from jaxrlworld.rl.envs.mdp.events.dr._model_fields import DERIVED_FIELDS, RecomputeGroups, collect_expand_fields
 from jaxrlworld.rl.runners import BaseRunner
 
 # Fields written per world that never need expansion, because the write
 # sizes itself to whatever the array already is and can never store out of
 # bounds:
-#   * ``stat`` (set_const_0): launched with ``dim=m.stat.meaninertia.shape[0]``;
-#   * ``geom_size``/``geom_aabb``/``geom_rbound`` (set_const_fixed,
+#   * ``stat`` (INERT0): launched with ``dim=m.stat.meaninertia.shape[0]``;
+#   * ``geom_size``/``geom_aabb``/``geom_rbound`` (FIXED,
 #     ``_compute_geom_bound``): every store indexes ``worldid % out.shape[0]``.
-_WRITE_EXEMPT: frozenset[str] = frozenset({"stat", "geom_size", "geom_aabb", "geom_rbound"})
+#   * ``actuator_lengthrange`` (INERT0): only for actuators with
+#     ``actuator_lengthrange`` unset, which mjlab's table leaves out too.
+_WRITE_EXEMPT: frozenset[str] = frozenset({"stat", "geom_size", "geom_aabb", "geom_rbound", "actuator_lengthrange"})
 
 # Fields the Go2 MuJoCo preset randomizes directly (as opposed to derived
 # constants recomputed from them). C7 requires cross-env variance for these.
@@ -110,20 +112,23 @@ def _retired_collect(event_cfg) -> tuple[str, ...]:
         "light_dir0",
         "eq_data",
     )
+    # The retired table was keyed by mujoco-warp 3.x's ``set_const*`` entry
+    # points; the groups of mujoco-warp 4 split ``set_const_0`` in two, so
+    # the reference lists ``set_const_0`` for every term that asked for it.
     derived_fields = {
-        RecomputeLevel.none: (),
-        RecomputeLevel.set_const_fixed: ("body_subtreemass",),
-        RecomputeLevel.set_const_0: set_const_0_fields,
-        RecomputeLevel.set_const: ("body_subtreemass",) + set_const_0_fields + ("tendon_lengthspring",),
+        RecomputeGroups.NONE: (),
+        RecomputeGroups.KIN0 | RecomputeGroups.INERT0: set_const_0_fields,
+        RecomputeGroups.INERT0: set_const_0_fields,
+        RecomputeGroups.ALL: ("body_subtreemass",) + set_const_0_fields + ("tendon_lengthspring",),
     }
     unified_to_fields = {
-        u.randomize_friction: (("geom_friction",), RecomputeLevel.none),
-        u.randomize_body_mass: (("body_mass",), RecomputeLevel.set_const),
-        u.randomize_body_com_offset: (("body_ipos",), RecomputeLevel.set_const),
-        u.randomize_pd_gains: (("actuator_gainprm", "actuator_biasprm"), RecomputeLevel.none),
-        u.randomize_joint_armature: (("dof_armature",), RecomputeLevel.set_const_0),
-        u.randomize_joint_friction: (("dof_frictionloss",), RecomputeLevel.none),
-        u.randomize_joint_damping: (("dof_damping",), RecomputeLevel.none),
+        u.randomize_friction: (("geom_friction",), RecomputeGroups.NONE),
+        u.randomize_body_mass: (("body_mass",), RecomputeGroups.ALL),
+        u.randomize_body_com_offset: (("body_ipos",), RecomputeGroups.KIN0 | RecomputeGroups.INERT0),
+        u.randomize_pd_gains: (("actuator_gainprm", "actuator_biasprm"), RecomputeGroups.NONE),
+        u.randomize_joint_armature: (("dof_armature",), RecomputeGroups.INERT0),
+        u.randomize_joint_friction: (("dof_frictionloss",), RecomputeGroups.NONE),
+        u.randomize_joint_damping: (("dof_damping",), RecomputeGroups.NONE),
     }
 
     out: list[str] = []
@@ -132,9 +137,9 @@ def _retired_collect(event_cfg) -> tuple[str, ...]:
             out.append(term.params["field"])
         entry = unified_to_fields.get(term.func)
         if entry is not None:
-            fields, level = entry
+            fields, groups = entry
             out.extend(fields)
-            out.extend(derived_fields[level])
+            out.extend(derived_fields[groups])
     return tuple(dict.fromkeys(out))
 
 
@@ -179,9 +184,11 @@ def check_c1() -> bool:
     only_old = [f for f in old if f not in new]
     print(f"  only in new: {only_new or '-'}")
     print(f"  only in old: {only_old or '-'}")
-    print(f"  order preserved: {list(new) == list(old)}")
     print(f"  fields: {list(new)}")
-    ok = tuple(new) == tuple(old)
+    # The retired table over-expanded two fields no ``set_const`` group writes
+    # (``actuator_biasprm``, ``tendon_lengthspring``); dropping them is the
+    # one intended difference.
+    ok = not only_new and set(only_old) <= {"actuator_biasprm", "tendon_lengthspring"}
     print(f"\n  C1: {'PASS' if ok else 'FAIL'}\n")
     return ok
 
@@ -192,11 +199,11 @@ def check_c2() -> bool:
     ok = True
     for name, func in entries:
         declared = getattr(func, "model_fields", None)  # dynamic-attr: optional @requires_model_fields marker
-        level = getattr(func, "recompute", None)  # dynamic-attr: optional @requires_model_fields marker
+        groups = getattr(func, "recompute", None)  # dynamic-attr: optional @requires_model_fields marker
         status = "OK" if declared is not None else "MISSING @requires_model_fields"
         ok &= declared is not None
-        level_name = level.name if level is not None else "-"
-        print(f"  {name:<32} {status:<30} recompute={level_name:<16} fields={list(declared or [])}")
+        groups_name = str(groups) if groups is not None else "-"
+        print(f"  {name:<32} {status:<30} recompute={groups_name:<24} fields={list(declared or [])}")
     print(f"\n  C2: {'PASS' if ok else 'FAIL'}  ({len(entries)} entry points)\n")
     return ok
 
@@ -217,15 +224,17 @@ def check_c3() -> bool:
     return False
 
 
-def _mujoco_warp_write_sets() -> dict[str, set[str]] | None:
-    """Fields each ``set_const*`` writes, from the installed mujoco-warp source.
+def _mujoco_warp_write_set() -> set[str] | None:
+    """Every model field ``set_const`` writes, from the installed mujoco-warp source.
 
     Walks the call graph so ``set_const`` picks up what its callees write.
     Writes are detected as top-level ``m.<field> =`` assignments plus anything
     named inside a kernel launch's ``outputs=[...]``; reads are ignored because
-    only writes can store out of bounds. Returns ``None`` when the source
-    layout is not recognised, so the caller reports INCONCLUSIVE rather than
-    a spurious failure.
+    only writes can store out of bounds. The groups gate the writes inside one
+    function body, so the source yields their union, which C4 compares against
+    the union of our table; the split per group is checked against mjlab's.
+    Returns ``None`` when the source layout is not recognised, so the caller
+    reports INCONCLUSIVE rather than a spurious failure.
     """
 
     src_path = pathlib.Path(mujoco_warp.__file__).parent / "_src" / "set_const.py"
@@ -233,7 +242,7 @@ def _mujoco_warp_write_sets() -> dict[str, set[str]] | None:
         return None
     lines = src_path.read_text().splitlines()
     defs = [(i, m.group(1)) for i, line in enumerate(lines) if (m := re.match(r"^def (\w+)", line))]
-    if not defs:
+    if not defs or "set_const" not in {name for _, name in defs}:
         return None
     bodies = {
         name: "\n".join(lines[i : (defs[k + 1][0] if k + 1 < len(defs) else len(lines))])
@@ -249,68 +258,55 @@ def _mujoco_warp_write_sets() -> dict[str, set[str]] | None:
     def callees(body: str, own: str) -> set[str]:
         return (set(re.findall(r"^\s*(?:return\s+)?([a-z_][a-z_0-9]*)\(", body, re.M)) & set(bodies)) - {own}
 
-    out: dict[str, set[str]] = {}
-    for entry in ("set_const_fixed", "set_const_0", "set_const"):
-        if entry not in bodies:
-            return None
-        seen: set[str] = set()
-        stack = [entry]
-        acc: set[str] = set()
-        while stack:
-            fn = stack.pop()
-            if fn in seen:
-                continue
-            seen.add(fn)
-            acc |= direct_writes(bodies[fn])
-            stack.extend(callees(bodies[fn], fn))
-        out[entry] = acc - _WRITE_EXEMPT
-    return out
+    seen: set[str] = set()
+    stack = ["set_const"]
+    acc: set[str] = set()
+    while stack:
+        fn = stack.pop()
+        if fn in seen:
+            continue
+        seen.add(fn)
+        acc |= direct_writes(bodies[fn])
+        stack.extend(callees(bodies[fn], fn))
+    return acc - _WRITE_EXEMPT
 
 
 def check_c4() -> bool | None:
-    _hdr("C4  derived-field table vs the installed mujoco-warp")
-    detected = _mujoco_warp_write_sets()
+    _hdr("C4  derived-field table vs the installed mujoco-warp and mjlab")
+    detected = _mujoco_warp_write_set()
     if detected is None:
         print("  mujoco_warp source unavailable or unparseable -- cannot verify.")
         print("\n  C4: INCONCLUSIVE\n")
         return None
 
-    levels = {
-        "set_const_fixed": RecomputeLevel.set_const_fixed,
-        "set_const_0": RecomputeLevel.set_const_0,
-        "set_const": RecomputeLevel.set_const,
-    }
-    ok = True
     print(f"  write-detection exemptions (self-sized kernels): {sorted(_WRITE_EXEMPT)}")
-    for entry, level in levels.items():
-        ours = set(DERIVED_FIELDS[level])
-        theirs = detected[entry]
-        missing = sorted(theirs - ours)  # dangerous: written per world, never expanded
-        extra = sorted(ours - theirs)  # harmless: expanded but no longer written
-        ok &= not missing
-        print(f"\n  {entry}: ours={len(ours)}  mujoco-warp writes={len(theirs)}")
-        print(f"    MISSING from our table (per-world write with no expansion): {missing or '-'}")
-        print(f"    extra in our table (stale, harmless):                       {extra or '-'}")
+    ours = {f for fields in DERIVED_FIELDS.values() for f in fields}
+    missing = sorted(detected - ours)  # dangerous: written per world, never expanded
+    extra = sorted(ours - detected)  # harmless: expanded but no longer written
+    ok = not missing
+    print(f"\n  set_const: ours={len(ours)}  mujoco-warp writes={len(detected)}")
+    print(f"    MISSING from our table (per-world write with no expansion): {missing or '-'}")
+    print(f"    extra in our table (stale, harmless):                       {extra or '-'}")
+
+    for group, fields in DERIVED_FIELDS.items():
+        theirs = set(MJLAB_DERIVED_FIELDS[mujoco_warp.SetConstGroup(int(group))])
+        same = set(fields) == theirs
+        ok &= same
+        print(
+            f"  {group.name:<8} matches mjlab's table: {same}"
+            + ("" if same else f"  ours={sorted(fields)} mjlab={sorted(theirs)}")
+        )
     print(f"\n  C4: {'PASS' if ok else 'FAIL'}\n")
     return ok
 
 
 def check_c5() -> bool:
-    _hdr("C5  RecomputeLevel name contract")
-    ok = True
-    theirs = {lvl.name for lvl in MjlabRecomputeLevel}
-    unknown = {lvl.name for lvl in RecomputeLevel} - theirs
-    print(f"  ours   : {sorted(lvl.name for lvl in RecomputeLevel)}")
-    print(f"  mjlab  : {sorted(theirs)}")
-    print(f"  not on mjlab's enum: {sorted(unknown) or '-'}")
-    ok &= not unknown
-
-    for level in RecomputeLevel:
-        if level is RecomputeLevel.none:
-            continue  # never dispatched; recompute is skipped at this level
-        resolves = hasattr(mujoco_warp, level.name)  # dynamic-attr: dispatch resolves the level by name
-        ok &= resolves
-        print(f"  getattr(mujoco_warp, {level.name!r}) resolves: {resolves}")
+    _hdr("C5  RecomputeGroups mirror mujoco_warp.SetConstGroup")
+    ours = {member.name: int(member) for member in RecomputeGroups}
+    theirs = {member.name: int(member) for member in mujoco_warp.SetConstGroup}
+    print(f"  ours        : {ours}")
+    print(f"  mujoco-warp : {theirs}")
+    ok = ours == theirs
     print(f"\n  C5: {'PASS' if ok else 'FAIL'}\n")
     return ok
 
@@ -428,7 +424,7 @@ def check_live(num_envs: int, steps: int) -> bool:
         c7_ok = False
     print(f"\n  C7: {'PASS' if c7_ok else 'FAIL'}  (required: {list(_GO2_DIRECTLY_RANDOMIZED)})\n")
 
-    _hdr("C8  deferred set_const recompute leaves the state finite")
+    _hdr("C8  deferred recompute leaves the state finite")
     zero_act = torch.zeros(env.num_envs, env.num_actions, device=env.device)
     for _ in range(steps):
         env.step(zero_act)
@@ -470,7 +466,7 @@ def main() -> int:
         "C2 decorator coverage": check_c2(),
         "C3 guard control": check_c3(),
         "C4 derived table vs mujoco-warp": check_c4(),
-        "C5 RecomputeLevel names": check_c5(),
+        "C5 RecomputeGroups bits": check_c5(),
     }
     if not args.static_only:
         results["C6-C8 live expansion"] = check_live(args.num_envs, args.steps)

@@ -49,6 +49,7 @@ from jaxrlworld.rl.configs.presets.g1_29dof.base import G1FlatConfig
 from jaxrlworld.rl.configs.presets.go2.base import Go2FlatConfig
 from jaxrlworld.rl.configs.presets.k1_velocity.base import K1VelocityConfig
 from jaxrlworld.rl.configs.presets.yam_lift.base import YamLiftConfig
+from jaxrlworld.rl.envs.mdp.events.dr._model_fields import RecomputeGroups
 from jaxrlworld.rl.runners import BaseRunner
 from jaxrlworld.rl.utils.jax_utils import jax_to_torch, torch_to_jax_many
 
@@ -793,33 +794,33 @@ def _probe_reset_dr(env, timer: _Timer, env_ids: torch.Tensor, repeats: int) -> 
 
     def call_without_flush(name):
         # The prologue and epilogue of _run_dr_batch without its flush: the
-        # backends fold their pending recompute level or notify flags in.
+        # backends fold their pending recompute groups or notify flags in.
         env._dr_batch_active = True
         env.event_manager.run_term(name, env_ids)
         env._dr_batch_active = False
-        level = env._dr_pending_recompute_level if is_mujoco else None
+        groups = env._dr_pending_recompute_groups if is_mujoco else None
         flags = env._dr_pending_notify_flags if is_newton else None
         env._dr_pending_notify_flags = 0
-        env._dr_pending_recompute_level = None
-        return level, flags
+        env._dr_pending_recompute_groups = RecomputeGroups.NONE
+        return groups, flags
 
     probes = {name: (lambda name=name: call_without_flush(name)) for name, _term in dr_terms}
     _time_probes(timer, probes, repeats)
 
     # What the terms between them ask the model to redo, then the cost of
     # doing it once.
-    level = None
+    groups = RecomputeGroups.NONE
     flags = 0
     for name, _term in dr_terms:
-        term_level, term_flags = call_without_flush(name)
-        if term_level is not None and (level is None or term_level > level):
-            level = term_level
+        term_groups, term_flags = call_without_flush(name)
+        if term_groups is not None:
+            groups |= term_groups
         if term_flags:
             flags |= term_flags
 
     flush_probes = {}
-    if is_mujoco and level:
-        flush_probes[f"sim.recompute_constants({level})"] = lambda: env.scene_manager.sim.recompute_constants(level)
+    if is_mujoco and groups:
+        flush_probes[f"sim.recompute_constants({groups})"] = lambda: env.scene_manager.sim.recompute_constants(groups)
     if is_newton and flags:
         flush_probes[f"solver.notify_model_changed({flags})"] = lambda: env.scene_manager.solver.notify_model_changed(
             flags

@@ -42,7 +42,7 @@ from jaxrlworld.rl.envs.backends import get_dr_backend
 from jaxrlworld.rl.envs.mdp.events.keyed_sampler import TermSampler, keyed_field_sampler
 from jaxrlworld.rl.envs.mdp.events.mujoco import _MujocoEnvAdapter
 
-from ._model_fields import RecomputeLevel, requires_model_fields
+from ._model_fields import RecomputeGroups, requires_model_fields
 from ._utils import apply_operation
 
 if TYPE_CHECKING:
@@ -77,27 +77,22 @@ def _newton_notify(env: World, flag) -> None:
         env.scene_manager.solver.notify_model_changed(flag_int)
 
 
-def _mujoco_recompute(env: World, sim, level) -> None:
+def _mujoco_recompute(env: World, sim, groups: RecomputeGroups) -> None:
     """Recompute derived MuJoCo constants after a DR write (MuJoCo-only).
 
-    ``sim.recompute_constants`` is model-GLOBAL and its most expensive level
-    (``set_const``, needed for body_mass) dominates the reset path when several
-    DR terms fire per reset — K1 has 2-3 body_mass terms + body_com, each of
-    which would otherwise trigger its own full set_const. Inside a DR batch
-    (``env._dr_batch_active``) we keep only the MAX level in
-    ``env._dr_pending_recompute_level`` (``RecomputeLevel`` is an ordered
-    IntEnum whose higher levels recompute a superset of the lower), and the
-    manager flushes a SINGLE recompute after all terms run. Outside a batch
-    the call is immediate. Mirrors the deferred pattern in
-    :func:`_newton_notify`.
+    ``sim.recompute_constants`` is model-GLOBAL and its full recompute
+    (``ALL``, needed for body_mass) dominates the reset path when several DR
+    terms fire per reset -- K1 has 2-3 body_mass terms + body_com, each of
+    which would otherwise trigger its own full recompute. Inside a DR batch
+    (``env._dr_batch_active``) the groups are OR-ed into
+    ``env._dr_pending_recompute_groups`` and the manager flushes a SINGLE
+    recompute of the union after all terms run. Outside a batch the call is
+    immediate. Mirrors the deferred pattern in :func:`_newton_notify`.
     """
-    pending = env._dr_pending_recompute_level
-    if not env._dr_batch_active:
-        sim.recompute_constants(level)
-    elif pending is None:
-        env._dr_pending_recompute_level = level
+    if env._dr_batch_active:
+        env._dr_pending_recompute_groups |= groups
     else:
-        env._dr_pending_recompute_level = max(pending, level)
+        sim.recompute_constants(groups)
 
 
 # Newton stores the three friction axes (slide / torsional / rolling)
@@ -458,7 +453,7 @@ def _selector_to_mjlab_cfg(asset_cfg: SceneEntitySelector | ResolvedEntity, scen
 # ══════════════════════════════════════════════════════════════════════
 
 
-@requires_model_fields("body_mass", recompute=RecomputeLevel.set_const)
+@requires_model_fields("body_mass", recompute=RecomputeGroups.ALL)
 def randomize_body_mass(
     env: World,
     env_ids: torch.Tensor,
@@ -591,7 +586,7 @@ def _mujoco_body_mass_backend(env, env_ids, sampler, asset_cfg, mass_range, oper
 # ══════════════════════════════════════════════════════════════════════
 
 
-@requires_model_fields("body_ipos", recompute=RecomputeLevel.set_const)
+@requires_model_fields("body_ipos", recompute=RecomputeGroups.KIN0 | RecomputeGroups.INERT0)
 def randomize_body_com_offset(
     env: World,
     env_ids: torch.Tensor,
@@ -1089,7 +1084,7 @@ def _mujoco_pd_gains_backend(env, env_ids, sampler, asset_cfg, kp_range, kd_rang
 # ══════════════════════════════════════════════════════════════════════
 
 
-@requires_model_fields("dof_armature", recompute=RecomputeLevel.set_const_0)
+@requires_model_fields("dof_armature", recompute=RecomputeGroups.INERT0)
 def randomize_joint_armature(
     env: World,
     env_ids: torch.Tensor,

@@ -28,8 +28,9 @@ from importlib import metadata
 import mujoco
 import torch
 import warp as wp
-from mjlab.managers.event_manager import _DERIVED_FIELDS, RecomputeLevel
+from mjlab.managers.event_manager import _DERIVED_FIELDS
 from mjlab.sim.sim import Simulation, SimulationCfg
+from mujoco_warp import SetConstGroup
 
 _XML = """
 <mujoco model="expand_repro">
@@ -77,9 +78,9 @@ def main() -> int:
     _stage(f"Sim built (use_cuda_graph={sim.use_cuda_graph})")
 
     # Expand the DR-written fields PLUS the derived fields that
-    # recompute_constants(set_const) writes — exactly what mjlab's own
-    # ``requires_model_fields(..., recompute=set_const)`` nominates.
-    expand_fields = tuple(dict.fromkeys(_FIELDS + _DERIVED_FIELDS[RecomputeLevel.set_const]))
+    # recompute_constants(ALL) writes — exactly what mjlab's own
+    # ``requires_model_fields`` nominates for these fields.
+    expand_fields = tuple(dict.fromkeys(_FIELDS + tuple(f for fs in _DERIVED_FIELDS.values() for f in fs)))
     print(f"[INFO] expanding: {expand_fields}")
     sim.expand_model_fields(expand_fields)
     torch.cuda.synchronize()
@@ -103,9 +104,9 @@ def main() -> int:
     # The exact call the JaxRLWorld mass/com DR backends make afterwards —
     # and the launch (mujoco_warp set_const -> smooth.kinematics) where the
     # matrix diagnostic crashes at num_envs>=256.
-    sim.recompute_constants(RecomputeLevel.set_const)
+    sim.recompute_constants(SetConstGroup.ALL)
     torch.cuda.synchronize()
-    _stage("recompute_constants(set_const) done")
+    _stage("recompute_constants(ALL) done")
 
     # Read back and verify the writes actually landed per-env.
     fl_back = wp.to_torch(sim.wp_model.dof_frictionloss).detach()
