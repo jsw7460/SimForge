@@ -1,10 +1,10 @@
 """Visualization exports.
 
-The overlay classes and the rasterizer-context helpers ``import genesis`` at
-module load (Genesis is the only backend that uses this GL rasterizer path),
-so they are exposed lazily via ``__getattr__`` — importing ``jaxrlworld.rl.vis``
-(or one of its sim-agnostic submodules, e.g. ``jaxrlworld.rl.vis.viser``) no
-longer drags Genesis into a Newton- or MuJoCo-only process.
+The overlay classes ``import genesis`` at module load (Genesis is the only
+backend that uses this GL rasterizer path), so they are exposed lazily via
+``__getattr__`` — importing ``jaxrlworld.rl.vis`` (or one of its sim-agnostic
+submodules, e.g. ``jaxrlworld.rl.vis.viser``) no longer drags Genesis into a
+Newton- or MuJoCo-only process.
 """
 
 from __future__ import annotations
@@ -21,15 +21,12 @@ _LAZY: dict[str, tuple[str, str]] = {
     "OverlayConfig": (".overlays", "OverlayConfig"),
     "Overlay2DConfig": (".overlays", "Overlay2DConfig"),
     "Overlay3DConfig": (".overlays", "Overlay3DConfig"),
+    "OverlayState": (".overlays", "OverlayState"),
     # Overlays (Genesis-importing)
     "CommandArrowOverlay": (".overlays", "CommandArrowOverlay"),
     "CommandArrowConfig": (".overlays", "CommandArrowConfig"),
     "TextHUDOverlay": (".overlays", "TextHUDOverlay"),
     "TextHUDConfig": (".overlays", "TextHUDConfig"),
-    # Rasterizer-context injection (Genesis-importing)
-    "RLWorldRasterizerContext": (".rasterizer_context", "RLWorldRasterizerContext"),
-    "OverlaySettings": (".rasterizer_context", "OverlaySettings"),
-    "inject_into_scene": (".rasterizer_context", "inject_into_scene"),
 }
 
 __all__ = list(_LAZY)
@@ -52,11 +49,7 @@ if TYPE_CHECKING:  # let type checkers / IDEs see the lazy names
         Overlay2DConfig,
         Overlay3DConfig,
         OverlayConfig,
+        OverlayState,
         TextHUDConfig,
         TextHUDOverlay,
-    )
-    from .rasterizer_context import (
-        OverlaySettings,
-        RLWorldRasterizerContext,
-        inject_into_scene,
     )

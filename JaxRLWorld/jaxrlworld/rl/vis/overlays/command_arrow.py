@@ -1,24 +1,18 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import genesis.utils.geom as gu
-import genesis.utils.mesh as mu
-import numpy as np
-from genesis.ext import pyrender
-from genesis.utils.misc import tensor_to_array
+import torch
 
-from .base import Base3DOverlay, Overlay3DConfig
+from .base import Base3DOverlay, Overlay3DConfig, OverlayState
 
 if TYPE_CHECKING:
-    from jaxrlworld.rl.vis.rasterizer_context import RLWorldRasterizerContext
+    import genesis as gs
 
 
-def _yaw_from_quat_wxyz(quat: np.ndarray) -> float:
-    """Extract yaw angle from wxyz quaternion."""
-    w, x, y, z = quat[0], quat[1], quat[2], quat[3]
-    siny_cosp = 2.0 * (w * z + x * y)
-    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    return float(np.arctan2(siny_cosp, cosy_cosp))
+def _yaw_from_quat_wxyz(quat: torch.Tensor) -> torch.Tensor:
+    """Yaw angle of each wxyz quaternion, in radians."""
+    w, x, y, z = quat.unbind(-1)
+    return torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
 @dataclass
@@ -27,185 +21,98 @@ class CommandArrowConfig(Overlay3DConfig):
 
     enabled: bool = True
 
-    # Arrow appearance
+    # Arrow geometry: length = min(max_arrow_length, |velocity| * arrow_length_scale)
     arrow_radius: float = 0.02
     arrow_length_scale: float = 0.5
     max_arrow_length: float = 1.0
-    arrow_head_length_ratio: float = 0.3
-    arrow_head_radius_ratio: float = 2.0
 
     # Colors (RGBA)
-    linear_vel_body_color: tuple[float, ...] = (0.2, 0.8, 0.2, 0.9)
-    linear_vel_head_color: tuple[float, ...] = (0.1, 0.6, 0.1, 0.9)
-    actual_vel_body_color: tuple[float, ...] = (0.8, 0.4, 0.1, 0.9)
-    actual_vel_head_color: tuple[float, ...] = (0.6, 0.3, 0.1, 0.9)
+    linear_vel_color: tuple[float, ...] = (0.2, 0.8, 0.2, 0.9)
+    actual_vel_color: tuple[float, ...] = (0.8, 0.4, 0.1, 0.9)
     angular_vel_positive_color: tuple[float, ...] = (0.8, 0.2, 0.8, 0.9)
     angular_vel_negative_color: tuple[float, ...] = (0.2, 0.8, 0.8, 0.9)
 
-    # Actual velocity arrow
+    # Actual velocity arrow, drawn just below the command arrow
     show_actual_vel: bool = True
+    actual_vel_z_offset: float = -0.05
 
-    # Position offset from base
+    # Height of the arrows above the base
     z_offset: float = 0.3
 
-    # Angular velocity visualization
+    # Yaw-rate arrow: vertical, up for a positive (counter-clockwise) command, down for a negative one
     show_angular_vel: bool = True
     angular_vel_threshold: float = 0.05
+    angular_vel_z_offset: float = 0.15
 
 
 class CommandArrowOverlay(Base3DOverlay):
     """
     Overlay for visualizing velocity commands as 3D arrows.
 
-    Renders:
-    - Linear velocity: Arrow pointing in command direction
-    - Angular velocity: Colored sphere indicating rotation direction
+    Renders, per rendered environment:
+    - Commanded planar velocity: arrow in the commanded direction (world frame)
+    - Measured planar velocity: a second arrow just below it
+    - Commanded yaw rate: a vertical arrow, up or down by the sign of the command
     """
 
-    def __init__(self, context: "RLWorldRasterizerContext", config: CommandArrowConfig | None = None):
+    def __init__(self, scene: "gs.Scene", config: CommandArrowConfig | None = None):
         config = config or CommandArrowConfig()
-        super().__init__(context, config)
+        super().__init__(scene, config)
         self.config: CommandArrowConfig = config
 
-    def update(self, state: dict[str, Any]) -> None:
-        """
-        Update command arrow visualization.
-
-        Expected state keys:
-            - base_pos: (num_envs, 3) base positions
-            - base_quat: (num_envs, 4) base quaternions (wxyz)
-            - cmd_lin_vel_x: (num_envs,) x velocity commands (body frame)
-            - cmd_lin_vel_y: (num_envs,) y velocity commands (body frame)
-            - cmd_ang_vel: (num_envs,) angular velocity commands (optional)
-            - render_env_ids: list[int] environment indices to render
-        """
-        if not self.enabled:
+    def update(self, state: OverlayState) -> None:
+        self.clear()
+        if not self.enabled or state.base_pos is None or state.base_quat is None or state.cmd_lin_vel is None:
             return
 
-        base_pos = state.get("base_pos")
-        base_quat = state.get("base_quat")
-        cmd_lin_vel_x = state.get("cmd_lin_vel_x")
-        cmd_lin_vel_y = state.get("cmd_lin_vel_y")
-        cmd_ang_vel = state.get("cmd_ang_vel")
-        render_env_ids = state.get("render_env_ids", [0])
-
-        if base_pos is None or cmd_lin_vel_x is None or cmd_lin_vel_y is None:
-            return
-
-        # Convert to numpy
-        base_pos = tensor_to_array(base_pos)
-        if base_quat is not None:
-            base_quat = tensor_to_array(base_quat)
-        cmd_lin_vel_x = tensor_to_array(cmd_lin_vel_x)
-        cmd_lin_vel_y = tensor_to_array(cmd_lin_vel_y)
-
-        for env_idx in render_env_ids:
-            pos = base_pos[env_idx]
-            vel_x = float(cmd_lin_vel_x[env_idx])
-            vel_y = float(cmd_lin_vel_y[env_idx])
-
-            # Extract yaw from quaternion to rotate body-frame command to world frame
-            yaw = 0.0
-            if base_quat is not None:
-                quat = base_quat[env_idx]  # wxyz
-                yaw = _yaw_from_quat_wxyz(quat)
-
-            # Draw command arrow (green, rotated to world frame)
-            self._draw_arrow(
+        pos = state.base_pos
+        yaw = _yaw_from_quat_wxyz(state.base_quat)
+        self._draw_planar_arrow(pos, state.cmd_lin_vel, yaw, self.config.linear_vel_color, z_extra_offset=0.0)
+        if self.config.show_actual_vel and state.actual_lin_vel is not None:
+            self._draw_planar_arrow(
                 pos,
-                vel_x,
-                vel_y,
+                state.actual_lin_vel[:, :2],
                 yaw,
-                body_color=self.config.linear_vel_body_color,
-                head_color=self.config.linear_vel_head_color,
+                self.config.actual_vel_color,
+                z_extra_offset=self.config.actual_vel_z_offset,
             )
+        if self.config.show_angular_vel and state.cmd_ang_vel is not None:
+            self._draw_yaw_rate_arrows(pos, state.cmd_ang_vel)
 
-            # Draw actual velocity arrow (orange, already body frame → rotate to world)
-            actual_lin_vel = state.get("actual_lin_vel")
-            if self.config.show_actual_vel and actual_lin_vel is not None:
-                actual = tensor_to_array(actual_lin_vel)
-                actual_vx = float(actual[env_idx, 0])
-                actual_vy = float(actual[env_idx, 1])
-                self._draw_arrow(
-                    pos,
-                    actual_vx,
-                    actual_vy,
-                    yaw,
-                    body_color=self.config.actual_vel_body_color,
-                    head_color=self.config.actual_vel_head_color,
-                    z_extra_offset=-0.05,
-                )
+    def _arrow_length(self, magnitude: torch.Tensor) -> torch.Tensor:
+        return (magnitude * self.config.arrow_length_scale).clamp(max=self.config.max_arrow_length)
 
-            # Draw angular velocity indicator
-            if self.config.show_angular_vel and cmd_ang_vel is not None:
-                ang_vel = float(tensor_to_array(cmd_ang_vel)[env_idx])
-                if abs(ang_vel) > self.config.angular_vel_threshold:
-                    self._draw_angular_velocity_indicator(pos, ang_vel)
-
-    def _draw_arrow(
+    def _draw_planar_arrow(
         self,
-        pos: np.ndarray,
-        vel_x: float,
-        vel_y: float,
-        yaw: float = 0.0,
-        body_color: tuple[float, ...] = (0.2, 0.8, 0.2, 0.9),
-        head_color: tuple[float, ...] = (0.1, 0.6, 0.1, 0.9),
-        z_extra_offset: float = 0.0,
+        pos: torch.Tensor,
+        vel_body: torch.Tensor,
+        yaw: torch.Tensor,
+        color: tuple[float, ...],
+        z_extra_offset: float,
     ) -> None:
-        """Draw arrow for a body-frame velocity vector.
+        """Draw a body-frame planar velocity as a world-frame arrow above the base."""
+        cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
+        vel_x, vel_y = vel_body.unbind(-1)
+        vel_world = torch.stack((cos_yaw * vel_x - sin_yaw * vel_y, sin_yaw * vel_x + cos_yaw * vel_y), dim=-1)
+        magnitude = torch.linalg.norm(vel_world, dim=-1, keepdim=True)
+        # A zero command keeps a zero vector, which the marker leaves out for that environment
+        direction = torch.where(magnitude > 1e-6, vel_world / magnitude.clamp(min=1e-6), 0.0)
+        vec = torch.zeros_like(pos)
+        vec[:, :2] = direction * self._arrow_length(magnitude)
+        arrow_pos = pos.clone()
+        arrow_pos[:, 2] += self.config.z_offset + z_extra_offset
+        self.draw_arrows(arrow_pos, vec, self.config.arrow_radius, color)
 
-        Rotates by robot yaw to display in world frame.
-        """
-        cos_yaw = np.cos(yaw)
-        sin_yaw = np.sin(yaw)
-        world_vel_x = cos_yaw * vel_x - sin_yaw * vel_y
-        world_vel_y = sin_yaw * vel_x + cos_yaw * vel_y
-        velocity = np.array([world_vel_x, world_vel_y, 0.0])
-        magnitude = np.linalg.norm(velocity)
-
-        if magnitude < 1e-6:
-            return
-
-        arrow_length = min(self.config.max_arrow_length, magnitude * self.config.arrow_length_scale)
-
-        direction = velocity / magnitude
-
-        arrow_mesh = mu.create_arrow(
-            length=arrow_length,
-            radius=self.config.arrow_radius,
-            l_ratio=self.config.arrow_head_length_ratio,
-            r_ratio=self.config.arrow_head_radius_ratio,
-            sections=16,
-            body_color=body_color,
-            head_color=head_color,
-        )
-
-        rotation = gu.z_to_R(direction)
-        arrow_mesh.vertices = gu.transform_by_R(arrow_mesh.vertices, rotation)
-
-        arrow_pos = pos.copy()
-        arrow_pos[2] += self.config.z_offset + z_extra_offset
-        arrow_mesh.vertices += arrow_pos
-
-        node = pyrender.Mesh.from_trimesh(arrow_mesh, is_marker=True)
-        self.add_dynamic_mesh(node)
-
-    def _draw_angular_velocity_indicator(self, pos: np.ndarray, angular_vel: float) -> None:
-        """Draw indicator for angular velocity command."""
-        indicator_pos = pos.copy()
-        indicator_pos[2] += self.config.z_offset + 0.15
-
-        # Choose color based on rotation direction
-        if angular_vel > 0:
-            color = self.config.angular_vel_positive_color
-        else:
-            color = self.config.angular_vel_negative_color
-
-        # Sphere size based on magnitude
-        sphere_radius = 0.03 + 0.03 * min(1.0, abs(angular_vel))
-        mesh = mu.create_sphere(radius=sphere_radius, color=color)
-
-        pose = np.eye(4)
-        pose[:3, 3] = indicator_pos
-        node = pyrender.Mesh.from_trimesh(mesh, is_marker=True)
-        self.context.add_dynamic_node(None, node, pose=pose)
+    def _draw_yaw_rate_arrows(self, pos: torch.Tensor, ang_vel: torch.Tensor) -> None:
+        """Draw the yaw-rate command as a vertical arrow, one color per sign."""
+        ang_vel = torch.where(ang_vel.abs() > self.config.angular_vel_threshold, ang_vel, 0.0)
+        arrow_pos = pos.clone()
+        arrow_pos[:, 2] += self.config.z_offset + self.config.angular_vel_z_offset
+        length = self._arrow_length(ang_vel.abs())
+        for sign, color in (
+            (1.0, self.config.angular_vel_positive_color),
+            (-1.0, self.config.angular_vel_negative_color),
+        ):
+            vec = torch.zeros_like(pos)
+            vec[:, 2] = torch.where(ang_vel * sign > 0, sign * length, 0.0)
+            self.draw_arrows(arrow_pos, vec, self.config.arrow_radius, color)

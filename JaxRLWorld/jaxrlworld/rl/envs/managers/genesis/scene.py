@@ -457,7 +457,7 @@ class SceneManager(BaseManager):
         self.scene.build(n_envs=self.env.num_envs, env_spacing=self.config.env_spacing, center_envs_at_origin=False)
         self._place_fixed_entities()
         self._configure_robot_dynamics()
-        self.env.vis_manager.inject_custom_context()
+        self.env.vis_manager.build_overlays()
 
     def _place_fixed_entities(self) -> None:
         """Put every welded entity at its declared ``init_state`` pose.

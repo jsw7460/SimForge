@@ -4,9 +4,18 @@ from typing import TYPE_CHECKING, Any
 
 import genesis as gs
 import numpy as np
+import torch
+from genesis.utils.geom import inv_quat, transform_by_quat
 
 from jaxrlworld.rl.envs.managers.base import BaseManager
-from jaxrlworld.rl.vis.overlays import TextHUDConfig, TextHUDOverlay
+from jaxrlworld.rl.vis.overlays import (
+    Base3DOverlay,
+    CommandArrowConfig,
+    CommandArrowOverlay,
+    OverlayState,
+    TextHUDConfig,
+    TextHUDOverlay,
+)
 from jaxrlworld.rl.vis.overlays.hud_items import (
     BaseHeightItem,
     CommandVelItem,
@@ -15,7 +24,6 @@ from jaxrlworld.rl.vis.overlays.hud_items import (
     FeetHeightItem,
     FeetHeightItemConfig,
 )
-from jaxrlworld.rl.vis.rasterizer_context import CommandArrowConfig, OverlaySettings, inject_into_scene
 
 if TYPE_CHECKING:
     from jaxrlworld.rl.envs import GenesisEnv
@@ -78,10 +86,8 @@ class VisualizationManager(BaseManager):
         self._is_recording = False
         self._recorded_frames: list[np.ndarray] = []
 
-        # References set after scene build
-        self.scene = None
-        self.robot = None
-        self._custom_context = None
+        # 3D overlays, created on the built scene by ``build_overlays``
+        self._overlays_3d: dict[str, Base3DOverlay] = {}
 
         # Initialize HUD immediately so users can customize before recording
         self._text_hud: TextHUDOverlay | None = None
@@ -95,12 +101,14 @@ class VisualizationManager(BaseManager):
             base_pos = (1.5, 1.5, 0.5)
             cam_pos = (2.5, 2.5, 0.5)
 
+            # A debug camera draws the markers of the 3D overlays; a plain camera draws the scene alone
             cam = scene.add_camera(
                 res=(1280, 960),
                 pos=tuple(cam_pos),
                 lookat=tuple(base_pos),
                 fov=60,
                 GUI=True,
+                debug=True,
             )
 
             self.cameras["recorder"] = cam
@@ -109,27 +117,39 @@ class VisualizationManager(BaseManager):
             if robot is not None:
                 cam.follow_entity(robot, fix_orientation=False)
 
-    def inject_custom_context(self) -> None:
-        """Inject RLWorldRasterizerContext into scene."""
-        arrow_config = None
+    def build_overlays(self) -> None:
+        """Create the 3D overlays. Called once the scene is built."""
+        scene = self.env.scene_manager.scene
         if self.config.enable_command_arrow:
             arrow_config = CommandArrowConfig(
-                enabled=True,
                 arrow_radius=self.config.command_arrow_radius,
                 arrow_length_scale=self.config.command_arrow_length_scale,
                 max_arrow_length=self.config.max_arrow_length,
             )
+            self._overlays_3d["command_arrow"] = CommandArrowOverlay(scene, arrow_config)
 
-        overlay_settings = OverlaySettings(
-            enable_command_arrow=self.config.enable_command_arrow,
-            command_arrow_config=arrow_config,
-            render_env_ids=self.config.record_env_ids,
-        )
-
+    def _overlay_state(self) -> OverlayState:
+        """Collect what the 3D overlays draw, one row per rendered environment."""
         scene = self.env.scene_manager.scene
-        self._custom_context = inject_into_scene(scene=scene, env=self.env, overlay_settings=overlay_settings)
+        rendered_envs_idx = scene.options.vis.rendered_envs_idx
+        rows = slice(None) if rendered_envs_idx is None else list(rendered_envs_idx)
 
-        gs.logger.info("RLWorldRasterizerContext injected successfully.")
+        state = OverlayState()
+        robot = self.env.scene_manager.entities.get("robot")
+        if robot is None:
+            return state
+        base_quat = robot.get_quat()
+        state.base_pos = robot.get_pos()[rows]
+        state.base_quat = base_quat[rows]
+        state.actual_lin_vel = transform_by_quat(robot.get_vel(), inv_quat(base_quat))[rows]
+
+        cmd_manager = self.env.command_manager
+        columns = {col for _, term in cmd_manager.iter_terms() for col in term.column_names}
+        if {"lin_vel_x", "lin_vel_y"} <= columns:
+            state.cmd_lin_vel = torch.stack((cmd_manager.lin_vel_x, cmd_manager.lin_vel_y), dim=-1)[rows]
+        if "ang_vel" in columns:
+            state.cmd_ang_vel = cmd_manager.ang_vel[rows]
+        return state
 
     # =========================================================================
     # Recording
@@ -168,6 +188,11 @@ class VisualizationManager(BaseManager):
         """Advance visualization. Called every step."""
         if "recorder" not in self.cameras:
             return
+
+        if self._overlays_3d:
+            state = self._overlay_state()
+            for overlay in self._overlays_3d.values():
+                overlay.update(state)
 
         cam = self.cameras["recorder"]
         cam.render()
@@ -279,12 +304,14 @@ class VisualizationManager(BaseManager):
     # =========================================================================
 
     def enable_command_arrow(self) -> None:
-        if self._custom_context:
-            self._custom_context.enable_overlay("command_arrow")
+        overlay = self._overlays_3d.get("command_arrow")
+        if overlay is not None:
+            overlay.enable()
 
     def disable_command_arrow(self) -> None:
-        if self._custom_context:
-            self._custom_context.disable_overlay("command_arrow")
+        overlay = self._overlays_3d.get("command_arrow")
+        if overlay is not None:
+            overlay.disable()
 
     def enable_text_hud(self) -> None:
         if self._text_hud:

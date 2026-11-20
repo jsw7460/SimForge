@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
+import torch
 
 if TYPE_CHECKING:
-    from jaxrlworld.rl.vis.rasterizer_context import RLWorldRasterizerContext
+    import genesis as gs
 
 
 @dataclass
@@ -27,6 +28,28 @@ class Overlay2DConfig(OverlayConfig):
     """Configuration for 2D overlays rendered as HUD."""
 
     pass
+
+
+@dataclass
+class OverlayState:
+    """What the 3D overlays draw from, one row per rendered environment.
+
+    Every tensor holds the rendered environments in the order Genesis renders
+    them (``VisOptions.rendered_envs_idx``), so the overlays hand the rows to
+    the scene's marker API as they are. A field is None when the scene has no
+    source for it (no robot, no velocity command).
+    """
+
+    base_pos: torch.Tensor | None = None
+    """Robot base position, world frame, ``(n_rendered, 3)``."""
+    base_quat: torch.Tensor | None = None
+    """Robot base orientation, wxyz, ``(n_rendered, 4)``."""
+    cmd_lin_vel: torch.Tensor | None = None
+    """Commanded planar linear velocity, body frame, ``(n_rendered, 2)``."""
+    cmd_ang_vel: torch.Tensor | None = None
+    """Commanded yaw rate, ``(n_rendered,)``."""
+    actual_lin_vel: torch.Tensor | None = None
+    """Measured base linear velocity, body frame, ``(n_rendered, 3)``."""
 
 
 class BaseOverlay(ABC):
@@ -53,32 +76,36 @@ class BaseOverlay(ABC):
 
 class Base3DOverlay(BaseOverlay):
     """
-    Base class for 3D overlays rendered in world space.
+    Base class for 3D overlays drawn as Genesis markers.
 
-    These overlays add meshes to the pyrender scene and are rendered
-    as part of the 3D world (affected by camera movement, depth, etc.)
+    The markers go through the scene's debug-draw API (``scene.draw_debug_*``),
+    which the interactive viewer and the debug cameras draw
+    (``scene.add_camera(debug=True)``); camera sensors and plain cameras leave
+    them out. An overlay redraws its markers every frame: ``update`` clears
+    the previous frame's markers first, so a disabled overlay also vanishes.
     """
 
-    def __init__(self, context: "RLWorldRasterizerContext", config: Overlay3DConfig):
+    def __init__(self, scene: "gs.Scene", config: Overlay3DConfig):
         super().__init__(config)
-        self.context = context
+        self.scene = scene
+        self._markers: list = []
 
     @abstractmethod
-    def update(self, state: dict[str, Any]) -> None:
-        """
-        Update overlay with current state.
-
-        Args:
-            state: Dictionary containing visualization state data
-        """
+    def update(self, state: OverlayState) -> None:
+        """Redraw the overlay's markers from the current state."""
         pass
 
-    def add_dynamic_mesh(self, mesh, pose: np.ndarray | None = None) -> None:
-        """Add a mesh that will be cleared next frame."""
-        if pose is not None:
-            self.context.add_dynamic_node(None, mesh, pose=pose)
-        else:
-            self.context.add_dynamic_node(None, mesh)
+    def clear(self) -> None:
+        """Remove every marker this overlay drew."""
+        for marker in self._markers:
+            self.scene.clear_debug_object(marker)
+        self._markers.clear()
+
+    def draw_arrows(self, pos: torch.Tensor, vec: torch.Tensor, radius: float, color: tuple[float, ...]) -> None:
+        """Draw one arrow per rendered environment, from ``pos`` along ``vec``; a zero vector draws nothing."""
+        marker = self.scene.draw_debug_arrow(pos, vec, radius=radius, color=color)
+        if marker is not None:
+            self._markers.append(marker)
 
 
 class Base2DOverlay(BaseOverlay):

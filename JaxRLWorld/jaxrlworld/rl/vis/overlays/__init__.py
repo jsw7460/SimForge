@@ -18,6 +18,7 @@ from .base import (
     Overlay2DConfig,
     Overlay3DConfig,
     OverlayConfig,
+    OverlayState,
 )
 
 # name → (submodule, attr) for lazily-loaded, Genesis-importing overlays.
@@ -35,6 +36,7 @@ __all__ = [
     "OverlayConfig",
     "Overlay2DConfig",
     "Overlay3DConfig",
+    "OverlayState",
     *_LAZY,
 ]
 
