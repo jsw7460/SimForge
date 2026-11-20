@@ -66,7 +66,7 @@ def _ray_optics(cfg: CameraSensorCfg, optics: MjcfCameraPlacement) -> dict:
     passing the fovy alone had looked right.
     """
     if optics.sensorsize is None or optics.focal is None:
-        return {"camera_fovs": math.radians(optics.fovy)}
+        return {"camera_fov": math.radians(optics.fovy)}
     if optics.focal[0] != optics.focal[1]:
         raise NotImplementedError(
             f"Camera {cfg.name!r} has different focal lengths across and down "
@@ -100,7 +100,7 @@ class NewtonCameraData:
 
 
 class NewtonCameraSensor:
-    """One camera riding on one link, rendered by ``SensorTiledCamera``."""
+    """One camera riding on one link, rendered by ``SensorCamera``."""
 
     def __init__(
         self,
@@ -137,26 +137,25 @@ class NewtonCameraSensor:
         self._offset_quat = torch.tensor(offset.quat, dtype=torch.float32, device=device)
 
         self._apply_visibility(cfg.visible_geometry)
-        self._sensor = newton.sensors.SensorTiledCamera(self._scene.model)
-        utils = self._sensor.utils
-        self._rays = utils.compute_camera_rays_pinhole(cfg.width, cfg.height, **_ray_optics(cfg, optics))
-        self._forward_depth = utils.create_forward_depth_image_output(cfg.width, cfg.height, camera_count=1)
+        model = self._scene.model
+        # Depth only, so the textures a color render would read stay unloaded.
+        self._sensor = newton.sensors.SensorCamera(model, load_textures=False)
+        self._rays = newton.sensors.SensorCamera.compute_camera_rays_pinhole(
+            cfg.width, cfg.height, **_ray_optics(cfg, optics), device=model.device
+        )
+        self._forward_depth = self._sensor.allocate_image_depth_forward(env.num_envs, cfg.width, cfg.height)
         # Which shape each pixel hit. Costs one more buffer and answers
         # the only question a depth image cannot: WHAT is that surface.
-        self._shape_index = utils.create_shape_index_image_output(cfg.width, cfg.height, camera_count=1)
+        self._shape_index = self._sensor.allocate_image_shape_index(env.num_envs, cfg.width, cfg.height)
 
-        # (camera_count, world_count), the order SensorTiledCamera.update
-        # documents for transforms — note the outputs are the other way
-        # round, (world_count, camera_count, H, W).
-        self._transform_torch = torch.zeros((1, env.num_envs, 7), dtype=torch.float32, device=device)
-        self._transforms = wp.from_torch(self._transform_torch.view(-1, 7), dtype=wp.transformf).reshape(
-            (1, env.num_envs)
-        )
+        # One view per world, in world order: SensorCamera renders view i
+        # from world i unless told otherwise.
+        self._transform_torch = torch.zeros((env.num_envs, 7), dtype=torch.float32, device=device)
+        self._transforms = wp.from_torch(self._transform_torch, dtype=wp.transformf)
 
-        # (worlds, cameras, H, W) -> (num_envs, H, W, 1), mjlab's layout.
-        depth_torch = wp.to_torch(self._forward_depth)
-        self.data.depth = depth_torch[:, 0].unsqueeze(-1)
-        self.data.shape_index = wp.to_torch(self._shape_index)[:, 0]
+        # (views, H, W) -> (num_envs, H, W, 1), mjlab's layout.
+        self.data.depth = wp.to_torch(self._forward_depth).unsqueeze(-1)
+        self.data.shape_index = wp.to_torch(self._shape_index)
 
     def _apply_visibility(self, visible_geometry: str) -> None:
         """Show the camera the same shapes mjlab is told to draw.
@@ -261,8 +260,8 @@ class NewtonCameraSensor:
 
         # warp transforms carry the quaternion as xyzw; the protocol
         # hands out wxyz.
-        self._transform_torch[0, :, 0:3] = camera_pos
-        self._transform_torch[0, :, 3:7] = wxyz_to_xyzw(camera_quat)
+        self._transform_torch[:, 0:3] = camera_pos
+        self._transform_torch[:, 3:7] = wxyz_to_xyzw(camera_quat)
 
     def render(self) -> None:
         """Refit the BVHs to the current state, then raytrace."""
