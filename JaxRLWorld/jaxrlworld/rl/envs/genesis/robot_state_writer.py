@@ -192,10 +192,10 @@ class GenesisRobotStateWriter:
     ) -> None:
         """Write root link position + orientation. Genesis is wxyz native.
 
-        Works for welded entities too: Genesis's solver writes a fixed link's
-        pose straight into ``dyn_state.links.pos`` / ``.quat`` instead of the
-        free-joint coordinates (``rigid_solver.set_base_links_pos``), and those
-        buffers are per-environment. That is what lets a table or tank be
+        Works for welded entities too: Genesis keeps a fixed root link's pose
+        as state of its own (``rigid_solver.set_base_links_pos`` writes it,
+        and forward kinematics copies it into the link pose buffers), and that
+        state is per-environment. That is what lets a table or tank be
         placed per env by a reset event — the same capability mjlab provides
         through its mocap base and Newton through its fixed-root mocap bodies.
         A welded entity is addressed with the env ids as given, so Genesis's

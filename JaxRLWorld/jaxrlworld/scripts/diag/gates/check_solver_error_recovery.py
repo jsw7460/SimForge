@@ -108,12 +108,14 @@ def run_misconfiguration(sim: str, config: str, num_envs: int, thrash_steps: int
     print(f"--- configuration error ({sim})")
     if sim == "genesis":
         import genesis as gs  # local-import: backend (genesis), only on the genesis path
-        from genesis.utils.array_class import ErrorCode  # local-import: backend (genesis), only on the genesis path
+        from genesis.engine.solvers.rigid.data import (
+            RigidErrorCode,  # local-import: backend (genesis), only on the genesis path
+        )
 
         env = build_env(config, sim, num_envs)
         zeros = torch.zeros(num_envs, env.num_actions, device=env.device)
         env.step(zeros)
-        env.scene.rigid_solver.flag_errno(int(ErrorCode.OVERFLOW_CONTACTS), 0)
+        env.scene.rigid_solver.flag_errno(int(RigidErrorCode.OVERFLOW_CONTACTS), 0)
         raised = None
         try:
             for _ in range(3):

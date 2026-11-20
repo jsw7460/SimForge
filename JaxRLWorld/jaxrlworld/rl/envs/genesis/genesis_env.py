@@ -1,6 +1,7 @@
 import genesis as gs
 import torch
-from genesis.utils.array_class import ErrorCode
+from genesis.engine.solvers.base_solver import BackwardErrorCode
+from genesis.engine.solvers.rigid.data import RigidErrorCode
 from genesis.utils.misc import set_random_seed as _gs_set_random_seed
 
 from jaxrlworld.rl.configs import (
@@ -31,14 +32,11 @@ from jaxrlworld.rl.vis.viser.viewer import ViserViewerConfig
 # the env recovers from by resetting it (``World._solver_error_mask``). The
 # other codes (a capacity overflow, an unsupported pair) are configuration
 # errors, left for Genesis to raise with its own message naming the option.
+# The rigid solver's flags sit above the backward pass's in the errno, so
+# the two enums are combined as integers.
 _GENESIS_STATE_ERROR_BITS = int(
-    ErrorCode.INVALID_CONTACT_NAN
-    | ErrorCode.INVALID_FORCE_NAN
-    | ErrorCode.INVALID_ACC_NAN
-    | ErrorCode.INVALID_GRAD_NAN
-    | ErrorCode.INVALID_VELOCITY_NAN
-    | ErrorCode.INVALID_VERTEX_NAN
-)
+    RigidErrorCode.INVALID_CONTACT_NAN | RigidErrorCode.INVALID_FORCE_NAN | RigidErrorCode.INVALID_ACC_NAN
+) | int(BackwardErrorCode.INVALID_GRAD_NAN)
 
 
 class GenesisEnv(World):
