@@ -40,7 +40,8 @@ Static (no environment, no GPU):
 Live (builds one Go2 MuJoCo environment):
   C6  every collected field is really ``(num_envs, ...)`` in the warp model,
       and a field nobody asked for is still ``(1, ...)``.
-  C7  after a reset the randomized fields actually differ across environments.
+  C7  once every DR term has fired, the randomized fields actually differ
+      across environments.
   C8  the deferred ``set_const`` recompute leaves the physics state finite.
 """
 
@@ -338,6 +339,13 @@ def check_live(num_envs: int, steps: int) -> bool:
     collected = collect_expand_fields(cfgs.event)
     env = BaseRunner.create_with_env(cfgs).env
     env.reset()
+    # The preset's DR terms fire on their own schedule (Go2's MuJoCo terms
+    # share a global interval), so each one is fired once here, on every
+    # environment, before the fields are read.
+    all_envs = torch.arange(env.num_envs, device=env.device)
+    for name, term in iter_terms(cfgs.event, EventTermConfig).items():
+        if term.mode in ("reset_dr", "interval_dr"):
+            env.event_manager.run_term(name, all_envs)
 
     sim = env.scene_manager.sim
     wp_model = sim.wp_model
