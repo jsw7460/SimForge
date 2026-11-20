@@ -44,7 +44,7 @@ from ...algorithms import PPOConfig
 class T1TrackingTransformerConfig(T1TrackingConfig):
     """T1 tracking with factorized space x time transformer policy."""
 
-    num_envs: int = 512
+    num_envs: int = 4096
     # ── Future motion reference window ────────────────────────────────
     # Sparse offsets in motion frames exposed to the transformer's
     # time axis (and to ``MotionCommandCfg.future_offsets`` so the obs

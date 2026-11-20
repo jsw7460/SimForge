@@ -89,7 +89,7 @@ class T1TrackingConfig:
     robot: T1Config = field(default_factory=T1Config)
 
     # Environment / training.
-    num_envs: int = 512
+    num_envs: int = 4096
     episode_length_s: float = 10.0
     seed: int = 42
 
