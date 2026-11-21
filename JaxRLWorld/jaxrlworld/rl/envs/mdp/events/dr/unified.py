@@ -1437,6 +1437,13 @@ def randomize_tau_scale(
     """
     if len(env_ids) == 0:
         return
+    if asset_cfg.name != env.robot_entity_name:
+        # ``act_manager.actuators`` are the driven robot's; another entity's
+        # selector would silently rescale the robot's kappa (same contract as
+        # randomize_pd_gains).
+        raise NotImplementedError(
+            f"randomize_tau_scale targets the driven robot {env.robot_entity_name!r} only, not {asset_cfg.name!r}"
+        )
     if not env.act_manager.has_explicit_actuators:
         raise NotImplementedError(
             "randomize_tau_scale requires explicit actuators (kappa lives on the actuator, not a sim PD store)."
