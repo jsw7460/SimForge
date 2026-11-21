@@ -227,12 +227,9 @@ class K1GetupConfig(K1VelocityConfig):
         )
         fn_joint_limits = rf.joint_pos_limits if is_mujoco else rf.joint_pos_limits_mjlab
         fn_action_rate = rf_common.raw_action_rate_l2 if is_mujoco else rf.raw_action_rate_l2_mjlab
-        # ``height_to_target`` looks the body up through ``RobotData.body_pos_w``,
-        # whose name semantics differ per backend: Newton matches a regex
-        # against entity-prefixed labels (``K1/Trunk``), so it needs the
-        # leading ``.*``; Genesis takes the exact link name and rejects a
-        # pattern; MuJoCo accepts either.
-        trunk_body = f".*{r.trunk_body_name}" if sim == "newton" else r.trunk_body_name
+        # ``height_to_target`` looks the body up through ``RobotData.body_pos_w``
+        # by its exact entity-local name on every backend.
+        trunk_body = r.trunk_body_name
         cfg = self
 
         @dataclass

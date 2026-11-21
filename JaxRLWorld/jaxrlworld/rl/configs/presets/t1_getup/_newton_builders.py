@@ -243,15 +243,12 @@ def build_reward(cfg: T1GetupConfig) -> RewardConfig:
             weight=cfg.orientation_weight,
             params={"std": cfg.orientation_std},
         )
-        # ``.*`` wraps the bare body name as a regex so lookup
-        # fullmatches both the flat URDF label (``T1/Trunk``) and the
-        # hierarchical MJCF XPath label (``T1/worldbody/Trunk``).
         trunk_height = RewardTermConfig(
             func=rf_getup.height_to_target,
             weight=cfg.trunk_height_weight,
             params={
                 "desired_height": cfg.trunk_desired_height,
-                "body_name": f".*{r.trunk_body_name}",
+                "body_name": r.trunk_body_name,
             },
         )
         waist_height = RewardTermConfig(
@@ -259,7 +256,7 @@ def build_reward(cfg: T1GetupConfig) -> RewardConfig:
             weight=cfg.waist_height_weight,
             params={
                 "desired_height": cfg.waist_desired_height,
-                "body_name": f".*{r.waist_body_name}",
+                "body_name": r.waist_body_name,
             },
         )
         gated_posture = RewardTermConfig(
@@ -323,7 +320,7 @@ def build_dr_terms(cfg: T1GetupConfig) -> Dict[str, EventTermConfig]:
             func=unified_dr.randomize_body_com_offset,
             mode="startup",
             params={
-                "asset_cfg": SceneEntitySelector(name="robot", body_names=(f".*{r.trunk_body_name}",)),
+                "asset_cfg": SceneEntitySelector(name="robot", body_names=(r.trunk_body_name,)),
                 "ranges": {
                     0: (-0.025, 0.025),
                     1: (-0.025, 0.025),
