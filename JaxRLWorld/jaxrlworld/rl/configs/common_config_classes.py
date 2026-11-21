@@ -181,18 +181,44 @@ class ObservationGroupConfig(BaseConfig):
     """
 
 
+def observation_groups(observation_cfg) -> dict[str, ObservationGroupConfig]:
+    """The observation groups of a config: every public attribute, instance or
+    class level, that is an :class:`ObservationGroupConfig`, in ``dir`` order.
+
+    The one definition of "what counts as a group", shared by the
+    observation manager (which builds the groups) and
+    :func:`disable_corruption` (which edits them), so a group the manager
+    serves is never one the editor misses.
+    """
+    groups: dict[str, ObservationGroupConfig] = {}
+    for attr_name in dir(observation_cfg):
+        if attr_name.startswith("_"):
+            continue
+        val = getattr(observation_cfg, attr_name)  # dynamic-attr: scan config attributes (dir order) for groups
+        if isinstance(val, ObservationGroupConfig):
+            groups[attr_name] = val
+    return groups
+
+
 def disable_corruption(observation_cfg) -> None:
-    """Disable noise on every ObservationGroupConfig field of the given config.
+    """Disable noise on every observation group of the given config.
 
     Convenience for eval / test runs that want raw observations on every
-    group at once. Walks the dataclass fields and sets
-    ``group.enable_corruption = False`` on each :class:`ObservationGroupConfig`
-    attribute. Replaces the old ``observation.enable_noise = False`` call
-    pattern.
+    group at once: sets ``group.enable_corruption = False`` on each group
+    :func:`observation_groups` finds. A group declared on the class rather
+    than the instance is shared by every instance of that config, the
+    training config included, so editing it here would silence the training
+    noise too; such a config is refused.
     """
-    for val in vars(observation_cfg).values():
-        if isinstance(val, ObservationGroupConfig):
-            val.enable_corruption = False
+    owned = vars(observation_cfg)
+    for name, group in observation_groups(observation_cfg).items():
+        if name not in owned:
+            raise ValueError(
+                f"Observation group {name!r} is a class attribute of {type(observation_cfg).__name__}, shared by "
+                "every instance of that config. Declare it as a dataclass field (default_factory) so each config "
+                "owns its group before disabling corruption."
+            )
+        group.enable_corruption = False
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -943,8 +943,14 @@ class World(ABC):
         return None
 
     @staticmethod
-    def _zero_rows(values: torch.Tensor, rows: torch.Tensor) -> torch.Tensor:
-        """A copy of ``values`` with the ``rows`` (a ``(num_envs,)`` mask) zeroed."""
+    def _zero_rows(values: torch.Tensor | dict, rows: torch.Tensor) -> torch.Tensor | dict:
+        """A copy of ``values`` with the ``rows`` (a ``(num_envs,)`` mask) zeroed.
+
+        A group with ``concatenate_terms=False`` is a dict of per-term
+        tensors; each leaf is zeroed the same way.
+        """
+        if isinstance(values, dict):
+            return {key: World._zero_rows(value, rows) for key, value in values.items()}
         return torch.where(rows.view(-1, *([1] * (values.ndim - 1))), 0.0, values)
 
     def _reset_scene(self, env_ids: torch.Tensor) -> None:

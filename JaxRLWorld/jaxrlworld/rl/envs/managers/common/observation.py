@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from jaxrlworld.rl.configs.base_config import iter_terms
-from jaxrlworld.rl.configs.common_config_classes import ObservationGroupConfig
+from jaxrlworld.rl.configs.common_config_classes import ObservationGroupConfig, observation_groups
 from jaxrlworld.rl.configs.observations import ObservationTermConfig
 from jaxrlworld.rl.configs.observations.noise import apply_noise
 from jaxrlworld.rl.envs.managers.base import BaseManager
@@ -41,14 +41,9 @@ class ObservationManager(BaseManager):
         # manager's ``_fd_prev_foot_pos`` store.
         self._term_state: dict[str, torch.Tensor | int] = {}
 
-        # Discover groups: any attribute that is an ObservationGroupConfig
-        self._groups: dict[str, ObservationGroupConfig] = {}
-        for attr_name in dir(config):
-            if attr_name.startswith("_"):
-                continue
-            val = getattr(config, attr_name)  # dynamic-attr: scan config attributes (dir order) for groups
-            if isinstance(val, ObservationGroupConfig):
-                self._groups[attr_name] = val
+        # Discover groups: the config's ObservationGroupConfig attributes, by
+        # the one definition ``disable_corruption`` uses too.
+        self._groups: dict[str, ObservationGroupConfig] = observation_groups(config)
 
         # Discover terms within each group (as manager-owned copies), resolve
         # callables, and resolve any SceneEntitySelector in each term's params.  Every
