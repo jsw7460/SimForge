@@ -236,3 +236,7 @@ class LiftingCommand(CommandTerm):
             torch.zeros(n, 3, device=self.device),
             env_ids=env_ids,
         )
+        # Newton's body transforms follow the root write only through FK;
+        # without it the object's body reads lag one physics step behind its
+        # placement. A no-op on the backends that derive them on read.
+        writer.eval_fk(env_ids=env_ids)
