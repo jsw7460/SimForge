@@ -141,8 +141,8 @@ class RigidObjectData(Protocol):
     def find_body_index(self, body_name: str) -> int:
         """Resolve a body/link name to its sim-internal integer index.
 
-        Each simulator stores bodies in its own indexing space:
-        - Newton: index into ``body_cache`` (per-env body slot)
+        Each simulator stores bodies in its own indexing space, entity-local:
+        - Newton: position in the entity's ``ArticulationView`` link list
         - Genesis: ``link.idx_local``
         - mjlab: index returned by ``entity.find_bodies([name])``
 

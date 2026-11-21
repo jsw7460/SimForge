@@ -87,8 +87,10 @@ class NewtonRigidObjectData(SiteReaderMixin):
         self._read_cache: dict[str, tuple[int, Tensor]] = {}
         self._gravity_vec: Tensor | None = None
         self._default_joint_pos = default_joint_pos
-        # Index of THIS entity's root body within that per-world layout; see
-        # :attr:`_root_body_index`. Lazily resolved once.
+        # This entity's rows of the per-world body arrays, in view link order;
+        # see :attr:`body_rows`. Resolved once, on first use.
+        self._body_rows: Tensor | None = None
+        self._body_rows_slice: slice | None = None
         self._root_body_idx: int | None = None
         # Immovability, resolved once from the model — see :attr:`is_fixed_base`.
         self._is_fixed_base: bool | None = None
@@ -137,22 +139,50 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return wp.to_torch(wp_arr).reshape(-1, 6)
 
     @property
-    def _root_body_index(self) -> int:
-        """Index of *this entity's* root body in the flat per-world body arrays.
+    def body_rows(self) -> Tensor:
+        """This entity's rows of the per-world body arrays, in view link order.
 
-        ``_body_q_view`` / ``_body_qd_view`` / ``_body_com_local_view`` span
-        every body in a world, because Newton keeps one flat ``body_q`` for the
-        whole model. Row 0 is therefore the first entity's root body — the
-        robot's — not necessarily this entity's, so a rigid object must locate
-        its own row. The view's ``link_labels`` are the very strings
-        ``model.body_label`` holds (``selection.py`` copies them), and a
-        Newton articulation lists its root link first, so the label lookup is
-        exact.
+        Newton keeps one flat ``body_q`` / ``body_mass`` / ``body_com`` for the
+        whole model, laid out world-major with every entity's bodies in
+        sequence. Row 0 of a world is the first entity's root body, not
+        necessarily this entity's, so a second robot or a passive prop has to
+        locate its own rows. The view's ``link_labels`` are the very strings
+        ``model.body_label`` holds (``selection.py`` copies them), so the
+        lookup is exact, and element ``i`` is the row of ``link_names[i]``:
+        the entity-local body index every protocol read and every resolved
+        selector uses, and the one coordinate the model-wide writers (mass
+        and CoM randomization) translate through.
         """
-        if self._root_body_idx is None:
-            cache = get_cache(self._env)
-            labels = self._env.scene_manager.model.body_label[: cache.bodies_per_env]
-            self._root_body_idx = labels.index(self._view.link_labels[0])
+        if self._body_rows is None:
+            self._resolve_body_rows()
+        return self._body_rows
+
+    def _resolve_body_rows(self) -> None:
+        cache = get_cache(self._env)
+        labels = list(self._env.scene_manager.model.body_label[: cache.bodies_per_env])
+        rows = [labels.index(label) for label in self._view.link_labels]
+        self._body_rows = torch.tensor(rows, device=self._env.device, dtype=torch.long)
+        self._root_body_idx = rows[0]
+        # An entity whose bodies sit in sequence (every entity Newton's
+        # ``add_builder`` merges) is a slice, a view of the flat state, where a
+        # gather would copy it on every read.
+        if rows == list(range(rows[0], rows[0] + len(rows))):
+            self._body_rows_slice = slice(rows[0], rows[0] + len(rows))
+
+    def _entity_rows(self, per_world: Tensor) -> Tensor:
+        """``per_world[:, rows]`` for a ``(num_envs, bodies_per_env, ...)`` array."""
+        if self._body_rows is None:
+            self._resolve_body_rows()
+        if self._body_rows_slice is not None:
+            return per_world[:, self._body_rows_slice]
+        return per_world[:, self._body_rows]
+
+    @property
+    def _root_body_index(self) -> int:
+        """Per-world row of this entity's root body: a Newton articulation
+        lists its root link first."""
+        if self._body_rows is None:
+            self._resolve_body_rows()
         return self._root_body_idx
 
     # ------------------------------------------------------------------
@@ -294,49 +324,27 @@ class NewtonRigidObjectData(SiteReaderMixin):
     # ------------------------------------------------------------------
 
     def find_body_index(self, body_name: str) -> int:
-        """Resolve a body name to its per-env body index, ON THIS ENTITY.
+        """Resolve a body name to its entity-local body index.
 
-        The body cache is model-wide and stores bare leaf names, so with
-        two robots built from one asset every name appears twice. Taking
-        the first match then hands the second robot the FIRST robot's
-        body — silently, and only for the second robot, which is the
-        hardest kind of wrong to see: one arm behaves and the other
-        reports the other arm's hand as its own.
-
-        So the search is scoped by the entity's label prefix, which the
-        scene manager assigns whenever a scene holds more than one robot
-        (``scene.py``: ``add_builder(label_prefix=entity_name)``). With a
-        single robot there is no prefix and no ambiguity to resolve.
+        The index is a position in this entity's ``ArticulationView`` link
+        list — the coordinate of every ``body_*_all`` read and of a resolved
+        selector's ``body_ids``. The search is scoped to the view, so with two
+        robots built from one asset each resolves its own ``"hand"``; a
+        model-wide first match would hand the second robot the first robot's
+        body, silently and only for the second robot. ``body_name`` is the
+        bare link name or its full Newton label (``"right/hand"``).
         """
-        cache = get_cache(self._env)
-        indices = cache.get_body_indices(body_name)
-        if not indices:
-            raise ValueError(f"Body name {body_name!r} not found in Newton model. Available bodies: {cache.body_names}")
-        if len(indices) == 1:
-            return indices[0]
-
-        labels = self._env.scene_manager.model.body_label
-        prefix = self._body_label_prefix()
-        if prefix is None:
+        matches = [
+            i
+            for i, (label, name) in enumerate(zip(self._view.link_labels, self._view.link_names, strict=True))
+            if body_name in (label, name)
+        ]
+        if len(matches) != 1:
             raise ValueError(
-                f"Body name {body_name!r} matches {len(indices)} bodies in the Newton model and entity "
-                f"{self._entity_name!r} has no label prefix to tell them apart. Two entities built from one "
-                "asset need distinct label prefixes."
+                f"Body name {body_name!r} matches {len(matches)} bodies of entity {self._entity_name!r}; it must "
+                f"name exactly one. Available bodies: {list(self._view.link_names)}"
             )
-        scoped = [i for i in indices if labels[i].startswith(f"{prefix}/")]
-        if len(scoped) != 1:
-            raise ValueError(
-                f"Body name {body_name!r} matches {len(scoped)} bodies under prefix {prefix!r} "
-                f"(entity {self._entity_name!r}); it must name exactly one."
-            )
-        return scoped[0]
-
-    def _body_label_prefix(self) -> str | None:
-        """This entity's Newton label prefix, or None when it has none."""
-        entity = self._env.scene_manager.entities.get(self._entity_name)
-        if entity is None:
-            return None
-        return entity["body_label_prefix"]
+        return matches[0]
 
     # ------------------------------------------------------------------
     # Batched per-body reads
@@ -344,13 +352,14 @@ class NewtonRigidObjectData(SiteReaderMixin):
 
     @_per_step_read
     def _body_q_view(self) -> Tensor:
-        """Helper: state.body_q reshaped to (num_envs, bodies_per_env, 7).
+        """``state.body_q`` reshaped to ``(num_envs, bodies_per_env, 7)``: every body of a world.
 
         Newton stores body_q as a flat ``wp.array[wp.transform]`` across
         all worlds. The standard JaxRLWorld setup replicates the same
         body layout per world, so a simple ``view(...)`` is correct.
         Each transform is ``(pos.x, pos.y, pos.z, quat.x, quat.y, quat.z, quat.w)``
-        — note Newton's native quaternion is **xyzw**.
+        — note Newton's native quaternion is **xyzw**. Rows are per-world body
+        rows; :meth:`_entity_rows` selects this entity's.
         """
         cache = get_cache(self._env)
         state = self._env.scene_manager.state
@@ -358,7 +367,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
 
     @_per_step_read
     def _body_qd_view(self) -> Tensor:
-        """Helper: state.body_qd reshaped to (num_envs, bodies_per_env, 6).
+        """``state.body_qd`` reshaped to ``(num_envs, bodies_per_env, 6)``: every body of a world.
 
         Newton stores body_qd as flat ``wp.array[wp.spatial_vector]``.
         Each spatial_vector is ``(lin.x, lin.y, lin.z, ang.x, ang.y, ang.z)``,
@@ -372,14 +381,13 @@ class NewtonRigidObjectData(SiteReaderMixin):
         return wp.to_torch(state.body_qd).view(self._env.num_envs, cache.bodies_per_env, 6)
 
     def _body_com_local_view(self) -> Tensor:
-        """``model.body_com`` reshaped to (num_envs, bodies_per_env, 3) — each
+        """``model.body_com`` reshaped to ``(num_envs, bodies_per_env, 3)`` — each
         body's CoM offset *expressed in that body's link frame*, per world.
 
         ``model.body_com`` is a parallel array to ``state.body_q`` (same
         per-world layout), so this is the same shape as ``_body_q_view()[..., :3]``
-        and indexes with the same body rows; row 0 is the first entity's root
-        body, which is this entity's root only for the robot — use
-        :attr:`_root_body_index` for the root row. It is a zero-copy view of
+        and indexes with the same per-world body rows (:attr:`body_rows`,
+        :attr:`_root_body_index`). It is a zero-copy view of
         the live model array, not a snapshot: the COM randomization writes
         per-world values into ``model.body_com`` (startup or reset), and a
         velocity transferred with another world's or a stale offset is off by
@@ -389,6 +397,21 @@ class NewtonRigidObjectData(SiteReaderMixin):
         model = self._env.scene_manager.model
         return wp.to_torch(model.body_com).view(self._env.num_envs, cache.bodies_per_env, 3)
 
+    # The ``body_*_all`` reads below cover THIS ENTITY's bodies, in view link
+    # order (the protocol's "entity's native body indexing"), so an
+    # entity-local index — :meth:`find_body_index`, a resolved selector's
+    # ``body_ids`` — indexes them directly. The per-world views above hold
+    # every entity of the world; a second robot or a passive prop reads its own
+    # rows through :meth:`_entity_rows`, which for the first entity is a slice.
+
+    @_per_step_read
+    def _body_q_entity(self) -> Tensor:
+        return self._entity_rows(self._body_q_view())
+
+    @_per_step_read
+    def _body_qd_entity(self) -> Tensor:
+        return self._entity_rows(self._body_qd_view())
+
     @property
     @_per_step_read
     def body_pos_w_all(self) -> Tensor:
@@ -397,7 +420,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         ``state.body_q`` is the link frame transform, so its translation IS
         the link frame origin.
         """
-        return self._body_q_view()[:, :, 0:3]
+        return self._body_q_entity()[:, :, 0:3]
 
     @property
     @_per_step_read
@@ -407,8 +430,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
         Newton stores quaternions as xyzw natively (positions 3..7 of
         the transform). We reorder to wxyz canonical via index gather.
         """
-        body_q = self._body_q_view()
-        quat_xyzw = body_q[:, :, 3:7]
+        quat_xyzw = self._body_q_entity()[:, :, 3:7]
         # xyzw -> wxyz
         return quat_xyzw[..., [3, 0, 1, 2]]
 
@@ -420,10 +442,10 @@ class NewtonRigidObjectData(SiteReaderMixin):
         ``body_qd[:, 0:3]`` is the velocity at each body's CoM; transfer it to
         the link frame origin O:  v_O = v_C - omega x (R @ c).
         """
-        qd = self._body_qd_view()
+        qd = self._body_qd_entity()
         v_com = qd[:, :, 0:3]  # (W, B, 3) — at CoM
         omega = qd[:, :, 3:6]  # (W, B, 3) — world frame
-        c = self._body_com_local_view()  # (W, B, 3) — CoM offset, body frame
+        c = self._entity_rows(self._body_com_local_view())  # (W, B, 3) — CoM offset, body frame
         r_world = quat_rotate_wxyz(self.body_quat_w_all, c)  # R @ c, world
         return v_com - torch.cross(omega, r_world, dim=-1)
 
@@ -431,7 +453,7 @@ class NewtonRigidObjectData(SiteReaderMixin):
     @_per_step_read
     def body_ang_vel_w_all(self) -> Tensor:
         """World-frame angular velocities of all bodies. Shape ``(num_envs, num_bodies, 3)``."""
-        return self._body_qd_view()[:, :, 3:6]
+        return self._body_qd_entity()[:, :, 3:6]
 
     @property
     @_per_step_read
@@ -440,8 +462,8 @@ class NewtonRigidObjectData(SiteReaderMixin):
 
         r_C = r_O + R @ c, where r_O = link frame origin (``state.body_q[:, 0:3]``).
         """
-        link_pos = self._body_q_view()[:, :, 0:3]  # (W, B, 3)
-        c = self._body_com_local_view()  # (W, B, 3)
+        link_pos = self._body_q_entity()[:, :, 0:3]  # (W, B, 3)
+        c = self._entity_rows(self._body_com_local_view())  # (W, B, 3)
         return link_pos + quat_rotate_wxyz(self.body_quat_w_all, c)
 
     @property
@@ -451,29 +473,16 @@ class NewtonRigidObjectData(SiteReaderMixin):
 
         Newton's native ``body_qd[:, 0:3]`` — already CoM-referenced.
         """
-        return self._body_qd_view()[:, :, 0:3]
+        return self._body_qd_entity()[:, :, 0:3]
 
     # ------------------------------------------------------------------
     # Per-name body/site reads
     # ------------------------------------------------------------------
 
     def _resolve_body_indices(self, names: list[str]) -> list[int]:
-        """Resolve a list of body names to per-env body indices.
-
-        Uses the singleton ``NewtonBodyCache``. Names should be the
-        Newton-prefixed body names (e.g. ``"go2_description/FL_foot"``)
-        and must each match exactly one body. Returned indices preserve
-        the input order so the resulting tensor columns line up with
-        ``names``.
-        """
-        cache = get_cache(self._env)
-        out: list[int] = []
-        for name in names:
-            indices = cache.get_body_indices(name)
-            if not indices:
-                raise ValueError(f"Body name {name!r} not found in Newton model. Available bodies: {cache.body_names}")
-            out.append(indices[0])
-        return out
+        """Entity-local body indices of ``names``, in input order (so the
+        resulting tensor columns line up with ``names``); see :meth:`find_body_index`."""
+        return [self.find_body_index(name) for name in names]
 
     def body_pos_w(self, names: list[str]) -> Tensor:
         idxs = self._resolve_body_indices(list(names))
@@ -523,12 +532,13 @@ class NewtonRigidObjectData(SiteReaderMixin):
         bodies_per_env = cache.bodies_per_env
         model = self._env.scene_manager.model
 
-        # Per-body, per-env model arrays (flat -> (W, B, ...)).
-        body_inertia = wp.to_torch(model.body_inertia).view(num_envs, bodies_per_env, 3, 3)
-        body_mass = wp.to_torch(model.body_mass).view(num_envs, bodies_per_env)  # (W, B)
+        # Per-body model arrays (flat -> (W, B, ...)), this entity's rows: the
+        # subtree is the robot, not the props sharing its world.
+        body_inertia = self._entity_rows(wp.to_torch(model.body_inertia).view(num_envs, bodies_per_env, 3, 3))
+        body_mass = self._entity_rows(wp.to_torch(model.body_mass).view(num_envs, bodies_per_env))  # (W, B)
 
-        body_q = self._body_q_view()
-        body_qd = self._body_qd_view()
+        body_q = self._body_q_entity()
+        body_qd = self._body_qd_entity()
         body_quat_xyzw = body_q[:, :, 3:7]
         ang_vel_world = body_qd[:, :, 3:6]  # (W, B, 3)
         # Newton's ``body_qd[:, :, 0:3]`` is linear velocity AT each body's CoM

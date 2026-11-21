@@ -34,7 +34,6 @@ from jaxrlworld.rl.configs.sensors.camera_sensor_config import (
     MjcfCameraPlacement,
     mjcf_camera_mount_bodies,
 )
-from jaxrlworld.rl.envs.utils.newton.body_cache import get_cache
 from jaxrlworld.rl.utils.quat_utils import quat_mul_wxyz, quat_rotate_wxyz, wxyz_to_xyzw
 
 if TYPE_CHECKING:
@@ -240,18 +239,12 @@ class NewtonCameraSensor:
         robot_data = self._env.get_robot_data(self._entity_name)
         if self._body_index is None:
             # Newton labels bodies by the MJCF's own body names, which is
-            # what resolve_mjcf_camera returns. Resolved through the cache
-            # rather than find_body_index because that one keeps the first
-            # of several matches, and a camera silently riding the wrong
-            # one of two identically-named bodies is the whole failure
-            # mode this sensor has.
-            indices = get_cache(self._env).get_body_indices(self._link_name)
-            if len(indices) != 1:
-                raise ValueError(
-                    f"Camera {self.cfg.name!r} rides body {self._link_name!r}, which matches "
-                    f"{len(indices)} bodies in the Newton model. It must name exactly one."
-                )
-            self._body_index = indices[0]
+            # what resolve_mjcf_camera returns. ``find_body_index`` is scoped
+            # to this camera's entity and refuses anything but exactly one
+            # match: a camera silently riding the wrong one of two
+            # identically-named bodies is the whole failure mode this sensor
+            # has.
+            self._body_index = robot_data.find_body_index(self._link_name)
         link_pos = robot_data.body_pos_w_all[:, self._body_index]
         link_quat = robot_data.body_quat_w_all[:, self._body_index]
 

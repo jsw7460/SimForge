@@ -528,6 +528,22 @@ def _genesis_body_mass_backend(env, env_ids, sampler, resolved, mass_range, oper
     entity.set_links_mass(mass=new_mass, links_idx_local=links_idx, envs_idx=env_ids)
 
 
+def _newton_body_rows(env, resolved: ResolvedEntity) -> torch.Tensor:
+    """Per-world rows of ``model.body_*`` that ``resolved`` selects, on its entity only.
+
+    Newton keeps one flat body array per world holding every entity, so a
+    model-wide write has to address rows, while a resolved selector's
+    ``body_ids`` are entity-local (the entity data's ``body_rows`` maps one to
+    the other). Resolving the rows by name instead would match the same leaf
+    name on every entity of the world, and ``body_ids=None`` would take the
+    props with the robot.
+    """
+    rows = env.get_entity_data(resolved.name).body_rows
+    if resolved.body_ids is None:
+        return rows
+    return rows[resolved.body_ids]
+
+
 def _newton_body_mass_backend(env, env_ids, sampler, resolved, mass_range, operation, distribution):
     import warp as wp  # local-import: backend (warp), only on the newton path
     from newton import ModelFlags  # local-import: backend (newton), only on the newton path
@@ -538,15 +554,7 @@ def _newton_body_mass_backend(env, env_ids, sampler, resolved, mass_range, opera
 
     cache = get_cache(env)
     model = env.scene_manager.model
-    if resolved.body_ids is None:
-        body_indices = torch.arange(cache.bodies_per_env, device=env.device)
-    else:
-        # Map view-local link indices to model-global body indices via cache.
-        # ``view.link_names`` is a subset (the robot articulation), so resolve
-        # the names back to model bodies via NewtonBodyCache.
-        view = env.scene_manager.articulation_views[resolved.name]
-        names = [view.link_names[i] for i in resolved.body_ids.tolist()]
-        body_indices = cache.get_body_indices(names)
+    body_indices = _newton_body_rows(env, resolved)
 
     mass = wp.to_torch(model.body_mass).reshape(env.num_envs, cache.bodies_per_env)
     n_bodies = len(body_indices)
@@ -671,12 +679,7 @@ def _newton_body_com_offset_backend(env, env_ids, sampler, resolved, ranges, ope
         )
     cache = get_cache(env)
     model = env.scene_manager.model
-    if resolved.body_ids is None:
-        body_indices = torch.arange(cache.bodies_per_env, device=env.device)
-    else:
-        view = env.scene_manager.articulation_views[resolved.name]
-        names = [view.link_names[i] for i in resolved.body_ids.tolist()]
-        body_indices = cache.get_body_indices(names)
+    body_indices = _newton_body_rows(env, resolved)
 
     body_com = wp.to_torch(model.body_com).reshape(env.num_envs, cache.bodies_per_env, 3)
     defaults = env._dr_baselines.body_com
