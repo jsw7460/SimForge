@@ -7,6 +7,11 @@ in that backend's order. Cross-simulator evaluation maps between the two:
 :class:`JointPermutation` reorders actions into the eval simulator's order
 and observations back into the canonical one, over the column slices that
 :func:`find_joint_obs_slices` identifies in each observation group.
+
+An env whose actions go through action terms lays the policy output out term
+by term, each slice in its term's joint order, so its action permutation is
+built from the terms' saved and current mappings
+(:func:`term_action_permutation`), not from the primary robot's joint list.
 """
 
 from __future__ import annotations
@@ -40,7 +45,12 @@ class JointPermutation:
         obs_group_joint_slices: Dict[str, List[Tuple[int, int]]],
         obs_group_dims: Dict[str, int],
         device: torch.device,
+        action_perm: torch.Tensor | None = None,
     ):
+        """``action_perm`` overrides the action map derived from the joint names:
+        the canonical->sim index tensor over the whole policy output of a
+        term-based action space (:func:`term_action_permutation`), whose layout
+        is not the primary robot's joint list."""
         n = len(canonical_names)
         assert len(sim_names) == n, f"Joint count mismatch: canonical={n}, sim={len(sim_names)}"
 
@@ -68,21 +78,25 @@ class JointPermutation:
         canon_to_sim_list = [sim_idx[b] for b in canonical_bare]
         self._canon_to_sim = torch.tensor(canon_to_sim_list, device=device, dtype=torch.long)
 
-        # ── Identity check ──
+        # ── Identity check (joint order, which the obs permutation follows) ──
         identity = torch.arange(n, device=device, dtype=torch.long)
-        self.is_identity = bool(torch.equal(self._sim_to_canon, identity))
+        self._obs_identity = bool(torch.equal(self._sim_to_canon, identity))
 
         # ── Action permutation (canonical → sim) ──
         # sim_actions[:, s] = canonical_actions[:, sim_to_canon[s]]
         # => sim_actions = canonical_actions[:, sim_to_canon]
-        self.action_perm = self._sim_to_canon
+        self.action_perm = self._sim_to_canon if action_perm is None else action_perm.to(device)
+        self._action_identity = bool(
+            torch.equal(self.action_perm, torch.arange(len(self.action_perm), device=device, dtype=torch.long))
+        )
+        self.is_identity = self._obs_identity and self._action_identity
 
         # ── Obs permutation per group (sim → canonical) ──
         self.obs_perms: Dict[str, torch.Tensor] = {}
         for group_name, joint_slices in obs_group_joint_slices.items():
             obs_dim = obs_group_dims[group_name]
             perm = torch.arange(obs_dim, device=device, dtype=torch.long)
-            if not self.is_identity:
+            if not self._obs_identity:
                 for start, end in joint_slices:
                     # perm[start + c] = start + canon_to_sim[c]
                     for c in range(n):
@@ -91,18 +105,48 @@ class JointPermutation:
 
     def permute_actions(self, canonical_actions: torch.Tensor) -> torch.Tensor:
         """Reorder actions from canonical joint order to this sim's order."""
-        if self.is_identity:
+        if self._action_identity:
             return canonical_actions
         return canonical_actions[:, self.action_perm]
 
     def permute_obs(self, sim_obs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Reorder observations from this sim's joint order to canonical."""
-        if self.is_identity:
+        if self._obs_identity:
             return sim_obs
         return {
             group: tensor[:, self.obs_perms[group]] if group in self.obs_perms else tensor
             for group, tensor in sim_obs.items()
         }
+
+
+def term_action_permutation(saved_terms: dict, current_terms: dict, device: torch.device) -> torch.Tensor:
+    """Canonical->sim index map over a term-based policy output.
+
+    ``saved_terms`` is the checkpoint's ``action_terms`` (each term's
+    :meth:`~jaxrlworld.rl.envs.mdp.actions.base.ActionTerm.resolved_mapping`
+    in policy-output order), ``current_terms`` the eval env's. The evaluator
+    has already required the two to agree term for term (names, order,
+    widths, joint sets); this maps each joint term's slice from the
+    checkpoint's joint order to the eval env's, by bare joint name, and
+    leaves a term without joints (a propeller thrust) in place. The result
+    indexes a canonical action vector: ``sim = canonical[:, perm]``.
+    """
+
+    def _bare(name: str) -> str:
+        return name.rsplit("/", 1)[-1]
+
+    perm: List[int] = []
+    offset = 0
+    for name, saved in saved_terms.items():
+        current = current_terms[name]
+        width = int(saved["action_dim"])
+        if "joint_names" in saved:
+            saved_pos = {_bare(j): i for i, j in enumerate(saved["joint_names"])}
+            perm.extend(offset + saved_pos[_bare(j)] for j in current["joint_names"])
+        else:
+            perm.extend(range(offset, offset + width))
+        offset += width
+    return torch.tensor(perm, device=device, dtype=torch.long)
 
 
 def find_joint_obs_slices(env: World, num_actions: int) -> Dict[str, List[Tuple[int, int]]]:

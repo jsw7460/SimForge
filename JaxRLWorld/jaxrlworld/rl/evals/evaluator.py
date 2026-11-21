@@ -14,7 +14,7 @@ from jaxrlworld.rl.algorithms.tdmpc2 import TDMPC2
 from jaxrlworld.rl.configs.eval_mode import apply_eval_mode
 from jaxrlworld.rl.envs import EpisodeStatsCollector
 from jaxrlworld.rl.envs.backends import find_backend
-from jaxrlworld.rl.envs.joint_permutation import JointPermutation, find_joint_obs_slices
+from jaxrlworld.rl.envs.joint_permutation import JointPermutation, find_joint_obs_slices, term_action_permutation
 from jaxrlworld.rl.evals.policy_wrappers import PolicyWrapper
 from jaxrlworld.rl.evals.sim_initializers import detect_sim_type, get_initializer, resolve_cross_sim_config
 from jaxrlworld.rl.utils.checkpoint import load_checkpoint_metadata, load_runner, replay_training_overrides
@@ -349,7 +349,18 @@ class PolicyEvaluator:
         canonical_bare = [_bare(n) for n in canonical_names]
         eval_bare = [_bare(n) for n in eval_names]
 
-        if canonical_bare == eval_bare:
+        # A term-based action space is laid out term by term, each slice in
+        # its term's joint order, so its action map comes from the terms'
+        # saved and current mappings (already checked to agree as sets by
+        # ``_check_term_action_parity``), not from the robot's joint list.
+        action_perm = None
+        action_identity = True
+        current_terms = self.env.act_manager.resolved_term_mappings()
+        if current_terms is not None:
+            action_perm = term_action_permutation(metadata["action_terms"], current_terms, self.device)
+            action_identity = bool(torch.equal(action_perm, torch.arange(len(action_perm), device=self.device)))
+
+        if canonical_bare == eval_bare and action_identity:
             print_info("Joint ordering matches canonical — no permutation needed.")
             return None
 
@@ -366,6 +377,7 @@ class PolicyEvaluator:
             obs_group_joint_slices=joint_slices,
             obs_group_dims=obs_dims,
             device=self.device,
+            action_perm=action_perm,
         )
         print_info(f"Joint permutation built: {len(canonical_names)} joints (canonical → {self.sim_type})")
         return perm
@@ -900,12 +912,11 @@ def _check_term_action_parity(metadata: dict, act_manager, train_sim_type: str, 
     if saved is None and current is None:
         return
     if saved is None:
-        print_warning(
-            "Checkpoint train_state.yaml has no action_terms; the eval env's action terms "
-            f"({', '.join(current)}) were NOT verified against the training env's. Checkpoints written since the "
-            "term mappings are saved are."
+        raise ValueError(
+            "Cross-sim eval: the checkpoint's train_state.yaml has no action_terms, so the eval env's action terms "
+            f"({', '.join(current)}) cannot be checked against the training env's. The checkpoint predates the "
+            "saved term mappings; re-train or evaluate it on its training simulator."
         )
-        return
     if current is None:
         raise ValueError(
             f"Cross-sim eval: the checkpoint maps its actions through terms {list(saved)}, the eval env through "

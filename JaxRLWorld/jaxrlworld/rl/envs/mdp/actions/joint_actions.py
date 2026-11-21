@@ -304,6 +304,14 @@ class SettleRelativeJointPositionAction(RelativeJointPositionAction):
 
     __name__ = "SettleRelativeJointPositionAction"
 
+    def resolved_mapping(self) -> dict:
+        # The hold changes what the same policy output does for the first
+        # ``settle_steps`` steps of an episode, so two envs that differ in it
+        # map the policy differently and a cross-sim eval must see that.
+        mapping = super().resolved_mapping()
+        mapping["settle_steps"] = int(self._cfg.settle_steps)
+        return mapping
+
     def compute_target_positions(self) -> torch.Tensor:
         current_pos = self._manager._get_joint_pos(self._entity_name)[:, self._joint_ids]
         target = current_pos + self._processed_actions

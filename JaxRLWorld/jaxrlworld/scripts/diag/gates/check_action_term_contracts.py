@@ -5,10 +5,12 @@ the engine writes stubbed:
 
 1. cross-sim eval: :func:`_check_term_action_parity` accepts the same terms
    (also with the eval simulator's joint order permuted) and rejects a
-   changed scale, offset, clip, residual alpha, term type, entity, term
-   order, joint set, or a checkpoint without terms when the env has them;
-   the manager-level check alone passes a changed term scale (why the
-   per-term check exists);
+   changed scale, offset, clip, residual alpha, settle steps, term type,
+   entity, term order, joint set, or a checkpoint without terms when the env
+   has them; a term whose joint order differs is accepted and
+   :func:`term_action_permutation` maps its slice joint by joint; the
+   manager-level check alone passes a changed term scale (why the per-term
+   check exists);
 2. dispatch: with explicit actuators on the driven robot, a second
    entity's joint target is written as a position target (its own
    simulator PD), never through the robot's explicit torque path;
@@ -27,12 +29,15 @@ from types import SimpleNamespace
 import torch
 
 from jaxrlworld.rl.configs.scene import SceneEntitySelector
+from jaxrlworld.rl.envs.joint_permutation import term_action_permutation
 from jaxrlworld.rl.envs.managers.common.action import ActionManagerBase, ActionManagerBaseConfig
 from jaxrlworld.rl.envs.mdp.actions.joint_actions import (
     JointPositionAction,
     JointPositionActionCfg,
     MotionResidualJointPositionAction,
     MotionResidualJointPositionActionCfg,
+    SettleRelativeJointPositionAction,
+    SettleRelativeJointPositionActionCfg,
 )
 from jaxrlworld.rl.envs.mdp.events.dr.unified import randomize_pd_gains
 from jaxrlworld.rl.envs.mdp.events.keyed_sampler import STAGE_RESET_DR, TermSampler
@@ -142,8 +147,35 @@ def main() -> int:
     ok, detail = _rejects(lambda: _check_term_action_parity(other_entity, _manager(), "train", "eval"))
     chk("changed entity: rejected", ok, detail)
     no_terms = {k: v for k, v in saved.items() if k != "action_terms"}
-    print("  (a checkpoint without action_terms warns:)")
-    _check_term_action_parity(no_terms, _manager(), "train", "eval")
+    ok, detail = _rejects(lambda: _check_term_action_parity(no_terms, _manager(), "train", "eval"))
+    chk("checkpoint without action_terms, env with terms: rejected", ok, detail)
+    # A term's own joint order is the policy output's layout for its slice;
+    # the parity check accepts a reordering (same values per joint) and the
+    # action permutation maps the slice back, joint by joint.
+    reordered = _manager(arm={"joint_names": ["j1", "j0"]})
+    chk("term joint order reversed, same values per joint: accepted", same(reordered))
+    perm = term_action_permutation(saved["action_terms"], reordered.resolved_term_mappings(), torch.device("cpu"))
+    chk("term joint order reversed: action permutation swaps the slice", perm.tolist() == [1, 0, 2], str(perm.tolist()))
+    settle_saved = _metadata(
+        _manager(
+            arm_type=lambda **kw: SettleRelativeJointPositionActionCfg(
+                class_type=SettleRelativeJointPositionAction, settle_steps=10, **kw
+            )
+        )
+    )
+    ok, detail = _rejects(
+        lambda: _check_term_action_parity(
+            settle_saved,
+            _manager(
+                arm_type=lambda **kw: SettleRelativeJointPositionActionCfg(
+                    class_type=SettleRelativeJointPositionAction, settle_steps=0, **kw
+                )
+            ),
+            "train",
+            "eval",
+        )
+    )
+    chk("changed settle_steps: rejected", ok, detail)
     changed = _manager(arm={"scale": {"j0": 0.25, "j1": 1.0}})
     manager_blind = not _rejects(lambda: _check_resolved_action_parity(saved, changed, "train", "eval"))[0]
     chk("the manager-level check alone does not see a term scale (why the term check exists)", manager_blind)
