@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-import warp as wp
-
 from jaxrlworld.rl.envs.utils.newton.label import leaf_name
 
 if TYPE_CHECKING:
@@ -30,10 +28,6 @@ class NewtonBodyCache:
         # Leaf extraction is enough to match bare pattern inputs from
         # user configs.
         self.body_names = [leaf_name(n) for n in model.body_label[: self.bodies_per_env]]
-
-        # Cache original values for domain randomization
-        body_mass = wp.to_torch(model.body_mass).reshape(env.num_envs, self.bodies_per_env)
-        self.original_body_mass = body_mass[0].clone()  # (bodies_per_env,)
 
     def get_body_indices(self, body_patterns: str | list[str]) -> list[int]:
         """Get body_q indices for patterns, preserving query pattern order.
@@ -88,18 +82,15 @@ class NewtonBodyCache:
         return self._contact_cache[key]
 
 
-_caches: dict[int, NewtonBodyCache] = {}
-
-
 def get_cache(env: NewtonEnv) -> NewtonBodyCache:
-    env_id = id(env)
-    if env_id not in _caches:
-        _caches[env_id] = NewtonBodyCache(env)
-    return _caches[env_id]
+    """The env's body cache, built on first use.
 
-
-def clear_cache(env: NewtonEnv = None) -> None:
-    if env is None:
-        _caches.clear()
-    else:
-        _caches.pop(id(env), None)
+    Owned by the env (``NewtonEnv._body_cache``) so it lives exactly as long
+    as the env does. A module-level registry keyed on ``id(env)`` held a
+    strong reference to every env ever built, so an evaluator or a sweep that
+    builds and drops environments in one process kept each one, and its
+    model, alive.
+    """
+    if env._body_cache is None:
+        env._body_cache = NewtonBodyCache(env)
+    return env._body_cache

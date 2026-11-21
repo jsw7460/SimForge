@@ -21,6 +21,7 @@ from jaxrlworld.rl.envs.newton.robot_data import NewtonRigidObjectData, NewtonRo
 from jaxrlworld.rl.envs.newton.robot_state_writer import NewtonRigidObjectStateWriter, NewtonRobotStateWriter
 from jaxrlworld.rl.envs.site_frames import resolve_sites
 from jaxrlworld.rl.envs.utils.mjwarp_overflow import MjwarpOverflowGuard
+from jaxrlworld.rl.envs.utils.newton.body_cache import NewtonBodyCache
 from jaxrlworld.rl.envs.utils.newton.dr_baselines import snapshot_newton_dr_baselines
 from jaxrlworld.rl.envs.utils.warp_logging import configure_warp_logging
 from jaxrlworld.rl.envs.world import World
@@ -105,6 +106,11 @@ class NewtonEnv(World):
         # NaN-tripwire history ring, allocated on the first tripwire check.
         self._nan_ring: torch.Tensor | None = None
         self._nan_ring_n = 0
+
+        # Body-name index over the built model, created on first use by
+        # ``utils.newton.body_cache.get_cache`` and owned here so it is
+        # released with the env.
+        self._body_cache: NewtonBodyCache | None = None
 
         # Initialize buffers
         self._init_buffers()
