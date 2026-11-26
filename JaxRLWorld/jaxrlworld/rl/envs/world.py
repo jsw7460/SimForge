@@ -177,6 +177,11 @@ class World(ABC):
         self.rew_buf_per_type = defaultdict(lambda: torch.zeros(self.num_envs, device=self.device, dtype=torch.float32))
         # Per-env command timer dt for steps that reset some envs (see step()).
         self._command_dt = torch.zeros(self.num_envs, device=self.device)
+        # The envs whose physics state the solver corrupted on the latest
+        # step (``_solver_error_mask``). ``_reset_scene`` reads it to give
+        # those envs a full simulator-side reset rather than the usual
+        # buffer clear — see :meth:`_reset_scene`.
+        self.solver_error_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.extras = {}
 
     def _invalidate_cache(self) -> None:
@@ -751,6 +756,7 @@ class World(ABC):
         # fresh state. Read right after the physics, before anything else
         # consumes the state.
         solver_error = self._solver_error_mask()
+        self.solver_error_buf.copy_(solver_error)
 
         # Increment the episode-step counter AFTER physics and BEFORE
         # termination/reward, matching IsaacLab / mjlab which do
@@ -971,6 +977,14 @@ class World(ABC):
           ``contact_manager.refresh_after_reset`` pass sees no stale
           externally-applied force.
 
+        ``solver_error_buf`` marks the envs among ``env_ids`` whose state the
+        solver corrupted this step. The reset events only write the
+        coordinates the configured entities index, so a backend has to clear
+        every other coordinate of those worlds itself (a passive joint no
+        entity drives keeps its NaN otherwise, and the next solve spreads it
+        back over the whole world): a corrupted env must leave this hook with
+        a finite state everywhere the events do not write.
+
         Mirrors the ``sim.reset(env_ids)`` slot in mjlab's and IsaacLab's
         ``_reset_idx``.  Base implementation is a no-op — Genesis manages its
         state internally and has nothing to clear here.
@@ -1109,6 +1123,9 @@ class World(ABC):
         built with (``env.seed``), which a reset cannot change.
         """
         all_env_ids = torch.arange(self.num_envs, device=self.device)
+        # A full reset starts every env afresh; no env carries a corrupted
+        # state from a previous step into it.
+        self.solver_error_buf.zero_()
         self._reset_idx(all_env_ids)
         self._post_reset_forward()
         self._post_full_reset()

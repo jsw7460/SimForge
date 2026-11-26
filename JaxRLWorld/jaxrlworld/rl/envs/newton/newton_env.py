@@ -2,6 +2,7 @@ import os
 
 import torch
 import warp as wp
+from newton import StateFlags
 
 from jaxrlworld.rl.configs import CommandConfig, CurriculumManagerConfig, EventConfig, RewardConfig
 from jaxrlworld.rl.configs.newton_config_classes import (
@@ -93,6 +94,10 @@ class NewtonEnv(World):
         # view aliases the torch buffer, so the data pointer stays stable.
         self._reset_world_mask = torch.zeros(self.num_envs + 1, dtype=torch.bool, device=self.device)
         self._reset_world_mask_wp = wp.from_torch(self._reset_world_mask)
+        # The subset of the reset worlds whose state the solver corrupted,
+        # which get their joint coordinates reset as well (see ``_reset_scene``).
+        self._corrupt_world_mask = torch.zeros(self.num_envs + 1, dtype=torch.bool, device=self.device)
+        self._corrupt_world_mask_wp = wp.from_torch(self._corrupt_world_mask)
 
         # The world-frame gravity direction per env, which the Newton
         # projected-gravity observation and orientation reward rotate into
@@ -372,6 +377,20 @@ class NewtonEnv(World):
         only, which is why this is safe to run before the curriculum-visible
         state has been overwritten.
 
+        The worlds the solver corrupted this step (``solver_error_buf``) also
+        get ``joint_q`` / ``joint_qd`` reset to the model defaults
+        (``StateFlags.JOINT_Q | StateFlags.JOINT_QD``). A diverged solve
+        leaves NaN in every coordinate of the world, and the reset events
+        rewrite only the coordinates the configured entities index: a joint
+        no entity drives (a passive joint coupled to another by an equality
+        constraint, say) kept its NaN through the reset, the next solve
+        spread it back over the whole world, and the env then died on the
+        first step of every episode for the rest of the run. The events run
+        after this hook and overwrite the coordinates they own on top of the
+        defaults, so a world that was not corrupted sees no change in
+        behaviour; a corrupted one starts from the model defaults wherever no
+        event writes.
+
         Mirrors ``isaaclab_newton``'s ``NewtonMJWarpManager._reset_solver_internals``.
         """
         scene_manager = self.scene_manager
@@ -388,6 +407,14 @@ class NewtonEnv(World):
         self._reset_world_mask.zero_()
         self._reset_world_mask[env_ids] = True
         solver.reset(scene_manager.state_0, world_mask=self._reset_world_mask_wp, flags=0)
+        # Masked launch, no device sync: an empty mask makes the kernels a no-op.
+        self._corrupt_world_mask.zero_()
+        torch.logical_and(self._reset_world_mask[:-1], self.solver_error_buf, out=self._corrupt_world_mask[:-1])
+        solver.reset(
+            scene_manager.state_0,
+            world_mask=self._corrupt_world_mask_wp,
+            flags=StateFlags.JOINT_Q | StateFlags.JOINT_QD,
+        )
 
     def _step_physics(self) -> None:
         """Newton physics step with decimation.
