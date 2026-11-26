@@ -76,6 +76,40 @@ def _evaluate_bootstrap_values_packed(
     return values.squeeze(-1)
 
 
+def _check_rollout_finite(storage: RolloutStorage) -> None:
+    """Raise if the collected rollout holds a non-finite value.
+
+    The env contract is that nothing non-finite reaches the learner: a
+    diverged env ends as a ``solver_error`` termination with its reward
+    dropped and its terminal observation zeroed. A value that gets through
+    anyway is a bug upstream, and it is fatal to the run from here on: the
+    observation normalizer folds the whole rollout into its running mean
+    and variance, and one NaN row turns every normalized observation, hence
+    every action, hence every env, NaN in a single update. Failing here,
+    with the field named, costs one small device read per update.
+    """
+    fields = {
+        "actor_obs": storage.actor_obs,
+        "critic_obs": storage.critic_obs,
+        "rewards": storage.rewards,
+        "actions": storage.actions,
+        "values": storage.values,
+        "log_probs": storage.log_probs,
+    }
+    finite = {
+        name: jnp.stack([jnp.isfinite(leaf).all() for leaf in jax.tree.leaves(value)]).all()
+        for name, value in fields.items()
+    }
+    finite = jax.device_get(finite)
+    bad = [name for name, ok in finite.items() if not bool(ok)]
+    if bad:
+        raise RuntimeError(
+            f"Non-finite values in the rollout: {', '.join(bad)}. The env must terminate a diverged env "
+            "(solver_error) and zero its terminal observation; a NaN here would poison the observation "
+            "normalizer and the policy for the rest of the run."
+        )
+
+
 @eqx.filter_jit
 def _update_normalizers(
     model: PPOActorCritic,
@@ -663,6 +697,7 @@ class PPO(OnPolicyAlgorithm):
 
     def update(self) -> PPOMetrics:
         """Update policy and value networks with early stopping and adaptive LR."""
+        _check_rollout_finite(self.storage)
         if self.recompute_gae_per_epoch:
             return self._update_recompute_gae()
 
