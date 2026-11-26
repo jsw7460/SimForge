@@ -102,12 +102,30 @@ def _check_rollout_finite(storage: RolloutStorage) -> None:
     }
     finite = jax.device_get(finite)
     bad = [name for name, ok in finite.items() if not bool(ok)]
-    if bad:
-        raise RuntimeError(
-            f"Non-finite values in the rollout: {', '.join(bad)}. The env must terminate a diverged env "
-            "(solver_error) and zero its terminal observation; a NaN here would poison the observation "
-            "normalizer and the policy for the rest of the run."
-        )
+    if not bad:
+        return
+    # Failure path only: where in the rollout, so the env side can be traced.
+    # ``[t, n, ...]``; ``episode_starts[t, n]`` says the row is the first
+    # step of an episode (its observation came from a reset), ``dones[t, n]``
+    # that the row ended one.
+    where = []
+    for name in bad:
+        for path, leaf in jax.tree_util.tree_leaves_with_path(fields[name]):
+            hits = jax.device_get(jnp.argwhere(~jnp.isfinite(leaf), size=8, fill_value=-1))
+            for hit in hits:
+                if hit[0] < 0:
+                    continue
+                t, n = int(hit[0]), int(hit[1])
+                flags = jax.device_get((storage.episode_starts[t, n], storage.dones[t, n]))
+                where.append(
+                    f"{name}{jax.tree_util.keystr(path)}[{', '.join(str(int(i)) for i in hit)}]"
+                    f" (episode_start={bool(flags[0])}, done={bool(flags[1])})"
+                )
+    raise RuntimeError(
+        f"Non-finite values in the rollout: {', '.join(bad)}. The env must terminate a diverged env "
+        "(solver_error) and zero its terminal observation; a NaN here would poison the observation "
+        "normalizer and the policy for the rest of the run. First offenders [t, env, ...]: " + "; ".join(where)
+    )
 
 
 @eqx.filter_jit
