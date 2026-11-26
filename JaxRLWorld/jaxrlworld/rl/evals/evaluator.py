@@ -913,7 +913,9 @@ def _check_term_action_parity(metadata: dict, act_manager, train_sim_type: str, 
     slices the policy output), and each in every field: type, entity,
     width and the rest exactly, joints as a set, and the ``per_joint``
     values joint by joint (matched by bare name, as the joint orders of
-    two simulators may differ).
+    two simulators may differ). A term may name joints without carrying
+    ``per_joint`` values (a twist term driving its wheels through a
+    kinematic model); its parameters are then compared as plain fields.
     """
     saved = metadata.get("action_terms")
     current = act_manager.resolved_term_mappings()
@@ -953,6 +955,11 @@ def _check_term_action_parity(metadata: dict, act_manager, train_sim_type: str, 
         e_joints = [_bare(n) for n in e_term["joint_names"]]
         if sorted(s_joints) != sorted(e_joints):
             problems.append(f"{name}.joint_names: checkpoint {s_joints} vs eval {e_joints}")
+            continue
+        if ("per_joint" in s_term) != ("per_joint" in e_term):
+            problems.append(f"{name}: per-joint values on one side only")
+            continue
+        if "per_joint" not in s_term:
             continue
         order = [e_joints.index(j) for j in s_joints]
         s_values, e_values = s_term["per_joint"], e_term["per_joint"]
