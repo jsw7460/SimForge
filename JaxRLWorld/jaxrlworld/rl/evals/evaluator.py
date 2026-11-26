@@ -848,7 +848,15 @@ def _check_resolved_action_parity(metadata: dict, act_manager, train_sim_type: s
     ``canonical_joint_names`` order. This compares them, joint by joint,
     to the eval env's resolved vectors, permuted to the canonical order
     by joint name.
+
+    An env with action terms maps the policy output through its terms,
+    and the manager's single mapping is an unused default whose vectors
+    are as long as the policy output, not the joint list -- a 7-action
+    arm term over a 23-joint robot cannot be permuted to canonical joint
+    order at all. :func:`_check_term_action_parity` owns that path.
     """
+    if act_manager.resolved_term_mappings() is not None:
+        return
     canonical = metadata["canonical_joint_names"]
 
     def _bare(name: str) -> str:
