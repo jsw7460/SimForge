@@ -80,6 +80,13 @@ def _saved_diff(saved: dict, current: dict) -> dict:
     not (added since training) raises, and so does a difference in the
     top-level scalars that identify the preset itself.
     """
+    # ``preset_kwargs`` records which constructor arguments were not at
+    # their defaults when the run was built; the rebuild has already
+    # consumed them. It is not config to restore: a default that moved to
+    # the saved value since makes the key vanish from the rebuilt record
+    # while the built config is identical.
+    saved = {k: v for k, v in saved.items() if k != "preset_kwargs"}
+    current = {k: v for k, v in current.items() if k != "preset_kwargs"}
     added = missing_from_saved(saved, current)
     if added:
         raise ValueError(
