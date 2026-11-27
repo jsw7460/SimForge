@@ -61,7 +61,7 @@ def restore_saved_config(cfgs: "ConfigsForRun", saved: dict) -> None:
     if not diff:
         return
     cfgs.apply_overrides(**diff)
-    residual = diff_config_dicts(saved, cfgs.recursive_to_dict())
+    residual = diff_config_dicts(_restorable(saved), _restorable(cfgs.recursive_to_dict()))
     if residual:
         raise ValueError(
             "Saved config could not be restored onto the rebuilt preset; still differing after the "
@@ -72,6 +72,18 @@ def restore_saved_config(cfgs: "ConfigsForRun", saved: dict) -> None:
     print(f"[checkpoint] restored {len(paths)} config value(s) that differ from the rebuilt preset: {shown}")
 
 
+def _restorable(config: dict) -> dict:
+    """A saved or rebuilt config without its ``preset_kwargs`` section.
+
+    That section records which constructor arguments were not at their
+    defaults when the run was built, and the rebuild has already consumed
+    them. It is not config to restore: a default that has since moved to
+    the saved value makes the key vanish from the rebuilt record while
+    the built config is identical.
+    """
+    return {k: v for k, v in config.items() if k != "preset_kwargs"}
+
+
 def _saved_diff(saved: dict, current: dict) -> dict:
     """The nested overrides that turn ``current`` into ``saved``.
 
@@ -80,13 +92,7 @@ def _saved_diff(saved: dict, current: dict) -> dict:
     not (added since training) raises, and so does a difference in the
     top-level scalars that identify the preset itself.
     """
-    # ``preset_kwargs`` records which constructor arguments were not at
-    # their defaults when the run was built; the rebuild has already
-    # consumed them. It is not config to restore: a default that moved to
-    # the saved value since makes the key vanish from the rebuilt record
-    # while the built config is identical.
-    saved = {k: v for k, v in saved.items() if k != "preset_kwargs"}
-    current = {k: v for k, v in current.items() if k != "preset_kwargs"}
+    saved, current = _restorable(saved), _restorable(current)
     added = missing_from_saved(saved, current)
     if added:
         raise ValueError(
