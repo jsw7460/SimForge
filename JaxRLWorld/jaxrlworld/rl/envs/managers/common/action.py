@@ -627,13 +627,17 @@ class ActionManagerBase(BaseManager):
 
         Entities driven through the simulator's own PD
         (``ImplicitActuatorCfg``) are unaffected, which covers every
-        multi-robot scene built so far.
+        multi-robot scene built so far. So are terms that write joint
+        effort directly (``uses_actuator_models`` False): the actuator
+        models never enter their path, and on mjlab an effort can only
+        reach a joint through a motor actuator, which is what a
+        non-implicit actuator config on that entity declares.
         """
         driven = self.env.robot_entity_name
         entities = self.env.scene_manager.config.entities or {}
         for term_name, term in self._terms.items():
             name = term.entity_name
-            if name == driven:
+            if name == driven or not term.uses_actuator_models:
                 continue
             cfg = entities.get(name)
             actuators = cfg.articulation.actuators if cfg is not None else ()

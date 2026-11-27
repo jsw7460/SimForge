@@ -93,6 +93,12 @@ class ActionTerm(ABC):
 
     __name__: str = "ActionTerm"
 
+    uses_actuator_models: bool = True
+    """Whether the term's writes go through the manager's actuator
+    models (the position-target path). A term that writes joint effort
+    directly sets this False; the manager then lets it drive an entity
+    other than the one its actuator models were built for."""
+
     def __init__(
         self,
         cfg: ActionTermCfg,

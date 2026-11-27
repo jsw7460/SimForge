@@ -477,6 +477,7 @@ class JointEffortAction(JointAction):
 
     __name__ = "JointEffortAction"
     _cfg: JointEffortActionCfg
+    uses_actuator_models = False
 
     def __init__(
         self,
@@ -554,6 +555,7 @@ class JointVelocityAction(JointAction):
 
     __name__ = "JointVelocityAction"
     _cfg: JointVelocityActionCfg
+    uses_actuator_models = False
 
     def __init__(
         self,
