@@ -33,7 +33,7 @@ Genesis-specific quirks the writer hides from callers:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 import torch
 from genesis.utils.misc import qd_to_torch
@@ -139,6 +139,36 @@ class GenesisRobotStateWriter:
         """Write actuated joint velocities."""
         rows, envs_idx = self._dof_rows(env_ids, self._dofs.to_sim_order(values))
         self._entity.set_dofs_velocity(velocity=rows, dofs_idx_local=self._dofs.dofs, envs_idx=envs_idx)
+
+    def set_joint_state_by_name(
+        self,
+        joint_names: Sequence[str],
+        positions: Tensor,
+        velocities: Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Write named joints, in or out of the action set (see the protocol).
+
+        Resolved through the entity's own joints: one ``qpos`` entry and
+        one DOF per named joint (hinge or slide), the position written as
+        the solver's reference configuration plus the value, as every
+        position write in this class does. Velocity first with
+        ``skip_forward``, then the position with its forward pass.
+        """
+        qs: list[int] = []
+        dofs: list[int] = []
+        for name in joint_names:
+            joint = self._entity.get_joint(name)
+            if joint.n_qs != 1 or joint.n_dofs != 1:
+                raise ValueError(f"joint {name!r} of entity {self._entity.name!r} is not a hinge or slide joint")
+            qs.append(int(joint.qs_idx_local[0]))
+            dofs.append(int(joint.dofs_idx_local[0]))
+        qpos0 = qd_to_torch(self._entity.solver.rigid_info.qpos0, transpose=True, copy=False)
+        ref = qpos0[:, [self._entity.q_start + q for q in qs]]
+        if env_ids is not None:
+            ref = ref[env_ids]
+        self._entity.set_dofs_velocity(velocities, dofs_idx_local=dofs, envs_idx=env_ids, skip_forward=True)
+        self._entity.set_qpos(positions + ref, qs_idx_local=qs, envs_idx=env_ids, zero_velocity=False)
 
     def set_dof_state(self, positions: Tensor, velocities: Tensor, env_ids: torch.Tensor | None = None) -> None:
         """Write joint positions and velocities with a single forward pass.

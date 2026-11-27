@@ -42,7 +42,7 @@ unchanged half.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, Sequence, runtime_checkable
 
 if TYPE_CHECKING:
     import torch
@@ -90,6 +90,38 @@ class RobotStateWriterProtocol(Protocol):
         calls each gather the missing half from sim state), and Genesis
         can run a single forward pass instead of one per write. Reset
         paths that have both halves should call this.
+        """
+        ...
+
+    def set_joint_state_by_name(
+        self,
+        joint_names: Sequence[str],
+        positions: torch.Tensor,
+        velocities: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Write positions AND velocities of the named joints, whether or
+        not they are in the action set.
+
+        The DOF writes above cover the entity's actuated joints -- the
+        ones the action manager indexes. An articulation can carry single-
+        DOF joints outside that set: a gripper's mirrored finger that an
+        equality constraint drives, a passive hinge. A reset that poses
+        the robot around an object has to place those too: a mirrored
+        finger left where the last episode ended takes the constraint
+        ~100 ms to catch up, and a sprung tool set between the pads
+        springs open in 25.
+
+        Args:
+            joint_names: Bare joint names of this entity. Each must be a
+                hinge or slide joint (one coordinate per DOF).
+            positions: ``(N, len(joint_names))``.
+            velocities: ``(N, len(joint_names))``.
+            env_ids: Subset of environments to update. ``None`` writes
+                all environments.
+
+        Raises:
+            ValueError: If a name is not a joint of this entity.
         """
         ...
 

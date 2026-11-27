@@ -28,7 +28,7 @@ mjlab-specific quirks the writer hides from callers:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 import torch
 from torch import Tensor
@@ -102,6 +102,28 @@ class MujocoRobotStateWriter:
             velocities,
             env_ids=env_ids,
             joint_ids=self._joint_ids,
+        )
+        self._env._mark_kinematics_stale()
+
+    def set_joint_state_by_name(
+        self,
+        joint_names: Sequence[str],
+        positions: Tensor,
+        velocities: Tensor,
+        env_ids: Tensor | None = None,
+    ) -> None:
+        """Write named joints, in or out of the action set (see the protocol).
+
+        mjlab's joint columns are the entity's non-free joints in spec
+        order (``Entity.joint_names``); the ids here index those.
+        """
+        all_names = self._entity.joint_names
+        missing = [n for n in joint_names if n not in all_names]
+        if missing:
+            raise ValueError(f"not joints of this entity: {missing}; it has {list(all_names)}")
+        ids = torch.tensor([all_names.index(n) for n in joint_names], device=self._env.device, dtype=torch.long)
+        self._entity.write_joint_state_to_sim(
+            positions, velocities, env_ids=self._resolve_env_ids(env_ids), joint_ids=ids
         )
         self._env._mark_kinematics_stale()
 

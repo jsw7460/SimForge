@@ -41,7 +41,7 @@ generalized coordinates.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 import torch
 import warp as wp
@@ -161,6 +161,24 @@ class NewtonRobotStateWriter:
         """Write joint positions and velocities (both zero-copy scatters)."""
         self.set_dof_positions(positions, env_ids=env_ids)
         self.set_dof_velocities(velocities, env_ids=env_ids)
+
+    def set_joint_state_by_name(
+        self,
+        joint_names: Sequence[str],
+        positions: Tensor,
+        velocities: Tensor,
+        env_ids: Tensor | None = None,
+    ) -> None:
+        """Write named joints, in or out of the action set (see the protocol):
+        the scene resolves the names to this entity's ``joint_q`` /
+        ``joint_qd`` indices, then the same zero-copy scatter."""
+        q_idx, qd_idx = self._env.scene_manager.joint_coordinate_indices(self._entity_name, joint_names)
+        if env_ids is not None:
+            self._joint_q[env_ids.unsqueeze(1), q_idx.unsqueeze(0)] = positions
+            self._joint_qd[env_ids.unsqueeze(1), qd_idx.unsqueeze(0)] = velocities
+        else:
+            self._joint_q[:, q_idx] = positions
+            self._joint_qd[:, qd_idx] = velocities
 
     # ------------------------------------------------------------------
     # Root writes

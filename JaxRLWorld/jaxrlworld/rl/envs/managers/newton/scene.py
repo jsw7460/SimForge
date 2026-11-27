@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from fnmatch import fnmatch
-from typing import TYPE_CHECKING, Any, Dict, Literal
+from typing import TYPE_CHECKING, Any, Dict, Literal, Sequence
 
 import mujoco
 import mujoco_warp
@@ -1658,6 +1658,45 @@ class NewtonSceneManager(BaseManager):
             self._step()
         self.graph = capture.graph
 
+    def joint_coordinate_indices(
+        self, entity_name: str, joint_names: Sequence[str]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """World-0 ``joint_q`` and ``joint_qd`` indices of the named joints of
+        an entity: ``(q_indices, qd_indices)``, each ``(len(joint_names),)``.
+
+        Any joint the entity's ``ArticulationView`` surfaces, in or out of
+        the action set (a mirrored finger, a passive hinge), one coordinate
+        and one DOF each. Each bare name is matched through the view's full
+        labels to world 0's joint of THIS entity: matching leaf names
+        against world 0's whole joint list picks the first entity that owns
+        a joint of that name, so two arms that both call a joint "joint1"
+        would resolve to the same one; and ``replicate`` copies labels
+        verbatim into every world, so a map over the full list would
+        resolve to the last world's copy. Indices past world 0's share
+        would address another world's memory, so they are rejected here.
+        """
+        view = self.articulation_views.get(entity_name)
+        if view is None:
+            raise ValueError(f"no articulation view for entity {entity_name!r}")
+        joint_names_raw = self.model.joint_label
+        num_worlds = self.model.world_count
+        joints_per_world = len(joint_names_raw) // num_worlds
+        label_to_world0 = {label: i for i, label in enumerate(joint_names_raw[:joints_per_world])}
+        view_label_of = dict(zip(view.joint_names, view.joint_labels, strict=True))
+        missing = [n for n in joint_names if n not in view_label_of]
+        if missing:
+            raise ValueError(f"not joints of entity {entity_name!r}: {missing}; it has {list(view.joint_names)}")
+        original_indices = [label_to_world0[view_label_of[n]] for n in joint_names]
+        joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
+        joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
+        q_indices = torch.tensor([int(joint_q_start[j]) for j in original_indices], device=self.device)
+        qd_indices = torch.tensor([int(joint_qd_start[j]) for j in original_indices], device=self.device)
+        coords_per_world = self.model.joint_coord_count // num_worlds
+        dofs_per_world = self.model.joint_dof_count // num_worlds
+        _reject_out_of_range(q_indices, coords_per_world, entity_name, list(joint_names), "coordinate")
+        _reject_out_of_range(qd_indices, dofs_per_world, entity_name, list(joint_names), "dof")
+        return q_indices, qd_indices
+
     def build_articulation_indexing(self, actuated_dof_names: list[str], entity_name: str = "robot"):
         """Build ArticulationIndexing for the Newton model in canonical joint order.
 
@@ -1686,15 +1725,6 @@ class NewtonSceneManager(BaseManager):
             raise ValueError("Newton model has no joint labels")
         num_worlds = self.model.world_count
         joints_per_world = len(joint_names_raw) // num_worlds
-        # Map each of THIS entity's joints to its world-0 joint index through
-        # the view's full labels. Matching on leaf names against world 0's
-        # whole joint list — the previous approach — picks the first entity
-        # that happens to own a joint of that name, so two arms that both
-        # call a joint "joint1" resolve to the same one. Restricted to world
-        # 0 because ``replicate`` copies labels verbatim into every world, so
-        # a map over the full list would resolve to the last world's copy.
-        label_to_world0 = {label: i for i, label in enumerate(joint_names_raw[:joints_per_world])}
-        view_label_of = dict(zip(view.joint_names, view.joint_labels, strict=True))
 
         # Canonical joint order from a DFS walk of the kinematic body tree.
         # Filtered to joints that ArticulationView surfaced (multi-DOF roots
@@ -1724,13 +1754,8 @@ class NewtonSceneManager(BaseManager):
                 newton_qd_indices=empty_long.clone(),
             )
 
-        # Matched bare names → model-global joint indices (for q/qd lookup).
-        original_indices = [label_to_world0[view_label_of[n]] for n in matched_names]
-
-        joint_q_start = wp.to_torch(self.model.joint_q_start).cpu().numpy()
-        joint_qd_start = wp.to_torch(self.model.joint_qd_start).cpu().numpy()
-        q_indices = torch.tensor([int(joint_q_start[j]) for j in original_indices], device=self.device)
-        qd_indices = torch.tensor([int(joint_qd_start[j]) for j in original_indices], device=self.device)
+        # Matched bare names → this entity's joint_q / joint_qd indices.
+        q_indices, qd_indices = self.joint_coordinate_indices(entity_name, matched_names)
         sim_indices = qd_indices
 
         sim_to_canonical = torch.zeros_like(sim_indices)
