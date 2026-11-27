@@ -9,13 +9,16 @@ actuated finger is dragged half-way to meet it. ``set_joint_state_by_name``
 writes such a joint directly at reset.
 
 Observable through the finger BODIES, which every backend reports: with
-the actuated finger closed to ``Q_CLOSED`` at reset, the distance between
-the two finger bodies says where the mirrored finger is. Written to
-``-Q_CLOSED`` it must equal, after the first step, the distance the pair
-settles to once the constraint has had time (``SETTLE_STEPS`` of holding
-the actuated finger's target); left to the solver it must still differ
-by millimetres then, which the gate also requires, so it notices if the
-constraint is ever made instantaneous and names it.
+the actuated finger closed to ``Q_CLOSED``, the distance between the two
+finger bodies says where the mirrored finger is. The gate first lets the
+pair settle at ``Q_CLOSED`` (the reference) and then at ``Q_FAR``, so the
+mirrored finger is parked far from the reference; a reset does not touch
+a joint outside the action set on Newton, Genesis or PhysX, and mjlab
+puts it at the model's zero, so either way the next episode starts with
+it wrong. Posing the actuated finger alone must then leave the pair
+millimetres off the reference after the first step; writing the mirrored
+finger too must put it on the reference. Both are required, so the gate
+also notices if the constraint is ever made instantaneous and names it.
 
 Run on a GPU box::
 
@@ -34,6 +37,7 @@ from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from jaxrlworld.rl.runners import BaseRunner
 
 Q_CLOSED = 0.005
+Q_FAR = 0.030
 MATCH_TOL = 0.0005
 LAG_MIN = 0.002
 SETTLE_STEPS = 25
@@ -51,9 +55,9 @@ def run(sim: str, num_envs: int) -> bool:
     ids = torch.arange(num_envs, device=env.device)
     zeros = torch.zeros(num_envs, 1, device=env.device)
 
-    def closed_hold_action() -> torch.Tensor:
+    def hold_action(q: float) -> torch.Tensor:
         act = torch.zeros(num_envs, env.act_manager.num_actions, device=env.device)
-        act[:, col] = (Q_CLOSED - home) / YAM_ACTION_SCALE[YAM_GRIPPER_JOINT]
+        act[:, col] = (q - home) / YAM_ACTION_SCALE[YAM_GRIPPER_JOINT]
         return act
 
     def finger_body_distance() -> torch.Tensor:
@@ -61,33 +65,38 @@ def run(sim: str, num_envs: int) -> bool:
         may refresh body poses only when it steps, so the read follows a step.
         The constraint moves a lagging mirrored finger ~5 mm in that step,
         against the ~27 mm it has to make up, so the lag stays legible."""
-        env.step(closed_hold_action())
+        env.step(hold_action(Q_CLOSED))
         env._invalidate_cache()
         pads = env.get_entity_data("robot").body_pos_w(FINGER_BODIES)
         return torch.norm(pads[:, 0] - pads[:, 1], dim=-1)
 
-    def pose_actuated() -> None:
+    def pose_actuated(q_finger: float) -> None:
         q = env.get_entity_data("robot").joint_pos.clone()
-        q[:, col] = Q_CLOSED
+        q[:, col] = q_finger
         writer.set_dof_state(q, torch.zeros_like(q), env_ids=ids)
 
+    def settle(q_finger: float) -> None:
+        env.reset()
+        pose_actuated(q_finger)
+        writer.eval_fk(env_ids=ids)
+        for _ in range(SETTLE_STEPS):
+            env.step(hold_action(q_finger))
+
     # The pair's distance once the constraint has settled with the actuated finger held closed.
-    env.reset()
-    pose_actuated()
-    writer.eval_fk(env_ids=ids)
-    for _ in range(SETTLE_STEPS):
-        env.step(closed_hold_action())
+    settle(Q_CLOSED)
     settled = finger_body_distance()
 
-    # Left to the solver: the mirrored finger is wherever the reset left it.
+    # Park the mirrored finger far away, then start an episode closing the actuated one alone.
+    settle(Q_FAR)
     env.reset()
-    pose_actuated()
+    pose_actuated(Q_CLOSED)
     writer.eval_fk(env_ids=ids)
     lag = (finger_body_distance() - settled).abs().max()
 
-    # Written: the pair agrees before any step.
+    # Written: the pair agrees from the first step.
+    settle(Q_FAR)
     env.reset()
-    pose_actuated()
+    pose_actuated(Q_CLOSED)
     writer.set_joint_state_by_name(
         (YAM_MIRRORED_GRIPPER_JOINT,), torch.full((num_envs, 1), -Q_CLOSED, device=env.device), zeros, env_ids=ids
     )
