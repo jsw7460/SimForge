@@ -152,6 +152,11 @@ def _add_action_sliders(viewer, policy: FixedAction, env) -> None:
     if manager.terms:
         for term_name, term in manager.terms.items():
             term_slice = manager.term_action_slices[term_name]
+            if term.action_dim == 0:
+                # A term the policy does not command (a joint the env
+                # drives at a set rate) has no slice to slide.
+                print(f"[view_scene] {term_name!r} takes no policy output — no sliders")
+                continue
             _group(
                 f"{term_name} ({term.entity_name})",
                 term.entity_name,
