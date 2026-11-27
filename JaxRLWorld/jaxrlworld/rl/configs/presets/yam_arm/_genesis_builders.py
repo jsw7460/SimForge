@@ -23,10 +23,7 @@ from jaxrlworld.rl.configs.genesis_config_classes import (
 )
 from jaxrlworld.rl.configs.robots.yam import (
     YAM_ACTION_SCALE,
-    YAM_ARMATURE,
-    YAM_DAMPING,
     YAM_EFFORT_LIMIT,
-    YAM_STIFFNESS,
 )
 from jaxrlworld.rl.configs.scene.unified_entity_config import (
     ArticulationCfg,
@@ -88,9 +85,12 @@ def build_scene(cfg: YamArmConfig, timing: Dict[str, Any]) -> SceneConfig:
                     actuators=(
                         ImplicitActuatorCfg(
                             target_names_expr=tuple(r.actuated_dof_patterns),
-                            stiffness=YAM_STIFFNESS,
-                            damping=YAM_DAMPING,
-                            armature=YAM_ARMATURE,
+                            # The gains and armature are the robot config's (YamConfig carries
+                            # the yam module's tables by default); a preset that needs another
+                            # servo on a joint sets them there, and only there.
+                            stiffness=r.p_gains,
+                            damping=r.d_gains,
+                            armature=r.armature,
                             effort_limit=YAM_EFFORT_LIMIT,
                         ),
                     ),
