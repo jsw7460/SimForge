@@ -8,16 +8,14 @@ constraint then takes ~100 ms to drag the pair to agreement, and the
 actuated finger is dragged half-way to meet it. ``set_joint_state_by_name``
 writes such a joint directly at reset.
 
-Observable without reading the passive joint: close the actuated finger
-to ``Q_CLOSED`` at reset and hold its target there through the position
-action. With the mirrored finger ALSO written to ``-Q_CLOSED`` the pair
-agrees from the first step and the actuated finger stays put; left where
-the solver had it, the constraint pulls the actuated finger several
-millimetres toward the mean within two control steps. The gate requires
-the written case to move the actuated finger by less than ``HOLD_TOL``
-and the unwritten case by more than ``LAG_MIN``, so it also fails if the
-constraint is ever made instantaneous (then the writer would be
-unobservable and this check meaningless) and names it.
+Observable through the finger BODIES, which every backend reports: with
+the actuated finger closed to ``Q_CLOSED`` at reset, the distance between
+the two finger bodies says where the mirrored finger is. Written to
+``-Q_CLOSED`` it must equal, before any step, the distance the pair
+settles to once the constraint has had time (``SETTLE_STEPS`` of holding
+the actuated finger's target); left to the solver it must differ by
+millimetres at the first step, which the gate also requires, so it
+notices if the constraint is ever made instantaneous and names it.
 
 Run on a GPU box::
 
@@ -36,9 +34,10 @@ from jaxrlworld.rl.configs.scene.entity_selector import SceneEntitySelector
 from jaxrlworld.rl.runners import BaseRunner
 
 Q_CLOSED = 0.005
-HOLD_TOL = 0.0005
+MATCH_TOL = 0.0003
 LAG_MIN = 0.002
-STEPS = 2
+SETTLE_STEPS = 25
+FINGER_BODIES = ["lf_down", "rf_down"]
 
 
 def run(sim: str, num_envs: int) -> bool:
@@ -57,36 +56,43 @@ def run(sim: str, num_envs: int) -> bool:
         act[:, col] = (Q_CLOSED - home) / YAM_ACTION_SCALE[YAM_GRIPPER_JOINT]
         return act
 
-    def finger() -> torch.Tensor:
+    def finger_body_distance() -> torch.Tensor:
         env._invalidate_cache()
-        return env.get_entity_data("robot").joint_pos[:, col]
+        pads = env.get_entity_data("robot").body_pos_w(FINGER_BODIES)
+        return torch.norm(pads[:, 0] - pads[:, 1], dim=-1)
 
     def pose_actuated() -> None:
         q = env.get_entity_data("robot").joint_pos.clone()
         q[:, col] = Q_CLOSED
         writer.set_dof_state(q, torch.zeros_like(q), env_ids=ids)
 
-    moved = {}
-    for written in (False, True):
-        env.reset()
-        env._invalidate_cache()
-        pose_actuated()
-        if written:
-            writer.set_joint_state_by_name(
-                (YAM_MIRRORED_GRIPPER_JOINT,),
-                torch.full((num_envs, 1), -Q_CLOSED, device=env.device),
-                zeros,
-                env_ids=ids,
-            )
-        writer.eval_fk(env_ids=ids)
-        q0 = finger()
-        for _ in range(STEPS):
-            env.step(closed_hold_action())
-        moved[written] = float((finger() - q0).abs().max())
-    ok = moved[True] < HOLD_TOL and moved[False] > LAG_MIN
+    # The pair's distance once the constraint has settled with the actuated finger held closed.
+    env.reset()
+    pose_actuated()
+    writer.eval_fk(env_ids=ids)
+    for _ in range(SETTLE_STEPS):
+        env.step(closed_hold_action())
+    settled = finger_body_distance()
+
+    # Left to the solver: the mirrored finger is wherever the reset left it.
+    env.reset()
+    pose_actuated()
+    writer.eval_fk(env_ids=ids)
+    lag = (finger_body_distance() - settled).abs().max()
+
+    # Written: the pair agrees before any step.
+    env.reset()
+    pose_actuated()
+    writer.set_joint_state_by_name(
+        (YAM_MIRRORED_GRIPPER_JOINT,), torch.full((num_envs, 1), -Q_CLOSED, device=env.device), zeros, env_ids=ids
+    )
+    writer.eval_fk(env_ids=ids)
+    written = (finger_body_distance() - settled).abs().max()
+
+    ok = float(written) < MATCH_TOL and float(lag) > LAG_MIN
     print(
-        f"[{sim}] actuated finger moved over {STEPS} steps: mirrored finger written {moved[True] * 1e3:.2f} mm "
-        f"(< {HOLD_TOL * 1e3:.1f}), left to the constraint {moved[False] * 1e3:.2f} mm (> {LAG_MIN * 1e3:.1f}) "
+        f"[{sim}] finger bodies' distance against the settled pair: mirrored finger written {float(written) * 1e3:.2f} mm "
+        f"(< {MATCH_TOL * 1e3:.1f}), left to the solver {float(lag) * 1e3:.2f} mm (> {LAG_MIN * 1e3:.1f}) "
         f"-> {'PASS' if ok else 'FAIL'}"
     )
     return ok
